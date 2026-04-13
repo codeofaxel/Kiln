@@ -227,6 +227,9 @@ class TestMaterialValueRanges:
             print_low = mat["thermal"]["print_temp_range_c"][0]
             # Glass transition must be well below print temp (material must flow)
             # Exception: TPU has negative Tg
+            # Exception: semi-crystalline materials like PP have no Tg (null)
+            if tg is None:
+                continue
             if tg > 0:
                 assert tg < print_low, (
                     f"{mat_id} glass_transition {tg}C >= print_temp_low {print_low}C"
@@ -434,7 +437,7 @@ class TestCompatibilityMatrix:
     VALID_UPGRADES = {
         "hardened_nozzle", "all_metal_hotend", "enclosure",
         "heated_bed", "direct_drive", "dry_box",
-        "pp_adhesion_sheet",
+        "pp_adhesion_sheet", "pp_build_surface",
     }
 
     def test_every_printer_exists_in_printer_intelligence(

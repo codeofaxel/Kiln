@@ -3137,7 +3137,7 @@
       "compressive_strength_mpa": 40,
       "elongation_at_break_pct": 100,
       "youngs_modulus_gpa": 1.3,
-      "impact_resistance": "high",
+      "impact_resistance": "excellent",
       "layer_adhesion": "poor",
       "creep_resistance": "moderate",
       "fatigue_resistance": "excellent"

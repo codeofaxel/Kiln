@@ -3757,5 +3757,139 @@
       "PVB's killer feature is IPA vapor smoothing. Print your first test piece and try a 30-minute IPA vapor bath to see the effect.",
       "PVB is weaker than PLA — design accordingly. Use thicker walls and more infill for structural parts."
     ]
+  },
+  "pp": {
+    "common_issues": [
+      {
+        "symptom": "Severe warping and bed detachment",
+        "severity": "major",
+        "root_cause": "PP has very high crystalline shrinkage on cooling, causing the part to curl and lift from the bed. Standard build surfaces provide almost no adhesion to PP's low-energy surface.",
+        "fixes": [
+          {
+            "action": "Use a PP-specific build surface (polypropylene sheet, Magigoo PP, or PP packing tape on glass)",
+            "priority": 1
+          },
+          {
+            "action": "Set bed temperature to 85-100C and use an enclosure to slow cooling",
+            "priority": 2
+          },
+          {
+            "action": "Add a wide brim of 8-10mm to increase bed contact area",
+            "priority": 3
+          },
+          {
+            "action": "Print first layer slowly at 15-20mm/s with extra squish for mechanical adhesion",
+            "priority": 4
+          }
+        ],
+        "prevention": "Always use a PP-specific build surface and enclosure. Design parts with large flat bases when possible."
+      },
+      {
+        "symptom": "Poor layer adhesion and delamination",
+        "severity": "major",
+        "root_cause": "PP's semi-crystalline nature and low surface energy make inter-layer bonding difficult. Insufficient nozzle temperature or excessive cooling worsens adhesion.",
+        "fixes": [
+          {
+            "action": "Increase nozzle temperature by 5-10C within the 220-260C range",
+            "priority": 1
+          },
+          {
+            "action": "Reduce part cooling fan to 0-30% for most of the print",
+            "priority": 2
+          },
+          {
+            "action": "Increase line width to 120% of nozzle diameter for more layer contact",
+            "priority": 3
+          },
+          {
+            "action": "Use an enclosure to maintain ambient temperature above 30C",
+            "priority": 4
+          }
+        ],
+        "prevention": "Print with minimal cooling and in an enclosed environment. Avoid drafts near the printer."
+      },
+      {
+        "symptom": "Stringing and oozing between features",
+        "severity": "minor",
+        "root_cause": "PP has low melt viscosity and remains fluid over a wide temperature range, allowing thin threads to draw on travel moves.",
+        "fixes": [
+          {
+            "action": "Lower nozzle temperature by 5-10C (try 220-230C)",
+            "priority": 1
+          },
+          {
+            "action": "Increase retraction to 6-8mm at 40mm/s for Bowden, 2-3mm at 30mm/s for direct drive",
+            "priority": 2
+          },
+          {
+            "action": "Increase travel speed to 150-200mm/s to break strings",
+            "priority": 3
+          },
+          {
+            "action": "Enable coasting at 0.04-0.06mm3 in slicer to reduce nozzle pressure before travel",
+            "priority": 4
+          }
+        ],
+        "prevention": "Find the lowest nozzle temperature that still gives good layer adhesion via a temperature tower test."
+      },
+      {
+        "symptom": "Dimensional inaccuracy and shrinkage",
+        "severity": "moderate",
+        "root_cause": "PP shrinks 1.5-2.5% on cooling due to crystallization, far more than amorphous materials like PLA or PETG. Parts come out smaller than designed.",
+        "fixes": [
+          {
+            "action": "Scale the model by 1.5-2% in the slicer to compensate for shrinkage",
+            "priority": 1
+          },
+          {
+            "action": "Use an enclosure to slow cooling and reduce differential shrinkage",
+            "priority": 2
+          },
+          {
+            "action": "Print with thicker walls (2mm+) to resist warping forces that distort geometry",
+            "priority": 3
+          }
+        ],
+        "prevention": "Always account for PP shrinkage in the design phase. Prototype critical dimensions and measure before final prints."
+      },
+      {
+        "symptom": "First layer not sticking to bed",
+        "severity": "major",
+        "root_cause": "PP is chemically inert with very low surface energy — standard PEI, glass, and magnetic sheets provide no adhesion. The filament slides or balls up on the first layer.",
+        "fixes": [
+          {
+            "action": "Switch to a PP-specific build surface — polypropylene sheet or packing tape",
+            "priority": 1
+          },
+          {
+            "action": "Apply Magigoo PP or similar PP adhesion promoter to the build surface",
+            "priority": 2
+          },
+          {
+            "action": "Reduce first layer speed to 15mm/s and increase first layer line width to 150%",
+            "priority": 3
+          },
+          {
+            "action": "Ensure bed temperature is at least 85C — PP adhesion drops sharply below this",
+            "priority": 4
+          }
+        ],
+        "prevention": "Never attempt PP on a standard PEI or glass bed without PP-specific adhesion treatment. Stock up on PP build surface material."
+      }
+    ],
+    "storage_requirements": {
+      "humidity_sensitive": false,
+      "max_humidity_pct": 50,
+      "storage_method": "Standard sealed bag or container. PP absorbs almost no moisture — less critical than nylon or PETG.",
+      "drying_temp_c": 55,
+      "drying_time_hours": 4
+    },
+    "break_in_tips": [
+      "Start with a nozzle temperature of 230-240C and bed at 90C. PP needs hotter bed temperatures than most materials.",
+      "Get a PP-specific build surface before you start — standard PEI and glass will not work. PP packing tape on glass is a cheap option.",
+      "Use an enclosure if you have one. PP warps aggressively without consistent ambient temperature.",
+      "Print a small flat test piece (50mm square, 5mm tall) first to dial in bed adhesion before committing to a large print.",
+      "Expect shrinkage — PP parts will be 1.5-2% smaller than the STL. Scale up in the slicer if dimensional accuracy matters."
+    ]
   }
 }
