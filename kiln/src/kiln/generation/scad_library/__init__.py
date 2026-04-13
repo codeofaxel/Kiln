@@ -6,6 +6,8 @@ code before compilation, making every library module available in scope without
 `use` or `include` statements.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 
 

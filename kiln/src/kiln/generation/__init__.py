@@ -23,6 +23,8 @@ Registry
     Universal provider registry with auto-discovery.
 """
 
+from __future__ import annotations
+
 from kiln.generation.base import (
     GenerationAuthError,
     GenerationError,
