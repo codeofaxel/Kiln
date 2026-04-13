@@ -385,10 +385,10 @@ class _GenerationToolsPlugin:
             try:
                 gen = _srv._get_generation_provider("meshy")
                 job = gen.retexture(mesh_path, prompt, style=style)
-                # Telemetry: count texture
+                # Telemetry: count as decoration (textures are a decoration subtype)
                 try:
                     from kiln.daily_stats import record_event
-                    record_event("textures")
+                    record_event("decorations", detail="ai_texture")
                 except Exception:
                     pass
 
