@@ -554,7 +554,7 @@ def _build_instructions() -> str:
     # --- Design intelligence ---
     parts.append(
         "DESIGN INTELLIGENCE: Kiln has a comprehensive design knowledge system "
-        "(27 materials with 36 brand-specific filament profiles, 20 design patterns). Key tools:\n"
+        "(25 materials with 45 brand-specific filament profiles, 20 design patterns). Key tools:\n"
         "  - `get_design_brief(requirements)` — functional analysis BEFORE designing\n"
         "  - `recommend_design_material(use_case)` — intelligent material selection\n"
         "  - `find_design_patterns(use_case)` — proven design patterns\n"

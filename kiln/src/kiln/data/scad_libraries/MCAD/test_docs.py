@@ -1,4 +1,5 @@
 
+from __future__ import annotations
 import py
 
 dirpath = py.path.local("./")

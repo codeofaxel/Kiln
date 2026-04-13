@@ -89,7 +89,7 @@ When adding new code, find and follow the closest existing pattern. Don't invent
 
 | Adding...                  | Copy the pattern in...                                              |
 |----------------------------|---------------------------------------------------------------------|
-| New MCP tool               | `plugins/design_tools.py` or any plugin file (decorator, error handling, return format). **NEVER add new tools to server.py** — it's frozen at 283 tools. All new tools go in `plugins/`. |
+| New MCP tool               | `plugins/design_tools.py` or any plugin file (decorator, error handling, return format). **NEVER add new tools to server.py** — it has 119 tools; all new tools go in `plugins/`. |
 | New printer adapter        | `printers/octoprint.py` (method order, retry logic, error wrapping, dataclass returns) |
 | New CLI command            | `cli/main.py` → `status` command (Click decorators, context, `--json` flag, error handling) |
 | New marketplace adapter    | `marketplaces/thingiverse.py` (API client pattern, auth, response normalization) |
