@@ -3202,9 +3202,43 @@
       "WARPING IS SEVERE. PP shrinks significantly on cooling — even more than ABS. Enclosure is essential. Use a brim of at least 8-10mm. First layer must be slow (15-20mm/s) for adhesion.",
       "POOR LAYER ADHESION and dimensional accuracy. PP is not a precision engineering material — expect significant warping and layer delamination without ideal conditions. Reserve for applications where its unique flex/chemical properties justify the difficulty."
     ],
+    "brand_profiles": {
+      "verbatim_pp": {
+        "brand": "Verbatim",
+        "product_name": "PP",
+        "nozzle_temp_range_c": [220, 240],
+        "nozzle_temp_optimal_c": 230,
+        "bed_temp_range_c": [85, 100],
+        "bed_temp_optimal_c": 90,
+        "max_volumetric_speed_mm3s": 5,
+        "density_g_cm3": 0.9,
+        "drying_temp_c": 55,
+        "drying_time_hours": 6,
+        "enclosure_required": true,
+        "hardened_nozzle_required": false,
+        "ams_compatible": false,
+        "source": "Verbatim PP TDS, community printing guides"
+      },
+      "formfutura_centaur_pp": {
+        "brand": "Formfutura",
+        "product_name": "Centaur PP",
+        "nozzle_temp_range_c": [220, 250],
+        "nozzle_temp_optimal_c": 235,
+        "bed_temp_range_c": [85, 100],
+        "bed_temp_optimal_c": 95,
+        "max_volumetric_speed_mm3s": 5,
+        "density_g_cm3": 0.9,
+        "drying_temp_c": 55,
+        "drying_time_hours": 6,
+        "enclosure_required": true,
+        "hardened_nozzle_required": false,
+        "ams_compatible": false,
+        "source": "FormFutura Centaur PP datasheet"
+      }
+    },
     "_validation": {
       "source": "Verbatim PP TDS, FormFutura Centaur PP datasheet, Prusa PP printing guide",
-      "verified_date": "2026-04-11",
+      "verified_date": "2026-04-13",
       "confidence": "high",
       "_review_needed": []
     },
