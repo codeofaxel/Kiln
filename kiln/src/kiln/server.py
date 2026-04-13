@@ -4794,10 +4794,8 @@ def recent_events(limit: int = 20, *, type: str | None = None) -> dict:
         return _error_dict(f"Unexpected error in recent_events: {exc}", code="INTERNAL_ERROR")
 
 
-# Billing tools -- moved to plugins/billing_tools.py
-# (billing_summary, billing_setup_url, billing_status, billing_history,
-#  billing_invoice, billing_export, check_payment_status, refund_payment,
-#  billing_check_setup, billing_alerts, billing_delete_data)
+# Billing tools -- removed from public repo (proprietary, lives in kiln-pro).
+# Stub tools registered via pro_tool_manifest.json.
 
 
 # ---------------------------------------------------------------------------
@@ -8769,7 +8767,7 @@ def main() -> None:
     # a context-aware summary of the user's actual capabilities.
     # NOTE: FastMCP.instructions is a read-only property (no setter) in
     # mcp>=1.9.  Write to the underlying server object directly.
-    # TODO: upstream PR to add a public setter to FastMCP.
+    # Workaround: FastMCP.instructions is read-only; write to the underlying server object.
     mcp._mcp_server.instructions = _build_instructions()
 
     # Initialise cloud sync from saved config

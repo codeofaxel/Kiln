@@ -1,15 +1,11 @@
 {
   "version": 1,
   "generated": "2026-04-13T20:00:54.294590+00:00",
-  "tool_count": 76,
+  "tool_count": 87,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
-      "pitch": "Generate ready-to-print products — coasters, keychains, ornaments, pet tags, and more — with one command."
-    },
-    "textures": {
-      "label": "Textures & Materials",
-      "pitch": "Apply procedural and image-based textures to any 3D model. Multicolor, deboss, emboss."
+      "pitch": "Generate ready-to-print products \u2014 coasters, keychains, ornaments, pet tags, and more \u2014 with one command."
     },
     "decoration": {
       "label": "Decoration Tools",
@@ -21,7 +17,7 @@
     },
     "print_intelligence": {
       "label": "Print Intelligence",
-      "pitch": "Your printer learns from every print — optimal settings, failure prediction, maintenance alerts."
+      "pitch": "Your printer learns from every print \u2014 optimal settings, failure prediction, maintenance alerts."
     },
     "cloud_sync": {
       "label": "Cloud Sync",
@@ -46,6 +42,10 @@
     "provenance_learning": {
       "label": "Proven Recipes",
       "pitch": "Record and recall proven recipes for any decoration + product combination."
+    },
+    "billing": {
+      "label": "Billing & Payments",
+      "pitch": "Orchestration fee tracking, payment setup, invoicing, and GDPR data management."
     }
   },
   "tools": [
@@ -2341,7 +2341,7 @@
       "name": "apply_geometric_texture",
       "description": "Apply a procedural texture as physical surface relief.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
-      "category": "textures",
+      "category": "decoration",
       "parameters": {
         "properties": {
           "input_path": {
@@ -2413,13 +2413,14 @@
         ],
         "title": "apply_geometric_textureArguments",
         "type": "object"
-      }
+      },
+      "subcategory": "texture"
     },
     {
       "name": "apply_image_texture",
       "description": "Apply a photo-based texture as a tiled deboss/emboss pattern.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
-      "category": "textures",
+      "category": "decoration",
       "parameters": {
         "properties": {
           "input_path": {
@@ -2472,13 +2473,14 @@
         ],
         "title": "apply_image_textureArguments",
         "type": "object"
-      }
+      },
+      "subcategory": "texture"
     },
     {
       "name": "apply_procedural_texture",
       "description": "Apply a procedural material texture to a 3D model for multicolor printing.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
-      "category": "textures",
+      "category": "decoration",
       "parameters": {
         "properties": {
           "input_path": {
@@ -2591,13 +2593,14 @@
         ],
         "title": "apply_procedural_textureArguments",
         "type": "object"
-      }
+      },
+      "subcategory": "texture"
     },
     {
       "name": "delete_custom_palette",
       "description": "Delete a saved custom color palette.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
-      "category": "textures",
+      "category": "decoration",
       "parameters": {
         "properties": {
           "name": {
@@ -2610,35 +2613,38 @@
         ],
         "title": "delete_custom_paletteArguments",
         "type": "object"
-      }
+      },
+      "subcategory": "texture"
     },
     {
       "name": "list_custom_palettes",
       "description": "List all saved custom color palettes.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
-      "category": "textures",
+      "category": "decoration",
       "parameters": {
         "properties": {},
         "title": "list_custom_palettesArguments",
         "type": "object"
-      }
+      },
+      "subcategory": "texture"
     },
     {
       "name": "list_procedural_textures",
       "description": "List all available procedural texture types, palettes, and presets.",
       "tier": "free",
-      "category": "textures",
+      "category": "decoration",
       "parameters": {
         "properties": {},
         "title": "list_procedural_texturesArguments",
         "type": "object"
-      }
+      },
+      "subcategory": "texture"
     },
     {
       "name": "preview_texture_2d",
       "description": "Render a flat 2D preview of a procedural texture as a PNG image.",
       "tier": "free",
-      "category": "textures",
+      "category": "decoration",
       "parameters": {
         "properties": {
           "texture": {
@@ -2713,13 +2719,14 @@
         ],
         "title": "preview_texture_2dArguments",
         "type": "object"
-      }
+      },
+      "subcategory": "texture"
     },
     {
       "name": "save_custom_palette",
       "description": "Save a custom color palette for reuse with any texture.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
-      "category": "textures",
+      "category": "decoration",
       "parameters": {
         "properties": {
           "name": {
@@ -2744,6 +2751,189 @@
           "colors"
         ],
         "title": "save_custom_paletteArguments",
+        "type": "object"
+      },
+      "subcategory": "texture"
+    },
+    {
+      "name": "billing_summary",
+      "description": "Get a summary of Kiln orchestration fees for the current month.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {},
+        "title": "billing_summaryArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "billing_setup_url",
+      "description": "Get a URL to link a payment method for Kiln orchestration fees.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "rail": {
+            "default": "stripe",
+            "title": "Rail",
+            "type": "string"
+          }
+        },
+        "title": "billing_setup_urlArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "billing_status",
+      "description": "Get enriched billing status including payment method info.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {},
+        "title": "billing_statusArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "billing_history",
+      "description": "Get recent billing charge history with payment outcomes.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "limit": {
+            "default": 20,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "billing_historyArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "billing_invoice",
+      "description": "Generate an invoice/receipt for a billing charge.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "charge_id": {
+            "default": "",
+            "title": "Charge Id",
+            "type": "string"
+          },
+          "job_id": {
+            "default": "",
+            "title": "Job Id",
+            "type": "string"
+          }
+        },
+        "title": "billing_invoiceArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "billing_export",
+      "description": "Export billing history for accounting.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "format": {
+            "default": "csv",
+            "title": "Format",
+            "type": "string"
+          },
+          "limit": {
+            "default": 100,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "billing_exportArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "check_payment_status",
+      "description": "Check the current status of a pending payment by ID.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "payment_id": {
+            "title": "Payment Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "payment_id"
+        ],
+        "title": "check_payment_statusArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "refund_payment",
+      "description": "Request a refund for a completed payment.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "payment_id": {
+            "title": "Payment Id",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "payment_id"
+        ],
+        "title": "refund_paymentArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "billing_check_setup",
+      "description": "Check if billing setup is complete after user visited the setup URL.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {},
+        "title": "billing_check_setupArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "billing_alerts",
+      "description": "Check billing system health and active alerts.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {},
+        "title": "billing_alertsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "billing_delete_data",
+      "description": "Delete all your billing data (GDPR right-to-erasure).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "confirm": {
+            "default": "",
+            "title": "Confirm",
+            "type": "string"
+          }
+        },
+        "title": "billing_delete_dataArguments",
         "type": "object"
       }
     }
