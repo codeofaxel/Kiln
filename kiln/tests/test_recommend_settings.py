@@ -14,11 +14,32 @@ from kiln.persistence import KilnDB
 
 @pytest.fixture()
 def db(tmp_path: Path) -> KilnDB:
-    """Fresh database for each test."""
+    """Fresh database for each test.
+
+    If kiln-pro is installed it monkey-patches ``KilnDB.save_print_outcome``
+    with an auto-record hook that feeds outcomes into its learning engine,
+    creating a *second* row per save.  We uninstall the hook for the duration
+    of each test so these unit tests see exactly the rows they insert.
+    """
+    uninstalled = False
+    try:
+        from kiln_pro.print_learning.auto_record import (
+            install_auto_record_hook,
+            uninstall_auto_record_hook,
+        )
+
+        uninstalled = uninstall_auto_record_hook()
+    except ImportError:
+        install_auto_record_hook = None  # type: ignore[assignment]
+
     db_path = str(tmp_path / "test.db")
     instance = KilnDB(db_path=db_path)
     yield instance
     instance.close()
+
+    # Re-install the hook if it was active before.
+    if uninstalled and install_auto_record_hook is not None:
+        install_auto_record_hook()
 
 
 def _outcome(

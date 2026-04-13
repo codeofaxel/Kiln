@@ -10,7 +10,7 @@
 
 ## Abstract
 
-We present Kiln, a protocol and reference implementation that enables autonomous AI agents to transform ideas -- expressed as natural language, sketches, or parametric specifications -- into physical objects through 3D printing. Kiln bridges the gap between digital intelligence and physical fabrication by providing: (1) a Design Intelligence layer with 27 FDM materials with full engineering properties, 36 brand-specific filament profiles, and 20 proven design patterns; (2) text-to-3D and sketch-to-3D generation via Gemini Deep Think, Meshy, Tripo3D, Stability AI, and OpenSCAD; (3) 7-dimension printability analysis before parts reach a slicer; (4) direct control of local printers via OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link adapters; (5) fulfillment routing through third-party providers such as Craftcloud; (6) multi-part assembly planning with clearance validation and tolerance stacking; and (7) real-time G-code interception for in-flight safety filtering. The system enforces safety invariants at the protocol level across 29 printer safety profiles, and preserves parametric Design DNA for iterative refinement. Kiln does not operate its own marketplace or manufacturing network -- it searches existing 3rd-party marketplaces and routes to existing fulfillment providers.
+We present Kiln, a protocol and reference implementation that enables autonomous AI agents to transform ideas -- expressed as natural language, sketches, or parametric specifications -- into physical objects through 3D printing. Kiln bridges the gap between digital intelligence and physical fabrication by providing: (1) a Design Intelligence layer with 25 FDM materials with full engineering properties, 45 brand-specific filament profiles, and 20 proven design patterns; (2) text-to-3D and sketch-to-3D generation via Gemini Deep Think, Meshy, Tripo3D, Stability AI, and OpenSCAD; (3) 7-dimension printability analysis before parts reach a slicer; (4) direct control of local printers via OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link adapters; (5) fulfillment routing through third-party providers such as Craftcloud; (6) multi-part assembly planning with clearance validation and tolerance stacking; and (7) real-time G-code interception for in-flight safety filtering. The system enforces safety invariants at the protocol level across 29 printer safety profiles, and preserves parametric Design DNA for iterative refinement. Kiln does not operate its own marketplace or manufacturing network -- it searches existing 3rd-party marketplaces and routes to existing fulfillment providers.
 
 ## 1. Introduction
 
@@ -24,7 +24,7 @@ AI agents are now capable enough to plan and execute multi-step physical tasks. 
 
 Kiln solves the entire pipeline:
 
-1. **Design Intelligence.** A structured knowledge base of 27 FDM materials with full engineering properties, 36 brand-specific filament profiles, and 20 proven design patterns informs material selection, structural design, joint types, and reinforcement strategies. The system provides material-aware design recommendations and structural load estimation.
+1. **Design Intelligence.** A structured knowledge base of 25 FDM materials with full engineering properties, 45 brand-specific filament profiles, and 20 proven design patterns informs material selection, structural design, joint types, and reinforcement strategies. The system provides material-aware design recommendations and structural load estimation.
 
 2. **Text & Sketch to 3D.** Five generation backends convert ideas into printable geometry. Gemini Deep Think uses AI reasoning to produce precise OpenSCAD code from text or sketch descriptions. Meshy, Tripo3D, and Stability AI handle organic shapes via cloud APIs. A local OpenSCAD provider compiles parametric code with zero API cost. A 14-component parametric catalog provides proven primitives (gears, threads, hinges, bearings, etc.) for assembly composition.
 
@@ -32,7 +32,7 @@ Kiln solves the entire pipeline:
 
 4. **Unified Adapter Layer.** A single `PrinterAdapter` abstract interface normalizes OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link APIs into consistent Python dataclasses. Adding a new backend requires implementing ~12 methods; all upstream consumers work automatically.
 
-5. **Agent-Native Interface.** 544+ typed MCP tools with structured JSON input/output make Kiln a first-class tool for any MCP-compatible agent. 114 CLI commands with `--json` flags cover the same surface for scripting.
+5. **Agent-Native Interface.** 542+ typed MCP tools with structured JSON input/output make Kiln a first-class tool for any MCP-compatible agent. 156 CLI commands with `--json` flags cover the same surface for scripting.
 
 6. **Safety-First Design.** Pre-flight checks, G-code validation, temperature limits, and confirmation gates are enforced at the protocol layer. 29 safety profiles define hardware-specific limits. An agent cannot bypass safety checks even if instructed to.
 
@@ -55,8 +55,8 @@ Kiln solves the entire pipeline:
                    /     |     |     |     \
         [Design    [Generation [Print-  [Your      [Fulfillment
         Intelligence] Backends] ability] Printers]  Providers]
-         27 mats    Gemini DT   7-dim   OP/MR/BL   Craftcloud
-         36 filaments Meshy     analysis PL/EG
+         25 mats    Gemini DT   7-dim   OP/MR/BL   Craftcloud
+         45 filaments Meshy     analysis PL/EG
          20 patterns Tripo3D
                     Stability
                     OpenSCAD
@@ -103,7 +103,7 @@ An agent may request any operation, but Kiln will refuse operations that violate
 
 ### 3.1 Material Knowledge Base
 
-The Design Intelligence layer maintains structured data on 27 FDM materials with full engineering properties and 36 brand-specific filament profiles. Each material entry includes mechanical properties (tensile strength, elongation, impact resistance), thermal properties (glass transition, heat deflection, print temperatures), design constraints (minimum wall thickness, maximum overhang angle, bridging distance), and recommended applications. The brand catalog maps real-world filaments (Hatchbox PLA, Prusament PETG, eSun PLA+, etc.) to engineering properties and purchase sources.
+The Design Intelligence layer maintains structured data on 25 FDM materials with full engineering properties and 45 brand-specific filament profiles. Each material entry includes mechanical properties (tensile strength, elongation, impact resistance), thermal properties (glass transition, heat deflection, print temperatures), design constraints (minimum wall thickness, maximum overhang angle, bridging distance), and recommended applications. The brand catalog maps real-world filaments (Hatchbox PLA, Prusament PETG, eSun PLA+, etc.) to engineering properties and purchase sources.
 
 Agents query this knowledge base when selecting materials for a design. The system can recommend materials based on functional requirements (outdoor use, food safety, flexibility, heat resistance) and flag incompatibilities between material choice and design geometry.
 

@@ -505,14 +505,10 @@ class TestGenerateAndPrint:
 # ---------------------------------------------------------------------------
 
 
-import pytest
-
-
-@pytest.mark.skip(reason="Plugin closure re-imports validate_mesh; mock can't intercept. Needs plugin refactor.")
 class TestValidateGeneratedMesh:
     """Tests for the validate_generated_mesh MCP tool."""
 
-    @patch("kiln.generation.validate_mesh")
+    @patch("kiln.generation.validation.validate_mesh")
     def test_valid_mesh(self, mock_validate):
         mock_validate.return_value = _make_validation(valid=True)
 
@@ -521,7 +517,7 @@ class TestValidateGeneratedMesh:
         assert result["validation"]["valid"] is True
         assert "valid" in result["message"].lower()
 
-    @patch("kiln.generation.validate_mesh")
+    @patch("kiln.generation.validation.validate_mesh")
     def test_invalid_mesh(self, mock_validate):
         mock_validate.return_value = _make_validation(
             valid=False, errors=["Zero volume", "Non-manifold edges"],
