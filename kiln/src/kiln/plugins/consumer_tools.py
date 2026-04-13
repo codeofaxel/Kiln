@@ -70,8 +70,15 @@ class _ConsumerToolsPlugin:
             from kiln.server import _error_dict
 
             try:
-                from kiln.tax import TaxCalculator
+                from kiln_pro.tax import TaxCalculator
+            except ImportError:
+                return {
+                    "status": "error",
+                    "error": "Tax calculation requires Kiln Pro. Visit https://kiln3d.com/pro to upgrade.",
+                    "code": "PRO_REQUIRED",
+                }
 
+            try:
                 calc = TaxCalculator()
                 result = calc.calculate_tax(
                     fee_amount,
@@ -94,8 +101,15 @@ class _ConsumerToolsPlugin:
             from kiln.server import _error_dict
 
             try:
-                from kiln.tax import TaxCalculator
+                from kiln_pro.tax import TaxCalculator
+            except ImportError:
+                return {
+                    "status": "error",
+                    "error": "Tax calculation requires Kiln Pro. Visit https://kiln3d.com/pro to upgrade.",
+                    "code": "PRO_REQUIRED",
+                }
 
+            try:
                 calc = TaxCalculator()
                 jurisdictions = [j.to_dict() for j in calc.list_jurisdictions()]
                 return {
@@ -117,8 +131,15 @@ class _ConsumerToolsPlugin:
             from kiln.server import _error_dict
 
             try:
-                from kiln.tax import TaxCalculator
+                from kiln_pro.tax import TaxCalculator
+            except ImportError:
+                return {
+                    "status": "error",
+                    "error": "Tax calculation requires Kiln Pro. Visit https://kiln3d.com/pro to upgrade.",
+                    "code": "PRO_REQUIRED",
+                }
 
+            try:
                 calc = TaxCalculator()
                 jur = calc.get_jurisdiction(code)
                 if jur is None:
