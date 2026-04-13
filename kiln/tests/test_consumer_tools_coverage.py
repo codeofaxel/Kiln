@@ -52,7 +52,7 @@ def consumer_tools():
 class TestTaxEstimate:
     """Tests for tax_estimate MCP tool."""
 
-    @patch("kiln.tax.TaxCalculator")
+    @patch("kiln_pro.tax.TaxCalculator")
     def test_happy_path(self, mock_calc_cls, consumer_tools):
         mock_result = MagicMock()
         mock_result.to_dict.return_value = {"tax_amount": 1.50, "rate": 0.075}
@@ -63,7 +63,7 @@ class TestTaxEstimate:
         assert result["success"] is True
         assert result["tax"]["rate"] == 0.075
 
-    @patch("kiln.tax.TaxCalculator")
+    @patch("kiln_pro.tax.TaxCalculator")
     def test_failure(self, mock_calc_cls, consumer_tools):
         mock_calc_cls.return_value.calculate_tax.side_effect = RuntimeError("boom")
 
@@ -80,7 +80,7 @@ class TestTaxEstimate:
 class TestTaxJurisdictions:
     """Tests for tax_jurisdictions MCP tool."""
 
-    @patch("kiln.tax.TaxCalculator")
+    @patch("kiln_pro.tax.TaxCalculator")
     def test_happy_path(self, mock_calc_cls, consumer_tools):
         j1 = MagicMock()
         j1.to_dict.return_value = {"code": "US-CA"}
@@ -93,7 +93,7 @@ class TestTaxJurisdictions:
         assert result["success"] is True
         assert result["count"] == 2
 
-    @patch("kiln.tax.TaxCalculator")
+    @patch("kiln_pro.tax.TaxCalculator")
     def test_failure(self, mock_calc_cls, consumer_tools):
         mock_calc_cls.return_value.list_jurisdictions.side_effect = RuntimeError("boom")
 
@@ -110,7 +110,7 @@ class TestTaxJurisdictions:
 class TestTaxJurisdictionLookup:
     """Tests for tax_jurisdiction_lookup MCP tool."""
 
-    @patch("kiln.tax.TaxCalculator")
+    @patch("kiln_pro.tax.TaxCalculator")
     def test_found(self, mock_calc_cls, consumer_tools):
         jur = MagicMock()
         jur.to_dict.return_value = {"code": "US-CA", "rate": 0.075}
@@ -121,7 +121,7 @@ class TestTaxJurisdictionLookup:
         assert result["success"] is True
         assert result["jurisdiction"]["code"] == "US-CA"
 
-    @patch("kiln.tax.TaxCalculator")
+    @patch("kiln_pro.tax.TaxCalculator")
     def test_not_found(self, mock_calc_cls, consumer_tools):
         mock_calc_cls.return_value.get_jurisdiction.return_value = None
 
@@ -130,7 +130,7 @@ class TestTaxJurisdictionLookup:
         assert result["success"] is False
         assert "Unknown jurisdiction" in result["error"]["message"]
 
-    @patch("kiln.tax.TaxCalculator")
+    @patch("kiln_pro.tax.TaxCalculator")
     def test_failure(self, mock_calc_cls, consumer_tools):
         mock_calc_cls.return_value.get_jurisdiction.side_effect = RuntimeError("boom")
 
