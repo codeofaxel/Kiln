@@ -1,6 +1,6 @@
 # Kiln
 
-AI agent control of 3D printers — 542 MCP tools + 156 CLI commands.
+AI agent control of 3D printers — 542 MCP tools + 142 CLI commands.
 
 ## What it does
 
