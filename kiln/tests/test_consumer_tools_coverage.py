@@ -21,12 +21,16 @@ import pytest
 
 # Ensure kiln_pro.tax is importable so @patch("kiln_pro.tax.TaxCalculator") can
 # resolve the module path.  The actual TaxCalculator class lives in kiln-pro
-# which may or may not be installed; we only need the module to exist in
+# which may or may not be installed; we only need the module chain to exist in
 # sys.modules so unittest.mock can traverse it.
+if "kiln_pro" not in sys.modules:
+    _fake_pro = types.ModuleType("kiln_pro")
+    sys.modules["kiln_pro"] = _fake_pro
 if "kiln_pro.tax" not in sys.modules:
     _fake_tax = types.ModuleType("kiln_pro.tax")
     _fake_tax.TaxCalculator = type("TaxCalculator", (), {})  # type: ignore[attr-defined]
     sys.modules["kiln_pro.tax"] = _fake_tax
+    sys.modules["kiln_pro"].tax = _fake_tax  # type: ignore[attr-defined]
 
 # ---------------------------------------------------------------------------
 # Helpers — register tools and capture them
