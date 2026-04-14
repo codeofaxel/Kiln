@@ -48,6 +48,11 @@ scripts/
 
 # Internal task tracking
 task.md
+
+# Lessons learned / session notes (private by convention across all repos)
+lessons_learned.md
+LESSONS_LEARNED.md
+*lessons_learned*.md
 tasks.md
 
 # Session summaries, work notes, scratch markdown — never commit these.
