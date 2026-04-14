@@ -62,6 +62,64 @@ class SkillManifest:
     setup_command: str = "kiln verify"
     health_command: str = "kiln status --json"
 
+    # Tool discovery — how agents find tools among 400+ MCP entries
+    discovery: dict[str, Any] = field(
+        default_factory=lambda: {
+            "total_tools_note": (
+                "Public Kiln ships ~270 MCP tools; kiln-pro adds ~170 more "
+                "(product generators, decoration, fleet ops, billing). When "
+                "kiln-pro is installed, agents see ~440+ live tools. When it "
+                "isn't, agents still see manifest stubs for pro tools labeled "
+                "with their tier + upgrade URL so they can recommend upgrades."
+            ),
+            "pattern": (
+                "MCP clients don't load all tool schemas upfront at this "
+                "scale. Agents use ToolSearch(keyword) to surface tool schemas "
+                "on demand — e.g. ToolSearch('slice bambu'), "
+                "ToolSearch('ams filament'), ToolSearch('billing')."
+            ),
+            "entry_points": [
+                "get_started() — quick-start + live tool count + core workflows",
+                "get_skill_manifest() — this tool; full capability map",
+                "printer_status() — first concrete probe for any agent",
+            ],
+            "tier_visibility_for_agents": (
+                "Tier-gated tools appear in ToolSearch results with a tier "
+                "label ('Requires Kiln Pro'/'Business') and upgrade URL in "
+                "the description. Free-tier agents can surface these to users "
+                "for upgrade messaging without kiln-pro installed locally."
+            ),
+        }
+    )
+
+    # Tier system — what paid tiers unlock
+    tiers: dict[str, Any] = field(
+        default_factory=lambda: {
+            "free": (
+                "Local printing, slicing, basic marketplace search, up to 2 "
+                "printers. Free agents can still discover Pro/Business stubs "
+                "via ToolSearch for upgrade messaging."
+            ),
+            "pro": (
+                "Product generators (coasters, keychains, ornaments, etc.), "
+                "decoration, procedural textures, cloud sync, design "
+                "versioning, manual speed control, print learning. "
+                "$29/mo. https://kiln3d.com/pro"
+            ),
+            "business": (
+                "Everything in Pro + fleet-wide ops (up to 50 printers, 5 "
+                "team seats), layer-scheduled speed adjustments, material "
+                "compliance tracking, custom safety profiles, webhooks. "
+                "$99/mo. https://kiln3d.com/pricing"
+            ),
+            "enterprise": (
+                "Everything in Business + unlimited printers, SSO, RBAC, "
+                "audit trails, lockable safety profiles, 99.9% uptime SLA. "
+                "$499/mo base. https://kiln3d.com/enterprise"
+            ),
+        }
+    )
+
     # Agent behavioral guidance — how to use Kiln well
     agent_rules: list[str] = field(
         default_factory=lambda: [
