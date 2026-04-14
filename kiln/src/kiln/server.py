@@ -6768,6 +6768,7 @@ def render_model_preview(
     file_path: str,
     width: int = 800,
     height: int = 600,
+    color: str = "",
 ) -> dict:
     """DEPRECATED — use visualize_model instead. This renders only 1 angle; visualize_model renders 6 angles with auto-framing, colored 3MF support, and quality scores.
 
@@ -6779,28 +6780,35 @@ def render_model_preview(
         file_path: Path to an ``.stl``, ``.3mf``, ``.obj``, or ``.scad`` file.
         width: Image width in pixels (default 800).
         height: Image height in pixels (default 600).
+        color: Hex color for the model (e.g. ``"#F72323"``).
     """
-    result = visualize_model(
+    # Redirect to visualize_model — this tool is deprecated, but we
+    # preserve the ORIGINAL return-dict shape (preview_path, width, height)
+    # for backward compatibility with any existing consumers.
+    from kiln.model_visualizer import visualize_model as _viz
+
+    result = _viz(
         file_path=file_path,
         angles=["isometric"],
         width=width,
         height=height,
+        color=color if color else "",
     )
     if not result.get("success"):
         return result
-    # Return in the old format for backwards compatibility
     views = result.get("views", [])
     if views:
         return {
             "success": True,
-            "preview_path": views[0]["path"],
+            "preview_path": views[0]["path"],  # legacy key — DO NOT remove
             "width": width,
             "height": height,
             "message": (
-                f"Preview rendered to {views[0]['path']}. TIP: Use visualize_model() for multi-angle previews."
+                f"Preview rendered to {views[0]['path']}. "
+                f"TIP: Use visualize_model() for multi-angle previews."
             ),
         }
-    return _error_dict("No views rendered", code="RENDER_ERROR")
+    return result
 
 
 @mcp.tool()
