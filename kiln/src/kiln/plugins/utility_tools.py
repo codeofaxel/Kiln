@@ -232,17 +232,30 @@ class _UtilityToolsPlugin:
         def get_started() -> dict:
             """Quick-start guide for AI agents using Kiln.
 
-            Returns an onboarding summary: what Kiln is, core workflows,
-            and the most useful tools to call first.  Call this at the start
-            of a session if you're unfamiliar with the available capabilities.
+            Returns an onboarding summary: what Kiln is, how to discover
+            its tools, core workflows, and the most useful tools to call
+            first.  Call this at the start of a session if you're
+            unfamiliar with the available capabilities.
             """
-            from kiln.tool_tiers import TIERS
+            import kiln.server as _srv
 
-            # Build a concise tier summary
-            tier_summary = {
-                name: {"tool_count": len(tools), "examples": tools[:5]}
-                for name, tools in TIERS.items()
-            }
+            # Live tool count — authoritative number of MCP tools this
+            # session can actually call (public Kiln + kiln-pro if installed
+            # + any manifest stubs).  Prior versions of this tool returned
+            # stale static tier buckets that didn't account for kiln-pro.
+            try:
+                live_tool_count = len(_srv.mcp._tool_manager.list_tools())
+            except Exception:
+                live_tool_count = 0
+
+            # Detect whether kiln-pro is providing real tools (not just stubs)
+            kiln_pro_installed = False
+            try:
+                import importlib
+                importlib.import_module("kiln_pro")
+                kiln_pro_installed = True
+            except ImportError:
+                pass
 
             # Check OpenSCAD installation status for guidance
             openscad_guidance: dict[str, Any] = {}
@@ -320,10 +333,42 @@ class _UtilityToolsPlugin:
             return {
                 "success": True,
                 "overview": (
-                    "Kiln is agent infrastructure for 3D printing. It provides "
-                    "MCP tools to monitor printers, manage files, slice models, "
-                    "search marketplaces, queue print jobs, and more."
+                    f"Kiln is agent infrastructure for 3D printing. This session "
+                    f"has {live_tool_count} MCP tools covering printer monitoring, "
+                    f"file management, slicing, marketplaces, model generation, "
+                    f"design intelligence, safety controls"
+                    + (
+                        ", and kiln-pro features (product generators, decoration, "
+                        "print intelligence, fleet ops, billing)."
+                        if kiln_pro_installed
+                        else ". Some tools you discover may be Pro/Business-tier "
+                        "stubs — their descriptions include tier + upgrade URL "
+                        "so you can surface upgrade messaging to the user."
+                    )
                 ),
+                "tool_discovery": {
+                    "total_tools": live_tool_count,
+                    "how_to_discover": (
+                        "MCP clients don't load all tool schemas upfront when "
+                        "the count is large — use ToolSearch(keyword) to surface "
+                        "relevant schemas on demand. Examples: ToolSearch('slice "
+                        "bambu'), ToolSearch('ams filament'), ToolSearch('billing'), "
+                        "ToolSearch('generate coaster')."
+                    ),
+                    "capability_map": (
+                        "Call get_skill_manifest() for the full machine-readable "
+                        "capability map: agent rules, common workflows, tool "
+                        "recommendations by use case, and tier system."
+                    ),
+                    "tier_visibility": (
+                        "Pro/Business tools appear in ToolSearch results with "
+                        "'Requires Kiln Pro/Business' and an upgrade URL in the "
+                        "description. Free-tier agents can surface them to users "
+                        "for upgrade messaging even when kiln-pro isn't locally "
+                        "installed."
+                    ),
+                    "kiln_pro_installed": kiln_pro_installed,
+                },
                 "quick_start": _quick_start,
                 "core_workflows": {
                     "print_a_file": "upload_file → visualize_model → preflight_check → start_print",
@@ -341,7 +386,6 @@ class _UtilityToolsPlugin:
                     "safety_settings — shows current auto-print and confirmation settings",
                     "safety_audit — reviews recent safety-relevant actions",
                 ],
-                "tool_tiers": tier_summary,
                 "session_recovery": {
                     "description": (
                         "If resuming a previous session, call get_agent_context to restore your memory."
@@ -353,9 +397,10 @@ class _UtilityToolsPlugin:
                     ),
                 },
                 "tip": (
-                    "Start with `printer_status` to see what's connected, then "
-                    "explore from there. Use `safety_status` for a full safety "
-                    "dashboard, or `safety_settings` to check auto-print settings."
+                    "Start with `printer_status` to see what's connected. Use "
+                    "ToolSearch(keyword) to discover tools for specific tasks "
+                    "rather than guessing tool names. Use get_skill_manifest() "
+                    "for the full capability map."
                 ),
                 "openscad": openscad_guidance,
             }
