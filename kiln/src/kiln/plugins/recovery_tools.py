@@ -901,11 +901,44 @@ class _RecoveryToolsPlugin:
                     session_id, success=success, notes=notes
                 )
                 outcome = "completed successfully" if success else "failed"
-                return {
+
+                # Pro-tier outcome learning — record to kiln-pro's store so
+                # get_recovery_recommendations can rank strategies by
+                # historical success.  Best-effort — failures here must not
+                # break the public recovery flow.
+                pro_outcome: dict | None = None
+                try:
+                    from kiln_pro.bridge import pro_features
+
+                    if pro_features is not None and pro_features.recovery is not None:
+                        from kiln_pro.recovery.outcome_learning import record_outcome
+
+                        plan = session.plan
+                        failure = session.failure_report
+                        pro_outcome = record_outcome(
+                            failure_type=failure.failure_type.value if failure else "unknown",
+                            strategy=plan.strategy.value if plan else "unknown",
+                            success=success,
+                            printer_name=failure.printer_name if failure else None,
+                            material_type=failure.material_type if failure else None,
+                            notes=notes,
+                            session_id=session_id,
+                        )
+                except ImportError:
+                    pass  # kiln-pro not installed — free tier
+                except Exception as exc:
+                    _logger.debug(
+                        "kiln-pro outcome recording failed (non-fatal): %s", exc,
+                    )
+
+                response: dict = {
                     "success": True,
                     "session": session.to_dict(),
                     "message": f"Recovery session {session_id} {outcome}.",
                 }
+                if pro_outcome is not None:
+                    response["pro_outcome_recorded"] = True
+                return response
             except ValueError as exc:
                 return _srv._error_dict(str(exc), code="INVALID_STATE")
             except Exception as exc:

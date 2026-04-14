@@ -164,6 +164,9 @@ class FailureReport:
     contributing_factors: list[str] = field(default_factory=list)
     telemetry_snapshot: dict[str, Any] = field(default_factory=dict)
     material_type: str | None = None
+    # Path to the original G-code file.  Enables kiln-pro to generate a
+    # resume-from-layer G-code artifact without re-slicing.
+    gcode_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
@@ -182,6 +185,7 @@ class FailureReport:
             "contributing_factors": self.contributing_factors,
             "telemetry_snapshot": self.telemetry_snapshot,
             "material_type": self.material_type,
+            "gcode_path": self.gcode_path,
         }
 
 
