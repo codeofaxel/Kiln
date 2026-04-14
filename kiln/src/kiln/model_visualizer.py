@@ -274,7 +274,12 @@ def visualize_model(
     color: str = "",
     timeout: int = 120,
 ) -> dict:
-    """Render a 3D model from multiple camera angles.
+    """Primary 3D preview tool — renders high-quality PNGs via OpenSCAD.
+
+    Preferred over ``render_multi_view_preview()`` (which produces
+    lightweight SVGs). Use this for all user-facing model previews.
+
+    Render a 3D model from multiple camera angles.
 
     Args:
         file_path: Path to an STL, 3MF, OBJ, or SCAD file.

@@ -60,6 +60,11 @@ def render_multi_view_preview(
 ) -> PreviewResult:
     """Render a 3-view mesh preview as an SVG image.
 
+    NOTE: This is a lightweight SVG shape preview. For high-quality PNG
+    renders with proper lighting, use ``visualize_model()`` from
+    ``kiln.model_visualizer`` instead — it renders via OpenSCAD at
+    1024x1024 with configurable angles and color support.
+
     Args:
         mesh_path: Path to STL/OBJ mesh.
         output_path: Optional output file path. Defaults to temp dir.

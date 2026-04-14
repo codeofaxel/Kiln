@@ -142,7 +142,12 @@ class _GenerationToolsPlugin:
 
         @mcp.tool()
         def preview_generated_model(file_path: str) -> dict:
-            """Render a 3D model to multi-angle PNG previews for visual inspection.
+            """Specialized post-generation verification renderer. For general-purpose
+            model viewing, use ``visualize_model`` instead. This tool adds
+            generation-specific checks (floating geometry, thin walls) on top of
+            the standard multi-angle renders.
+
+            Render a 3D model to multi-angle PNG previews for visual inspection.
 
             **REQUIRED** before printing any generated model.  You MUST call this
             tool after generating a model and BEFORE printing.  View ALL rendered
@@ -346,7 +351,11 @@ class _GenerationToolsPlugin:
             style: str = "realistic",
             provider: str = "meshy",
         ) -> dict:
-            """Generate AI texture for a 3D model from a text prompt.
+            """Cloud AI texture generation (requires Meshy API key + internet).
+
+            For instant offline textures without any API, use
+            ``apply_procedural_texture`` (multicolor) or
+            ``apply_geometric_texture`` (relief) from kiln-pro.
 
             Takes any untextured mesh (STL, OBJ, GLB) and generates a
             UV-mapped texture based on the text description.  The textured

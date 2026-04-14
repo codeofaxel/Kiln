@@ -6769,7 +6769,7 @@ def render_model_preview(
     width: int = 800,
     height: int = 600,
 ) -> dict:
-    """Render a PNG preview of a 3D model (DEPRECATED — use visualize_model).
+    """DEPRECATED — use visualize_model instead. This renders only 1 angle; visualize_model renders 6 angles with auto-framing, colored 3MF support, and quality scores.
 
     This tool is a thin wrapper around ``visualize_model`` with a single
     isometric angle.  Prefer ``visualize_model`` directly for multi-angle
@@ -6811,7 +6811,7 @@ def visualize_model(
     height: int = 600,
     color: str = "",
 ) -> dict:
-    """Render a 3D model from 6 standard camera angles for visual inspection.
+    """Primary 3D preview tool — renders high-quality PNGs from multiple camera angles via OpenSCAD.
 
     Universal visualization tool that works with ANY 3D file — STL, 3MF,
     OBJ, or SCAD.  Returns PNG images from 6 angles: isometric, front,
@@ -10880,6 +10880,11 @@ def decorate_surface(
     template_id: str = "",
 ) -> dict:
     """Put any image, text, or pattern onto a 3D model surface.
+
+    For repeating patterns (wood grain, camo, honeycomb) that tile across
+    the entire surface, use ``apply_geometric_texture`` or
+    ``apply_procedural_texture`` instead.  This tool is for one-off
+    content placement (logos, text, images).
 
     Takes a model and content (image file, text string, SVG) and returns
     a new STL with the content embossed or debossed onto the surface.

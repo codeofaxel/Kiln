@@ -2357,7 +2357,8 @@
               "snakeskin_diamond",
               "bamboo",
               "carbon_fiber",
-              "brushed_metal"
+              "brushed_metal",
+              "honeycomb"
             ],
             "title": "Texture",
             "type": "string"
