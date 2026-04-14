@@ -50,6 +50,17 @@ scripts/
 task.md
 tasks.md
 
+# Session summaries, work notes, scratch markdown — never commit these.
+# These are ephemeral working-memory artifacts, not repo artifacts.
+# See CLAUDE.md "Files Never to Commit" section.
+*SUMMARY.md
+*_SUMMARY.md
+*_NOTES.md
+WORK_LOG.md
+SESSION_*.md
+OVERNIGHT_*.md
+NOTES.md
+
 # Circle recovery files
 .circle-recovery.txt
 recovery.dat
