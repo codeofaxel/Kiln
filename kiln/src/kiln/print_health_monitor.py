@@ -445,9 +445,9 @@ class PrintHealthMonitor:
         policy = MonitorPolicy.from_env()
 
         # Lazy import to avoid circular dependency at module load time
-        from kiln.registry import get_printer_registry
+        from kiln.server import _get_registry
 
-        registry = get_printer_registry()
+        registry = _get_registry()
         adapter = registry.get(printer_name)
         state = adapter.get_state()
 
