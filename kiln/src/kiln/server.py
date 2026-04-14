@@ -3347,7 +3347,10 @@ def set_temperature(
 
 @mcp.tool()
 def ams_status() -> dict:
-    """Query the AMS (Automatic Material System) status (Bambu Lab printers only).
+    """Full AMS hardware dump — all trays, humidity, RFID (Bambu Lab only).
+
+    For just the currently-active material, use ``get_active_material``
+    instead. For Kiln's software material tracker, use ``get_material``.
 
     Returns what's loaded in each AMS tray: filament type, color, remaining
     percentage, RFID tag, temperature ranges, and humidity.

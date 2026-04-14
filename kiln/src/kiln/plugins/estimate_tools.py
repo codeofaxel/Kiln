@@ -82,7 +82,10 @@ class _EstimateToolsPlugin:
             profile: str | None = None,
             material: str = "PLA",
         ) -> dict:
-            """Slice a 3D model and return estimates WITHOUT printing.
+            """Primary estimation tool — slice a 3D model and return time, filament, cost, and printability analysis.
+
+            For G-code files (already sliced), use ``estimate_cost`` instead.
+            For quick volume-based estimates without slicing, use ``estimate_material_cost``.
 
             Slices the model using PrusaSlicer or OrcaSlicer, parses the
             output G-code for time and filament metadata, runs printability
@@ -246,7 +249,10 @@ class _EstimateToolsPlugin:
             electricity_rate: float = 0.12,
             printer_wattage: float = 200.0,
         ) -> dict:
-            """Estimate the cost of a print job from a G-code file.
+            """Estimate the cost of a print job from a G-code file (already-sliced only).
+
+            For STL/OBJ files, use ``slice_and_estimate`` instead — it slices
+            and estimates in one step.
 
             Analyses G-code extrusion commands to calculate filament usage,
             material weight, filament cost, electricity cost, and total.
