@@ -62,35 +62,10 @@ class SkillManifest:
     setup_command: str = "kiln verify"
     health_command: str = "kiln status --json"
 
-    # Tool discovery — how agents find tools among 400+ MCP entries
-    discovery: dict[str, Any] = field(
-        default_factory=lambda: {
-            "total_tools_note": (
-                "Public Kiln ships ~270 MCP tools; kiln-pro adds ~170 more "
-                "(product generators, decoration, fleet ops, billing). When "
-                "kiln-pro is installed, agents see ~440+ live tools. When it "
-                "isn't, agents still see manifest stubs for pro tools labeled "
-                "with their tier + upgrade URL so they can recommend upgrades."
-            ),
-            "pattern": (
-                "MCP clients don't load all tool schemas upfront at this "
-                "scale. Agents use ToolSearch(keyword) to surface tool schemas "
-                "on demand — e.g. ToolSearch('slice bambu'), "
-                "ToolSearch('ams filament'), ToolSearch('billing')."
-            ),
-            "entry_points": [
-                "get_started() — quick-start + live tool count + core workflows",
-                "get_skill_manifest() — this tool; full capability map",
-                "printer_status() — first concrete probe for any agent",
-            ],
-            "tier_visibility_for_agents": (
-                "Tier-gated tools appear in ToolSearch results with a tier "
-                "label ('Requires Kiln Pro'/'Business') and upgrade URL in "
-                "the description. Free-tier agents can surface these to users "
-                "for upgrade messaging without kiln-pro installed locally."
-            ),
-        }
-    )
+    # Tool discovery — how agents find tools among 400+ MCP entries.
+    # `total_tools_note` is computed from the live MCP registry at
+    # construction time so the numbers can never drift from reality.
+    discovery: dict[str, Any] = field(default_factory=lambda: _build_discovery_section())
 
     # Tier system — what paid tiers unlock
     tiers: dict[str, Any] = field(
@@ -266,6 +241,129 @@ def get_tool_count() -> int:
     except (json.JSONDecodeError, OSError, KeyError):
         pass
     return 0
+
+
+def get_cli_count() -> int:
+    """Count total CLI commands — leaves + groups, incl. kiln-pro extensions.
+
+    Walks the Click command tree rooted at ``kiln.cli.main.cli`` and
+    returns ``len(leaves) + num_groups``.  This matches the documented
+    methodology in ``.dev/LESSONS_LEARNED.md`` and counts everything
+    a user can type after ``kiln `` — every subcommand *and* every
+    parent group (which is itself invocable as ``kiln <group>``).
+
+    kiln-pro extends the tree at import time via ``register_pro_commands``,
+    so counting at call time automatically picks up pro CLI commands
+    when kiln-pro is installed.  Returns 0 if the CLI can't be imported
+    (e.g. missing click dependency in a minimal environment).
+    """
+    try:
+        import click
+
+        from kiln.cli.main import cli
+    except Exception:  # noqa: BLE001 — click or cli import failure
+        return 0
+
+    def walk_leaves(group: click.Group, prefix: str = "") -> list[str]:
+        out: list[str] = []
+        for name, cmd in group.commands.items():
+            full = f"{prefix} {name}".strip()
+            if isinstance(cmd, click.Group):
+                out.extend(walk_leaves(cmd, full))
+            else:
+                out.append(full)
+        return out
+
+    def count_groups(group: click.Group) -> int:
+        n = 0
+        for _, cmd in group.commands.items():
+            if isinstance(cmd, click.Group):
+                n += 1 + count_groups(cmd)
+        return n
+
+    return len(walk_leaves(cli)) + count_groups(cli)
+
+
+def _build_discovery_section() -> dict[str, Any]:
+    """Build the manifest `discovery` section with live tool counts.
+
+    Called lazily by ``SkillManifest``'s default_factory so every
+    generated manifest reflects the currently registered MCP tools
+    (public + kiln-pro) rather than a stale hand-edited blurb.
+    """
+    split = get_tool_counts_split()
+    if split["total"]:
+        total_tools_note = (
+            f"Public Kiln ships {split['public']} MCP tools; kiln-pro adds "
+            f"{split['pro']} more (product generators, decoration, fleet ops, "
+            f"billing). When kiln-pro is installed, agents see {split['total']} "
+            "live tools. When it isn't, agents still see manifest stubs for "
+            "pro tools labeled with their tier + upgrade URL so they can "
+            "recommend upgrades."
+        )
+    else:
+        # Registry not reachable (cold import path). Keep the copy
+        # honest: no hardcoded numbers, just the shape of the system.
+        total_tools_note = (
+            "Public Kiln ships a broad MCP tool catalog; kiln-pro extends "
+            "it with product generators, decoration, fleet ops, and billing. "
+            "When kiln-pro isn't installed, agents still see manifest stubs "
+            "for pro tools labeled with their tier + upgrade URL so they can "
+            "recommend upgrades."
+        )
+
+    return {
+        "total_tools_note": total_tools_note,
+        "pattern": (
+            "MCP clients don't load all tool schemas upfront at this "
+            "scale. Agents use ToolSearch(keyword) to surface tool schemas "
+            "on demand — e.g. ToolSearch('slice bambu'), "
+            "ToolSearch('ams filament'), ToolSearch('billing')."
+        ),
+        "entry_points": [
+            "get_started() — quick-start + live tool count + core workflows",
+            "get_skill_manifest() — this tool; full capability map",
+            "printer_status() — first concrete probe for any agent",
+        ],
+        "tier_visibility_for_agents": (
+            "Tier-gated tools appear in ToolSearch results with a tier "
+            "label ('Requires Kiln Pro'/'Business') and upgrade URL in "
+            "the description. Free-tier agents can surface these to users "
+            "for upgrade messaging without kiln-pro installed locally."
+        ),
+    }
+
+
+def get_tool_counts_split() -> dict[str, int]:
+    """Return ``{"public": N, "pro": N, "total": N}`` from the live registry.
+
+    Introspects each registered MCP tool's ``__module__`` to classify
+    it as a public Kiln tool (``kiln.*``) or kiln-pro plugin tool
+    (``kiln_pro.*``).  Used to render "public Kiln ships N tools;
+    kiln-pro adds M more" copy dynamically.  Returns zeros if the
+    registry isn't reachable.
+    """
+    out = {"public": 0, "pro": 0, "total": 0}
+    try:
+        import kiln.server as _srv
+    except Exception:  # noqa: BLE001
+        return out
+
+    try:
+        tools = _srv.mcp._tool_manager._tools  # dict[name, Tool]
+    except Exception:  # noqa: BLE001
+        return out
+
+    for tool in tools.values():
+        fn = getattr(tool, "fn", None) or getattr(tool, "func", None) or getattr(tool, "handler", None)
+        mod = getattr(fn, "__module__", "") if fn is not None else ""
+        if mod.startswith("kiln_pro"):
+            out["pro"] += 1
+        elif mod.startswith("kiln"):
+            out["public"] += 1
+        # else: third-party plugin — ignored for the public/pro split
+    out["total"] = out["public"] + out["pro"]
+    return out
 
 
 def generate_manifest() -> SkillManifest:
