@@ -680,6 +680,7 @@ def build_bambu_3mf(
     settings: BambuPrintSettings | None = None,
     source_3mf_path: str | None = None,
     stl_paths: list[str] | None = None,
+    resume_mode: bool = False,
 ) -> Bambu3MFResult:
     """Build a Bambu-compatible 3MF from PrusaSlicer gcode body.
 
@@ -692,6 +693,13 @@ def build_bambu_3mf(
     :param settings: Print settings (temps, filament, etc.).
     :param source_3mf_path: Optional source 3MF to extract thumbnails
         and 3D model geometry from.
+    :param resume_mode: When True, skip Bambu's proprietary start-gcode
+        (homing, bed probe, AMS load, purge, calibration) and the initial
+        M73.  Used for mid-print resume gcode that carries its own
+        preamble (heat → Z+5 safety lift → home X/Y only → travel →
+        optional prime → descend to resume Z).  Re-running Bambu's full
+        start sequence on a bed with a partial print risks nozzle
+        collision on Z rehome and wastes ~18 minutes on init.
     :returns: :class:`Bambu3MFResult` with output path and metadata.
     :raises FileNotFoundError: If the start/end gcode data files are missing.
     :raises ValueError: If the gcode body has no layer changes.
@@ -802,7 +810,17 @@ def build_bambu_3mf(
     initial_m73 = f"M73 P0 R{est_minutes_with_startup}\n"
 
     # Assemble complete gcode.
-    complete_gcode = initial_m73 + header + start_gcode + "\n" + processed_body + "\n" + end_gcode
+    if resume_mode:
+        # Resume-mode: suppress Bambu's proprietary start sequence and initial
+        # M73.  The resume gcode body carries its own safety preamble (heat →
+        # Z+5 lift → G28 X Y only → travel Z → optional filament prime →
+        # descend to resume Z).  Running Bambu's start-gcode on a bed with a
+        # partial print would re-home Z (nozzle collision risk), re-probe bed
+        # (impossible with print on it), and waste ~18 min on AMS load +
+        # calibration before the resume preamble ever executes.
+        complete_gcode = header + processed_body + "\n" + end_gcode
+    else:
+        complete_gcode = initial_m73 + header + start_gcode + "\n" + processed_body + "\n" + end_gcode
 
     # Build metadata.
     gcode_bytes = complete_gcode.encode("utf-8")

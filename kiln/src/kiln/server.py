@@ -308,6 +308,12 @@ _PRINTER_API_KEY: str = os.environ.get("KILN_PRINTER_API_KEY", "")
 _PRINTER_TYPE: str = os.environ.get("KILN_PRINTER_TYPE", "octoprint")
 _PRINTER_SERIAL: str = os.environ.get("KILN_PRINTER_SERIAL", "")
 _PRINTER_MODEL: str = os.environ.get("KILN_PRINTER_MODEL", "")
+
+# Provenance string for the active printer config — set by
+# ``_reload_env_config``. Logged prominently at startup so users can
+# see whether credentials came from the environment or ~/.kiln/config.yaml
+# (critical for debugging stale env vars that silently shadow config edits).
+_PRINTER_CONFIG_SOURCE: str = "unset"
 # PrusaSlicer defaults to conservative speeds (~45mm/s) designed for
 # generic printers. Modern printers (especially Bambu with input shaping)
 # can handle much higher speeds safely. These overrides are injected
@@ -406,6 +412,7 @@ def _reload_env_config() -> None:
     """
     global _PRINTER_HOST, _PRINTER_API_KEY, _PRINTER_TYPE  # noqa: PLW0603
     global _PRINTER_SERIAL, _PRINTER_MODEL  # noqa: PLW0603
+    global _PRINTER_CONFIG_SOURCE  # noqa: PLW0603
     global _CONFIRM_UPLOAD, _CONFIRM_MODE  # noqa: PLW0603
     global _THINGIVERSE_TOKEN, _MMF_API_KEY  # noqa: PLW0603
     global _CULTS3D_USERNAME, _CULTS3D_API_KEY, _CRAFTCLOUD_API_KEY  # noqa: PLW0603
@@ -419,6 +426,81 @@ def _reload_env_config() -> None:
     _PRINTER_TYPE = os.environ.get("KILN_PRINTER_TYPE", "octoprint")
     _PRINTER_SERIAL = os.environ.get("KILN_PRINTER_SERIAL", "")
     _PRINTER_MODEL = os.environ.get("KILN_PRINTER_MODEL", "")
+
+    # Printer credential resolution — ONE SOURCE OF TRUTH:
+    #   ``~/.kiln/config.yaml`` WINS when it has a printer with a host.
+    #   ``KILN_PRINTER_*`` env vars are only used when the YAML file is
+    #   absent or has no active printer configured (fresh installs, CI).
+    #
+    # Why we inverted the documented "env > yaml" precedence:
+    #   Stale ``KILN_PRINTER_*`` env vars inherited from a long-dead shell
+    #   session (or a parent MCP-host process that captured them at its
+    #   launch time) would silently shadow every config.yaml edit for the
+    #   life of the parent process.  Users would edit the YAML, see no
+    #   effect, and burn hours chasing a phantom.  Making YAML authoritative
+    #   means editing the file always works and ``kiln`` CLI + MCP server
+    #   always see the same printer.
+    #
+    # Escape hatch: set ``KILN_PRINTER_CONFIG_IGNORE_YAML=1`` to force the
+    # old env-first behaviour (for CI pipelines that deliberately override
+    # a checked-in config.yaml).  Otherwise, edit the YAML or delete it.
+    #
+    # Even when YAML wins, we still surface any env/YAML disagreement as
+    # a warning at startup so the ghost-env footgun is impossible to miss.
+    _yaml_cfg: dict = {}
+    try:
+        from kiln.cli.config import _read_config_file as _read_yaml
+        from kiln.cli.config import get_config_path as _get_cfg_path
+
+        _yaml_full = _read_yaml(_get_cfg_path()) or {}
+        _active = _yaml_full.get("active_printer") or "default"
+        _printers = _yaml_full.get("printers") or {}
+        _yaml_cfg = _printers.get(_active, {}) or _printers.get("default", {}) or {}
+    except Exception:  # noqa: BLE001
+        _yaml_cfg = {}
+
+    _force_env = os.environ.get("KILN_PRINTER_CONFIG_IGNORE_YAML", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    _yaml_has_printer = bool(_yaml_cfg.get("host"))
+
+    if _yaml_has_printer and not _force_env:
+        # YAML wins — override any env-derived values we just read.
+        _PRINTER_HOST = str(_yaml_cfg.get("host", ""))
+        _PRINTER_TYPE = str(_yaml_cfg.get("type", "octoprint"))
+        # Bambu stores the LAN Access Code under `access_code`; every
+        # other backend uses `api_key`.  Internally the server treats
+        # them interchangeably via `_PRINTER_API_KEY`.
+        _PRINTER_API_KEY = str(
+            _yaml_cfg.get("api_key") or _yaml_cfg.get("access_code") or ""
+        )
+        _PRINTER_SERIAL = str(_yaml_cfg.get("serial", ""))
+        if not _PRINTER_MODEL:
+            _PRINTER_MODEL = str(_yaml_cfg.get("printer_model", ""))
+        masked_key = (
+            _PRINTER_API_KEY[:4] + "****"
+            if len(_PRINTER_API_KEY) >= 4
+            else "(empty)"
+        )
+        _PRINTER_CONFIG_SOURCE = (
+            f"~/.kiln/config.yaml (host={_PRINTER_HOST}, "
+            f"type={_PRINTER_TYPE}, api_key={masked_key}, "
+            f"serial={_PRINTER_SERIAL or '(none)'})"
+        )
+    elif _PRINTER_HOST:
+        masked_key = (
+            _PRINTER_API_KEY[:4] + "****" if len(_PRINTER_API_KEY) >= 4 else "(empty)"
+        )
+        _PRINTER_CONFIG_SOURCE = (
+            f"env vars (KILN_PRINTER_HOST={_PRINTER_HOST}, "
+            f"type={_PRINTER_TYPE}, api_key={masked_key}, "
+            f"serial={_PRINTER_SERIAL or '(none)'})"
+            + (" [forced via KILN_PRINTER_CONFIG_IGNORE_YAML]" if _force_env else "")
+        )
+    else:
+        _PRINTER_CONFIG_SOURCE = "unset (no ~/.kiln/config.yaml printer, no env vars)"
     _CONFIRM_UPLOAD = os.environ.get("KILN_CONFIRM_UPLOAD", "").lower() in ("1", "true", "yes")
     _CONFIRM_MODE = os.environ.get("KILN_CONFIRM_MODE", "").lower() in ("1", "true", "yes")
     _THINGIVERSE_TOKEN = os.environ.get("KILN_THINGIVERSE_TOKEN", "")
@@ -2609,23 +2691,29 @@ def _resolve_use_ams(
     use_ams: str | bool,
     ams_mapping: list[int] | None,
     adapter: PrinterAdapter,
+    material: str | None = None,
 ) -> dict[str, Any]:
-    """Resolve tri-state use_ams into a concrete decision.
+    """Resolve tri-state use_ams into a concrete routing decision.
 
     :param use_ams: ``"auto"``, ``"true"``/``True``, or ``"false"``/``False``.
     :param ams_mapping: Explicit AMS mapping from the caller (may be None).
     :param adapter: Printer adapter to probe for AMS presence.
-    :returns: Dict with ``use_ams`` (bool) and optional ``ams_mapping`` (list).
+    :param material: Optional material hint (e.g. ``"PLA"``).  When set,
+        auto-routing prefers a tray whose ``tray_type`` matches (case-
+        insensitive), falling back to the first loaded tray and
+        attaching a warning when no match is found.
+    :returns: Dict with ``use_ams`` (bool), optional ``ams_mapping`` (list),
+        and optional ``warnings`` (list of human-readable strings).
     """
     # Normalize string/bool input
     if isinstance(use_ams, bool):
-        return {"use_ams": use_ams, "ams_mapping": None}
+        return {"use_ams": use_ams, "ams_mapping": None, "warnings": []}
 
     val = str(use_ams).lower().strip()
     if val in ("true", "1", "yes"):
-        return {"use_ams": True, "ams_mapping": None}
+        return {"use_ams": True, "ams_mapping": None, "warnings": []}
     if val in ("false", "0", "no"):
-        return {"use_ams": False, "ams_mapping": None}
+        return {"use_ams": False, "ams_mapping": None, "warnings": []}
 
     # "auto" — probe the printer for AMS
     if val != "auto":
@@ -2634,45 +2722,95 @@ def _resolve_use_ams(
     # Check if the adapter supports AMS queries
     if not hasattr(adapter, "get_ams_status"):
         logger.debug("Adapter has no get_ams_status — AMS auto-detect disabled.")
-        return {"use_ams": False, "ams_mapping": None}
+        return {"use_ams": False, "ams_mapping": None, "warnings": []}
 
     try:
         ams_info = adapter.get_ams_status()
     except Exception as exc:
         logger.debug("AMS auto-detect probe failed: %s — defaulting to no AMS.", exc)
-        return {"use_ams": False, "ams_mapping": None}
+        return {"use_ams": False, "ams_mapping": None, "warnings": []}
 
-    # Check if AMS exists with loaded trays
+    # Check if AMS exists
     units = ams_info.get("units", [])
     if not units:
         logger.debug("AMS auto-detect: no AMS units found — using external spool.")
-        return {"use_ams": False, "ams_mapping": None}
+        return {"use_ams": False, "ams_mapping": None, "warnings": []}
 
-    # Find loaded tray slots
-    loaded_slots: list[int] = []
+    # Collect loaded trays.  Trust ``tray_type`` as the loaded-indicator —
+    # the A1/AMS Lite reports ``remain: 0`` even for full spools (RFID
+    # capacity is only tracked on Bambu-branded spools with tag readers),
+    # so requiring ``remain > 0`` would incorrectly reject valid trays
+    # and force a broken external-spool route.
+    #
+    # Bambu's JSON sometimes returns slot IDs as strings (``"0"``) — coerce
+    # here so downstream ``%d`` logging and ``int`` arithmetic don't trip.
+    loaded_trays: list[dict[str, Any]] = []
     for unit in units:
         for tray in unit.get("trays", []):
-            tray_type = tray.get("tray_type", "")
-            remain = tray.get("remain", 0)
-            if tray_type and remain and remain > 0:
-                loaded_slots.append(tray.get("slot", 0))
+            tray_type = str(tray.get("tray_type", "") or "").strip()
+            if not tray_type:
+                continue
+            try:
+                slot_idx = int(tray.get("slot", 0))
+            except (TypeError, ValueError):
+                continue
+            loaded_trays.append({
+                "slot": slot_idx,
+                "tray_type": tray_type,
+            })
 
-    if not loaded_slots:
-        logger.debug("AMS auto-detect: AMS present but no loaded trays — using external spool.")
-        return {"use_ams": False, "ams_mapping": None}
+    if not loaded_trays:
+        logger.warning(
+            "AMS present but no trays report loaded filament — routing to "
+            "external spool.  If the external-spool feeder is empty the "
+            "print will pause with error 0300-8015.",
+        )
+        return {
+            "use_ams": False,
+            "ams_mapping": None,
+            "warnings": [
+                "AMS is attached but no trays report loaded filament. "
+                "Print will use the external-spool feed path — if nothing "
+                "is loaded there the print will pause with error 0300-8015."
+            ],
+        }
+
+    warnings_out: list[str] = []
+
+    # Material-aware tray selection when caller hints at the material.
+    chosen = None
+    if material:
+        mat_norm = material.strip().upper()
+        for tray in loaded_trays:
+            if tray["tray_type"].upper() == mat_norm:
+                chosen = tray
+                break
+        if chosen is None:
+            chosen = loaded_trays[0]
+            warnings_out.append(
+                f"No AMS tray matches material {material!r}; using tray "
+                f"{chosen['slot']} ({chosen['tray_type']}) instead."
+            )
+    else:
+        chosen = loaded_trays[0]
 
     logger.info(
-        "AMS auto-detect: found %d loaded slot(s) %s — enabling AMS.",
-        len(loaded_slots),
-        loaded_slots,
+        "AMS auto-detect: routing to tray %d (%s) — %d loaded slot(s) available.",
+        chosen["slot"],
+        chosen["tray_type"],
+        len(loaded_trays),
     )
 
     # Auto-generate mapping only if caller didn't provide one
     auto_mapping = None
     if ams_mapping is None:
-        auto_mapping = [loaded_slots[0]]
+        auto_mapping = [chosen["slot"]]  # already coerced to int above
 
-    return {"use_ams": True, "ams_mapping": auto_mapping}
+    return {
+        "use_ams": True,
+        "ams_mapping": auto_mapping,
+        "warnings": warnings_out,
+    }
 
 
 @mcp.tool()
@@ -3512,6 +3650,7 @@ def wrap_gcode_as_3mf(
     filament_types: list[str] | None = None,
     thumbnail_path: str | None = None,
     stl_path: str | None = None,
+    resume_mode: bool = False,
 ) -> dict:
     """Wrap raw PrusaSlicer G-code in a Bambu-compatible 3MF (Bambu Lab only).
 
@@ -3568,6 +3707,7 @@ def wrap_gcode_as_3mf(
             filament_colors=filament_colors,
             filament_types=filament_types,
             stl_paths=stl_paths,
+            resume_mode=resume_mode,
         )
         # Inject thumbnail PNG if provided and not already in the 3MF.
         # Bambu printers read from Auxiliaries/.thumbnails/ — not just
@@ -4958,11 +5098,11 @@ def get_upgrade_url(tier: str = "pro", billing: str = "monthly", email: str = ""
 
 
 @mcp.tool()
-def restart_server() -> dict:
+def restart_server(clean_env: bool = True) -> dict:
     """Restart the Kiln MCP server process in-place.
 
     Replaces the current process with a fresh instance using
-    ``os.execv``.  The MCP client (Claude Code, etc.) should detect
+    ``os.execve``.  The MCP client (Claude Code, etc.) should detect
     the connection drop and automatically reconnect, picking up any
     code changes made since the last startup.
 
@@ -4970,23 +5110,73 @@ def restart_server() -> dict:
     environment variables, or modifying server code — avoids the
     need to fully restart the MCP client application.
 
-    :returns: Confirmation that the restart is imminent.  The
-        connection will drop within ~0.5 seconds.
+    :param clean_env: When ``True`` (default), strips ``KILN_PRINTER_*``
+        environment variables from the child process if
+        ``~/.kiln/config.yaml`` has a printer configured.  This defeats
+        the "ghost env" footgun where a stale ``KILN_PRINTER_API_KEY``
+        inherited from a past shell session silently shadows config.yaml
+        edits for the lifetime of the MCP parent process.  Without this,
+        every edit to config.yaml looks like it does nothing and the
+        printer rejects MQTT auth with no hint why.  Set to ``False`` to
+        preserve the full env (useful for CI or pure env-driven workflows
+        where config.yaml is absent or deliberately overridden).
+    :returns: Confirmation that the restart is imminent, plus the list
+        of env vars that were stripped (for debugging transparency).
+        The connection will drop within ~0.5 seconds.
     """
     import threading
 
+    new_env = os.environ.copy()
+    stripped: list[str] = []
+    if clean_env:
+        # Only strip when config.yaml has a printer — otherwise the env
+        # is the sole source of truth and stripping would break the server.
+        has_yaml_printer = False
+        try:
+            from kiln.cli.config import load_printer_config
+
+            cfg = load_printer_config()
+            has_yaml_printer = bool(cfg.get("host"))
+        except Exception:  # noqa: BLE001 — never fail restart on config read
+            has_yaml_printer = False
+
+        if has_yaml_printer:
+            for key in list(new_env):
+                if key.startswith("KILN_PRINTER_"):
+                    stripped.append(key)
+                    del new_env[key]
+
     def _do_restart() -> None:
         time.sleep(0.3)  # let the tool response flush
-        logger.info("Kiln MCP server restarting via restart_server tool...")
-        os.execv(sys.executable, [sys.executable, "-m", "kiln"])
+        if stripped:
+            logger.info(
+                "Kiln MCP server restarting; stripped %d stale env var(s) so "
+                "config.yaml wins: %s",
+                len(stripped),
+                ", ".join(sorted(stripped)),
+            )
+        else:
+            logger.info("Kiln MCP server restarting via restart_server tool...")
+        # ``serve`` is the only subcommand that runs the MCP server; without
+        # it ``python -m kiln`` just prints help and exits, which makes the
+        # MCP host think the child died and spawn a fresh one with its own
+        # (ghost-laden) environment — defeating ``clean_env`` entirely.
+        os.execve(
+            sys.executable, [sys.executable, "-m", "kiln", "serve"], new_env
+        )
 
     threading.Thread(target=_do_restart, daemon=True).start()
+    msg = "Kiln server restarting in ~0.3s."
+    if stripped:
+        msg += (
+            f" Stripped {len(stripped)} stale KILN_PRINTER_* env var(s) so "
+            f"~/.kiln/config.yaml wins."
+        )
+    msg += " MCP connection will drop and the client should auto-reconnect."
     return {
         "success": True,
-        "message": (
-            "Kiln server restarting in ~0.3s. The MCP connection will "
-            "drop and the client should auto-reconnect to the fresh process."
-        ),
+        "stripped_env_vars": sorted(stripped),
+        "message": msg,
     }
 
 
@@ -8734,16 +8924,87 @@ def main() -> None:
     # Set up log rotation and sensitive data scrubbing.
     _configure_log_rotation()
 
-    # Auto-register the env-configured printer so the scheduler can
-    # dispatch jobs even if no explicit register_printer call is made.
+    # Loud, unmissable banner telling the user which config source the
+    # server is actually using.  The scenario we want to rule out: a
+    # stale env var (e.g. leftover in .mcp.json, a wrapper shell, or an
+    # inherited os.execv env) silently shadows ~/.kiln/config.yaml.
+    # Editing the YAML file looks like it does nothing, and the printer
+    # rejects auth with no hint why.  Emitting the source loudly at
+    # startup turns a half-day debugging session into a one-line check.
+    logger.info("Kiln printer config source: %s", _PRINTER_CONFIG_SOURCE)
+
+    # Surface env-vs-YAML disagreement as a warning regardless of who won.
+    # When YAML wins (the default) we still want the user to know that
+    # stale env vars are hanging around in their process tree — silent
+    # precedence swallowing would be the new footgun if we didn't tell
+    # them.  When env wins (explicit override) the warning doubles as a
+    # reminder that their YAML file is being shadowed on purpose.
+    try:
+        env_host = os.environ.get("KILN_PRINTER_HOST", "")
+        env_key = os.environ.get("KILN_PRINTER_API_KEY", "")
+        env_serial = os.environ.get("KILN_PRINTER_SERIAL", "")
+        if env_host:
+            from kiln.cli.config import _read_config_file as _read_yaml
+            from kiln.cli.config import get_config_path as _get_cfg_path
+
+            _yaml = _read_yaml(_get_cfg_path()) or {}
+            _active = _yaml.get("active_printer") or "default"
+            _printers = _yaml.get("printers") or {}
+            _yaml_printer = (
+                _printers.get(_active, {}) or _printers.get("default", {}) or {}
+            )
+            if _yaml_printer:
+                yaml_key = str(
+                    _yaml_printer.get("access_code")
+                    or _yaml_printer.get("api_key")
+                    or ""
+                )
+                yaml_host = str(_yaml_printer.get("host", ""))
+                yaml_serial = str(_yaml_printer.get("serial", ""))
+                mismatches: list[str] = []
+                if env_key and yaml_key and env_key != yaml_key:
+                    mismatches.append(
+                        f"api_key (env={env_key[:4]}****, yaml={yaml_key[:4]}****)"
+                    )
+                if yaml_host and env_host != yaml_host:
+                    mismatches.append(f"host (env={env_host}, yaml={yaml_host})")
+                if yaml_serial and env_serial and env_serial != yaml_serial:
+                    mismatches.append(
+                        f"serial (env={env_serial}, yaml={yaml_serial})"
+                    )
+                if mismatches:
+                    if _PRINTER_CONFIG_SOURCE.startswith("~/.kiln/config.yaml"):
+                        logger.warning(
+                            "Stale KILN_PRINTER_* env vars detected in the "
+                            "MCP process environment; YAML is winning as "
+                            "designed, but you may want to clear them to "
+                            "avoid confusion.  Mismatch: %s",
+                            "; ".join(mismatches),
+                        )
+                    else:
+                        logger.warning(
+                            "Printer config MISMATCH between env vars and "
+                            "~/.kiln/config.yaml: %s. Env vars are winning "
+                            "(KILN_PRINTER_CONFIG_IGNORE_YAML=1 is set or "
+                            "YAML is empty); your config.yaml edits are "
+                            "being ignored.  Unset the env vars to switch "
+                            "to YAML.",
+                            "; ".join(mismatches),
+                        )
+    except Exception:  # noqa: BLE001 — warning is best-effort
+        pass
+
+    # Auto-register the resolved printer (env or config.yaml) so the
+    # scheduler can dispatch jobs even if no explicit register_printer
+    # call is made.
     if _PRINTER_HOST and _get_registry().count == 0:
         try:
             adapter = _get_adapter()
             _get_registry().register("default", adapter)
-            logger.info("Auto-registered env-configured printer as 'default'")
+            logger.info("Auto-registered printer as 'default' from %s", _PRINTER_CONFIG_SOURCE.split(" (", 1)[0])
         except Exception as exc:
             logger.debug(
-                "Could not auto-register env-configured printer: %s",
+                "Could not auto-register printer: %s",
                 _sanitize_log_msg(str(exc)),
             )
 

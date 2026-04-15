@@ -1551,6 +1551,7 @@ class BambuAdapter(PrinterAdapter):
         filament_colors: list[str] | None = None,
         filament_types: list[str] | None = None,
         stl_paths: list[str] | None = None,
+        resume_mode: bool = False,
     ) -> str:
         """Wrap PrusaSlicer gcode in a Bambu-compatible 3MF.
 
@@ -1605,6 +1606,7 @@ class BambuAdapter(PrinterAdapter):
             settings=settings,
             source_3mf_path=source_3mf_path,
             stl_paths=stl_paths,
+            resume_mode=resume_mode,
         )
         return result.output_path
 
@@ -2091,6 +2093,50 @@ class BambuAdapter(PrinterAdapter):
                         ams_mapping,
                     )
 
+            # Single-filament AMS auto-routing (defense in depth).
+            #
+            # If the caller didn't pass ams_mapping or use_ams and the AMS
+            # has loaded trays, route to the first loaded tray rather than
+            # falling through to external spool.  Silent external-spool
+            # fallthrough caused production failures (error 0300-8015
+            # "filament on external spool has run out") when users had
+            # AMS trays loaded but nothing on the direct feeder.
+            #
+            # Uses the cached MQTT status only — no extra round-trip — so
+            # we don't add latency to every start_print call.  Callers that
+            # want the freshest state should poll ``get_ams_status`` first.
+            #
+            # ``use_ams`` must be checked against the original kwargs (not
+            # the local default of ``False``) so callers can still opt out
+            # of AMS routing by passing ``use_ams=False`` explicitly.
+            if (
+                ams_mapping is None
+                and "use_ams" not in kwargs
+            ):
+                loaded_trays = self._peek_loaded_ams_trays()
+                if loaded_trays:
+                    slot_idx = int(loaded_trays[0].get("slot", 0))
+                    ams_mapping = [slot_idx]
+                    use_ams = True
+                    logger.info(
+                        "Single-filament AMS auto-routing: tray %d (%s)",
+                        slot_idx,
+                        loaded_trays[0].get("tray_type", "unknown"),
+                    )
+                # If we have no cached AMS data at all, stay silent — the
+                # caller may not have an AMS attached.  Only warn when we
+                # DO have AMS data and it shows zero loaded trays.
+                elif loaded_trays is not None:
+                    warnings.append(
+                        "AMS is attached but no trays report loaded "
+                        "filament. Print will use the external-spool "
+                        "feed path — if nothing is loaded there the "
+                        "print will pause with error 0300-8015."
+                    )
+                    logger.warning(
+                        "Bambu AMS has no loaded trays — routing to external spool"
+                    )
+
             # Fall back to single-filament defaults.
             if ams_mapping is None:
                 ams_mapping = [0]
@@ -2483,6 +2529,47 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
     # AMS (Automatic Material System)
     # ------------------------------------------------------------------
+
+    def _peek_loaded_ams_trays(self) -> list[dict[str, Any]] | None:
+        """Return loaded AMS trays from cached MQTT status, without any I/O.
+
+        Unlike ``get_ams_status``, this does not trigger a pushall request
+        when the cache is empty — it returns ``None`` instead.  Intended
+        for auto-routing decisions where an extra MQTT round-trip per
+        ``start_print`` call would be wasteful.
+
+        :returns: List of loaded-tray dicts (``tray_type`` non-empty), or
+            ``None`` if no AMS data is cached yet.  Empty list means AMS
+            is attached but no trays have filament.
+        """
+        try:
+            status = self._get_cached_status()
+        except Exception:
+            return None
+
+        ams_data = status.get("ams")
+        if isinstance(ams_data, dict):
+            ams_data = ams_data.get("ams")
+        if not isinstance(ams_data, list):
+            return None
+
+        loaded: list[dict[str, Any]] = []
+        for unit in ams_data:
+            if not isinstance(unit, dict):
+                continue
+            raw_trays = unit.get("tray")
+            if not isinstance(raw_trays, list):
+                continue
+            for tray in raw_trays:
+                if not isinstance(tray, dict):
+                    continue
+                if tray.get("tray_type"):
+                    loaded.append({
+                        "slot": tray.get("id", 0),
+                        "tray_type": tray.get("tray_type", ""),
+                        "tray_color": tray.get("tray_color", ""),
+                    })
+        return loaded
 
     def get_ams_status(self) -> dict[str, Any]:
         """Query AMS status: what's loaded in each tray.

@@ -329,6 +329,12 @@ class PrintRecovery:
                     "bed_actual": telemetry.get("bed_temp"),
                 }
                 report.material_type = info.get("material") or telemetry.get("material")
+                # Stamp gcode_path so kiln-pro's resume engine can locate the
+                # original .gcode without re-slicing.  Accept either
+                # ``gcode_path`` (explicit) or ``gcode_file`` (legacy).
+                gp = info.get("gcode_path") or info.get("gcode_file")
+                if isinstance(gp, str) and gp:
+                    report.gcode_path = gp
                 with self._lock:
                     self._failure_history.append(report)
                     if len(self._failure_history) > self._max_history:
