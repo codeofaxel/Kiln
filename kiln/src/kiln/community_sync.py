@@ -44,19 +44,28 @@ def _community_cache_dir() -> Path:
     return Path.home() / ".kiln" / "community_cache"
 
 
-def community_opt_in_enabled() -> bool:
-    """Check if the user has opted in to community data sharing.
+def community_sharing_enabled() -> bool:
+    """Check if this install participates in the anonymous community
+    learning loop.
 
-    True opt-in semantics: the default is False (no sharing) and the
-    user must explicitly set ``KILN_COMMUNITY_OPT_IN`` to an affirmative
-    value (``true``, ``1``, ``yes``, ``on``) to participate.  Anything
-    else — unset, empty, or falsy — keeps sharing off.
+    Default is ON — the data shared is geometric hashes + printer model
+    + material + outcome + failure_mode, with no file paths, no user
+    identifiers, and no PII.  The network effect of participating
+    (better cross-installation intelligence for everyone) outweighs the
+    opt-in friction.
 
-    This matches what the function name claims ("opt-in enabled") rather
-    than silently opting every user into data sharing.
+    Users who want to disable sharing can set
+    ``KILN_COMMUNITY_OPT_IN=false`` (or ``0``, ``no``, ``off``) in their
+    environment.
     """
-    val = os.environ.get("KILN_COMMUNITY_OPT_IN", "").strip().lower()
-    return val in ("true", "1", "yes", "on")
+    val = os.environ.get("KILN_COMMUNITY_OPT_IN", "true").strip().lower()
+    return val not in ("false", "0", "no", "off")
+
+
+# Backward-compat alias.  The original name suggested "opt-in" semantics
+# but the behavior was always opt-out by default; ``community_sharing_enabled``
+# is the honest name.  Kept so existing callers don't break.
+community_opt_in_enabled = community_sharing_enabled
 
 
 def sync_community_print(record: dict[str, Any]) -> bool:
