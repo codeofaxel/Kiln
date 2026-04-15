@@ -1,7 +1,9 @@
 """Community print data sync — local registry ↔ Supabase.
 
-Opt-in anonymous sharing of print outcomes to build collective
-intelligence.  Enable with ``KILN_COMMUNITY_OPT_IN=true``.
+Anonymous sharing of print outcomes to build collective intelligence.
+**Enabled by default.**  Users who want to opt out set
+``KILN_COMMUNITY_OPT_IN=false`` (or ``0`` / ``no`` / ``off``) in their
+environment; any other value (or unset) keeps sharing on.
 
 Only geometric signatures, printer model, material, settings hash,
 outcome, and failure mode are shared.  No file paths, no user IDs,
