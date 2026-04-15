@@ -537,7 +537,44 @@ class _SlicerToolsPlugin:
                         code="PREFLIGHT_FAILED",
                     )
 
-                print_result = adapter.start_print(file_name)
+                # --- AMS auto-routing for Bambu printers ---
+                # Silent fallthrough to the external-spool feed path caused
+                # production failures (error 0300-8015 "filament on external
+                # spool has run out") when users had AMS trays loaded but
+                # nothing on the external spool.  Delegate to the shared
+                # ``_resolve_use_ams`` helper so this matches the behaviour
+                # of the ``start_print`` MCP tool exactly.
+                print_kwargs: dict[str, Any] = {}
+                ams_routing: dict[str, Any] | None = None
+                ams_routing_warnings: list[str] = []
+                if _srv._PRINTER_TYPE == "bambu":
+                    ams_decision = _srv._resolve_use_ams(
+                        "auto", None, adapter, material=material,
+                    )
+                    ams_routing_warnings = list(ams_decision.get("warnings") or [])
+                    if ams_decision.get("use_ams"):
+                        print_kwargs["use_ams"] = True
+                        mapping = ams_decision.get("ams_mapping")
+                        if mapping is not None:
+                            print_kwargs["ams_mapping"] = mapping
+                        ams_routing = {
+                            "routed": "ams",
+                            "ams_mapping": mapping,
+                            "warnings": ams_routing_warnings,
+                        }
+                    else:
+                        ams_routing = {
+                            "routed": "external_spool",
+                            "warnings": ams_routing_warnings,
+                        }
+
+                # Pass local 3MF path so bambu.py can compute MD5 + detect
+                # multi-material plates (supersedes single-tray routing above
+                # when the 3MF explicitly declares multiple filaments).
+                if upload_path.lower().endswith(".3mf") and os.path.isfile(upload_path):
+                    print_kwargs["local_file_path"] = upload_path
+
+                print_result = adapter.start_print(file_name, **print_kwargs)
                 _srv._get_heater_watchdog().notify_print_started()
 
                 resp: dict[str, Any] = {
@@ -551,6 +588,10 @@ class _SlicerToolsPlugin:
                 }
                 if adhesion_rec:
                     resp["adhesion"] = adhesion_rec
+                if ams_routing is not None:
+                    resp["ams_routing"] = ams_routing
+                if ams_routing_warnings:
+                    resp["warnings"] = ams_routing_warnings
                 return resp
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
