@@ -1113,7 +1113,36 @@ class _DidYouMeanGroup(click.Group):
     ``kiln status``, Click normally prints a bare "No such command" error.
     This subclass uses :func:`difflib.get_close_matches` to suggest the
     closest valid command, reducing friction for agents and humans alike.
+
+    It also resolves ``{tool_count}`` in the banner docstring against
+    the live MCP registry the first time ``--help`` is rendered.  The
+    lookup is lazy so importing the CLI never triggers loading the
+    full MCP server — the registry is only queried if someone actually
+    asks for help.
     """
+
+    def format_help_text(
+        self, ctx: click.Context, formatter: click.HelpFormatter
+    ) -> None:
+        """Render help text after substituting ``{tool_count}`` with the live count."""
+        if self.help and "{tool_count}" in self.help:
+            try:
+                from kiln.skill_manifest import get_tool_count
+
+                count = get_tool_count()
+            except Exception:  # noqa: BLE001 — help must never crash
+                count = 0
+            # Fall back to a human-readable word if we couldn't reach
+            # the registry (e.g. a minimal install with no server deps).
+            replacement = str(count) if count else "many"
+            original_help = self.help
+            self.help = original_help.replace("{tool_count}", replacement)
+            try:
+                super().format_help_text(ctx, formatter)
+            finally:
+                self.help = original_help
+            return
+        super().format_help_text(ctx, formatter)
 
     def resolve_command(self, ctx: click.Context, args: list[str]) -> tuple:
         try:
@@ -1155,7 +1184,7 @@ def cli(ctx: click.Context, printer: str | None) -> None:
     \b
     🤖 AI agent? Use Kiln as an MCP server instead of CLI:
        kiln serve
-       MCP provides 461 tools with richer descriptions,
+       MCP provides {tool_count} tools with richer descriptions,
        structured JSON responses, and tool chaining.
        See: https://kiln3d.com/docs
     """
@@ -8998,11 +9027,11 @@ def watch(printer: str | None, delay: int, checks: int, interval: int, use_json:
 # Pro/Enterprise CLI plugins (loaded from kiln-pro when installed)
 # ---------------------------------------------------------------------------
 
-try:
-    from kiln_pro.cli.pro_commands import register_pro_cli
-    register_pro_cli(cli)
-except ImportError:
-    pass  # kiln-pro not installed — pro CLI commands not available
+# Pro-CLI registration moved to end-of-module (search: "register_pro_cli(cli)")
+# so existing @cli.group decorators (e.g. versions, ingest) are fully
+# registered before kiln-pro tries to graft subcommands onto them.  Running
+# here at line 9031 used to silently skip pro-tier subcommand injection into
+# the public `versions` group because the group hadn't been decorated yet.
 
 
 # ---------------------------------------------------------------------------
@@ -9567,6 +9596,17 @@ def repair(file_path: str, output: str | None, json_mode: bool) -> None:
             )
         )
         sys.exit(1)
+
+
+# Pro-CLI registration — MUST run after every @cli.group decorator above so
+# kiln-pro can extend public groups (e.g. graft `versions alerts`, `versions
+# record-outcome`, `versions best` onto the public `versions` group).
+try:
+    from kiln_pro.cli.pro_commands import register_pro_cli
+
+    register_pro_cli(cli)
+except ImportError:
+    pass  # kiln-pro not installed — pro CLI commands not available
 
 
 def main() -> None:
