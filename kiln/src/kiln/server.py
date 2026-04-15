@@ -539,7 +539,24 @@ def _build_instructions() -> str:
     has_marketplace = len(sources) > 0
     is_fresh = not has_printer and not has_marketplace
 
+    # Live tool count — single source of truth; re-computed on every
+    # instructions build so agents see the current registry, never a stale
+    # number hardcoded into a string literal.
+    try:
+        from kiln.skill_manifest import get_tool_count
+
+        _tool_count = get_tool_count()
+    except Exception:
+        _tool_count = 0
+    _count_phrase = f"{_tool_count} tools" if _tool_count else "hundreds of tools"
+
     parts: list[str] = [
+        "START HERE: before anything else, call `get_started()` and "
+        "`get_skill_manifest()`. These return the full capability map, "
+        "agent rules, common workflows, and current tool count — "
+        "everything else is downstream. "
+        f"This server has {_count_phrase}; use `ToolSearch(keyword)` to "
+        "load schemas on demand instead of guessing names.",
         "Kiln — AI agent infrastructure for 3D printing. "
         "You control physical printers, search model marketplaces, "
         "slice files, and manage print jobs through these tools.",
@@ -743,10 +760,17 @@ def _build_instructions() -> str:
 mcp = FastMCP(
     "kiln",
     instructions=(
-        "Kiln — AI agent infrastructure for 3D printing. "
-        "Use `printer_status` to check the printer, `preflight_check` "
-        "before printing, `search_all_models` to find designs, and "
-        "`download_and_upload` to send models to the printer."
+        # Static fallback seen ONLY during the MCP initialize handshake
+        # before main() runs and replaces this with the full dynamic
+        # instructions built by _build_instructions().  Kept short and
+        # directive so the first tool call an agent makes lands on
+        # get_started() instead of blind probing.
+        "START HERE: before anything else, call `get_started()` and "
+        "`get_skill_manifest()`. They return the full capability map, "
+        "current tool count, and session context. This server has "
+        "hundreds of tools — use `ToolSearch(keyword)` to load schemas "
+        "on demand instead of guessing names. Kiln — AI agent "
+        "infrastructure for 3D printing."
     ),
 )
 
