@@ -338,18 +338,29 @@ def analyze_for_feedback(
     report = _normalize_feedback_report(printability_report)
 
     # --- Printability checks ---
+    # Each detected issue synthesizes a constraint string that bakes in
+    # the ACTUAL measured geometry — "no overhangs greater than 65
+    # degrees (current max 72°)" is more actionable than the template
+    # "no overhangs greater than 45 degrees".  Constraints remain
+    # target-specific (the AI is told what to aim for) but also carry
+    # the delta from current state.
     printability_issues: list[str] = []
     printability_constraints: list[str] = []
 
     max_overhang = report.get("max_overhang_angle", 0)
     if max_overhang > 45:
         printability_issues.append(f"Overhangs detected ({max_overhang} degrees)")
-        printability_constraints.append(_PRINTABILITY_CONSTRAINTS["overhang"])
+        printability_constraints.append(
+            f"flat bottom, no overhangs greater than 45 degrees "
+            f"(current max {max_overhang:.0f}°)"
+        )
 
     min_wall = report.get("min_wall_thickness", float("inf"))
     if min_wall < 2.0:
         printability_issues.append(f"Thin walls detected ({min_wall:.1f}mm)")
-        printability_constraints.append(_PRINTABILITY_CONSTRAINTS["thin_wall"])
+        printability_constraints.append(
+            f"minimum wall thickness 2mm (current min {min_wall:.1f}mm)"
+        )
 
     if report.get("has_bridges"):
         printability_issues.append("Bridges detected")
@@ -382,7 +393,10 @@ def analyze_for_feedback(
                 original_prompt=original_prompt,
                 feedback_type=FeedbackType.STRUCTURAL,
                 issues=[f"Low bed contact area ({contact_pct:.1f}%)"],
-                constraints=[_STRUCTURAL_CONSTRAINTS["weak_base"]],
+                constraints=[
+                    f"wide flat base for bed adhesion "
+                    f"(current contact ~{contact_pct:.0f}% — target >20%)"
+                ],
                 severity="moderate" if contact_pct >= 5.0 else "critical",
             )
         )
@@ -430,24 +444,53 @@ def analyze_for_feedback(
             )
 
     # --- Failure-mode based structural feedback ---
+    # When a failure_mode is accompanied by geometric context (dimensions,
+    # bed contact, overhang angles), we synthesize a richer constraint
+    # than the template — e.g., for warping on a large flat base, append
+    # the actual base dimensions so the next generation knows exactly
+    # what to chamfer down.  This upgrades mode→template to
+    # (mode, geometry) → specific-geometric constraint.
     if failure_mode:
         struct_issues: list[str] = []
         struct_constraints: list[str] = []
 
         fm_lower = failure_mode.lower()
+        dims = report.get("dimensions") or {}
+        base_w = dims.get("width", 0)
+        base_d = dims.get("depth", 0)
+
         if fm_lower in ("adhesion", "adhesion_loss"):
             struct_issues.append("Part detached from bed during printing")
-            struct_constraints.append(_STRUCTURAL_CONSTRAINTS["weak_base"])
+            if contact_pct is not None and contact_pct < 15.0:
+                struct_constraints.append(
+                    f"wide flat base for bed adhesion, consider brim "
+                    f"(previous print had only {contact_pct:.0f}% bed contact)"
+                )
+            else:
+                struct_constraints.append(_STRUCTURAL_CONSTRAINTS["weak_base"])
         if fm_lower in ("spaghetti", "layer_shift"):
             struct_issues.append(f"Print failure mode: {failure_mode}")
             struct_constraints.append(_STRUCTURAL_CONSTRAINTS["fragile"])
-            struct_constraints.append(_PRINTABILITY_CONSTRAINTS["overhang"])
+            if max_overhang > 45:
+                struct_constraints.append(
+                    f"flat bottom, no overhangs greater than 45 degrees "
+                    f"(previous failure had {max_overhang:.0f}° overhang)"
+                )
+            else:
+                struct_constraints.append(_PRINTABILITY_CONSTRAINTS["overhang"])
         if fm_lower == "stringing":
             struct_issues.append("Excessive stringing between parts")
             struct_constraints.append(_PRINTABILITY_CONSTRAINTS["bridge"])
         if fm_lower in ("warping",):
             struct_issues.append("Part warped during printing")
-            struct_constraints.append(_STRUCTURAL_CONSTRAINTS["weak_base"])
+            if base_w > 50 and base_d > 50:
+                struct_constraints.append(
+                    f"chamfered corners, avoid large flat surfaces "
+                    f"(previous failure had a {base_w:.0f}mm x {base_d:.0f}mm "
+                    f"base — chamfer corners ≥3mm)"
+                )
+            else:
+                struct_constraints.append(_STRUCTURAL_CONSTRAINTS["weak_base"])
 
         if struct_issues:
             feedback_items.append(

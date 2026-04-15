@@ -426,3 +426,64 @@ class TestWireE_AutoClassify:
         assert result.get("failure_mode") == "spaghetti"
         # Classifier must not even run when failure_mode is provided.
         assert mock_af.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Wire G — (mode, geometry) → specific constraint synthesis.
+# ---------------------------------------------------------------------------
+
+
+class TestWireG_GeometricConstraintSynthesis:
+    """The constraint synthesizer bakes measured geometry numbers into
+    the constraint strings instead of emitting templates.  This is the
+    #010 patent refinement: "synthesize the specific geometric
+    constraint that would have prevented the failure" rather than
+    picking a generic mitigation keyed on mode alone."""
+
+    def test_warping_with_large_base_gets_dimensions_baked_in(self):
+        from kiln.generation_feedback import analyze_for_feedback
+
+        feedback = analyze_for_feedback(
+            "/fake/path.stl",
+            original_prompt="a coaster",
+            failure_mode="warping",
+            printability_report={
+                "dimensions": {"width": 85.0, "depth": 85.0, "height": 4.0},
+            },
+        )
+        constraints = " ".join(
+            c for fb in feedback for c in fb.constraints
+        )
+        # Specific base dimensions must appear — the synthesizer baked
+        # 85mm x 85mm into the constraint so the next generation knows
+        # exactly what to chamfer.
+        assert "85mm" in constraints
+        assert "chamfer corners" in constraints
+
+    def test_thin_wall_reports_current_measurement(self):
+        from kiln.generation_feedback import analyze_for_feedback
+
+        feedback = analyze_for_feedback(
+            "/fake/path.stl",
+            original_prompt="a bracket",
+            printability_report={"min_wall_thickness_mm": 0.8},
+        )
+        constraints = " ".join(
+            c for fb in feedback for c in fb.constraints
+        )
+        assert "0.8mm" in constraints
+        assert "minimum wall thickness 2mm" in constraints
+
+    def test_overhang_reports_current_angle(self):
+        from kiln.generation_feedback import analyze_for_feedback
+
+        feedback = analyze_for_feedback(
+            "/fake/path.stl",
+            original_prompt="an overhang test",
+            printability_report={"max_overhang_angle": 68.0},
+        )
+        constraints = " ".join(
+            c for fb in feedback for c in fb.constraints
+        )
+        assert "68°" in constraints
+        assert "no overhangs greater than 45 degrees" in constraints
