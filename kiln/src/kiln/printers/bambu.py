@@ -900,6 +900,14 @@ class BambuAdapter(PrinterAdapter):
         # Merge print status fields into our cache.
         # A1/A1 mini may send command as "push_status" or "PUSH_STATUS".
         print_data = payload.get("print", {})
+        # Initialize hook vars to None — they're only set when cmd ==
+        # "push_status" and the merge actually happens.  The hook-call
+        # block below short-circuits when any of these is falsy.
+        prev_gcode_state: str | None = None
+        new_gcode_state: str | None = None
+        job_id_for_hook: Any = None
+        file_name_for_hook: Any = None
+        print_error_for_hook: int = 0
         if isinstance(print_data, dict):
             cmd = str(print_data.get("command", "")).lower()
             if cmd == "push_status":
@@ -926,8 +934,68 @@ class BambuAdapter(PrinterAdapter):
                                         last_ts_float,
                                     )
                                     return
+                    # Bug #10: capture previous gcode_state BEFORE the
+                    # merge so the terminal-transition hook can detect
+                    # a printing→finish/failed/idle edge and auto-fire
+                    # record_print_outcome.
+                    prev_gcode_state = str(
+                        self._last_status.get("gcode_state", "")
+                    ).lower().strip()
                     self._last_status.update(print_data)
                     self._last_state_time = time.monotonic()
+
+                    # Fire the auto-record hook outside the state lock
+                    # to avoid a deadlock if record_print_outcome ever
+                    # needs to call back into the adapter.  Capture the
+                    # post-merge values we need to pass and defer the
+                    # hook call until after we've released _state_lock.
+                    new_gcode_state = str(
+                        self._last_status.get("gcode_state", "")
+                    ).lower().strip()
+                    job_id_for_hook = (
+                        self._last_status.get("subtask_name")
+                        or self._last_status.get("task_id")
+                        or self._last_status.get("subtask_id")
+                        or ""
+                    )
+                    file_name_for_hook = (
+                        self._last_status.get("gcode_file")
+                        or self._last_status.get("subtask_name")
+                        or None
+                    )
+                    print_error_for_hook = int(
+                        self._last_status.get("print_error") or 0
+                    )
+            # _state_lock has been released here (outside the `with`).
+            # Fire the hook — it's idempotent per (printer, job_id)
+            # and cheap when no terminal transition occurred.
+            if prev_gcode_state and new_gcode_state and job_id_for_hook:
+                try:
+                    from kiln.auto_record_hook import (
+                        fire_terminal_state_hook,
+                        observe_state,
+                    )
+
+                    # observe_state records the printer's current gcode_state
+                    # for the NEXT hook fire; it returns the previous
+                    # one it had recorded, which may be staler than
+                    # prev_gcode_state (e.g. on the first message after
+                    # process start).  Either works for terminal-transition
+                    # detection, but prev_gcode_state from this merge is
+                    # strictly fresher.
+                    observe_state(self.name, new_gcode_state)
+                    fire_terminal_state_hook(
+                        prev_state=prev_gcode_state,
+                        new_state=new_gcode_state,
+                        print_error_code=print_error_for_hook,
+                        printer_name=self.name,
+                        job_id=str(job_id_for_hook),
+                        file_name=str(file_name_for_hook) if file_name_for_hook else None,
+                    )
+                except Exception as exc:  # pragma: no cover
+                    logger.debug(
+                        "auto-record hook raised (non-fatal): %s", exc,
+                    )
 
     def _publish_command(
         self,

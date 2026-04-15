@@ -3336,6 +3336,19 @@ def cancel_print(
         except Exception as exc:
             logger.debug("cancel_print: keep-alive stop failed (best-effort): %s", exc)
 
+        # Bug #10: register the cancel intent BEFORE issuing the cancel
+        # command.  Bambu firmware has no "cancelled" gcode_state — a
+        # successful cancel transitions the printer to "idle", which
+        # looks identical to a natural finish.  The intent flag lets
+        # auto_record_hook classify the next idle transition as a
+        # cancel rather than a success, so the learning DB gets
+        # ``outcome="cancelled"`` instead of a bogus ``"success"``.
+        try:
+            from kiln.auto_record_hook import register_cancel_intent
+            register_cancel_intent(_resolve_effective_printer_name(None))
+        except Exception as exc:  # pragma: no cover — best-effort
+            logger.debug("cancel_print: register_cancel_intent failed: %s", exc)
+
         result = adapter.cancel_print()
         _get_heater_watchdog().notify_print_ended()
 

@@ -116,6 +116,7 @@ def record_print_outcome(
     decoration_slug: str | None = None,
     decoration_settings: dict | None = None,
     auto_classify: bool = False,
+    auto_recorded: bool = False,
 ) -> dict:
     """Record the outcome of a print for cross-printer learning.
 
@@ -164,6 +165,12 @@ def record_print_outcome(
             explicit ``failure_mode``, run the failure classifier and
             store its best-guess mode if confidence >= 0.75.  Default
             False — callers opt in.
+        auto_recorded: When True, tags the outcome as auto-fired by
+            the terminal-state hook (see
+            :mod:`kiln.auto_record_hook`).  Agents can later refine
+            the outcome by calling record_print_outcome again with the
+            same ``job_id`` — the most recent call wins at the
+            ``proven_settings`` level.  Default False.
     """
     import kiln.server as _srv
     from kiln.persistence import get_db
@@ -238,6 +245,18 @@ def record_print_outcome(
     if not printer_name:
         printer_name = "unknown"
 
+    # Bug #10: auto-recorded outcomes get a tag in the notes so agents
+    # and analytics can distinguish them from agent-curated outcomes.
+    # This is the minimal tagging that avoids a schema change; a full
+    # dedicated column lives on the follow-up roadmap.
+    if auto_recorded:
+        tag = "[auto-recorded]"
+        if notes:
+            if tag not in notes:
+                notes = f"{tag} {notes}"
+        else:
+            notes = tag
+
     try:
         row_id = get_db().save_print_outcome(
             {
@@ -252,7 +271,7 @@ def record_print_outcome(
                 "settings": settings,
                 "environment": environment,
                 "notes": notes,
-                "agent_id": "mcp",
+                "agent_id": "auto" if auto_recorded else "mcp",
                 "created_at": time.time(),
             }
         )
