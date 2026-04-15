@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-15T18:21:28.149087+00:00",
-  "tool_count": 104,
+  "generated": "2026-04-15T18:51:18.935701+00:00",
+  "tool_count": 105,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -873,6 +873,94 @@
           "stl_path"
         ],
         "title": "read_design_sidecarArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_design_version_outcome",
+      "description": "Record whether a print succeeded or failed for a design version.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          },
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "warp_severity": {
+            "default": 0.0,
+            "title": "Warp Severity",
+            "type": "number"
+          },
+          "adhesion_issues": {
+            "default": false,
+            "title": "Adhesion Issues",
+            "type": "boolean"
+          },
+          "print_time_actual_s": {
+            "default": 0.0,
+            "title": "Print Time Actual S",
+            "type": "number"
+          },
+          "material_cost_usd": {
+            "default": 0.0,
+            "title": "Material Cost Usd",
+            "type": "number"
+          },
+          "electricity_cost_usd": {
+            "default": 0.0,
+            "title": "Electricity Cost Usd",
+            "type": "number"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "previous_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Previous Version Id"
+          },
+          "design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Id"
+          }
+        },
+        "required": [
+          "version_id",
+          "printer_id",
+          "material",
+          "success"
+        ],
+        "title": "record_design_version_outcomeArguments",
         "type": "object"
       }
     },
