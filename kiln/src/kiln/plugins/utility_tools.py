@@ -397,10 +397,11 @@ class _UtilityToolsPlugin:
                     ),
                 },
                 "tip": (
-                    "Start with `printer_status` to see what's connected. Use "
-                    "ToolSearch(keyword) to discover tools for specific tasks "
-                    "rather than guessing tool names. Use get_skill_manifest() "
-                    "for the full capability map."
+                    "Start with `printer_status` to see what's connected. "
+                    "Check `safety_status` / `safety_settings` for guardrails "
+                    "and auto-print state. Use ToolSearch(keyword) to discover "
+                    "tools for specific tasks rather than guessing names, or "
+                    "get_skill_manifest() for the full capability map."
                 ),
                 "openscad": openscad_guidance,
             }
