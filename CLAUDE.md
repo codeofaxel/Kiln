@@ -6,6 +6,18 @@
 - If the user mentions a branch name, switch to it first.
 - When editing documentation or changelogs, **append** new content rather than replacing existing content unless explicitly told to replace.
 
+### Files Never to Commit
+- `.env`, credentials, API keys, access tokens
+- `tasks.md` / `task.md` (gitignored — private task tracking)
+- **Session summaries, work notes, scratch markdown** — files like
+  `OVERNIGHT_WORK_SUMMARY.md`, `WORK_LOG.md`, `NOTES.md`, `SUMMARY.md`,
+  `*_NOTES.md`, `*_SUMMARY.md`, `SESSION_*.md`, `TODO.md`.  These are
+  ephemeral working-memory artifacts and MUST NOT be committed to the
+  repo.  Put them in `/tmp/`, outside the repo, or in a gitignored
+  local-only directory.  If one slips in, remove it before merging —
+  they bloat the repo and leak internal context to future contributors.
+  The `.gitignore` has patterns for these as a safety net.
+
 ## Communication Style
 - **Be direct. Execute, don't narrate.** Show findings concisely. Don't over-explain reasoning.
 - When asked to investigate or explain, provide findings directly **without asking for approval**. Only ask for approval before making destructive or irreversible changes (deleting files, force pushing, dropping tables).
