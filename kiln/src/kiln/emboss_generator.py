@@ -567,12 +567,40 @@ def generate_emboss_scad(
             f"            {inner}"
         )
 
-    # Compute translate Z component depending on mode and face orientation
+    # Compute translate Z component depending on mode and face orientation.
+    #
+    # The content prism is created as linear_extrude(height=depth_mm + 0.1)
+    # pointing in +Z in the content's local frame.  _rotation_for_normal()
+    # then aligns the prism's +Z with the face normal direction.  This means
+    # for a FLIPPED face (normal has a strong -Z component), the prism ends
+    # up pointing in -Z in world coordinates — the OPPOSITE side of the
+    # material it should be cutting.  Previously `z_offset = -depth_mm`
+    # shifted the prism even further away from material for bottom faces,
+    # leaving it entirely outside the model (Z=[-1.7, -0.8] vs tray Z=[0,18])
+    # and producing a silent no-op subtraction.
+    #
+    # Fix: when the face normal points downward, the prism (post-rotate) lives
+    # at Z=[-h, 0] relative to the face center.  Shift it by +(depth_mm + 0.1)
+    # so the prism's far end rests at cz and its near end extends INTO the
+    # material at cz + depth_mm.  This mirrors the top-face behavior where
+    # we shift -depth_mm so the prism penetrates inward.
+    extrude_height = depth_mm + 0.1
     if mode == "deboss":
-        # Position so the extrusion cuts into the surface
-        z_offset = -depth_mm
+        if normal[2] < -0.9:
+            # Bottom-like face: prism was flipped by rotate([180,0,0]).
+            # Shift up by full extrude_height so it penetrates upward into
+            # the body sitting above the face.
+            z_offset = extrude_height
+        else:
+            # Top-like or side face: prism already points toward the body
+            # after rotation; shift by -depth_mm so far end penetrates depth.
+            z_offset = -depth_mm
     else:
-        # Position so the extrusion protrudes from the surface
+        # Emboss — protrude outward from the surface.  Rotation already
+        # orients the prism outward; no additional Z shift needed for top
+        # faces.  For bottom faces the prism (post-flip) sits at Z=[-h, 0]
+        # in world frame, which is already OUTSIDE the material above —
+        # correct for a raised emboss on the tray underside.
         z_offset = 0.0
 
     translate_line = f"translate([{tx:.6f}, {ty:.6f}, {tz + z_offset:.6f}])"

@@ -344,6 +344,54 @@ def _write_dat(path: str, rows: list[list[int]], w: int, h: int) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
+# HEIC / HEIF container magic — iPhone default format, frequently carries
+# a .jpg extension after AirDrop/Photos export.  PIL cannot read these; we
+# detect by ISO-BMFF magic bytes and auto-convert via macOS `sips`.
+_HEIC_BRANDS = frozenset({
+    b"heic", b"heix", b"hevc", b"hevx", b"mif1",
+    b"msf1", b"heim", b"heis", b"avif", b"avis",
+})
+
+
+def _is_heic_container(path: str) -> bool:
+    """Detect HEIC/HEIF by ISO-BMFF magic bytes, regardless of extension."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(12)
+    except OSError:
+        return False
+    return len(head) >= 12 and head[4:8] == b"ftyp" and head[8:12] in _HEIC_BRANDS
+
+
+def _auto_convert_heic(src: str, work_dir: str) -> str:
+    """Convert HEIC → JPEG via macOS sips.  Raises RuntimeError on failure.
+
+    This exists so iPhone photos (which default to HEIC even when saved
+    with a .jpg extension) don't silently fail downstream in PIL.
+    """
+    import shutil as _shutil
+    import subprocess as _sp
+    if not _shutil.which("sips"):
+        raise RuntimeError(
+            f"{os.path.basename(src)} is HEIC/HEIF (iPhone format).  "
+            "PIL cannot read this directly.  On macOS this is auto-converted "
+            "via `sips`, but `sips` was not found on PATH.  Convert the file "
+            "manually (Preview → Export → JPEG) and retry."
+        )
+    out = os.path.join(work_dir, f"heic_converted_{os.path.basename(src)}.jpg")
+    try:
+        _sp.run(
+            ["sips", "-s", "format", "jpeg", src, "--out", out],
+            check=True, capture_output=True, timeout=30,
+        )
+    except (_sp.CalledProcessError, _sp.TimeoutExpired) as exc:
+        raise RuntimeError(
+            f"HEIC→JPEG conversion failed for {os.path.basename(src)}: {exc}.  "
+            "Convert manually and retry."
+        ) from exc
+    return out
+
+
 def prepare_image_for_emboss(
     image_path: str,
     output_dir: str,
@@ -381,6 +429,14 @@ def prepare_image_for_emboss(
     dict
         Keys: pgm_path, width_px, height_px, aspect_ratio
     """
+    # Pre-flight: detect HEIC (iPhone default, commonly mislabeled .jpg) and
+    # auto-convert before PIL gets a chance to choke silently.  This is the
+    # earliest point the image path flows into the kiln decoration pipeline,
+    # so handling it here covers decorate_surface AND all product generators.
+    if _is_heic_container(image_path):
+        os.makedirs(output_dir, exist_ok=True)
+        image_path = _auto_convert_heic(image_path, output_dir)
+
     # Apply style-specific preprocessing
     if style == "photo":
         # Best for photos of people, pets, objects.
