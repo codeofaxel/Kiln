@@ -45,9 +45,18 @@ def _community_cache_dir() -> Path:
 
 
 def community_opt_in_enabled() -> bool:
-    """Check if the user has opted in to community data sharing."""
-    val = os.environ.get("KILN_COMMUNITY_OPT_IN", "true").strip().lower()
-    return val not in ("false", "0", "no", "off")
+    """Check if the user has opted in to community data sharing.
+
+    True opt-in semantics: the default is False (no sharing) and the
+    user must explicitly set ``KILN_COMMUNITY_OPT_IN`` to an affirmative
+    value (``true``, ``1``, ``yes``, ``on``) to participate.  Anything
+    else — unset, empty, or falsy — keeps sharing off.
+
+    This matches what the function name claims ("opt-in enabled") rather
+    than silently opting every user into data sharing.
+    """
+    val = os.environ.get("KILN_COMMUNITY_OPT_IN", "").strip().lower()
+    return val in ("true", "1", "yes", "on")
 
 
 def sync_community_print(record: dict[str, Any]) -> bool:

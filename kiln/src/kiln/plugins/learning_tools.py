@@ -23,41 +23,15 @@ _logger = logging.getLogger(__name__)
 # Constants — validation sets and safety limits
 # ---------------------------------------------------------------------------
 
-_VALID_OUTCOMES = frozenset({"success", "failed", "partial"})
-_VALID_QUALITY_GRADES = frozenset({"excellent", "good", "acceptable", "poor"})
-_VALID_FAILURE_MODES = frozenset(
-    {
-        "spaghetti",
-        "layer_shift",
-        "warping",
-        "adhesion",
-        "stringing",
-        "under_extrusion",
-        "over_extrusion",
-        "clog",
-        "thermal_runaway",
-        "power_loss",
-        "filament_runout",
-        "mechanical",
-        "other",
-    }
+from kiln.failure_vocabulary import (
+    AUTO_CLASSIFY_MIN_CONFIDENCE as _AUTO_CLASSIFY_MIN_CONFIDENCE,
+    CLASSIFIER_TO_CANONICAL as _VISION_TO_DB_FAILURE_MODE,
+    VALID_FAILURE_MODES as _VALID_FAILURE_MODES,
+    to_canonical as _to_canonical_failure_mode,
 )
 
-# Mapping from the failure-classifier's vocabulary
-# (:class:`kiln.failure_recovery.FailureType`) to the canonical DB
-# failure_mode vocabulary (``_VALID_FAILURE_MODES``).  Values absent from
-# this map are assumed to be already-canonical DB names.
-_VISION_TO_DB_FAILURE_MODE: dict[str, str] = {
-    "adhesion_loss": "adhesion",
-    "nozzle_clog": "clog",
-    "unknown": "other",
-}
-
-# Minimum confidence from the failure classifier for auto-stored
-# ``failure_mode``.  Below this, the classification is echoed back to
-# the caller but never written to the outcome row — prevents silent
-# data poisoning from low-confidence guesses.
-_AUTO_CLASSIFY_MIN_CONFIDENCE = 0.75
+_VALID_OUTCOMES = frozenset({"success", "failed", "partial"})
+_VALID_QUALITY_GRADES = frozenset({"excellent", "good", "acceptable", "poor"})
 
 # Hard safety limits — recorded settings cannot exceed these.
 # Prevents malicious agents from poisoning the learning database
@@ -112,14 +86,14 @@ def _auto_classify_failure(
 
     classification = analysis.classification
     raw_type = classification.failure_type.value
-    db_mode = _VISION_TO_DB_FAILURE_MODE.get(raw_type, raw_type)
+    canonical = _to_canonical_failure_mode(raw_type)
     stored = (
-        classification.confidence >= _AUTO_CLASSIFY_MIN_CONFIDENCE
-        and db_mode in _VALID_FAILURE_MODES
+        canonical is not None
+        and classification.confidence >= _AUTO_CLASSIFY_MIN_CONFIDENCE
     )
     return {
         "failure_type": raw_type,
-        "db_mode": db_mode,
+        "db_mode": canonical or raw_type,  # echo something even on untranslatable
         "confidence": round(classification.confidence, 3),
         "evidence": list(classification.evidence),
         "stored": stored,
@@ -292,7 +266,19 @@ def record_print_outcome(
         except Exception:
             pass
 
-        # Auto-contribute to community (anonymous, opt-in)
+        # Auto-contribute to community (anonymous, opt-in).
+        #
+        # The ``printer_model`` field is what lets the pull side
+        # ``fetch_community_insights`` aggregate across users with the
+        # same hardware — so we need a canonical model identifier, not
+        # the per-user ``printer_name`` (which might be "my-bambu-01").
+        # Resolution order:
+        #   1. adapter.get_printer_info().model — the printer's own
+        #      self-reported model string (what
+        #      ``resolve_printer_generation_context`` uses on the pull
+        #      side — guarantees push/pull match)
+        #   2. printer_name — backward compat with existing rows
+        #      pre-dating this fix
         try:
             import hashlib as _hl
             import json as _js
@@ -302,13 +288,25 @@ def record_print_outcome(
             if community_opt_in_enabled() and file_hash:
                 from kiln.community_sync import sync_community_print_async
 
+                resolved_model: str | None = None
+                try:
+                    adapter = _srv._registry.get(printer_name)
+                    if adapter is not None:
+                        info = adapter.get_printer_info()
+                        resolved_model = (
+                            getattr(info, "model", None)
+                            or getattr(info, "printer_model", None)
+                        )
+                except Exception:
+                    _logger.debug("Could not resolve printer_model for community push", exc_info=True)
+
                 _grade_map = {
                     "excellent": "A", "good": "B",
                     "acceptable": "C", "poor": "D",
                 }
                 sync_community_print_async({
                     "geometric_signature": file_hash,
-                    "printer_model": printer_name or "unknown",
+                    "printer_model": resolved_model or printer_name or "unknown",
                     "material": material_type or "unknown",
                     "settings_hash": _hl.sha256(
                         _js.dumps(settings or {}, sort_keys=True).encode(),

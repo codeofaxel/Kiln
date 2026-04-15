@@ -1092,25 +1092,13 @@ def enhance_prompt_with_design_intelligence(
 
     # Printer-specific failure mitigations — learned from this printer's
     # common failure patterns so the generated design avoids them.
-    # Keys cover both DB-canonical failure_mode values (see
-    # ``_VALID_FAILURE_MODES`` in ``learning_tools.py``) and their human
-    # synonyms, so live outcome data and static intel both resolve.
-    _FAILURE_MITIGATIONS: dict[str, str] = {
-        "adhesion": "extra-wide base for bed adhesion, consider brim",
-        "adhesion_loss": "extra-wide base for bed adhesion, consider brim",
-        "stringing": "minimize travel moves, avoid thin isolated features",
-        "warping": "chamfered corners, avoid large flat surfaces",
-        "layer_shift": "low center of gravity, avoid tall narrow geometry",
-        "spaghetti": "no unsupported overhangs, solid geometry",
-        "elephant_foot": "slight chamfer on bottom edges",
-        "under_extrusion": "minimum wall thickness 1.2mm",
-        "over_extrusion": "generous tolerances, avoid tight press-fits",
-        "clog": "avoid rapid retraction zones",
-        "clogging": "avoid rapid retraction zones",
-    }
+    # Delegated to :mod:`kiln.failure_vocabulary` so the failure-mode
+    # taxonomy and its design mitigations stay in one place.
     if printer_context is not None and printer_context.common_failures:
+        from kiln.failure_vocabulary import mitigation_for
+
         for failure in printer_context.common_failures[:3]:
-            mitigation = _FAILURE_MITIGATIONS.get(failure.lower())
+            mitigation = mitigation_for(failure)
             if mitigation and mitigation not in core_constraints:
                 core_constraints.append(mitigation)
 
