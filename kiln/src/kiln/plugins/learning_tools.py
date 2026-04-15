@@ -77,6 +77,8 @@ def record_print_outcome(
     file_name: str | None = None,
     file_hash: str | None = None,
     material_type: str | None = None,
+    decoration_slug: str | None = None,
+    decoration_settings: dict | None = None,
 ) -> dict:
     """Record the outcome of a print for cross-printer learning.
 
@@ -87,6 +89,11 @@ def record_print_outcome(
     **Safety**: Settings are validated against hard safety limits.  Outcomes
     with temperatures exceeding safe maximums are rejected to prevent
     poisoning the learning database with dangerous data.
+
+    **Decoration feedback**: When ``decoration_slug`` is provided, the
+    corresponding decoration's proven-settings counter is auto-updated
+    (``success_count`` or ``failure_count``) so the library's tracked
+    reliability reflects real field outcomes without manual curation.
 
     Args:
         job_id: The job ID from the print queue.
@@ -100,6 +107,12 @@ def record_print_outcome(
         file_name: File printed.  Auto-resolved from job if omitted.
         file_hash: Optional hash of the file for cross-printer comparison.
         material_type: Material used (e.g. ``"PLA"``, ``"PETG"``).
+        decoration_slug: Optional decoration slug that was applied to this
+            print.  When set, the matching decoration's success/failure
+            counters are auto-updated.
+        decoration_settings: Optional dict of decoration settings used
+            (``depth_mm``, ``mode``, ``image_style``).  Falls back to the
+            decoration's current defaults when omitted.
     """
     import kiln.server as _srv
     from kiln.persistence import get_db
@@ -219,6 +232,61 @@ def record_print_outcome(
                 })
         except Exception:
             pass  # Never let community sync block outcome recording
+
+        # Auto-update decoration proven-settings counters when this print
+        # carried a decoration.  Mirrors the community-sync pattern — the
+        # dispatch is silent, never blocks the outcome return, and uses
+        # the decoration's current defaults when explicit settings are
+        # missing.  Keeps decoration library reliability grounded in real
+        # field outcomes rather than self-reported success.
+        if decoration_slug and material_type and outcome in ("success", "failed"):
+            try:
+                from kiln.decoration_library import (
+                    get_decoration,
+                    record_decoration_failure,
+                    record_decoration_success,
+                )
+
+                dec = get_decoration(decoration_slug)
+                if dec is not None:
+                    # Resolve depth/mode/image_style: prefer explicit
+                    # args, fall back to the decoration's content-type
+                    # defaults.
+                    ds = decoration_settings or {}
+                    existing = dec.proven_settings.get(material_type)
+                    depth_mm = float(
+                        ds.get("depth_mm")
+                        if ds.get("depth_mm") is not None
+                        else (existing.depth_mm if existing else 0.5)
+                    )
+                    mode = str(ds.get("mode") or (existing.mode if existing else "emboss"))
+                    image_style = str(
+                        ds.get("image_style")
+                        or (existing.image_style if existing else "auto")
+                    )
+
+                    if outcome == "success":
+                        record_decoration_success(
+                            decoration_slug,
+                            material=material_type,
+                            depth_mm=depth_mm,
+                            mode=mode,
+                            image_style=image_style,
+                        )
+                    else:
+                        record_decoration_failure(
+                            decoration_slug,
+                            material=material_type,
+                            depth_mm=depth_mm,
+                            mode=mode,
+                            image_style=image_style,
+                            failure_mode=failure_mode,
+                        )
+            except Exception:
+                _logger.debug(
+                    "Decoration outcome update failed (non-fatal)",
+                    exc_info=True,
+                )
 
         return {
             "success": True,

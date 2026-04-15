@@ -80,13 +80,24 @@ class DecorationScaling:
 
 @dataclass
 class ProvenSetting:
-    """A print setting combination that has been proven to work."""
+    """A print setting combination that has been proven to work.
+
+    ``success_count`` and ``failure_count`` are auto-incremented from
+    :func:`record_print_outcome` when a print job carries a
+    ``decoration_slug``, so proven status reflects actual field data
+    rather than self-reports.  ``last_failure_mode`` captures the most
+    recent failure category (warping, adhesion, etc.) so later runs can
+    avoid the same pitfall.
+    """
 
     depth_mm: float
     mode: str = "emboss"
     image_style: str = "auto"
     success_count: int = 0
+    failure_count: int = 0
     last_printed: str | None = None
+    last_failed: str | None = None
+    last_failure_mode: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -94,7 +105,10 @@ class ProvenSetting:
             "mode": self.mode,
             "image_style": self.image_style,
             "success_count": self.success_count,
+            "failure_count": self.failure_count,
             "last_printed": self.last_printed,
+            "last_failed": self.last_failed,
+            "last_failure_mode": self.last_failure_mode,
         }
 
     @classmethod
@@ -104,7 +118,10 @@ class ProvenSetting:
             mode=d.get("mode", "emboss"),
             image_style=d.get("image_style", "auto"),
             success_count=d.get("success_count", 0),
+            failure_count=d.get("failure_count", 0),
             last_printed=d.get("last_printed"),
+            last_failed=d.get("last_failed"),
+            last_failure_mode=d.get("last_failure_mode"),
         )
 
 
@@ -525,6 +542,58 @@ def record_decoration_success(
             image_style=image_style,
             success_count=1,
             last_printed=now,
+        )
+
+    dec.print_count += 1
+    _write_manifest(dec.slug, dec.to_dict())
+    return dec
+
+
+def record_decoration_failure(
+    name_or_slug: str,
+    *,
+    material: str,
+    depth_mm: float,
+    mode: str = "emboss",
+    image_style: str = "auto",
+    failure_mode: str | None = None,
+) -> Decoration:
+    """Record a failed print for this decoration + material combination.
+
+    Mirror of :func:`record_decoration_success` — increments
+    ``failure_count`` on the matching :class:`ProvenSetting` and stamps
+    ``last_failed`` / ``last_failure_mode``.  When the combination has
+    never been printed before, a new :class:`ProvenSetting` is created
+    with ``success_count=0`` so the record reflects the failure without
+    falsely claiming a proven pairing.
+
+    :raises ValueError: if the decoration is not found.
+    """
+    dec = get_decoration(name_or_slug)
+    if dec is None:
+        raise ValueError(f"Decoration not found: {name_or_slug}")
+
+    now = _now_iso()
+
+    if material in dec.proven_settings:
+        ps = dec.proven_settings[material]
+        ps.failure_count += 1
+        ps.last_failed = now
+        ps.last_failure_mode = failure_mode
+        # Depth/mode/style reflect the MOST RECENT attempt — useful when
+        # diagnosing whether a setting drift caused the failure.
+        ps.depth_mm = depth_mm
+        ps.mode = mode
+        ps.image_style = image_style
+    else:
+        dec.proven_settings[material] = ProvenSetting(
+            depth_mm=depth_mm,
+            mode=mode,
+            image_style=image_style,
+            success_count=0,
+            failure_count=1,
+            last_failed=now,
+            last_failure_mode=failure_mode,
         )
 
     dec.print_count += 1

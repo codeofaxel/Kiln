@@ -807,9 +807,12 @@ def resolve_printer_generation_context(
         ctx.material = material
         ctx.material_source = "user"
 
+    # Adapter resolution is best-effort: when the server registry has no
+    # matching adapter (e.g. offline tests, fresh install) we still want
+    # the downstream outcome-history and community-intelligence blend to
+    # run, so we carry on with ``adapter = None`` instead of bailing out.
+    adapter: Any = None
     try:
-        # Use the server's adapter resolution — handles both fleet registry
-        # and single-printer setups.
         import kiln.server as _srv
 
         if printer_name:
@@ -817,30 +820,30 @@ def resolve_printer_generation_context(
         else:
             adapter = _srv._get_adapter()
     except Exception:
-        logger.debug("No printer available for context resolution", exc_info=True)
-        return ctx
+        logger.debug("No adapter available for context resolution", exc_info=True)
 
     # Build volume from printer info.
-    try:
-        info = adapter.get_printer_info()
-        bv = getattr(info, "build_volume", None)
-        if isinstance(bv, dict) and bv:
-            ctx.build_volume_mm = {
-                "x": float(bv.get("x", 256)),
-                "y": float(bv.get("y", 256)),
-                "z": float(bv.get("z", 256)),
-            }
-        nozzle = getattr(info, "nozzle_diameter", None)
-        if nozzle:
-            ctx.nozzle_diameter_mm = float(nozzle)
-        model = getattr(info, "model", None) or getattr(info, "printer_model", None)
-        if model:
-            ctx.printer_model = str(model)
-    except Exception:
-        logger.debug("Could not resolve printer info", exc_info=True)
+    if adapter is not None:
+        try:
+            info = adapter.get_printer_info()
+            bv = getattr(info, "build_volume", None)
+            if isinstance(bv, dict) and bv:
+                ctx.build_volume_mm = {
+                    "x": float(bv.get("x", 256)),
+                    "y": float(bv.get("y", 256)),
+                    "z": float(bv.get("z", 256)),
+                }
+            nozzle = getattr(info, "nozzle_diameter", None)
+            if nozzle:
+                ctx.nozzle_diameter_mm = float(nozzle)
+            model = getattr(info, "model", None) or getattr(info, "printer_model", None)
+            if model:
+                ctx.printer_model = str(model)
+        except Exception:
+            logger.debug("Could not resolve printer info", exc_info=True)
 
     # Auto-detect material from AMS (Bambu) or spool manager.
-    if not ctx.material:
+    if not ctx.material and adapter is not None:
         try:
             # Bambu AMS: get_ams_status() → units → trays → tray_type
             if hasattr(adapter, "get_ams_status"):
@@ -862,20 +865,91 @@ def resolve_printer_generation_context(
             logger.debug("Could not auto-detect material from AMS", exc_info=True)
 
     # Printer intelligence — common failure modes and notes.
+    # Three sources, in priority order:
+    #   1. LIVE outcome history for this specific printer instance (SQLite
+    #      ``print_outcomes`` table).  This is ground truth — what THIS
+    #      printer has actually failed with, most recent first.
+    #   2. STATIC knowledge base for the printer model (firmware quirks,
+    #      known-issue symptoms).  Fallback when live history is sparse.
+    #   3. COMMUNITY aggregate for the (printer_model, material) pair —
+    #      anonymous cross-user intelligence, only consulted when local
+    #      outcomes are too sparse to be statistically meaningful (< 3).
+    #
+    # Higher-priority failures are placed first so the downstream
+    # ``_FAILURE_MITIGATIONS`` loop (which takes the first 3) picks this
+    # printer's real problems before model-level hearsay or community wisdom.
+    _LOCAL_SPARSE_THRESHOLD = 3  # below this, community data seeds the gap
+    live_failures: list[str] = []
+    live_outcome_count = 0
+    if printer_name:
+        try:
+            from kiln.persistence import get_db
+
+            insights = get_db().get_printer_learning_insights(printer_name)
+            live_outcome_count = int(insights.get("total_outcomes", 0) or 0)
+            breakdown = insights.get("failure_breakdown") or {}
+            # failure_breakdown is already ordered by count DESC from the
+            # SQL GROUP BY, but dict iteration order is insertion order
+            # in 3.7+ so this is safe.
+            live_failures = [
+                fm for fm, count in breakdown.items()
+                if fm and count > 0
+            ]
+        except Exception:
+            logger.debug("Live learning insights unavailable", exc_info=True)
+
+    static_failures: list[str] = []
     if ctx.printer_model:
         try:
-            from kiln.printer_intelligence import get_printer_intelligence
+            from kiln.printer_intelligence import (
+                get_printer_intel,
+                intel_to_dict,
+            )
 
-            intel = get_printer_intelligence(ctx.printer_model)
+            intel_obj = get_printer_intel(ctx.printer_model)
+            intel = intel_to_dict(intel_obj) if intel_obj else None
             if intel:
                 failures = intel.get("common_failures", [])
                 if failures:
-                    ctx.common_failures = [f.get("symptom", "") for f in failures[:5] if f.get("symptom")]
+                    static_failures = [
+                        f.get("symptom", "") for f in failures[:5]
+                        if f.get("symptom")
+                    ]
                 notes = intel.get("agent_notes", [])
                 if notes:
                     ctx.printer_notes = notes[:3]
         except Exception:
             logger.debug("Printer intelligence unavailable", exc_info=True)
+
+    community_failures: list[str] = []
+    if (
+        live_outcome_count < _LOCAL_SPARSE_THRESHOLD
+        and ctx.printer_model
+        and ctx.material
+    ):
+        try:
+            from kiln.community_sync import fetch_community_insights
+
+            community = fetch_community_insights(ctx.printer_model, ctx.material)
+            if community and community.get("sample_size", 0) >= _LOCAL_SPARSE_THRESHOLD:
+                breakdown = community.get("failure_breakdown") or {}
+                community_failures = [
+                    fm for fm, count in breakdown.items()
+                    if fm and count > 0
+                ]
+        except Exception:
+            logger.debug("Community insights unavailable", exc_info=True)
+
+    # Merge: live → static → community; dedupe case-insensitively.
+    seen_lower: set[str] = set()
+    merged: list[str] = []
+    for entry in (*live_failures, *static_failures, *community_failures):
+        key = entry.lower()
+        if key and key not in seen_lower:
+            seen_lower.add(key)
+            merged.append(entry)
+    if merged:
+        ctx.common_failures = merged
 
     return ctx
 
@@ -1012,14 +1086,20 @@ def enhance_prompt_with_design_intelligence(
 
     # Printer-specific failure mitigations — learned from this printer's
     # common failure patterns so the generated design avoids them.
+    # Keys cover both DB-canonical failure_mode values (see
+    # ``_VALID_FAILURE_MODES`` in ``learning_tools.py``) and their human
+    # synonyms, so live outcome data and static intel both resolve.
     _FAILURE_MITIGATIONS: dict[str, str] = {
         "adhesion": "extra-wide base for bed adhesion, consider brim",
+        "adhesion_loss": "extra-wide base for bed adhesion, consider brim",
         "stringing": "minimize travel moves, avoid thin isolated features",
         "warping": "chamfered corners, avoid large flat surfaces",
         "layer_shift": "low center of gravity, avoid tall narrow geometry",
         "spaghetti": "no unsupported overhangs, solid geometry",
         "elephant_foot": "slight chamfer on bottom edges",
         "under_extrusion": "minimum wall thickness 1.2mm",
+        "over_extrusion": "generous tolerances, avoid tight press-fits",
+        "clog": "avoid rapid retraction zones",
         "clogging": "avoid rapid retraction zones",
     }
     if printer_context is not None and printer_context.common_failures:
