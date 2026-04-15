@@ -391,6 +391,63 @@ class TestCancelPrint:
         result = server_cancel_print()
         assert result["success"] is False
 
+    @patch("kiln.server._get_adapter")
+    def test_preserve_temperatures_restores_targets(self, mock_get_adapter):
+        """preserve_temperatures=True re-asserts pre-cancel targets so the
+        Bambu firmware's default cool-on-cancel behaviour doesn't kill bed
+        adhesion when the caller plans to start a resume 3MF immediately
+        (mid-print decoration swap workflow)."""
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        adapter.cancel_print.return_value = PrintResult(success=True, message="Print cancelled.")
+        state = MagicMock()
+        state.tool_temp_target = 220.0
+        state.bed_temp_target = 65.0
+        adapter.get_state.return_value = state
+        mock_get_adapter.return_value = adapter
+
+        result = server_cancel_print(preserve_temperatures=True)
+
+        assert result["success"] is True
+        assert result["preserved_temperatures"] == {
+            "tool_target": 220.0, "bed_target": 65.0,
+        }
+        adapter.set_tool_temp.assert_called_once_with(220.0)
+        adapter.set_bed_temp.assert_called_once_with(65.0)
+
+    @patch("kiln.server._get_adapter")
+    def test_preserve_temperatures_noop_when_already_idle(self, mock_get_adapter):
+        """Nothing to restore if both targets are already 0."""
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        adapter.cancel_print.return_value = PrintResult(success=True, message="Print cancelled.")
+        state = MagicMock()
+        state.tool_temp_target = 0
+        state.bed_temp_target = 0
+        adapter.get_state.return_value = state
+        mock_get_adapter.return_value = adapter
+
+        result = server_cancel_print(preserve_temperatures=True)
+
+        assert result["success"] is True
+        assert result["preserved_temperatures"] is None
+        adapter.set_tool_temp.assert_not_called()
+        adapter.set_bed_temp.assert_not_called()
+
+    @patch("kiln.server._get_adapter")
+    def test_preserve_temperatures_default_false_preserves_legacy(self, mock_get_adapter):
+        """Without the opt-in, cancel_print behaves exactly as before —
+        no state snapshot, no set_*_temp calls, printer cools to idle."""
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        adapter.cancel_print.return_value = PrintResult(success=True, message="Print cancelled.")
+        mock_get_adapter.return_value = adapter
+
+        result = server_cancel_print()  # default: preserve_temperatures=False
+
+        assert result["success"] is True
+        assert "preserved_temperatures" not in result
+        adapter.get_state.assert_not_called()
+        adapter.set_tool_temp.assert_not_called()
+        adapter.set_bed_temp.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # pause_print()

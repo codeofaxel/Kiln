@@ -2972,17 +2972,27 @@ def start_print(
 
 
 @mcp.tool()
-def cancel_print() -> dict:
+def cancel_print(preserve_temperatures: bool = False) -> dict:
     """Cancel the currently running print job.
 
     Sends cancel via MQTT (Bambu) or REST API (OctoPrint/Moonraker)
     automatically.
 
-    The printer must have an active job (printing or paused).  After
-    cancellation the printer will cool down and return to idle.
+    The printer must have an active job (printing or paused).
+
+    :param preserve_temperatures: When ``True``, re-asserts the pre-cancel
+        hotend + bed targets immediately after the cancel command, so the
+        printer does NOT cool down.  Use this when you plan to swap in a
+        different file (e.g., a mid-print decoration resume 3MF) and need
+        bed adhesion + nozzle temperature held across the cancel-then-
+        start-print transition.  Without this, Bambu firmware defaults
+        to cooling on cancel, which can warp the existing part or kill
+        bed adhesion on a partial print you're about to resume.
+        Default ``False`` preserves legacy behaviour (cool down to idle).
 
     WARNING: Cancellation is irreversible -- the print cannot be resumed
-    from where it left off.
+    from where it left off UNLESS a resume-mode 3MF has been pre-staged
+    (see ``decorate_during_print`` and ``revert_mid_print``).
     """
     if err := _check_auth("print"):
         return err
@@ -2992,10 +3002,53 @@ def cancel_print() -> dict:
         return conf
     try:
         adapter = _get_adapter()
+
+        # Snapshot pre-cancel targets so we can restore them below.
+        preserved: dict[str, float] | None = None
+        if preserve_temperatures:
+            try:
+                state = adapter.get_state()
+                preserved = {
+                    "tool_target": float(state.tool_temp_target or 0.0),
+                    "bed_target": float(state.bed_temp_target or 0.0),
+                }
+            except Exception:
+                # Best-effort — if we can't read state, fall through.
+                # The cancel itself is still authoritative.
+                preserved = None
+
         result = adapter.cancel_print()
         _get_heater_watchdog().notify_print_ended()
+
+        # Re-assert targets AFTER cancel so the firmware's default-cool
+        # behaviour is overridden.  Only fires when the caller asked for
+        # it AND the pre-cancel targets were non-zero (no point restoring
+        # a printer that was already idle).  Uses the adapter's split
+        # ``set_tool_temp`` / ``set_bed_temp`` methods — present on every
+        # adapter subclass (base, bambu, octoprint, moonraker, serial,
+        # elegoo, prusaconnect).
+        restored: dict[str, float] | None = None
+        if preserve_temperatures and preserved is not None:
+            if preserved["tool_target"] > 0 or preserved["bed_target"] > 0:
+                try:
+                    if preserved["tool_target"] > 0:
+                        adapter.set_tool_temp(preserved["tool_target"])
+                    if preserved["bed_target"] > 0:
+                        adapter.set_bed_temp(preserved["bed_target"])
+                    restored = preserved
+                except Exception as exc:
+                    logger.warning(
+                        "cancel_print: failed to restore temperatures "
+                        "after cancel (%s): %s",
+                        preserved, exc,
+                    )
+
         _audit("cancel_print", "executed")
-        return result.to_dict()
+
+        out = result.to_dict()
+        if preserve_temperatures:
+            out["preserved_temperatures"] = restored
+        return out
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to cancel print: {exc}. Check that a print is currently active.")
     except Exception as exc:
