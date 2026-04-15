@@ -300,3 +300,129 @@ class TestWireC_CommunityPull:
         from kiln.community_sync import fetch_community_insights
 
         assert fetch_community_insights("bambu_x1c", "PLA") is None
+
+
+# ---------------------------------------------------------------------------
+# Wire E — vision auto-classify on record_print_outcome (opt-in).
+# ---------------------------------------------------------------------------
+
+
+class TestWireE_AutoClassify:
+    def _fake_analysis(self, ftype: str, confidence: float, evidence: list[str]):
+        """Build a duck-typed analyze_failure return object."""
+        from kiln.failure_recovery import (
+            FailureClassification,
+            FailureType,
+            RecoveryAction,
+        )
+
+        # We don't need a real recovery plan / history — only
+        # ``analysis.classification`` is read by ``_auto_classify_failure``.
+        class _FakeAnalysis:
+            pass
+
+        fa = _FakeAnalysis()
+        fa.classification = FailureClassification(
+            failure_type=FailureType(ftype),
+            confidence=confidence,
+            evidence=evidence,
+            progress_at_failure=0.5,
+            time_printing_seconds=1800,
+            material_wasted_grams=12.0,
+        )
+        return fa
+
+    def test_high_confidence_stores_mapped_mode(self, tmp_kiln_env):
+        """adhesion_loss → adhesion (DB vocabulary); stored because
+        confidence clears the 0.75 threshold."""
+        from kiln.plugins.learning_tools import record_print_outcome
+
+        analysis = self._fake_analysis(
+            "adhesion_loss", 0.9, ["Mid-print progress halt", "Bed temp normal"],
+        )
+        with patch("kiln.server._check_auth", return_value=None), patch(
+            "kiln.failure_recovery.analyze_failure", return_value=analysis,
+        ):
+            result = record_print_outcome(
+                job_id="job-1",
+                outcome="failed",
+                printer_name="test-bambu",
+                material_type="PLA",
+                auto_classify=True,
+            )
+        assert result.get("success") is True
+        assert result.get("failure_mode") == "adhesion"
+        ac = result.get("auto_classification")
+        assert ac is not None
+        assert ac["failure_type"] == "adhesion_loss"
+        assert ac["db_mode"] == "adhesion"
+        assert ac["stored"] is True
+        assert ac["confidence"] >= 0.75
+
+    def test_low_confidence_echoes_but_does_not_store(self, tmp_kiln_env):
+        """0.4 confidence < 0.75 → classification echoed but not stored;
+        failure_mode stays unset to avoid poisoning the DB."""
+        from kiln.plugins.learning_tools import record_print_outcome
+
+        analysis = self._fake_analysis(
+            "warping", 0.4, ["Thin evidence"],
+        )
+        with patch("kiln.server._check_auth", return_value=None), patch(
+            "kiln.failure_recovery.analyze_failure", return_value=analysis,
+        ):
+            result = record_print_outcome(
+                job_id="job-2",
+                outcome="failed",
+                printer_name="test-bambu",
+                material_type="PLA",
+                auto_classify=True,
+            )
+        assert result.get("success") is True
+        assert "failure_mode" not in result  # nothing stored
+        ac = result.get("auto_classification")
+        assert ac is not None
+        assert ac["stored"] is False
+        assert ac["confidence"] == 0.4
+
+    def test_opt_in_only_does_not_trigger_by_default(self, tmp_kiln_env):
+        from kiln.plugins.learning_tools import record_print_outcome
+
+        analysis = self._fake_analysis("warping", 0.99, [])
+        called = {"n": 0}
+
+        def _counting(*a, **kw):
+            called["n"] += 1
+            return analysis
+
+        with patch("kiln.server._check_auth", return_value=None), patch(
+            "kiln.failure_recovery.analyze_failure", side_effect=_counting,
+        ):
+            result = record_print_outcome(
+                job_id="job-3",
+                outcome="failed",
+                printer_name="test-bambu",
+            )
+        assert result.get("success") is True
+        assert called["n"] == 0  # no opt-in → no classifier invocation
+        assert "auto_classification" not in result
+
+    def test_explicit_failure_mode_wins(self, tmp_kiln_env):
+        """Caller-supplied failure_mode must not be overwritten even when
+        auto_classify is on — the primitive respects explicit inputs."""
+        from kiln.plugins.learning_tools import record_print_outcome
+
+        analysis = self._fake_analysis("warping", 0.99, [])
+        with patch("kiln.server._check_auth", return_value=None), patch(
+            "kiln.failure_recovery.analyze_failure", return_value=analysis,
+        ) as mock_af:
+            result = record_print_outcome(
+                job_id="job-4",
+                outcome="failed",
+                failure_mode="spaghetti",
+                printer_name="test-bambu",
+                auto_classify=True,
+            )
+        assert result.get("success") is True
+        assert result.get("failure_mode") == "spaghetti"
+        # Classifier must not even run when failure_mode is provided.
+        assert mock_af.call_count == 0

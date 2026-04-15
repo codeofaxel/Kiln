@@ -37,10 +37,27 @@ _VALID_FAILURE_MODES = frozenset(
         "clog",
         "thermal_runaway",
         "power_loss",
+        "filament_runout",
         "mechanical",
         "other",
     }
 )
+
+# Mapping from the failure-classifier's vocabulary
+# (:class:`kiln.failure_recovery.FailureType`) to the canonical DB
+# failure_mode vocabulary (``_VALID_FAILURE_MODES``).  Values absent from
+# this map are assumed to be already-canonical DB names.
+_VISION_TO_DB_FAILURE_MODE: dict[str, str] = {
+    "adhesion_loss": "adhesion",
+    "nozzle_clog": "clog",
+    "unknown": "other",
+}
+
+# Minimum confidence from the failure classifier for auto-stored
+# ``failure_mode``.  Below this, the classification is echoed back to
+# the caller but never written to the outcome row — prevents silent
+# data poisoning from low-confidence guesses.
+_AUTO_CLASSIFY_MIN_CONFIDENCE = 0.75
 
 # Hard safety limits — recorded settings cannot exceed these.
 # Prevents malicious agents from poisoning the learning database
@@ -65,6 +82,51 @@ _LEARNING_SAFETY_NOTICE = (
 # ---------------------------------------------------------------------------
 
 
+def _auto_classify_failure(
+    job_id: str | None,
+    printer_name: str | None,
+) -> dict[str, Any] | None:
+    """Run the failure classifier and translate its output for storage.
+
+    Returns a dict describing the classification (always safe to echo to
+    the caller), or ``None`` when the classifier cannot be reached.  The
+    ``stored`` flag tells the caller whether the classification was
+    confident enough to become the row's ``failure_mode``.
+
+    Separated from ``record_print_outcome`` so the logic has a single
+    testable entry point and so the caller still writes the outcome row
+    when classification fails — never lets auto-classify break the
+    primitive.
+    """
+    try:
+        from kiln.failure_recovery import analyze_failure
+    except Exception:
+        _logger.debug("Failure classifier unavailable", exc_info=True)
+        return None
+
+    try:
+        analysis = analyze_failure(job_id=job_id, printer_name=printer_name)
+    except Exception:
+        _logger.debug("Failure classifier raised", exc_info=True)
+        return None
+
+    classification = analysis.classification
+    raw_type = classification.failure_type.value
+    db_mode = _VISION_TO_DB_FAILURE_MODE.get(raw_type, raw_type)
+    stored = (
+        classification.confidence >= _AUTO_CLASSIFY_MIN_CONFIDENCE
+        and db_mode in _VALID_FAILURE_MODES
+    )
+    return {
+        "failure_type": raw_type,
+        "db_mode": db_mode,
+        "confidence": round(classification.confidence, 3),
+        "evidence": list(classification.evidence),
+        "stored": stored,
+        "min_confidence": _AUTO_CLASSIFY_MIN_CONFIDENCE,
+    }
+
+
 def record_print_outcome(
     job_id: str,
     outcome: str,
@@ -79,6 +141,7 @@ def record_print_outcome(
     material_type: str | None = None,
     decoration_slug: str | None = None,
     decoration_settings: dict | None = None,
+    auto_classify: bool = False,
 ) -> dict:
     """Record the outcome of a print for cross-printer learning.
 
@@ -94,6 +157,16 @@ def record_print_outcome(
     corresponding decoration's proven-settings counter is auto-updated
     (``success_count`` or ``failure_count``) so the library's tracked
     reliability reflects real field outcomes without manual curation.
+
+    **Auto-classification** (opt-in): When ``auto_classify=True`` and the
+    outcome is ``"failed"`` with no explicit ``failure_mode``, the failure
+    classifier runs (:func:`kiln.failure_recovery.analyze_failure`) and
+    its result is mapped into the canonical DB vocabulary.  The
+    classification is always echoed back in the ``auto_classification``
+    key of the response; it is only STORED as ``failure_mode`` when the
+    classifier's confidence meets or exceeds
+    ``_AUTO_CLASSIFY_MIN_CONFIDENCE`` (0.75).  Lower-confidence guesses
+    are surfaced to the caller without poisoning the learning database.
 
     Args:
         job_id: The job ID from the print queue.
@@ -113,6 +186,10 @@ def record_print_outcome(
         decoration_settings: Optional dict of decoration settings used
             (``depth_mm``, ``mode``, ``image_style``).  Falls back to the
             decoration's current defaults when omitted.
+        auto_classify: When True and this outcome is a failure with no
+            explicit ``failure_mode``, run the failure classifier and
+            store its best-guess mode if confidence >= 0.75.  Default
+            False — callers opt in.
     """
     import kiln.server as _srv
     from kiln.persistence import get_db
@@ -131,6 +208,18 @@ def record_print_outcome(
             f"Invalid quality_grade {quality_grade!r}. Must be one of: {', '.join(sorted(_VALID_QUALITY_GRADES))}",
             code="VALIDATION_ERROR",
         )
+
+    # --- Auto-classification (opt-in) ---
+    # Runs only for failed outcomes with no explicit failure_mode, and
+    # only when the caller opts in.  High-confidence classifications
+    # promote to ``failure_mode``; lower-confidence results are echoed
+    # back so the caller can decide what to do.  Never raises.
+    auto_classification: dict[str, Any] | None = None
+    if auto_classify and outcome == "failed" and not failure_mode:
+        auto_classification = _auto_classify_failure(job_id, printer_name)
+        if auto_classification and auto_classification.get("stored"):
+            failure_mode = auto_classification["db_mode"]
+
     if failure_mode and failure_mode not in _VALID_FAILURE_MODES:
         return _srv._error_dict(
             f"Invalid failure_mode {failure_mode!r}. Must be one of: {', '.join(sorted(_VALID_FAILURE_MODES))}",
@@ -288,7 +377,7 @@ def record_print_outcome(
                     exc_info=True,
                 )
 
-        return {
+        result: dict[str, Any] = {
             "success": True,
             "outcome_id": row_id,
             "job_id": job_id,
@@ -296,6 +385,11 @@ def record_print_outcome(
             "outcome": outcome,
             "quality_grade": quality_grade,
         }
+        if failure_mode is not None:
+            result["failure_mode"] = failure_mode
+        if auto_classification is not None:
+            result["auto_classification"] = auto_classification
+        return result
     except Exception as exc:
         _logger.exception("Unexpected error in record_print_outcome")
         return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
