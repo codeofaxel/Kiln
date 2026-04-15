@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-14T20:46:27.504059+00:00",
-  "tool_count": 83,
+  "generated": "2026-04-15T18:21:28.149087+00:00",
+  "tool_count": 104,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -769,6 +769,37 @@
       }
     },
     {
+      "name": "dismiss_regression_alert",
+      "description": "Mark a regression alert as dismissed so it stops surfacing.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          },
+          "previous_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Previous Version Id"
+          }
+        },
+        "required": [
+          "version_id"
+        ],
+        "title": "dismiss_regression_alertArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "get_design_ancestry",
       "description": "Walk the parent chain from a recipe back to the root.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -789,6 +820,40 @@
           "recipe_path"
         ],
         "title": "get_design_ancestryArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_regression_alerts",
+      "description": "List persisted regression alerts emitted by record_print_outcome.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Id"
+          },
+          "include_dismissed": {
+            "default": false,
+            "title": "Include Dismissed",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 20,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "get_regression_alertsArguments",
         "type": "object"
       }
     },
@@ -1018,6 +1083,612 @@
       }
     },
     {
+      "name": "add_feature_during_print",
+      "description": "Slice a new mesh at pause_z and resume printing it (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "feature": {
+            "title": "Feature",
+            "type": "string"
+          },
+          "gcode_path": {
+            "title": "Gcode Path",
+            "type": "string"
+          },
+          "current_layer": {
+            "title": "Current Layer",
+            "type": "integer"
+          },
+          "pause_z_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pause Z Mm"
+          },
+          "printer_name": {
+            "default": "default",
+            "title": "Printer Name",
+            "type": "string"
+          },
+          "printer_z_known": {
+            "default": false,
+            "title": "Printer Z Known",
+            "type": "boolean"
+          },
+          "placement": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Placement"
+          },
+          "first_layer_height_mm": {
+            "default": 0.2,
+            "title": "First Layer Height Mm",
+            "type": "number"
+          },
+          "orient": {
+            "default": "auto",
+            "title": "Orient",
+            "type": "string"
+          },
+          "output_dir": {
+            "default": "",
+            "title": "Output Dir",
+            "type": "string"
+          },
+          "hotend_temp": {
+            "default": 220,
+            "title": "Hotend Temp",
+            "type": "integer"
+          },
+          "bed_temp": {
+            "default": 65,
+            "title": "Bed Temp",
+            "type": "integer"
+          },
+          "filament_type": {
+            "default": "PLA",
+            "title": "Filament Type",
+            "type": "string"
+          },
+          "printer_bed_size": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Bed Size"
+          },
+          "slicer_config_ini": {
+            "default": "",
+            "title": "Slicer Config Ini",
+            "type": "string"
+          },
+          "source_3mf_path": {
+            "default": "",
+            "title": "Source 3Mf Path",
+            "type": "string"
+          },
+          "parent_design_id": {
+            "default": "",
+            "title": "Parent Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature",
+          "gcode_path",
+          "current_layer"
+        ],
+        "title": "add_feature_during_printArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "add_feature_during_print_fleet",
+      "description": "Add the same feature (e.g. a hat) to N paused printers (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "feature": {
+            "title": "Feature",
+            "type": "string"
+          },
+          "printers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Printers",
+            "type": "array"
+          },
+          "first_layer_height_mm": {
+            "default": 0.2,
+            "title": "First Layer Height Mm",
+            "type": "number"
+          },
+          "orient": {
+            "default": "auto",
+            "title": "Orient",
+            "type": "string"
+          },
+          "hotend_temp": {
+            "default": 220,
+            "title": "Hotend Temp",
+            "type": "integer"
+          },
+          "bed_temp": {
+            "default": 65,
+            "title": "Bed Temp",
+            "type": "integer"
+          },
+          "filament_type": {
+            "default": "PLA",
+            "title": "Filament Type",
+            "type": "string"
+          },
+          "parent_design_id": {
+            "default": "",
+            "title": "Parent Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature",
+          "printers"
+        ],
+        "title": "add_feature_during_print_fleetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "analyze_mid_print_impact",
+      "description": "Pre-commit truth gate: which layers will actually change (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "default": "",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "engine_output_dir": {
+            "default": "",
+            "title": "Engine Output Dir",
+            "type": "string"
+          },
+          "carved_gcode_path": {
+            "default": "",
+            "title": "Carved Gcode Path",
+            "type": "string"
+          },
+          "requested_depth_mm": {
+            "default": 0.0,
+            "title": "Requested Depth Mm",
+            "type": "number"
+          }
+        },
+        "title": "analyze_mid_print_impactArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "apply_mid_print_decoration_plan",
+      "description": "Commit a planned mid-print decoration (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "default": "",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "engine_output_dir": {
+            "default": "",
+            "title": "Engine Output Dir",
+            "type": "string"
+          }
+        },
+        "title": "apply_mid_print_decoration_planArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "deboss_during_print",
+      "description": "Carve a debossed image into the top of an in-flight print (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "image_path": {
+            "title": "Image Path",
+            "type": "string"
+          },
+          "gcode_path": {
+            "title": "Gcode Path",
+            "type": "string"
+          },
+          "current_layer": {
+            "title": "Current Layer",
+            "type": "integer"
+          },
+          "depth_mm": {
+            "default": 1.2,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "top_layers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Top Layers"
+          },
+          "image_scale": {
+            "default": 0.7,
+            "title": "Image Scale",
+            "type": "number"
+          },
+          "aspect_policy": {
+            "default": "auto_crop",
+            "title": "Aspect Policy",
+            "type": "string"
+          },
+          "printer_z_known": {
+            "default": false,
+            "title": "Printer Z Known",
+            "type": "boolean"
+          },
+          "resume_z_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resume Z Mm"
+          },
+          "threshold": {
+            "default": 0.35,
+            "title": "Threshold",
+            "type": "number"
+          },
+          "bevel": {
+            "default": true,
+            "title": "Bevel",
+            "type": "boolean"
+          },
+          "output_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Output Dir"
+          },
+          "package_as_3mf": {
+            "default": true,
+            "title": "Package As 3Mf",
+            "type": "boolean"
+          },
+          "source_3mf_path": {
+            "default": "",
+            "title": "Source 3Mf Path",
+            "type": "string"
+          },
+          "hotend_temp": {
+            "default": 220,
+            "title": "Hotend Temp",
+            "type": "integer"
+          },
+          "bed_temp": {
+            "default": 65,
+            "title": "Bed Temp",
+            "type": "integer"
+          },
+          "filament_type": {
+            "default": "PLA",
+            "title": "Filament Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image_path",
+          "gcode_path",
+          "current_layer"
+        ],
+        "title": "deboss_during_printArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "decorate_during_print",
+      "description": "Add a decoration to an in-flight paused print (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "decoration": {
+            "title": "Decoration",
+            "type": "string"
+          },
+          "gcode_path": {
+            "title": "Gcode Path",
+            "type": "string"
+          },
+          "current_layer": {
+            "title": "Current Layer",
+            "type": "integer"
+          },
+          "printer_name": {
+            "default": "default",
+            "title": "Printer Name",
+            "type": "string"
+          },
+          "printer_z_known": {
+            "default": false,
+            "title": "Printer Z Known",
+            "type": "boolean"
+          },
+          "depth_mm": {
+            "default": 1.2,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "image_scale": {
+            "default": 0.7,
+            "title": "Image Scale",
+            "type": "number"
+          },
+          "threshold": {
+            "default": 0.35,
+            "title": "Threshold",
+            "type": "number"
+          },
+          "bevel": {
+            "default": true,
+            "title": "Bevel",
+            "type": "boolean"
+          },
+          "aspect_policy": {
+            "default": "auto_crop",
+            "title": "Aspect Policy",
+            "type": "string"
+          },
+          "output_dir": {
+            "default": "",
+            "title": "Output Dir",
+            "type": "string"
+          },
+          "hotend_temp": {
+            "default": 220,
+            "title": "Hotend Temp",
+            "type": "integer"
+          },
+          "bed_temp": {
+            "default": 65,
+            "title": "Bed Temp",
+            "type": "integer"
+          },
+          "filament_type": {
+            "default": "PLA",
+            "title": "Filament Type",
+            "type": "string"
+          },
+          "source_3mf_path": {
+            "default": "",
+            "title": "Source 3Mf Path",
+            "type": "string"
+          },
+          "parent_design_id": {
+            "default": "",
+            "title": "Parent Design Id",
+            "type": "string"
+          },
+          "image_center_xy": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Image Center Xy"
+          },
+          "style": {
+            "default": "stencil",
+            "title": "Style",
+            "type": "string"
+          },
+          "start_layer_override": {
+            "default": 0,
+            "title": "Start Layer Override",
+            "type": "integer"
+          },
+          "accept_unsafe_depth": {
+            "default": false,
+            "title": "Accept Unsafe Depth",
+            "type": "boolean"
+          },
+          "accept_bridge_cascade_risk": {
+            "default": false,
+            "title": "Accept Bridge Cascade Risk",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "decoration",
+          "gcode_path",
+          "current_layer"
+        ],
+        "title": "decorate_during_printArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "decorate_during_print_fleet",
+      "description": "Apply the same decoration to N paused printers at once (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "decoration": {
+            "title": "Decoration",
+            "type": "string"
+          },
+          "printers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Printers",
+            "type": "array"
+          },
+          "depth_mm": {
+            "default": 1.2,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "image_scale": {
+            "default": 0.7,
+            "title": "Image Scale",
+            "type": "number"
+          },
+          "threshold": {
+            "default": 0.35,
+            "title": "Threshold",
+            "type": "number"
+          },
+          "bevel": {
+            "default": true,
+            "title": "Bevel",
+            "type": "boolean"
+          },
+          "aspect_policy": {
+            "default": "auto_crop",
+            "title": "Aspect Policy",
+            "type": "string"
+          },
+          "hotend_temp": {
+            "default": 220,
+            "title": "Hotend Temp",
+            "type": "integer"
+          },
+          "bed_temp": {
+            "default": 65,
+            "title": "Bed Temp",
+            "type": "integer"
+          },
+          "filament_type": {
+            "default": "PLA",
+            "title": "Filament Type",
+            "type": "string"
+          },
+          "parent_design_id": {
+            "default": "",
+            "title": "Parent Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decoration",
+          "printers"
+        ],
+        "title": "decorate_during_print_fleetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_recovery_gcode",
+      "description": "Generate a resume-from-layer G-code file for a failed print (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "failure_id": {
+            "title": "Failure Id",
+            "type": "string"
+          },
+          "printer_z_known": {
+            "title": "Printer Z Known",
+            "type": "boolean"
+          },
+          "overlap_layers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Overlap Layers"
+          },
+          "output_dir": {
+            "default": "",
+            "title": "Output Dir",
+            "type": "string"
+          },
+          "prime_extrusion_mm": {
+            "default": 0.0,
+            "title": "Prime Extrusion Mm",
+            "type": "number"
+          }
+        },
+        "required": [
+          "failure_id",
+          "printer_z_known"
+        ],
+        "title": "generate_recovery_gcodeArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "get_auto_tuned_settings",
       "description": "Get auto-tuned print settings from historical success/failure analysis.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -1186,6 +1857,344 @@
       }
     },
     {
+      "name": "get_recovery_recommendations",
+      "description": "Return the historically best recovery strategy (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "failure_type": {
+            "title": "Failure Type",
+            "type": "string"
+          },
+          "printer_name": {
+            "default": "",
+            "title": "Printer Name",
+            "type": "string"
+          },
+          "material_type": {
+            "default": "",
+            "title": "Material Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "failure_type"
+        ],
+        "title": "get_recovery_recommendationsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_recovery_strategy_stats",
+      "description": "Return per-strategy recovery stats for display (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "failure_type": {
+            "default": "",
+            "title": "Failure Type",
+            "type": "string"
+          },
+          "printer_name": {
+            "default": "",
+            "title": "Printer Name",
+            "type": "string"
+          },
+          "material_type": {
+            "default": "",
+            "title": "Material Type",
+            "type": "string"
+          }
+        },
+        "title": "get_recovery_strategy_statsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "plan_mid_print_decoration",
+      "description": "Plan a mid-print decoration in one call (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "decoration": {
+            "title": "Decoration",
+            "type": "string"
+          },
+          "gcode_path": {
+            "title": "Gcode Path",
+            "type": "string"
+          },
+          "current_layer": {
+            "title": "Current Layer",
+            "type": "integer"
+          },
+          "printer_name": {
+            "default": "default",
+            "title": "Printer Name",
+            "type": "string"
+          },
+          "printer_z_known": {
+            "default": false,
+            "title": "Printer Z Known",
+            "type": "boolean"
+          },
+          "depth_mm": {
+            "default": 1.2,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "image_scale": {
+            "default": 0.7,
+            "title": "Image Scale",
+            "type": "number"
+          },
+          "threshold": {
+            "default": 0.35,
+            "title": "Threshold",
+            "type": "number"
+          },
+          "bevel": {
+            "default": true,
+            "title": "Bevel",
+            "type": "boolean"
+          },
+          "aspect_policy": {
+            "default": "auto_crop",
+            "title": "Aspect Policy",
+            "type": "string"
+          },
+          "output_dir": {
+            "default": "",
+            "title": "Output Dir",
+            "type": "string"
+          },
+          "hotend_temp": {
+            "default": 220,
+            "title": "Hotend Temp",
+            "type": "integer"
+          },
+          "bed_temp": {
+            "default": 65,
+            "title": "Bed Temp",
+            "type": "integer"
+          },
+          "filament_type": {
+            "default": "PLA",
+            "title": "Filament Type",
+            "type": "string"
+          },
+          "source_3mf_path": {
+            "default": "",
+            "title": "Source 3Mf Path",
+            "type": "string"
+          },
+          "parent_design_id": {
+            "default": "",
+            "title": "Parent Design Id",
+            "type": "string"
+          },
+          "image_center_xy": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Image Center Xy"
+          },
+          "style": {
+            "default": "stencil",
+            "title": "Style",
+            "type": "string"
+          },
+          "start_layer_override": {
+            "default": 0,
+            "title": "Start Layer Override",
+            "type": "integer"
+          },
+          "accept_unsafe_depth": {
+            "default": false,
+            "title": "Accept Unsafe Depth",
+            "type": "boolean"
+          },
+          "accept_bridge_cascade_risk": {
+            "default": false,
+            "title": "Accept Bridge Cascade Risk",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "decoration",
+          "gcode_path",
+          "current_layer"
+        ],
+        "title": "plan_mid_print_decorationArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "predict_print_failure_risk",
+      "description": "Score current failure risk BEFORE a failure occurs (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "telemetry": {
+            "additionalProperties": true,
+            "title": "Telemetry",
+            "type": "object"
+          },
+          "telemetry_history": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Telemetry History"
+          },
+          "job_info": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Job Info"
+          }
+        },
+        "required": [
+          "telemetry"
+        ],
+        "title": "predict_print_failure_riskArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "preview_decorated_mesh",
+      "description": "Render a 3D preview of a mid-print decorated part (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "default": "",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "engine_output_dir": {
+            "default": "",
+            "title": "Engine Output Dir",
+            "type": "string"
+          },
+          "source_gcode_path": {
+            "default": "",
+            "title": "Source Gcode Path",
+            "type": "string"
+          },
+          "decoration": {
+            "default": "kiln",
+            "title": "Decoration",
+            "type": "string"
+          },
+          "depth_mm": {
+            "default": 0.8,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "image_scale": {
+            "default": 0.6,
+            "title": "Image Scale",
+            "type": "number"
+          },
+          "output_dir": {
+            "default": "",
+            "title": "Output Dir",
+            "type": "string"
+          },
+          "width": {
+            "default": 800,
+            "title": "Width",
+            "type": "integer"
+          },
+          "height": {
+            "default": 600,
+            "title": "Height",
+            "type": "integer"
+          },
+          "color": {
+            "default": "#FFFFFF",
+            "title": "Color",
+            "type": "string"
+          }
+        },
+        "title": "preview_decorated_meshArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "preview_mid_print_session",
+      "description": "One-call approval gate for a mid-print decoration (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "default": "",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "engine_output_dir": {
+            "default": "",
+            "title": "Engine Output Dir",
+            "type": "string"
+          },
+          "decoration": {
+            "default": "",
+            "title": "Decoration",
+            "type": "string"
+          },
+          "depth_mm": {
+            "default": 0.0,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "image_scale": {
+            "default": 0.0,
+            "title": "Image Scale",
+            "type": "number"
+          },
+          "regen_thumbnail": {
+            "default": true,
+            "title": "Regen Thumbnail",
+            "type": "boolean"
+          }
+        },
+        "title": "preview_mid_print_sessionArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "record_completed_print",
       "description": "Record a completed print into the learning system.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -1246,6 +2255,185 @@
           "material"
         ],
         "title": "record_completed_printArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_recovery_outcome",
+      "description": "Record the outcome of a recovery attempt (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "failure_type": {
+            "title": "Failure Type",
+            "type": "string"
+          },
+          "strategy": {
+            "title": "Strategy",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "printer_name": {
+            "default": "",
+            "title": "Printer Name",
+            "type": "string"
+          },
+          "material_type": {
+            "default": "",
+            "title": "Material Type",
+            "type": "string"
+          },
+          "time_to_resolve_s": {
+            "default": 0.0,
+            "title": "Time To Resolve S",
+            "type": "number"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "session_id": {
+            "default": "",
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "failure_type",
+          "strategy",
+          "success"
+        ],
+        "title": "record_recovery_outcomeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "regenerate_3mf_thumbnail",
+      "description": "Swap the embedded thumbnails in a 3MF for renders of a decorated STL so the Bambu screen shows the decoration (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "three_mf_path": {
+            "title": "Three Mf Path",
+            "type": "string"
+          },
+          "decorated_stl_path": {
+            "title": "Decorated Stl Path",
+            "type": "string"
+          },
+          "output_path": {
+            "default": "",
+            "title": "Output Path",
+            "type": "string"
+          },
+          "color": {
+            "default": "#FFFFFF",
+            "title": "Color",
+            "type": "string"
+          }
+        },
+        "required": [
+          "three_mf_path",
+          "decorated_stl_path"
+        ],
+        "title": "regenerate_3mf_thumbnailArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "revert_mid_print",
+      "description": "Undo a mid-print transform by swapping back the original resume (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "default": "",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "engine_output_dir": {
+            "default": "",
+            "title": "Engine Output Dir",
+            "type": "string"
+          }
+        },
+        "title": "revert_mid_printArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "revert_mid_print_fleet",
+      "description": "Revert mid-print transforms on N printers at once (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "sessions": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Sessions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "title": "revert_mid_print_fleetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "wrap_gcode_as_resume_3mf",
+      "description": "Wrap resume gcode as a Bambu 3MF with start-gcode BYPASSED (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "gcode_path": {
+            "title": "Gcode Path",
+            "type": "string"
+          },
+          "output_path": {
+            "default": "",
+            "title": "Output Path",
+            "type": "string"
+          },
+          "hotend_temp": {
+            "default": 220,
+            "title": "Hotend Temp",
+            "type": "integer"
+          },
+          "bed_temp": {
+            "default": 65,
+            "title": "Bed Temp",
+            "type": "integer"
+          },
+          "filament_type": {
+            "default": "PLA",
+            "title": "Filament Type",
+            "type": "string"
+          },
+          "source_3mf_path": {
+            "default": "",
+            "title": "Source 3Mf Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "gcode_path"
+        ],
+        "title": "wrap_gcode_as_resume_3mfArguments",
         "type": "object"
       }
     },
