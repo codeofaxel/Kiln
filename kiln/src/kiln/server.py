@@ -932,6 +932,35 @@ def _get_temp_limits() -> tuple:
     return 300.0, 130.0
 
 
+def _is_resume_mode_3mf(file_name: str) -> bool:
+    """Return True if ``file_name`` looks like a mid-print resume 3MF.
+
+    Resume 3MFs are produced by ``decorate_during_print`` and
+    ``revert_mid_print``.  They strip Bambu's proprietary start-gcode
+    (homing, bed probe, AMS load, calibration, M140/M190 pre-heat) and
+    carry their own resume preamble that picks up where the paused
+    print left off.
+
+    Detection is filename-based for now (no in-3MF marker exists yet).
+    The convention from kiln-pro's mid_print_engine is:
+
+        ``transformed_resume_<sid>.3mf``  — user's modification applied
+        ``original_resume_<sid>.3mf``     — unchanged remainder
+
+    Both contain the substring ``_resume_`` (case-insensitive).  We
+    also match files whose basename starts with ``transformed_resume``
+    or ``original_resume`` for older sessions that didn't carry a sid.
+    """
+    if not file_name:
+        return False
+    base = os.path.basename(str(file_name)).lower()
+    if not base.endswith(".3mf"):
+        return False
+    if "_resume_" in base:
+        return True
+    return base.startswith(("transformed_resume", "original_resume"))
+
+
 def _resolve_effective_printer_name(printer_name: str | None = None) -> str:
     """Resolve the printer identifier used for emergency latch checks."""
     if printer_name:
@@ -1177,6 +1206,123 @@ def _audit(
 # Pending confirmations: {token: {tool, args, created_at}}.
 _pending_confirmations: dict[str, dict[str, Any]] = {}
 _CONFIRM_TOKEN_TTL: float = 300.0  # 5 minutes
+
+
+# ---------------------------------------------------------------------------
+# Pause keep-alive — fights firmware idle-cooldown during long pauses
+# ---------------------------------------------------------------------------
+# Bambu A1 firmware (and several other FDM firmwares) drops the hotend
+# heater after a few minutes of pause regardless of the slicer's targets.
+# When the agent plans a mid-print decoration swap that takes 5+ minutes
+# (sign-off, planning, slicing, upload), the printer is stone-cold by the
+# time we resume.  This re-asserts the captured pre-pause targets every
+# ``_PAUSE_KEEPALIVE_INTERVAL_S`` seconds via the existing adapter API.
+#
+# Design:
+#   - One daemon thread per process.  Idempotent ``start`` so repeat
+#     pauses don't compound threads.
+#   - ``stop()`` is called from resume/cancel/error paths.
+#   - All adapter calls are best-effort; a failed re-assert is logged
+#     once at INFO level and the loop keeps trying.
+_PAUSE_KEEPALIVE_INTERVAL_S: float = 120.0  # 2 min — well under firmware idle threshold
+
+
+class _PauseKeepAlive:
+    """Daemon thread that re-asserts heater targets across long pauses.
+
+    Singleton-ish: one instance lives in the module.  ``start`` is
+    idempotent; calling it twice while the thread is running just
+    refreshes the stored targets.  ``stop`` is fast and side-effect
+    free if the thread isn't running.
+    """
+
+    def __init__(self) -> None:
+        import threading
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._targets: dict[str, float] = {}
+
+    def start(self, tool_target: float, bed_target: float) -> bool:
+        """Begin re-asserting ``tool_target`` and ``bed_target`` every 2 min.
+
+        If the thread is already running, just update the stored targets.
+        Returns ``True`` if a new thread was spawned, ``False`` if an
+        existing thread was just refreshed.
+        """
+        import threading
+        with self._lock:
+            self._targets = {
+                "tool": float(tool_target or 0.0),
+                "bed": float(bed_target or 0.0),
+            }
+            if self._thread is not None and self._thread.is_alive():
+                return False  # Refreshed in place, no new thread.
+            self._stop_event.clear()
+            self._thread = threading.Thread(
+                target=self._loop,
+                name="kiln-pause-keepalive",
+                daemon=True,
+            )
+            self._thread.start()
+            return True
+
+    def stop(self) -> None:
+        """Signal the thread to exit.  Safe to call when not running."""
+        with self._lock:
+            self._stop_event.set()
+            self._thread = None
+            self._targets = {}
+
+    def is_running(self) -> bool:
+        with self._lock:
+            return self._thread is not None and self._thread.is_alive()
+
+    def _loop(self) -> None:
+        """Re-assert targets until stopped or the printer leaves PAUSED."""
+        # Wait first — the immediate post-pause state already has the
+        # targets set by the slicer/firmware; we only need to fight the
+        # cooldown that kicks in a few minutes later.
+        while not self._stop_event.wait(_PAUSE_KEEPALIVE_INTERVAL_S):
+            try:
+                from kiln.printers.base import PrinterStatus
+                adapter = _get_adapter()
+                # Stop if the printer left PAUSED on its own (resume,
+                # cancel, error, or operator pressed buttons on the printer).
+                try:
+                    state = adapter.get_state()
+                    if state.state != PrinterStatus.PAUSED:
+                        logger.debug(
+                            "Pause keep-alive: printer state is %s, not paused — exiting loop",
+                            state.state,
+                        )
+                        return
+                except Exception as exc:
+                    logger.debug("Pause keep-alive: state read failed (%s); continuing", exc)
+
+                with self._lock:
+                    targets = dict(self._targets)
+                if targets.get("tool", 0) > 0:
+                    try:
+                        adapter.set_tool_temp(targets["tool"])
+                    except Exception as exc:
+                        logger.info(
+                            "Pause keep-alive: set_tool_temp(%s) failed: %s",
+                            targets["tool"], exc,
+                        )
+                if targets.get("bed", 0) > 0:
+                    try:
+                        adapter.set_bed_temp(targets["bed"])
+                    except Exception as exc:
+                        logger.info(
+                            "Pause keep-alive: set_bed_temp(%s) failed: %s",
+                            targets["bed"], exc,
+                        )
+            except Exception as exc:  # noqa: BLE001 — never let a daemon die silently
+                logger.warning("Pause keep-alive loop error (continuing): %s", exc)
+
+
+_pause_keepalive = _PauseKeepAlive()
 
 
 def _check_confirmation(tool_name: str, args: dict[str, Any]) -> dict | None:
@@ -2850,6 +2996,8 @@ def start_print(
     nozzle_clog_detect: bool = True,
     bed_type: str = "auto",
     plate_number: int = 1,
+    resume_from_paused: bool = False,
+    skip_preheat_reassert: bool = False,
 ) -> dict:
     """Start printing a file already uploaded to the printer (file must exist on printer).
 
@@ -2890,6 +3038,27 @@ def start_print(
         bed_type: Bed surface type (Bambu only).  Default ``"auto"``.
         plate_number: Plate index in multi-plate 3MF files (Bambu only).
             Default ``1``.
+        resume_from_paused: When ``True``, the pre-flight ``printer_idle``
+            check accepts ``paused`` as a valid state.  Use this when
+            starting a resume-mode 3MF (mid-print decoration swap):
+            the printer is paused, you upload the resume 3MF, and then
+            ``start_print`` it with this flag.  The file is treated as
+            a fresh print from the firmware's POV — the resume gcode
+            carries its own preamble (heat → safety lift → home X/Y →
+            travel → descend to resume Z).  Default ``False``.
+
+            Auto-detected for files whose name contains ``_resume_``
+            (case-insensitive) or starts with ``transformed_resume`` /
+            ``original_resume`` — these are the conventional names
+            produced by ``decorate_during_print`` and ``revert_mid_print``.
+        skip_preheat_reassert: When the file is a resume-mode 3MF, the
+            tool re-asserts the printer's pre-start hotend + bed targets
+            immediately after the MQTT start command, because Bambu's
+            resume 3MFs strip the M140/M190 pre-heat block (the original
+            print already heated the bed) and the firmware's
+            cool-on-new-job policy will otherwise drop the bed to 0
+            before the resume preamble executes.  Set ``True`` to
+            disable this safety net.  Default ``False``.
     """
     if err := _check_auth("print"):
         return err
@@ -2899,8 +3068,45 @@ def start_print(
         return conf
     if block := _emergency_latch_error("start_print", _resolve_effective_printer_name()):
         return block
+
+    # Auto-detect resume-mode 3MFs by filename.  Convention: files
+    # produced by decorate_during_print / revert_mid_print are named
+    # ``transformed_resume_<sid>.3mf`` or ``original_resume_<sid>.3mf``,
+    # both contain the substring ``_resume_``.  When detected, we flip
+    # ``resume_from_paused`` so the printer_idle preflight check accepts
+    # ``paused`` as a valid state.  Caller can still pass it explicitly.
+    is_resume_3mf = _is_resume_mode_3mf(file_name)
+    if is_resume_3mf and not resume_from_paused:
+        resume_from_paused = True
+        logger.info(
+            "start_print: auto-detected resume-mode 3MF %r — accepting paused state in preflight",
+            file_name,
+        )
+
     try:
         adapter = _get_adapter()
+
+        # Snapshot pre-start temperature targets BEFORE the cancel/start
+        # so we can re-assert them after the MQTT start command kicks
+        # off the cool-on-new-job sequence.  Bambu resume-mode 3MFs
+        # omit the M140/M190 pre-heat block (the original print
+        # already heated the bed), so without this re-assert the bed
+        # drops to 0 before the resume preamble runs and adhesion
+        # fails.  Only relevant for resume-mode 3MFs.
+        pre_start_targets: dict[str, float] | None = None
+        if is_resume_3mf and not skip_preheat_reassert:
+            try:
+                _state = adapter.get_state()
+                pre_start_targets = {
+                    "tool": float(_state.tool_temp_target or 0.0),
+                    "bed": float(_state.bed_temp_target or 0.0),
+                }
+            except Exception as exc:
+                logger.debug(
+                    "start_print: pre-start state snapshot failed (%s); skipping reassert",
+                    exc,
+                )
+                pre_start_targets = None
 
         # -- Automatic pre-flight safety gate ----------------------------------
         # Mandatory by default.  Set KILN_SKIP_PREFLIGHT=1 to bypass (advanced
@@ -2919,7 +3125,7 @@ def start_print(
             )
             _audit("start_print", "preflight_skipped", details={"file": file_name})
         else:
-            pf = preflight_check(remote_file=file_name)
+            pf = preflight_check(remote_file=file_name, accept_paused=resume_from_paused)
             if not pf.get("ready", False):
                 # Build a detailed remediation message from individual checks
                 failed = [c for c in pf.get("checks", []) if not c.get("passed", False)]
@@ -2984,8 +3190,54 @@ def start_print(
             print_kwargs["plate_number"] = plate_number
         result = adapter.start_print(file_name, **print_kwargs)
         _get_heater_watchdog().notify_print_started()
-        _audit("start_print", "executed", details={"file": file_name, **print_kwargs})
-        return result.to_dict()
+
+        # Stop any pause keep-alive thread now that the print is back
+        # under firmware control.  Safe to call when nothing's running.
+        try:
+            _pause_keepalive.stop()
+        except Exception as exc:
+            logger.debug("start_print: keep-alive stop failed (best-effort): %s", exc)
+
+        # Re-assert the pre-start temperature targets immediately after
+        # the start command so the firmware's cool-on-new-job sequence
+        # doesn't drop the bed/tool to 0 before the resume preamble
+        # runs.  Only fires for resume-mode 3MFs (which strip M140/M190)
+        # AND when the caller hasn't opted out via skip_preheat_reassert.
+        reasserted: dict[str, float] | None = None
+        if (
+            is_resume_3mf
+            and not skip_preheat_reassert
+            and pre_start_targets is not None
+            and (pre_start_targets["tool"] > 0 or pre_start_targets["bed"] > 0)
+        ):
+            try:
+                if pre_start_targets["tool"] > 0:
+                    adapter.set_tool_temp(pre_start_targets["tool"])
+                if pre_start_targets["bed"] > 0:
+                    adapter.set_bed_temp(pre_start_targets["bed"])
+                reasserted = pre_start_targets
+            except Exception as exc:
+                logger.warning(
+                    "start_print: failed to re-assert pre-start temps "
+                    "after resume-3MF start (%s): %s",
+                    pre_start_targets, exc,
+                )
+
+        _audit(
+            "start_print", "executed",
+            details={
+                "file": file_name,
+                "resume_from_paused": resume_from_paused,
+                "is_resume_3mf": is_resume_3mf,
+                **print_kwargs,
+            },
+        )
+        out = result.to_dict()
+        if is_resume_3mf:
+            out["resume_3mf_detected"] = True
+        if reasserted is not None:
+            out["preheat_reasserted"] = reasserted
+        return out
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(
             f"Failed to start print: {exc}. Check that the printer is online and idle. Use printer_files() to verify the file exists."
@@ -2996,7 +3248,12 @@ def start_print(
 
 
 @mcp.tool()
-def cancel_print(preserve_temperatures: bool = False) -> dict:
+def cancel_print(
+    preserve_temperatures: bool = False,
+    expected_tool_target: float | None = None,
+    expected_bed_target: float | None = None,
+    expected_chamber_target: float | None = None,
+) -> dict:
     """Cancel the currently running print job.
 
     Sends cancel via MQTT (Bambu) or REST API (OctoPrint/Moonraker)
@@ -3005,14 +3262,31 @@ def cancel_print(preserve_temperatures: bool = False) -> dict:
     The printer must have an active job (printing or paused).
 
     :param preserve_temperatures: When ``True``, re-asserts the pre-cancel
-        hotend + bed targets immediately after the cancel command, so the
-        printer does NOT cool down.  Use this when you plan to swap in a
+        hotend + bed (+ chamber, if expected_chamber_target is provided)
+        targets immediately after the cancel command, so the printer
+        does NOT cool down.  Use this when you plan to swap in a
         different file (e.g., a mid-print decoration resume 3MF) and need
         bed adhesion + nozzle temperature held across the cancel-then-
         start-print transition.  Without this, Bambu firmware defaults
         to cooling on cancel, which can warp the existing part or kill
         bed adhesion on a partial print you're about to resume.
         Default ``False`` preserves legacy behaviour (cool down to idle).
+
+    :param expected_tool_target: Optional caller-supplied tool target to
+        preserve.  When provided AND ``preserve_temperatures=True``,
+        this overrides the introspected ``state.tool_temp_target``.
+        Useful when the printer was paused and the firmware has already
+        cleared the target (so a fresh state read returns 0) but the
+        caller knows what the pre-pause target was.
+    :param expected_bed_target: Same as above, for the bed.  This is
+        the primary fix for Bambu A1 long-pause-then-cancel: the bed
+        target sometimes reads back as 0 from MQTT cache after a long
+        pause, and without an explicit override the cancel preservation
+        skips the bed restore.
+    :param expected_chamber_target: Optional chamber target (M141) to
+        re-assert via raw G-code.  Not all printers expose chamber
+        heating via the adapter API, so this is sent as a raw M141
+        command best-effort.  Pass ``None`` to skip chamber preservation.
 
     WARNING: Cancellation is irreversible -- the print cannot be resumed
     from where it left off UNLESS a resume-mode 3MF has been pre-staged
@@ -3028,18 +3302,52 @@ def cancel_print(preserve_temperatures: bool = False) -> dict:
         adapter = _get_adapter()
 
         # Snapshot pre-cancel targets so we can restore them below.
+        # Caller-supplied ``expected_*`` values take precedence over the
+        # introspected state — this is the escape hatch for the case
+        # where MQTT cache lag or firmware idle-cooldown has already
+        # zeroed out the bed target before we can read it.
         preserved: dict[str, float] | None = None
         if preserve_temperatures:
+            tool_t = 0.0
+            bed_t = 0.0
             try:
                 state = adapter.get_state()
-                preserved = {
-                    "tool_target": float(state.tool_temp_target or 0.0),
-                    "bed_target": float(state.bed_temp_target or 0.0),
-                }
+                tool_t = float(state.tool_temp_target or 0.0)
+                bed_t = float(state.bed_temp_target or 0.0)
             except Exception:
-                # Best-effort — if we can't read state, fall through.
-                # The cancel itself is still authoritative.
-                preserved = None
+                # Best-effort — fall through to caller overrides.
+                pass
+            if expected_tool_target is not None:
+                tool_t = float(expected_tool_target)
+            if expected_bed_target is not None:
+                bed_t = float(expected_bed_target)
+            preserved = {
+                "tool_target": tool_t,
+                "bed_target": bed_t,
+            }
+
+        # Stop any pause keep-alive thread BEFORE the cancel — the
+        # cancel will leave the printer in IDLE/CANCELLING and the
+        # keep-alive's get_state() check would exit anyway, but
+        # explicit shutdown avoids a possible race where set_*_temp
+        # fights the cancel-cool sequence.
+        try:
+            _pause_keepalive.stop()
+        except Exception as exc:
+            logger.debug("cancel_print: keep-alive stop failed (best-effort): %s", exc)
+
+        # Bug #10: register the cancel intent BEFORE issuing the cancel
+        # command.  Bambu firmware has no "cancelled" gcode_state — a
+        # successful cancel transitions the printer to "idle", which
+        # looks identical to a natural finish.  The intent flag lets
+        # auto_record_hook classify the next idle transition as a
+        # cancel rather than a success, so the learning DB gets
+        # ``outcome="cancelled"`` instead of a bogus ``"success"``.
+        try:
+            from kiln.auto_record_hook import register_cancel_intent
+            register_cancel_intent(_resolve_effective_printer_name(None))
+        except Exception as exc:  # pragma: no cover — best-effort
+            logger.debug("cancel_print: register_cancel_intent failed: %s", exc)
 
         result = adapter.cancel_print()
         _get_heater_watchdog().notify_print_ended()
@@ -3050,8 +3358,10 @@ def cancel_print(preserve_temperatures: bool = False) -> dict:
         # a printer that was already idle).  Uses the adapter's split
         # ``set_tool_temp`` / ``set_bed_temp`` methods — present on every
         # adapter subclass (base, bambu, octoprint, moonraker, serial,
-        # elegoo, prusaconnect).
+        # elegoo, prusaconnect).  Chamber temp (rare) is sent as raw
+        # M141 G-code since most adapters don't expose a chamber setter.
         restored: dict[str, float] | None = None
+        chamber_restored: float | None = None
         if preserve_temperatures and preserved is not None:
             if preserved["tool_target"] > 0 or preserved["bed_target"] > 0:
                 try:
@@ -3066,12 +3376,25 @@ def cancel_print(preserve_temperatures: bool = False) -> dict:
                         "after cancel (%s): %s",
                         preserved, exc,
                     )
+            if expected_chamber_target is not None and expected_chamber_target > 0:
+                # Best-effort — not every printer supports M141.  Bambu
+                # X1 enclosed printers and some Voron/Ratrig setups do.
+                try:
+                    adapter.send_gcode([f"M141 S{int(expected_chamber_target)}"])
+                    chamber_restored = float(expected_chamber_target)
+                except Exception as exc:
+                    logger.info(
+                        "cancel_print: chamber temp re-assert (M141 S%s) failed (printer may not support chamber heating): %s",
+                        expected_chamber_target, exc,
+                    )
 
         _audit("cancel_print", "executed")
 
         out = result.to_dict()
         if preserve_temperatures:
             out["preserved_temperatures"] = restored
+            if chamber_restored is not None:
+                out["preserved_chamber"] = chamber_restored
         return out
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to cancel print: {exc}. Check that a print is currently active.")
@@ -3360,11 +3683,38 @@ def emergency_trip_input(
 
 
 @mcp.tool()
-def pause_print() -> dict:
+def pause_print(keep_temps: bool = True) -> dict:
     """Pause the currently running print job.
 
-    Pausing lifts the nozzle and parks the head.  The heaters stay on.
+    Pausing lifts the nozzle and parks the head.
+
+    Heater behaviour during pause varies by firmware:
+
+      - Bambu A1 / A1 mini: the firmware drops the **hotend** target
+        ~3-5 minutes into a pause regardless of slicer settings (bed
+        target survives).  An untreated 25-min pause cools the nozzle
+        from 220°C to ~90°C, which means the resume can't extrude
+        until you re-heat — and bed adhesion can fail in the meantime.
+      - Bambu X1/P1 series: typically holds both targets, but a long
+        idle can still trigger cooldown.
+      - OctoPrint / Moonraker / Klipper: depends on firmware config;
+        most hold targets across pause.
+
+    To fight this, ``pause_print`` spawns a best-effort daemon thread
+    that re-asserts the pre-pause hotend + bed targets every 2 minutes
+    until the printer leaves the PAUSED state (resume, cancel, error,
+    or manual button press).  This is enabled by default.
+
+    Args:
+        keep_temps: When ``True`` (default), capture the pre-pause tool
+            and bed targets and re-assert them every ~2 minutes via a
+            background daemon thread.  Set ``False`` to skip the
+            keep-alive (legacy behaviour — printer may cool during long
+            pauses).  The keep-alive thread is idempotent: repeat
+            pause/resume cycles do not compound threads.
+
     Use ``resume_print()`` to continue from where the print left off.
+    The keep-alive thread is automatically stopped on resume or cancel.
     """
     if err := _check_auth("print"):
         return err
@@ -3372,8 +3722,46 @@ def pause_print() -> dict:
         return err
     try:
         adapter = _get_adapter()
+
+        # Snapshot pre-pause targets BEFORE issuing the pause command —
+        # some firmwares clear them within seconds of the pause being
+        # accepted.
+        snapshot: dict[str, float] | None = None
+        if keep_temps:
+            try:
+                state = adapter.get_state()
+                snapshot = {
+                    "tool": float(state.tool_temp_target or 0.0),
+                    "bed": float(state.bed_temp_target or 0.0),
+                }
+            except Exception as exc:
+                logger.debug("pause_print: state snapshot failed (%s); keep-alive disabled", exc)
+                snapshot = None
+
         result = adapter.pause_print()
-        return result.to_dict()
+
+        # Start (or refresh) the keep-alive daemon.  Idempotent: if a
+        # thread is already running from a previous pause that wasn't
+        # cleanly resumed, the targets are refreshed in place.
+        keepalive_started = False
+        if keep_temps and snapshot is not None and (snapshot["tool"] > 0 or snapshot["bed"] > 0):
+            try:
+                keepalive_started = _pause_keepalive.start(
+                    tool_target=snapshot["tool"],
+                    bed_target=snapshot["bed"],
+                )
+            except Exception as exc:
+                logger.warning("pause_print: failed to start keep-alive: %s", exc)
+
+        out = result.to_dict()
+        if keep_temps and snapshot is not None:
+            out["keep_alive"] = {
+                "active": _pause_keepalive.is_running(),
+                "started_new_thread": keepalive_started,
+                "interval_seconds": _PAUSE_KEEPALIVE_INTERVAL_S,
+                "targets": snapshot,
+            }
+        return out
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to pause print: {exc}. Check that a print is currently active.")
     except Exception as exc:
@@ -3397,6 +3785,13 @@ def resume_print() -> dict:
     try:
         adapter = _get_adapter()
         result = adapter.resume_print()
+        # Stop the pause keep-alive thread if one was running — the print
+        # is back under firmware control and re-asserting targets here
+        # would race with the resume preamble gcode.
+        try:
+            _pause_keepalive.stop()
+        except Exception as exc:
+            logger.debug("resume_print: keep-alive stop failed (best-effort): %s", exc)
         return result.to_dict()
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to resume print: {exc}. Check that the printer is in a paused state.")
@@ -3972,7 +4367,10 @@ def get_tool_position() -> dict:
 
 @mcp.tool()
 def preflight_check(
-    file_path: str | None = None, expected_material: str | None = None, remote_file: str | None = None
+    file_path: str | None = None,
+    expected_material: str | None = None,
+    remote_file: str | None = None,
+    accept_paused: bool = False,
 ) -> dict:
     """Run pre-print safety checks to verify the printer is ready.
 
@@ -3993,6 +4391,12 @@ def preflight_check(
 
         remote_file: Optional filename to verify exists on the printer.
             If provided, checks the printer's file list for a matching file.
+        accept_paused: When ``True``, the ``printer_idle`` check accepts
+            the ``paused`` state in addition to ``idle``.  Used by
+            ``start_print(resume_from_paused=True)`` for mid-print
+            resume 3MFs (which start from a paused-state printer).
+            Default ``False`` — only ``idle`` is accepted.
+
     Call this before ``start_print()`` to catch problems early.  The result
     includes a ``ready`` boolean and detailed per-check breakdowns.
     """
@@ -4016,14 +4420,20 @@ def preflight_check(
         if not is_connected:
             errors.append("Printer is not connected / offline")
 
-        # Idle (not printing or in error)
+        # Idle (not printing or in error).  Resume-mode 3MFs need to
+        # start from a PAUSED printer (the original print was paused
+        # by decorate_during_print before slicing the resume), so
+        # callers may opt to also accept PAUSED here.
         idle_states = {PrinterStatus.IDLE}
+        if accept_paused:
+            idle_states.add(PrinterStatus.PAUSED)
         is_idle = state.state in idle_states
+        msg_suffix = " (paused accepted for resume-mode start)" if accept_paused and state.state == PrinterStatus.PAUSED else ""
         checks.append(
             {
                 "name": "printer_idle",
                 "passed": is_idle,
-                "message": f"Printer state: {state.state.value}",
+                "message": f"Printer state: {state.state.value}{msg_suffix}",
             }
         )
         if not is_idle:
