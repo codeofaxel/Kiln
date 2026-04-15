@@ -1472,14 +1472,25 @@ class TestBambuAdapterPrintConfirmation:
             result = adapter_with_mqtt.start_print("test.3mf")
         assert result.success is True
 
-    def test_timeout_returns_failure(self, adapter_with_mqtt: BambuAdapter) -> None:
+    def test_timeout_returns_success_with_preparing(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """Cold-start Bambu transitions can exceed the MQTT ack window.
+
+        Historically this returned a scary ``success=False, "did not transition"``
+        even though the print command had been accepted and the printer was
+        simply still in its preheat / calibration phase.  The honest behaviour
+        is to return success with a clear ``preparing`` hint and tell the
+        caller to poll ``printer_status`` to confirm.
+        """
         adapter_with_mqtt._last_status = {"gcode_state": "idle"}
         # Mock time.monotonic to simulate timeout.
         with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=[0.0, 0.0, 100.0]), \
                 mock.patch("kiln.printers.bambu.time.sleep"):
             result = adapter_with_mqtt.start_print("test.3mf")
-        assert result.success is False
-        assert "did not transition" in result.message
+        assert result.success is True
+        assert "accepted" in result.message
+        assert "preparing" in result.message
+        assert "printer_status" in result.message
+        assert "did not transition" not in result.message
 
     def test_skips_wait_when_already_active(self, adapter_with_mqtt: BambuAdapter) -> None:
         adapter_with_mqtt._last_status = {"gcode_state": "running"}
@@ -2603,13 +2614,21 @@ class TestStartPrintErrorMessages:
         assert "12345678" in result.message
         assert "hex" in result.message.lower()
 
-    def test_no_error_code_generic_message(self, adapter_with_mqtt: BambuAdapter) -> None:
+    def test_no_error_code_returns_preparing_success(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """No error code + ack timeout = printer is simply still preparing.
+
+        The honest response is ``success=True`` with a ``preparing`` hint.
+        Previously this returned a scary ``did not transition`` failure
+        even though the command had been accepted.
+        """
         adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": 0}
         with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=[0.0, 0.0, 100.0]), \
                 mock.patch("kiln.printers.bambu.time.sleep"):
             result = adapter_with_mqtt.start_print("test.3mf")
-        assert result.success is False
-        assert "did not transition" in result.message
+        assert result.success is True
+        assert "accepted" in result.message
+        assert "preparing" in result.message
+        assert "did not transition" not in result.message
 
 
 class TestValidate3mfFilamentIds:

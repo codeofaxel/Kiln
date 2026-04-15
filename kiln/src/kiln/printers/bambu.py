@@ -1614,7 +1614,7 @@ class BambuAdapter(PrinterAdapter):
 
     def _wait_for_print_start(
         self,
-        timeout: float = 5.0,
+        timeout: float = 15.0,
         poll_interval: float = 1.0,
     ) -> tuple[str, int | None]:
         """Poll MQTT cache until printer enters a print-active state.
@@ -2213,7 +2213,7 @@ class BambuAdapter(PrinterAdapter):
         # Wait for MQTT confirmation unless already active.
         if not already_active:
             result_state, error_code = self._wait_for_print_start()
-            if result_state in ("timeout", "failed"):
+            if result_state == "failed":
                 # Build a specific error message if we recognise the code.
                 err_detail = ""
                 if error_code is not None:
@@ -2231,9 +2231,24 @@ class BambuAdapter(PrinterAdapter):
                 return PrintResult(
                     success=False,
                     message=(
-                        f"Print command sent for {basename} but printer did not "
-                        f"transition to an active state within timeout."
-                        f"{err_detail}"
+                        f"Print command sent for {basename} but printer "
+                        f"reported a failure.{err_detail}"
+                    ),
+                )
+            if result_state == "timeout":
+                # The printer hasn't transitioned to an active state yet,
+                # but the command was sent successfully.  Bambu printers
+                # can take 5-8+ minutes for their startup sequence
+                # (homing, AMS load, calibration) before gcode_state
+                # flips to "running" or "prepare".  This is normal.
+                with self._state_lock:
+                    current_state = str(self._last_status.get("gcode_state", "unknown")).lower()
+                return PrintResult(
+                    success=True,
+                    message=(
+                        f"Print command accepted for {basename}. Printer is "
+                        f"preparing (state: {current_state}). Use printer_status() "
+                        f"to monitor — print has not yet confirmed running.{warn_suffix}"
                     ),
                 )
             if result_state == "running":
