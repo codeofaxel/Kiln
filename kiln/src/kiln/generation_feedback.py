@@ -37,6 +37,13 @@ _PROVIDER_PROMPT_LIMITS: dict[str, int] = {
     "openscad": 100_000,
 }
 
+# When this-printer outcome history has fewer than this many total
+# recorded prints, the prompt context resolver also consults community
+# aggregates to seed the gap.  Three is the point at which a median /
+# mode starts being statistically meaningful for a small bag of
+# categorical outcomes.
+_LOCAL_SPARSE_THRESHOLD = 3
+
 
 def get_provider_prompt_limit(provider: str | None = None) -> int:
     """Return the maximum prompt length for a provider.
@@ -878,7 +885,6 @@ def resolve_printer_generation_context(
     # Higher-priority failures are placed first so the downstream
     # ``_FAILURE_MITIGATIONS`` loop (which takes the first 3) picks this
     # printer's real problems before model-level hearsay or community wisdom.
-    _LOCAL_SPARSE_THRESHOLD = 3  # below this, community data seeds the gap
     live_failures: list[str] = []
     live_outcome_count = 0
     if printer_name:

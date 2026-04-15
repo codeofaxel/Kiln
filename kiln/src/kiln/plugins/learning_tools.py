@@ -235,10 +235,13 @@ def record_print_outcome(
 
         # Auto-update decoration proven-settings counters when this print
         # carried a decoration.  Mirrors the community-sync pattern — the
-        # dispatch is silent, never blocks the outcome return, and uses
-        # the decoration's current defaults when explicit settings are
-        # missing.  Keeps decoration library reliability grounded in real
-        # field outcomes rather than self-reported success.
+        # dispatch is silent and never blocks the outcome return.
+        #
+        # We only dispatch when we have real settings to record: either
+        # the caller supplied them, or the library already has a proven
+        # setting for this material that we can re-stamp.  If neither is
+        # true we skip silently rather than invent defaults — proven
+        # settings must reflect real prints, not our guesses.
         if decoration_slug and material_type and outcome in ("success", "failed"):
             try:
                 from kiln.decoration_library import (
@@ -249,39 +252,36 @@ def record_print_outcome(
 
                 dec = get_decoration(decoration_slug)
                 if dec is not None:
-                    # Resolve depth/mode/image_style: prefer explicit
-                    # args, fall back to the decoration's content-type
-                    # defaults.
                     ds = decoration_settings or {}
                     existing = dec.proven_settings.get(material_type)
-                    depth_mm = float(
-                        ds.get("depth_mm")
-                        if ds.get("depth_mm") is not None
-                        else (existing.depth_mm if existing else 0.5)
-                    )
-                    mode = str(ds.get("mode") or (existing.mode if existing else "emboss"))
-                    image_style = str(
-                        ds.get("image_style")
-                        or (existing.image_style if existing else "auto")
-                    )
+                    have_explicit = ds.get("depth_mm") is not None
+                    if have_explicit or existing is not None:
+                        depth_mm = float(
+                            ds["depth_mm"] if have_explicit else existing.depth_mm
+                        )
+                        mode = str(ds.get("mode") or (existing.mode if existing else "emboss"))
+                        image_style = str(
+                            ds.get("image_style")
+                            or (existing.image_style if existing else "auto")
+                        )
 
-                    if outcome == "success":
-                        record_decoration_success(
-                            decoration_slug,
-                            material=material_type,
-                            depth_mm=depth_mm,
-                            mode=mode,
-                            image_style=image_style,
-                        )
-                    else:
-                        record_decoration_failure(
-                            decoration_slug,
-                            material=material_type,
-                            depth_mm=depth_mm,
-                            mode=mode,
-                            image_style=image_style,
-                            failure_mode=failure_mode,
-                        )
+                        if outcome == "success":
+                            record_decoration_success(
+                                decoration_slug,
+                                material=material_type,
+                                depth_mm=depth_mm,
+                                mode=mode,
+                                image_style=image_style,
+                            )
+                        else:
+                            record_decoration_failure(
+                                decoration_slug,
+                                material=material_type,
+                                depth_mm=depth_mm,
+                                mode=mode,
+                                image_style=image_style,
+                                failure_mode=failure_mode,
+                            )
             except Exception:
                 _logger.debug(
                     "Decoration outcome update failed (non-fatal)",
