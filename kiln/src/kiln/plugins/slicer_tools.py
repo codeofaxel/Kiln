@@ -18,6 +18,42 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 
+def _auto_wrap_bambu_3mf(
+    gcode_path: str,
+    effective_printer_id: str | None,
+    stl_path: str | None,
+) -> tuple[str | None, str | None]:
+    """If the effective printer is a Bambu Lab, repackage the sliced
+    G-code into a 3MF so it can actually start (Bambu firmware ignores
+    raw ``.gcode`` via the ``gcode_file`` MQTT command; only
+    ``project_file`` works, and that requires ``.3mf``).
+
+    Returns ``(threemf_path, warning)``.  When no wrap happens, both
+    are ``None``.  Failure is non-fatal — the original gcode_path is
+    still usable for non-Bambu printers or manual wrapping.
+    """
+    if not effective_printer_id or not effective_printer_id.startswith("bambu"):
+        return (None, None)
+    try:
+        from kiln.printers.bambu_3mf import repackage_gcode_as_bambu_3mf
+
+        threemf_path = gcode_path.rsplit(".", 1)[0] + ".gcode.3mf"
+        source = stl_path if stl_path and os.path.isfile(stl_path) else None
+        repackage_gcode_as_bambu_3mf(
+            gcode_path,
+            threemf_path,
+            source_3mf_path=source,
+        )
+        _logger.info(
+            "Auto-wrapped %s as Bambu 3MF at %s",
+            os.path.basename(gcode_path), threemf_path,
+        )
+        return (threemf_path, None)
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning("Bambu auto-wrap failed: %s — leaving as raw gcode", exc)
+        return (None, f"Bambu auto-wrap failed: {exc}")
+
+
 class _SlicerToolsPlugin:
     """Slicer tools: slice, reslice, find slicer, list/get profiles.
 
@@ -96,6 +132,22 @@ class _SlicerToolsPlugin:
                     response["printer_id"] = effective_printer_id
                 if effective_profile:
                     response["profile_path"] = effective_profile
+
+                # Bambu auto-wrap: Bambu firmware ignores gcode_file MQTT
+                # commands and only starts via project_file on .3mf.  Wrap
+                # here so callers don't have to know the Bambu-specific
+                # convention.  Failure is non-fatal — raw gcode still usable.
+                _gcode_path = result.to_dict().get("output_path")
+                if _gcode_path:
+                    threemf_path, warning = _auto_wrap_bambu_3mf(
+                        _gcode_path, effective_printer_id, input_path,
+                    )
+                    if threemf_path:
+                        response["output_3mf_path"] = threemf_path
+                        response["output_path"] = threemf_path
+                        response["raw_gcode_path"] = _gcode_path
+                    if warning:
+                        response.setdefault("warnings", []).append(warning)
 
                 # Cross-check slicer profile against printer safety limits
                 if _srv._PRINTER_MODEL and effective_profile:
@@ -277,6 +329,20 @@ class _SlicerToolsPlugin:
                     response["profile_path"] = effective_profile
                 if parsed_overrides:
                     response["applied_overrides"] = parsed_overrides
+
+                # Bambu auto-wrap (same logic as slice_model) so callers
+                # don't have to know raw gcode won't start on Bambu.
+                _gcode_path = result.to_dict().get("output_path")
+                if _gcode_path:
+                    threemf_path, warning = _auto_wrap_bambu_3mf(
+                        _gcode_path, effective_printer_id, input_abs,
+                    )
+                    if threemf_path:
+                        response["output_3mf_path"] = threemf_path
+                        response["output_path"] = threemf_path
+                        response["raw_gcode_path"] = _gcode_path
+                    if warning:
+                        response.setdefault("warnings", []).append(warning)
 
                 # Attach validation warnings/errors when present
                 if validation_result and (validation_result["warnings"] or validation_result["errors"]):
