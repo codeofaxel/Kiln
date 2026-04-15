@@ -63,6 +63,57 @@ _ANGLE_ROTATIONS: dict[str, tuple[float, float, float]] = {
 # Default distance when bounding box detection fails
 _DEFAULT_DISTANCE = 250
 
+
+# Aspect-ratio threshold below which a model is "flat" — for these the
+# pure-horizontal front/right/back views degenerate to a thin strip and
+# hide all top-surface decoration.  We tilt them up by FLAT_TILT_DEGREES
+# so the top face is visible from the side angle.
+_FLAT_ASPECT_RATIO = 0.3
+_FLAT_TILT_DEGREES = 35
+
+# Aspect-ratio threshold above which a model is "tall" — we steepen the
+# top/bottom views so flat tops don't look like circles.
+_TALL_ASPECT_RATIO = 1.6
+
+
+def _adapt_angles_to_bbox(
+    bbox: "_BoundingBoxInfo",
+) -> dict[str, tuple[float, float, float]]:
+    """Return angle rotations adjusted for the model's aspect ratio.
+
+    - **Flat models** (z < 0.3 × max(x,y)): pure-horizontal front/right/
+      back views show only a thin strip and hide top decoration.  Tilt
+      them ``_FLAT_TILT_DEGREES`` toward the top so the decorated face is
+      visible from every angle.  Previously these rendered as
+      uninformative slabs of background color — exactly the failure the
+      jewelry-tray decoration debug session surfaced.
+    - **Tall models** (z > 1.6 × max(x,y)): steepen top/bottom to 30°
+      tilt so the cylinder caps don't appear as flat circles.
+    - **Cubic-ish models**: keep the defaults.
+
+    Isometric is always a 3/4 overview regardless of aspect ratio.
+    """
+    dx = max(1e-6, bbox.dx)
+    dy = max(1e-6, bbox.dy)
+    dz = max(1e-6, bbox.dz)
+    planar_max = max(dx, dy)
+    aspect = dz / planar_max
+
+    angles = dict(_ANGLE_ROTATIONS)
+
+    if aspect < _FLAT_ASPECT_RATIO:
+        # Flat — shift horizontal views to a near-top oblique.
+        tilt = 90 - _FLAT_TILT_DEGREES  # e.g. 55° from vertical
+        angles["front"] = (tilt, 0, 0)
+        angles["right"] = (tilt, 0, 90)
+        angles["back"] = (tilt, 0, 180)
+    elif aspect > _TALL_ASPECT_RATIO:
+        # Tall — pull top/bottom further off-axis to catch detail.
+        angles["top"] = (30, 0, 10)
+        angles["bottom"] = (150, 0, 15)
+
+    return angles
+
 # OpenSCAD binary search order
 _OPENSCAD_PATHS = [
     "openscad",  # PATH
@@ -111,12 +162,21 @@ def _get_bounding_box(scad_path: str) -> _BoundingBoxInfo:
 
 @dataclass
 class _BoundingBoxInfo:
-    """Bounding box with center and optimal camera distance."""
+    """Bounding box with center, optimal camera distance, and raw extents.
+
+    ``dx``/``dy``/``dz`` are the per-axis extents (max − min).  They drive
+    aspect-ratio-adaptive angle selection in :func:`_adapt_angles_to_bbox`
+    so flat models (like a jewelry tray) don't render pure-horizontal
+    views as uninformative strips.
+    """
 
     center_x: float = 0.0
     center_y: float = 0.0
     center_z: float = 0.0
     distance: float = _DEFAULT_DISTANCE
+    dx: float = 0.0
+    dy: float = 0.0
+    dz: float = 0.0
 
 
 def _bbox_from_ascii_stl(data: bytes) -> _BoundingBoxInfo:
@@ -159,6 +219,7 @@ def _bbox_from_ascii_stl(data: bytes) -> _BoundingBoxInfo:
         center_y=(min_xyz[1] + max_xyz[1]) / 2.0,
         center_z=(min_xyz[2] + max_xyz[2]) / 2.0,
         distance=distance,
+        dx=dx, dy=dy, dz=dz,
     )
 
 
@@ -215,6 +276,7 @@ def _distance_from_stl(stl_path: str) -> _BoundingBoxInfo:
     return _BoundingBoxInfo(
         center_x=cx, center_y=cy, center_z=cz,
         distance=distance,
+        dx=dx, dy=dy, dz=dz,
     )
 
 
@@ -408,9 +470,17 @@ def visualize_model(
     scad_path = _make_scad_wrapper(file_path, color=render_color, bbox=bbox)
     is_wrapper = scad_path != file_path
 
+    # Aspect-ratio-adaptive angle selection: flat models tilt side views
+    # up so the top decoration is visible; tall models steepen top/bottom.
+    angle_rotations = _adapt_angles_to_bbox(bbox)
+
     logger.debug(
-        "Camera: bbox_center=(%.1f,%.1f,%.1f) distance=%.1f (model centered at origin)",
-        bbox.center_x, bbox.center_y, bbox.center_z, bbox.distance,
+        "Camera: bbox_center=(%.1f,%.1f,%.1f) dims=(%.1fx%.1fx%.1f) "
+        "distance=%.1f aspect_z=%.2f",
+        bbox.center_x, bbox.center_y, bbox.center_z,
+        bbox.dx, bbox.dy, bbox.dz,
+        bbox.distance,
+        bbox.dz / max(1e-6, max(bbox.dx, bbox.dy)),
     )
 
     try:
@@ -418,7 +488,7 @@ def visualize_model(
         stem = Path(file_path).stem
 
         for label, description in selected:
-            rx, ry, rz = _ANGLE_ROTATIONS[label]
+            rx, ry, rz = angle_rotations[label]
             # Model is now centered at origin via translate in the wrapper,
             # so camera targets 0,0,0 with the computed distance.
             camera = f"0,0,0,{rx},{ry},{rz},{bbox.distance:.0f}"
