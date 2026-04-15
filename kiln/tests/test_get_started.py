@@ -24,10 +24,10 @@ class TestGetStarted:
         expected_keys = {
             "success",
             "overview",
+            "tool_discovery",
             "quick_start",
             "core_workflows",
             "safety_tools",
-            "tool_tiers",
             "session_recovery",
             "tip",
             "openscad",

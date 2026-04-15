@@ -77,6 +77,7 @@ class TestSkillManifest:
             "required_env", "optional_env",
             "interfaces", "tool_count", "safety_levels",
             "setup_command", "health_command",
+            "discovery", "tiers",
             "agent_rules", "tool_recommendations", "workflows",
         }
         assert set(d.keys()) == expected_keys
@@ -112,23 +113,29 @@ class TestGetVersion:
 
 
 class TestGetToolCount:
-    """Verify get_tool_count reads from tool_safety.json."""
+    """Verify get_tool_count queries the live MCP registry with fallback."""
 
     def test_returns_positive_int(self):
         count = get_tool_count()
         assert isinstance(count, int)
-        assert count > 0  # we know tool_safety.json has entries
+        assert count > 0  # live MCP registry or classification fallback
 
-    def test_returns_zero_on_json_decode_error(self, tmp_path: Path):
+    def test_returns_zero_when_both_sources_fail(self, tmp_path: Path):
+        """When live registry AND classification file both fail, return 0."""
         bad_json = tmp_path / "data" / "tool_safety.json"
         bad_json.parent.mkdir(parents=True)
         bad_json.write_text("not valid json")
         import kiln.skill_manifest as mod
         original_file = mod.__file__
         try:
-            # Point __file__ so the data path resolves to our bad JSON
+            # Point __file__ so the classification fallback finds bad JSON
             mod.__file__ = str(tmp_path / "skill_manifest.py")
-            assert get_tool_count() == 0
+            # Mock the live registry so it also fails
+            with patch("kiln.server.mcp") as mock_mcp:
+                mock_mcp._tool_manager.list_tools.side_effect = RuntimeError(
+                    "registry unavailable"
+                )
+                assert get_tool_count() == 0
         finally:
             mod.__file__ = original_file
 

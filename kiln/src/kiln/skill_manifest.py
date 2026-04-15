@@ -235,7 +235,29 @@ def get_version() -> str:
 
 
 def get_tool_count() -> int:
-    """Count available MCP tools from the safety classification file."""
+    """Return the live count of MCP tools registered on the server.
+
+    Primary source: ``kiln.server.mcp._tool_manager.list_tools()`` —
+    the authoritative count of every tool callable in this session,
+    including kiln-pro plugins and manifest stubs when they're
+    loaded. This matches the number reported by ``get_started()``
+    so agents see consistent answers across both tools.
+
+    Fallback: ``data/tool_safety.json`` classification count.  Used
+    only when the live registry isn't reachable (e.g. during cold
+    startup, or in test harnesses that import skill_manifest before
+    the MCP server initializes).  Returns 0 if both sources fail.
+    """
+    # Primary: live MCP registry (single source of truth for "how
+    # many tools are actually callable right now").
+    try:
+        import kiln.server as _srv
+
+        return len(_srv.mcp._tool_manager.list_tools())
+    except Exception:  # noqa: BLE001 — any import/attr error → fallback
+        pass
+
+    # Fallback: static classification file.
     try:
         data_path = Path(__file__).resolve().parent / "data" / "tool_safety.json"
         if data_path.is_file():
