@@ -77,7 +77,7 @@ _TALL_ASPECT_RATIO = 1.6
 
 
 def _adapt_angles_to_bbox(
-    bbox: "_BoundingBoxInfo",
+    bbox: _BoundingBoxInfo,
 ) -> dict[str, tuple[float, float, float]]:
     """Return angle rotations adjusted for the model's aspect ratio.
 

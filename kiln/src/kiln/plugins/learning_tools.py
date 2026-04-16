@@ -17,18 +17,21 @@ import os
 import time
 from typing import Any
 
+from kiln.failure_vocabulary import (
+    AUTO_CLASSIFY_MIN_CONFIDENCE as _AUTO_CLASSIFY_MIN_CONFIDENCE,
+)
+from kiln.failure_vocabulary import (
+    VALID_FAILURE_MODES as _VALID_FAILURE_MODES,
+)
+from kiln.failure_vocabulary import (
+    to_canonical as _to_canonical_failure_mode,
+)
+
 _logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants — validation sets and safety limits
 # ---------------------------------------------------------------------------
-
-from kiln.failure_vocabulary import (
-    AUTO_CLASSIFY_MIN_CONFIDENCE as _AUTO_CLASSIFY_MIN_CONFIDENCE,
-    CLASSIFIER_TO_CANONICAL as _VISION_TO_DB_FAILURE_MODE,
-    VALID_FAILURE_MODES as _VALID_FAILURE_MODES,
-    to_canonical as _to_canonical_failure_mode,
-)
 
 _VALID_OUTCOMES = frozenset({"success", "failed", "partial"})
 _VALID_QUALITY_GRADES = frozenset({"excellent", "good", "acceptable", "poor"})
