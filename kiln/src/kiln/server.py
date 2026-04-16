@@ -2755,6 +2755,29 @@ def monitor_print(
                 logger.debug("Snapshot capture failed: %s", snap_exc)
                 snapshot_line = "Snapshot capture failed"
 
+        # --- MQTT staleness detection ---
+        # Bambu A1 MQTT telemetry can lag 30-60s behind reality on long
+        # first layers.  Track elapsed_s across calls; if wall-clock time
+        # advances but printer-reported elapsed doesn't, warn the agent.
+        import time as _time_mod
+        _now = _time_mod.time()
+        _stale_warning = ""
+        if elapsed_s is not None and state_str == "printing":
+            _prev = getattr(monitor_print, "_last_elapsed", None)
+            _prev_ts = getattr(monitor_print, "_last_ts", None)
+            if _prev is not None and _prev_ts is not None:
+                wall_delta = _now - _prev_ts
+                printer_delta = (elapsed_s or 0) - (_prev or 0)
+                if wall_delta > 30 and printer_delta < 5:
+                    _stale_warning = (
+                        f"MQTT telemetry may be stale — {wall_delta:.0f}s of "
+                        f"wall-clock time passed but printer-reported elapsed "
+                        f"only advanced {printer_delta:.0f}s. Visual check "
+                        f"recommended."
+                    )
+            monitor_print._last_elapsed = elapsed_s  # type: ignore[attr-defined]
+            monitor_print._last_ts = _now  # type: ignore[attr-defined]
+
         # --- Comments ---
         comment = _generate_print_comment(
             state_str,
@@ -2765,6 +2788,8 @@ def monitor_print(
             bed_target=bed_target,
             print_error=print_error,
         )
+        if _stale_warning:
+            comment = f"{_stale_warning} {comment}"
 
         # --- Assemble report ---
         lines = [
