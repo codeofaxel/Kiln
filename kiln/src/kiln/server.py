@@ -920,13 +920,40 @@ def _get_temp_limits() -> tuple:
 
     When ``KILN_PRINTER_MODEL`` is set, loads the matching profile from the
     bundled database.  Falls back to conservative generic limits (300/130).
+
+    PTFE-lined hotends (non-all-metal) are additionally clamped to 240°C
+    regardless of the profile's stated maximum — PTFE burns above ~245°C
+    and releases toxic fumes + permanently deforms the extruder geometry.
+    Set ``KILN_OVERRIDE_PTFE_LIMIT=1`` to disable this clamp (only do this
+    if you've physically replaced the PTFE with an all-metal conversion).
     """
     if _PRINTER_MODEL:
         try:
             from kiln.safety_profiles import get_profile  # noqa: E402
 
             profile = get_profile(_PRINTER_MODEL)
-            return profile.max_hotend_temp, profile.max_bed_temp
+            max_tool = profile.max_hotend_temp
+            max_bed = profile.max_bed_temp
+            # PTFE clamp — look up hotend_type from printer_intelligence.
+            if os.environ.get("KILN_OVERRIDE_PTFE_LIMIT", "").strip() not in ("1", "true", "yes"):
+                try:
+                    from kiln.printer_intelligence import get_printer_intel
+                    intel = get_printer_intel(_PRINTER_MODEL)
+                    hotend_type = (intel or {}).get("hotend_type", "").lower()
+                    if hotend_type and hotend_type != "all_metal":
+                        # Common values: "ptfe", "ptfe_lined", "hybrid", ""
+                        _PTFE_SAFE_MAX = 240.0
+                        if max_tool > _PTFE_SAFE_MAX:
+                            logger.info(
+                                "Clamping hotend limit from %.0f°C to %.0f°C "
+                                "for %s (hotend_type=%s, non-all-metal). "
+                                "Override with KILN_OVERRIDE_PTFE_LIMIT=1.",
+                                max_tool, _PTFE_SAFE_MAX, _PRINTER_MODEL, hotend_type,
+                            )
+                            max_tool = _PTFE_SAFE_MAX
+                except Exception:
+                    pass
+            return max_tool, max_bed
         except (KeyError, ImportError):
             pass
     return 300.0, 130.0

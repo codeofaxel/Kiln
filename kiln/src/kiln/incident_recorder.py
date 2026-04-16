@@ -42,9 +42,17 @@ import logging
 import os
 import re
 import shutil
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Module-level lock serializing incident-id generation + dir creation.
+# Fleet deployments can have many printers anomaly at once; perf_counter_ns
+# + sha1 makes collisions astronomically unlikely, but a mutex around the
+# ID-then-mkdir window makes it provably impossible.  Cost is microseconds
+# per incident — irrelevant given incidents are rare.
+_INCIDENT_ID_LOCK = threading.Lock()
 from typing import Any, Iterable
 
 logger = logging.getLogger(__name__)
@@ -139,9 +147,17 @@ def record_incident(
     root = Path(root_dir) if root_dir is not None else DEFAULT_INCIDENTS_ROOT
     root.mkdir(parents=True, exist_ok=True)
 
-    incident_id = _generate_incident_id(incident_type)
-    incident_dir = root / incident_id
-    incident_dir.mkdir(parents=True, exist_ok=True)
+    # Serialize ID generation + dir creation across threads so two
+    # simultaneous anomalies (e.g. fleet-wide thermal event) can't race
+    # and collide on the same incident_dir.
+    with _INCIDENT_ID_LOCK:
+        incident_id = _generate_incident_id(incident_type)
+        incident_dir = root / incident_id
+        # retry-until-unique — hash has ~2^32 space so one retry suffices
+        if incident_dir.exists():
+            incident_id = _generate_incident_id(incident_type + "_r")
+            incident_dir = root / incident_id
+        incident_dir.mkdir(parents=True, exist_ok=True)
 
     # Assemble the structured record first — paths may get rewritten below
     # when we copy files in, so we update the record after each copy.

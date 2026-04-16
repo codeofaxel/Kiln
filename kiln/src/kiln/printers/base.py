@@ -309,6 +309,91 @@ class PrinterAdapter(ABC):
 
     _safety_profile_id: str | None = None
 
+    # ------------------------------------------------------------------
+    # Safety interposition: wrap every concrete subclass's upload_file
+    # with a bed-fit + homing-sequence pre-check.  This ensures no code
+    # path — MCP tool, marketplace download, CLI, pipeline — can push
+    # an unsafe file to the printer's filesystem.  Incident #0
+    # (2026-04-15) showed that gating only the MCP upload_file tool
+    # leaves download_and_upload / slice_and_print / CLI paths open.
+    # See kiln/printers/bed_fit.py for the validation logic.
+    # ------------------------------------------------------------------
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        original = cls.__dict__.get("upload_file")
+        if original is None or getattr(original, "_kiln_safety_wrapped", False):
+            return
+        import functools
+
+        @functools.wraps(original)
+        def _safe_upload_file(self, file_path: str):
+            try:
+                _preflight_upload_or_raise(self, file_path)
+            except _UnsafeUpload as exc:
+                # Raise PrinterError so callers get a consistent exception
+                # type across adapters.
+                from kiln.printers import PrinterError
+                raise PrinterError(str(exc)) from None
+            return original(self, file_path)
+
+        _safe_upload_file._kiln_safety_wrapped = True  # type: ignore[attr-defined]
+        cls.upload_file = _safe_upload_file
+
+
+class _UnsafeUpload(Exception):
+    """Internal sentinel raised by the pre-upload safety check."""
+
+
+def _preflight_upload_or_raise(adapter: "PrinterAdapter", file_path: str) -> None:
+    """Run bed-fit + homing validation on a local file before it hits
+    any adapter's upload_file.  Raises :class:`_UnsafeUpload` on hard
+    failures (OFF_BED_GEOMETRY / EXCEEDS_BED / NO_HOMING_SEQUENCE).
+
+    Soft-passes on unknown printer, unknown bbox, or any internal
+    exception — we'd rather allow a print on an obscure printer than
+    block it based on incomplete data.  All upstream gates
+    (slice_model, slice_and_print, MCP upload_file) still run their
+    own checks; this is defence in depth, not the only line.
+    """
+    import os
+    try:
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext not in (".gcode", ".gco", ".g", ".3mf") and not file_path.lower().endswith(".gcode.3mf"):
+            return  # only validate printable files; STL/OBJ uploads skip
+        # Resolve printer_id from the adapter.  Most adapters expose
+        # _safety_profile_id or adapter.name — prefer explicit profile.
+        printer_id = getattr(adapter, "_safety_profile_id", None)
+        if not printer_id:
+            # Also try the module-level _PRINTER_MODEL for single-printer setups
+            try:
+                import kiln.server as _srv
+                printer_id = getattr(_srv, "_PRINTER_MODEL", None)
+            except Exception:
+                pass
+        if not printer_id:
+            return  # unknown printer — soft-pass
+        from kiln.printers.bed_fit import (
+            validate_3mf_for_printer,
+            validate_gcode_for_printer,
+        )
+        if ext in (".gcode", ".gco", ".g"):
+            result = validate_gcode_for_printer(file_path, printer_id)
+        else:
+            result = validate_3mf_for_printer(file_path, printer_id)
+        if not result.get("ok", True):
+            code = result.get("error_code")
+            if code in ("OFF_BED_GEOMETRY", "EXCEEDS_BED", "NO_HOMING_SEQUENCE"):
+                raise _UnsafeUpload(
+                    f"Upload refused ({code}): "
+                    f"{result.get('error_message', 'unsafe file')}. "
+                    f"This would have been the incident #0 class of crash."
+                )
+    except _UnsafeUpload:
+        raise
+    except Exception:
+        # Any other error — don't block the upload, just skip the check.
+        return
+
     def set_safety_profile(self, profile_id: str) -> None:
         """Bind a printer safety profile for temperature validation.
 
