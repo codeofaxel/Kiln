@@ -469,27 +469,6 @@ class BambuAdapter(PrinterAdapter):
         self._access_code = access_code
         self._serial = serial
         self._timeout = timeout
-
-        # Incident #0 follow-up: adapter self-inference of safety profile.
-        # The adapter knows its own serial at construction time — compute
-        # the safety_profile_id here so downstream safety gates (upload
-        # wrap, bed-fit, temperature) don't need to consult a module-level
-        # resolver.  Matches antirez's critique that a frozen global is
-        # the wrong abstraction.  Deterministic: Bambu assigns serials
-        # by model family, so the prefix uniquely identifies the model.
-        if not self._safety_profile_id:
-            _bambu_prefixes = {
-                "03919": "bambu_x1c",  # longer prefix wins — sorted below
-                "039":   "bambu_a1",
-                "094":   "bambu_a1_mini",
-                "00M":   "bambu_p1s",
-                "00W":   "bambu_p1p",
-                "01S":   "bambu_x1e",
-            }
-            for prefix in sorted(_bambu_prefixes, key=len, reverse=True):
-                if serial.startswith(prefix):
-                    self._safety_profile_id = _bambu_prefixes[prefix]
-                    break
         configured_tls_mode = (tls_mode or os.environ.get(_TLS_MODE_ENV, _DEFAULT_TLS_MODE)).strip().lower()
         if configured_tls_mode not in _VALID_TLS_MODES:
             raise ValueError(f"tls_mode must be one of {sorted(_VALID_TLS_MODES)}, got {configured_tls_mode!r}")

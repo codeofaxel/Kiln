@@ -211,33 +211,30 @@ class _UtilityToolsPlugin:
             except ImportError:
                 modules["bambu_available"] = False
 
-            # Surface the active safety profile so users can see whether
-            # the safety stack is running with full gates or soft-passing.
-            # Incident #0 follow-up: previously users had no visibility
-            # into whether _PRINTER_MODEL was set, which determined half
-            # the safety gates.
+            # Surface the active safety profile so users + agents can
+            # see whether the safety stack is running with full gates
+            # or soft-passing.  Single source of truth: the
+            # `printer_model` field in ~/.kiln/config.yaml.  If absent,
+            # the agent should ask the user and call `set_printer_model`.
             safety_profile_info: dict[str, Any] = {
-                "resolved_model": None,
-                "resolution_source": "unknown",
+                "printer_model": None,
                 "gates_active": False,
                 "hint": None,
             }
             try:
-                from kiln.printer_model_resolver import resolve_printer_model_with_source
-                _model, _source = resolve_printer_model_with_source()
-                safety_profile_info["resolved_model"] = _model
-                safety_profile_info["resolution_source"] = _source
+                from kiln.printer_model_resolver import resolve_printer_model
+                _model = resolve_printer_model()
+                safety_profile_info["printer_model"] = _model
                 safety_profile_info["gates_active"] = _model is not None
                 if _model is None:
                     safety_profile_info["hint"] = (
-                        "Set `printer_model: <your-model>` in ~/.kiln/config.yaml "
-                        "to activate bed-fit, bounds, and temperature safety gates. "
-                        "See kiln/data/printer_intelligence.json for valid keys."
-                    )
-                elif _source in ("type_fallback", "serial_inference", "host_pattern"):
-                    safety_profile_info["hint"] = (
-                        f"Model inferred via {_source}; set `printer_model: {_model}` "
-                        f"in ~/.kiln/config.yaml to make it explicit."
+                        "printer_model is NOT configured. Safety gates (bed-fit, "
+                        "gcode bounds, temperature limits) will soft-pass — unsafe "
+                        "prints can reach the printer. Ask the user which printer "
+                        "they're using, then add `printer_model: <model>` under "
+                        "`printers.<name>` in ~/.kiln/config.yaml (examples: "
+                        "bambu_a1, bambu_x1c, prusa_mk4, prusa_mini, ender3). "
+                        "Valid keys are in kiln/data/printer_intelligence.json."
                     )
             except Exception as exc:
                 safety_profile_info["hint"] = f"resolver error: {exc}"
