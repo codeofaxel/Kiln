@@ -479,6 +479,26 @@ def _reload_env_config() -> None:
         _PRINTER_SERIAL = str(_yaml_cfg.get("serial", ""))
         if not _PRINTER_MODEL:
             _PRINTER_MODEL = str(_yaml_cfg.get("printer_model", ""))
+        # Incident #0 follow-up: infer _PRINTER_MODEL from Bambu serial
+        # prefix when the config didn't set it explicitly.  Without this,
+        # half the safety gates (upload_file, send_gcode bounds,
+        # adapter.upload_file wrap) soft-pass because they can't look up
+        # the printer's build volume.  Bambu assigns deterministic serial
+        # prefixes per model, so detection is exact.
+        if not _PRINTER_MODEL and _PRINTER_TYPE == "bambu" and _PRINTER_SERIAL:
+            _bambu_serial_prefixes = {
+                "039": "bambu_a1",       # A1 (confirmed from user's 03900D5C...)
+                "03919": "bambu_x1c",    # X1C — distinct sub-prefix
+                "094": "bambu_a1_mini",  # A1 Mini (commonly prefixed 094)
+                "00M": "bambu_p1s",      # P1S
+                "00W": "bambu_p1p",      # P1P
+                "01S": "bambu_x1e",      # X1E
+            }
+            # Match longest-prefix first to prioritize specific models
+            for prefix in sorted(_bambu_serial_prefixes, key=len, reverse=True):
+                if _PRINTER_SERIAL.startswith(prefix):
+                    _PRINTER_MODEL = _bambu_serial_prefixes[prefix]
+                    break
         masked_key = (
             _PRINTER_API_KEY[:4] + "****"
             if len(_PRINTER_API_KEY) >= 4
