@@ -18,6 +18,84 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 
+def _apply_bed_fit_gate(
+    input_path: str,
+    effective_printer_id: str | None,
+    auto_center: bool,
+) -> tuple[str, dict | None, dict]:
+    """Pre-slice safety gate: verify the mesh fits within the printer's
+    build volume and hasn't been placed off-bed (origin-centered
+    geometry crashed a Bambu A1 nozzle into the purge tool on 2026-04-15
+    — incident #0).
+
+    When ``auto_center=True`` (default) and the mesh is off-bed but
+    physically fits, we translate it to a bed-centered copy in a temp
+    directory and return that path.  The original file is not modified.
+
+    When the mesh exceeds the build volume, we return an error dict
+    even with ``auto_center=True`` — translation can't fix that.
+
+    Returns ``(effective_input_path, error_dict_or_None, bed_fit_info)``.
+    The caller uses ``effective_input_path`` for slicing.  If
+    ``error_dict_or_None`` is not None, the caller should return it
+    immediately instead of slicing.
+    """
+    from kiln.printers.bed_fit import (
+        apply_translation_to_stl,
+        validate_mesh_for_printer,
+    )
+
+    if not effective_printer_id:
+        # No printer context — skip the gate.  The caller probably knows
+        # what they're doing (e.g. generic slice without a target printer).
+        return input_path, None, {"gate": "skipped_no_printer"}
+
+    if not input_path.lower().endswith(".stl"):
+        # Only validate + translate STLs for now.  3MF/STEP/OBJ are out
+        # of scope for the translate path — we'd need format-specific
+        # rewriters.  Still run a bbox validation but can't auto-fix.
+        fit = validate_mesh_for_printer(input_path, effective_printer_id)
+        if not fit["ok"] and fit["error_code"] in ("OFF_BED_GEOMETRY", "EXCEEDS_BED"):
+            return input_path, fit, fit
+        return input_path, None, fit
+
+    fit = validate_mesh_for_printer(input_path, effective_printer_id)
+    if fit["ok"]:
+        return input_path, None, fit
+    if fit["error_code"] == "EXCEEDS_BED":
+        return input_path, fit, fit
+    if fit["error_code"] == "OFF_BED_GEOMETRY":
+        if auto_center and fit.get("suggested_translate"):
+            # Auto-center: translate STL into a temp copy and use it.
+            import tempfile
+            stem = os.path.splitext(os.path.basename(input_path))[0]
+            tmp_dir = tempfile.mkdtemp(prefix="kiln_bedfit_")
+            centered_path = os.path.join(tmp_dir, f"{stem}_bedcentered.stl")
+            try:
+                apply_translation_to_stl(
+                    input_path, fit["suggested_translate"], centered_path,
+                )
+                _logger.info(
+                    "Auto-centered off-bed mesh for %s: translate %s -> %s",
+                    effective_printer_id, fit["suggested_translate"],
+                    centered_path,
+                )
+                fit["auto_centered"] = True
+                fit["centered_input_path"] = centered_path
+                return centered_path, None, fit
+            except Exception as exc:  # noqa: BLE001
+                _logger.warning("Auto-center failed: %s", exc)
+                fit["error_message"] = (
+                    f"{fit['error_message']} "
+                    f"(auto-center also failed: {exc})"
+                )
+                return input_path, fit, fit
+        # auto_center disabled or translation path unavailable — block.
+        return input_path, fit, fit
+    # Unknown warn-only states (BBOX_UNKNOWN, VOLUME_UNKNOWN) — pass through.
+    return input_path, None, fit
+
+
 def _auto_wrap_bambu_3mf(
     gcode_path: str,
     effective_printer_id: str | None,
@@ -28,6 +106,12 @@ def _auto_wrap_bambu_3mf(
     raw ``.gcode`` via the ``gcode_file`` MQTT command; only
     ``project_file`` works, and that requires ``.3mf``).
 
+    ``stl_path`` is routed by extension: ``.stl`` goes to ``stl_paths``
+    so OpenSCAD generates a thumbnail for the LCD preview, while ``.3mf``
+    goes to ``source_3mf_path`` to copy its embedded thumbnails.  Other
+    extensions (``.step``, ``.obj``) are ignored — the wrap still
+    succeeds but the touchscreen shows a blank preview.
+
     Returns ``(threemf_path, warning)``.  When no wrap happens, both
     are ``None``.  Failure is non-fatal — the original gcode_path is
     still usable for non-Bambu printers or manual wrapping.
@@ -35,17 +119,47 @@ def _auto_wrap_bambu_3mf(
     if not effective_printer_id or not effective_printer_id.startswith("bambu"):
         return (None, None)
     try:
-        from kiln.printers.bambu_3mf import repackage_gcode_as_bambu_3mf
+        # CRITICAL: use build_bambu_3mf (adds BambuStudio start-gcode —
+        # G28 homing, M620 AMS load, purge line, bed leveling) rather
+        # than repackage_gcode_as_bambu_3mf (only zips gcode that ALREADY
+        # has Bambu init).  PrusaSlicer-native output never has Bambu
+        # init, so repackage_* produced 3MFs that caused nozzle crashes
+        # because the printer tried to execute G1 moves without ever
+        # homing — incident #0 (2026-04-15).  Route through the adapter's
+        # wrap_gcode_as_3mf method which wires to build_bambu_3mf with
+        # the correct start-gcode for the printer model.
+        from kiln.printers.bambu_3mf import (
+            BambuPrintSettings,
+            build_bambu_3mf,
+        )
+        from pathlib import Path as _Path
 
         threemf_path = gcode_path.rsplit(".", 1)[0] + ".gcode.3mf"
-        source = stl_path if stl_path and os.path.isfile(stl_path) else None
-        repackage_gcode_as_bambu_3mf(
-            gcode_path,
+        stl_paths: list[str] | None = None
+        source_3mf: str | None = None
+        if stl_path and os.path.isfile(stl_path):
+            ext = os.path.splitext(stl_path)[1].lower()
+            if ext == ".stl":
+                stl_paths = [stl_path]
+            elif ext == ".3mf":
+                source_3mf = stl_path
+
+        gcode_body = _Path(gcode_path).read_text(encoding="utf-8")
+        settings = BambuPrintSettings(
+            model_name=_Path(gcode_path).stem,
+            # Temps default to PLA; the PrusaSlicer gcode body already
+            # contains M104/M190 with the correct values from the
+            # profile, so these are only used for metadata fields.
+        )
+        build_bambu_3mf(
+            gcode_body,
             threemf_path,
-            source_3mf_path=source,
+            settings=settings,
+            source_3mf_path=source_3mf,
+            stl_paths=stl_paths,
         )
         _logger.info(
-            "Auto-wrapped %s as Bambu 3MF at %s",
+            "Auto-wrapped %s as Bambu 3MF (with Bambu init) at %s",
             os.path.basename(gcode_path), threemf_path,
         )
         return (threemf_path, None)
@@ -90,6 +204,7 @@ class _SlicerToolsPlugin:
             profile: str | None = None,
             printer_id: str | None = None,
             slicer_path: str | None = None,
+            auto_center: bool = True,
         ) -> dict:
             """Slice a 3D model (STL/3MF/STEP) to G-code using PrusaSlicer or OrcaSlicer.
 
@@ -102,6 +217,13 @@ class _SlicerToolsPlugin:
                     auto-selection (e.g. ``"prusa_mini"``).
                 slicer_path: Explicit path to the slicer binary.  Auto-detected
                     if omitted.
+                auto_center: When True (default), off-bed STLs are translated
+                    to a bed-centered copy before slicing.  This prevents the
+                    class of crash where origin-centered meshes (common from
+                    compose_part_from_primitives / OpenSCAD output) produce
+                    sliced gcode with negative X/Y moves that drive the
+                    nozzle into the printer frame.  Set False only if you've
+                    verified the input is already correctly positioned.
 
             Returns a JSON object with the output G-code path.  The output file
             can then be uploaded to a printer with ``upload_file`` and printed
@@ -118,8 +240,20 @@ class _SlicerToolsPlugin:
                     profile=profile,
                     printer_id=printer_id,
                 )
+
+                # Bed-fit safety gate (Layer 1).  Blocks off-bed / oversized
+                # geometry before it hits the slicer.  May auto-translate
+                # an origin-centered STL into a bed-centered temp copy.
+                effective_input, gate_err, gate_info = _apply_bed_fit_gate(
+                    input_path, effective_printer_id, auto_center,
+                )
+                if gate_err is not None:
+                    return _srv._error_dict(
+                        gate_err.get("error_message", "Bed-fit check failed."),
+                        code=gate_err.get("error_code", "BED_FIT_ERROR"),
+                    )
                 result = slice_file(
-                    input_path,
+                    effective_input,
                     output_dir=output_dir,
                     profile=effective_profile,
                     slicer_path=slicer_path,
@@ -137,17 +271,52 @@ class _SlicerToolsPlugin:
                 # commands and only starts via project_file on .3mf.  Wrap
                 # here so callers don't have to know the Bambu-specific
                 # convention.  Failure is non-fatal — raw gcode still usable.
+                # Use the (possibly centered) STL for thumbnail generation
+                # so the LCD preview matches the sliced geometry.
                 _gcode_path = result.to_dict().get("output_path")
                 if _gcode_path:
                     threemf_path, warning = _auto_wrap_bambu_3mf(
-                        _gcode_path, effective_printer_id, input_path,
+                        _gcode_path, effective_printer_id, effective_input,
                     )
                     if threemf_path:
                         response["output_3mf_path"] = threemf_path
                         response["output_path"] = threemf_path
                         response["raw_gcode_path"] = _gcode_path
+                        # POST-WRAP VERIFICATION: ensure the final 3MF has
+                        # both a valid bbox AND a homing sequence before
+                        # handing it to the caller.  Incident #0 showed
+                        # that a dormant bug in the wrap function could
+                        # produce a 3MF without G28 — the safety check
+                        # catches that regression class.
+                        try:
+                            from kiln.printers.bed_fit import (
+                                verify_3mf_is_safe_to_print,
+                            )
+                            safety = verify_3mf_is_safe_to_print(
+                                threemf_path, effective_printer_id,
+                            )
+                            response["safety_verification"] = safety
+                            if not safety["ok"]:
+                                return _srv._error_dict(
+                                    f"Produced 3MF failed safety verification: "
+                                    f"{safety.get('error_message', 'unknown issue')}. "
+                                    f"Failed checks: {', '.join(safety['failed'])}. "
+                                    f"The slicer or wrapper produced unsafe output. "
+                                    f"Do NOT upload this file to the printer.",
+                                    code=safety.get("error_code", "UNSAFE_3MF"),
+                                )
+                        except Exception as _exc:
+                            _logger.warning(
+                                "Post-wrap safety verification skipped: %s",
+                                _exc,
+                            )
                     if warning:
                         response.setdefault("warnings", []).append(warning)
+
+                # Surface the bed-fit result so callers can see if we
+                # auto-centered + the translation applied.
+                if gate_info.get("gate") != "skipped_no_printer":
+                    response["bed_fit"] = gate_info
 
                 # Cross-check slicer profile against printer safety limits
                 if _srv._PRINTER_MODEL and effective_profile:
@@ -202,6 +371,7 @@ class _SlicerToolsPlugin:
             overrides: str | None = None,
             output_dir: str | None = None,
             slicer_path: str | None = None,
+            auto_center: bool = True,
         ) -> dict[str, Any]:
             """Reslice a 3D model with custom slicer parameter overrides.
 
@@ -311,9 +481,19 @@ class _SlicerToolsPlugin:
                 if has_temp_overrides and effective_printer_id and _srv._PRINTER_MODEL:
                     validation_result = validate_profile_for_printer(effective_printer_id, _srv._PRINTER_MODEL)
 
+                # -- Bed-fit safety gate (Layer 1) --
+                effective_input, gate_err, gate_info = _apply_bed_fit_gate(
+                    input_abs, effective_printer_id, auto_center,
+                )
+                if gate_err is not None:
+                    return _srv._error_dict(
+                        gate_err.get("error_message", "Bed-fit check failed."),
+                        code=gate_err.get("error_code", "BED_FIT_ERROR"),
+                    )
+
                 # -- Slice --
                 result = slice_file(
-                    input_abs,
+                    effective_input,
                     output_dir=output_dir,
                     profile=effective_profile,
                     slicer_path=slicer_path,
@@ -329,18 +509,43 @@ class _SlicerToolsPlugin:
                     response["profile_path"] = effective_profile
                 if parsed_overrides:
                     response["applied_overrides"] = parsed_overrides
+                if gate_info.get("gate") != "skipped_no_printer":
+                    response["bed_fit"] = gate_info
 
                 # Bambu auto-wrap (same logic as slice_model) so callers
                 # don't have to know raw gcode won't start on Bambu.
                 _gcode_path = result.to_dict().get("output_path")
+                _wrap_path: str | None = None
                 if _gcode_path:
                     threemf_path, warning = _auto_wrap_bambu_3mf(
-                        _gcode_path, effective_printer_id, input_abs,
+                        _gcode_path, effective_printer_id, effective_input,
                     )
+                    _wrap_path = threemf_path
                     if threemf_path:
                         response["output_3mf_path"] = threemf_path
                         response["output_path"] = threemf_path
                         response["raw_gcode_path"] = _gcode_path
+                        # Post-wrap safety verification — parity with slice_model
+                        try:
+                            from kiln.printers.bed_fit import (
+                                verify_3mf_is_safe_to_print,
+                            )
+                            safety = verify_3mf_is_safe_to_print(
+                                threemf_path, effective_printer_id,
+                            )
+                            response["safety_verification"] = safety
+                            if not safety["ok"]:
+                                return _srv._error_dict(
+                                    f"Produced 3MF failed safety verification: "
+                                    f"{safety.get('error_message', 'unknown issue')}. "
+                                    f"Failed checks: {', '.join(safety['failed'])}. "
+                                    f"Do NOT upload this file.",
+                                    code=safety.get("error_code", "UNSAFE_3MF"),
+                                )
+                        except Exception as _exc:
+                            _logger.warning(
+                                "Post-wrap safety verification skipped: %s", _exc,
+                            )
                     if warning:
                         response.setdefault("warnings", []).append(warning)
 
@@ -419,6 +624,7 @@ class _SlicerToolsPlugin:
             profile: str | None = None,
             printer_id: str | None = None,
             material: str | None = None,
+            auto_center: bool = True,
         ) -> dict:
             """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
 
@@ -557,8 +763,20 @@ class _SlicerToolsPlugin:
                     except Exception:
                         _logger.debug("Profile override injection failed", exc_info=True)
 
+                # --- Bed-fit safety gate (Layer 1) ---
+                # Blocks off-bed / oversized geometry before slicing.
+                # May auto-translate an origin-centered STL to bed-centered.
+                effective_input, gate_err, gate_info = _apply_bed_fit_gate(
+                    input_path, effective_printer_id, auto_center,
+                )
+                if gate_err is not None:
+                    return _srv._error_dict(
+                        gate_err.get("error_message", "Bed-fit check failed."),
+                        code=gate_err.get("error_code", "BED_FIT_ERROR"),
+                    )
+
                 result = slice_file(
-                    input_path,
+                    effective_input,
                     profile=effective_profile,
                 )
 
@@ -569,17 +787,44 @@ class _SlicerToolsPlugin:
 
                 # Bambu printers need PrusaSlicer output wrapped in a 3MF with
                 # the proprietary BambuStudio start/end gcode.  The adapter
-                # exposes wrap_gcode_as_3mf() for this.
+                # exposes wrap_gcode_as_3mf() for this.  Pass the (possibly
+                # bed-centered) STL so the LCD thumbnail matches the sliced
+                # geometry.
                 upload_path = result.output_path
                 if hasattr(adapter, "wrap_gcode_as_3mf") and result.output_path.endswith(".gcode"):
                     try:
-                        upload_path = adapter.wrap_gcode_as_3mf(result.output_path)
+                        _stl_paths = (
+                            [effective_input] if effective_input.lower().endswith(".stl") else None
+                        )
+                        upload_path = adapter.wrap_gcode_as_3mf(
+                            result.output_path, stl_paths=_stl_paths,
+                        )
                         _logger.info("Wrapped gcode as Bambu 3MF: %s", upload_path)
                     except Exception:
                         _logger.warning(
                             "Bambu 3MF wrapping failed, uploading raw gcode",
                             exc_info=True,
                         )
+
+                # Post-wrap safety verification — refuse to upload a 3MF
+                # that has no homing sequence or off-bed coordinates.
+                # Last gate before bytes reach the printer via FTPS.
+                try:
+                    from kiln.printers.bed_fit import verify_3mf_is_safe_to_print
+                    if upload_path.lower().endswith(".3mf"):
+                        safety = verify_3mf_is_safe_to_print(
+                            upload_path, effective_printer_id,
+                        )
+                        if not safety["ok"]:
+                            return _srv._error_dict(
+                                f"Sliced 3MF failed safety verification before upload: "
+                                f"{safety.get('error_message', 'unknown issue')}. "
+                                f"Failed checks: {', '.join(safety['failed'])}. "
+                                f"This would have been the incident #0 class of crash.",
+                                code=safety.get("error_code", "UNSAFE_3MF"),
+                            )
+                except Exception as _exc:
+                    _logger.warning("slice_and_print safety check skipped: %s", _exc)
 
                 upload = adapter.upload_file(upload_path)
                 file_name = upload.file_name or os.path.basename(upload_path)

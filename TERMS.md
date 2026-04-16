@@ -1,6 +1,6 @@
 # Kiln Terms of Use
 
-*Last updated: 2026-02-24 · Version 1.3*
+*Last updated: 2026-04-15 · Version 1.4*
 
 ## What Kiln Is
 
@@ -25,6 +25,41 @@ By using Kiln you agree that:
    validation), these systems reduce risk — they do not eliminate it.
    Unattended 3D printing carries inherent fire and mechanical hazards.
    Follow your printer manufacturer's safety guidelines.
+
+## Automated Control Risks
+
+Kiln exposes tools over the Model Context Protocol (MCP) that third-party
+AI agents — such as Claude Code, Cursor, ChatGPT, and other MCP clients —
+can invoke to perform physical operations on your printer, including
+homing, motion, heating, extrusion, bed leveling, file uploads, and
+unattended print execution. Kiln agents may initiate printer motion,
+heating, and material extrusion autonomously based on your instructions
+or inferred intent. These agents operate on your behalf under your
+configuration; Kiln does not select, direct, or supervise them.
+
+Kiln validates tool inputs and refuses unsafe operations where they are
+deterministically detectable (for example: off-bed geometry, missing
+homing sequences, temperatures exceeding the printer's mechanical limits,
+G-code with blocked commands, blocked command dialects). These validations
+reduce but do not eliminate the risk of physical harm. Kiln cannot and
+does not guarantee that the invoking agent will call tools correctly, in
+the correct sequence, or in accordance with your intent.
+
+**You remain solely responsible for:**
+- Reviewing previews and agent-proposed actions before confirming them.
+- Supervising unattended prints.
+- Any physical damage, personal injury, lost work, or loss of equipment
+  arising from agent behaviour or misbehaviour — including agents making
+  mistakes, misinterpreting your intent, or invoking tools in harmful
+  sequences.
+- Complying with your printer manufacturer's operating, maintenance, and
+  safety guidelines.
+
+**Kiln assumes no liability for agent actions, agent errors, agent
+misinterpretation of user intent, or any physical, financial, or other
+consequences arising from the automated execution of tools in this
+software. This disclaimer is in addition to the "No Warranty" section
+below.**
 
 ## Third-Party Content
 

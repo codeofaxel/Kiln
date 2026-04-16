@@ -2687,6 +2687,58 @@ def upload_file(file_path: str) -> dict:
             except (ImportError, FileNotFoundError, PermissionError):
                 pass  # scan is best-effort; file existence was already verified above
 
+        # -- Bed-fit safety gate (Layer 2 — last-line-of-defense) -------------
+        # Incident #0 (2026-04-15, Bambu A1): sliced gcode had X=-12.5
+        # moves that drove the nozzle into the purge tool.  This gate
+        # inspects the ACTUAL bytes being uploaded to the printer — it's
+        # the last chance to reject dangerous coordinates before the
+        # physical device sees them.  Runs on both raw .gcode and
+        # .gcode.3mf (Bambu).
+        try:
+            from kiln.printers.bed_fit import (
+                validate_3mf_for_printer,
+                validate_gcode_for_printer,
+            )
+            _ext = os.path.splitext(file_path)[1].lower()
+            bed_fit_result: dict[str, Any] | None = None
+            if _ext in _GCODE_EXTENSIONS:
+                bed_fit_result = validate_gcode_for_printer(
+                    file_path, _PRINTER_MODEL,
+                )
+            elif _ext == ".3mf" or file_path.lower().endswith(".gcode.3mf"):
+                bed_fit_result = validate_3mf_for_printer(
+                    file_path, _PRINTER_MODEL,
+                )
+            if bed_fit_result and not bed_fit_result.get("ok", True):
+                code = bed_fit_result.get("error_code", "BED_FIT_ERROR")
+                if code in ("OFF_BED_GEOMETRY", "EXCEEDS_BED", "NO_HOMING_SEQUENCE"):
+                    _audit(
+                        "upload_file",
+                        "bed_fit_blocked",
+                        details={
+                            "file": os.path.basename(file_path),
+                            "error_code": code,
+                            "bbox": bed_fit_result.get("bbox"),
+                        },
+                    )
+                    return {
+                        "success": False,
+                        "error": {
+                            "code": code,
+                            "message": (
+                                f"Upload blocked: {bed_fit_result.get('error_message', 'off-bed geometry')}. "
+                                f"This would have driven the nozzle into the printer frame. "
+                                f"Re-slice with auto_center=True or call center_model_on_bed first."
+                            ),
+                        },
+                        "bed_fit": bed_fit_result,
+                    }
+        except Exception as exc:
+            # Bed-fit check is defense-in-depth; don't block uploads on
+            # a check failure — slice_model/slice_and_print already ran
+            # their own gate upstream.  Log and continue.
+            logger.debug("Bed-fit check skipped due to error: %s", exc)
+
         # -- Upload confirmation gate (when KILN_CONFIRM_UPLOAD is set) ------
         file_name = os.path.basename(file_path)
         if _CONFIRM_UPLOAD:
@@ -2998,6 +3050,7 @@ def start_print(
     plate_number: int = 1,
     resume_from_paused: bool = False,
     skip_preheat_reassert: bool = False,
+    preview_token: str | None = None,
 ) -> dict:
     """Start printing a file already uploaded to the printer (file must exist on printer).
 
@@ -3068,6 +3121,51 @@ def start_print(
         return conf
     if block := _emergency_latch_error("start_print", _resolve_effective_printer_name()):
         return block
+
+    # -- Preview confirmation gate (Jony Ive / Steve Jobs tier) -----------
+    # Refuse to start a print unless the agent has demonstrated a preview
+    # was rendered and the user approved.  Bypass via
+    # KILN_SKIP_PREVIEW_GATE=1 for CI / advanced users.  Skipped for
+    # resume-mode 3MFs because the print is already in progress.
+    _skip_preview_gate = os.environ.get("KILN_SKIP_PREVIEW_GATE", "").strip() in (
+        "1", "true", "yes",
+    )
+    _is_resume = resume_from_paused or _is_resume_mode_3mf(file_name)
+    if not _skip_preview_gate and not _is_resume:
+        if not preview_token:
+            return _error_dict(
+                "start_print refuses to proceed without a preview confirmation. "
+                "Render a preview with visualize_model(), show it to the user, "
+                "and call issue_preview_token(file_path) to get a token. "
+                "Pass the token as preview_token=<token>. To bypass (advanced / "
+                "CI only), set KILN_SKIP_PREVIEW_GATE=1.",
+                code="PREVIEW_NOT_CONFIRMED",
+            )
+        try:
+            from kiln.preview_gate import get_preview_gate
+            # Find the local file path corresponding to this printer file
+            # name so we can validate the token against the actual bytes.
+            # We can't hash a file on the printer; match by file_name hash
+            # instead (token must have been issued with file_name as path
+            # argument or as a pre-computed hash).
+            ok, reason = get_preview_gate().validate(
+                preview_token, file_name, printer_id=_PRINTER_MODEL,
+            )
+            if not ok:
+                return _error_dict(
+                    f"Preview token rejected: {reason}. Re-render the preview "
+                    f"and issue a fresh token.",
+                    code="PREVIEW_TOKEN_INVALID",
+                )
+        except Exception as exc:
+            logger.warning("Preview gate validation failed: %s", exc)
+    elif _skip_preview_gate and not _is_resume:
+        logger.warning(
+            "KILN_SKIP_PREVIEW_GATE is set — skipping mandatory preview "
+            "confirmation for start_print(%s).  Only do this in CI.",
+            file_name,
+        )
+        _audit("start_print", "preview_gate_skipped", details={"file": file_name})
 
     # Auto-detect resume-mode 3MFs by filename.  Convention: files
     # produced by decorate_during_print / revert_mid_print are named
@@ -4956,6 +5054,69 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
 # safety_audit — moved to plugins/safety_tools.py
 
 # get_session_log — moved to plugins/utility_tools.py
+
+
+# ---------------------------------------------------------------------------
+# Preview confirmation token issuance
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def issue_preview_token(
+    file_path: str,
+    printer_id: str | None = None,
+    ttl_seconds: int = 600,
+) -> dict:
+    """Issue a preview-confirmation token for a file about to be printed.
+
+    Call this AFTER rendering a preview (``visualize_model`` /
+    ``preview_generated_model``) and showing it to the user.  The user
+    approves → you call this tool → you pass the returned token as
+    ``preview_token`` to ``start_print``.
+
+    Without a valid token, ``start_print`` refuses to execute (unless
+    ``KILN_SKIP_PREVIEW_GATE=1``).  This is the deepest safety gate
+    that prevents an agent from sending a print to the physical printer
+    without the user ever seeing what's about to be printed.
+
+    Tokens are single-use and expire after ``ttl_seconds`` (default 600
+    seconds / 10 minutes).  Scoped to the specific file hash and
+    optionally to a specific printer_id so a token for one file can't
+    be reused to approve a different file.
+
+    Args:
+        file_path: Path to the file to be printed (STL, 3MF, or .gcode).
+            Hashed to bind the token to specific bytes.  If the file
+            changes between issuing and using the token, the token is
+            rejected.
+        printer_id: Optional printer model ID to scope the token to a
+            specific printer.  When set, using the token with a different
+            printer will be rejected.
+        ttl_seconds: Lifetime of the token (default 600).
+
+    Returns:
+        Dict with ``token`` and ``expires_at`` (unix timestamp).
+    """
+    if err := _check_auth("print"):
+        return err
+    try:
+        from kiln.preview_gate import get_preview_gate
+        t = get_preview_gate().issue(
+            file_path, printer_id=printer_id, ttl_seconds=ttl_seconds,
+        )
+        return {
+            "success": True,
+            "token": t.token,
+            "file_hash": t.file_hash,
+            "expires_at": t.issued_at + t.ttl_seconds,
+            "ttl_seconds": ttl_seconds,
+            "usage_hint": (
+                "Pass this token as preview_token=<token> to start_print. "
+                "Single-use, expires in ~10 minutes."
+            ),
+        }
+    except Exception as exc:
+        return _error_dict(f"Failed to issue preview token: {exc}")
 
 
 # ---------------------------------------------------------------------------

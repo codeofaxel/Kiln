@@ -41,6 +41,7 @@ from kiln.printers.bambu_3mf import (
     _resolve_end_gcode,
     _resolve_start_gcode,
     build_bambu_3mf,
+    repackage_gcode_as_bambu_3mf,
 )
 
 # ---------------------------------------------------------------------------
@@ -995,6 +996,77 @@ class TestBuildBambu3mfSourceExtraction:
         with zipfile.ZipFile(out) as zf:
             model = zf.read("3D/3dmodel.model").decode("utf-8")
             assert "vertex" in model
+
+
+# ---------------------------------------------------------------------------
+# repackage_gcode_as_bambu_3mf — stl_paths thumbnail fallback
+# ---------------------------------------------------------------------------
+
+class TestRepackageStlThumbnailFallback:
+    """When no source_3mf_path thumbnails are available, stl_paths must
+    trigger OpenSCAD-based thumbnail generation so the Bambu LCD shows
+    the actual part (not a blank preview)."""
+
+    def test_stl_paths_triggers_thumbnail_generation(self, tmp_path):
+        gcode = tmp_path / "test.gcode"
+        gcode.write_text("; test gcode\nG1 X0 Y0 Z0\n")
+        stl = tmp_path / "disc.stl"
+        stl.write_text("solid test\nendsolid\n")
+        out = str(tmp_path / "output.3mf")
+
+        # Real PNG bytes — PIL needs a valid image to resize.
+        from io import BytesIO
+        from PIL import Image
+        buf = BytesIO()
+        Image.new("RGB", (64, 64), color=(255, 255, 255)).save(buf, format="PNG")
+        fake_png = buf.getvalue()
+
+        with patch(
+            "kiln.multicolor_3mf._generate_thumbnail",
+            return_value=fake_png,
+        ):
+            repackage_gcode_as_bambu_3mf(
+                str(gcode), out, stl_paths=[str(stl)],
+            )
+
+        with zipfile.ZipFile(out) as zf:
+            names = zf.namelist()
+            assert "Metadata/plate_1.png" in names
+            assert "Auxiliaries/.thumbnails/thumbnail_3mf.png" in names
+
+    def test_source_3mf_thumbnails_win_over_stl_fallback(self, tmp_path):
+        gcode = tmp_path / "test.gcode"
+        gcode.write_text("; test gcode\n")
+        source = tmp_path / "source.3mf"
+        with zipfile.ZipFile(source, "w") as zf:
+            zf.writestr("Metadata/plate_1.png", b"source_thumb_bytes")
+        stl = tmp_path / "disc.stl"
+        stl.write_text("solid test\nendsolid\n")
+        out = str(tmp_path / "output.3mf")
+
+        # _generate_thumbnail should NOT be called when source 3MF has thumbnails
+        with patch(
+            "kiln.multicolor_3mf._generate_thumbnail",
+            return_value=b"stl_fallback_bytes",
+        ) as gen:
+            repackage_gcode_as_bambu_3mf(
+                str(gcode), out,
+                source_3mf_path=str(source),
+                stl_paths=[str(stl)],
+            )
+            gen.assert_not_called()
+
+        with zipfile.ZipFile(out) as zf:
+            assert zf.read("Metadata/plate_1.png") == b"source_thumb_bytes"
+
+    def test_no_stl_no_thumbnails_still_succeeds(self, tmp_path):
+        gcode = tmp_path / "test.gcode"
+        gcode.write_text("; test gcode\n")
+        out = str(tmp_path / "output.3mf")
+
+        repackage_gcode_as_bambu_3mf(str(gcode), out)
+
+        assert zipfile.is_zipfile(out)
 
 
 # ---------------------------------------------------------------------------

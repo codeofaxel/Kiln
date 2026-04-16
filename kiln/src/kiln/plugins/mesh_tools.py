@@ -785,12 +785,29 @@ class _MeshToolsPlugin:
         def compose_part_from_primitives(
             operations: list[dict],
             output_path: str = "",
+            center_on_bed: bool = True,
+            bed_x_mm: float = 256.0,
+            bed_y_mm: float = 256.0,
         ) -> dict:
             """Build a functional part by composing geometric primitives with booleans.
 
             The **CAD-aware generation path** -- instead of asking text-to-mesh AI
             to guess at geometry, describe parts as a tree of primitives combined
             with boolean operations. Produces exact, deterministic, functional parts.
+
+            **SAFETY DEFAULT (changed 2026-04-15):** ``center_on_bed=True`` is the
+            default.  OpenSCAD primitives are natively centered on the model origin
+            (``cylinder(h,r)`` produces geometry centered on X/Y = (0,0), which
+            means half the geometry lives at NEGATIVE X/Y).  Sending such an STL
+            to most FDM printers (Bambu, Prusa, Ender, Creality) — whose bed
+            origin is the front-left corner — causes the nozzle to drive off-bed
+            into the purge/wipe assembly on layer 1.  This happened once on a
+            Bambu A1 (incident #0, 2026-04-15, nearly damaged the printer).
+
+            With ``center_on_bed=True`` the output STL is translated so it sits
+            centered on the build plate and its lowest point touches z=0.  Set
+            ``center_on_bed=False`` only if your downstream flow expects
+            origin-centered geometry (e.g. further CAD composition).
 
             **Operation format** -- each item is either a primitive or boolean:
 
@@ -812,24 +829,15 @@ class _MeshToolsPlugin:
             - rounded_cube: ``{"size": [x,y,z], "radius": 1}``
             - pipe: ``{"h": height, "outer_r": 10, "inner_r": 8}``
 
-            **Example -- L-bracket with mounting hole:**
-            ```json
-            [{"type": "boolean", "operation": "difference", "children": [
-                {"type": "boolean", "operation": "union", "children": [
-                    {"type": "primitive", "shape": "cube", "params": {"size": [40, 5, 30]}},
-                    {"type": "primitive", "shape": "cube", "params": {"size": [5, 30, 30]}}
-                ]},
-                {"type": "primitive", "shape": "cylinder",
-                 "params": {"h": 10, "r": 3},
-                 "translate": [20, -1, 15], "rotate": [-90, 0, 0]}
-            ]}]
-            ```
-
             Requires OpenSCAD installed on the system.
 
             :param operations: List of operation dicts (primitive/boolean tree).
             :param output_path: Output path (defaults to temp file).
-            :returns: Dict with result path, SCAD code, and triangle count.
+            :param center_on_bed: Translate output to bed-center (default True).
+            :param bed_x_mm: Build plate X dimension for centering (default 256).
+            :param bed_y_mm: Build plate Y dimension for centering (default 256).
+            :returns: Dict with result path, SCAD code, triangle count, and
+                (if centered) ``bed_centered=True`` + applied translation.
             """
             from kiln.server import _check_auth, _error_dict
 
@@ -838,13 +846,37 @@ class _MeshToolsPlugin:
             try:
                 from kiln.generation.openscad import compose_from_primitives
 
-                return {
-                    "success": True,
-                    **compose_from_primitives(
-                        operations,
-                        output_path=output_path or None,
-                    ),
-                }
+                result = compose_from_primitives(
+                    operations,
+                    output_path=output_path or None,
+                )
+                response: dict = {"success": True, **result}
+
+                if center_on_bed:
+                    stl_path = result.get("path")
+                    if stl_path:
+                        try:
+                            from kiln.generation.validation import center_on_bed as _center
+                            centered = _center(
+                                stl_path,
+                                bed_x_mm=bed_x_mm,
+                                bed_y_mm=bed_y_mm,
+                                output_path=None,  # overwrite
+                            )
+                            response["bed_centered"] = True
+                            response["bed_dims_mm"] = [bed_x_mm, bed_y_mm]
+                            response["translation_applied"] = centered.get(
+                                "translation"
+                            ) or centered.get("translate")
+                        except Exception as exc:
+                            # Centering is best-effort; leave STL untouched
+                            # and surface a warning.  Downstream slicer gate
+                            # will still catch off-bed geometry.
+                            response["bed_centered"] = False
+                            response.setdefault("warnings", []).append(
+                                f"bed-centering failed: {exc}"
+                            )
+                return response
             except ValueError as exc:
                 return _error_dict(str(exc), code="INVALID_ARGS")
             except Exception as exc:

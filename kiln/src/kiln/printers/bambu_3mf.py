@@ -969,6 +969,7 @@ def repackage_gcode_as_bambu_3mf(
     output_path: str,
     *,
     source_3mf_path: str | None = None,
+    stl_paths: list[str] | None = None,
     estimated_time_minutes: int = 0,
 ) -> str:
     """Wrap already-Bambu gcode in a minimal 3MF container.
@@ -984,14 +985,20 @@ def repackage_gcode_as_bambu_3mf(
     MQTT command for raw .gcode uploads — they only respond to
     ``project_file`` which expects a .3mf archive.
 
-    If *source_3mf_path* is provided, thumbnails and plate metadata
-    are copied from it (with time estimates adjusted) so the printer's
-    touchscreen shows a preview and accurate progress.
+    Thumbnails are resolved in this order:
+      1. Copied from ``source_3mf_path`` if it's a valid 3MF zip.
+      2. Generated from ``stl_paths`` via OpenSCAD when no source
+         thumbnails were found.  Without this fallback the printer's
+         LCD shows a blank preview for freshly-sliced parts.
 
     :param gcode_path: Path to the .gcode file (already Bambu-ready).
     :param output_path: Path for the output .gcode.3mf file.
     :param source_3mf_path: Optional source 3MF to copy thumbnails and
         plate metadata from.
+    :param stl_paths: Optional list of STL paths.  When no thumbnails
+        were extracted from *source_3mf_path*, renders of these STLs
+        are embedded so the Bambu touchscreen preview matches the
+        sliced geometry.
     :param estimated_time_minutes: Object's estimated print time in
         minutes (from extraction).  Used to update the ``prediction``
         field in slice_info.config so the printer display shows
@@ -1032,6 +1039,40 @@ def repackage_gcode_as_bambu_3mf(
             logger.warning(
                 "Could not extract metadata from %s", source_3mf_path
             )
+
+    # Fallback: generate thumbnails from STL via OpenSCAD so the Bambu
+    # LCD shows the actual part rather than a blank square.  Mirrors
+    # the logic in :func:`build_bambu_3mf`.
+    if not thumbnails and stl_paths:
+        try:
+            from kiln.multicolor_3mf import _generate_thumbnail
+            thumb_data = _generate_thumbnail(stl_paths)
+            if thumb_data:
+                _thumb_specs: dict[str, tuple[int, int]] = {
+                    "Metadata/plate_1.png": (512, 512),
+                    "Metadata/plate_1_small.png": (128, 128),
+                    "Metadata/top_1.png": (512, 512),
+                    "Metadata/pick_1.png": (512, 512),
+                    "Auxiliaries/.thumbnails/thumbnail_3mf.png": (240, 180),
+                    "Auxiliaries/.thumbnails/thumbnail_middle.png": (680, 510),
+                    "Auxiliaries/.thumbnails/thumbnail_small.png": (251, 188),
+                }
+                try:
+                    from io import BytesIO
+
+                    from PIL import Image
+
+                    src_img = Image.open(BytesIO(thumb_data))
+                    for name, (tw, th) in _thumb_specs.items():
+                        resized = src_img.resize((tw, th), Image.LANCZOS)
+                        buf = BytesIO()
+                        resized.save(buf, format="PNG")
+                        thumbnails[name] = buf.getvalue()
+                except ImportError:
+                    for name in _thumb_specs:
+                        thumbnails[name] = thumb_data
+        except Exception:
+            logger.warning("STL thumbnail generation failed", exc_info=True)
 
     # Update the time prediction in slice_info.config so the printer
     # display shows correct time remaining instead of the full plate's
