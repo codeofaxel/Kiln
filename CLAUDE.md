@@ -115,7 +115,7 @@ When adding new code, find and follow the closest existing pattern. Don't invent
 **The rule:** Before writing new code, `grep` for the closest existing example and match its structure exactly. If no reference exists, propose the pattern before implementing.
 
 ## Use Existing Tools — Never Reinvent (MANDATORY)
-Before writing ad-hoc scripts for printer operations, **check if an MCP tool already exists**. Kiln has 567 MCP tools. The answer is almost always yes.
+Before writing ad-hoc scripts for printer operations, **check if an MCP tool already exists**. Kiln has 568 MCP tools. The answer is almost always yes.
 
 | Operation                  | Use this tool — don't write a script                                |
 |----------------------------|---------------------------------------------------------------------|
