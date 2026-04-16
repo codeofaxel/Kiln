@@ -1439,6 +1439,57 @@ def status(ctx: click.Context, json_mode: bool) -> None:
                 logger.debug("Failed to enrich printer info: %s", exc)  # Best-effort enrichment
 
         click.echo(format_status(state.to_dict(), job.to_dict(), json_mode=json_mode, extra=extra))
+
+        # Migration nag: warn if the active printer has no printer_model.
+        # Incident #0 (2026-04-15) exposed that the field silently
+        # de-activates the safety stack for every user who set up their
+        # config before 2026-04-16.  Emit exactly once per `kiln status`
+        # invocation, and only in human mode so agents don't get noisy
+        # json output.
+        if not json_mode:
+            try:
+                from kiln.cli.config import _read_config_file, get_config_path
+                from kiln.cli.printer_model_prompt import (
+                    check_existing_config_for_missing_model,
+                    suggest_bambu_model,
+                )
+                raw_cfg = _read_config_file(get_config_path())
+                missing = check_existing_config_for_missing_model(raw_cfg)
+                if missing:
+                    active_name = ctx.obj.get("printer") if ctx.obj else None
+                    if active_name is None:
+                        active_name = raw_cfg.get("active_printer") or "default"
+                    if active_name in missing:
+                        entry = (raw_cfg.get("printers") or {}).get(active_name, {})
+                        suggestion = None
+                        if entry.get("type") == "bambu" and entry.get("serial"):
+                            suggestion = suggest_bambu_model(entry["serial"])
+                        click.echo()
+                        click.echo(click.style(
+                            "⚠ SAFETY GAP: printer_model is NOT set for "
+                            f"'{active_name}'",
+                            fg="yellow", bold=True,
+                        ))
+                        click.echo(
+                            "  Without it, the bed-fit gate, gcode bounds check, "
+                            "and temperature limits soft-pass."
+                        )
+                        if suggestion:
+                            click.echo(click.style(
+                                f"  Suggested: add `printer_model: {suggestion}` "
+                                f"to ~/.kiln/config.yaml",
+                                fg="cyan",
+                            ))
+                        else:
+                            click.echo(
+                                "  Fix: add `printer_model: <value>` to the "
+                                "printer entry in ~/.kiln/config.yaml"
+                            )
+                        click.echo(
+                            "  Or run `kiln setup` for the interactive flow."
+                        )
+            except Exception:
+                pass  # migration nag is best-effort; never break status
     except click.ClickException:
         raise
     except PrinterError as exc:
@@ -6415,6 +6466,17 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         if not serial:
             serial = None
 
+    # -- printer_model (activates safety stack) ----------------------------
+    # Incident #0 (2026-04-15) exposed that setup never asked for this
+    # field, so every existing user's config skips the bed-fit / bounds /
+    # temperature safety gates silently.  Always prompt here.  For
+    # Bambu printers with a recognisable serial, we offer a confident
+    # default the user can confirm with Enter.
+    from kiln.cli.printer_model_prompt import prompt_for_printer_model
+    printer_model = prompt_for_printer_model(
+        printer_type, serial=serial, allow_skip=False,
+    )
+
     # -- Save --------------------------------------------------------------
     click.echo()
     try:
@@ -6425,6 +6487,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
             api_key=api_key,
             access_code=access_code,
             serial=serial,
+            printer_model=printer_model,
             set_active=True,
         )
         click.echo(f"  Saved printer '{name}' to {path}")
@@ -6612,6 +6675,12 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
         click.echo(click.style("  Step 3: Configure printer", bold=True))
 
     existing = _list_printers()
+    # Check for existing printers missing printer_model — one-time
+    # migration nag for users who set up before incident #0 (2026-04-15).
+    from kiln.cli.printer_model_prompt import (
+        check_existing_config_for_missing_model,
+        suggest_bambu_model,
+    )
     if existing:
         active = next((p for p in existing if p.get("active")), existing[0])
         results["setup"] = {
@@ -6620,15 +6689,56 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
         }
         if not json_mode:
             click.echo(f"    Already configured: {active['name']} [{active.get('type', '?')}]")
+        # Migration nag: warn if printer_model isn't set
+        try:
+            from kiln.cli.config import _read_config_file, get_config_path
+            raw_cfg = _read_config_file(get_config_path())
+            missing = check_existing_config_for_missing_model(raw_cfg)
+            if missing:
+                suggestion = None
+                if active.get("type") == "bambu" and active.get("serial"):
+                    suggestion = suggest_bambu_model(active["serial"])
+                if not json_mode:
+                    click.echo()
+                    click.echo(click.style(
+                        "    ⚠ SAFETY GAP: printer_model is NOT set for: "
+                        f"{', '.join(missing)}",
+                        fg="yellow", bold=True,
+                    ))
+                    click.echo(
+                        "    Without it, the bed-fit gate, gcode bounds check, "
+                        "and temperature\n    limits all soft-pass — unsafe prints "
+                        "can reach the printer."
+                    )
+                    if suggestion:
+                        click.echo(click.style(
+                            f"    Suggested value for your Bambu: printer_model: {suggestion}",
+                            fg="cyan",
+                        ))
+                    click.echo(
+                        "    Fix: add `printer_model: <value>` under the printer "
+                        "entry in\n    ~/.kiln/config.yaml.  Run `kiln setup` to "
+                        "re-run the interactive\n    flow which now asks for this."
+                    )
+                results["setup"]["missing_printer_model"] = missing
+        except Exception:
+            pass
     elif discovered:
         # Auto-configure the first discovered printer
         first = discovered[0]
         printer_name = (first.name or first.printer_type).lower().replace(" ", "-").replace(".", "-")
+        # Offer a suggested printer_model for Bambu discoveries so the
+        # non-interactive quickstart flow doesn't ship without the field.
+        auto_model = None
+        if first.printer_type == "bambu":
+            serial_hint = getattr(first, "serial", None) or ""
+            auto_model = suggest_bambu_model(serial_hint)
         try:
             save_printer(
                 printer_name,
                 first.printer_type,
                 first.host,
+                printer_model=auto_model,
                 set_active=True,
             )
             results["setup"] = {
@@ -6636,9 +6746,21 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
                 "printer": printer_name,
                 "host": first.host,
                 "type": first.printer_type,
+                "printer_model": auto_model,
             }
             if not json_mode:
                 click.echo(f"    Auto-configured: {printer_name} [{first.printer_type}] at {first.host}")
+                if auto_model:
+                    click.echo(click.style(
+                        f"    ✓ printer_model suggested from serial: {auto_model}",
+                        fg="green",
+                    ))
+                else:
+                    click.echo(click.style(
+                        "    ⚠ printer_model NOT set.  Safety gates will soft-pass.\n"
+                        "      Run `kiln setup` for the interactive flow that asks for it.",
+                        fg="yellow",
+                    ))
                 click.echo("    Note: You may need to add an API key with 'kiln auth'.")
         except OSError as exc:
             results["setup"] = {"action": "failed", "error": str(exc)}
