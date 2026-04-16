@@ -935,11 +935,32 @@ def _get_adapter() -> PrinterAdapter:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_printer_model_live() -> str:
+    """Return the current printer_id preferring the live config.yaml
+    resolver over the frozen module global.  This lets safety gates
+    always see the latest user config without requiring a server
+    restart — and it gives them a fighting chance when the user never
+    set _PRINTER_MODEL explicitly.  Returns empty string when no
+    source has a value.
+    """
+    try:
+        from kiln.printer_model_resolver import resolve_printer_model
+        live = resolve_printer_model()
+        if live:
+            return live
+    except Exception as exc:
+        logger.debug("live printer-model resolution failed: %s", exc)
+    return _PRINTER_MODEL or ""
+
+
 def _get_temp_limits() -> tuple:
     """Return ``(max_tool, max_bed)`` from the printer's safety profile.
 
-    When ``KILN_PRINTER_MODEL`` is set, loads the matching profile from the
-    bundled database.  Falls back to conservative generic limits (300/130).
+    Resolution order (via :func:`_resolve_printer_model_live`):
+      1. ``printer_model`` field in ``~/.kiln/config.yaml``
+      2. Bambu serial-prefix inference / host-pattern inference
+      3. ``KILN_PRINTER_MODEL`` environment variable
+      4. Conservative generic limits (300/130) if all of the above fail
 
     PTFE-lined hotends (non-all-metal) are additionally clamped to 240°C
     regardless of the profile's stated maximum — PTFE burns above ~245°C
@@ -947,18 +968,25 @@ def _get_temp_limits() -> tuple:
     Set ``KILN_OVERRIDE_PTFE_LIMIT=1`` to disable this clamp (only do this
     if you've physically replaced the PTFE with an all-metal conversion).
     """
-    if _PRINTER_MODEL:
+    live_model = _resolve_printer_model_live()
+    if live_model:
+        # Temporarily rebind _PRINTER_MODEL for the PTFE clamp branch
+        # below so the existing logic reads the live value.
+        _resolved = live_model
+    else:
+        _resolved = _PRINTER_MODEL
+    if _resolved:
         try:
             from kiln.safety_profiles import get_profile  # noqa: E402
 
-            profile = get_profile(_PRINTER_MODEL)
+            profile = get_profile(_resolved)
             max_tool = profile.max_hotend_temp
             max_bed = profile.max_bed_temp
             # PTFE clamp — look up hotend_type from printer_intelligence.
             if os.environ.get("KILN_OVERRIDE_PTFE_LIMIT", "").strip() not in ("1", "true", "yes"):
                 try:
                     from kiln.printer_intelligence import get_printer_intel
-                    intel = get_printer_intel(_PRINTER_MODEL)
+                    intel = get_printer_intel(_resolved)
                     hotend_type = (intel or {}).get("hotend_type", "").lower()
                     if hotend_type and hotend_type != "all_metal":
                         # Common values: "ptfe", "ptfe_lined", "hybrid", ""
@@ -968,7 +996,7 @@ def _get_temp_limits() -> tuple:
                                 "Clamping hotend limit from %.0f°C to %.0f°C "
                                 "for %s (hotend_type=%s, non-all-metal). "
                                 "Override with KILN_OVERRIDE_PTFE_LIMIT=1.",
-                                max_tool, _PTFE_SAFE_MAX, _PRINTER_MODEL, hotend_type,
+                                max_tool, _PTFE_SAFE_MAX, _resolved, hotend_type,
                             )
                             max_tool = _PTFE_SAFE_MAX
                 except Exception:
@@ -2818,13 +2846,14 @@ def upload_file(file_path: str) -> dict:
             )
             _ext = os.path.splitext(file_path)[1].lower()
             bed_fit_result: dict[str, Any] | None = None
+            _live_model = _resolve_printer_model_live() or _PRINTER_MODEL
             if _ext in _GCODE_EXTENSIONS:
                 bed_fit_result = validate_gcode_for_printer(
-                    file_path, _PRINTER_MODEL,
+                    file_path, _live_model,
                 )
             elif _ext == ".3mf" or file_path.lower().endswith(".gcode.3mf"):
                 bed_fit_result = validate_3mf_for_printer(
-                    file_path, _PRINTER_MODEL,
+                    file_path, _live_model,
                 )
             if bed_fit_result and not bed_fit_result.get("ok", True):
                 code = bed_fit_result.get("error_code", "BED_FIT_ERROR")
@@ -5135,8 +5164,12 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
             )
 
         # -- Safety validation -------------------------------------------------
-        if _PRINTER_MODEL:
-            validation = validate_gcode_for_printer(cmd_list, _PRINTER_MODEL)
+        # Use the live resolver so users who haven't manually set
+        # _PRINTER_MODEL (via env or printer_model yaml field) still get
+        # the bounds/temperature checks.
+        _live_model = _resolve_printer_model_live() or _PRINTER_MODEL
+        if _live_model:
+            validation = validate_gcode_for_printer(cmd_list, _live_model)
         else:
             validation = _validate_gcode_impl(cmd_list)
 

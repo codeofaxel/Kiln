@@ -364,7 +364,14 @@ def _preflight_upload_or_raise(adapter: "PrinterAdapter", file_path: str) -> Non
         # _safety_profile_id or adapter.name — prefer explicit profile.
         printer_id = getattr(adapter, "_safety_profile_id", None)
         if not printer_id:
-            # Also try the module-level _PRINTER_MODEL for single-printer setups
+            # Use the live resolver (config.yaml → serial inference → env)
+            try:
+                from kiln.printer_model_resolver import resolve_printer_model
+                printer_id = resolve_printer_model()
+            except Exception:
+                pass
+        if not printer_id:
+            # Last-ditch fallback to the frozen module global
             try:
                 import kiln.server as _srv
                 printer_id = getattr(_srv, "_PRINTER_MODEL", None)
