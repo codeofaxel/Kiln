@@ -138,18 +138,24 @@ def _find_openscad() -> str:
 def _get_bounding_box(scad_path: str) -> _BoundingBoxInfo:
     """Get model bounding box and return camera center + distance.
 
-    Parses the STL binary header for an exact bounding box.  Falls back
-    to default distance centered at origin if detection fails.
+    For STL files: parses the binary/ASCII STL header directly.
+    For SCAD files with ``import("...")``: reads the embedded STL path.
+    For pure parametric SCAD: compiles to a temp STL via OpenSCAD to get
+    the real bounding box.  Falls back to default distance if all else fails.
     """
     try:
         stl_path = None
-        content = Path(scad_path).read_text(encoding="utf-8")
-        if 'import("' in content:
-            start = content.index('import("') + 8
-            end = content.index('"', start)
-            stl_path = content[start:end]
-        elif scad_path.lower().endswith(".stl"):
+        if scad_path.lower().endswith(".stl"):
             stl_path = scad_path
+        elif scad_path.lower().endswith(".scad"):
+            content = Path(scad_path).read_text(encoding="utf-8")
+            if 'import("' in content:
+                start = content.index('import("') + 8
+                end = content.index('"', start)
+                stl_path = content[start:end]
+            else:
+                # Pure parametric SCAD — compile to temp STL to measure bbox.
+                stl_path = _compile_scad_for_bbox(scad_path)
 
         if stl_path and os.path.isfile(stl_path) and stl_path.lower().endswith(".stl"):
             return _distance_from_stl(stl_path)
@@ -158,6 +164,40 @@ def _get_bounding_box(scad_path: str) -> _BoundingBoxInfo:
         logger.debug("Bounding box detection failed", exc_info=True)
 
     return _BoundingBoxInfo()
+
+
+def _compile_scad_for_bbox(scad_path: str) -> str | None:
+    """Compile a SCAD file to a temporary STL for bounding-box measurement.
+
+    Returns the temp STL path on success, None on failure.  The caller is
+    responsible for cleanup — the temp file is created with ``delete=False``
+    so it survives the subprocess boundary.
+    """
+    import tempfile
+
+    try:
+        openscad = _find_openscad()
+    except FileNotFoundError:
+        return None
+
+    fd, tmp_stl = tempfile.mkstemp(suffix=".stl", prefix="kiln_bbox_")
+    os.close(fd)
+    try:
+        result = subprocess.run(
+            [openscad, "--export-format", "binstl", "-o", tmp_stl, scad_path],
+            capture_output=True,
+            timeout=30,
+        )
+        if result.returncode == 0 and os.path.getsize(tmp_stl) > 84:
+            return tmp_stl
+    except Exception:
+        logger.debug("SCAD bbox compile failed", exc_info=True)
+    finally:
+        # Clean up temp file if compilation failed or produced empty output.
+        if not (os.path.exists(tmp_stl) and os.path.getsize(tmp_stl) > 84):
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_stl)
+    return None
 
 
 @dataclass

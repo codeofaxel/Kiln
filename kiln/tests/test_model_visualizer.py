@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import struct
-import tempfile
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -13,11 +13,13 @@ import pytest
 from kiln.model_visualizer import (
     _ANGLE_ROTATIONS,
     _CAMERA_ANGLES,
+    _BoundingBoxInfo,
+    _compile_scad_for_bbox,
     _find_openscad,
+    _get_bounding_box,
     _make_scad_wrapper,
     visualize_model,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -61,9 +63,8 @@ def test_find_openscad_on_path():
 
 def test_find_openscad_not_found():
     """Should raise FileNotFoundError when no openscad binary exists."""
-    with patch("shutil.which", return_value=None):
-        with pytest.raises(FileNotFoundError, match="OpenSCAD not found"):
-            _find_openscad()
+    with patch("shutil.which", return_value=None), pytest.raises(FileNotFoundError, match="OpenSCAD not found"):
+        _find_openscad()
 
 
 # ---------------------------------------------------------------------------
@@ -140,9 +141,9 @@ def test_visualize_all_angles(tmp_stl: Path, tmp_path: Path):
         mock.returncode = 0
         return mock
 
-    with patch("kiln.model_visualizer._find_openscad", return_value="openscad"):
-        with patch("subprocess.run", side_effect=mock_run):
-            result = visualize_model(str(tmp_stl), output_dir=output_dir)
+    with patch("kiln.model_visualizer._find_openscad", return_value="openscad"), \
+         patch("subprocess.run", side_effect=mock_run):
+        result = visualize_model(str(tmp_stl), output_dir=output_dir)
 
     assert result["success"] is True
     assert result["rendered"] == 6
@@ -169,11 +170,11 @@ def test_visualize_subset_angles(tmp_stl: Path, tmp_path: Path):
         mock.returncode = 0
         return mock
 
-    with patch("kiln.model_visualizer._find_openscad", return_value="openscad"):
-        with patch("subprocess.run", side_effect=mock_run):
-            result = visualize_model(
-                str(tmp_stl), angles=["top", "bottom"], output_dir=output_dir,
-            )
+    with patch("kiln.model_visualizer._find_openscad", return_value="openscad"), \
+         patch("subprocess.run", side_effect=mock_run):
+        result = visualize_model(
+            str(tmp_stl), angles=["top", "bottom"], output_dir=output_dir,
+        )
 
     assert result["success"] is True
     assert result["rendered"] == 2
@@ -201,9 +202,9 @@ def test_visualize_partial_failure(tmp_stl: Path, tmp_path: Path):
             mock.stderr = "render error"
         return mock
 
-    with patch("kiln.model_visualizer._find_openscad", return_value="openscad"):
-        with patch("subprocess.run", side_effect=mock_run):
-            result = visualize_model(str(tmp_stl), output_dir=output_dir)
+    with patch("kiln.model_visualizer._find_openscad", return_value="openscad"), \
+         patch("subprocess.run", side_effect=mock_run):
+        result = visualize_model(str(tmp_stl), output_dir=output_dir)
 
     assert result["success"] is True  # partial success
     assert result["rendered"] == 3
@@ -225,3 +226,94 @@ def test_camera_angles_have_required_fields():
         assert isinstance(description, str)
         assert label  # non-empty
         assert label in _ANGLE_ROTATIONS
+
+
+# ---------------------------------------------------------------------------
+# _get_bounding_box — pure SCAD path
+# ---------------------------------------------------------------------------
+
+
+class TestGetBoundingBoxPureScad:
+    """_get_bounding_box compiles pure SCAD to STL for bbox measurement."""
+
+    def test_pure_scad_uses_compile_path(self, tmp_scad: Path, tmp_stl: Path):
+        """A pure parametric SCAD file (no import()) triggers compilation."""
+        with patch(
+            "kiln.model_visualizer._compile_scad_for_bbox",
+            return_value=str(tmp_stl),
+        ) as mock_compile:
+            result = _get_bounding_box(str(tmp_scad))
+        mock_compile.assert_called_once_with(str(tmp_scad))
+        assert isinstance(result, _BoundingBoxInfo)
+        assert result.distance > 0
+
+    def test_scad_with_import_skips_compile(self, tmp_path: Path, tmp_stl: Path):
+        """A SCAD file that uses import() reads the STL directly, no compile."""
+        scad = tmp_path / "wrapper.scad"
+        scad.write_text(f'import("{tmp_stl}");')
+        with patch("kiln.model_visualizer._compile_scad_for_bbox") as mock_compile:
+            result = _get_bounding_box(str(scad))
+        mock_compile.assert_not_called()
+        assert isinstance(result, _BoundingBoxInfo)
+
+    def test_compile_failure_returns_default(self, tmp_scad: Path):
+        """If compilation fails, fall back to default bbox (no crash)."""
+        with patch(
+            "kiln.model_visualizer._compile_scad_for_bbox",
+            return_value=None,
+        ):
+            result = _get_bounding_box(str(tmp_scad))
+        assert result.distance == 250  # _DEFAULT_DISTANCE
+
+
+# ---------------------------------------------------------------------------
+# _compile_scad_for_bbox
+# ---------------------------------------------------------------------------
+
+
+class TestCompileScadForBbox:
+    """_compile_scad_for_bbox wraps OpenSCAD subprocess correctly."""
+
+    def test_returns_stl_path_on_success(self, tmp_scad: Path, tmp_path: Path):
+        """Returns a non-None path when OpenSCAD exits 0 and produces output."""
+        fake_stl = tmp_path / "fake.stl"
+        # Write > 84 bytes so size check passes.
+        fake_stl.write_bytes(b"\x00" * 200)
+
+        def _fake_mkstemp(suffix="", prefix="", **_kw):
+            import os
+            fd = os.open(str(fake_stl), os.O_WRONLY | os.O_CREAT)
+            return fd, str(fake_stl)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+
+        with patch("kiln.model_visualizer._find_openscad", return_value="/usr/bin/openscad"), \
+             patch("tempfile.mkstemp", side_effect=_fake_mkstemp), \
+             patch("subprocess.run", return_value=mock_result):
+            path = _compile_scad_for_bbox(str(tmp_scad))
+
+        assert path == str(fake_stl)
+
+    def test_returns_none_when_openscad_missing(self, tmp_scad: Path):
+        """Returns None if OpenSCAD binary is not found."""
+        with patch(
+            "kiln.model_visualizer._find_openscad",
+            side_effect=FileNotFoundError("not found"),
+        ):
+            assert _compile_scad_for_bbox(str(tmp_scad)) is None
+
+    def test_returns_none_on_nonzero_exit(self, tmp_scad: Path):
+        """Returns None if OpenSCAD exits non-zero (compile error in SCAD)."""
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+
+        with patch("kiln.model_visualizer._find_openscad", return_value="/usr/bin/openscad"), \
+             patch("subprocess.run", return_value=mock_result):
+            assert _compile_scad_for_bbox(str(tmp_scad)) is None
+
+    def test_returns_none_on_timeout(self, tmp_scad: Path):
+        """Returns None if OpenSCAD times out."""
+        with patch("kiln.model_visualizer._find_openscad", return_value="/usr/bin/openscad"), \
+             patch("subprocess.run", side_effect=subprocess.TimeoutExpired("openscad", 30)):
+            assert _compile_scad_for_bbox(str(tmp_scad)) is None
