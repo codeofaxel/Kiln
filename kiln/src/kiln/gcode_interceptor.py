@@ -894,6 +894,44 @@ class GcodeInterceptor:
             )
         )
 
+        # -- Bed-safety pattern rules (incident #0 backstop) --
+        # Regex-level gate that rejects G0/G1 moves with negative X/Y or
+        # coordinates past the build volume.  Complements the mesh-level
+        # and 3MF-level pre-send gates — even a hand-crafted bad gcode
+        # file can't crash the nozzle if these rules are active.
+        try:
+            from kiln.safety.default_interception_rules import (
+                get_default_bed_safety_rules,
+            )
+            for rule_dict in get_default_bed_safety_rules(printer_name):
+                _action = (
+                    InterceptionAction.BLOCK
+                    if rule_dict.get("action") == "reject"
+                    else InterceptionAction.ALERT
+                )
+                rules.append(
+                    InterceptionRule(
+                        rule_id=str(uuid.uuid4()),
+                        name=f"bed_fit_{len(rules)}",
+                        trigger=InterceptionTrigger.PATTERN_MATCH,
+                        action=_action,
+                        priority=RulePriority.CRITICAL,
+                        pattern=rule_dict["pattern"],
+                        message=rule_dict["reason"],
+                        created_at=now,
+                    )
+                )
+            logger.info(
+                "Installed %d default bed-safety rules for printer %s",
+                sum(1 for r in rules if r.name.startswith("bed_fit_")),
+                printer_name,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to install default bed-safety rules for %s: %s",
+                printer_name, exc,
+            )
+
         return rules
 
     # -- stats & history ---------------------------------------------------

@@ -1406,6 +1406,72 @@ _start_time = time.time()
 # Track whether event bus subscriptions have been wired (once-only guard).
 _event_subs_wired: bool = False
 
+# Layer 5: per-printer PrintWatchdog registry.  Keyed by printer_name so a
+# fleet deployment can have one watchdog per printer.  Daemon threads —
+# destroyed when the server process exits.
+import threading as _threading_for_watchdog  # local alias — server.py avoids top-level threading import elsewhere
+
+_print_watchdogs: dict[str, Any] = {}
+_print_watchdogs_lock = _threading_for_watchdog.Lock()
+
+
+def _spawn_print_watchdog(adapter: Any, file_name: str) -> None:
+    """Spawn a PrintWatchdog for the printer that just started a print.
+
+    If a watchdog already exists for this printer, stop the old one
+    and replace it.  On any anomaly, logs the crash envelope to
+    ``~/.kiln/incidents/`` via the incident_recorder.
+    """
+    from kiln.print_watchdog import PrintWatchdog
+
+    printer_name = _resolve_effective_printer_name() or "default"
+
+    def _on_anomaly(flag):
+        logger.error(
+            "PrintWatchdog anomaly on %s: %s", printer_name, flag,
+        )
+        # Auto-capture incident envelope (Layer 6) — local only, no upload.
+        try:
+            from kiln import incident_recorder
+            incident_recorder.record_incident(
+                incident_type="watchdog_red_flag",
+                printer_status={"printer_name": printer_name, "file": file_name},
+                user_description=str(flag),
+                tags=["watchdog", "auto"],
+            )
+        except Exception as _rec_exc:
+            logger.debug(
+                "incident_recorder auto-capture failed: %s", _rec_exc,
+            )
+
+    with _print_watchdogs_lock:
+        # Replace any prior watchdog for this printer.
+        old = _print_watchdogs.get(printer_name)
+        if old is not None:
+            try:
+                old.stop(timeout=1.0)
+            except Exception:
+                pass
+        wd = PrintWatchdog(
+            adapter=adapter,
+            poll_interval_sec=2.5,
+            on_anomaly=_on_anomaly,
+        )
+        wd.start()
+        _print_watchdogs[printer_name] = wd
+
+
+def _stop_print_watchdog(printer_name: str | None = None) -> None:
+    """Stop the PrintWatchdog for a printer (e.g., on cancel / finish)."""
+    with _print_watchdogs_lock:
+        name = printer_name or _resolve_effective_printer_name() or "default"
+        wd = _print_watchdogs.pop(name, None)
+    if wd is not None:
+        try:
+            wd.stop(timeout=1.5)
+        except Exception as exc:
+            logger.debug("PrintWatchdog stop failed: %s", exc)
+
 
 def _get_registry() -> PrinterRegistry:
     """Return the lazily-initialised printer registry."""
@@ -1435,6 +1501,10 @@ def _get_event_bus() -> EventBus:
         _event_bus.subscribe(EventType.PRINT_COMPLETED, lambda _e: _get_heater_watchdog().notify_print_ended())
         _event_bus.subscribe(EventType.PRINT_FAILED, lambda _e: _get_heater_watchdog().notify_print_ended())
         _event_bus.subscribe(EventType.PRINT_CANCELLED, lambda _e: _get_heater_watchdog().notify_print_ended())
+        # Layer 5: tear down the PrintWatchdog when a print ends, by any path.
+        _event_bus.subscribe(EventType.PRINT_COMPLETED, lambda _e: _stop_print_watchdog())
+        _event_bus.subscribe(EventType.PRINT_FAILED, lambda _e: _stop_print_watchdog())
+        _event_bus.subscribe(EventType.PRINT_CANCELLED, lambda _e: _stop_print_watchdog())
         # Persistence and billing subscribers (previously wired at import time).
         _event_bus.subscribe(None, _persist_event)
         _event_bus.subscribe(EventType.JOB_COMPLETED, _billing_hook)
@@ -3289,6 +3359,20 @@ def start_print(
         result = adapter.start_print(file_name, **print_kwargs)
         _get_heater_watchdog().notify_print_started()
 
+        # Layer 5: spawn in-process PrintWatchdog to catch HMS codes,
+        # thermal anomalies, stuck-layer conditions.  Agent-driven
+        # polling (~60s) is too slow to catch clogs / crashes in time.
+        # The watchdog polls every 2.5s and calls adapter.emergency_stop
+        # on red flags.  Best-effort — a failure here must not abort
+        # the print start.
+        try:
+            _spawn_print_watchdog(adapter, file_name)
+        except Exception as _wd_exc:
+            logger.warning(
+                "PrintWatchdog spawn failed for %s (print continues without watchdog): %s",
+                file_name, _wd_exc,
+            )
+
         # Stop any pause keep-alive thread now that the print is back
         # under firmware control.  Safe to call when nothing's running.
         try:
@@ -3447,8 +3531,36 @@ def cancel_print(
         except Exception as exc:  # pragma: no cover — best-effort
             logger.debug("cancel_print: register_cancel_intent failed: %s", exc)
 
+        # Layer 6: if the print is being cancelled very early (before
+        # layer 5), auto-capture an incident envelope to ~/.kiln/incidents/.
+        # That's usually a crash, nozzle issue, or user stopping a bad
+        # start — exactly when we want to preserve evidence.  Local only,
+        # no upload.
+        try:
+            _state_at_cancel = adapter.get_state()
+            _layer_at_cancel = getattr(
+                getattr(_state_at_cancel, "job", None), "current_layer", 0,
+            ) or 0
+            if _layer_at_cancel < 5:
+                from kiln import incident_recorder
+                incident_recorder.record_incident(
+                    incident_type="user_cancel_pre_layer_5",
+                    printer_status={
+                        "printer_name": _resolve_effective_printer_name(None),
+                        "layer_at_cancel": _layer_at_cancel,
+                        "state": getattr(_state_at_cancel, "state", None),
+                    },
+                    tags=["cancel", "early", "auto"],
+                )
+        except Exception as _inc_exc:
+            logger.debug(
+                "Early-cancel incident auto-capture skipped: %s", _inc_exc,
+            )
+
         result = adapter.cancel_print()
         _get_heater_watchdog().notify_print_ended()
+        # Layer 5: tear down the PrintWatchdog for this printer.
+        _stop_print_watchdog()
 
         # Re-assert targets AFTER cancel so the firmware's default-cool
         # behaviour is overridden.  Only fires when the caller asked for
@@ -4980,6 +5092,43 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
             validation = validate_gcode_for_printer(cmd_list, _PRINTER_MODEL)
         else:
             validation = _validate_gcode_impl(cmd_list)
+
+        # Incident #0 hardening: promote bounds-violation warnings to
+        # blockers.  Before this, "G1 X-50 Y-50" passed through with a
+        # build-volume warning but executed anyway, risking nozzle
+        # crash into the printer frame.  Negative/out-of-bounds X/Y
+        # moves are now refused unless KILN_SKIP_BOUNDS_CHECK=1.
+        _skip_bounds = os.environ.get("KILN_SKIP_BOUNDS_CHECK", "").strip() in (
+            "1", "true", "yes",
+        )
+        if not _skip_bounds:
+            bounds_warnings = [
+                w for w in validation.warnings
+                if " is outside " in w and "build volume" in w
+            ]
+            if bounds_warnings:
+                _audit(
+                    "send_gcode",
+                    "bounds_blocked",
+                    details={"bounds_warnings": bounds_warnings[:5]},
+                )
+                _record_tool_block("send_gcode")
+                return {
+                    "success": False,
+                    "error": {
+                        "code": "GCODE_OUT_OF_BOUNDS",
+                        "message": (
+                            f"Refused to send G-code: moves outside the "
+                            f"printer's build volume would drive the nozzle "
+                            f"into the printer frame.  Offending commands: "
+                            f"{'; '.join(bounds_warnings[:3])}. "
+                            f"Bypass with KILN_SKIP_BOUNDS_CHECK=1 for "
+                            f"advanced use."
+                        ),
+                    },
+                    "bounds_violations": bounds_warnings,
+                }
+
         if not validation.valid:
             _audit(
                 "send_gcode",
