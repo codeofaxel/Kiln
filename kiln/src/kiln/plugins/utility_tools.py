@@ -414,6 +414,14 @@ class _UtilityToolsPlugin:
                     "safety_status — comprehensive safety dashboard (limits, rate-limits, blocked actions, auth)",
                     "safety_settings — shows current auto-print and confirmation settings",
                     "safety_audit — reviews recent safety-relevant actions",
+                    (
+                        "kiln_health — check `safety_profile.gates_active`. "
+                        "If false, printer_model is unset in ~/.kiln/config.yaml "
+                        "and the bed-fit / bounds / temperature safety gates "
+                        "are soft-passing.  Ask the user their printer model "
+                        "(e.g. bambu_a1, prusa_mk4) and add "
+                        "`printer_model: <value>` to the printer entry."
+                    ),
                 ],
                 "session_recovery": {
                     "description": (

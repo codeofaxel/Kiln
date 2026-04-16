@@ -2312,12 +2312,14 @@ def printer_status() -> dict:
         job = adapter.get_job()
         caps = adapter.capabilities
 
-        return {
+        response = {
             "success": True,
             "printer": state.to_dict(),
             "job": job.to_dict(),
             "capabilities": caps.to_dict(),
         }
+        from kiln.safety_gap_warning import attach_safety_warning
+        return attach_safety_warning(response)
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(
             f"Failed to get printer status: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct."
@@ -5081,7 +5083,8 @@ def preflight_check(
         if cost_estimate is not None:
             result["estimated_cost"] = cost_estimate
 
-        return result
+        from kiln.safety_gap_warning import attach_safety_warning
+        return attach_safety_warning(result)
 
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(
