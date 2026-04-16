@@ -101,7 +101,7 @@ When adding new code, find and follow the closest existing pattern. Don't invent
 
 | Adding...                  | Copy the pattern in...                                              |
 |----------------------------|---------------------------------------------------------------------|
-| New MCP tool               | `plugins/design_tools.py` or any plugin file (decorator, error handling, return format). **NEVER add new tools to server.py** — it has 119 tools; all new tools go in `plugins/`. |
+| New MCP tool               | `plugins/design_tools.py` or any plugin file (decorator, error handling, return format). **NEVER add new tools to server.py** — it has 120 tools; all new tools go in `plugins/`. |
 | New printer adapter        | `printers/octoprint.py` (method order, retry logic, error wrapping, dataclass returns) |
 | New CLI command            | `cli/main.py` → `status` command (Click decorators, context, `--json` flag, error handling) |
 | New marketplace adapter    | `marketplaces/thingiverse.py` (API client pattern, auth, response normalization) |
@@ -115,7 +115,7 @@ When adding new code, find and follow the closest existing pattern. Don't invent
 **The rule:** Before writing new code, `grep` for the closest existing example and match its structure exactly. If no reference exists, propose the pattern before implementing.
 
 ## Use Existing Tools — Never Reinvent (MANDATORY)
-Before writing ad-hoc scripts for printer operations, **check if an MCP tool already exists**. Kiln has 350+ tools. The answer is almost always yes.
+Before writing ad-hoc scripts for printer operations, **check if an MCP tool already exists**. Kiln has 567 MCP tools. The answer is almost always yes.
 
 | Operation                  | Use this tool — don't write a script                                |
 |----------------------------|---------------------------------------------------------------------|
@@ -392,6 +392,17 @@ Kiln maintains three living documents that must stay in sync with the codebase:
 - Documentation-only changes (avoid circular updates).
 
 **How to update:** Append or edit the specific section — don't rewrite the entire document. Keep the whitepaper formal and the guide reference-dense.
+
+### Hard rule: NEVER edit historical metrics in old blog posts (MANDATORY)
+
+Old blog posts are **point-in-time snapshots**. The MCP tool count, CLI command count, test count, printer-model count, and any other numeric metric stated in a published post is part of the historical record of what Kiln was on the date of that post. **NEVER update these numbers when doing a doc count sync.**
+
+- Files this applies to: every `*.astro` file under `docs/site/src/pages/blog/`, the per-post card descriptions in `docs/site/src/pages/blog.astro`, and any future `docs/site/src/pages/blog/**` post or social-card SVG (e.g. `docs/site/public/blog/*.svg`).
+- This includes the title, body, bullet lists, "What ships today" sections, and meta `description=` props of those posts.
+- Editing a Feb 17 launch post to claim 559 MCP tools (when Feb 17 had 197) is a credibility-destroying revision of history. It happened repeatedly in past sessions (commits `5c05a86`, `f3ccb82`, `ad1945f`, `1644602b`, `454f20fa` all touched historical post numbers) and must stop.
+- When grepping for stale counts to update, **explicitly exclude `docs/site/src/pages/blog/` and any blog-post asset files** before running batch edits.
+- If a published post contains a count that's actually wrong for its post date, restore it to the count that was correct on the post's date — not to the current count, and not to whatever someone else last edited it to.
+- The doc-count sync flow only updates **currently-true marketing surfaces** (README, server.json, SKILL.md, whitepaper, litepaper, PROJECT_DOCS, THREAT_MODEL, llms.txt, the live site shell — Hero/FeatureGrid/pricing/install/integrations/use-cases/faq, the desktop app strings, plus any other surface that asserts a current claim).
 
 ## Session Continuity
 For long or multi-session work, maintain a lightweight state file so crashed or context-exhausted sessions can be resumed cleanly.

@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-15T18:51:18.935701+00:00",
-  "tool_count": 105,
+  "generated": "2026-04-16T00:43:49.883128+00:00",
+  "tool_count": 113,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -1171,6 +1171,43 @@
       }
     },
     {
+      "name": "resume_interrupted_print",
+      "description": "Resume an interrupted print with one call (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "other",
+      "parameters": {
+        "properties": {
+          "original_gcode_path": {
+            "default": "",
+            "title": "Original Gcode Path",
+            "type": "string"
+          },
+          "layer": {
+            "default": 0,
+            "title": "Layer",
+            "type": "integer"
+          },
+          "printer_name": {
+            "default": "",
+            "title": "Printer Name",
+            "type": "string"
+          },
+          "prime_extrusion_mm": {
+            "default": 5.0,
+            "title": "Prime Extrusion Mm",
+            "type": "number"
+          },
+          "material_type": {
+            "default": "PLA",
+            "title": "Material Type",
+            "type": "string"
+          }
+        },
+        "title": "resume_interrupted_printArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "add_feature_during_print",
       "description": "Slice a new mesh at pause_z and resume printing it (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -2118,6 +2155,16 @@
             "default": false,
             "title": "Accept Bridge Cascade Risk",
             "type": "boolean"
+          },
+          "accept_subtle_depth": {
+            "default": false,
+            "title": "Accept Subtle Depth",
+            "type": "boolean"
+          },
+          "strict": {
+            "default": true,
+            "title": "Strict",
+            "type": "boolean"
           }
         },
         "required": [
@@ -2516,6 +2563,11 @@
             "default": "",
             "title": "Source 3Mf Path",
             "type": "string"
+          },
+          "prime_extruder_on_resume": {
+            "default": true,
+            "title": "Prime Extruder On Resume",
+            "type": "boolean"
           }
         },
         "required": [
@@ -3306,6 +3358,30 @@
       }
     },
     {
+      "name": "describe_face",
+      "description": "Return metadata for a single semantic face on a product.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_intelligence",
+      "parameters": {
+        "properties": {
+          "product_type": {
+            "title": "Product Type",
+            "type": "string"
+          },
+          "face_name": {
+            "title": "Face Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_type",
+          "face_name"
+        ],
+        "title": "describe_faceArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "generate_decorated_product",
       "description": "Generate a fully decorated product from a photo in one step (Pro).\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -3389,6 +3465,68 @@
       }
     },
     {
+      "name": "get_face_emboss_depth",
+      "description": "Return the recommended maximum emboss/deboss depth for a face.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_intelligence",
+      "parameters": {
+        "properties": {
+          "product_type": {
+            "title": "Product Type",
+            "type": "string"
+          },
+          "face_name": {
+            "title": "Face Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_type",
+          "face_name"
+        ],
+        "title": "get_face_emboss_depthArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_product_color_roles",
+      "description": "Return semantic color roles for a product type.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_intelligence",
+      "parameters": {
+        "properties": {
+          "product_type": {
+            "title": "Product Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_type"
+        ],
+        "title": "get_product_color_rolesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_product_faces",
+      "description": "Return the full semantic face registry for a product type.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_intelligence",
+      "parameters": {
+        "properties": {
+          "product_type": {
+            "title": "Product Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_type"
+        ],
+        "title": "get_product_facesArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "get_product_profile",
       "description": "Get optimized pipeline profile for a product type (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -3404,6 +3542,36 @@
           "product_type"
         ],
         "title": "get_product_profileArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_decoratable_faces",
+      "description": "List face names that may be passed to ``decorate_surface``.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_intelligence",
+      "parameters": {
+        "properties": {
+          "product_type": {
+            "title": "Product Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_type"
+        ],
+        "title": "list_decoratable_facesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_product_types",
+      "description": "List all Kiln product types that expose a semantic face registry.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_intelligence",
+      "parameters": {
+        "properties": {},
+        "title": "list_product_typesArguments",
         "type": "object"
       }
     },
@@ -3453,6 +3621,45 @@
           "qr_content"
         ],
         "title": "print_qr_productArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "recommend_text_size",
+      "description": "One-stop text-sizing helper for product decoration.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_intelligence",
+      "parameters": {
+        "properties": {
+          "product_type": {
+            "title": "Product Type",
+            "type": "string"
+          },
+          "face_name": {
+            "title": "Face Name",
+            "type": "string"
+          },
+          "char_count": {
+            "title": "Char Count",
+            "type": "integer"
+          },
+          "face_width_mm": {
+            "default": 0.0,
+            "title": "Face Width Mm",
+            "type": "number"
+          },
+          "face_fill_pct": {
+            "default": 0.8,
+            "title": "Face Fill Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "product_type",
+          "face_name",
+          "char_count"
+        ],
+        "title": "recommend_text_sizeArguments",
         "type": "object"
       }
     },
