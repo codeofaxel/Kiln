@@ -124,13 +124,14 @@ const pricingFaqSchema = {
             <li><span class="check">&#10003;</span> Up to 2 printers</li>
             <li><span class="check">&#10003;</span> 10-job queue</li>
             <li><span class="check">&#10003;</span> Design intelligence (25 FDM materials, 45 brand-specific filament profiles, 20 patterns)</li>
-            <li><span class="check">&#10003;</span> Text &amp; sketch to 3D generation</li>
+            <li><span class="check">&#10003;</span> Natural-language to physical fabrication &mdash; text/image to validated 3D print <span class="patent-mark">[Patent Pending]</span></li>
+            <li><span class="check">&#10003;</span> Multi-modal decoration engine &mdash; 3/mo (QR, photos, text, SVG, brand assets) <span class="patent-mark">[Patent Pending]</span></li>
+            <li><span class="check">&#10003;</span> Closed-loop AI generation feedback &mdash; failed prints auto-improve future generations <span class="patent-mark">[Patent Pending]</span></li>
             <li><span class="check">&#10003;</span> Printability engine (7-dimension analysis)</li>
             <li><span class="check">&#10003;</span> Multi-part assembly (up to 10 parts)</li>
             <li><span class="check">&#10003;</span> Cost estimation &amp; recommendations</li>
             <li><span class="check">&#10003;</span> 14-component parametric catalog</li>
-            <li><span class="check">&#10003;</span> 3 decorations/month (QR, photos, text)</li>
-            <li><span class="check">&#10003;</span> 559 MCP tools &amp; 151 CLI commands</li>
+            <li><span class="check">&#10003;</span> 567 MCP tools &amp; 151 CLI commands</li>
             <li><span class="check">&#10003;</span> Community support</li>
             <li><span class="check">&#10003;</span> 3 fulfillment orders/month free</li>
             <li><span class="check">&#10003;</span> 5% orchestration fee on fulfillment</li>
@@ -157,10 +158,12 @@ const pricingFaqSchema = {
             <li><span class="check">&#10003;</span> Unlimited assembly parts</li>
             <li><span class="check">&#10003;</span> Product templates (coasters, keychains, ornaments, and more)</li>
             <li><span class="check">&#10003;</span> Procedural textures (tiger stripe, camo, marble, lava, wood, honeycomb)</li>
-            <li><span class="check">&#10003;</span> Unlimited decorations (QR codes, photos, logos, text)</li>
+            <li><span class="check">&#10003;</span> Unlimited decorations &mdash; photo, QR, text, SVG, brand assets</li>
+            <li><span class="check">&#10003;</span> Mid-print modification engine &mdash; decorate, add features, swap material mid-job <span class="patent-mark">[Patent Pending]</span></li>
+            <li><span class="check">&#10003;</span> Autonomous failure recovery &amp; print resume <span class="patent-mark">[Patent Pending]</span></li>
+            <li><span class="check">&#10003;</span> Design provenance &amp; regression detection <span class="patent-mark">[Patent Pending]</span></li>
             <li><span class="check">&#10003;</span> Manual speed control &amp; print learning</li>
             <li><span class="check">&#10003;</span> Cross-printer learning</li>
-            <li><span class="check">&#10003;</span> Design provenance &amp; version intelligence</li>
             <li><span class="check">&#10003;</span> Fleet orchestration &amp; analytics</li>
             <li><span class="check">&#10003;</span> REST API server</li>
             <li><span class="check">&#10003;</span> Cloud sync</li>
@@ -571,5 +574,14 @@ const pricingFaqSchema = {
     .pricing-cards {
       padding: 20px 0 50px;
     }
+  }
+
+  /* Patent-pending markers — subtle footnote, not a billboard */
+  .patent-mark {
+    display: inline;
+    font-size: 11px;
+    font-style: italic;
+    color: rgba(255, 255, 255, 0.4);
+    letter-spacing: 0.02em;
   }
 </style>

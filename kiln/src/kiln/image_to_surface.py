@@ -582,9 +582,43 @@ def prepare_image_for_emboss(
             for _ in range(3):
                 img = img.filter(ImageFilter.MedianFilter(size=3))
 
-            # Step 6: 8-level posterize for clean FDM depth tiers
-            step = 256 // 8
-            img = img.point(lambda x: (x // step) * step * 255 // (step * 7))
+            # Step 6: Adaptive posterize — detect contrast and adjust
+            # levels for clean FDM depth tiers.
+            #
+            # High-contrast subjects (dark dog on light background, like
+            # Fig 2 close-up face) work great with 8 levels — the tonal
+            # range is already spread and 8 steps resolve fine detail.
+            #
+            # Low-contrast subjects (cream dog in pink hood on white
+            # blanket, like Fig 1) have most pixels clustered in a narrow
+            # brightness band.  8 levels = most steps are near-identical
+            # height → flat-looking deboss.  Fewer levels (5-6) force
+            # bigger height jumps per step → more visible coin relief.
+            #
+            # Heuristic: compute the interquartile range (IQR) of pixel
+            # values after dodge+burn.  If IQR < 80 (compressed tonal
+            # range), drop to 5 posterize levels.  Otherwise use 8.
+            try:
+                import numpy as _np_contrast
+                _arr = _np_contrast.array(img)
+                _q25, _q75 = _np_contrast.percentile(_arr, [25, 75])
+                _iqr = _q75 - _q25
+                if _iqr < 80:
+                    _posterize_levels = 5
+                    _logger.info(
+                        "Low-contrast image detected (IQR=%.0f < 80). "
+                        "Using %d posterize levels for stronger coin relief.",
+                        _iqr, _posterize_levels,
+                    )
+                else:
+                    _posterize_levels = 8
+            except ImportError:
+                _posterize_levels = 8
+
+            step = 256 // _posterize_levels
+            img = img.point(
+                lambda x: (x // step) * step * 255 // (step * (_posterize_levels - 1))
+            )
 
             # Apply mask shape (circle, rectangle, rounded_rectangle)
             # "auto" for coin style defaults to circle (proven Ash coaster recipe)
