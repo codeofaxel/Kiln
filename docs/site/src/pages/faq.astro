@@ -126,6 +126,34 @@ const sections: Section[] = [
         q: "How does cost estimation work?",
         a: "Kiln calculates the cost of any print before it starts — material cost (by weight and filament type), electricity, and time. It also provides smart recommendations: cheaper filament alternatives that maintain strength, speed profiles that save time, and quality tradeoffs. Use it to budget projects or compare local vs outsourced manufacturing costs."
       },
+      {
+        q: "Can Kiln add decorations to my prints?",
+        a: "Yes. Kiln's multi-modal decoration engine accepts photos, QR codes, logos, text, SVGs, and brand assets and converts them into embossed or debossed surface features with one command. Free users get 3 decorations per month; Pro unlocks unlimited. The engine handles surface intelligence automatically — it knows which face of a coaster or jewelry tray to decorate and at what depth."
+      },
+      {
+        q: "What are procedural textures?",
+        a: "Procedural textures are algorithmically generated surface patterns — tiger stripe, marble, digital camo, snakeskin, wood grain, carbon fiber, honeycomb, lava, and more — that Kiln applies directly to any 3D model for multicolor FDM printing. No UV mapping or texture software needed. Each texture generates the correct AMS color assignments automatically. This is a Pro feature."
+      },
+      {
+        q: "Can I generate products with one command?",
+        a: "Yes. Kiln Pro includes product templates for coasters, keychains, ornaments, pet tags, pet bowls, bookmarks, fridge magnets, jewelry trays, wall plaques, and ashtrays. Say \"make me a coaster with my logo\" and Kiln generates the geometry, places the decoration, picks the right colors, and prepares the file for print — including multicolor if your printer has an AMS."
+      },
+      {
+        q: "Can Kiln modify a print that's already running?",
+        a: "Yes. Kiln Pro's mid-print modification engine can decorate, add geometric features, or swap materials on a live print — without cancelling and restarting. If the modification goes wrong, an atomic revert path restores the original job. This is patent-pending technology that works across all supported FDM printers."
+      },
+      {
+        q: "What happens if my print gets cancelled or fails mid-job?",
+        a: "With Kiln Pro, you don't lose the partial print. The resume system picks up from the exact layer where the print stopped — generating a safe resume sequence that avoids crashing the nozzle into the partial object on the bed. Works on Bambu Lab, OctoPrint, Moonraker/Klipper, Prusa Connect, Elegoo, and Serial printers. This is patent-pending technology."
+      },
+      {
+        q: "Does Kiln learn from past prints?",
+        a: "Yes. Kiln records print outcomes (success, failure, quality grade) and correlates them with the material, printer, settings, and design version used. Over time, it recommends better settings for the same material + printer combination, predicts failure risk before you start, and detects design regressions when a model that used to print well stops working. Cross-printer learning means insights from one printer improve predictions across your fleet. This is a Pro feature."
+      },
+      {
+        q: "Does Kiln support Bambu AMS and multi-material printing?",
+        a: "Yes. Kiln auto-detects AMS trays, identifies loaded filament colors and types, and routes the correct AMS slot when starting a print. For multicolor prints, Kiln handles automatic color segmentation and multi-gcode merging. Use <code>ams_status()</code> to check loaded materials and <code>slice_and_print</code> for automatic AMS routing."
+      },
     ]
   },
   {
@@ -145,7 +173,7 @@ const sections: Section[] = [
       },
       {
         q: "How do I contribute?",
-        a: "Fork the repo, create a branch, and submit a pull request. Kiln uses pytest for testing (~10,250 tests), Ruff for linting, and follows strict patterns documented in the contributing guide. Issues and feature requests are welcome on <a href='https://github.com/codeofaxel/Kiln' target='_blank' rel='noopener'>GitHub</a>."
+        a: "Fork the repo, create a branch, and submit a pull request. Kiln uses pytest for testing (~10,400 tests across both repos), Ruff for linting, and follows strict patterns documented in the contributing guide. Issues and feature requests are welcome on <a href='https://github.com/codeofaxel/Kiln' target='_blank' rel='noopener'>GitHub</a>."
       },
     ]
   },
