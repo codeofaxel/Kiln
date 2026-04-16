@@ -49,10 +49,15 @@ All three modes use the same MCP tools and CLI commands. An agent can seamlessly
 
 ### Why Kiln?
 
-- **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link. Manage a mixed fleet from one place.
+- **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
 - **AI-native** — <!-- KILN_MCP_COUNT:OLD --> 567 MCP tools built for AI agents. Not a web UI with an API bolted on.
-- **Prints don't fail silently** — Cross-printer learning, automatic failure rerouting, preflight safety checks on every job.
-- **Search → Slice → Print** — Search and download 3D models from Thingiverse, MyMiniFactory, and Cults3D (search only), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
+- **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print. Patent pending.
+- **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command. Patent pending.
+- **Resume, don't restart** — Cancelled or failed print? Resume from the exact layer it stopped on any supported FDM printer. No filament wasted. Patent pending (Pro).
+- **Modify mid-print** — Add decorations, append features, or swap materials on a live print with atomic revert if anything goes wrong. Patent pending (Pro).
+- **Smart material routing** — 25 materials, 45 brand-specific filament profiles (Bambu, Prusament, Polymaker, and more) across 11 material families. Intent-based recommendations with printer capability awareness.
+- **Prints don't fail silently** — Cross-printer learning, automatic failure recovery, closed-loop AI generation feedback (failed prints auto-improve future generations), preflight safety checks on every job.
+- **Search → Slice → Print** — Search and download 3D models from MyMiniFactory and Cults3D (search only), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
 - **Safety at scale** — 29 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
 
 ## Architecture
@@ -683,6 +688,55 @@ The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_COUNT:OLD --> 567 too
 | `quick_adaptive_plan` | All-in-one analyze + plan for adaptive slicing |
 | `export_adaptive_slicer_config` | Export adaptive plan to PrusaSlicer, OrcaSlicer, or Cura format |
 | `estimate_adaptive_time_savings` | Estimate time savings vs uniform layer height |
+
+### Decoration & Textures
+
+| Tool | Description |
+|------|-------------|
+| `decorate_surface` | Apply QR codes, photos, logos, text, or SVGs to any model face (emboss or deboss) |
+| `apply_procedural_texture` | Apply procedural textures (tiger stripe, marble, camo, wood, honeycomb, etc.) to a model |
+| `preview_texture_2d` | Fast 2D texture preview before 3D application |
+| `apply_image_texture` | Apply a photographic or image-based texture with cylinder detection |
+| `save_decoration` | Save a proven decoration (photo, SVG, QR, text) for reuse across models |
+| `list_decorations` | List saved decorations |
+| `iterate_decoration` | Iterate a decoration version with adjustments |
+
+### Product Templates (Pro)
+
+| Tool | Description |
+|------|-------------|
+| `generate_coaster` | Generate a coaster with optional QR, logo, photo, or text decoration |
+| `generate_keychain` | Generate a keychain (rectangle/circle/oval/heart) with front decoration |
+| `generate_ornament` | Generate a hanging ornament (disc/star) with front/back decoration |
+| `generate_pet_tag` | Generate a pet ID tag with name text and optional QR |
+| `generate_jewelry_tray` | Generate a jewelry tray with dividers and decoration |
+| `generate_ashtray` | Generate an ashtray with rim notches and interior/exterior decoration |
+| `generate_wall_plaque` | Generate a wall plaque with photo emboss (coin/posterize pipeline) |
+| `generate_pet_bowl` | Generate a pet bowl with exterior decoration |
+| `generate_bookmark` | Generate a bookmark with page clip and decoration |
+| `generate_fridge_magnet` | Generate a fridge magnet with front decoration and rear magnet recess |
+
+### Mid-Print Modification & Resume (Pro)
+
+| Tool | Description |
+|------|-------------|
+| `plan_mid_print_decoration` | Plan a decoration injection on a paused print |
+| `apply_mid_print_decoration_plan` | Execute a planned mid-print decoration with atomic revert |
+| `resume_interrupted_print` | One-call resume from the exact layer a print stopped — works on any FDM printer |
+| `analyze_mid_print_impact` | Analyze the structural impact of a proposed mid-print modification |
+| `preview_mid_print_session` | Preview what a mid-print modification will look like before committing |
+
+### Design Provenance & Learning (Pro)
+
+| Tool | Description |
+|------|-------------|
+| `save_design_version` | Save a design version with parametric source and provenance metadata |
+| `get_design_version` | Retrieve a design version with its full ancestry chain |
+| `diff_design_versions` | Geometric diff between two design versions |
+| `check_design_regression` | Detect if a design change caused a regression in print success |
+| `record_design_version_outcome` | Record a print outcome against a specific design version |
+| `get_proven_recipe` | Query provenance history for the best-performing parameters |
+| `get_regression_alerts` | Get active regression alerts for designs that stopped printing well |
 | `get_adaptive_plan_summary` | Human-readable summary of an adaptive slicing plan |
 
 ### G-code Interception

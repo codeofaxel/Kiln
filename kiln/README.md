@@ -99,7 +99,15 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 - **Failure recovery** — 9 failure types classified, automated recovery planning
 - **Multi-printer splitting** — round-robin and assembly-based job distribution across fleets
 - **Generation feedback loop** — failed print → improved prompt with printability constraints
-- **Smart material routing** — intent-based material recommendations (8 materials, printer capability aware)
+- **Smart material routing** — intent-based material recommendations (45 brand-specific filament profiles across 11 material families, printer capability aware)
+- **Decoration engine** — QR codes, photos, logos, text, SVGs, and brand assets embossed or debossed onto any model with one command (patent pending)
+- **Procedural textures** — tiger stripe, marble, digital camo, snakeskin, wood grain, carbon fiber, honeycomb, lava — applied directly to any model for multicolor FDM printing (Pro)
+- **Product templates** — one-command generation of coasters, keychains, ornaments, pet tags, pet bowls, bookmarks, magnets, jewelry trays, wall plaques, and ashtrays with built-in decoration support (Pro)
+- **Mid-print modification** — decorate, add features, or swap material on a live print with atomic dual-artifact revert (patent pending, Pro)
+- **Resume interrupted prints** — resume from the exact layer after cancel on any supported FDM printer, no wasted filament (patent pending, Pro)
+- **Design provenance** — version tracking, regression detection, outcome-correlated genealogy across design iterations (patent pending, Pro)
+- **Cross-printer learning** — fleet-wide outcome learning, predictive settings, closed-loop AI generation feedback where failed prints auto-improve future generations (patent pending)
+- **AMS auto-routing** — automatic Bambu AMS tray detection, color/type identification, and slot routing when starting prints
 - **Community print registry** — opt-in crowd-sourced settings and success rates
 - **Fulfillment services** — outsource to Craftcloud (150+ print services, no API key required)
 - **Safety first** — pre-flight checks, G-code validation, temperature limits, optional auth

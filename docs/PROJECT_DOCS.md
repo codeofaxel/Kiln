@@ -835,6 +835,54 @@ Constraint-aware design reasoning — agents query material properties, design p
 | `project_cost_summary` | `project_id` | Aggregate costs with category breakdown and budget tracking |
 | `client_cost_report` | `client` | Cross-project cost aggregation for a client |
 
+#### Procedural Textures (Pro Tier)
+
+| Tool | Description |
+|---|---|
+| `apply_procedural_texture` | Apply a procedural texture (tiger stripe, marble, camo, wood, honeycomb, lava, etc.) to any model for multicolor FDM printing |
+| `list_procedural_textures` | List all available procedural texture presets with descriptions |
+| `preview_texture_2d` | Fast 2D preview of a texture before 3D application |
+| `apply_image_texture` | Apply a photographic or image-based texture with cylinder detection |
+| `apply_geometric_texture` | Apply geometric tile patterns (snakeskin, bamboo, carbon fiber) |
+
+#### Mid-Print Modification & Resume (Pro Tier)
+
+| Tool | Description |
+|---|---|
+| `plan_mid_print_decoration` | Plan a decoration injection on a paused/running print |
+| `apply_mid_print_decoration_plan` | Execute a planned mid-print decoration with atomic dual-artifact revert |
+| `resume_interrupted_print` | One-call resume from the exact layer a print stopped — works on any FDM printer (Bambu, OctoPrint, Moonraker/Klipper, Prusa Connect, Elegoo, Serial) |
+| `analyze_mid_print_impact` | Structural impact analysis of a proposed mid-print modification |
+| `preview_mid_print_session` | Preview what a mid-print modification will look like before committing |
+| `cancel_print_recovery` | Cancel an in-progress recovery session |
+| `generate_recovery_gcode` | Generate safe resume G-code with loaded-bed preamble (heat → Z-lift → home X/Y only → descend) |
+
+#### Design Provenance & Version Intelligence (Pro Tier)
+
+| Tool | Description |
+|---|---|
+| `save_design_version` | Save a design version with parametric source and provenance metadata |
+| `get_design_version` | Retrieve a design version with its full ancestry chain |
+| `diff_design_versions` | Geometric diff between two design versions |
+| `compare_design_versions` | Side-by-side comparison of two design versions |
+| `check_design_regression` | Detect if a design change caused a regression in print success |
+| `record_design_version_outcome` | Record a print outcome against a specific design version |
+| `get_proven_recipe` | Query provenance history for the best-performing parameters for a given material and printer |
+| `get_regression_alerts` | Get active regression alerts for designs that stopped printing well |
+| `dismiss_regression_alert` | Dismiss a regression alert after investigation |
+| `best_design_version` | Find the best-performing design version for a material/printer combination |
+
+#### Print Learning & Cross-Printer Intelligence (Pro Tier)
+
+| Tool | Description |
+|---|---|
+| `get_print_learning_summary` | Aggregate learning insights: what works, what fails, material success rates |
+| `get_optimal_settings` | Recommend optimal settings from historical outcomes for a material/printer |
+| `get_material_success_rates` | Success/failure rates per material across your fleet |
+| `get_maintenance_prediction` | Predictive maintenance alerts based on failure pattern analysis |
+| `get_print_confidence` | Confidence score for an upcoming print based on historical data |
+| `record_print_outcome` | Record a print outcome (success/failure/partial) with settings and quality grade |
+
 ### MCP Resources
 
 Read-only resources for agent context:
