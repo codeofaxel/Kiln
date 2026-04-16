@@ -77,9 +77,12 @@
       {
         "symptom": "Consistent horizontal lines/banding on print surface (Z-banding)",
         "cause": "Lead screw wobble, Z-axis binding, or inconsistent layer heights from mechanical play",
-        "fix": "Check lead screw for bends — spin by hand and look for wobble. Lubricate Z rods. Ensure Z coupler is not over-tightened"
+        "fix": "Check lead screw for bends \u2014 spin by hand and look for wobble. Lubricate Z rods. Ensure Z coupler is not over-tightened"
       }
-    ]
+    ],
+    "build_volume_mm": [200, 200, 200],
+    "max_hotend_temp": 250,
+    "max_bed_temp": 100
   },
   "ender3": {
     "display_name": "Creality Ender 3 / Ender 3 Pro / Ender 3 V2",
@@ -142,7 +145,10 @@
         "cause": "Retraction too short for bowden setup",
         "fix": "Increase retraction to 5-6mm at 45mm/s"
       }
-    ]
+    ],
+    "build_volume_mm": [220, 220, 250],
+    "max_hotend_temp": 260,
+    "max_bed_temp": 110
   },
   "ender3_s1": {
     "display_name": "Creality Ender 3 S1 / S1 Pro",
@@ -198,7 +204,10 @@
         "cause": "Heat creep in all-metal hotend",
         "fix": "Ensure heatsink fan runs at 100%. Print PETG at 230-235C, not higher."
       }
-    ]
+    ],
+    "build_volume_mm": [220, 220, 270],
+    "max_hotend_temp": 260,
+    "max_bed_temp": 100
   },
   "k1": {
     "display_name": "Creality K1 / K1 Max",
@@ -255,7 +264,10 @@
         "cause": "Input shaping not tuned or belt tension off",
         "fix": "Re-run input shaper calibration. Check belt tension on both X and Y."
       }
-    ]
+    ],
+    "build_volume_mm": [220, 220, 250],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 100
   },
   "prusa_mk3s": {
     "display_name": "Prusa i3 MK3S / MK3S+",
@@ -318,7 +330,10 @@
         "cause": "Partially clogged nozzle or cold pull needed",
         "fix": "Do cold pull with nylon at 285C \u2192 pull at 90C. Replace nozzle if persists."
       }
-    ]
+    ],
+    "build_volume_mm": [250, 210, 210],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 120
   },
   "prusa_mk4": {
     "display_name": "Prusa MK4 / MK4S",
@@ -375,7 +390,10 @@
         "cause": "Retraction set too high (above 1mm)",
         "fix": "Reset retraction to 0.4mm in slicer profile. Nextruder requires very short retraction."
       }
-    ]
+    ],
+    "build_volume_mm": [250, 210, 220],
+    "max_hotend_temp": 290,
+    "max_bed_temp": 120
   },
   "prusa_mini": {
     "display_name": "Prusa Mini / Mini+",
@@ -401,7 +419,7 @@
         "hotend": 240,
         "bed": 100,
         "fan": 0,
-        "notes": "Marginal on stock PTFE hotend — 240C is the absolute max. No enclosure means warping risk on tall parts. Only recommended for small, low-profile prints."
+        "notes": "Marginal on stock PTFE hotend \u2014 240C is the absolute max. No enclosure means warping risk on tall parts. Only recommended for small, low-profile prints."
       },
       "TPU": {
         "hotend": 220,
@@ -443,7 +461,10 @@
         "cause": "WiFi instability on Mini's built-in ESP module",
         "fix": "Move printer closer to router, or use USB serial via OctoPrint on a Raspberry Pi for reliable monitoring."
       }
-    ]
+    ],
+    "build_volume_mm": [180, 180, 180],
+    "max_hotend_temp": 280,
+    "max_bed_temp": 100
   },
   "bambu_x1c": {
     "display_name": "Bambu Lab X1 Carbon",
@@ -519,7 +540,10 @@
         "cause": "Build plate not clean or chamber not pre-heated",
         "fix": "Clean with IPA. Pre-heat chamber by running bed at 100C for 10 min before print."
       }
-    ]
+    ],
+    "build_volume_mm": [256, 256, 256],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 120
   },
   "bambu_p1s": {
     "display_name": "Bambu Lab P1S",
@@ -569,7 +593,7 @@
       },
       {
         "symptom": "First layer inconsistency or adhesion failure",
-        "cause": "No LiDAR auto-inspection (unlike X1C) — Z-offset drift or bed contamination goes undetected",
+        "cause": "No LiDAR auto-inspection (unlike X1C) \u2014 Z-offset drift or bed contamination goes undetected",
         "fix": "Manually verify first layer quality on every print. Re-run bed leveling calibration. Clean PEI sheet with IPA between prints"
       },
       {
@@ -597,7 +621,10 @@
         "cause": "High flow rate combined with PETG's naturally stringy behavior and insufficient retraction",
         "fix": "Lower hotend temp to 230-235C. Increase retraction to 0.8-1.0mm. Enable wipe on retract in slicer. Reduce flow rate by 2-3%"
       }
-    ]
+    ],
+    "build_volume_mm": [256, 256, 256],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 100
   },
   "bambu_a1": {
     "display_name": "Bambu Lab A1",
@@ -611,7 +638,13 @@
     "max_acceleration_mm_s2": 10000,
     "max_nozzle_temp": 300,
     "max_bed_temp": 100,
-    "nozzle_options": ["0.2mm SS", "0.4mm SS (default)", "0.4mm hardened steel", "0.6mm hardened steel", "0.8mm hardened steel"],
+    "nozzle_options": [
+      "0.2mm SS",
+      "0.4mm SS (default)",
+      "0.4mm hardened steel",
+      "0.6mm hardened steel",
+      "0.8mm hardened steel"
+    ],
     "ams_type": "ams_lite",
     "ams_slots": 4,
     "camera": "1080p ~1fps",
@@ -706,7 +739,8 @@
         "cause": "RTSP authentication required by newer firmware, or camera disabled on printer",
         "fix": "Ensure camera is enabled in printer settings. Verify LAN access code is correct. Check ffmpeg is installed."
       }
-    ]
+    ],
+    "max_hotend_temp": 300
   },
   "voron_2": {
     "display_name": "Voron 2.4 / Trident",
@@ -775,7 +809,10 @@
         "cause": "Chamber too hot, heater PID not tuned for chamber temps",
         "fix": "Re-tune PID with chamber at target temp. Ensure thermistor readings are accurate."
       }
-    ]
+    ],
+    "build_volume_mm": [300, 300, 300],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 120
   },
   "elegoo_neptune4": {
     "display_name": "Elegoo Neptune 4 / 4 Pro",
@@ -830,7 +867,7 @@
       },
       {
         "symptom": "PLA jamming in hotend during slow or low-temp prints",
-        "cause": "Heat creep in all-metal hotend — PLA softens in the heat break zone at low flow rates",
+        "cause": "Heat creep in all-metal hotend \u2014 PLA softens in the heat break zone at low flow rates",
         "fix": "Increase minimum print temp to 210C for PLA. Ensure hotend cooling fan is running at 100%. Avoid long idle periods at temp"
       },
       {
@@ -848,7 +885,10 @@
         "cause": "USB power management or electromagnetic interference disrupting the serial connection",
         "fix": "Use a short, shielded USB cable. Disable USB power management in host OS. Route USB cable away from stepper motor wires. Prefer SD card for long prints"
       }
-    ]
+    ],
+    "build_volume_mm": [225, 225, 265],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 100
   },
   "elegoo_centauri_carbon": {
     "display_name": "Elegoo Centauri Carbon / Carbon 2",
@@ -910,7 +950,10 @@
         "cause": "Printer cannot reach the local HTTP server (firewall, different subnet)",
         "fix": "Ensure no firewall blocks the ephemeral port. Verify printer and host are on same network segment."
       }
-    ]
+    ],
+    "build_volume_mm": [256, 256, 256],
+    "max_hotend_temp": 320,
+    "max_bed_temp": 110
   },
   "elegoo_orangestorm_giga": {
     "display_name": "Elegoo OrangeStorm Giga",
@@ -943,17 +986,17 @@
     },
     "failure_modes": [
       {
-        "symptom": "Four Z-axes become misaligned — first layer uneven across bed",
+        "symptom": "Four Z-axes become misaligned \u2014 first layer uneven across bed",
         "cause": "Quad lead screws drift out of sync from mechanical settling, vibration, or missed steps on one motor",
         "fix": "Run quad-Z alignment procedure (G34 or Klipper Z_TILT_ADJUST). Verify all four corners are within 0.05mm. Add Z_TILT_ADJUST to start G-code"
       },
       {
         "symptom": "Large prints warp severely, especially corners lifting",
-        "cause": "No enclosure on a massive build volume — ambient temperature gradient across 800mm causes differential shrinkage",
+        "cause": "No enclosure on a massive build volume \u2014 ambient temperature gradient across 800mm causes differential shrinkage",
         "fix": "Build a temporary enclosure from foam board or moving blankets. Use brim width of 10-15mm. Print with lower bed temp gradient materials (PLA, PETG) for large parts"
       },
       {
-        "symptom": "First layer uneven — thin in some areas, thick in others across 800mm bed",
+        "symptom": "First layer uneven \u2014 thin in some areas, thick in others across 800mm bed",
         "cause": "Mesh bed leveling not capturing enough probe points, or bed physically warped beyond mesh compensation range",
         "fix": "Increase mesh probe density to at least 10x10 points. Re-run mesh leveling with bed at print temperature. Check bed flatness with straight edge"
       },
@@ -964,11 +1007,11 @@
       },
       {
         "symptom": "Filament runs out mid-print on large models",
-        "cause": "Large prints consume multiple full spools — single spool insufficient for 800mm-scale parts",
+        "cause": "Large prints consume multiple full spools \u2014 single spool insufficient for 800mm-scale parts",
         "fix": "Calculate filament usage before printing. Stage multiple spools. Enable filament runout sensor and test that pause/resume works before committing to long prints"
       },
       {
-        "symptom": "Temperature varies across bed — edges 5-10C cooler than center",
+        "symptom": "Temperature varies across bed \u2014 edges 5-10C cooler than center",
         "cause": "800mm heated bed loses heat at edges faster than the heater can compensate, especially without insulation",
         "fix": "Add cork or silicone insulation under the bed. Increase bed temp by 5-10C to compensate. Avoid placing critical first-layer features at bed edges"
       },
@@ -982,7 +1025,10 @@
         "cause": "Belt stretch from sustained tension over many hours, or stepper motor thermal drift",
         "fix": "Use Gates GT2 belts rated for sustained tension. Check belt tension every 100 print hours. Add stepper driver cooling if motors exceed 50C. Reduce acceleration for long prints"
       }
-    ]
+    ],
+    "build_volume_mm": [800, 800, 1000],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 110
   },
   "qidi_x_plus3": {
     "display_name": "QIDI X-Plus 3 / X-Max 3",
@@ -1034,7 +1080,7 @@
     "failure_modes": [
       {
         "symptom": "Firmware update fails or breaks features",
-        "cause": "QIDI's custom Klipper fork lags behind mainline Klipper — updates may introduce incompatibilities or revert fixes",
+        "cause": "QIDI's custom Klipper fork lags behind mainline Klipper \u2014 updates may introduce incompatibilities or revert fixes",
         "fix": "Back up printer.cfg before updating. Check QIDI forums for known issues with new firmware. Roll back via SD card if update causes problems"
       },
       {
@@ -1049,25 +1095,28 @@
       },
       {
         "symptom": "Bubbling, popping, or rough surface finish with nylon or polycarbonate",
-        "cause": "Hygroscopic engineering materials (PA, PA-CF, PC) absorb moisture rapidly — even hours of ambient exposure",
+        "cause": "Hygroscopic engineering materials (PA, PA-CF, PC) absorb moisture rapidly \u2014 even hours of ambient exposure",
         "fix": "Store filament in sealed dry box with desiccant. Dry PA/PA-CF at 80C for 8-12h, PC at 80C for 8h before printing. Use inline filament dryer for long prints"
       },
       {
-        "symptom": "Print quality degrades after firmware update — ringing or artifacts appear",
+        "symptom": "Print quality degrades after firmware update \u2014 ringing or artifacts appear",
         "cause": "Input shaping profile reset or invalidated by firmware update changing motion parameters",
         "fix": "Re-run input shaping calibration after every firmware update. Save your tuned shaper values externally so you can re-enter them manually if needed"
       },
       {
         "symptom": "Touchscreen freezes or becomes unresponsive during long prints",
         "cause": "UI bug in certain QIDI firmware versions causes display process to hang under sustained load",
-        "fix": "Print continues even if screen freezes — monitor via network (Fluidd/Mainsail) instead. Update to latest firmware if available. Power cycle screen only (not printer) if possible"
+        "fix": "Print continues even if screen freezes \u2014 monitor via network (Fluidd/Mainsail) instead. Update to latest firmware if available. Power cycle screen only (not printer) if possible"
       },
       {
         "symptom": "Engineering materials (ABS, PA) lose bed adhesion at high chamber temperatures",
-        "cause": "PEI adhesion characteristics change at elevated chamber temps — thermal expansion and surface energy shift",
+        "cause": "PEI adhesion characteristics change at elevated chamber temps \u2014 thermal expansion and surface energy shift",
         "fix": "Use Magigoo or specialized adhesive for engineering materials. Increase first layer width to 150%. Lower chamber temp by 5C if adhesion is marginal"
       }
-    ]
+    ],
+    "build_volume_mm": [280, 280, 270],
+    "max_hotend_temp": 350,
+    "max_bed_temp": 120
   },
   "klipper_generic": {
     "display_name": "Generic Klipper Printer (Moonraker)",
@@ -1147,7 +1196,10 @@
         "cause": "Probe wiring loose or probe triggered during travel",
         "fix": "Check probe wiring. Increase probe travel height (probe_hop). Ensure probe is not triggering from bed vibration."
       }
-    ]
+    ],
+    "build_volume_mm": [220, 220, 250],
+    "max_hotend_temp": 260,
+    "max_bed_temp": 110
   },
   "ender5": {
     "display_name": "Creality Ender 5 / Ender 5 Plus",
@@ -1199,7 +1251,10 @@
         "cause": "Stock springs too weak for heavy glass bed",
         "fix": "Upgrade to stiffer yellow springs or silicone spacers."
       }
-    ]
+    ],
+    "build_volume_mm": [220, 220, 300],
+    "max_hotend_temp": 260,
+    "max_bed_temp": 110
   },
   "cr10": {
     "display_name": "Creality CR-10 / CR-10S",
@@ -1251,7 +1306,10 @@
         "cause": "PTFE tube degradation or plastic extruder arm crack",
         "fix": "Replace PTFE tube. Upgrade to metal extruder arm."
       }
-    ]
+    ],
+    "build_volume_mm": [300, 300, 400],
+    "max_hotend_temp": 260,
+    "max_bed_temp": 100
   },
   "voron_0": {
     "display_name": "Voron 0 / 0.2",
@@ -1309,7 +1367,10 @@
         "cause": "Build plate adhesion issue or Z offset too high",
         "fix": "Clean bed with IPA. Re-calibrate Z offset. For ABS, let chamber soak at temp 10 min before printing."
       }
-    ]
+    ],
+    "build_volume_mm": [120, 120, 120],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 120
   },
   "ratrig_vcore3": {
     "display_name": "Rat Rig V-Core 3 / V-Core 3.1",
@@ -1368,7 +1429,10 @@
         "cause": "Belt tension uneven or rail alignment off",
         "fix": "Re-tension belts evenly. Verify linear rails are parallel using straight edge."
       }
-    ]
+    ],
+    "build_volume_mm": [300, 300, 300],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 120
   },
   "elegoo_neptune3": {
     "display_name": "Elegoo Neptune 3 / 3 Pro / 3 Plus",
@@ -1420,7 +1484,10 @@
         "cause": "PTFE tube swelling at higher temps",
         "fix": "Print PETG at 225-230C max. Replace PTFE tube if deformed."
       }
-    ]
+    ],
+    "build_volume_mm": [220, 220, 280],
+    "max_hotend_temp": 260,
+    "max_bed_temp": 100
   },
   "anker_m5": {
     "display_name": "AnkerMake M5 / M5C",
@@ -1472,7 +1539,10 @@
         "cause": "Z offset needs adjustment or bed not clean",
         "fix": "Clean PEI sheet with IPA. Adjust Z offset in 0.05mm increments."
       }
-    ]
+    ],
+    "build_volume_mm": [235, 235, 250],
+    "max_hotend_temp": 260,
+    "max_bed_temp": 100
   },
   "artillery_sw_x3": {
     "display_name": "Artillery Sidewinder X3 Plus / X3 Pro",
@@ -1530,7 +1600,10 @@
         "cause": "USB connection to MCU unstable",
         "fix": "Use high-quality USB cable. Avoid USB hubs."
       }
-    ]
+    ],
+    "build_volume_mm": [240, 240, 260],
+    "max_hotend_temp": 260,
+    "max_bed_temp": 110
   },
   "sovol_sv06": {
     "display_name": "Sovol SV06 / SV06 Plus",
@@ -1588,7 +1661,10 @@
         "cause": "Probe mount screws loosening from vibration",
         "fix": "Tighten probe mounting screws. Re-run auto-level."
       }
-    ]
+    ],
+    "build_volume_mm": [220, 220, 250],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 100
   },
   "sovol_sv07": {
     "display_name": "Sovol SV07 / SV07 Plus",
@@ -1646,7 +1722,10 @@
         "cause": "Moonraker service crashed or network configuration issue",
         "fix": "Power cycle printer. Check network settings via touchscreen."
       }
-    ]
+    ],
+    "build_volume_mm": [250, 250, 240],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 110
   },
   "flashforge_adventurer5m": {
     "display_name": "FlashForge Adventurer 5M / 5M Pro",
@@ -1698,7 +1777,10 @@
         "cause": "Nozzle not seated properly in quick-swap mechanism",
         "fix": "Remove and re-seat nozzle. Ensure it clicks into place. Tighten if thread-based."
       }
-    ]
+    ],
+    "build_volume_mm": [220, 220, 220],
+    "max_hotend_temp": 280,
+    "max_bed_temp": 110
   },
   "prusa_xl": {
     "display_name": "Prusa XL",
@@ -1762,7 +1844,10 @@
         "cause": "Temperature difference at zone boundaries",
         "fix": "Allow extra bed soak time (5-10 min) for zones to equalize."
       }
-    ]
+    ],
+    "build_volume_mm": [360, 360, 360],
+    "max_hotend_temp": 290,
+    "max_bed_temp": 120
   },
   "bambu_p1p": {
     "display_name": "Bambu Lab P1P",
@@ -1808,7 +1893,10 @@
         "cause": "No enclosure \u2014 ambient air cooling causes differential shrinkage",
         "fix": "Add aftermarket enclosure. Or switch to draft-resistant materials (PLA, PETG)."
       }
-    ]
+    ],
+    "build_volume_mm": [256, 256, 256],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 100
   },
   "bambu_a1_mini": {
     "display_name": "Bambu Lab A1 Mini",
@@ -1853,6 +1941,9 @@
         "cause": "Y-axis acceleration too aggressive for bed-slinger with heavy part",
         "fix": "Reduce acceleration for tall or heavy prints."
       }
-    ]
+    ],
+    "build_volume_mm": [180, 180, 180],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 80
   }
 }
