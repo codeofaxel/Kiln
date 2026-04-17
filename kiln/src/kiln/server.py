@@ -3228,13 +3228,85 @@ def _resolve_use_ams(
     try:
         ams_info = adapter.get_ams_status()
     except Exception as exc:
-        logger.debug("AMS auto-detect probe failed: %s — defaulting to no AMS.", exc)
-        return {"use_ams": False, "ams_mapping": None, "warnings": []}
+        logger.warning(
+            "AMS auto-detect probe failed: %s — external spool fallback, "
+            "but this may be wrong if AMS is attached.  Pass use_ams='true' "
+            "with an explicit ams_mapping to force AMS routing.",
+            exc,
+        )
+        return {
+            "use_ams": False,
+            "ams_mapping": None,
+            "warnings": [
+                f"AMS auto-detect probe failed: {exc}.  Falling back to "
+                "external spool — pass use_ams='true' with an explicit "
+                "ams_mapping=[<slot>] if you want AMS."
+            ],
+            "ambiguous": True,
+        }
 
-    # Check if AMS exists
+    # Check if AMS exists.  Bambu's MQTT can return zeroed AMS state for
+    # a few seconds after a cancel / disconnect / adapter reconnect —
+    # the AMS is still physically attached but the cached state hasn't
+    # repopulated yet.  Retrying once picks up the republished state
+    # and prevents the silent external-spool fallthrough that used to
+    # route every post-cancel reslice to the wrong filament path
+    # (memory: "always route to AMS when printer has one").
     units = ams_info.get("units", [])
+    ams_exist_bits = str(ams_info.get("ams_exist_bits", "0")).strip()
+    tray_exist_bits = str(ams_info.get("tray_exist_bits", "0")).strip()
     if not units:
-        logger.debug("AMS auto-detect: no AMS units found — using external spool.")
+        import time as _time
+        _time.sleep(1.2)
+        try:
+            ams_info_retry = adapter.get_ams_status()
+            retry_units = ams_info_retry.get("units", [])
+            if retry_units:
+                ams_info = ams_info_retry
+                units = retry_units
+                ams_exist_bits = str(ams_info.get("ams_exist_bits", "0")).strip()
+                tray_exist_bits = str(ams_info.get("tray_exist_bits", "0")).strip()
+                logger.info(
+                    "AMS auto-detect: initial probe returned no units, retry "
+                    "picked up %d unit(s).  (Transient MQTT cache — normal "
+                    "after cancel/reconnect.)",
+                    len(units),
+                )
+        except Exception:
+            pass
+
+    # Still no units after retry — is AMS hardware actually present?
+    if not units:
+        hw_present = ams_exist_bits != "0" or tray_exist_bits != "0"
+        if hw_present:
+            # Hardware bits say AMS exists but no tray state.  This
+            # is almost always stale cache or an unplugged AMS cable.
+            # Either way, refusing to silent-route is the correct
+            # behaviour per the "always route to AMS" memory rule.
+            logger.warning(
+                "AMS hardware present (ams_exist_bits=%s, tray_exist_bits=%s) "
+                "but no tray state available after retry.  Refusing silent "
+                "external-spool fallthrough.  Pass use_ams='true' with an "
+                "explicit ams_mapping=[<slot>] to force AMS routing.",
+                ams_exist_bits,
+                tray_exist_bits,
+            )
+            return {
+                "use_ams": False,
+                "ams_mapping": None,
+                "warnings": [
+                    f"AMS hardware detected (ams_bits={ams_exist_bits}, "
+                    f"tray_bits={tray_exist_bits}) but no tray state was "
+                    "reported after retry.  Routing would silently fall "
+                    "through to the external spool — pass use_ams='true' "
+                    "with an explicit ams_mapping=[<slot>] to force AMS, "
+                    "or wait a few seconds for the MQTT cache to refresh."
+                ],
+                "ambiguous": True,
+            }
+        # No AMS hardware bits set either — genuinely no AMS on this
+        # printer.  External spool is correct.
+        logger.info("AMS auto-detect: no AMS hardware — external spool.")
         return {"use_ams": False, "ams_mapping": None, "warnings": []}
 
     # Collect loaded trays.  Trust ``tray_type`` as the loaded-indicator —
