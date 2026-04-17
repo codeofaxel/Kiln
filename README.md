@@ -1111,9 +1111,9 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (10,790 total)
-cd kiln && python3 -m pytest tests/ -v        # 8,725 tests
-cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
+# Run tests (11,159 total across Kiln + kiln-pro)
+cd kiln && python3 -m pytest tests/ -v        # 8,750 tests
+cd ../octoprint-cli && python3 -m pytest tests/ -v  # 223 tests (auxiliary CLI tool)
 ```
 
 ## Revenue Model
