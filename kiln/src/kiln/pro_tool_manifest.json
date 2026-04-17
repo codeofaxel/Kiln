@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-17T22:26:14.661479+00:00",
-  "tool_count": 217,
+  "generated": "2026-04-17T22:45:54.227979+00:00",
+  "tool_count": 221,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -7458,6 +7458,76 @@
       }
     },
     {
+      "name": "assign_artifact_to_org",
+      "description": "Mark a local artifact as owned by *org_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "artifact_type": {
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "assigned_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Assigned By"
+          }
+        },
+        "required": [
+          "artifact_type",
+          "artifact_id",
+          "org_id"
+        ],
+        "title": "assign_artifact_to_orgArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "backfill_artifact_into_org",
+      "description": "Move an existing tenant-owned artifact into *org_id*, updating BOTH the cloud rows and the local ownership marker.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "artifact_type": {
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_type",
+          "artifact_id",
+          "org_id"
+        ],
+        "title": "backfill_artifact_into_orgArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "check_capability",
       "description": "Dry-run the permission check the cloud RLS will run.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -7700,6 +7770,99 @@
           "capability"
         ],
         "title": "revoke_scopeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "setup_team",
+      "description": "One-shot team onboarding: create an org, invite members, and optionally migrate existing artifacts into it.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "owner_tenant": {
+            "title": "Owner Tenant",
+            "type": "string"
+          },
+          "member_tenants": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Member Tenants"
+          },
+          "tier": {
+            "default": "pro",
+            "title": "Tier",
+            "type": "string"
+          },
+          "migrate_artifact_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Migrate Artifact Ids"
+          },
+          "migrate_artifact_type": {
+            "default": "design",
+            "title": "Migrate Artifact Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "slug",
+          "owner_tenant"
+        ],
+        "title": "setup_teamArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "unassign_artifact",
+      "description": "Remove the local org-ownership marker for an artifact.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "artifact_type": {
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_type",
+          "artifact_id"
+        ],
+        "title": "unassign_artifactArguments",
         "type": "object"
       }
     },
