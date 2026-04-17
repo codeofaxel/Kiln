@@ -79,6 +79,99 @@ All three modes use the same MCP tools and CLI commands.
 
 ---
 
+## How Kiln Works
+
+A high-level map of Kiln's four core subsystems. These are what the "Before and After Kiln" comparison on the home page refers to. Deeper per-tool tables live further down this page; this section is for the reader who wants to understand the *shape* of the system before digging in.
+
+### 1. The Validation Pipeline
+
+Before a model ever reaches a printer, Kiln runs it through a printability analysis. The goal is simple: **catch problems early so you don't waste filament, time, or bed adhesion on a print that was never going to work.**
+
+The pipeline scores a mesh across seven dimensions and returns a 0–100 score with a letter grade and a list of recommended fixes:
+
+| Dimension | What it catches |
+|---|---|
+| Overhangs | Triangles steeper than the printer can bridge without supports |
+| Thin walls | Walls thinner than the nozzle diameter |
+| Bridging | Horizontal spans too long to print reliably |
+| Bed adhesion | Contact area too small or too sparse for the first layer to grip |
+| Support volume | How much scaffolding the print would need |
+| Thermal stress | Sharp cross-section changes that crack or warp |
+| Adhesion force | Predicted peel/shear force at the bed for the chosen material and printer |
+
+The last two dimensions are **material-aware**. Kiln knows ABS/ASA/PA/PC tend to warp, bed-slinger printers have less adhesion than CoreXY, and enclosures change everything. The output isn't a warning list — it's concrete slicer overrides: `brim_width`, `raft_layers`, reorientation suggestions, support placement.
+
+Pure Python, no external mesh libraries. Runs locally on your laptop. Part of the patent-pending Printability Validation Pipeline.
+
+### 2. The Decoration Engine
+
+Kiln's decoration engine accepts many kinds of input and turns them into fabrication instructions for a physical printer (or a virtual asset for a game engine or metaverse platform). The core idea: **many inputs → one normalized heightmap → many outputs.**
+
+Inputs the engine accepts:
+
+- **Photographs** — your dog, a logo, a team photo. Auto-background removal, posterization to FDM-resolution depth tiers, heightmap conversion.
+- **Natural language** — "add a wave texture to the side" or "emboss 'Happy Birthday' on top".
+- **Voice** — the same, spoken aloud and transcribed.
+- **SVG** — brand logos, icons, lettering.
+- **QR codes** — generated to the right module size for the pocket's physical dimensions so a phone camera can actually scan the print.
+- **Procedural textures** — tiger stripe, marble, snakeskin, wood grain, carbon fiber, honeycomb, lava, ocean, tie-dye, galaxy. Generated at face-centroid resolution; no UV mapping required.
+- **Brand assets** — registered logos and imagery from a per-tenant brand asset registry for repeatable POS / merch / kiosk production.
+
+Outputs the engine produces:
+
+- **Physical:** CSG boolean difference/union for FDM (emboss or deboss), G-code with grayscale-modulated laser power for engravers, heightmap-derived pocket depth for CNC milling.
+- **Virtual:** GLTF/FBX for game engines, USD/Alembic for VFX pipelines, WebGL-ready formats for browsers, NFT/marketplace packages.
+- **Combined:** the same decorated mesh dispatched simultaneously to a physical printer and a virtual asset pipeline in a single operation.
+
+Covered by patent-pending Decoration Engine (KILN-017) and the patent-pending Cross-Domain Object Lifecycle (KILN-024) for simultaneous physical-plus-virtual delivery.
+
+### 3. Git for 3D Printing
+
+Version control for designs, decorations, and mechanical features — modeled after git, but operating on manufacturing-domain semantics instead of byte diffs.
+
+**Three artifact types, one substrate:**
+
+- **Designs** — the mesh itself.
+- **Decorations** — logos, textures, photo-emboss, brand assets applied to a mesh.
+- **Features** — chamfers, fillets, pockets, holes, bosses, ribs — the mechanical modifications.
+
+All three get the same operations: branch, merge, pull request, release, cherry-pick, A/B analysis. You can:
+
+- **Branch in parallel** — try three emboss depths without touching your proven version.
+- **Three-way semantic merge** — merges operate on the manufacturing-domain fingerprint (Z-levels, pockets, bounding-box), not raw bytes. A conflict means two changes touched the same physical feature — which means something real.
+- **Sign a release with Ed25519** — after a version prints well, sign it. Anyone downstream can verify later that the mesh hasn't changed since you signed.
+- **Cross-branch A/B** — correlate print outcomes with design changes across branches to see which variant actually printed best.
+- **Cherry-pick modifications** — pull a single chamfer or a single decoration from one branch into another, conflict-aware.
+- **Local-first, optional sync** — everything runs offline on your laptop. If you want to sync across devices or collaborate, push to your own Supabase-backed cloud — not a vendor's.
+
+Covered by patent-pending Semantic Version Control for 3D Manufacturing (KILN-028) and Design Provenance + Manufacturing Intelligence (KILN-021).
+
+### 4. The Cross-Printer Intelligence Layer
+
+Every print outcome Kiln sees — success, failure, material, printer, settings, quality grade — goes into an outcome database. The intelligence layer reads from this database to make every subsequent print smarter:
+
+- **Proven recipes** — the best-performing settings Kiln has ever seen for a given material-plus-printer combination. When you start a similar print, the agent gets these as a starting point instead of guessing.
+- **Regression alerts** — if a design that used to print well suddenly stops, the system flags it with the version diff so you can see what changed.
+- **Cross-printer learning** — a recovery strategy that worked on one Bambu A1 propagates as a candidate fix for a Prusa MK4 hitting the same symptom class. Fleet-wide learning, not per-machine.
+- **Predictive maintenance** — failure-pattern analysis flags likely hardware issues (belt tension drift, hot-end clogging, bed-leveling regression) before they cause a scrapped print.
+- **Print confidence scoring** — before a job starts, Kiln reports a confidence number based on historical outcomes for this material-printer-model combination.
+
+Covered by patent-pending filings KILN-003 (autonomous failure detection + layer-accurate resume + cross-device learning), KILN-010 (closed-loop failure-to-prompt constraint synthesis), KILN-014 (cross-printer learning), and KILN-027 (cross-printer material learning).
+
+### How These Fit Together
+
+A typical session strings all four together:
+
+1. You describe or sketch what you want → **a design is generated** (text/image to 3D, OpenSCAD parametric, or search a third-party marketplace).
+2. The mesh flows through **the validation pipeline** → score, grade, and any auto-fixes applied before slicing.
+3. You **branch**, add a **decoration** or **mechanical feature**, maybe tweak depth or size, and start a print.
+4. The **intelligence layer** suggests proven settings for your material and printer and flags any regression against past prints of this design family.
+5. The print outcome is recorded against the version, so the next iteration is smarter than this one. If you like the result, **sign the release** — any downstream party can verify the exact mesh that shipped.
+
+Every subsystem is optional. Free tier gets validation and basic design tools; decoration presets, mid-print modification, git-for-3D, and cross-printer learning unlock with Pro. Nothing about the pipeline requires a cloud account — sync is opt-in and lands in *your* cloud, not a vendor's.
+
+---
+
 ## Getting Started
 
 ### Installation

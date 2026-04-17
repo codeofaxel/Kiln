@@ -31,6 +31,7 @@ const rows: Row[] = [
     without: 'UV mapping skills + texture software \u2014 not practical for most users',
     withKiln: 'Tiger stripe, marble, snakeskin, wood grain, carbon fiber, honeycomb, etc. \u2014 applied directly to any model',
     tier: 'pro',
+    patent: true,
   },
   {
     capability: 'Multicolor printing',
@@ -93,11 +94,6 @@ const rows: Row[] = [
     withKiln: 'Route to 150+ 3rd-party services via Craftcloud directly from your workflow',
   },
   {
-    capability: 'Let AI run the whole thing',
-    without: 'Not possible',
-    withKiln: 'Full pipeline via MCP \u2014 any AI agent, any printer, start to finish',
-  },
-  {
     capability: 'Version-control your designs',
     without: 'Rename files v1, v2, v2-final, v2-final-FINAL \u2014 lose track of which printed right',
     withKiln: 'Branch, merge, cherry-pick, A/B across designs / decorations / features \u2014 three-way semantic merge at the mesh level',
@@ -106,17 +102,22 @@ const rows: Row[] = [
   },
   {
     capability: 'Prove which version shipped',
-    without: 'Email the STL and trust the recipient didn\u2019t edit it',
-    withKiln: 'Ed25519-signed releases with tamper-evident fingerprint recompute \u2014 FDA 21 CFR 820.70 / AS9100 / ISO 13485 grade',
+    without: 'Email the STL and trust nobody edited it',
+    withKiln: 'Sign a version the way you\u2019d sign a contract \u2014 anyone can verify later that nothing changed after you signed it',
     tier: 'pro',
     patent: true,
   },
   {
-    capability: 'Share a design across devices',
+    capability: 'Sync designs across devices',
     without: 'Dropbox and hope nothing drifts',
-    withKiln: 'Push/pull to your own Supabase with tenant-isolated RLS + Merkle receipts \u2014 operator-controlled infrastructure',
+    withKiln: 'Push and pull between your machines, synced through your own cloud \u2014 not a vendor\u2019s',
     tier: 'pro',
     patent: true,
+  },
+  {
+    capability: 'Let AI run the whole thing',
+    without: 'Not possible',
+    withKiln: 'Full pipeline via MCP \u2014 any AI agent, any printer, start to finish',
   },
 ];
 ---

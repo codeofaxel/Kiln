@@ -1134,7 +1134,7 @@ For provider-routed orders, the provider remains merchant of record and support 
 | Tier | Price | What You Get |
 |------|-------|-------------|
 | **Free** | $0 | All local printing, slicing, marketplace, safety profiles. Job queue (10 jobs). Up to 2 printers. Billing visibility. |
-| **Pro** | $29/mo | Unlimited printers + fleet orchestration, fleet analytics, unlimited queue depth, cloud sync, priority scheduler, product templates (coasters, keychains, bookmarks, ornaments, fridge magnets, pet tags, pet bowls, jewelry trays, ashtrays, wall plaques) with QR code embedding and batch generation. Annual: $23/mo ($276/yr). |
+| **Pro** | $29/mo | Up to 5 printers + fleet orchestration, fleet analytics, unlimited queue depth, git-for-3D version control (branch / merge / signed releases on designs, decorations, and mechanical features), cloud push/pull to your own Supabase, priority scheduler, product templates (coasters, keychains, bookmarks, ornaments, fridge magnets, pet tags, pet bowls, jewelry trays, ashtrays, wall plaques) with QR code embedding and batch generation. Annual: $23/mo ($276/yr). |
 | **Business** | $99/mo | Everything in Pro + up to 50 printers, 5 team seats, unlimited fulfillment orders (5% orchestration fee), shared hosted MCP server, priority support, custom safety profiles, webhook integrations. Annual: $79/mo ($948/yr). |
 | **Enterprise** | From $499/mo | Everything in Business + unlimited printers (20 included, $15/mo each after), unlimited seats, role-based access control, dedicated single-tenant MCP server, on-prem/cloud/hybrid deployment, SSO (SAML/OIDC), full audit trail with export, lockable safety profiles, encrypted G-code at rest, 99.9% uptime SLA, dedicated Slack channel. Annual: $399/mo ($4,788/yr). |
 

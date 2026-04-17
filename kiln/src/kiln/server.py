@@ -57,6 +57,7 @@ import shutil
 import signal
 import sys
 import tempfile
+import threading
 import time
 import uuid as _uuid_mod
 from contextvars import ContextVar
@@ -125,8 +126,45 @@ try:
         get_tier,
         requires_tier,
     )
+    # Pro / Business caps are supplied by kiln-pro's licensing module
+    # when installed.  Free users never have kiln-pro so the fallback
+    # block below is their runtime state.
+    try:
+        from kiln.licensing import (
+            BUSINESS_TIER_MAX_PRINTERS,
+            PRO_TIER_MAX_PRINTERS,
+            max_printers_for_tier,
+        )
+    except ImportError:
+        PRO_TIER_MAX_PRINTERS = 5
+        BUSINESS_TIER_MAX_PRINTERS = 50
+
+        def max_printers_for_tier(tier: object) -> int | None:
+            value = getattr(tier, "value", tier)
+            if value == "free":
+                return FREE_TIER_MAX_PRINTERS
+            if value == "pro":
+                return PRO_TIER_MAX_PRINTERS
+            if value == "business":
+                return BUSINESS_TIER_MAX_PRINTERS
+            return None  # enterprise → unlimited
+
 except ImportError:
-    FREE_TIER_MAX_PRINTERS = 1  # Available in kiln-pro
+    # Free-tier fallback when kiln-pro is not installed.  Matches the
+    # "Up to 2 printers" marketing on the Free tier of /pricing.
+    FREE_TIER_MAX_PRINTERS = 2
+    PRO_TIER_MAX_PRINTERS = 5
+    BUSINESS_TIER_MAX_PRINTERS = 50
+
+    def max_printers_for_tier(tier: object) -> int | None:  # type: ignore[no-redef]
+        value = getattr(tier, "value", tier)
+        if value == "free":
+            return FREE_TIER_MAX_PRINTERS
+        if value == "pro":
+            return PRO_TIER_MAX_PRINTERS
+        if value == "business":
+            return BUSINESS_TIER_MAX_PRINTERS
+        return None
 
     class _DummyTier:
         """Stub for LicenseTier when licensing module is not installed."""
@@ -1175,10 +1213,8 @@ def _resolve_adapter(printer_name: str | None = None) -> PrinterAdapter:
     else:
         raise PrinterNotFoundError(printer_name)
 
-    try:
+    with contextlib.suppress(Exception):  # best-effort self-heal
         registry.register(printer_name, adapter)
-    except Exception:  # noqa: BLE001 — best-effort self-heal
-        pass
     return adapter
 
 
@@ -1615,10 +1651,9 @@ _event_subs_wired: bool = False
 # Layer 5: per-printer PrintWatchdog registry.  Keyed by printer_name so a
 # fleet deployment can have one watchdog per printer.  Daemon threads —
 # destroyed when the server process exits.
-import threading as _threading_for_watchdog  # local alias — server.py avoids top-level threading import elsewhere
 
 _print_watchdogs: dict[str, Any] = {}
-_print_watchdogs_lock = _threading_for_watchdog.Lock()
+_print_watchdogs_lock = threading.Lock()
 
 
 def _spawn_print_watchdog(adapter: Any, file_name: str) -> None:
@@ -1654,10 +1689,8 @@ def _spawn_print_watchdog(adapter: Any, file_name: str) -> None:
         # Replace any prior watchdog for this printer.
         old = _print_watchdogs.get(printer_name)
         if old is not None:
-            try:
+            with contextlib.suppress(Exception):
                 old.stop(timeout=1.0)
-            except Exception:
-                pass
         wd = PrintWatchdog(
             adapter=adapter,
             poll_interval_sec=2.5,
@@ -5721,27 +5754,40 @@ def register_printer(
     if err := _check_auth("admin"):
         return err
     try:
-        # Free-tier printer cap: allow up to FREE_TIER_MAX_PRINTERS
-        # without a Pro license.  Replacing an existing printer doesn't
-        # count against the limit.
+        # Tier-aware printer cap: Free → 2, Pro → 5, Business → 50,
+        # Enterprise → unlimited.  Replacing an existing printer doesn't
+        # count against the limit (only NEW registrations do).
         current_tier = get_tier()
+        tier_cap = max_printers_for_tier(current_tier)
+        tier_label = str(
+            getattr(current_tier, "value", current_tier) or "free"
+        ).title()
         if (
-            current_tier < LicenseTier.PRO
+            tier_cap is not None
             and name not in _get_registry()
-            and _get_registry().count >= FREE_TIER_MAX_PRINTERS
+            and _get_registry().count >= tier_cap
         ):
+            # Recommend the next tier up so the upgrade message is
+            # concrete, not just "upgrade."
+            upgrade_hint = {
+                "Free": "Kiln Pro unlocks up to 5 printers with fleet orchestration",
+                "Pro": "Kiln Business unlocks up to 50 printers with team seats",
+                "Business": "Kiln Enterprise removes the printer cap",
+            }.get(tier_label, "Upgrade at https://kiln3d.com/pricing")
             return {
                 "success": False,
                 "error": (
-                    f"Fleet registration is limited to {FREE_TIER_MAX_PRINTERS} printers on the Free tier "
+                    f"Fleet registration is limited to {tier_cap} printers "
+                    f"on the {tier_label} tier "
                     f"(you have {_get_registry().count}). "
-                    "Kiln Pro unlocks unlimited printers with fleet orchestration. "
-                    "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
+                    f"{upgrade_hint}. "
+                    "Upgrade at https://kiln3d.com/pricing or run 'kiln upgrade'."
                 ),
-                "code": "FREE_TIER_LIMIT",
+                "code": "TIER_PRINTER_LIMIT",
+                "current_tier": tier_label.lower(),
                 "current_count": _get_registry().count,
-                "max_allowed": FREE_TIER_MAX_PRINTERS,
-                "upgrade_url": "https://kiln3d.com/pro",
+                "max_allowed": tier_cap,
+                "upgrade_url": "https://kiln3d.com/pricing",
             }
         # Validate and clean the printer URL
         host, url_warnings = _validate_printer_url(host, printer_type=printer_type)
