@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-17T23:08:05.557146+00:00",
-  "tool_count": 228,
+  "generated": "2026-04-17T23:13:36.656976+00:00",
+  "tool_count": 234,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -7714,6 +7714,58 @@
       }
     },
     {
+      "name": "github_poll_login",
+      "description": "Complete the device-code flow.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "device_code": {
+            "title": "Device Code",
+            "type": "string"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tenant Id"
+          },
+          "interval": {
+            "default": 5,
+            "title": "Interval",
+            "type": "integer"
+          },
+          "expires_in": {
+            "default": 900,
+            "title": "Expires In",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "device_code"
+        ],
+        "title": "github_poll_loginArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "github_start_device_login",
+      "description": "Kick off the GitHub device-code flow.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {},
+        "title": "github_start_device_loginArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "grant_scope",
       "description": "Grant *capability* on *scope_key* to a tenant OR a team.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -7780,6 +7832,102 @@
           "granted_by"
         ],
         "title": "grant_scopeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "link_identity",
+      "description": "Manually bind ``(provider, provider_user_id)`` to a tenant.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_user_id": {
+            "title": "Provider User Id",
+            "type": "string"
+          },
+          "handle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Handle"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Email"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Display Name"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tenant Id"
+          }
+        },
+        "required": [
+          "provider",
+          "provider_user_id"
+        ],
+        "title": "link_identityArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_my_identities",
+      "description": "Every identity linked to a given tenant id.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tenant Id"
+          }
+        },
+        "title": "list_my_identitiesArguments",
         "type": "object"
       }
     },
@@ -7975,6 +8123,30 @@
       }
     },
     {
+      "name": "resolve_handle",
+      "description": "Invite-by-handle resolver: ``(provider, handle)`` \u2192 Kiln tenant id.  Returns the linked identity row (or ``{found: False}`` when no binding exists).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "handle": {
+            "title": "Handle",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "handle"
+        ],
+        "title": "resolve_handleArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "revoke_scope",
       "description": "Revoke a scope grant.  Supply either ``tenant_id`` (to remove a personal grant) or ``team_id`` (to remove a team-targeted grant).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -8117,6 +8289,30 @@
           "artifact_id"
         ],
         "title": "unassign_artifactArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "unlink_identity",
+      "description": "Remove a ``(provider, provider_user_id)`` binding.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_user_id": {
+            "title": "Provider User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "provider_user_id"
+        ],
+        "title": "unlink_identityArguments",
         "type": "object"
       }
     },
