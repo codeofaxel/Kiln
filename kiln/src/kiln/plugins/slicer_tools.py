@@ -780,10 +780,7 @@ class _SlicerToolsPlugin:
                     profile=effective_profile,
                 )
 
-                if printer_name:
-                    adapter = _srv._get_registry().get(printer_name)
-                else:
-                    adapter = _srv._get_adapter()
+                adapter = _srv._resolve_adapter(printer_name)
 
                 # Bambu printers need PrusaSlicer output wrapped in a 3MF with
                 # the proprietary BambuStudio start/end gcode.  The adapter

@@ -1031,6 +1031,47 @@ def _resolve_effective_printer_name(printer_name: str | None = None) -> str:
     return "default"
 
 
+def _resolve_adapter(printer_name: str | None = None) -> PrinterAdapter:
+    """Resolve a :class:`PrinterAdapter` from an optional printer name.
+
+    Handles the startup race where the env/YAML auto-register at
+    :func:`main` didn't populate the registry (e.g. because
+    ``_PRINTER_HOST`` wasn't wired yet or ``_get_adapter()`` threw
+    during startup).  In that state, ``_get_registry().get("default")``
+    fails cold even though ``_get_adapter()`` can still build the
+    adapter lazily from config.
+
+    Behaviour:
+      * ``printer_name=None``: return ``_get_adapter()`` — same path
+        used by tools that don't expose a printer_name arg.
+      * Explicit *printer_name*: try the registry first.  If the
+        lookup misses AND the name matches the effective default
+        (i.e. what the registry *would* have registered had
+        auto-register succeeded), fall back to ``_get_adapter()``
+        and opportunistically register it so subsequent calls hit
+        the fast path.
+      * Any other unregistered name: re-raise ``PrinterNotFoundError``
+        — we never silently redirect "a1combo" to the default.
+    """
+    from kiln.registry import PrinterNotFoundError
+
+    if not printer_name:
+        return _get_adapter()
+    try:
+        return _get_registry().get(printer_name)
+    except PrinterNotFoundError:
+        # Only fall back when the caller asked for what should have
+        # been auto-registered.  Any other name is genuinely unknown.
+        if printer_name != _resolve_effective_printer_name(None):
+            raise
+        adapter = _get_adapter()
+        try:
+            _get_registry().register(printer_name, adapter)
+        except Exception:  # noqa: BLE001 — best-effort self-heal
+            pass
+        return adapter
+
+
 def _get_emergency_latch_status(printer_name: str) -> dict[str, Any] | None:
     """Best-effort emergency latch status lookup for a printer."""
     try:
