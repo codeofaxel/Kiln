@@ -46,11 +46,15 @@ class DesignVersion:
     Attributes:
         version_id: Unique identifier for this version (UUID).
         design_id: Identifier grouping versions of the same design.
-        scad_source: Full OpenSCAD source code for this version.
+        scad_source: OpenSCAD source code for this version, or ``None``
+            for mesh-only versions registered from external files
+            (STL/3MF/OBJ) where no source code exists.  When ``None``,
+            consumers should fall back to the mesh fingerprint stored
+            in ``mesh_fingerprint`` for any geometry-aware operation.
         prompt: The natural-language prompt that produced this version.
         parameters: Parametric values (key → value) used for generation.
         diff_from_prev: Unified diff from the previous version, or ``None``
-            if this is the first version.
+            if this is the first version OR if either side has no source.
         created_at: Unix timestamp when the version was saved.
         parent_version_id: The ``version_id`` of the preceding version, or
             ``None`` for the initial version.
@@ -59,7 +63,7 @@ class DesignVersion:
 
     version_id: str
     design_id: str
-    scad_source: str
+    scad_source: str | None
     prompt: str
     parameters: dict[str, Any]
     diff_from_prev: str | None
@@ -117,7 +121,7 @@ class DesignVersionStore:
             CREATE TABLE IF NOT EXISTS design_versions (
                 version_id        TEXT PRIMARY KEY,
                 design_id         TEXT NOT NULL,
-                scad_source       TEXT NOT NULL,
+                scad_source       TEXT,
                 prompt            TEXT NOT NULL DEFAULT '',
                 parameters        TEXT NOT NULL DEFAULT '{}',
                 diff_from_prev    TEXT,
@@ -154,7 +158,66 @@ class DesignVersionStore:
                 self._conn.execute(
                     f"ALTER TABLE design_versions ADD COLUMN {col} TEXT"
                 )
+        # Drop NOT NULL from scad_source on legacy databases so external-
+        # mesh imports (STL/3MF/OBJ) can register as first-class versions
+        # without fabricating sentinel source code.  SQLite doesn't
+        # support ALTER COLUMN DROP NOT NULL directly, so we use the
+        # canonical create-copy-drop-rename dance.  Idempotent: a no-op
+        # on databases already created with the nullable schema above.
+        self._migrate_nullable_scad_source()
         self._conn.commit()
+
+    def _migrate_nullable_scad_source(self) -> None:
+        """Idempotently drop NOT NULL from ``design_versions.scad_source``.
+
+        Uses ``PRAGMA table_info`` to detect the legacy NOT NULL constraint;
+        if found, copies all rows into a fresh table with the relaxed
+        constraint, drops the old table, and renames.  Existing rows are
+        preserved bit-for-bit; new rows can carry NULL source for
+        mesh-only imports.
+        """
+        cursor = self._conn.execute("PRAGMA table_info(design_versions)")
+        cols = list(cursor.fetchall())
+        if not cols:
+            return  # table will be created fresh by the script above
+        scad_col = next((c for c in cols if c[1] == "scad_source"), None)
+        if scad_col is None or scad_col[3] == 0:
+            # PRAGMA columns: (cid, name, type, notnull, dflt_value, pk)
+            # notnull=0 means already nullable — nothing to do.
+            return
+        self._conn.executescript(
+            """\
+            CREATE TABLE design_versions__new (
+                version_id        TEXT PRIMARY KEY,
+                design_id         TEXT NOT NULL,
+                scad_source       TEXT,
+                prompt            TEXT NOT NULL DEFAULT '',
+                parameters        TEXT NOT NULL DEFAULT '{}',
+                diff_from_prev    TEXT,
+                created_at        REAL NOT NULL,
+                parent_version_id TEXT,
+                notes             TEXT NOT NULL DEFAULT '',
+                version_number    INTEGER NOT NULL DEFAULT 1,
+                provenance        TEXT,
+                mesh_fingerprint  TEXT,
+                mesh_diff         TEXT
+            );
+            INSERT INTO design_versions__new
+                (version_id, design_id, scad_source, prompt, parameters,
+                 diff_from_prev, created_at, parent_version_id, notes,
+                 version_number, provenance, mesh_fingerprint, mesh_diff)
+            SELECT version_id, design_id, scad_source, prompt, parameters,
+                   diff_from_prev, created_at, parent_version_id, notes,
+                   version_number, provenance, mesh_fingerprint, mesh_diff
+            FROM design_versions;
+            DROP TABLE design_versions;
+            ALTER TABLE design_versions__new RENAME TO design_versions;
+            CREATE INDEX IF NOT EXISTS idx_dv_design_id
+                ON design_versions(design_id);
+            CREATE INDEX IF NOT EXISTS idx_dv_created_at
+                ON design_versions(created_at);
+            """
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -181,8 +244,18 @@ class DesignVersionStore:
         )
 
     @staticmethod
-    def _compute_diff(old_source: str, new_source: str) -> str:
-        """Compute a unified diff between two source strings."""
+    def _compute_diff(
+        old_source: str | None, new_source: str | None
+    ) -> str | None:
+        """Compute a unified diff between two source strings.
+
+        Returns ``None`` when either side has no source (mesh-only
+        version): a textual diff is meaningless without source code, so
+        callers should fall back to the mesh fingerprint diff for
+        geometry comparison.
+        """
+        if old_source is None or new_source is None:
+            return None
         old_lines = old_source.splitlines(keepends=True)
         new_lines = new_source.splitlines(keepends=True)
         diff = difflib.unified_diff(
@@ -200,7 +273,7 @@ class DesignVersionStore:
     def save_version(
         self,
         design_id: str,
-        scad_source: str,
+        scad_source: str | None = None,
         prompt: str = "",
         parameters: dict[str, Any] | None = None,
         notes: str = "",
@@ -210,25 +283,31 @@ class DesignVersionStore:
         Automatically computes a unified diff from the previous version
         (if any), assigns a UUID version_id, and records the timestamp.
 
+        ``scad_source=None`` is permitted and is the canonical shape for
+        externally-imported mesh-only versions (STL/3MF/OBJ from
+        Thingiverse, MakerWorld, etc.) where no source code exists.
+        Such versions still participate in the version genealogy via
+        their mesh fingerprint, but ``diff_from_prev`` will be ``None``.
+
         Returns the newly created :class:`DesignVersion`.
 
         Raises:
-            ValueError: If *design_id* or *scad_source* is empty/blank,
-                or if any string argument contains null bytes.
+            ValueError: If *design_id* is empty/blank, or if any string
+                argument contains null bytes.
         """
         if not design_id or not design_id.strip():
             raise ValueError("design_id must not be empty")
-        if not scad_source:
-            raise ValueError("scad_source must not be empty")
-        # Null bytes can corrupt SQLite TEXT columns.
+        # Null bytes can corrupt SQLite TEXT columns.  scad_source is
+        # checked separately because None is now valid.
         for name, val in [
             ("design_id", design_id),
-            ("scad_source", scad_source),
             ("prompt", prompt),
             ("notes", notes),
         ]:
             if "\x00" in val:
                 raise ValueError(f"{name} must not contain null bytes")
+        if scad_source is not None and "\x00" in scad_source:
+            raise ValueError("scad_source must not contain null bytes")
         if parameters is None:
             parameters = {}
 
