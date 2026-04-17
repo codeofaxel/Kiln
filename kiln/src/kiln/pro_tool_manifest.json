@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-04-17T05:09:41.085126+00:00",
+  "generated": "2026-04-17T05:16:22.670342+00:00",
   "tool_count": 134,
   "categories": {
     "product_generators": {
@@ -1332,8 +1332,16 @@
             "type": "string"
           },
           "author_user_id": {
-            "title": "Author User Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Author User Id"
           },
           "description": {
             "default": "",
@@ -1370,8 +1378,7 @@
           "design_id",
           "source_branch_id",
           "target_branch_id",
-          "title",
-          "author_user_id"
+          "title"
         ],
         "title": "propose_design_changeArguments",
         "type": "object"
@@ -1642,13 +1649,21 @@
             "title": "Pr Id",
             "type": "string"
           },
-          "user_id": {
-            "title": "User Id",
-            "type": "string"
-          },
           "decision": {
             "title": "Decision",
             "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "User Id"
           },
           "body": {
             "default": "",
@@ -1658,7 +1673,6 @@
         },
         "required": [
           "pr_id",
-          "user_id",
           "decision"
         ],
         "title": "review_design_pull_requestArguments",
