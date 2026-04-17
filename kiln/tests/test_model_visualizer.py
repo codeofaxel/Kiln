@@ -317,3 +317,127 @@ class TestCompileScadForBbox:
         with patch("kiln.model_visualizer._find_openscad", return_value="/usr/bin/openscad"), \
              patch("subprocess.run", side_effect=subprocess.TimeoutExpired("openscad", 30)):
             assert _compile_scad_for_bbox(str(tmp_scad)) is None
+
+
+# ---------------------------------------------------------------------------
+# Bambu-wrapped 3MF thumbnail extraction
+# ---------------------------------------------------------------------------
+#
+# A Bambu-wrapped 3MF has ``Metadata/plate_1.gcode`` as the real payload
+# and a 1-2KB placeholder in ``3D/3dmodel.model``.  OpenSCAD renders
+# such files as an empty black frame, which breaks the preview gate for
+# every Bambu print.  ``visualize_model`` short-circuits that path by
+# surfacing the slicer's embedded thumbnails — tested here with
+# synthetic fixtures because we don't want to depend on a real sliced
+# 3MF bundled with the tests.
+
+
+def _make_bambu_wrapped_3mf(
+    path: Path,
+    *,
+    include_middle_thumb: bool = True,
+    include_plate_png: bool = True,
+    include_top_png: bool = True,
+    placeholder_model_size: int = 1300,
+    gcode_size: int = 2048,
+) -> Path:
+    """Build a synthetic Bambu-wrapped 3MF for testing."""
+    import zipfile as _zipfile
+    with _zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("3D/3dmodel.model", b"X" * placeholder_model_size)
+        zf.writestr("Metadata/plate_1.gcode", b"G28\n" + b";" * gcode_size)
+        # 8-byte PNG magic makes an easy "valid PNG" stub.
+        png_stub = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+        if include_middle_thumb:
+            zf.writestr("Auxiliaries/.thumbnails/thumbnail_middle.png", png_stub)
+            zf.writestr("Auxiliaries/.thumbnails/thumbnail_small.png", png_stub)
+        if include_plate_png:
+            zf.writestr("Metadata/plate_1.png", png_stub)
+        if include_top_png:
+            zf.writestr("Metadata/top_1.png", png_stub)
+    return path
+
+
+@pytest.fixture
+def bambu_3mf(tmp_path: Path) -> Path:
+    return _make_bambu_wrapped_3mf(tmp_path / "coaster_bedcentered.3mf")
+
+
+class TestBambuWrapped3MFDetection:
+    def test_recognises_bambu_wrapper(self, bambu_3mf: Path):
+        from kiln.model_visualizer import _is_bambu_wrapped_3mf
+        assert _is_bambu_wrapped_3mf(str(bambu_3mf)) is True
+
+    def test_plain_3mf_not_flagged(self, tmp_path: Path):
+        """A 3MF without plate_1.gcode is not a Bambu wrapper."""
+        import zipfile as _zipfile
+        from kiln.model_visualizer import _is_bambu_wrapped_3mf
+        path = tmp_path / "geom.3mf"
+        with _zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("3D/3dmodel.model", b"<model>" + b"X" * 10000 + b"</model>")
+        assert _is_bambu_wrapped_3mf(str(path)) is False
+
+    def test_real_mesh_wrapper_not_flagged(self, tmp_path: Path):
+        """An archive with a real-sized 3dmodel.model is not a wrapper
+        even if it happens to contain a plate_1.gcode for some reason."""
+        from kiln.model_visualizer import _is_bambu_wrapped_3mf
+        path = _make_bambu_wrapped_3mf(
+            tmp_path / "mesh.3mf",
+            placeholder_model_size=500_000,
+        )
+        assert _is_bambu_wrapped_3mf(str(path)) is False
+
+    def test_corrupt_archive_not_flagged(self, tmp_path: Path):
+        from kiln.model_visualizer import _is_bambu_wrapped_3mf
+        path = tmp_path / "corrupt.3mf"
+        path.write_bytes(b"not a zip")
+        assert _is_bambu_wrapped_3mf(str(path)) is False
+
+
+class TestBambuThumbnailExtraction:
+    def test_extracts_all_thumbnails(self, bambu_3mf: Path, tmp_path: Path):
+        from kiln.model_visualizer import _extract_bambu_thumbnails
+        out_dir = tmp_path / "out"
+        views = _extract_bambu_thumbnails(str(bambu_3mf), str(out_dir))
+        assert len(views) >= 3  # at least middle/top/plate
+        for v in views:
+            assert "path" in v
+            assert os.path.isfile(v["path"])
+            assert v["source"] == "bambu_3mf_thumbnail"
+
+    def test_filter_by_angles(self, bambu_3mf: Path, tmp_path: Path):
+        from kiln.model_visualizer import _extract_bambu_thumbnails
+        views = _extract_bambu_thumbnails(
+            str(bambu_3mf), str(tmp_path / "out"), angles=["top"],
+        )
+        assert len(views) == 1
+        assert views[0]["angle"] == "top"
+
+    def test_missing_thumbnail_skipped_not_faked(self, tmp_path: Path):
+        """If the archive lacks a thumbnail, no faked view is produced."""
+        from kiln.model_visualizer import _extract_bambu_thumbnails
+        path = _make_bambu_wrapped_3mf(
+            tmp_path / "no_plate.3mf",
+            include_plate_png=False,
+            include_top_png=False,
+        )
+        views = _extract_bambu_thumbnails(str(path), str(tmp_path / "out"))
+        angles = {v["angle"] for v in views}
+        assert "top" not in angles
+        assert "front" not in angles
+
+
+class TestVisualizeModelOnBambu3MF:
+    def test_visualize_returns_thumbnails_without_openscad(self, bambu_3mf: Path, tmp_path: Path):
+        """Bambu-wrapped 3MFs should return a success response backed
+        by the slicer's own thumbnails, never falling through to an
+        OpenSCAD render of the empty placeholder mesh (which would
+        produce a black frame)."""
+        result = visualize_model(
+            str(bambu_3mf), output_dir=str(tmp_path / "out"),
+        )
+        assert result["success"] is True
+        assert result.get("source") == "bambu_3mf_thumbnails"
+        assert result["rendered"] >= 1
+        for v in result["views"]:
+            assert os.path.isfile(v["path"])
