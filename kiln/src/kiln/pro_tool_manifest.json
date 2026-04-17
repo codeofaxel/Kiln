@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-04-17T20:10:43.266937+00:00",
+  "generated": "2026-04-17T22:26:14.661479+00:00",
   "tool_count": 217,
   "categories": {
     "product_generators": {
@@ -4397,6 +4397,18 @@
             ],
             "default": null,
             "title": "Webhook Urls"
+          },
+          "webhook_hmac_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Webhook Hmac Secret"
           },
           "disable_telegram": {
             "default": false,
