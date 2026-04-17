@@ -39,13 +39,14 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import re
 import shutil
 import threading
 import time
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 # Module-level lock serializing incident-id generation + dir creation.
 # Fleet deployments can have many printers anomaly at once; perf_counter_ns
@@ -53,7 +54,6 @@ from pathlib import Path
 # ID-then-mkdir window makes it provably impossible.  Cost is microseconds
 # per incident — irrelevant given incidents are rare.
 _INCIDENT_ID_LOCK = threading.Lock()
-from typing import Any, Iterable
 
 logger = logging.getLogger(__name__)
 

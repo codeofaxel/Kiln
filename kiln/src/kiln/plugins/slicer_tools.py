@@ -128,11 +128,12 @@ def _auto_wrap_bambu_3mf(
         # homing — incident #0 (2026-04-15).  Route through the adapter's
         # wrap_gcode_as_3mf method which wires to build_bambu_3mf with
         # the correct start-gcode for the printer model.
+        from pathlib import Path as _Path
+
         from kiln.printers.bambu_3mf import (
             BambuPrintSettings,
             build_bambu_3mf,
         )
-        from pathlib import Path as _Path
 
         threemf_path = gcode_path.rsplit(".", 1)[0] + ".gcode.3mf"
         stl_paths: list[str] | None = None

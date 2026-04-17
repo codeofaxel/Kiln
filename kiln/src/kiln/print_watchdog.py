@@ -38,8 +38,9 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -124,8 +125,8 @@ class PrintWatchdog:
         self,
         adapter: Any,
         poll_interval_sec: float = DEFAULT_POLL_INTERVAL,
-        on_anomaly: Optional[Callable[["Flag"], None]] = None,
-        hms_blocklist: Optional[list[str]] = None,
+        on_anomaly: Callable[[Flag], None] | None = None,
+        hms_blocklist: list[str] | None = None,
         *,
         tool_drop_c: float = DEFAULT_TOOL_DROP_C,
         bed_drop_c: float = DEFAULT_BED_DROP_C,

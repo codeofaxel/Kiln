@@ -104,7 +104,6 @@ _Z_MIN_MM: float = -_EPSILON_MM
 # We normalise to ``bed + epsilon`` and take the integer ceiling, so
 # the rule rejects ``X256.5001`` but not ``X256.4999``.
 
-import math
 
 
 def _negative_axis_pattern(axis: str) -> str:

@@ -77,8 +77,8 @@ def safety_gap_warning() -> dict[str, Any] | None:
         # a suggestion is a convenience for the agent to propose to
         # the user when they ask what to fill in.
         try:
-            from kiln.cli.printer_model_prompt import suggest_bambu_model
             import kiln.server as _srv
+            from kiln.cli.printer_model_prompt import suggest_bambu_model
             if _srv._PRINTER_TYPE == "bambu" and _srv._PRINTER_SERIAL:
                 suggestion = suggest_bambu_model(_srv._PRINTER_SERIAL)
                 if suggestion:

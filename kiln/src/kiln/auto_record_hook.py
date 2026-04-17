@@ -144,9 +144,7 @@ class _HookState:
             ts = self._cancel_intents.pop(printer, None)
             if ts is None:
                 return False
-            if time.monotonic() - ts > _CANCEL_INTENT_TTL_S:
-                return False
-            return True
+            return time.monotonic() - ts <= _CANCEL_INTENT_TTL_S
 
     def mark_recorded(self, printer: str, job_id: str) -> bool:
         """Return True if this is the first recording for (printer,

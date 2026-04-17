@@ -279,7 +279,7 @@ class FirmwareUpdateResult:
 # ---------------------------------------------------------------------------
 
 
-class PrinterAdapter(ABC):
+class PrinterAdapter(ABC):  # noqa: B024 — abstract methods are defined below but accidentally nested inside _preflight_upload_or_raise; see TASKS.md
     """Abstract base for all printer backend adapters.
 
     Concrete subclasses must implement **every** abstract method and
@@ -344,7 +344,7 @@ class _UnsafeUpload(Exception):
     """Internal sentinel raised by the pre-upload safety check."""
 
 
-def _preflight_upload_or_raise(adapter: "PrinterAdapter", file_path: str) -> None:
+def _preflight_upload_or_raise(adapter: PrinterAdapter, file_path: str) -> None:
     """Run bed-fit + homing validation on a local file before it hits
     any adapter's upload_file.  Raises :class:`_UnsafeUpload` on hard
     failures (OFF_BED_GEOMETRY / EXCEEDS_BED / NO_HOMING_SEQUENCE).

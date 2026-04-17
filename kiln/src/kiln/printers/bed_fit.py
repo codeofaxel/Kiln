@@ -22,6 +22,7 @@ translation so the printer always receives coordinates that fit.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -247,10 +248,8 @@ def compute_3mf_bbox(threemf_path: str) -> dict[str, float] | None:
     try:
         return compute_gcode_bbox(tmp_path)
     finally:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_path)
-        except OSError:
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -500,10 +499,8 @@ def check_gcode_has_homing(
         except (zipfile.BadZipFile, KeyError):
             pass
     else:
-        try:
+        with contextlib.suppress(OSError):
             gcode_text = p.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            pass
     if gcode_text is None:
         return {
             "ok": True, "error_code": "UNKNOWN_FILE", "error_message": None,
@@ -538,11 +535,14 @@ def check_gcode_has_homing(
         if stripped.startswith("G28") and first_home < 0:
             first_home = i
             continue
-        if stripped.startswith("G1 ") and " E" in stripped:
-            if " X" in stripped or " Y" in stripped:
-                if first_print_move < 0:
-                    first_print_move = i
-                    break
+        if (
+            stripped.startswith("G1 ")
+            and " E" in stripped
+            and (" X" in stripped or " Y" in stripped)
+            and first_print_move < 0
+        ):
+            first_print_move = i
+            break
     if first_print_move < 0:
         return {"ok": True, "error_code": None, "error_message": None}
     if first_home < 0 or first_home > first_print_move:
