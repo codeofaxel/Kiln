@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-17T05:16:22.670342+00:00",
-  "tool_count": 134,
+  "generated": "2026-04-17T06:08:24.313180+00:00",
+  "tool_count": 158,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -49,6 +49,291 @@
     }
   },
   "tools": [
+    {
+      "name": "cloud_clone_design",
+      "description": "Bootstrap local storage for a remote-only design.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "cloud_clone_designArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_list_remote_branches",
+      "description": "List branches on the remote for *design_id*.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "cloud_list_remote_branchesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_list_remote_releases",
+      "description": "List signed releases published to the remote for *design_id*.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "cloud_list_remote_releasesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_pull_branch",
+      "description": "Pull a remote branch head into the local BranchStore.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "branch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Branch Id"
+          },
+          "branch_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Branch Name"
+          },
+          "since_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Since Version Id"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "cloud_pull_branchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_push_branch",
+      "description": "Push a local branch (+ its versions + sidecars) to a remote.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "branch_id": {
+            "title": "Branch Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id",
+          "branch_id"
+        ],
+        "title": "cloud_push_branchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_push_release",
+      "description": "Push a locally-signed release to the remote.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "release_id": {
+            "title": "Release Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "release_id"
+        ],
+        "title": "cloud_push_releaseArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_remote_add",
+      "description": "Register a Kiln Cloud remote this machine can push to.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "license_key_env": {
+            "default": "KILN_LICENSE_KEY",
+            "title": "License Key Env",
+            "type": "string"
+          },
+          "default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Default"
+          }
+        },
+        "required": [
+          "name",
+          "url"
+        ],
+        "title": "cloud_remote_addArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_remote_list",
+      "description": "List all registered Kiln Cloud remotes.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {},
+        "title": "cloud_remote_listArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_remote_remove",
+      "description": "Forget a remote.  Does not delete any data on the remote.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "cloud_remote_removeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_retire_remote_branch",
+      "description": "Mark a remote branch retired (preserves records for audit).\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "branch_id": {
+            "title": "Branch Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id",
+          "branch_id"
+        ],
+        "title": "cloud_retire_remote_branchArguments",
+        "type": "object"
+      }
+    },
     {
       "name": "cloud_sync_devices",
       "description": "List all devices connected to your cloud sync account.\n\nKiln Pro \u2014 kiln3d.com/pro",
@@ -664,6 +949,30 @@
       }
     },
     {
+      "name": "annotate_decoration_preset_branch",
+      "description": "Set the human-readable purpose string for a preset branch.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "branch_id": {
+            "title": "Branch Id",
+            "type": "string"
+          },
+          "annotation": {
+            "title": "Annotation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "branch_id",
+          "annotation"
+        ],
+        "title": "annotate_decoration_preset_branchArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "annotate_design_branch",
       "description": "Set the human-readable purpose string for a branch.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
@@ -684,6 +993,42 @@
           "annotation"
         ],
         "title": "annotate_design_branchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "apply_decoration_preset_release_to_mesh",
+      "description": "Apply a signed preset release to a host mesh.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "preset_release_id": {
+            "title": "Preset Release Id",
+            "type": "string"
+          },
+          "host_mesh_path": {
+            "title": "Host Mesh Path",
+            "type": "string"
+          },
+          "base_mesh_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Base Mesh Version Id"
+          }
+        },
+        "required": [
+          "preset_release_id",
+          "host_mesh_path"
+        ],
+        "title": "apply_decoration_preset_release_to_meshArguments",
         "type": "object"
       }
     },
@@ -738,6 +1083,52 @@
           "version_ids"
         ],
         "title": "check_design_regressionArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cherry_pick_decoration_modification",
+      "description": "Apply ONE field modification from source onto target.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "ancestor_preset_version_id": {
+            "title": "Ancestor Preset Version Id",
+            "type": "string"
+          },
+          "source_preset_version_id": {
+            "title": "Source Preset Version Id",
+            "type": "string"
+          },
+          "target_preset_version_id": {
+            "title": "Target Preset Version Id",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "source_branch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Branch Id"
+          }
+        },
+        "required": [
+          "ancestor_preset_version_id",
+          "source_preset_version_id",
+          "target_preset_version_id",
+          "feature_id"
+        ],
+        "title": "cherry_pick_decoration_modificationArguments",
         "type": "object"
       }
     },
@@ -808,6 +1199,219 @@
           "version_id_b"
         ],
         "title": "compare_design_versionsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "create_decoration_preset",
+      "description": "Create or version a decoration preset on a branch.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pattern_family": {
+            "title": "Pattern Family",
+            "type": "string"
+          },
+          "pattern_id": {
+            "title": "Pattern Id",
+            "type": "string"
+          },
+          "depth_mm": {
+            "default": 1.2,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "surface_selection": {
+            "default": "outer_faces",
+            "title": "Surface Selection",
+            "type": "string"
+          },
+          "selected_face_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Selected Face Ids"
+          },
+          "posterization_tier": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Posterization Tier"
+          },
+          "image_asset_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Image Asset Path"
+          },
+          "image_asset_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Image Asset Sha256"
+          },
+          "design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Id"
+          },
+          "preset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Preset Id"
+          },
+          "parent_preset_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parent Preset Version Id"
+          },
+          "branch_name": {
+            "default": "main",
+            "title": "Branch Name",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Created By"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "pattern_family",
+          "pattern_id"
+        ],
+        "title": "create_decoration_presetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "create_decoration_preset_branch",
+      "description": "Fork a new branch from a specific preset version.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "preset_id": {
+            "title": "Preset Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "base_preset_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Base Preset Version Id"
+          },
+          "parent_branch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parent Branch Id"
+          },
+          "annotation": {
+            "default": "",
+            "title": "Annotation",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Created By"
+          }
+        },
+        "required": [
+          "preset_id",
+          "name"
+        ],
+        "title": "create_decoration_preset_branchArguments",
         "type": "object"
       }
     },
@@ -901,6 +1505,34 @@
       }
     },
     {
+      "name": "cross_preset_ab_report",
+      "description": "Cross-preset outcome A/B analysis.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "preset_inputs": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Preset Inputs",
+            "type": "array"
+          },
+          "min_outcomes_per_preset": {
+            "default": 3,
+            "title": "Min Outcomes Per Preset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "preset_inputs"
+        ],
+        "title": "cross_preset_ab_reportArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "design_version_health",
       "description": "Full health report for a design across all its versions.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
@@ -924,6 +1556,35 @@
           "version_ids"
         ],
         "title": "design_version_healthArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "detect_decoration_preset_merge_conflicts",
+      "description": "Detect field-level conflicts between two preset branches.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "ancestor_preset_version_id": {
+            "title": "Ancestor Preset Version Id",
+            "type": "string"
+          },
+          "branch_a_preset_version_id": {
+            "title": "Branch A Preset Version Id",
+            "type": "string"
+          },
+          "branch_b_preset_version_id": {
+            "title": "Branch B Preset Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ancestor_preset_version_id",
+          "branch_a_preset_version_id",
+          "branch_b_preset_version_id"
+        ],
+        "title": "detect_decoration_preset_merge_conflictsArguments",
         "type": "object"
       }
     },
@@ -1154,6 +1815,83 @@
       }
     },
     {
+      "name": "list_decoration_cherry_pick_candidates",
+      "description": "Enumerate field-level modifications cherry-pickable from source.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "ancestor_preset_version_id": {
+            "title": "Ancestor Preset Version Id",
+            "type": "string"
+          },
+          "source_preset_version_id": {
+            "title": "Source Preset Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ancestor_preset_version_id",
+          "source_preset_version_id"
+        ],
+        "title": "list_decoration_cherry_pick_candidatesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_decoration_preset_branches",
+      "description": "List the branches of a decoration preset.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "preset_id": {
+            "title": "Preset Id",
+            "type": "string"
+          },
+          "include_retired": {
+            "default": false,
+            "title": "Include Retired",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "preset_id"
+        ],
+        "title": "list_decoration_preset_branchesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_decoration_presets",
+      "description": "List the latest version of every decoration preset.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Id"
+          },
+          "portfolio_only": {
+            "default": false,
+            "title": "Portfolio Only",
+            "type": "boolean"
+          }
+        },
+        "title": "list_decoration_presetsArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "list_design_branches",
       "description": "List the branches of a design.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
@@ -1234,6 +1972,62 @@
           "design_id"
         ],
         "title": "list_design_releasesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "merge_decoration_preset_branches",
+      "description": "Merge ``source_branch`` into ``target_branch`` semantically.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "source_branch_id": {
+            "title": "Source Branch Id",
+            "type": "string"
+          },
+          "target_branch_id": {
+            "title": "Target Branch Id",
+            "type": "string"
+          },
+          "ancestor_preset_version_id": {
+            "title": "Ancestor Preset Version Id",
+            "type": "string"
+          },
+          "resolutions": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resolutions"
+          },
+          "merged_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Merged By"
+          }
+        },
+        "required": [
+          "source_branch_id",
+          "target_branch_id",
+          "ancestor_preset_version_id"
+        ],
+        "title": "merge_decoration_preset_branchesArguments",
         "type": "object"
       }
     },
@@ -1596,6 +2390,25 @@
       }
     },
     {
+      "name": "retire_decoration_preset_branch",
+      "description": "Mark a decoration-preset branch retired.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "branch_id": {
+            "title": "Branch Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "branch_id"
+        ],
+        "title": "retire_decoration_preset_branchArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "retire_design_branch",
       "description": "Mark a branch retired \u2014 preserves records, frees the name.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
@@ -1676,6 +2489,42 @@
           "decision"
         ],
         "title": "review_design_pull_requestArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "sign_decoration_preset_release",
+      "description": "Designate an immutable Ed25519-signed preset release.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "preset_version_id": {
+            "title": "Preset Version Id",
+            "type": "string"
+          },
+          "release_name": {
+            "title": "Release Name",
+            "type": "string"
+          },
+          "signed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Signed By"
+          }
+        },
+        "required": [
+          "preset_version_id",
+          "release_name"
+        ],
+        "title": "sign_decoration_preset_releaseArguments",
         "type": "object"
       }
     },
@@ -1825,6 +2674,30 @@
           "right_source"
         ],
         "title": "source_merge_three_wayArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "verify_decoration_preset_release",
+      "description": "Verify a preset release's signature and optionally its content.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "release_id": {
+            "title": "Release Id",
+            "type": "string"
+          },
+          "recompute_from_preset": {
+            "default": true,
+            "title": "Recompute From Preset",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "release_id"
+        ],
+        "title": "verify_decoration_preset_releaseArguments",
         "type": "object"
       }
     },
