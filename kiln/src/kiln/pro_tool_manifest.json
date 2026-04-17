@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-16T00:43:49.883128+00:00",
-  "tool_count": 113,
+  "generated": "2026-04-17T04:26:45.809020+00:00",
+  "tool_count": 134,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -51,7 +51,7 @@
   "tools": [
     {
       "name": "cloud_sync_devices",
-      "description": "List all devices connected to your cloud sync account.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "List all devices connected to your cloud sync account.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "cloud_sync",
       "parameters": {
@@ -62,7 +62,7 @@
     },
     {
       "name": "cloud_sync_history",
-      "description": "View the sync operation log.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "View the sync operation log.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "cloud_sync",
       "parameters": {
@@ -79,7 +79,7 @@
     },
     {
       "name": "cloud_sync_resolve_conflict",
-      "description": "Manually resolve a sync conflict.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Manually resolve a sync conflict.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "cloud_sync",
       "parameters": {
@@ -103,7 +103,7 @@
     },
     {
       "name": "auto_add_rubber_feet",
-      "description": "Add rubber foot positions to model bottom (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Add rubber foot positions to model bottom (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "decoration",
       "parameters": {
@@ -123,7 +123,7 @@
     },
     {
       "name": "auto_multicolor_from_texture",
-      "description": "Segment a textured OBJ mesh into discrete color zones for multi-material printing.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Segment a textured OBJ mesh into discrete color zones for multi-material printing.\n\nFree tier: 3/month (shared quota).  Pro: unlimited.",
       "tier": "pro",
       "category": "decoration",
       "parameters": {
@@ -191,7 +191,7 @@
     },
     {
       "name": "auto_recess_pocket",
-      "description": "Add recessed pocket to a face for bed-safe decoration (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Add recessed pocket to a face for bed-safe decoration (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "decoration",
       "parameters": {
@@ -211,7 +211,7 @@
     },
     {
       "name": "batch_decorate",
-      "description": "Apply the same decoration to multiple models (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Apply the same decoration to multiple models (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "decoration",
       "parameters": {
@@ -231,7 +231,7 @@
     },
     {
       "name": "estimate_batch_cost",
-      "description": "Estimate total cost for a batch of decorated items (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Estimate total cost for a batch of decorated items (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "decoration",
       "parameters": {
@@ -251,7 +251,7 @@
     },
     {
       "name": "estimate_decoration_cost",
-      "description": "Estimate cost impact of decorating a model (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Estimate cost impact of decorating a model (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "decoration",
       "parameters": {
@@ -271,7 +271,7 @@
     },
     {
       "name": "generate_qr_decoration",
-      "description": "Generate a QR code heightmap for embossing onto 3D models (Pro) (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Generate a QR code heightmap for embossing onto 3D models (Pro) (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "decoration",
       "parameters": {
@@ -291,7 +291,7 @@
     },
     {
       "name": "get_template_decoration_profile",
-      "description": "Get the decoration profile for a design template (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Get the decoration profile for a design template (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "decoration",
       "parameters": {
@@ -315,7 +315,7 @@
     },
     {
       "name": "list_brand_assets",
-      "description": "List all registered brand assets (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "List all registered brand assets (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "decoration",
       "parameters": {
@@ -335,7 +335,7 @@
     },
     {
       "name": "list_decoratable_templates",
-      "description": "List all design templates that have decoration profiles (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "List all design templates that have decoration profiles (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "decoration",
       "parameters": {
@@ -346,7 +346,7 @@
     },
     {
       "name": "register_brand_asset",
-      "description": "Register a logo/image as a named brand asset (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Register a logo/image as a named brand asset (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "decoration",
       "parameters": {
@@ -366,7 +366,7 @@
     },
     {
       "name": "remove_brand_asset",
-      "description": "Remove a registered brand asset (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Remove a registered brand asset (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "decoration",
       "parameters": {
@@ -386,7 +386,7 @@
     },
     {
       "name": "resolve_template_decoration",
-      "description": "Resolve decoration settings for a template, merging profile defaults with overrides (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Resolve decoration settings for a template, merging profile defaults with overrides (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "decoration",
       "parameters": {
@@ -435,7 +435,7 @@
     },
     {
       "name": "smart_decorate",
-      "description": "Intelligent decoration with auto-fix for printability (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Intelligent decoration with auto-fix for printability (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "decoration",
       "parameters": {
@@ -455,7 +455,7 @@
     },
     {
       "name": "decoration_history",
-      "description": "Get the full version history of a decoration (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Get the full version history of a decoration (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "decoration_learning",
       "parameters": {
@@ -474,7 +474,7 @@
     },
     {
       "name": "iterate_decoration",
-      "description": "Create a new version of a decoration, archiving the current settings (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Create a new version of a decoration, archiving the current settings (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "decoration_learning",
       "parameters": {
@@ -518,7 +518,7 @@
     },
     {
       "name": "record_decoration_success",
-      "description": "Record a successful print, updating proven settings for a decoration (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Record a successful print, updating proven settings for a decoration (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "decoration_learning",
       "parameters": {
@@ -557,7 +557,7 @@
     },
     {
       "name": "rollback_decoration",
-      "description": "Restore a previous version of a decoration (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Restore a previous version of a decoration (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "decoration_learning",
       "parameters": {
@@ -581,7 +581,7 @@
     },
     {
       "name": "change_part_color",
-      "description": "Change a part's color in a design recipe and re-slice (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Change a part's color in a design recipe and re-slice (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "design_modification",
       "parameters": {
@@ -622,7 +622,7 @@
     },
     {
       "name": "rebuild_design",
-      "description": "Re-execute the full build pipeline from a saved recipe (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Re-execute the full build pipeline from a saved recipe (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "design_modification",
       "parameters": {
@@ -641,7 +641,7 @@
     },
     {
       "name": "smart_redesign",
-      "description": "Interpret a natural language instruction and modify the design (Business).\n\nRequires Kiln Business.\nLearn more: https://kiln3d.com/enterprise",
+      "description": "Interpret a natural language instruction and modify the design (Business).\n\nKiln Business \u2014 kiln3d.com/enterprise",
       "tier": "business",
       "category": "design_modification",
       "parameters": {
@@ -664,8 +664,32 @@
       }
     },
     {
+      "name": "annotate_design_branch",
+      "description": "Set the human-readable purpose string for a branch.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "branch_id": {
+            "title": "Branch Id",
+            "type": "string"
+          },
+          "annotation": {
+            "title": "Annotation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "branch_id",
+          "annotation"
+        ],
+        "title": "annotate_design_branchArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "best_design_version",
-      "description": "Find the version with the highest success rate.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Find the version with the highest success rate.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -697,7 +721,7 @@
     },
     {
       "name": "check_design_regression",
-      "description": "Check if the latest version of a design is printing worse.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Check if the latest version of a design is printing worse.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -718,8 +742,54 @@
       }
     },
     {
+      "name": "cherry_pick_modification",
+      "description": "Apply one isolated semantic modification from a source branch onto a target branch (KILN-021 Priority 13).\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "ancestor_version_id": {
+            "title": "Ancestor Version Id",
+            "type": "string"
+          },
+          "source_version_id": {
+            "title": "Source Version Id",
+            "type": "string"
+          },
+          "target_version_id": {
+            "title": "Target Version Id",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "source_branch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Branch Id"
+          }
+        },
+        "required": [
+          "ancestor_version_id",
+          "source_version_id",
+          "target_version_id",
+          "feature_id"
+        ],
+        "title": "cherry_pick_modificationArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "compare_design_versions",
-      "description": "Compare print outcomes between two versions of a design.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Compare print outcomes between two versions of a design.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -742,8 +812,97 @@
       }
     },
     {
+      "name": "create_design_branch",
+      "description": "Create a new named branch forked from a specific version. Subsequent saves on this design flow to the new branch.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "base_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Base Version Id"
+          },
+          "parent_branch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parent Branch Id"
+          },
+          "annotation": {
+            "default": "",
+            "title": "Annotation",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Created By"
+          }
+        },
+        "required": [
+          "design_id",
+          "name"
+        ],
+        "title": "create_design_branchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cross_branch_ab_report",
+      "description": "Rank semantic features by their measured outcome impact across branches.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "min_outcomes_per_branch": {
+            "default": 3,
+            "title": "Min Outcomes Per Branch",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "cross_branch_ab_reportArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "design_version_health",
-      "description": "Full health report for a design across all its versions.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Full health report for a design across all its versions.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -769,8 +928,63 @@
       }
     },
     {
+      "name": "detect_merge_conflicts",
+      "description": "Three-way mesh-fingerprint diff: identify conflicts before merging.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "ancestor_version_id": {
+            "title": "Ancestor Version Id",
+            "type": "string"
+          },
+          "source_version_id": {
+            "title": "Source Version Id",
+            "type": "string"
+          },
+          "target_version_id": {
+            "title": "Target Version Id",
+            "type": "string"
+          },
+          "source_lines": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Lines"
+          },
+          "target_lines": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Lines"
+          }
+        },
+        "required": [
+          "ancestor_version_id",
+          "source_version_id",
+          "target_version_id"
+        ],
+        "title": "detect_merge_conflictsArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "dismiss_regression_alert",
-      "description": "Mark a regression alert as dismissed so it stops surfacing.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Mark a regression alert as dismissed so it stops surfacing.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -801,7 +1015,7 @@
     },
     {
       "name": "get_design_ancestry",
-      "description": "Walk the parent chain from a recipe back to the root.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Walk the parent chain from a recipe back to the root.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -825,7 +1039,7 @@
     },
     {
       "name": "get_regression_alerts",
-      "description": "List persisted regression alerts emitted by record_print_outcome.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "List persisted regression alerts emitted by record_print_outcome.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -858,8 +1072,331 @@
       }
     },
     {
+      "name": "import_external_mesh",
+      "description": "Import an external STL/3MF as a first-class design version.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "mesh_path": {
+            "title": "Mesh Path",
+            "type": "string"
+          },
+          "design_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Name"
+          },
+          "source_attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Attribution"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "branch_name": {
+            "default": "main",
+            "title": "Branch Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id",
+          "mesh_path"
+        ],
+        "title": "import_external_meshArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_cherry_pick_candidates",
+      "description": "Enumerate the semantic modifications cherry-pickable from *source_version_id* relative to *ancestor_version_id*.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "ancestor_version_id": {
+            "title": "Ancestor Version Id",
+            "type": "string"
+          },
+          "source_version_id": {
+            "title": "Source Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ancestor_version_id",
+          "source_version_id"
+        ],
+        "title": "list_cherry_pick_candidatesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_design_branches",
+      "description": "List the branches of a design.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "include_retired": {
+            "default": false,
+            "title": "Include Retired",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "list_design_branchesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_design_pull_requests",
+      "description": "List proposed design changes, optionally filtered.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Id"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          }
+        },
+        "title": "list_design_pull_requestsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_design_releases",
+      "description": "List signed releases for a design.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "include_retired": {
+            "default": false,
+            "title": "Include Retired",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "list_design_releasesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "merge_design_branches",
+      "description": "Record a merge of source into target with conflict resolution.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "source_branch_id": {
+            "title": "Source Branch Id",
+            "type": "string"
+          },
+          "target_branch_id": {
+            "title": "Target Branch Id",
+            "type": "string"
+          },
+          "merged_version_id": {
+            "title": "Merged Version Id",
+            "type": "string"
+          },
+          "ancestor_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ancestor Version Id"
+          },
+          "resolutions": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resolutions"
+          },
+          "merge_strategy": {
+            "default": "semantic",
+            "title": "Merge Strategy",
+            "type": "string"
+          },
+          "merged_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Merged By"
+          }
+        },
+        "required": [
+          "source_branch_id",
+          "target_branch_id",
+          "merged_version_id"
+        ],
+        "title": "merge_design_branchesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "propose_design_change",
+      "description": "Propose a branch's changes for review before merging.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "source_branch_id": {
+            "title": "Source Branch Id",
+            "type": "string"
+          },
+          "target_branch_id": {
+            "title": "Target Branch Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "author_user_id": {
+            "title": "Author User Id",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "reviewer_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reviewer User Id"
+          },
+          "review_artifact": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Review Artifact"
+          }
+        },
+        "required": [
+          "design_id",
+          "source_branch_id",
+          "target_branch_id",
+          "title",
+          "author_user_id"
+        ],
+        "title": "propose_design_changeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "prune_design_render_cache",
+      "description": "Remove cached PNGs older than *max_age_days*.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "max_age_days": {
+            "default": 30,
+            "title": "Max Age Days",
+            "type": "integer"
+          }
+        },
+        "title": "prune_design_render_cacheArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "read_design_sidecar",
-      "description": "Read provenance data from the sidecar next to an STL or recipe file.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Read provenance data from the sidecar next to an STL or recipe file.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -878,7 +1415,7 @@
     },
     {
       "name": "record_design_version_outcome",
-      "description": "Record whether a print succeeded or failed for a design version.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Record whether a print succeeded or failed for a design version.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -966,7 +1503,7 @@
     },
     {
       "name": "rename_design",
-      "description": "Rename a design while preserving full version history.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Rename a design while preserving full version history.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -989,6 +1526,348 @@
       }
     },
     {
+      "name": "rename_design_branch",
+      "description": "Rename a branch.  New name must be unique per design (excluding retired branches).\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "branch_id": {
+            "title": "Branch Id",
+            "type": "string"
+          },
+          "new_name": {
+            "title": "New Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "branch_id",
+          "new_name"
+        ],
+        "title": "rename_design_branchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "render_design_mesh",
+      "description": "Force a render of a single mesh through the cache.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "mesh_path": {
+            "title": "Mesh Path",
+            "type": "string"
+          },
+          "angles": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Angles"
+          },
+          "color": {
+            "default": "",
+            "title": "Color",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mesh_path"
+        ],
+        "title": "render_design_meshArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "retire_design_branch",
+      "description": "Mark a branch retired \u2014 preserves records, frees the name.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "branch_id": {
+            "title": "Branch Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "branch_id"
+        ],
+        "title": "retire_design_branchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "retire_design_release",
+      "description": "Yank a release \u2014 record preserved, name no longer resolves.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "release_id": {
+            "title": "Release Id",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "release_id"
+        ],
+        "title": "retire_design_releaseArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "review_design_pull_request",
+      "description": "Approve, request changes, or reject a proposed design change.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "pr_id": {
+            "title": "Pr Id",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "body": {
+            "default": "",
+            "title": "Body",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pr_id",
+          "user_id",
+          "decision"
+        ],
+        "title": "review_design_pull_requestArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "sign_design_release",
+      "description": "Sign and persist an immutable named release of a version.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "mesh_fingerprint": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Mesh Fingerprint"
+          },
+          "ancestry_chain": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ancestry Chain"
+          },
+          "outcomes": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Outcomes"
+          },
+          "provenance": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Provenance"
+          },
+          "branch_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Branch Name"
+          },
+          "signed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Signed By"
+          }
+        },
+        "required": [
+          "design_id",
+          "version_id",
+          "name"
+        ],
+        "title": "sign_design_releaseArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "source_merge_three_way",
+      "description": "Three-way OpenSCAD source merge (KILN-021 Priority 9 fallback).\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "base_source": {
+            "title": "Base Source",
+            "type": "string"
+          },
+          "left_source": {
+            "title": "Left Source",
+            "type": "string"
+          },
+          "right_source": {
+            "title": "Right Source",
+            "type": "string"
+          },
+          "left_label": {
+            "default": "branch_a",
+            "title": "Left Label",
+            "type": "string"
+          },
+          "right_label": {
+            "default": "branch_b",
+            "title": "Right Label",
+            "type": "string"
+          },
+          "show_base_in_markers": {
+            "default": false,
+            "title": "Show Base In Markers",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "base_source",
+          "left_source",
+          "right_source"
+        ],
+        "title": "source_merge_three_wayArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "verify_design_release",
+      "description": "Verify a release's signature and (optionally) its mesh fingerprint.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "release_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Release Id"
+          },
+          "design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Id"
+          },
+          "release_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Release Name"
+          },
+          "recompute_fingerprint": {
+            "default": false,
+            "title": "Recompute Fingerprint",
+            "type": "boolean"
+          }
+        },
+        "title": "verify_design_releaseArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "billing_alerts",
       "description": "Check billing system health and active alerts.",
       "tier": "free",
@@ -1001,7 +1880,7 @@
     },
     {
       "name": "billing_check_setup",
-      "description": "Check if billing setup is complete after user visited the setup URL.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Check if billing setup is complete after user visited the setup URL.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "other",
       "parameters": {
@@ -1012,7 +1891,7 @@
     },
     {
       "name": "billing_delete_data",
-      "description": "Delete all your billing data (GDPR right-to-erasure).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Delete all your billing data (GDPR right-to-erasure).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "other",
       "parameters": {
@@ -1029,7 +1908,7 @@
     },
     {
       "name": "billing_export",
-      "description": "Export billing history for accounting.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Export billing history for accounting.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "other",
       "parameters": {
@@ -1068,7 +1947,7 @@
     },
     {
       "name": "billing_invoice",
-      "description": "Generate an invoice/receipt for a billing charge.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Generate an invoice/receipt for a billing charge.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "other",
       "parameters": {
@@ -1090,7 +1969,7 @@
     },
     {
       "name": "billing_setup_url",
-      "description": "Get a URL to link a payment method for Kiln orchestration fees.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Get a URL to link a payment method for Kiln orchestration fees.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "other",
       "parameters": {
@@ -1107,7 +1986,7 @@
     },
     {
       "name": "billing_status",
-      "description": "Get enriched billing status including payment method info.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Get enriched billing status including payment method info.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "other",
       "parameters": {
@@ -1129,7 +2008,7 @@
     },
     {
       "name": "check_payment_status",
-      "description": "Check the current status of a pending payment by ID.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Check the current status of a pending payment by ID.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "other",
       "parameters": {
@@ -1148,7 +2027,7 @@
     },
     {
       "name": "refund_payment",
-      "description": "Request a refund for a completed payment.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Request a refund for a completed payment.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "other",
       "parameters": {
@@ -1172,7 +2051,7 @@
     },
     {
       "name": "resume_interrupted_print",
-      "description": "Resume an interrupted print with one call (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Resume an interrupted print with one call on any supported FDM printer (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "other",
       "parameters": {
@@ -1201,6 +2080,26 @@
             "default": "PLA",
             "title": "Material Type",
             "type": "string"
+          },
+          "use_ams": {
+            "default": "auto",
+            "title": "Use Ams",
+            "type": "string"
+          },
+          "ams_mapping": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ams Mapping"
           }
         },
         "title": "resume_interrupted_printArguments",
@@ -1209,7 +2108,7 @@
     },
     {
       "name": "add_feature_during_print",
-      "description": "Slice a new mesh at pause_z and resume printing it (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Slice a new mesh at pause_z and resume printing it (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -1335,7 +2234,7 @@
     },
     {
       "name": "add_feature_during_print_fleet",
-      "description": "Add the same feature (e.g. a hat) to N paused printers (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Add the same feature (e.g. a hat) to N paused printers (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -1393,7 +2292,7 @@
     },
     {
       "name": "analyze_mid_print_impact",
-      "description": "Pre-commit truth gate: which layers will actually change (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Pre-commit truth gate: which layers will actually change (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -1425,7 +2324,7 @@
     },
     {
       "name": "apply_mid_print_decoration_plan",
-      "description": "Commit a planned mid-print decoration (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Commit a planned mid-print decoration (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -1447,7 +2346,7 @@
     },
     {
       "name": "deboss_during_print",
-      "description": "Carve a debossed image into the top of an in-flight print (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Carve a debossed image into the top of an in-flight print (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -1567,7 +2466,7 @@
     },
     {
       "name": "decorate_during_print",
-      "description": "Add a decoration to an in-flight paused print (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Add a decoration to an in-flight paused print (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -1696,7 +2595,7 @@
     },
     {
       "name": "decorate_during_print_fleet",
-      "description": "Apply the same decoration to N paused printers at once (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Apply the same decoration to N paused printers at once (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -1769,7 +2668,7 @@
     },
     {
       "name": "generate_recovery_gcode",
-      "description": "Generate a resume-from-layer G-code file for a failed print (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Generate a resume-from-layer G-code file for a failed print (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -1815,7 +2714,7 @@
     },
     {
       "name": "get_auto_tuned_settings",
-      "description": "Get auto-tuned print settings from historical success/failure analysis.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Get auto-tuned print settings from historical success/failure analysis.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -1839,7 +2738,7 @@
     },
     {
       "name": "get_maintenance_prediction",
-      "description": "Predict when maintenance is likely needed for a printer.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Predict when maintenance is likely needed for a printer.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -1858,7 +2757,7 @@
     },
     {
       "name": "get_material_success_rates",
-      "description": "Get per-material success/fail breakdown for a printer.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Get per-material success/fail breakdown for a printer.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -1877,7 +2776,7 @@
     },
     {
       "name": "get_material_warnings",
-      "description": "Get warnings about printing a specific material on a printer.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Get warnings about printing a specific material on a printer.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -1901,7 +2800,7 @@
     },
     {
       "name": "get_optimal_settings",
-      "description": "Predict the best print settings based on historical success.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Predict the best print settings based on historical success.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -1930,7 +2829,7 @@
     },
     {
       "name": "get_print_confidence",
-      "description": "Predict how likely a print will succeed based on your print history.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Predict how likely a print will succeed based on your print history.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -1964,7 +2863,7 @@
     },
     {
       "name": "get_print_learning_summary",
-      "description": "Get what the print learning system has learned about a printer.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Get what the print learning system has learned about a printer.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -1983,7 +2882,7 @@
     },
     {
       "name": "get_recovery_recommendations",
-      "description": "Return the historically best recovery strategy (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Return the historically best recovery strategy (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -2012,7 +2911,7 @@
     },
     {
       "name": "get_recovery_strategy_stats",
-      "description": "Return per-strategy recovery stats for display (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Return per-strategy recovery stats for display (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -2039,7 +2938,7 @@
     },
     {
       "name": "plan_mid_print_decoration",
-      "description": "Plan a mid-print decoration in one call (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Plan a mid-print decoration in one call (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -2178,7 +3077,7 @@
     },
     {
       "name": "predict_print_failure_risk",
-      "description": "Score current failure risk BEFORE a failure occurs (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Score current failure risk BEFORE a failure occurs (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -2227,7 +3126,7 @@
     },
     {
       "name": "preview_decorated_mesh",
-      "description": "Render a 3D preview of a mid-print decorated part (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Render a 3D preview of a mid-print decorated part (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -2289,7 +3188,7 @@
     },
     {
       "name": "preview_mid_print_session",
-      "description": "One-call approval gate for a mid-print decoration (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "One-call approval gate for a mid-print decoration (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -2331,7 +3230,7 @@
     },
     {
       "name": "record_completed_print",
-      "description": "Record a completed print into the learning system.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Record a completed print into the learning system.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -2395,7 +3294,7 @@
     },
     {
       "name": "record_recovery_outcome",
-      "description": "Record the outcome of a recovery attempt (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Record the outcome of a recovery attempt (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -2449,7 +3348,7 @@
     },
     {
       "name": "regenerate_3mf_thumbnail",
-      "description": "Swap the embedded thumbnails in a 3MF for renders of a decorated STL so the Bambu screen shows the decoration (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Swap the embedded thumbnails in a 3MF for renders of a decorated STL so the Bambu screen shows the decoration (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -2483,7 +3382,7 @@
     },
     {
       "name": "revert_mid_print",
-      "description": "Undo a mid-print transform by swapping back the original resume (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Undo a mid-print transform by swapping back the original resume (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -2505,7 +3404,7 @@
     },
     {
       "name": "revert_mid_print_fleet",
-      "description": "Revert mid-print transforms on N printers at once (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Revert mid-print transforms on N printers at once (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -2530,7 +3429,7 @@
     },
     {
       "name": "wrap_gcode_as_resume_3mf",
-      "description": "Wrap resume gcode as a Bambu 3MF with start-gcode BYPASSED (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Wrap resume gcode as a Bambu 3MF with start-gcode BYPASSED (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -2579,7 +3478,7 @@
     },
     {
       "name": "generate_ashtray",
-      "description": "Generate an ashtray with optional branding and QR code.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Generate an ashtray with optional branding and QR code.\n\nFree tier: 3/month (shared quota).  Pro: unlimited.",
       "tier": "pro",
       "category": "product_generators",
       "parameters": {
@@ -2646,7 +3545,7 @@
     },
     {
       "name": "generate_bookmark",
-      "description": "Generate a bookmark with optional decoration and page clip.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Generate a bookmark with optional decoration and page clip.\n\nFree tier: 3/month (shared quota).  Pro: unlimited.",
       "tier": "pro",
       "category": "product_generators",
       "parameters": {
@@ -2708,7 +3607,7 @@
     },
     {
       "name": "generate_coaster",
-      "description": "Generate a coaster with optional branding and QR code.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Generate a coaster with optional branding and QR code.\n\nFree tier: 3/month (shared quota).  Pro: unlimited.",
       "tier": "pro",
       "category": "product_generators",
       "parameters": {
@@ -2760,7 +3659,7 @@
     },
     {
       "name": "generate_fridge_magnet",
-      "description": "Generate a printable fridge magnet with front decoration.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Generate a printable fridge magnet with front decoration.\n\nFree tier: 3/month (shared quota).  Pro: unlimited.",
       "tier": "pro",
       "category": "product_generators",
       "parameters": {
@@ -2837,7 +3736,7 @@
     },
     {
       "name": "generate_jewelry_tray",
-      "description": "Generate a jewelry tray with optional decoration and QR code.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Generate a jewelry tray with optional decoration and QR code.\n\nFree tier: 3/month (shared quota).  Pro: unlimited.",
       "tier": "pro",
       "category": "product_generators",
       "parameters": {
@@ -2924,7 +3823,7 @@
     },
     {
       "name": "generate_keychain",
-      "description": "Generate a 3D-printable keychain.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Generate a 3D-printable keychain.\n\nFree tier: 3/month (shared quota).  Pro: unlimited.",
       "tier": "pro",
       "category": "product_generators",
       "parameters": {
@@ -2996,7 +3895,7 @@
     },
     {
       "name": "generate_ornament",
-      "description": "Generate a hanging ornament with optional decoration.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Generate a hanging ornament with optional decoration.\n\nFree tier: 3/month (shared quota).  Pro: unlimited.",
       "tier": "pro",
       "category": "product_generators",
       "parameters": {
@@ -3063,7 +3962,7 @@
     },
     {
       "name": "generate_pet_bowl",
-      "description": "Generate a tapered pet bowl optimized for FDM printing.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Generate a tapered pet bowl optimized for FDM printing.\n\nFree tier: 3/month (shared quota).  Pro: unlimited.",
       "tier": "pro",
       "category": "product_generators",
       "parameters": {
@@ -3120,7 +4019,7 @@
     },
     {
       "name": "generate_pet_tag",
-      "description": "Generate a 3D-printable pet ID tag.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Generate a 3D-printable pet ID tag.\n\nFree tier: 3/month (shared quota).  Pro: unlimited.",
       "tier": "pro",
       "category": "product_generators",
       "parameters": {
@@ -3189,7 +4088,7 @@
     },
     {
       "name": "generate_wall_plaque",
-      "description": "Generate a wall-mountable photo plaque.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Generate a wall-mountable photo plaque.\n\nFree tier: 3/month (shared quota).  Pro: unlimited.",
       "tier": "pro",
       "category": "product_generators",
       "parameters": {
@@ -3258,7 +4157,7 @@
     },
     {
       "name": "add_qr_to_product",
-      "description": "Add a scannable QR code to any product STL (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Add a scannable QR code to any product STL (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "product_intelligence",
       "parameters": {
@@ -3307,7 +4206,7 @@
     },
     {
       "name": "batch_generate_products",
-      "description": "Generate N decorated products from N photos in one call (Pro).\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Generate N decorated products from N photos in one call (Pro).\n\nFree tier: 3/month (shared quota).  Pro: unlimited.",
       "tier": "pro",
       "category": "product_intelligence",
       "parameters": {
@@ -3359,7 +4258,7 @@
     },
     {
       "name": "describe_face",
-      "description": "Return metadata for a single semantic face on a product.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Return metadata for a single semantic face on a product.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "product_intelligence",
       "parameters": {
@@ -3383,7 +4282,7 @@
     },
     {
       "name": "generate_decorated_product",
-      "description": "Generate a fully decorated product from a photo in one step (Pro).\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Generate a fully decorated product from a photo in one step (Pro).\n\nFree tier: 3/month (shared quota).  Pro: unlimited.",
       "tier": "pro",
       "category": "product_intelligence",
       "parameters": {
@@ -3432,7 +4331,7 @@
     },
     {
       "name": "generate_product_base",
-      "description": "Generate a 3D-printable product base shape from a template (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Generate a 3D-printable product base shape from a template (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "product_intelligence",
       "parameters": {
@@ -3466,7 +4365,7 @@
     },
     {
       "name": "get_face_emboss_depth",
-      "description": "Return the recommended maximum emboss/deboss depth for a face.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Return the recommended maximum emboss/deboss depth for a face.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "product_intelligence",
       "parameters": {
@@ -3490,7 +4389,7 @@
     },
     {
       "name": "get_product_color_roles",
-      "description": "Return semantic color roles for a product type.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Return semantic color roles for a product type.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "product_intelligence",
       "parameters": {
@@ -3509,7 +4408,7 @@
     },
     {
       "name": "get_product_faces",
-      "description": "Return the full semantic face registry for a product type.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Return the full semantic face registry for a product type.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "product_intelligence",
       "parameters": {
@@ -3528,7 +4427,7 @@
     },
     {
       "name": "get_product_profile",
-      "description": "Get optimized pipeline profile for a product type (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Get optimized pipeline profile for a product type (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "product_intelligence",
       "parameters": {
@@ -3547,7 +4446,7 @@
     },
     {
       "name": "list_decoratable_faces",
-      "description": "List face names that may be passed to ``decorate_surface``.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "List face names that may be passed to ``decorate_surface``.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "product_intelligence",
       "parameters": {
@@ -3566,7 +4465,7 @@
     },
     {
       "name": "list_product_types",
-      "description": "List all Kiln product types that expose a semantic face registry.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "List all Kiln product types that expose a semantic face registry.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "product_intelligence",
       "parameters": {
@@ -3577,7 +4476,7 @@
     },
     {
       "name": "print_qr_product",
-      "description": "One-shot QR product pipeline: generate base, add QR, slice, merge, wrap 3MF, upload, and print (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "One-shot QR product pipeline: generate base, add QR, slice, merge, wrap 3MF, upload, and print (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "product_intelligence",
       "parameters": {
@@ -3626,7 +4525,7 @@
     },
     {
       "name": "recommend_text_size",
-      "description": "One-stop text-sizing helper for product decoration.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "One-stop text-sizing helper for product decoration.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "product_intelligence",
       "parameters": {
@@ -3665,7 +4564,7 @@
     },
     {
       "name": "enable_auto_proven_recipes",
-      "description": "Toggle automatic proven recipe recording on print completion (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Toggle automatic proven recipe recording on print completion (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "provenance_learning",
       "parameters": {
@@ -3682,7 +4581,7 @@
     },
     {
       "name": "get_proven_recipe",
-      "description": "Get the proven recipe for a decoration + product combination (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Get the proven recipe for a decoration + product combination (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "provenance_learning",
       "parameters": {
@@ -3706,7 +4605,7 @@
     },
     {
       "name": "list_proven_recipes",
-      "description": "List all proven recipes across all designs (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "List all proven recipes across all designs (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "provenance_learning",
       "parameters": {
@@ -3723,7 +4622,7 @@
     },
     {
       "name": "record_proven_recipe",
-      "description": "Record a design version's recipe as proven after a print (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Record a design version's recipe as proven after a print (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "provenance_learning",
       "parameters": {
@@ -3787,7 +4686,7 @@
     },
     {
       "name": "cancel_speed_schedule",
-      "description": "Cancel the active speed schedule (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Cancel the active speed schedule (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "speed_control",
       "parameters": {
@@ -3798,7 +4697,7 @@
     },
     {
       "name": "fleet_set_speed",
-      "description": "Set speed across all registered printers in the fleet (Business).\n\nRequires Kiln Business.\nLearn more: https://kiln3d.com/enterprise",
+      "description": "Set speed across all registered printers in the fleet (Business).\n\nKiln Business \u2014 kiln3d.com/enterprise",
       "tier": "business",
       "category": "speed_control",
       "parameters": {
@@ -3817,7 +4716,7 @@
     },
     {
       "name": "get_speed_schedule",
-      "description": "Get the current active speed schedule and status (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Get the current active speed schedule and status (Pro).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "speed_control",
       "parameters": {
@@ -3828,7 +4727,7 @@
     },
     {
       "name": "set_speed_percent",
-      "description": "Set printer speed to a custom percentage (Pro feature).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Set printer speed to a custom percentage (Pro feature).\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "speed_control",
       "parameters": {
@@ -3859,7 +4758,7 @@
     },
     {
       "name": "set_speed_schedule",
-      "description": "Set layer-based speed schedule with automatic adjustments (Business).\n\nRequires Kiln Business.\nLearn more: https://kiln3d.com/enterprise",
+      "description": "Set layer-based speed schedule with automatic adjustments (Business).\n\nKiln Business \u2014 kiln3d.com/enterprise",
       "tier": "business",
       "category": "speed_control",
       "parameters": {
@@ -3894,7 +4793,7 @@
     },
     {
       "name": "apply_geometric_texture",
-      "description": "Apply a procedural texture as physical surface relief.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Apply a procedural texture as physical surface relief.\n\nFree tier: 3/month (shared quota).  Pro: unlimited.",
       "tier": "pro",
       "category": "textures",
       "parameters": {
@@ -3973,7 +4872,7 @@
     },
     {
       "name": "apply_image_texture",
-      "description": "Apply a photo-based texture as a tiled deboss/emboss pattern.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Apply a photo-based texture as a tiled deboss/emboss pattern.\n\nFree tier: 3/month (shared quota).  Pro: unlimited.",
       "tier": "pro",
       "category": "textures",
       "parameters": {
@@ -4032,7 +4931,7 @@
     },
     {
       "name": "apply_procedural_texture",
-      "description": "Apply a multicolor procedural texture (requires AMS/MMU for multi-material printing).\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Apply a multicolor procedural texture (requires AMS/MMU for multi-material printing).\n\nFree tier: 3/month (shared quota).  Pro: unlimited.",
       "tier": "pro",
       "category": "textures",
       "parameters": {
@@ -4151,7 +5050,7 @@
     },
     {
       "name": "delete_custom_palette",
-      "description": "Delete a saved custom color palette.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Delete a saved custom color palette.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "textures",
       "parameters": {
@@ -4170,7 +5069,7 @@
     },
     {
       "name": "list_custom_palettes",
-      "description": "List all saved custom color palettes.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "List all saved custom color palettes.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "textures",
       "parameters": {
@@ -4290,7 +5189,7 @@
     },
     {
       "name": "save_custom_palette",
-      "description": "Save a custom color palette for reuse with any texture.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Save a custom color palette for reuse with any texture.\n\nKiln Pro \u2014 kiln3d.com/pro",
       "tier": "pro",
       "category": "textures",
       "parameters": {

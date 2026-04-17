@@ -59,6 +59,11 @@ class DesignVersion:
         parent_version_id: The ``version_id`` of the preceding version, or
             ``None`` for the initial version.
         notes: Free-text notes attached to this version.
+        version_number: Monotonic per-design sequence number, starting at
+            1.  Mirrors the SQLite ``version_number`` column so callers
+            (and sidecar writers) can name per-version artifacts without
+            running a second query.  Defaults to 1 for freshly-constructed
+            instances that have not yet been persisted.
     """
 
     version_id: str
@@ -73,6 +78,7 @@ class DesignVersion:
     provenance: dict[str, Any] | None = field(default=None)
     mesh_fingerprint: dict[str, Any] | None = field(default=None)
     mesh_diff: dict[str, Any] | None = field(default=None)
+    version_number: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dict suitable for JSON output."""
@@ -241,6 +247,7 @@ class DesignVersionStore:
             provenance=json.loads(prov_raw) if prov_raw else None,
             mesh_fingerprint=json.loads(fp_raw) if fp_raw else None,
             mesh_diff=json.loads(md_raw) if md_raw else None,
+            version_number=int(row["version_number"]) if "version_number" in cols else 1,
         )
 
     @staticmethod
@@ -367,6 +374,7 @@ class DesignVersionStore:
             created_at=now,
             parent_version_id=parent_id,
             notes=notes,
+            version_number=version_number,
         )
 
     def get_version(self, version_id: str) -> DesignVersion | None:
