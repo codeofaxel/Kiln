@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-04-17T04:26:45.809020+00:00",
+  "generated": "2026-04-17T05:09:41.085126+00:00",
   "tool_count": 134,
   "categories": {
     "product_generators": {
@@ -1697,7 +1697,7 @@
             "default": null,
             "title": "Mesh Fingerprint"
           },
-          "ancestry_chain": {
+          "ancestry": {
             "anyOf": [
               {
                 "items": {},
@@ -1708,7 +1708,7 @@
               }
             ],
             "default": null,
-            "title": "Ancestry Chain"
+            "title": "Ancestry"
           },
           "outcomes": {
             "anyOf": [
