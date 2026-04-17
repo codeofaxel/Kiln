@@ -323,8 +323,12 @@ class TestDeleteFile:
 class TestStartPrint:
     """Tests for the start_print MCP tool."""
 
+    @patch.dict("os.environ", {"KILN_SKIP_PREVIEW_GATE": "1"})
     @patch("kiln.server._get_adapter")
     def test_success(self, mock_get_adapter):
+        # KILN_SKIP_PREVIEW_GATE=1 bypasses the preview-token gate added
+        # in d1ef6f4 (incident-#0 safety hardening); production paths go
+        # through issue_preview_token() + preview_token=.
         adapter = MagicMock(spec=OctoPrintAdapter)
         adapter.start_print.return_value = PrintResult(
             success=True, message="Started printing benchy.gcode."
@@ -349,6 +353,7 @@ class TestStartPrint:
         assert result["success"] is True
         assert "benchy" in result["message"]
 
+    @patch.dict("os.environ", {"KILN_SKIP_PREVIEW_GATE": "1"})
     @patch("kiln.server._get_adapter")
     def test_printer_error(self, mock_get_adapter):
         adapter = MagicMock(spec=OctoPrintAdapter)
@@ -434,8 +439,15 @@ class TestCancelPrint:
 
     @patch("kiln.server._get_adapter")
     def test_preserve_temperatures_default_false_preserves_legacy(self, mock_get_adapter):
-        """Without the opt-in, cancel_print behaves exactly as before —
-        no state snapshot, no set_*_temp calls, printer cools to idle."""
+        """Without the opt-in, cancel_print does not re-assert temperature
+        targets — the printer cools to idle as before.
+
+        Note: get_state() IS called once during cancel (Layer 6 early-cancel
+        incident capture added in d0d076b7), but no set_*_temp calls fire
+        and no preserved_temperatures field is returned.  The legacy
+        contract is "don't keep heaters warm," not "don't touch the
+        adapter at all."
+        """
         adapter = MagicMock(spec=OctoPrintAdapter)
         adapter.cancel_print.return_value = PrintResult(success=True, message="Print cancelled.")
         mock_get_adapter.return_value = adapter
@@ -444,7 +456,6 @@ class TestCancelPrint:
 
         assert result["success"] is True
         assert "preserved_temperatures" not in result
-        adapter.get_state.assert_not_called()
         adapter.set_tool_temp.assert_not_called()
         adapter.set_bed_temp.assert_not_called()
 
