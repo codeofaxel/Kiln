@@ -105,7 +105,7 @@ Pure Python, no external mesh libraries. Runs locally on your laptop. Part of th
 
 ### 2. The Decoration Engine
 
-Kiln's decoration engine accepts many kinds of input and turns them into fabrication instructions for a physical printer (or a virtual asset for a game engine or metaverse platform). The core idea: **many inputs → one normalized heightmap → many outputs.**
+Kiln's decoration engine accepts many kinds of input and turns them into fabrication instructions for an FDM printer. The core idea: **many inputs → one normalized heightmap → a printable decorated mesh.**
 
 Inputs the engine accepts:
 
@@ -117,13 +117,9 @@ Inputs the engine accepts:
 - **Procedural textures** — tiger stripe, marble, snakeskin, wood grain, carbon fiber, honeycomb, lava, ocean, tie-dye, galaxy. Generated at face-centroid resolution; no UV mapping required.
 - **Brand assets** — registered logos and imagery from a per-tenant brand asset registry for repeatable POS / merch / kiosk production.
 
-Outputs the engine produces:
+Every input funnels through the same normalized-heightmap intermediate, then out to a CSG boolean on your mesh (emboss or deboss) that slices and prints on any Kiln-supported printer.
 
-- **Physical:** CSG boolean difference/union for FDM (emboss or deboss), G-code with grayscale-modulated laser power for engravers, heightmap-derived pocket depth for CNC milling.
-- **Virtual:** GLTF/FBX for game engines, USD/Alembic for VFX pipelines, WebGL-ready formats for browsers, NFT/marketplace packages.
-- **Combined:** the same decorated mesh dispatched simultaneously to a physical printer and a virtual asset pipeline in a single operation.
-
-Covered by patent-pending Decoration Engine (KILN-017) and the patent-pending Cross-Domain Object Lifecycle (KILN-024) for simultaneous physical-plus-virtual delivery.
+Covered by patent-pending Decoration Engine (KILN-017).
 
 ### 3. Git for 3D Printing
 
