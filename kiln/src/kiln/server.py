@@ -1031,6 +1031,157 @@ def _resolve_effective_printer_name(printer_name: str | None = None) -> str:
     return "default"
 
 
+def _read_config_printers() -> dict[str, dict[str, Any]]:
+    """Return ``{name: entry}`` for every printer in ``~/.kiln/config.yaml``.
+
+    Empty dict when no YAML file, no printers block, or parse failure —
+    callers treat an empty result as "no config-level printers" rather
+    than raising.  This makes config.yaml the single source of truth
+    for which printer names exist, independent of what's currently
+    loaded into the live :class:`PrinterRegistry`.
+    """
+    try:
+        from kiln.cli.config import _read_config_file, get_config_path
+
+        cfg = _read_config_file(get_config_path()) or {}
+        printers = cfg.get("printers") or {}
+        return {name: entry for name, entry in printers.items() if isinstance(entry, dict)}
+    except Exception as exc:  # noqa: BLE001 — YAML is best-effort
+        logger.debug("Could not read config.yaml printers: %s", exc)
+        return {}
+
+
+def _build_adapter_from_config_entry(name: str, entry: dict[str, Any]) -> PrinterAdapter:
+    """Build a :class:`PrinterAdapter` from a single config.yaml printer entry.
+
+    Pure factory — reads only from *entry* and a small set of optional
+    environment variables for fields the YAML doesn't model (serial
+    port path, mainboard id).  Does not mutate module globals.  Use
+    this when you need an adapter for a *named* config entry other
+    than the env-resolved default; ``_get_adapter()`` continues to
+    own the env/YAML-resolved default path.
+
+    Raises ``RuntimeError`` when the entry is missing required fields
+    or requests an unsupported printer type, so the caller can emit
+    a targeted warning rather than a generic "not found".
+    """
+    host = str(entry.get("host") or "").strip()
+    api_key = str(entry.get("api_key") or entry.get("access_code") or "").strip()
+    printer_type = str(entry.get("type") or entry.get("printer_type") or "").strip().lower()
+    serial = str(entry.get("serial") or "").strip()
+    printer_model = str(entry.get("printer_model") or "").strip()
+
+    if not host:
+        raise RuntimeError(f"Config entry {name!r} is missing 'host'.")
+    if not printer_type:
+        raise RuntimeError(f"Config entry {name!r} is missing 'type'.")
+
+    adapter: PrinterAdapter
+    if printer_type == "octoprint":
+        if not api_key:
+            raise RuntimeError(f"Config entry {name!r} (OctoPrint) is missing 'api_key'.")
+        adapter = OctoPrintAdapter(host=host, api_key=api_key)
+    elif printer_type == "moonraker":
+        adapter = MoonrakerAdapter(host=host, api_key=api_key or None)
+    elif printer_type == "bambu":
+        if BambuAdapter is None:
+            raise RuntimeError(
+                f"Config entry {name!r} is type 'bambu' but paho-mqtt is not installed."
+            )
+        if not api_key:
+            raise RuntimeError(f"Config entry {name!r} (Bambu) is missing 'access_code'.")
+        if not serial:
+            raise RuntimeError(f"Config entry {name!r} (Bambu) is missing 'serial'.")
+        adapter = BambuAdapter(host=host, access_code=api_key, serial=serial)
+    elif printer_type == "elegoo":
+        if ElegooAdapter is None:
+            raise RuntimeError(
+                f"Config entry {name!r} is type 'elegoo' but websocket-client is not installed."
+            )
+        mainboard_id = str(entry.get("mainboard_id") or os.environ.get("KILN_PRINTER_MAINBOARD_ID", ""))
+        adapter = ElegooAdapter(host=host, mainboard_id=mainboard_id)
+    elif printer_type == "prusaconnect":
+        adapter = PrusaConnectAdapter(host=host, api_key=api_key or None)
+    elif printer_type == "serial":
+        port = str(entry.get("port") or os.environ.get("KILN_PRINTER_PORT", ""))
+        if not port:
+            raise RuntimeError(f"Config entry {name!r} (serial) is missing 'port'.")
+        baudrate = int(entry.get("baudrate") or parse_int_env("KILN_PRINTER_BAUDRATE", 115200))
+        adapter = SerialPrinterAdapter(port=port, baudrate=baudrate)
+    else:
+        raise RuntimeError(
+            f"Config entry {name!r} has unsupported printer type {printer_type!r}."
+        )
+
+    if printer_model:
+        adapter.set_safety_profile(printer_model)
+
+    return adapter
+
+
+def _resolve_adapter(printer_name: str | None = None) -> PrinterAdapter:
+    """Resolve a :class:`PrinterAdapter` from an optional printer name.
+
+    config.yaml is the source of truth for which printer names exist;
+    the :class:`PrinterRegistry` is a cache of *live* adapter instances
+    in front of it.  When the registry misses — because startup
+    auto-register silently failed, or because the server has been
+    running long enough that an adapter got evicted — we fall back
+    to config.yaml and lazily build + register the adapter, so the
+    next call hits the fast path.
+
+    Behaviour:
+      * ``printer_name=None``: return ``_get_adapter()`` — the env/YAML
+        resolved default adapter, same path used by tools that don't
+        expose a printer_name arg.
+      * Registry hit: return the live adapter.
+      * Registry miss, *name* is the effective default:
+        use ``_get_adapter()`` and self-heal the registry entry.
+      * Registry miss, *name* is in config.yaml: build the adapter
+        from the config entry, register it, return.
+      * Registry miss, *name* not in config.yaml: raise
+        :class:`PrinterNotFoundError` — we never silently redirect
+        an unknown name to the default adapter.
+    """
+    from kiln.registry import PrinterNotFoundError
+
+    if not printer_name:
+        return _get_adapter()
+
+    registry = _get_registry()
+    try:
+        return registry.get(printer_name)
+    except PrinterNotFoundError:
+        pass
+
+    # Registry miss — consult config.yaml.
+    config_printers = _read_config_printers()
+    effective_default = _resolve_effective_printer_name(None)
+
+    if printer_name == effective_default:
+        adapter = _get_adapter()
+    elif printer_name in config_printers:
+        try:
+            adapter = _build_adapter_from_config_entry(
+                printer_name, config_printers[printer_name],
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to build adapter for config-listed printer %r: %s",
+                printer_name,
+                _sanitize_log_msg(str(exc)),
+            )
+            raise PrinterNotFoundError(printer_name) from exc
+    else:
+        raise PrinterNotFoundError(printer_name)
+
+    try:
+        registry.register(printer_name, adapter)
+    except Exception:  # noqa: BLE001 — best-effort self-heal
+        pass
+    return adapter
+
+
 def _get_emergency_latch_status(printer_name: str) -> dict[str, Any] | None:
     """Best-effort emergency latch status lookup for a printer."""
     try:
@@ -3077,13 +3228,85 @@ def _resolve_use_ams(
     try:
         ams_info = adapter.get_ams_status()
     except Exception as exc:
-        logger.debug("AMS auto-detect probe failed: %s — defaulting to no AMS.", exc)
-        return {"use_ams": False, "ams_mapping": None, "warnings": []}
+        logger.warning(
+            "AMS auto-detect probe failed: %s — external spool fallback, "
+            "but this may be wrong if AMS is attached.  Pass use_ams='true' "
+            "with an explicit ams_mapping to force AMS routing.",
+            exc,
+        )
+        return {
+            "use_ams": False,
+            "ams_mapping": None,
+            "warnings": [
+                f"AMS auto-detect probe failed: {exc}.  Falling back to "
+                "external spool — pass use_ams='true' with an explicit "
+                "ams_mapping=[<slot>] if you want AMS."
+            ],
+            "ambiguous": True,
+        }
 
-    # Check if AMS exists
+    # Check if AMS exists.  Bambu's MQTT can return zeroed AMS state for
+    # a few seconds after a cancel / disconnect / adapter reconnect —
+    # the AMS is still physically attached but the cached state hasn't
+    # repopulated yet.  Retrying once picks up the republished state
+    # and prevents the silent external-spool fallthrough that used to
+    # route every post-cancel reslice to the wrong filament path
+    # (memory: "always route to AMS when printer has one").
     units = ams_info.get("units", [])
+    ams_exist_bits = str(ams_info.get("ams_exist_bits", "0")).strip()
+    tray_exist_bits = str(ams_info.get("tray_exist_bits", "0")).strip()
     if not units:
-        logger.debug("AMS auto-detect: no AMS units found — using external spool.")
+        import time as _time
+        _time.sleep(1.2)
+        try:
+            ams_info_retry = adapter.get_ams_status()
+            retry_units = ams_info_retry.get("units", [])
+            if retry_units:
+                ams_info = ams_info_retry
+                units = retry_units
+                ams_exist_bits = str(ams_info.get("ams_exist_bits", "0")).strip()
+                tray_exist_bits = str(ams_info.get("tray_exist_bits", "0")).strip()
+                logger.info(
+                    "AMS auto-detect: initial probe returned no units, retry "
+                    "picked up %d unit(s).  (Transient MQTT cache — normal "
+                    "after cancel/reconnect.)",
+                    len(units),
+                )
+        except Exception:
+            pass
+
+    # Still no units after retry — is AMS hardware actually present?
+    if not units:
+        hw_present = ams_exist_bits != "0" or tray_exist_bits != "0"
+        if hw_present:
+            # Hardware bits say AMS exists but no tray state.  This
+            # is almost always stale cache or an unplugged AMS cable.
+            # Either way, refusing to silent-route is the correct
+            # behaviour per the "always route to AMS" memory rule.
+            logger.warning(
+                "AMS hardware present (ams_exist_bits=%s, tray_exist_bits=%s) "
+                "but no tray state available after retry.  Refusing silent "
+                "external-spool fallthrough.  Pass use_ams='true' with an "
+                "explicit ams_mapping=[<slot>] to force AMS routing.",
+                ams_exist_bits,
+                tray_exist_bits,
+            )
+            return {
+                "use_ams": False,
+                "ams_mapping": None,
+                "warnings": [
+                    f"AMS hardware detected (ams_bits={ams_exist_bits}, "
+                    f"tray_bits={tray_exist_bits}) but no tray state was "
+                    "reported after retry.  Routing would silently fall "
+                    "through to the external spool — pass use_ams='true' "
+                    "with an explicit ams_mapping=[<slot>] to force AMS, "
+                    "or wait a few seconds for the MQTT cache to refresh."
+                ],
+                "ambiguous": True,
+            }
+        # No AMS hardware bits set either — genuinely no AMS on this
+        # printer.  External spool is correct.
+        logger.info("AMS auto-detect: no AMS hardware — external spool.")
         return {"use_ams": False, "ams_mapping": None, "warnings": []}
 
     # Collect loaded trays.  Trust ``tray_type`` as the loaded-indicator —
@@ -9854,18 +10077,51 @@ def main() -> None:
     except Exception:  # noqa: BLE001 — warning is best-effort
         pass
 
-    # Auto-register the resolved printer (env or config.yaml) so the
-    # scheduler can dispatch jobs even if no explicit register_printer
-    # call is made.
-    if _PRINTER_HOST and _get_registry().count == 0:
+    # Auto-register printers so the scheduler can dispatch jobs, fleet
+    # queries work, and tools that accept a printer_name argument can
+    # find them by name without requiring an explicit register_printer
+    # call.  config.yaml is the source of truth: we register every
+    # entry it declares (not just the env-resolved default).  Any
+    # failure is logged at WARNING level so a silently-empty registry
+    # can never again masquerade as a healthy startup.
+    _registry = _get_registry()
+    if _PRINTER_HOST and _registry.count == 0:
         try:
             adapter = _get_adapter()
-            _get_registry().register("default", adapter)
-            logger.info("Auto-registered printer as 'default' from %s", _PRINTER_CONFIG_SOURCE.split(" (", 1)[0])
+            _registry.register("default", adapter)
+            logger.info(
+                "Auto-registered 'default' printer from %s",
+                _PRINTER_CONFIG_SOURCE.split(" (", 1)[0],
+            )
         except Exception as exc:
-            logger.debug(
-                "Could not auto-register printer: %s",
+            logger.warning(
+                "Could not auto-register 'default' printer from %s: %s. "
+                "Tools that take a printer_name will miss until you call "
+                "register_printer() or fix the config.",
+                _PRINTER_CONFIG_SOURCE.split(" (", 1)[0],
                 _sanitize_log_msg(str(exc)),
+            )
+
+    # Also register any *additional* printers declared in config.yaml
+    # beyond the env-resolved default.  Missing entries here aren't
+    # fatal — _resolve_adapter() still lazy-loads on miss — but
+    # eagerly registering them makes fleet_status and similar
+    # directory-style queries correct out of the box.
+    _config_printers = _read_config_printers()
+    for _name, _entry in _config_printers.items():
+        if _name in _registry:
+            continue
+        try:
+            _adapter = _build_adapter_from_config_entry(_name, _entry)
+            _registry.register(_name, _adapter)
+            logger.info("Auto-registered printer %r from ~/.kiln/config.yaml", _name)
+        except Exception as _exc:  # noqa: BLE001 — surface but don't crash
+            logger.warning(
+                "Could not auto-register config.yaml printer %r: %s. "
+                "Printer remains listed in config but is not in the live "
+                "registry — tools will lazy-build it on first use.",
+                _name,
+                _sanitize_log_msg(str(_exc)),
             )
 
     # Auto-register marketplace adapters from env credentials

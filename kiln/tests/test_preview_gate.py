@@ -138,3 +138,58 @@ class TestConcurrentIssuance:
             t = gate.issue(str(sample_file))
             tokens.add(t.token)
         assert len(tokens) == 100  # no collisions
+
+
+class TestFilenameKeyValidation:
+    """start_print only sees the printer-side file_name (basename).
+
+    The previous implementation treated any string with a "." in it
+    as a path and tried to ``hash_file("coaster.3mf")`` — which
+    resolved against the server's cwd, didn't find the file, and
+    returned a ``NO_FILE:`` sentinel.  Every real start_print with a
+    valid token got rejected as ``token_file_hash_mismatch``.  These
+    tests pin the filename-key path so that regression can't come
+    back silently.
+    """
+
+    def test_issue_by_path_validate_by_bare_filename_ok(self, gate, sample_file):
+        """Real-world hot path: issue from the local path, validate
+        from the printer-side bare filename."""
+        t = gate.issue(str(sample_file), printer_id="bambu_a1")
+        # ``start_print`` is called with just "disc.gcode.3mf" — no
+        # directory separator.  The old heuristic misread this as a
+        # path because it contained a "." and hash-compared, failing.
+        ok, reason = gate.validate(
+            t.token, sample_file.name, printer_id="bambu_a1",
+        )
+        assert ok, f"unexpected rejection: {reason}"
+
+    def test_filename_mismatch_rejected(self, gate, sample_file):
+        t = gate.issue(str(sample_file))
+        ok, reason = gate.validate(t.token, "different.3mf")
+        assert not ok
+        assert reason == "token_filename_mismatch"
+
+    def test_filename_with_dot_is_not_treated_as_path(self, gate, sample_file):
+        """Bare filenames with dots must NOT trigger a hash_file lookup."""
+        t = gate.issue(str(sample_file))
+        # ``coaster.3mf`` does not exist at this cwd.  If the gate
+        # treats it as a path it will hash_file() -> NO_FILE: sentinel
+        # and reject.  Correct behaviour: take the filename-key path.
+        ok, reason = gate.validate(t.token, "coaster.3mf")
+        # Should reject with filename_mismatch, NOT hash_mismatch or
+        # NO_FILE-comparison artefacts.
+        assert not ok
+        assert reason == "token_filename_mismatch"
+
+    def test_issue_by_bare_filename_validate_by_bare_filename(self, gate):
+        """When no local path is ever available on either side."""
+        t = gate.issue("plate_1.gcode", printer_id="bambu_a1")
+        assert t.filename_key == "plate_1.gcode"
+        ok, reason = gate.validate(t.token, "plate_1.gcode", "bambu_a1")
+        assert ok, f"unexpected rejection: {reason}"
+
+    def test_issue_by_path_preserves_basename_key(self, gate, sample_file):
+        t = gate.issue(str(sample_file))
+        assert t.filename_key == sample_file.name
+        assert t.file_hash  # full hash also present

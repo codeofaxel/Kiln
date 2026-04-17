@@ -780,10 +780,7 @@ class _SlicerToolsPlugin:
                     profile=effective_profile,
                 )
 
-                if printer_name:
-                    adapter = _srv._get_registry().get(printer_name)
-                else:
-                    adapter = _srv._get_adapter()
+                adapter = _srv._resolve_adapter(printer_name)
 
                 # Bambu printers need PrusaSlicer output wrapped in a 3MF with
                 # the proprietary BambuStudio start/end gcode.  The adapter
@@ -863,6 +860,26 @@ class _SlicerToolsPlugin:
                         "auto", None, adapter, material=material,
                     )
                     ams_routing_warnings = list(ams_decision.get("warnings") or [])
+                    # Refuse to silent-route when AMS state is ambiguous
+                    # (hardware bits say AMS present but no tray state, or
+                    # probe errored out).  Returning an error envelope
+                    # here blocks the print BEFORE upload instead of
+                    # silently routing to the wrong filament feed path.
+                    # Memory rule: "always route to AMS when printer has
+                    # one — never silent external-spool fallthrough".
+                    if ams_decision.get("ambiguous") and not ams_decision.get("use_ams"):
+                        return _srv._error_dict(
+                            "AMS routing is ambiguous — hardware reports AMS "
+                            "present but no tray state is available.  Refusing "
+                            "to silently route to external spool (which would "
+                            "fail with Bambu error 0300-8015 if nothing is "
+                            "loaded there).  Retry in a few seconds for the "
+                            "MQTT cache to refresh, or call start_print() "
+                            "directly with use_ams='true' and an explicit "
+                            "ams_mapping=[<slot>]. "
+                            + " ".join(ams_routing_warnings),
+                            code="AMS_STATE_AMBIGUOUS",
+                        )
                     if ams_decision.get("use_ams"):
                         print_kwargs["use_ams"] = True
                         mapping = ams_decision.get("ams_mapping")

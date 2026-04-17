@@ -385,9 +385,13 @@ class TestInputValidation:
         with pytest.raises(ValueError, match="design_id must not be empty"):
             store.save_version("   ", SCAD_V1)
 
-    def test_empty_scad_source_rejected(self, store):
-        with pytest.raises(ValueError, match="scad_source must not be empty"):
-            store.save_version("d1", "")
+    def test_empty_scad_source_now_allowed_for_mesh_only_versions(self, store):
+        # Empty source is allowed (mesh-only imports use this path) —
+        # the version is stored with scad_source as the literal empty
+        # string.  None (canonical mesh-only shape) is also allowed and
+        # is exercised in test_null_source_version.py.
+        v = store.save_version("d1", "")
+        assert v.scad_source == ""
 
     def test_null_byte_in_design_id_rejected(self, store):
         with pytest.raises(ValueError, match="null bytes"):

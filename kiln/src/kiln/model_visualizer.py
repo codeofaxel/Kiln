@@ -25,12 +25,123 @@ import os
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from kiln.emboss_generator import _openscad_version_year, get_openscad_version
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Bambu-wrapped 3MF thumbnail fallback
+# ---------------------------------------------------------------------------
+#
+# When Kiln wraps PrusaSlicer gcode in a Bambu-compatible 3MF for upload
+# to a Bambu printer, the archive's ``3D/3dmodel.model`` is a minimal
+# XML placeholder — the real print payload is ``Metadata/plate_1.gcode``.
+# OpenSCAD renders such a 3MF as an empty black frame because there's
+# no mesh to render, which breaks the preview gate for every Bambu
+# print (the agent can't show the user what's about to print).
+#
+# The slicer already embeds high-quality thumbnails of the sliced plate
+# in the archive.  They are the same images the Bambu LCD shows, so
+# surfacing them through ``visualize_model`` gives the user a faithful
+# preview of the physical output without needing a working mesh render.
+
+_BAMBU_THUMBNAIL_MAP: list[tuple[str, str, str]] = [
+    # (archive_member, angle_label, description)
+    (
+        "Auxiliaries/.thumbnails/thumbnail_middle.png",
+        "isometric",
+        "Slicer plate thumbnail (Bambu LCD preview) — 3/4 overview",
+    ),
+    (
+        "Metadata/top_1.png",
+        "top",
+        "Slicer top-down plate render",
+    ),
+    (
+        "Metadata/plate_1.png",
+        "front",
+        "Slicer plate render (primary)",
+    ),
+    (
+        "Auxiliaries/.thumbnails/thumbnail_small.png",
+        "bottom",
+        "Slicer small plate thumbnail (fallback)",
+    ),
+]
+
+# A real mesh embedded in 3D/3dmodel.model is usually tens to hundreds
+# of KB of XML.  The Bambu wrapper's placeholder is ~1-2 KB.  Anything
+# below this threshold triggers the embedded-thumbnail path.
+_BAMBU_PLACEHOLDER_MODEL_MAX_BYTES = 4096
+
+
+def _is_bambu_wrapped_3mf(file_path: str) -> bool:
+    """Return True when the 3MF at *file_path* looks like a Bambu wrapper.
+
+    Heuristic: archive contains ``Metadata/plate_1.gcode`` (the actual
+    print payload for Bambu) AND the ``3D/3dmodel.model`` entry is
+    below ``_BAMBU_PLACEHOLDER_MODEL_MAX_BYTES`` (just a format-
+    compliance stub, not real geometry).  Both signals together
+    distinguish a Kiln/BambuStudio slicer output from a geometry-
+    carrying 3MF like those produced by Fusion or exported for
+    PrusaSlicer input.
+    """
+    try:
+        with zipfile.ZipFile(file_path, "r") as zf:
+            members = set(zf.namelist())
+            if "Metadata/plate_1.gcode" not in members:
+                return False
+            if "3D/3dmodel.model" not in members:
+                return False
+            return zf.getinfo("3D/3dmodel.model").file_size <= _BAMBU_PLACEHOLDER_MODEL_MAX_BYTES
+    except (zipfile.BadZipFile, KeyError, OSError):
+        return False
+
+
+def _extract_bambu_thumbnails(
+    file_path: str,
+    output_dir: str,
+    angles: list[str] | None = None,
+) -> list[dict]:
+    """Extract the slicer-embedded thumbnails from a Bambu-wrapped 3MF.
+
+    Returns a list of view dicts compatible with the ``visualize_model``
+    response shape.  Only members that exist in the archive contribute
+    views — a missing thumbnail is skipped rather than faked.  When
+    *angles* is supplied, thumbnails are filtered to that subset.
+    """
+    os.makedirs(output_dir, mode=0o700, exist_ok=True)
+    stem = Path(file_path).stem
+    wanted_angles = {a.lower() for a in angles} if angles else None
+
+    out: list[dict] = []
+    try:
+        with zipfile.ZipFile(file_path, "r") as zf:
+            members = set(zf.namelist())
+            for member, angle_label, description in _BAMBU_THUMBNAIL_MAP:
+                if member not in members:
+                    continue
+                if wanted_angles is not None and angle_label not in wanted_angles:
+                    continue
+                # Materialise to a predictable path under output_dir so
+                # the caller can Read the image directly.
+                png_path = os.path.join(output_dir, f"{stem}_{angle_label}.png")
+                with zf.open(member) as src, open(png_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                out.append({
+                    "angle": angle_label,
+                    "description": description,
+                    "path": png_path,
+                    "source": "bambu_3mf_thumbnail",
+                    "archive_member": member,
+                })
+    except (zipfile.BadZipFile, OSError) as exc:
+        logger.warning("Bambu 3MF thumbnail extract failed for %s: %s", file_path, exc)
+    return out
 
 # ---------------------------------------------------------------------------
 # Camera angles — 6 standard views covering all faces
@@ -463,6 +574,47 @@ def visualize_model(
             logger.debug("Colored renderer not available — falling through to OpenSCAD")
         except Exception:  # noqa: BLE001
             logger.debug("Colored 3MF parse/render failed — falling through to OpenSCAD", exc_info=True)
+
+        # Bambu-wrapped 3MF path: the archive's 3D/3dmodel.model is a
+        # format-compliance placeholder; the real payload is gcode plus
+        # embedded thumbnails.  OpenSCAD would render a black frame, so
+        # we short-circuit to the slicer-rendered plate thumbnails —
+        # these are the same images the Bambu LCD shows the user, which
+        # is exactly what the preview gate is asking to confirm.
+        if _is_bambu_wrapped_3mf(file_path):
+            logger.debug("3MF is Bambu-wrapped — extracting slicer thumbnails")
+            thumb_out_dir = output_dir or os.path.join(
+                tempfile.gettempdir(), "kiln_visualizations",
+            )
+            bambu_views = _extract_bambu_thumbnails(
+                file_path, thumb_out_dir, angles=angles,
+            )
+            if bambu_views:
+                return {
+                    "success": True,
+                    "views": bambu_views,
+                    "output_dir": thumb_out_dir,
+                    "file_path": file_path,
+                    "file_type": ext,
+                    "rendered": len(bambu_views),
+                    "failed": 0,
+                    "source": "bambu_3mf_thumbnails",
+                    "message": (
+                        f"Surfaced {len(bambu_views)} slicer-embedded "
+                        f"thumbnail(s) for {Path(file_path).name}.  This 3MF "
+                        "wraps gcode for Bambu firmware; its 3D/3dmodel.model "
+                        "entry is a placeholder, so the slicer's own plate "
+                        "renders are the faithful preview.  Same images the "
+                        "Bambu LCD shows."
+                    ),
+                }
+            # Fall through — no thumbnails extractable.  OpenSCAD will
+            # produce an empty frame, but that's better than returning
+            # nothing; the caller still gets a structured response.
+            logger.warning(
+                "Bambu 3MF has no usable embedded thumbnails: %s",
+                file_path,
+            )
 
     try:
         openscad = _find_openscad()
