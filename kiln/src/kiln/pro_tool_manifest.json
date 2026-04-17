@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-17T23:13:36.656976+00:00",
-  "tool_count": 234,
+  "generated": "2026-04-17T23:25:02.270972+00:00",
+  "tool_count": 246,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -7499,6 +7499,59 @@
       }
     },
     {
+      "name": "apply_role_template",
+      "description": "Grant every scope in a role template to a tenant or team in a single call.  Composes repeated ``grant_scope`` under the hood \u2014 no new primitive, just ergonomic bundling.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "granted_by": {
+            "title": "Granted By",
+            "type": "string"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tenant Id"
+          },
+          "team_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Team Id"
+          }
+        },
+        "required": [
+          "org_id",
+          "role",
+          "granted_by"
+        ],
+        "title": "apply_role_templateArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "assign_artifact_to_org",
       "description": "Mark a local artifact as owned by *org_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -7714,6 +7767,129 @@
       }
     },
     {
+      "name": "evaluate_pr_approval",
+      "description": "Dry-run the approval gate on *pr_id* \u2014 returns ``allowed`` + a detailed reason (\"needs_1_more_approval\", \"blocked_by_change_requests\", \"gate_satisfied\", or \"no_gate_configured\").\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "pr_id": {
+            "title": "Pr Id",
+            "type": "string"
+          },
+          "target_branch_name": {
+            "title": "Target Branch Name",
+            "type": "string"
+          },
+          "artifact_type": {
+            "default": "design",
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "org_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Org Id"
+          }
+        },
+        "required": [
+          "pr_id",
+          "target_branch_name"
+        ],
+        "title": "evaluate_pr_approvalArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "export_audit_log",
+      "description": "Dump the local reflog to JSONL or CSV.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "output_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Output Path"
+          },
+          "output_format": {
+            "default": "jsonl",
+            "title": "Output Format",
+            "type": "string"
+          },
+          "artifact_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Artifact Type"
+          },
+          "branch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Branch Id"
+          },
+          "start_time": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Start Time"
+          },
+          "end_time": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "End Time"
+          },
+          "limit": {
+            "default": 100000,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "export_audit_logArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "github_poll_login",
       "description": "Complete the device-code flow.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -7908,6 +8084,66 @@
       }
     },
     {
+      "name": "list_approval_gates",
+      "description": "List every configured approval gate, optionally filtered.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "artifact_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Artifact Type"
+          },
+          "artifact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Artifact Id"
+          }
+        },
+        "title": "list_approval_gatesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_expiring_grants",
+      "description": "Return grants set to ``expires_at`` within the next *within_days*.  Lets admins renew or revoke before they lapse and break workflows.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "within_days": {
+            "default": 30,
+            "title": "Within Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "org_id"
+        ],
+        "title": "list_expiring_grantsArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "list_my_identities",
       "description": "Every identity linked to a given tenant id.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -7994,6 +8230,17 @@
       }
     },
     {
+      "name": "list_role_templates",
+      "description": "Enumerate available role templates and their scope sets.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {},
+        "title": "list_role_templatesArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "list_scopes",
       "description": "List grants for an org, optionally filtered by tenant OR team.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -8037,6 +8284,30 @@
       }
     },
     {
+      "name": "list_stale_grants",
+      "description": "Return every grant in *org_id* whose ``granted_at`` is older than *older_than_days*.  The quarterly access-review starting point: \"these grants have been untouched for 3 months \u2014 still needed?\".\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "older_than_days": {
+            "default": 90,
+            "title": "Older Than Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "org_id"
+        ],
+        "title": "list_stale_grantsArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "list_team_members",
       "description": "List every member of *team_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -8071,6 +8342,35 @@
           "org_id"
         ],
         "title": "list_teamsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "remove_approval_gate",
+      "description": "Remove an approval gate.  Merges on the target branch return to unprotected.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "artifact_type": {
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "branch_name": {
+            "title": "Branch Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_type",
+          "artifact_id",
+          "branch_name"
+        ],
+        "title": "remove_approval_gateArguments",
         "type": "object"
       }
     },
@@ -8119,6 +8419,40 @@
           "tenant_id"
         ],
         "title": "remove_team_memberArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "require_recent_auth",
+      "description": "Step-up auth gate for critical ops.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "max_age_minutes": {
+            "default": 15,
+            "title": "Max Age Minutes",
+            "type": "integer"
+          },
+          "provider": {
+            "default": "github",
+            "title": "Provider",
+            "type": "string"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tenant Id"
+          }
+        },
+        "title": "require_recent_authArguments",
         "type": "object"
       }
     },
@@ -8200,6 +8534,79 @@
       }
     },
     {
+      "name": "scope_review_summary",
+      "description": "Aggregate view of every grant in an org \u2014 by capability, by target (tenant / team), plus counts of stale and expiring.  Starting point for a quarterly audit.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "org_id"
+        ],
+        "title": "scope_review_summaryArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_approval_gate",
+      "description": "Create or update an approval gate on a target branch.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "artifact_type": {
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "branch_name": {
+            "title": "Branch Name",
+            "type": "string"
+          },
+          "required_count": {
+            "title": "Required Count",
+            "type": "integer"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "required_team_id": {
+            "default": "",
+            "title": "Required Team Id",
+            "type": "string"
+          },
+          "required_role": {
+            "default": "",
+            "title": "Required Role",
+            "type": "string"
+          },
+          "block_changes_requested": {
+            "default": true,
+            "title": "Block Changes Requested",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "artifact_type",
+          "artifact_id",
+          "branch_name",
+          "required_count",
+          "created_by"
+        ],
+        "title": "set_approval_gateArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "setup_team",
       "description": "One-shot team onboarding: create an org, invite members, and optionally migrate existing artifacts into it.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -8265,6 +8672,40 @@
           "owner_tenant"
         ],
         "title": "setup_teamArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "transfer_artifact_between_orgs",
+      "description": "Move an artifact from one org's ownership to another.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "artifact_type": {
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "from_org_id": {
+            "title": "From Org Id",
+            "type": "string"
+          },
+          "to_org_id": {
+            "title": "To Org Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_type",
+          "artifact_id",
+          "from_org_id",
+          "to_org_id"
+        ],
+        "title": "transfer_artifact_between_orgsArguments",
         "type": "object"
       }
     },
