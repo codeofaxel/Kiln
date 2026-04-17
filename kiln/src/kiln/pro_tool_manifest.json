@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-17T08:27:40.274162+00:00",
-  "tool_count": 177,
+  "generated": "2026-04-17T19:16:07.815241+00:00",
+  "tool_count": 210,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -26,6 +26,14 @@
     "cloud_sync": {
       "label": "Cloud Sync",
       "pitch": "Sync designs, settings, and print history across all your devices."
+    },
+    "notifications": {
+      "label": "Notifications & Hooks",
+      "pitch": "Route VCS events to Telegram, Discord, or a local log \u2014 and gate operations with pre/post shell hooks."
+    },
+    "teams": {
+      "label": "Teams & Orgs",
+      "pitch": "Multi-user orgs, team memberships, and fine-grained permission scopes for Business and Enterprise tiers."
     },
     "design_versioning": {
       "label": "Design Versioning",
@@ -949,6 +957,57 @@
       }
     },
     {
+      "name": "add_mesh_comment",
+      "description": "Add a region-anchored comment to a versioned artifact.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "artifact_type": {
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "artifact_version_id": {
+            "title": "Artifact Version Id",
+            "type": "string"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "anchor": {
+            "default": "global",
+            "title": "Anchor",
+            "type": "string"
+          },
+          "scope": {
+            "default": "comment",
+            "title": "Scope",
+            "type": "string"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Author"
+          }
+        },
+        "required": [
+          "artifact_type",
+          "artifact_version_id",
+          "body"
+        ],
+        "title": "add_mesh_commentArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "annotate_decoration_preset_branch",
       "description": "Set the human-readable purpose string for a preset branch.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -1085,6 +1144,183 @@
           "version_ids"
         ],
         "title": "best_design_versionArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "bisect_bad",
+      "description": "Mark the current (or explicit) candidate as known-bad.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version Id"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "bisect_badArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "bisect_current",
+      "description": "Return the current candidate + progress for a session.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "bisect_currentArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "bisect_end",
+      "description": "End a bisect session without requiring full convergence.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "bisect_endArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "bisect_good",
+      "description": "Mark the current (or explicit) candidate as known-good.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version Id"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "bisect_goodArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "bisect_skip",
+      "description": "Skip the current candidate (uncertain / untested).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version Id"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "bisect_skipArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "bisect_start",
+      "description": "Start a new bisect session.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "artifact_type": {
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "good_version_id": {
+            "title": "Good Version Id",
+            "type": "string"
+          },
+          "bad_version_id": {
+            "title": "Bad Version Id",
+            "type": "string"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operator"
+          }
+        },
+        "required": [
+          "artifact_type",
+          "artifact_id",
+          "good_version_id",
+          "bad_version_id"
+        ],
+        "title": "bisect_startArguments",
         "type": "object"
       }
     },
@@ -1882,6 +2118,25 @@
       }
     },
     {
+      "name": "get_comment_thread",
+      "description": "Retrieve a whole thread (root + replies) ordered oldest-first.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id"
+        ],
+        "title": "get_comment_threadArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "get_design_ancestry",
       "description": "Walk the parent chain from a recipe back to the root.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -1921,6 +2176,25 @@
           "feature_version_id"
         ],
         "title": "get_featureArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_reflog_entry",
+      "description": "Fetch a single reflog entry by id.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "reflog_id": {
+            "title": "Reflog Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reflog_id"
+        ],
+        "title": "get_reflog_entryArguments",
         "type": "object"
       }
     },
@@ -2386,6 +2660,35 @@
       }
     },
     {
+      "name": "list_mesh_comments",
+      "description": "List comments on a specific version of an artifact.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "artifact_type": {
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "artifact_version_id": {
+            "title": "Artifact Version Id",
+            "type": "string"
+          },
+          "only_unresolved": {
+            "default": false,
+            "title": "Only Unresolved",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "artifact_type",
+          "artifact_version_id"
+        ],
+        "title": "list_mesh_commentsArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "merge_decoration_preset_branches",
       "description": "Merge ``source_branch`` into ``target_branch`` semantically.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -2693,6 +2996,114 @@
       }
     },
     {
+      "name": "rebase_design_branch",
+      "description": "Rebase a design branch's divergent versions onto another.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "source_branch_id": {
+            "title": "Source Branch Id",
+            "type": "string"
+          },
+          "onto_branch_id": {
+            "title": "Onto Branch Id",
+            "type": "string"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operator"
+          }
+        },
+        "required": [
+          "source_branch_id",
+          "onto_branch_id"
+        ],
+        "title": "rebase_design_branchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "rebase_feature_branch",
+      "description": "Rebase a feature branch.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "source_branch_id": {
+            "title": "Source Branch Id",
+            "type": "string"
+          },
+          "onto_branch_id": {
+            "title": "Onto Branch Id",
+            "type": "string"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operator"
+          }
+        },
+        "required": [
+          "source_branch_id",
+          "onto_branch_id"
+        ],
+        "title": "rebase_feature_branchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "rebase_preset_branch",
+      "description": "Rebase a decoration preset branch.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "source_branch_id": {
+            "title": "Source Branch Id",
+            "type": "string"
+          },
+          "onto_branch_id": {
+            "title": "Onto Branch Id",
+            "type": "string"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operator"
+          }
+        },
+        "required": [
+          "source_branch_id",
+          "onto_branch_id"
+        ],
+        "title": "rebase_preset_branchArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "record_design_version_outcome",
       "description": "Record whether a print succeeded or failed for a design version.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -2864,6 +3275,128 @@
           "mesh_path"
         ],
         "title": "render_design_meshArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "reopen_comment_thread",
+      "description": "Reopen a previously resolved thread.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id"
+        ],
+        "title": "reopen_comment_threadArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "reply_to_comment",
+      "description": "Reply to an existing comment (joins its thread).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "parent_comment_id": {
+            "title": "Parent Comment Id",
+            "type": "string"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Author"
+          }
+        },
+        "required": [
+          "parent_comment_id",
+          "body"
+        ],
+        "title": "reply_to_commentArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "resolve_comment_thread",
+      "description": "Mark a whole thread (root + replies) as resolved.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "resolved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resolved By"
+          }
+        },
+        "required": [
+          "thread_id"
+        ],
+        "title": "resolve_comment_threadArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "restore_from_reflog_entry",
+      "description": "Snap a branch back to a recorded head state.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "reflog_id": {
+            "title": "Reflog Id",
+            "type": "string"
+          },
+          "target": {
+            "default": "old_head",
+            "title": "Target",
+            "type": "string"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operator"
+          }
+        },
+        "required": [
+          "reflog_id"
+        ],
+        "title": "restore_from_reflog_entryArguments",
         "type": "object"
       }
     },
@@ -3117,6 +3650,59 @@
           "target_kind"
         ],
         "title": "save_featureArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "show_reflog",
+      "description": "List head-mutating operations newest-first.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "artifact_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Artifact Type"
+          },
+          "artifact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Artifact Id"
+          },
+          "branch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Branch Id"
+          },
+          "limit": {
+            "default": 100,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "show_reflogArguments",
         "type": "object"
       }
     },
@@ -3485,6 +4071,157 @@
           }
         },
         "title": "verify_feature_releaseArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "emit_test_event",
+      "description": "Fire a synthetic event to verify Telegram/Discord/log wiring.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "notifications",
+      "parameters": {
+        "properties": {
+          "message": {
+            "default": "notification wiring test",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "emit_test_eventArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_event_subscriptions",
+      "description": "Return the current event-subscription config.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "notifications",
+      "parameters": {
+        "properties": {},
+        "title": "list_event_subscriptionsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_hooks",
+      "description": "Return the list of configured shell hooks.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "notifications",
+      "parameters": {
+        "properties": {},
+        "title": "list_hooksArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_event_subscriptions",
+      "description": "Write a new event-subscription config.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "notifications",
+      "parameters": {
+        "properties": {
+          "telegram_events": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Telegram Events"
+          },
+          "discord_events": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Discord Events"
+          },
+          "log_events": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Log Events"
+          },
+          "disable_telegram": {
+            "default": false,
+            "title": "Disable Telegram",
+            "type": "boolean"
+          },
+          "disable_discord": {
+            "default": false,
+            "title": "Disable Discord",
+            "type": "boolean"
+          },
+          "disable_log": {
+            "default": false,
+            "title": "Disable Log",
+            "type": "boolean"
+          }
+        },
+        "title": "set_event_subscriptionsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_hooks",
+      "description": "Replace the hooks.json file with *hooks*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "notifications",
+      "parameters": {
+        "properties": {
+          "hooks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Hooks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "hooks"
+        ],
+        "title": "set_hooksArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "tail_event_log",
+      "description": "Return the last *limit* events from the local event log.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "notifications",
+      "parameters": {
+        "properties": {
+          "limit": {
+            "default": 50,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "tail_event_logArguments",
         "type": "object"
       }
     },
@@ -6409,6 +7146,293 @@
           "schedule"
         ],
         "title": "set_speed_scheduleArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "add_org_member",
+      "description": "Add *tenant_id* to *org_id*.  ``role`` is one of ``owner``, ``admin``, ``member``, ``viewer``.  Already- enrolled members get their role updated in place.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "role": {
+            "default": "member",
+            "title": "Role",
+            "type": "string"
+          },
+          "invited_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Invited By"
+          }
+        },
+        "required": [
+          "org_id",
+          "tenant_id"
+        ],
+        "title": "add_org_memberArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "check_capability",
+      "description": "Dry-run the permission check the cloud RLS will run.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "scope_key": {
+            "title": "Scope Key",
+            "type": "string"
+          },
+          "capability": {
+            "title": "Capability",
+            "type": "string"
+          }
+        },
+        "required": [
+          "org_id",
+          "tenant_id",
+          "scope_key",
+          "capability"
+        ],
+        "title": "check_capabilityArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "create_org",
+      "description": "Create a new org.  Owner is auto-enrolled as an owner-role member so permission checks never need a special case.  ``tier`` is one of ``pro``, ``business``, ``enterprise``.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "owner_tenant": {
+            "title": "Owner Tenant",
+            "type": "string"
+          },
+          "tier": {
+            "default": "pro",
+            "title": "Tier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "slug",
+          "owner_tenant"
+        ],
+        "title": "create_orgArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "grant_scope",
+      "description": "Grant *capability* on *scope_key* to *tenant_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "scope_key": {
+            "title": "Scope Key",
+            "type": "string"
+          },
+          "capability": {
+            "title": "Capability",
+            "type": "string"
+          },
+          "granted_by": {
+            "title": "Granted By",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expires At"
+          }
+        },
+        "required": [
+          "org_id",
+          "tenant_id",
+          "scope_key",
+          "capability",
+          "granted_by"
+        ],
+        "title": "grant_scopeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_my_orgs",
+      "description": "Return every org *tenant_id* belongs to (owner or member).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id"
+        ],
+        "title": "list_my_orgsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_org_members",
+      "description": "List every member of *org_id* with their role.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "org_id"
+        ],
+        "title": "list_org_membersArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_scopes",
+      "description": "List grants for an org, optionally filtered by tenant.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tenant Id"
+          }
+        },
+        "required": [
+          "org_id"
+        ],
+        "title": "list_scopesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "remove_org_member",
+      "description": "Remove a member and every permission scope they held inside *org_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "org_id",
+          "tenant_id"
+        ],
+        "title": "remove_org_memberArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "revoke_scope",
+      "description": "Revoke a specific (tenant, scope_key, capability) grant.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "scope_key": {
+            "title": "Scope Key",
+            "type": "string"
+          },
+          "capability": {
+            "title": "Capability",
+            "type": "string"
+          }
+        },
+        "required": [
+          "org_id",
+          "tenant_id",
+          "scope_key",
+          "capability"
+        ],
+        "title": "revoke_scopeArguments",
         "type": "object"
       }
     },
