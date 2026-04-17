@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-17T22:45:54.227979+00:00",
-  "tool_count": 221,
+  "generated": "2026-04-17T23:08:05.557146+00:00",
+  "tool_count": 228,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -7458,6 +7458,47 @@
       }
     },
     {
+      "name": "add_team_member",
+      "description": "Add *tenant_id* to *team_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "team_id": {
+            "title": "Team Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "role": {
+            "default": "member",
+            "title": "Role",
+            "type": "string"
+          },
+          "added_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Added By"
+          }
+        },
+        "required": [
+          "team_id",
+          "tenant_id"
+        ],
+        "title": "add_team_memberArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "assign_artifact_to_org",
       "description": "Mark a local artifact as owned by *org_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -7596,8 +7637,8 @@
       }
     },
     {
-      "name": "grant_scope",
-      "description": "Grant *capability* on *scope_key* to *tenant_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "name": "create_team",
+      "description": "Create a team (sub-group) inside an org.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
       "category": "teams",
       "parameters": {
@@ -7606,8 +7647,81 @@
             "title": "Org Id",
             "type": "string"
           },
-          "tenant_id": {
-            "title": "Tenant Id",
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "parent_team_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parent Team Id"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Created By"
+          }
+        },
+        "required": [
+          "org_id",
+          "name",
+          "slug"
+        ],
+        "title": "create_teamArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "delete_team",
+      "description": "Delete a team, its memberships, and its scope grants.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "team_id": {
+            "title": "Team Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id"
+        ],
+        "title": "delete_teamArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "grant_scope",
+      "description": "Grant *capability* on *scope_key* to a tenant OR a team.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
             "type": "string"
           },
           "scope_key": {
@@ -7621,6 +7735,30 @@
           "granted_by": {
             "title": "Granted By",
             "type": "string"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tenant Id"
+          },
+          "team_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Team Id"
           },
           "expires_at": {
             "anyOf": [
@@ -7637,7 +7775,6 @@
         },
         "required": [
           "org_id",
-          "tenant_id",
           "scope_key",
           "capability",
           "granted_by"
@@ -7666,6 +7803,30 @@
       }
     },
     {
+      "name": "list_my_teams",
+      "description": "List teams within *org_id* that *tenant_id* belongs to.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "org_id",
+          "tenant_id"
+        ],
+        "title": "list_my_teamsArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "list_org_members",
       "description": "List every member of *org_id* with their role.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -7686,7 +7847,7 @@
     },
     {
       "name": "list_scopes",
-      "description": "List grants for an org, optionally filtered by tenant.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "List grants for an org, optionally filtered by tenant OR team.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
       "category": "teams",
       "parameters": {
@@ -7706,12 +7867,62 @@
             ],
             "default": null,
             "title": "Tenant Id"
+          },
+          "team_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Team Id"
           }
         },
         "required": [
           "org_id"
         ],
         "title": "list_scopesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_team_members",
+      "description": "List every member of *team_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "team_id": {
+            "title": "Team Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id"
+        ],
+        "title": "list_team_membersArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_teams",
+      "description": "List every team in *org_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "org_id"
+        ],
+        "title": "list_teamsArguments",
         "type": "object"
       }
     },
@@ -7740,18 +7951,38 @@
       }
     },
     {
+      "name": "remove_team_member",
+      "description": "Remove a tenant from a team.  Their personal org membership is unaffected; only team-targeted scope grants stop applying to them.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "team_id": {
+            "title": "Team Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "team_id",
+          "tenant_id"
+        ],
+        "title": "remove_team_memberArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "revoke_scope",
-      "description": "Revoke a specific (tenant, scope_key, capability) grant.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Revoke a scope grant.  Supply either ``tenant_id`` (to remove a personal grant) or ``team_id`` (to remove a team-targeted grant).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
       "category": "teams",
       "parameters": {
         "properties": {
           "org_id": {
             "title": "Org Id",
-            "type": "string"
-          },
-          "tenant_id": {
-            "title": "Tenant Id",
             "type": "string"
           },
           "scope_key": {
@@ -7761,11 +7992,34 @@
           "capability": {
             "title": "Capability",
             "type": "string"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tenant Id"
+          },
+          "team_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Team Id"
           }
         },
         "required": [
           "org_id",
-          "tenant_id",
           "scope_key",
           "capability"
         ],
