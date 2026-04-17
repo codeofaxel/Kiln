@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-17T19:16:07.815241+00:00",
-  "tool_count": 210,
+  "generated": "2026-04-17T20:10:43.266937+00:00",
+  "tool_count": 217,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -1509,6 +1509,30 @@
       }
     },
     {
+      "name": "compute_mesh_diff_components",
+      "description": "Geometry-only mesh diff \u2014 returns three STL file paths (unchanged / removed / added) without rendering.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "before_mesh_path": {
+            "title": "Before Mesh Path",
+            "type": "string"
+          },
+          "after_mesh_path": {
+            "title": "After Mesh Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "before_mesh_path",
+          "after_mesh_path"
+        ],
+        "title": "compute_mesh_diff_componentsArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "create_decoration_preset",
       "description": "Create or version a decoration preset on a branch.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -2368,6 +2392,30 @@
       }
     },
     {
+      "name": "list_bisect_sessions",
+      "description": "List active bisect sessions, optionally filtered by artifact type (``design`` / ``preset`` / ``feature``).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "artifact_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Artifact Type"
+          }
+        },
+        "title": "list_bisect_sessionsArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "list_cherry_pick_candidates",
       "description": "Enumerate the semantic modifications cherry-pickable from *source_version_id* relative to *ancestor_version_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -2973,6 +3021,76 @@
           }
         },
         "title": "prune_design_render_cacheArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "pull_reflog_from_cloud",
+      "description": "Read entries from the cloud reflog \u2014 shows what teammates did from their machines.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "artifact_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Artifact Type"
+          },
+          "branch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Branch Id"
+          },
+          "limit": {
+            "default": 100,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "pull_reflog_from_cloudArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "push_reflog_to_cloud",
+      "description": "Mirror local reflog entries up to the tenant's cloud reflog (``kiln_cloud_reflog``).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "artifact_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Artifact Type"
+          },
+          "limit": {
+            "default": 500,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "push_reflog_to_cloudArguments",
         "type": "object"
       }
     },
@@ -3945,6 +4063,42 @@
       }
     },
     {
+      "name": "undo_last_head_change",
+      "description": "One-tap recovery: snap *branch_id* back to the ``old_head`` of its most recent head-mutating reflog entry.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "artifact_type": {
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "branch_id": {
+            "title": "Branch Id",
+            "type": "string"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Operator"
+          }
+        },
+        "required": [
+          "artifact_type",
+          "branch_id"
+        ],
+        "title": "undo_last_head_changeArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "verify_decoration_preset_release",
       "description": "Verify a preset release's signature and optionally its content.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -4075,6 +4229,55 @@
       }
     },
     {
+      "name": "visual_diff_meshes",
+      "description": "Render a composited mesh-diff image per angle.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "before_mesh_path": {
+            "title": "Before Mesh Path",
+            "type": "string"
+          },
+          "after_mesh_path": {
+            "title": "After Mesh Path",
+            "type": "string"
+          },
+          "angles": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Angles"
+          },
+          "width": {
+            "default": 800,
+            "title": "Width",
+            "type": "integer"
+          },
+          "height": {
+            "default": 600,
+            "title": "Height",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "before_mesh_path",
+          "after_mesh_path"
+        ],
+        "title": "visual_diff_meshesArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "emit_test_event",
       "description": "Fire a synthetic event to verify Telegram/Discord/log wiring.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -4165,6 +4368,36 @@
             "default": null,
             "title": "Log Events"
           },
+          "webhook_events": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Webhook Events"
+          },
+          "webhook_urls": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Webhook Urls"
+          },
           "disable_telegram": {
             "default": false,
             "title": "Disable Telegram",
@@ -4178,6 +4411,11 @@
           "disable_log": {
             "default": false,
             "title": "Disable Log",
+            "type": "boolean"
+          },
+          "disable_webhook": {
+            "default": false,
+            "title": "Disable Webhook",
             "type": "boolean"
           }
         },
@@ -4205,6 +4443,23 @@
           "hooks"
         ],
         "title": "set_hooksArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "summarize_events",
+      "description": "Aggregate counts from the event log over the last *window_hours* \u2014 a cheap dashboard for a single node.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "notifications",
+      "parameters": {
+        "properties": {
+          "window_hours": {
+            "default": 24.0,
+            "title": "Window Hours",
+            "type": "number"
+          }
+        },
+        "title": "summarize_eventsArguments",
         "type": "object"
       }
     },
