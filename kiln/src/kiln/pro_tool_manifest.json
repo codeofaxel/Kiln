@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-17T06:08:24.313180+00:00",
-  "tool_count": 158,
+  "generated": "2026-04-17T06:27:23.955271+00:00",
+  "tool_count": 159,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -1729,6 +1729,98 @@
           }
         },
         "title": "get_regression_alertsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "import_external_decoration",
+      "description": "Import an existing image / logo / texture / brand asset into Kiln's versioned decoration-preset system as v1 of a new preset.\n\nKiln Pro \u2014 kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "asset_path": {
+            "title": "Asset Path",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pattern_family": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pattern Family"
+          },
+          "depth_mm": {
+            "default": 1.2,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "surface_selection": {
+            "default": "outer_faces",
+            "title": "Surface Selection",
+            "type": "string"
+          },
+          "posterization_tier": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Posterization Tier"
+          },
+          "design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Id"
+          },
+          "branch_name": {
+            "default": "main",
+            "title": "Branch Name",
+            "type": "string"
+          },
+          "source_attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Attribution"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_path",
+          "name"
+        ],
+        "title": "import_external_decorationArguments",
         "type": "object"
       }
     },
