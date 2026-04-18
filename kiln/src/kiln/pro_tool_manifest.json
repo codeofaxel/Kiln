@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-17T23:25:02.270972+00:00",
-  "tool_count": 246,
+  "generated": "2026-04-18T00:36:39.517182+00:00",
+  "tool_count": 247,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -8672,6 +8672,49 @@
           "owner_tenant"
         ],
         "title": "setup_teamArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "sso_login",
+      "description": "Complete an enterprise SSO login in one call.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "State"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tenant Id"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "sso_loginArguments",
         "type": "object"
       }
     },
