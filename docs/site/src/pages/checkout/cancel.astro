@@ -1,0 +1,71 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Checkout cancelled — Kiln"
+  description="No charge was made. You can restart checkout any time from the pricing page."
+  noindex={true}
+>
+  <section class="checkout-cancel">
+    <div class="container">
+      <img src="/assets/kiln-logo-dark-notext.svg" alt="Kiln" width="64" height="64" class="logo-icon">
+      <h1>No charge made.</h1>
+      <p class="lead">Checkout was cancelled before payment went through. Nothing was charged to your card.</p>
+
+      <div class="cta-row">
+        <a href="/pricing" class="btn">Back to pricing</a>
+        <a href="mailto:adam@kiln3d.com?subject=Question%20about%20Kiln%20pricing" class="btn btn-ghost">
+          Ask a question first
+        </a>
+      </div>
+
+      <p class="footnote">
+        Questions about tier fit, bulk licensing, or enterprise? Reach out directly — I read every email.
+      </p>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .checkout-cancel {
+    padding: 100px 0 120px;
+    text-align: center;
+  }
+  .checkout-cancel .container {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: 0 20px;
+  }
+  .logo-icon {
+    margin-bottom: 24px;
+    opacity: 0.6;
+  }
+  .checkout-cancel h1 {
+    font-size: 36px;
+    font-weight: 700;
+    margin-bottom: 16px;
+  }
+  .checkout-cancel .lead {
+    font-size: 17px;
+    line-height: 1.6;
+    color: var(--text-muted);
+    margin-bottom: 40px;
+  }
+  .cta-row {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 32px;
+  }
+  .btn-ghost {
+    background: transparent;
+    border: 1px solid var(--border, #d5d5d5);
+    color: var(--text, inherit);
+  }
+  .footnote {
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+</style>

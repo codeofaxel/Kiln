@@ -176,8 +176,8 @@ const pricingFaqSchema = {
             <li><span class="check">&#10003;</span> 3 fulfillment orders/month free</li>
             <li><span class="check">&#10003;</span> 5% orchestration fee on fulfillment</li>
           </ul>
-          <p class="upgrade-note">Install Kiln, then run <code>kiln upgrade</code></p>
-          <a href="/install" class="btn card-cta">Get Pro &#8594;</a>
+          <button type="button" class="btn card-cta checkout-cta" data-tier="pro">Get Pro &#8594;</button>
+          <p class="upgrade-note">Already installed? Run <code>kiln license activate &lt;key&gt;</code></p>
         </div>
 
         <!-- Business Tier -->
@@ -202,8 +202,8 @@ const pricingFaqSchema = {
             <li><span class="check">&#10003;</span> Custom safety profiles</li>
             <li><span class="check">&#10003;</span> Webhook integrations</li>
           </ul>
-          <p class="upgrade-note">Install Kiln, then run <code>kiln upgrade</code></p>
-          <a href="/install" class="btn card-cta">Get Business &#8594;</a>
+          <button type="button" class="btn card-cta checkout-cta" data-tier="business">Get Business &#8594;</button>
+          <p class="upgrade-note">Already installed? Run <code>kiln license activate &lt;key&gt;</code></p>
         </div>
 
         <!-- Enterprise Tier -->
@@ -279,7 +279,7 @@ const pricingFaqSchema = {
 </BaseLayout>
 
 <script>
-  const toggle = document.getElementById('billing-toggle');
+  const toggle = document.getElementById('billing-toggle') as HTMLInputElement | null;
   if (toggle) {
     toggle.addEventListener('change', () => {
       const isAnnual = toggle.checked;
@@ -291,6 +291,50 @@ const pricingFaqSchema = {
       });
     });
   }
+
+  // Stripe Checkout CTAs — POST to the kiln-pro REST API, redirect to
+  // the returned Stripe-hosted checkout URL.  The API root is resolved
+  // from PUBLIC_KILN_API_URL at build time; falls back to the production
+  // deployment so the static site works locally-built too.
+  const API_ROOT =
+    (import.meta as any).env?.PUBLIC_KILN_API_URL ||
+    'https://api.kiln3d.com';
+
+  document.querySelectorAll<HTMLButtonElement>('.checkout-cta').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const tier = btn.dataset.tier;
+      if (!tier) return;
+      const billing = toggle?.checked ? 'annual' : 'monthly';
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Redirecting to Stripe…';
+      try {
+        const resp = await fetch(`${API_ROOT}/api/billing/create-checkout-session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tier,
+            billing,
+            success_url: `${window.location.origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${window.location.origin}/pricing`,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success || !data.checkout_url) {
+          throw new Error(data.error || `Checkout failed (${resp.status})`);
+        }
+        window.location.href = data.checkout_url;
+      } catch (err: any) {
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+        console.error('Checkout error:', err);
+        alert(
+          `Couldn't start checkout: ${err?.message ?? 'unknown error'}\n\n` +
+          `If this keeps happening, email adam@kiln3d.com and we'll set you up manually.`
+        );
+      }
+    });
+  });
 </script>
 
 <style>
