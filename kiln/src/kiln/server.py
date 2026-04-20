@@ -5209,6 +5209,67 @@ def preflight_check(
                 except Exception as exc:
                     logger.debug("Missing temperature check failed: %s", exc)
 
+        # -- SCAD flip-readability check (advisory) -------------------------
+        # When a local file_path is provided, look for a companion .scad
+        # source in the same directory.  If found, run the static analyzer
+        # to catch backwards bottom-face text or too-shallow engravings
+        # BEFORE the print starts — saving hours of wasted print time.
+        if file_path is not None:
+            try:
+                from kiln.scad_verification import verify_flip_readability
+
+                _scad_candidates = []
+                _file_dir = Path(file_path).parent
+                _stem = Path(file_path).stem.split(".")[0]  # handle model.gcode.3mf
+                # Explicit stem match first, then any .scad in directory
+                _stem_scad = _file_dir / f"{_stem}.scad"
+                if _stem_scad.exists():
+                    _scad_candidates.append(str(_stem_scad))
+                else:
+                    _scad_candidates.extend(
+                        str(p) for p in sorted(_file_dir.glob("*.scad"))[:1]
+                    )
+
+                for _scad_path in _scad_candidates:
+                    _flip_report = verify_flip_readability(_scad_path)
+                    if _flip_report.get("issues"):
+                        _flip_errors = _flip_report.get("errors", [])
+                        _flip_warnings = _flip_report.get("warnings", [])
+                        _msgs = [
+                            f"[{i['severity'].upper()}] {i['message']}"
+                            for i in _flip_report["issues"]
+                        ]
+                        checks.append(
+                            {
+                                "name": "scad_flip_readability",
+                                "passed": not _flip_errors,
+                                "message": "; ".join(_msgs),
+                                "advisory": not _flip_errors,
+                                "scad_path": _scad_path,
+                            }
+                        )
+                        if _flip_errors:
+                            errors.append(
+                                f"SCAD verification: bottom-face text may print reversed. "
+                                f"See scad_flip_readability check details."
+                            )
+                    elif _flip_report.get("text_entries_checked", 0) > 0:
+                        checks.append(
+                            {
+                                "name": "scad_flip_readability",
+                                "passed": True,
+                                "message": (
+                                    f"SCAD flip-readability verified — "
+                                    f"{_flip_report['text_entries_checked']} text entries checked, "
+                                    f"all correctly mirrored for flip-reading."
+                                ),
+                            }
+                        )
+            except ImportError:
+                pass  # scad_verification not available — skip silently
+            except Exception as exc:
+                logger.debug("SCAD flip-readability check failed: %s", exc)
+
         # -- Remote file check (optional) ----------------------------------
         if remote_file is not None:
             try:
