@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-21T04:15:05.656646+00:00",
-  "tool_count": 251,
+  "generated": "2026-04-21T07:04:51.046524+00:00",
+  "tool_count": 255,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -1612,6 +1612,40 @@
           "feature_id"
         ],
         "title": "cherry_pick_modificationArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "compare_branches",
+      "description": "Render a side-by-side comparison of two branches as a Mermaid ``sequenceDiagram`` (KILN-028 merge-preview).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "branch_a": {
+            "title": "Branch A",
+            "type": "string"
+          },
+          "branch_b": {
+            "title": "Branch B",
+            "type": "string"
+          },
+          "artifact_type": {
+            "default": "design",
+            "title": "Artifact Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "branch_a",
+          "branch_b"
+        ],
+        "title": "compare_branchesArguments",
         "type": "object"
       }
     },
@@ -3903,6 +3937,69 @@
       }
     },
     {
+      "name": "show_branch_history",
+      "description": "List the commits on a single branch, newest-first \u2014 the text-mode companion to ``visualize_branch_tree``.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "branch_name": {
+            "title": "Branch Name",
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "annotate_outcomes": {
+            "default": true,
+            "title": "Annotate Outcomes",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "design_id",
+          "branch_name"
+        ],
+        "title": "show_branch_historyArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "show_design_lineage",
+      "description": "Show the full lineage of a design as a Mermaid ``flowchart TD`` with outcomes emphasized (KILN-021 native).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "annotate_outcomes": {
+            "default": true,
+            "title": "Annotate Outcomes",
+            "type": "boolean"
+          },
+          "max_commits": {
+            "default": 50,
+            "title": "Max Commits",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id"
+        ],
+        "title": "show_design_lineageArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "show_reflog",
       "description": "List head-mutating operations newest-first.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -4405,6 +4502,40 @@
           "after_mesh_path"
         ],
         "title": "visual_diff_meshesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "visualize_branch_tree",
+      "description": "Render a design / preset / feature branch tree as a Mermaid ``flowchart TD`` diagram.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "artifact_type": {
+            "default": "design",
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "detail": {
+            "default": "rich",
+            "title": "Detail",
+            "type": "string"
+          },
+          "max_commits": {
+            "default": 50,
+            "title": "Max Commits",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id"
+        ],
+        "title": "visualize_branch_treeArguments",
         "type": "object"
       }
     },
