@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-21T04:12:23.127491+00:00",
-  "tool_count": 250,
+  "generated": "2026-04-21T04:15:05.656646+00:00",
+  "tool_count": 251,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -87,6 +87,25 @@
           }
         },
         "title": "open_billing_portalArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "preview_overage_charge",
+      "description": "Preview the Enterprise printer-overage charge for the current billing cycle WITHOUT reporting usage to Stripe.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "active_printer_count": {
+            "title": "Active Printer Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "active_printer_count"
+        ],
+        "title": "preview_overage_chargeArguments",
         "type": "object"
       }
     },
