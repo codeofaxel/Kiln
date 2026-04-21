@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-21T07:04:51.046524+00:00",
-  "tool_count": 255,
+  "generated": "2026-04-21T08:03:46.657415+00:00",
+  "tool_count": 256,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -61,6 +61,30 @@
     }
   },
   "tools": [
+    {
+      "name": "license_status_live",
+      "description": "Return live tier / status / expiry for a Kiln license key by hitting the server (revocation-aware).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "license_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "License Key"
+          }
+        },
+        "title": "license_status_liveArguments",
+        "type": "object"
+      }
+    },
     {
       "name": "open_billing_portal",
       "description": "Get a Stripe Billing Portal URL so a paying customer can manage their subscription (update card, change plan, cancel).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
