@@ -32,7 +32,7 @@ const pricingSchema = {
     {
       '@type': 'Offer',
       name: 'Enterprise',
-      price: '499',
+      price: '1999',
       priceCurrency: 'USD',
       availability: 'https://schema.org/InStock',
       url: 'https://kiln3d.com/pricing',
@@ -161,7 +161,7 @@ const pricingFaqSchema = {
             <li><span class="check">&#10003;</span> Three-way semantic mesh merge &mdash; Z-level / pocket / bounding-box diff at manufacturing tolerance <span class="patent-mark">[Patent Pending]</span></li>
             <li><span class="check">&#10003;</span> Versioned decoration presets &mdash; brand-asset library with signed releases <span class="patent-mark">[Patent Pending]</span></li>
             <li><span class="check">&#10003;</span> Versioned mechanical features &mdash; chamfers, fillets, pockets, holes, bosses, ribs, screw-hole patterns, custom OpenSCAD <span class="patent-mark">[Patent Pending]</span></li>
-            <li><span class="check">&#10003;</span> Cloud push/pull to your own Supabase &mdash; tenant-isolated RLS + Merkle push receipts <span class="patent-mark">[Patent Pending]</span></li>
+            <li><span class="check">&#10003;</span> Solo cloud sync to Kiln Cloud &mdash; tenant-isolated RLS + Merkle push receipts (self-host option available) <span class="patent-mark">[Patent Pending]</span></li>
             <li><span class="check">&#10003;</span> Product templates (coasters, keychains, ornaments, and more)</li>
             <li><span class="check">&#10003;</span> Procedural textures (tiger stripe, camo, marble, lava, wood, honeycomb)</li>
             <li><span class="check">&#10003;</span> Unlimited decorations &mdash; photo, QR, text, SVG, brand assets</li>
@@ -196,6 +196,10 @@ const pricingFaqSchema = {
             <li><span class="check">&#10003;</span> Layer-scheduled speed adjustments (auto-apply per-layer)</li>
             <li><span class="check">&#10003;</span> Up to 50 printers</li>
             <li><span class="check">&#10003;</span> 5 team seats</li>
+            <li><span class="check">&#10003;</span> Team pull requests on design versions &mdash; code-review-style approval workflow with latest-decision-wins <span class="patent-mark">[Patent Pending]</span></li>
+            <li><span class="check">&#10003;</span> Approval gates &mdash; required team reviewers, step-up authentication on production releases <span class="patent-mark">[Patent Pending]</span></li>
+            <li><span class="check">&#10003;</span> Cross-organization artifact transfer &mdash; assign IP between orgs with audit trail <span class="patent-mark">[Patent Pending]</span></li>
+            <li><span class="check">&#10003;</span> Federated design sharing &mdash; cross-operator cloud push/pull with SHA-256 branch anonymization <span class="patent-mark">[Patent Pending]</span></li>
             <li><span class="check">&#10003;</span> Unlimited fulfillment orders</li>
             <li><span class="check">&#10003;</span> Material compliance tracking</li>
             <li><span class="check">&#10003;</span> Priority support</li>
@@ -211,8 +215,8 @@ const pricingFaqSchema = {
           <div class="card-header">
             <h3>Enterprise</h3>
             <div class="price">
-              <span class="amount monthly-price">$499</span>
-              <span class="amount annual-price" style="display:none">$399</span>
+              <span class="amount monthly-price">$1,999</span>
+              <span class="amount annual-price" style="display:none">$1,599</span>
               <span class="period monthly-price-period">/ mo base</span>
               <span class="period annual-price-period" style="display:none">/ mo base, billed annually</span>
             </div>
@@ -231,7 +235,8 @@ const pricingFaqSchema = {
             <li><span class="check">&#10003;</span> Dedicated onboarding + private Discord channel</li>
             <li><span class="check">&#10003;</span> Priority feature requests + direct founder support</li>
           </ul>
-          <a href="mailto:adam@kiln3d.com?subject=Kiln%20Enterprise" class="btn card-cta enterprise-cta">Talk to us &#8594;</a>
+          <button type="button" class="btn card-cta checkout-cta" data-tier="enterprise">Get Enterprise &#8594;</button>
+          <p class="upgrade-note">Need custom SSO setup, a contract, or invoice terms? <a href="mailto:adam@kiln3d.com?subject=Kiln%20Enterprise%20custom%20deployment">Talk to us &#8594;</a></p>
         </div>
       </div>
     </div>
@@ -259,7 +264,7 @@ const pricingFaqSchema = {
         </details>
         <details>
           <summary>What does annual billing save?</summary>
-          <p>Annual plans save roughly 20% compared to monthly. Pro drops from $29/mo to $23/mo ($276/yr). Business drops from $99/mo to $79/mo ($948/yr). Enterprise drops from $499/mo to $399/mo ($4,788/yr). You can switch between monthly and annual at any time.</p>
+          <p>Annual plans save roughly 20% compared to monthly. Pro drops from $29/mo to $23/mo ($276/yr). Business drops from $99/mo to $79/mo ($948/yr). Enterprise drops from $1,999/mo to $1,599/mo ($19,188/yr). You can switch between monthly and annual at any time.</p>
         </details>
         <details>
           <summary>What's included in Enterprise?</summary>
