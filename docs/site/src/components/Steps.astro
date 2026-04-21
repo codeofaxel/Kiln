@@ -8,13 +8,17 @@ const steps = [
   { icon: '\u2702\uFE0F', label: 'Slice' },
   { icon: '\u{1F5A8}', label: 'Print' },
   { icon: '\u{1F4F7}', label: 'Monitor' },
+  // Iterate closes the loop — every outcome feeds the next branch.
+  // Leaf icon matches the Git-for-3D feature card so the two surfaces
+  // read as a single story.
+  { icon: '\u{1F33F}', label: 'Iterate' },
 ];
 ---
 
 <section id="how-it-works" style="border-top: 1px solid var(--border); padding: 56px 0;">
   <div class="container">
     <h2 style="font-size: clamp(24px, 4vw, 40px); font-weight: 700; margin-bottom: 8px;">How it works</h2>
-    <p style="color: var(--text-muted); font-size: 17px; margin-bottom: 36px;">From idea to physical object — one conversation.</p>
+    <p style="color: var(--text-muted); font-size: 17px; margin-bottom: 36px;">From idea to physical object &mdash; then branch, merge, and print a better one.</p>
 
     <div style="display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: nowrap;">
       {steps.map((s, i) => (
@@ -37,7 +41,7 @@ const steps = [
     </div>
 
     <p style="text-align: center; color: var(--text-muted); font-size: 12px; margin-top: 24px;">
-      Every step is an MCP tool. Agents compose the pipeline. Humans can run any step from the CLI.
+      Every step is an MCP tool. Agents compose the pipeline. Humans can run any step from the CLI. Every print outcome feeds the next iteration.
     </p>
   </div>
 </section>

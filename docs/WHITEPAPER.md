@@ -279,7 +279,7 @@ On-premises deployment via Kubernetes manifests and Helm chart with namespace is
 Local printer control is free and unrestricted. Kiln uses a four-tier model:
 
 - **Free** -- All local printing, design intelligence, generation, and printability analysis. Up to 2 printers, 10-job queue.
-- **Pro ($29/mo, $23/mo annual)** -- Unlimited printers, fleet orchestration, analytics, cloud sync, product templates, procedural textures, decoration system, speed control, print learning, and cross-printer intelligence.
+- **Pro ($49/mo, $39/mo annual)** -- Up to 5 printers, fleet orchestration, analytics, cloud sync, git-for-3D version control, product templates, procedural textures, decoration system, speed control, print learning, and cross-printer intelligence. Positioning: Claude made generating virtual artifacts trivial; Kiln Pro does the same for physical ones.
 - **Business ($99/mo, $79/mo annual)** -- Up to 50 printers, 5 team seats, fulfillment brokering, shared hosted MCP server, priority support, custom safety profiles.
 - **Enterprise (from $499/mo, $399/mo annual)** -- Unlimited printers (20 included, $15/mo each additional), unlimited team seats, dedicated MCP server, on-premises deployment, SSO, RBAC, audit trail, encrypted G-code, 99.9% SLA.
 

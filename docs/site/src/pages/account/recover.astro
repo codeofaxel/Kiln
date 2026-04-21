@@ -1,0 +1,166 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Recover license key — Kiln"
+  description="Lost your Kiln license key? Enter the email you paid with and we'll send a fresh one."
+  noindex={true}
+>
+  <section class="recover">
+    <div class="container">
+      <img src="/assets/kiln-logo-dark-notext.svg" alt="Kiln" width="56" height="56" class="logo-icon">
+      <h1>Re-send my license key</h1>
+      <p class="lead">
+        Enter the email address on your Stripe subscription. We verify the subscription is active, then email a fresh license key.
+      </p>
+
+      <form id="recover-form" class="recover-form" autocomplete="on">
+        <label for="email">Email</label>
+        <input
+          id="email"
+          name="email"
+          type="email"
+          placeholder="you@example.com"
+          required
+          autocomplete="email"
+        />
+        <button type="submit" class="btn primary">Send me a fresh key</button>
+        <p id="recover-status" class="status" style="display:none"></p>
+      </form>
+
+      <div class="altpath">
+        <p>Still need help? <a href="mailto:adam@kiln3d.com?subject=Lost%20Kiln%20license%20key">Email us directly</a> from the address on the subscription.</p>
+        <p>Not a customer yet? <a href="/pricing">See pricing</a>.</p>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    const API_ROOT =
+      (import.meta as any).env?.PUBLIC_KILN_API_URL ||
+      'https://api.kiln3d.com';
+
+    const form = document.getElementById('recover-form') as HTMLFormElement | null;
+    const statusEl = document.getElementById('recover-status') as HTMLElement | null;
+
+    form?.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      if (!statusEl) return;
+      statusEl.style.display = 'none';
+      statusEl.classList.remove('error');
+      statusEl.classList.remove('ok');
+
+      const btn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+      const emailInput = form.querySelector<HTMLInputElement>('#email');
+      const email = (emailInput?.value || '').trim();
+      if (!email) return;
+
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+
+      try {
+        const resp = await fetch(`${API_ROOT}/api/license/reissue`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          throw new Error(data.error || `Request failed (${resp.status})`);
+        }
+        // Anti-enumeration: server returns the same envelope whether the
+        // email matched a subscription or not.  We surface that to the UI
+        // with neutral copy.
+        statusEl.classList.add('ok');
+        statusEl.textContent = data.message || 'If an active subscription exists for this email, a fresh license key has been sent.';
+        statusEl.style.display = '';
+        btn.textContent = 'Sent';
+        // Re-enable after 30s in case user needs to try another email.
+        setTimeout(() => {
+          btn.disabled = false;
+          btn.textContent = originalLabel;
+        }, 30_000);
+      } catch (err: any) {
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+        statusEl.classList.add('error');
+        statusEl.textContent = `Couldn't send: ${err?.message ?? 'unknown error'}. If this keeps happening, email adam@kiln3d.com.`;
+        statusEl.style.display = '';
+      }
+    });
+  </script>
+</BaseLayout>
+
+<style>
+  .recover {
+    padding: 90px 0 120px;
+  }
+  .recover .container {
+    max-width: 520px;
+    margin: 0 auto;
+    padding: 0 20px;
+    text-align: center;
+  }
+  .logo-icon { margin-bottom: 20px; }
+  .recover h1 {
+    font-size: 32px;
+    font-weight: 700;
+    margin-bottom: 12px;
+  }
+  .recover .lead {
+    color: var(--text-muted);
+    font-size: 16px;
+    line-height: 1.6;
+    margin-bottom: 40px;
+  }
+  .recover-form {
+    text-align: left;
+    background: var(--bg-card, #f8f8f8);
+    border: 1px solid var(--border, #e5e5e5);
+    border-radius: 10px;
+    padding: 24px 28px;
+    margin-bottom: 28px;
+  }
+  .recover-form label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 8px;
+    font-size: 14px;
+  }
+  .recover-form input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border, #d5d5d5);
+    border-radius: 6px;
+    font-size: 14px;
+    box-sizing: border-box;
+    margin-bottom: 18px;
+  }
+  .recover-form .primary {
+    width: 100%;
+  }
+  .recover-form .status {
+    font-size: 13px;
+    margin-top: 14px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    line-height: 1.5;
+  }
+  .recover-form .status.ok {
+    background: rgba(0, 128, 0, 0.06);
+    border: 1px solid rgba(0, 128, 0, 0.25);
+    color: #0a6b1a;
+  }
+  .recover-form .status.error {
+    background: rgba(176, 0, 32, 0.05);
+    border: 1px solid rgba(176, 0, 32, 0.25);
+    color: #b00020;
+  }
+  .altpath {
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.9;
+  }
+</style>

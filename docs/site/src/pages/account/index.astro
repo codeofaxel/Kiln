@@ -1,0 +1,157 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Manage subscription — Kiln"
+  description="Update your payment method, change plans, or cancel your Kiln subscription via Stripe's secure portal."
+  noindex={true}
+>
+  <section class="account">
+    <div class="container">
+      <img src="/assets/kiln-logo-dark-notext.svg" alt="Kiln" width="56" height="56" class="logo-icon">
+      <h1>Manage your subscription</h1>
+      <p class="lead">
+        Update your card, switch between monthly and annual, change plans, or cancel — everything runs through Stripe's secure billing portal.
+      </p>
+
+      <form id="portal-form" class="portal-form" autocomplete="off">
+        <label for="license_key">Paste your Kiln license key</label>
+        <textarea
+          id="license_key"
+          name="license_key"
+          placeholder="kln-v2.eyJ0aWVyIjoicHJvIiwi…"
+          required
+          rows="3"
+          spellcheck="false"
+        ></textarea>
+        <p class="hint">
+          Your license key carries your billing email as a signed claim. We verify it against Stripe so only the paying account can open the portal.
+        </p>
+        <button type="submit" class="btn primary">Open billing portal &#8594;</button>
+        <p id="portal-error" class="error" style="display:none"></p>
+      </form>
+
+      <div class="altpath">
+        <p>Lost your license key? <a href="/account/recover">Have a fresh one emailed</a>.</p>
+        <p>Still stuck? <a href="mailto:adam@kiln3d.com?subject=Billing%20help">Email us</a> and we'll sort it manually.</p>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    const API_ROOT =
+      (import.meta as any).env?.PUBLIC_KILN_API_URL ||
+      'https://api.kiln3d.com';
+
+    const form = document.getElementById('portal-form') as HTMLFormElement | null;
+    const errEl = document.getElementById('portal-error') as HTMLElement | null;
+
+    form?.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      if (!errEl) return;
+      errEl.style.display = 'none';
+
+      const btn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+      const keyInput = form.querySelector<HTMLTextAreaElement>('#license_key');
+      const key = (keyInput?.value || '').trim();
+      if (!key) return;
+
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Opening portal…';
+
+      try {
+        const resp = await fetch(`${API_ROOT}/api/billing/create-portal-session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            license_key: key,
+            return_url: `${window.location.origin}/account`,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success || !data.portal_url) {
+          throw new Error(data.error || `Portal session failed (${resp.status})`);
+        }
+        window.location.href = data.portal_url;
+      } catch (err: any) {
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+        errEl.textContent = `Couldn't open the portal: ${err?.message ?? 'unknown error'}. If this keeps happening, email adam@kiln3d.com.`;
+        errEl.style.display = '';
+      }
+    });
+  </script>
+</BaseLayout>
+
+<style>
+  .account {
+    padding: 90px 0 120px;
+  }
+  .account .container {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: 0 20px;
+    text-align: center;
+  }
+  .logo-icon { margin-bottom: 20px; }
+  .account h1 {
+    font-size: 32px;
+    font-weight: 700;
+    margin-bottom: 12px;
+  }
+  .account .lead {
+    color: var(--text-muted);
+    font-size: 16px;
+    line-height: 1.6;
+    margin-bottom: 40px;
+  }
+  .portal-form {
+    text-align: left;
+    background: var(--bg-card, #f8f8f8);
+    border: 1px solid var(--border, #e5e5e5);
+    border-radius: 10px;
+    padding: 24px 28px;
+    margin-bottom: 28px;
+  }
+  .portal-form label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 8px;
+    font-size: 14px;
+  }
+  .portal-form textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border, #d5d5d5);
+    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px;
+    resize: vertical;
+    box-sizing: border-box;
+  }
+  .portal-form .hint {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin: 10px 0 18px;
+    line-height: 1.5;
+  }
+  .portal-form .primary {
+    width: 100%;
+  }
+  .portal-form .error {
+    color: #b00020;
+    font-size: 13px;
+    margin-top: 12px;
+    background: rgba(176, 0, 32, 0.05);
+    padding: 10px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(176, 0, 32, 0.25);
+  }
+  .altpath {
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.9;
+  }
+</style>
