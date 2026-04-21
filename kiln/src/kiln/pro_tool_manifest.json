@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-18T01:21:00.289735+00:00",
-  "tool_count": 247,
+  "generated": "2026-04-21T04:12:23.127491+00:00",
+  "tool_count": 250,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -54,9 +54,121 @@
     "provenance_learning": {
       "label": "Proven Recipes",
       "pitch": "Record and recall proven recipes for any decoration + product combination."
+    },
+    "billing": {
+      "label": "Billing & Subscription",
+      "pitch": "Self-serve Stripe Checkout, customer portal, lost-key reissue, and live license status \u2014 for agents and humans."
     }
   },
   "tools": [
+    {
+      "name": "open_billing_portal",
+      "description": "Get a Stripe Billing Portal URL so a paying customer can manage their subscription (update card, change plan, cancel).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "license_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "License Key"
+          },
+          "return_url": {
+            "default": "https://kiln3d.com/account",
+            "title": "Return Url",
+            "type": "string"
+          }
+        },
+        "title": "open_billing_portalArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "reissue_license",
+      "description": "Trigger a license-key reissue for a lost key.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "reissue_licenseArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "start_subscription_checkout",
+      "description": "Get a URL the user can visit to subscribe to a Kiln paid tier.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "tier": {
+            "title": "Tier",
+            "type": "string"
+          },
+          "billing": {
+            "default": "monthly",
+            "title": "Billing",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Email"
+          },
+          "success_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Success Url"
+          },
+          "cancel_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cancel Url"
+          }
+        },
+        "required": [
+          "tier"
+        ],
+        "title": "start_subscription_checkoutArguments",
+        "type": "object"
+      }
+    },
     {
       "name": "cloud_clone_design",
       "description": "Bootstrap local storage for a remote-only design.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
@@ -8085,7 +8197,7 @@
     },
     {
       "name": "list_approval_gates",
-      "description": "List every configured approval gate, optionally filtered.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "List every configured approval gate, optionally filtered. Business+ tier.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
       "category": "teams",
       "parameters": {
@@ -8121,7 +8233,7 @@
     },
     {
       "name": "list_expiring_grants",
-      "description": "Return grants set to ``expires_at`` within the next *within_days*.  Lets admins renew or revoke before they lapse and break workflows.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Return grants set to ``expires_at`` within the next *within_days*.  Lets admins renew or revoke before they lapse and break workflows.  Business+ tier.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
       "category": "teams",
       "parameters": {
@@ -8285,7 +8397,7 @@
     },
     {
       "name": "list_stale_grants",
-      "description": "Return every grant in *org_id* whose ``granted_at`` is older than *older_than_days*.  The quarterly access-review starting point: \"these grants have been untouched for 3 months \u2014 still needed?\".\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Return every grant in *org_id* whose ``granted_at`` is older than *older_than_days*.  The quarterly access-review starting point: \"these grants have been untouched for 3 months \u2014 still needed?\"  Business+ tier (team access review).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
       "category": "teams",
       "parameters": {
@@ -8347,7 +8459,7 @@
     },
     {
       "name": "remove_approval_gate",
-      "description": "Remove an approval gate.  Merges on the target branch return to unprotected.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Remove an approval gate.  Merges on the target branch return to unprotected.  Business+ tier.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
       "category": "teams",
       "parameters": {
@@ -8535,7 +8647,7 @@
     },
     {
       "name": "scope_review_summary",
-      "description": "Aggregate view of every grant in an org \u2014 by capability, by target (tenant / team), plus counts of stale and expiring.  Starting point for a quarterly audit.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Aggregate view of every grant in an org \u2014 by capability, by target (tenant / team), plus counts of stale and expiring.  Starting point for a quarterly audit.  Business+ tier (team-level org management).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
       "category": "teams",
       "parameters": {
