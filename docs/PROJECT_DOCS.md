@@ -8,7 +8,7 @@
 
 ### Overview
 
-Kiln is the intelligence layer between idea and physical object. It provides a unified interface for AI agents to design, validate, and manufacture 3D-printed parts — controlling local printers, searching third-party model marketplaces (Thingiverse, MyMiniFactory, Cults3D), and routing jobs to fulfillment providers (Craftcloud) — all through the Model Context Protocol (MCP) or a <!-- KILN_CLI_COUNT:OLD --> 151-command CLI.
+Kiln is the intelligence layer between idea and physical object. It provides a unified interface for AI agents to design, validate, and manufacture 3D-printed parts — controlling local printers, searching third-party model marketplaces (Thingiverse, MyMiniFactory, Cults3D), and routing jobs to fulfillment providers (Craftcloud) — all through the Model Context Protocol (MCP) or a <!-- KILN_CLI_COUNT:OLD --> 194-command CLI.
 
 **Clarification:** Kiln does **not** operate its own marketplace or manufacturing network. It integrates with third-party marketplaces for model discovery and third-party fulfillment providers for outsourced manufacturing. Kiln is orchestration and agent infrastructure, not a supply-side platform.
 
@@ -368,7 +368,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **<!-- KILN_MCP_COUNT:OLD --> 702 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
+Kiln exposes **<!-- KILN_MCP_COUNT:OLD --> 728 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
 
 #### Printer Control
 
@@ -1248,8 +1248,8 @@ pip install -e "./octoprint-cli[dev]"
 ### Running Tests
 
 ```bash
-cd kiln && python3 -m pytest tests/ -v    # 8,750 tests
-cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
+cd kiln && python3 -m pytest tests/ -v    # 8,699 tests
+cd ../octoprint-cli && python3 -m pytest tests/ -v  # 223 tests
 ```
 
 ### Adding a New Printer Adapter
