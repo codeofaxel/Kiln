@@ -1,0 +1,194 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { marked } from 'marked';
+
+// Read TERMS.md at the repo root at build time.  Canonical copy
+// lives there alongside PRIVACY.md so contributors + auditors see
+// the same document the site renders.
+const mdPath = resolve(process.cwd(), '../../TERMS.md');
+const markdown = readFileSync(mdPath, 'utf-8');
+
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .trim();
+}
+
+const renderer = new marked.Renderer();
+renderer.heading = function ({ text, depth }: { text: string; depth: number }) {
+  const id = slugify(text);
+  return `<h${depth} id="${id}">${text}</h${depth}>`;
+};
+
+marked.setOptions({ renderer, gfm: true, breaks: false });
+
+const htmlContent = await marked.parse(markdown);
+
+const schema = {
+  '@type': 'WebPage',
+  name: 'Terms of Use — Kiln',
+  description:
+    "The terms under which Kiln's open-source infrastructure is provided.",
+  url: 'https://kiln3d.com/terms',
+};
+---
+
+<BaseLayout
+  title="Terms of Use — Kiln"
+  description="Kiln's terms of use. Open-source infrastructure for controlling 3D printers — your responsibility to use it safely."
+  current="terms"
+  keywords={['kiln terms of use', 'kiln terms of service', '3d printing terms']}
+  schema={schema}
+>
+  <main class="legal-page">
+    <div class="page-header">
+      <h1>Terms of Use</h1>
+      <p class="subtitle">The terms under which Kiln is provided.</p>
+    </div>
+    <article class="prose" set:html={htmlContent} />
+  </main>
+</BaseLayout>
+
+<style>
+  .legal-page {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 48px 24px 96px;
+  }
+
+  .page-header {
+    margin-bottom: 40px;
+    padding-bottom: 28px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .page-header h1 {
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+  }
+
+  .page-header .subtitle {
+    color: var(--text-muted);
+    font-size: 16px;
+    line-height: 1.6;
+    max-width: 560px;
+  }
+
+  .prose {
+    font-size: 16px;
+    line-height: 1.7;
+    color: var(--text);
+  }
+
+  .prose :global(h1) { display: none; }
+
+  .prose :global(h2) {
+    font-size: 22px;
+    font-weight: 700;
+    margin-top: 48px;
+    margin-bottom: 14px;
+    padding-top: 28px;
+    border-top: 1px solid var(--border);
+    letter-spacing: -0.01em;
+  }
+
+  .prose :global(h2:first-of-type) {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .prose :global(h3) {
+    font-size: 17px;
+    font-weight: 600;
+    margin-top: 32px;
+    margin-bottom: 10px;
+    padding-left: 12px;
+    border-left: 3px solid var(--accent);
+  }
+
+  .prose :global(p) { margin-bottom: 14px; }
+  .prose :global(strong) { font-weight: 600; color: var(--text); }
+  .prose :global(a) {
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .prose :global(a:hover) { text-decoration: underline; }
+
+  .prose :global(ul),
+  .prose :global(ol) {
+    margin-bottom: 14px;
+    padding-left: 22px;
+  }
+  .prose :global(li) { margin-bottom: 4px; }
+
+  .prose :global(hr) {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 40px 0;
+  }
+
+  .prose :global(code) {
+    font-family: var(--mono);
+    font-size: 0.875em;
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .prose :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    margin: 20px 0;
+    display: block;
+    overflow-x: auto;
+  }
+  .prose :global(th) {
+    text-align: left;
+    padding: 10px 14px;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+  }
+  .prose :global(td) {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .prose :global(tr:last-child td) { border-bottom: none; }
+
+  .prose :global(blockquote) {
+    border-left: 3px solid var(--accent);
+    padding: 10px 18px;
+    margin: 16px 0;
+    background: rgba(255, 107, 43, 0.05);
+    border-radius: 0 6px 6px 0;
+    color: var(--text-muted);
+  }
+  .prose :global(blockquote p) { margin-bottom: 0; }
+
+  .prose :global(em) {
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  @media (max-width: 768px) {
+    .legal-page { padding: 32px 16px 80px; }
+    .page-header h1 { font-size: 28px; }
+    .prose :global(h2) { font-size: 18px; margin-top: 32px; padding-top: 20px; }
+    .prose :global(h3) { font-size: 15px; margin-top: 24px; }
+  }
+</style>
