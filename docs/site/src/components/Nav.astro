@@ -1,5 +1,10 @@
 ---
 const { current = '' } = Astro.props;
+
+// Which sub-page slugs belong under the "Product" dropdown.  Used to
+// mark the Product trigger active when the visitor is on any of them.
+const productPages = ['features', 'use-cases', 'integrations', 'boundary', 'install'];
+const productActive = productPages.includes(current);
 ---
 
 <nav>
@@ -8,19 +13,35 @@ const { current = '' } = Astro.props;
       <img src="/assets/kiln-logo-dark-notext.svg" alt="Kiln" width="28" height="28">
       <span>K<span class="accent">I</span>LN</span>
     </a>
-    <button class="mobile-toggle" aria-label="Toggle menu">
+    <button class="mobile-toggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="nav-links">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <line x1="3" y1="6" x2="21" y2="6"/>
         <line x1="3" y1="12" x2="21" y2="12"/>
         <line x1="3" y1="18" x2="21" y2="18"/>
       </svg>
     </button>
-    <div class="links">
-      <a href="/#features" class:list={[{ active: current === 'features' }]}>Features</a>
-      <a href="/use-cases" class:list={[{ active: current === 'use-cases' }]}>Use Cases</a>
-      <a href="/integrations" class:list={[{ active: current === 'integrations' }]}>Integrations</a>
-      <a href="/boundary" class:list={[{ active: current === 'boundary' }]}>Boundary</a>
-      <a href="/install" class:list={[{ active: current === 'install' }]}>Install</a>
+    <div class="links" id="nav-links">
+      <div class="dropdown" data-dropdown>
+        <button
+          type="button"
+          class:list={['dropdown-trigger', { active: productActive }]}
+          aria-haspopup="true"
+          aria-expanded="false"
+          aria-controls="nav-product-menu"
+        >
+          Product
+          <svg class="caret" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+            <path d="M2 4 L5 7 L8 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <ul class="dropdown-menu" id="nav-product-menu" role="menu">
+          <li role="none"><a role="menuitem" href="/#features" class:list={[{ active: current === 'features' }]}>Features</a></li>
+          <li role="none"><a role="menuitem" href="/use-cases" class:list={[{ active: current === 'use-cases' }]}>Use Cases</a></li>
+          <li role="none"><a role="menuitem" href="/integrations" class:list={[{ active: current === 'integrations' }]}>Integrations</a></li>
+          <li role="none"><a role="menuitem" href="/boundary" class:list={[{ active: current === 'boundary' }]}>Boundary</a></li>
+          <li role="none"><a role="menuitem" href="/install" class:list={[{ active: current === 'install' }]}>Install</a></li>
+        </ul>
+      </div>
       <a href="/docs" class:list={[{ active: current === 'docs' }]}>Docs</a>
       <a href="/blog" class:list={[{ active: current === 'blog' }]}>Blog</a>
       <a href="https://github.com/codeofaxel/Kiln" target="_blank" rel="noopener">GitHub</a>
@@ -60,15 +81,17 @@ const { current = '' } = Astro.props;
   .logo .accent { color: var(--accent); }
   .links {
     display: flex;
+    align-items: center;
     gap: 18px;
     font-size: 13px;
   }
-  .links a {
+  .links > a {
     color: var(--text-muted);
     text-decoration: none;
     white-space: nowrap;
   }
-  .links a:hover, .links a.active {
+  .links > a:hover,
+  .links > a.active {
     color: var(--text);
     text-decoration: none;
   }
@@ -78,6 +101,89 @@ const { current = '' } = Astro.props;
   .links a.signin:hover {
     color: var(--text);
   }
+
+  /* ---- Product dropdown ------------------------------------------ */
+  .dropdown {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .dropdown-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color .12s ease;
+  }
+  .dropdown-trigger:hover,
+  .dropdown-trigger.active,
+  .dropdown[data-open] .dropdown-trigger {
+    color: var(--text);
+  }
+  .dropdown-trigger .caret {
+    color: currentColor;
+    transition: transform .15s ease;
+    opacity: 0.7;
+  }
+  .dropdown[data-open] .dropdown-trigger .caret {
+    transform: rotate(180deg);
+    opacity: 1;
+  }
+
+  .dropdown-menu {
+    position: absolute;
+    top: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%) translateY(-4px);
+    margin: 0;
+    padding: 6px;
+    list-style: none;
+    min-width: 180px;
+    background: rgba(18, 18, 18, 0.96);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow:
+      0 14px 40px -10px rgba(0, 0, 0, 0.7),
+      0 4px 14px -6px rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .15s ease, transform .15s ease;
+  }
+  .dropdown[data-open] .dropdown-menu {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(-50%) translateY(0);
+  }
+  .dropdown-menu li {
+    margin: 0;
+  }
+  .dropdown-menu a {
+    display: block;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: var(--text-muted);
+    text-decoration: none;
+    border-radius: 6px;
+    white-space: nowrap;
+    transition: background-color .12s ease, color .12s ease;
+  }
+  .dropdown-menu a:hover,
+  .dropdown-menu a.active {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.05);
+    text-decoration: none;
+  }
+
   .mobile-toggle {
     display: none;
     background: none;
@@ -87,7 +193,7 @@ const { current = '' } = Astro.props;
     padding: 4px;
   }
 
-  @media (max-width: 640px) {
+  @media (max-width: 720px) {
     .mobile-toggle { display: block; }
     .links {
       display: none;
@@ -99,16 +205,123 @@ const { current = '' } = Astro.props;
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
       flex-direction: column;
+      align-items: stretch;
       padding: 16px 24px;
-      gap: 16px;
+      gap: 4px;
       border-bottom: 1px solid var(--border);
     }
     .links.open { display: flex; }
+    .links > a {
+      padding: 10px 0;
+    }
+
+    /* Dropdown becomes an accordion on mobile — menu inlines
+       below the trigger instead of floating as a popover. */
+    .dropdown {
+      display: block;
+      width: 100%;
+    }
+    .dropdown-trigger {
+      width: 100%;
+      justify-content: space-between;
+      padding: 10px 0;
+    }
+    .dropdown-menu {
+      position: static;
+      transform: none;
+      opacity: 1;
+      pointer-events: auto;
+      display: none;
+      background: transparent;
+      backdrop-filter: none;
+      border: none;
+      box-shadow: none;
+      padding: 0 0 6px 16px;
+      min-width: 0;
+    }
+    .dropdown[data-open] .dropdown-menu {
+      display: block;
+      transform: none;
+    }
   }
 </style>
 
 <script>
-  const toggle = document.querySelector('.mobile-toggle');
-  const links = document.querySelector('.links');
-  toggle?.addEventListener('click', () => links?.classList.toggle('open'));
+  // Mobile nav open/close
+  const mobileToggle = document.querySelector<HTMLButtonElement>('.mobile-toggle');
+  const links = document.querySelector<HTMLElement>('.links');
+  mobileToggle?.addEventListener('click', () => {
+    const isOpen = links?.classList.toggle('open');
+    mobileToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  });
+
+  // Product dropdown: click-to-toggle on desktop, also toggles on mobile
+  // where the menu is the accordion panel.  Closes on outside-click and
+  // Escape.  Hover-open is layered on top via :hover below but the
+  // click path is authoritative so keyboard users get the same
+  // experience as mouse users.
+  const dropdowns = document.querySelectorAll<HTMLElement>('[data-dropdown]');
+
+  function closeAll(except?: HTMLElement) {
+    dropdowns.forEach((d) => {
+      if (d !== except) {
+        d.removeAttribute('data-open');
+        d.querySelector<HTMLButtonElement>('.dropdown-trigger')
+          ?.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+
+  dropdowns.forEach((d) => {
+    const trigger = d.querySelector<HTMLButtonElement>('.dropdown-trigger');
+    trigger?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const wasOpen = d.hasAttribute('data-open');
+      closeAll(wasOpen ? undefined : d);
+      if (wasOpen) {
+        d.removeAttribute('data-open');
+        trigger.setAttribute('aria-expanded', 'false');
+      } else {
+        d.setAttribute('data-open', '');
+        trigger.setAttribute('aria-expanded', 'true');
+      }
+    });
+
+    // Hover-open on desktop only (no effect on touch).  Uses a tiny
+    // delay on close so moving the cursor from trigger → menu doesn't
+    // flicker through the gap.
+    let hoverTimer: number | undefined;
+    const openHover = () => {
+      if (window.matchMedia('(hover: hover)').matches && window.innerWidth > 720) {
+        window.clearTimeout(hoverTimer);
+        d.setAttribute('data-open', '');
+        trigger?.setAttribute('aria-expanded', 'true');
+      }
+    };
+    const closeHover = () => {
+      if (window.matchMedia('(hover: hover)').matches && window.innerWidth > 720) {
+        hoverTimer = window.setTimeout(() => {
+          d.removeAttribute('data-open');
+          trigger?.setAttribute('aria-expanded', 'false');
+        }, 120);
+      }
+    };
+    d.addEventListener('mouseenter', openHover);
+    d.addEventListener('mouseleave', closeHover);
+  });
+
+  // Outside-click closes any open dropdown
+  document.addEventListener('click', (e) => {
+    const target = e.target as Node;
+    let clickedInside = false;
+    dropdowns.forEach((d) => {
+      if (d.contains(target)) clickedInside = true;
+    });
+    if (!clickedInside) closeAll();
+  });
+
+  // Escape closes any open dropdown
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeAll();
+  });
 </script>
