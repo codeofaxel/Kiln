@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-21T08:03:46.657415+00:00",
-  "tool_count": 256,
+  "generated": "2026-04-22T03:02:08.428043+00:00",
+  "tool_count": 266,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -61,6 +61,164 @@
     }
   },
   "tools": [
+    {
+      "name": "billing_alerts",
+      "description": "Check billing system health and active alerts.",
+      "tier": "free",
+      "category": "billing",
+      "parameters": {
+        "properties": {},
+        "title": "billing_alertsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "billing_check_setup",
+      "description": "Check if billing setup is complete after user visited the setup URL.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {},
+        "title": "billing_check_setupArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "billing_delete_data",
+      "description": "Delete all your billing data (GDPR right-to-erasure).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "confirm": {
+            "default": "",
+            "title": "Confirm",
+            "type": "string"
+          }
+        },
+        "title": "billing_delete_dataArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "billing_export",
+      "description": "Export billing history for accounting.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "format": {
+            "default": "csv",
+            "title": "Format",
+            "type": "string"
+          },
+          "limit": {
+            "default": 100,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "billing_exportArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "billing_history",
+      "description": "Get recent billing charge history with payment outcomes.",
+      "tier": "free",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "limit": {
+            "default": 20,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "billing_historyArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "billing_invoice",
+      "description": "Generate an invoice/receipt for a billing charge.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "charge_id": {
+            "default": "",
+            "title": "Charge Id",
+            "type": "string"
+          },
+          "job_id": {
+            "default": "",
+            "title": "Job Id",
+            "type": "string"
+          }
+        },
+        "title": "billing_invoiceArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "billing_setup_url",
+      "description": "Get a URL to link a payment method for Kiln orchestration fees.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "rail": {
+            "default": "stripe",
+            "title": "Rail",
+            "type": "string"
+          }
+        },
+        "title": "billing_setup_urlArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "billing_status",
+      "description": "Get enriched billing status including payment method info.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {},
+        "title": "billing_statusArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "billing_summary",
+      "description": "Get a summary of Kiln orchestration fees for the current month.",
+      "tier": "free",
+      "category": "billing",
+      "parameters": {
+        "properties": {},
+        "title": "billing_summaryArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "check_payment_status",
+      "description": "Check the current status of a pending payment by ID.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "payment_id": {
+            "title": "Payment Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "payment_id"
+        ],
+        "title": "check_payment_statusArguments",
+        "type": "object"
+      }
+    },
     {
       "name": "license_status_live",
       "description": "Return live tier / status / expiry for a Kiln license key by hitting the server (revocation-aware).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
@@ -130,6 +288,30 @@
           "active_printer_count"
         ],
         "title": "preview_overage_chargeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "refund_payment",
+      "description": "Request a refund for a completed payment.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "payment_id": {
+            "title": "Payment Id",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "payment_id"
+        ],
+        "title": "refund_paymentArguments",
         "type": "object"
       }
     },
@@ -1271,6 +1453,63 @@
       }
     },
     {
+      "name": "archive_decoration_preset",
+      "description": "Archive a decoration preset \u2014 hide from default listings while preserving every version, branch, release, and outcome.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "preset_id": {
+            "title": "Preset Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preset_id"
+        ],
+        "title": "archive_decoration_presetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "archive_design",
+      "description": "Archive a design \u2014 hide from default listings while preserving every version, branch, recipe sidecar, and print outcome.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "archive_designArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "archive_feature",
+      "description": "Archive a mechanical feature \u2014 hide it from default listings while preserving every version, branch, link event, and outcome.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id"
+        ],
+        "title": "archive_featureArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "best_design_version",
       "description": "Find the version with the highest success rate.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -2350,6 +2589,25 @@
       }
     },
     {
+      "name": "get_design",
+      "description": "Fetch a single design's summary + branch list for the workshop detail view.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "get_designArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "get_design_ancestry",
       "description": "Walk the parent chain from a recipe back to the root.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -2699,6 +2957,11 @@
             "default": false,
             "title": "Portfolio Only",
             "type": "boolean"
+          },
+          "include_archived": {
+            "default": false,
+            "title": "Include Archived",
+            "type": "boolean"
           }
         },
         "title": "list_decoration_presetsArguments",
@@ -2786,6 +3049,33 @@
           "design_id"
         ],
         "title": "list_design_releasesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_designs",
+      "description": "List every design the user has saved \u2014 id, name, branches, last-updated.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "filter": {
+            "default": "all",
+            "title": "Filter",
+            "type": "string"
+          },
+          "offset": {
+            "default": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "limit": {
+            "default": 24,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "list_designsArguments",
         "type": "object"
       }
     },
@@ -2889,6 +3179,11 @@
           "portfolio_only": {
             "default": false,
             "title": "Portfolio Only",
+            "type": "boolean"
+          },
+          "include_archived": {
+            "default": false,
+            "title": "Include Archived",
             "type": "boolean"
           }
         },
@@ -3499,8 +3794,32 @@
       }
     },
     {
+      "name": "rename_decoration_preset",
+      "description": "Rename a decoration preset \u2014 update the display name across every saved version without touching content or history.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "preset_id": {
+            "title": "Preset Id",
+            "type": "string"
+          },
+          "new_name": {
+            "title": "New Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preset_id",
+          "new_name"
+        ],
+        "title": "rename_decoration_presetArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "rename_design",
-      "description": "Rename a design while preserving full version history.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "description": "Rename a design \u2014 change its id and display name across every version while keeping branches, outcomes, and parent_version chains intact.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -3543,6 +3862,30 @@
           "new_name"
         ],
         "title": "rename_design_branchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "rename_feature",
+      "description": "Rename a mechanical feature \u2014 update the display name across every saved version without touching content or history.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "new_name": {
+            "title": "New Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "new_name"
+        ],
+        "title": "rename_featureArguments",
         "type": "object"
       }
     },
@@ -4315,6 +4658,63 @@
       }
     },
     {
+      "name": "unarchive_decoration_preset",
+      "description": "Restore a previously-archived decoration preset to default listings.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "preset_id": {
+            "title": "Preset Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preset_id"
+        ],
+        "title": "unarchive_decoration_presetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "unarchive_design",
+      "description": "Restore a previously-archived design to default listings.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "unarchive_designArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "unarchive_feature",
+      "description": "Restore a previously-archived mechanical feature to default listings.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id"
+        ],
+        "title": "unarchive_featureArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "undo_last_head_change",
       "description": "One-tap recovery: snap *branch_id* back to the ``old_head`` of its most recent head-mutating reflog entry.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -4775,188 +5175,6 @@
           }
         },
         "title": "tail_event_logArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "billing_alerts",
-      "description": "Check billing system health and active alerts.",
-      "tier": "free",
-      "category": "other",
-      "parameters": {
-        "properties": {},
-        "title": "billing_alertsArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "billing_check_setup",
-      "description": "Check if billing setup is complete after user visited the setup URL.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
-      "tier": "pro",
-      "category": "other",
-      "parameters": {
-        "properties": {},
-        "title": "billing_check_setupArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "billing_delete_data",
-      "description": "Delete all your billing data (GDPR right-to-erasure).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
-      "tier": "pro",
-      "category": "other",
-      "parameters": {
-        "properties": {
-          "confirm": {
-            "default": "",
-            "title": "Confirm",
-            "type": "string"
-          }
-        },
-        "title": "billing_delete_dataArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "billing_export",
-      "description": "Export billing history for accounting.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
-      "tier": "pro",
-      "category": "other",
-      "parameters": {
-        "properties": {
-          "format": {
-            "default": "csv",
-            "title": "Format",
-            "type": "string"
-          },
-          "limit": {
-            "default": 100,
-            "title": "Limit",
-            "type": "integer"
-          }
-        },
-        "title": "billing_exportArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "billing_history",
-      "description": "Get recent billing charge history with payment outcomes.",
-      "tier": "free",
-      "category": "other",
-      "parameters": {
-        "properties": {
-          "limit": {
-            "default": 20,
-            "title": "Limit",
-            "type": "integer"
-          }
-        },
-        "title": "billing_historyArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "billing_invoice",
-      "description": "Generate an invoice/receipt for a billing charge.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
-      "tier": "pro",
-      "category": "other",
-      "parameters": {
-        "properties": {
-          "charge_id": {
-            "default": "",
-            "title": "Charge Id",
-            "type": "string"
-          },
-          "job_id": {
-            "default": "",
-            "title": "Job Id",
-            "type": "string"
-          }
-        },
-        "title": "billing_invoiceArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "billing_setup_url",
-      "description": "Get a URL to link a payment method for Kiln orchestration fees.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
-      "tier": "pro",
-      "category": "other",
-      "parameters": {
-        "properties": {
-          "rail": {
-            "default": "stripe",
-            "title": "Rail",
-            "type": "string"
-          }
-        },
-        "title": "billing_setup_urlArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "billing_status",
-      "description": "Get enriched billing status including payment method info.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
-      "tier": "pro",
-      "category": "other",
-      "parameters": {
-        "properties": {},
-        "title": "billing_statusArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "billing_summary",
-      "description": "Get a summary of Kiln orchestration fees for the current month.",
-      "tier": "free",
-      "category": "other",
-      "parameters": {
-        "properties": {},
-        "title": "billing_summaryArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "check_payment_status",
-      "description": "Check the current status of a pending payment by ID.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
-      "tier": "pro",
-      "category": "other",
-      "parameters": {
-        "properties": {
-          "payment_id": {
-            "title": "Payment Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "payment_id"
-        ],
-        "title": "check_payment_statusArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "refund_payment",
-      "description": "Request a refund for a completed payment.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
-      "tier": "pro",
-      "category": "other",
-      "parameters": {
-        "properties": {
-          "payment_id": {
-            "title": "Payment Id",
-            "type": "string"
-          },
-          "reason": {
-            "default": "",
-            "title": "Reason",
-            "type": "string"
-          }
-        },
-        "required": [
-          "payment_id"
-        ],
-        "title": "refund_paymentArguments",
         "type": "object"
       }
     },
