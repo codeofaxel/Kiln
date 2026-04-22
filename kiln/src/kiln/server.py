@@ -5275,8 +5275,8 @@ def preflight_check(
                         )
                         if _flip_errors:
                             errors.append(
-                                f"SCAD verification: bottom-face text may print reversed. "
-                                f"See scad_flip_readability check details."
+                                "SCAD verification: bottom-face text may print reversed. "
+                                "See scad_flip_readability check details."
                             )
                     elif _flip_report.get("text_entries_checked", 0) > 0:
                         checks.append(
