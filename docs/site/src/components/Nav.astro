@@ -26,8 +26,9 @@ const { current = '' } = Astro.props;
       <a href="/litepaper" class:list={[{ active: current === 'litepaper' }]}>Litepaper</a>
       <a href="/blog" class:list={[{ active: current === 'blog' }]}>Blog</a>
       <a href="/faq" class:list={[{ active: current === 'faq' }]}>FAQ</a>
-      <a href="/pricing" class:list={[{ active: current === 'pricing' }]}>Pricing</a>
       <a href="https://github.com/codeofaxel/Kiln" target="_blank" rel="noopener">GitHub</a>
+      <a href="/pricing" class:list={[{ active: current === 'pricing' }]}>Pricing</a>
+      <a href="https://app.kiln3d.com/signin" class="signin">Sign in</a>
     </div>
   </div>
 </nav>
@@ -72,6 +73,12 @@ const { current = '' } = Astro.props;
   .links a:hover, .links a.active {
     color: var(--text);
     text-decoration: none;
+  }
+  .links a.signin {
+    color: var(--accent);
+  }
+  .links a.signin:hover {
+    color: var(--text);
   }
   .mobile-toggle {
     display: none;
