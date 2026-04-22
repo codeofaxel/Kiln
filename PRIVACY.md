@@ -1,6 +1,6 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-04-21 · Version 2.1*
+*Last updated: 2026-04-21 · Version 2.2*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
 > Delaware C corporation headquartered in California. Most of Kiln runs
@@ -59,22 +59,39 @@ when you **use** Kiln, not when you merely read its code.
 
 ## 3. What we collect — at a glance
 
-| Category | Examples | Where it's stored | Legal basis (GDPR) |
-|---|---|---|---|
-| **Account identity** | Email address from OAuth (Google / Apple / GitHub), verified auth UID, display name, avatar URL, OAuth provider | Supabase Auth (managed), EU or US regions | Contract (§6(1)(b)) |
-| **Entitlement metadata** | Tier (pro / business / enterprise), token ID (JTI), issue + expiry timestamps, hashed email, status, activation counts | Supabase DB (`pilot_entitlements` table) | Contract (§6(1)(b)) |
-| **Payment data** | Stripe customer ID, subscription ID, invoice history, payment method fingerprint (never the card number itself) | Stripe (PCI-DSS certified); we see only references | Contract + legal obligation (§6(1)(b), (c)) |
-| **Workshop content (git-for-3D)** | Designs you upload or generate, branch commits, version snapshots, release tags, PR-style change proposals, comments on PRs, reflog entries, cherry-picks, features + presets in your libraries | Supabase DB (`kiln_cloud_designs`, `kiln_cloud_branches`, `kiln_cloud_versions`, `kiln_cloud_meshes`, `kiln_cloud_feature_*`, `kiln_cloud_preset_*`, `kiln_cloud_releases`, `kiln_cloud_version_comments`, `kiln_cloud_reflog`) | Contract (§6(1)(b)) |
-| **Rendered previews** | Auto-generated thumbnails + preview images of your designs so you can browse your library visually | Supabase Storage (`kiln_cloud_meshes` blob storage) | Contract (§6(1)(b)) |
-| **Org + team data** | Org names, membership rosters, team assignments, role grants, email addresses of people you invite to your org (before they accept) | Supabase DB (`kiln_cloud_orgs`, `kiln_cloud_org_memberships`, `kiln_cloud_memberships`, `kiln_cloud_team_memberships`, `kiln_cloud_org_teams`) | Contract (§6(1)(b)) |
-| **Workshop access logs** | Who pushed / pulled / viewed / cloned which design + when, for audit trail + collaboration accountability | Supabase DB (`kiln_cloud_reflog`) | Legitimate interest — collaborative-work audit (§6(1)(f)) |
-| **Usage heartbeats** | Per-tier rate-limit counters + paywall-enforcement counters. Scoped to auth_user_id but records only the tool category + timestamp, never the file content | Supabase DB (`usage_heartbeats`) | Legitimate interest — abuse prevention, paywall integrity (§6(1)(f)) |
-| **Local product data** | Print job history, printer configuration, billing records, event logs — everything you do with physical printers | **On your machine only**, in `~/.kiln/`. We cannot see it and cannot retrieve it. | Not applicable — we can't see it |
-| **Support interactions** | Email you send to us, support ticket content | Our email provider + internal tooling | Legitimate interest (§6(1)(f)) |
-| **Security telemetry** | Coarse IP bucket hash, hashed device fingerprint, client version, timestamped security event type — all cryptographically hashed before storage | Supabase (`license_security_events` table) | Legitimate interest — fraud + abuse prevention (§6(1)(f)) |
-| **Cookies (site)** | Supabase auth session cookie, CSRF token | Your browser | Consent for non-essential (§6(1)(a)); contract for session cookies |
-| **Fulfillment orders** | Ship-to address, model file, material + finish choice | Passed through to Craftcloud; not retained by us beyond the order record | Contract (§6(1)(b)) |
-| **Opt-in community datasets** | If you explicitly opt in via `community_share`, we accept anonymized print outcome records (printer model, material, settings hash, success/fail outcome) and recovery strategies — never your email, auth_user_id, tenant_id, file names, or geometry | Supabase DB (`community_prints`, `community_recoveries`) | Consent (§6(1)(a)) |
+**First and most important: free users never sign up for an
+account, and we never collect anything from them.** Kiln's free
+tier runs entirely on your machine as local software (CLI + MCP
+server). It talks to your printers directly over your local
+network, slices your models in-process, and never needs to reach
+our servers. If you stick with the free tier there is no account,
+no OAuth, no email on file, no usage tracking, no telemetry,
+no cookies — effectively the only line of this policy that
+applies to you is "we don't have any data about you."
+
+The table below applies **only to users who explicitly chose
+to create a paid-tier account** (Pro / Business / Enterprise) by
+signing in through Google, Apple, or GitHub OAuth — plus two
+rows that apply to everyone (local product data, which stays on
+your machine by design; and support interactions, which exist
+only if you write to us).
+
+| Category | Applies to | Examples | Where it's stored | Legal basis (GDPR) |
+|---|---|---|---|---|
+| **Account identity** | Paid users only | Email address from OAuth (Google / Apple / GitHub), verified auth UID, display name, avatar URL, OAuth provider | Supabase Auth (managed), EU or US regions | Contract (§6(1)(b)) |
+| **Entitlement metadata** | Paid users only | Tier (pro / business / enterprise), token ID (JTI), issue + expiry timestamps, hashed email, status, activation counts | Supabase DB (`pilot_entitlements` table) | Contract (§6(1)(b)) |
+| **Payment data** | Paid users only | Stripe customer ID, subscription ID, invoice history, payment method fingerprint (never the card number itself) | Stripe (PCI-DSS certified); we see only references | Contract + legal obligation (§6(1)(b), (c)) |
+| **Workshop content (git-for-3D)** | Paid users who push to the cloud | Designs you upload or generate, branch commits, version snapshots, release tags, PR-style change proposals, comments on PRs, reflog entries, cherry-picks, features + presets in your libraries | Supabase DB (`kiln_cloud_designs`, `kiln_cloud_branches`, `kiln_cloud_versions`, `kiln_cloud_meshes`, `kiln_cloud_feature_*`, `kiln_cloud_preset_*`, `kiln_cloud_releases`, `kiln_cloud_version_comments`, `kiln_cloud_reflog`) | Contract (§6(1)(b)) |
+| **Rendered previews** | Paid users who push to the cloud | Auto-generated thumbnails + preview images of your designs so you can browse your library visually | Supabase Storage (`kiln_cloud_meshes` blob storage) | Contract (§6(1)(b)) |
+| **Org + team data** | Paid users on Business / Enterprise who create or join orgs | Org names, membership rosters, team assignments, role grants, email addresses of people you invite to your org (before they accept) | Supabase DB (`kiln_cloud_orgs`, `kiln_cloud_org_memberships`, `kiln_cloud_memberships`, `kiln_cloud_team_memberships`, `kiln_cloud_org_teams`) | Contract (§6(1)(b)) |
+| **Workshop access logs** | Paid users who push to the cloud | Who pushed / pulled / viewed / cloned which design + when, for audit trail + collaboration accountability | Supabase DB (`kiln_cloud_reflog`) | Legitimate interest — collaborative-work audit (§6(1)(f)) |
+| **Usage heartbeats** | Paid users only | Per-tier rate-limit counters + paywall-enforcement counters. Scoped to auth_user_id but records only the tool category + timestamp, never the file content | Supabase DB (`usage_heartbeats`) | Legitimate interest — abuse prevention, paywall integrity (§6(1)(f)) |
+| **Local product data** | **Every user — free and paid** | Print job history, printer configuration, billing records, event logs — everything you do with physical printers | **On your machine only**, in `~/.kiln/`. We cannot see it and cannot retrieve it. | Not applicable — we can't see it |
+| **Support interactions** | Anyone who emails us | Email you send to us, support ticket content | Our email provider + internal tooling | Legitimate interest (§6(1)(f)) |
+| **Security telemetry** | Paid users (free users never hit authed endpoints) | Coarse IP bucket hash, hashed device fingerprint, client version, timestamped security event type — all cryptographically hashed before storage | Supabase (`license_security_events` table) | Legitimate interest — fraud + abuse prevention (§6(1)(f)) |
+| **Cookies (site)** | Visitors to `app.kiln3d.com` (paid-tier web workshop) | Supabase auth session cookie, CSRF token | Your browser | Consent for non-essential (§6(1)(a)); contract for session cookies |
+| **Fulfillment orders** | Paid users who route through Craftcloud | Ship-to address, model file, material + finish choice | Passed through to Craftcloud; not retained by us beyond the order record | Contract (§6(1)(b)) |
+| **Opt-in community datasets** | Any user (free or paid) who explicitly opts in | If you explicitly opt in via `community_share`, we accept anonymized print outcome records (printer model, material, settings hash, success/fail outcome) and recovery strategies — never your email, auth_user_id, tenant_id, file names, or geometry | Supabase DB (`community_prints`, `community_recoveries`) | Consent (§6(1)(a)) |
 
 **What we deliberately do NOT collect:** advertising identifiers,
 analytics / telemetry of product usage, browsing history, your

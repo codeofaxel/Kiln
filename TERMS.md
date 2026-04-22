@@ -1,6 +1,6 @@
 # Kiln Terms of Use
 
-*Last updated: 2026-04-21 · Version 2.1*
+*Last updated: 2026-04-21 · Version 2.2*
 
 > **Plain-English summary** — These terms govern your use of Kiln,
 > operated by Hadron Labs Inc. Kiln has two sides:
@@ -428,10 +428,16 @@ Policy (backups, legal holds).
 
 We will **not** use Your Content to train machine-learning
 models, to generate derivative products, for marketing, or for
-any purpose other than operating the service for you. This
-commitment is stronger than the industry norm because Kiln is
-built by and for people who care about IP ownership of what
-they design and print.
+any purpose other than operating the service for you —
+**unless you explicitly opt in via a clearly-labeled consent
+flow.** Today we have no ML pipeline trained on user content,
+and we are not collecting data for that purpose. If we ever
+build one (for example, to improve slice-quality prediction or
+failure-mode detection), we will ask your permission first and
+let you decline without losing any features. This commitment
+is stronger than the industry norm because Kiln is built by
+and for people who care about IP ownership of what they design
+and print.
 
 ### 11.3 Your representations about Your Content
 
