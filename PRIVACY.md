@@ -1,13 +1,17 @@
 # Kiln Privacy Policy
 
-*Last updated: 2026-04-21 · Version 2.0*
+*Last updated: 2026-04-21 · Version 2.1*
 
 > **Plain-English summary** — Kiln is operated by **Hadron Labs Inc.**, a
-> Delaware C corporation headquartered in California. We collect the
-> minimum data needed to run the product, never sell it, never hand it
-> to ad networks, and give you meaningful rights to access and delete
-> it. If you prefer to skip the legalese, the table in §3 is the short
-> version.
+> Delaware C corporation headquartered in California. Most of Kiln runs
+> **locally on your machine** (the CLI, the MCP server, slicing, printer
+> control, fulfillment) — we can't see that data. The **web workshop at
+> `app.kiln3d.com`** is a **git-style cloud layer for 3D designs** —
+> branches, versions, PR-style reviews, orgs, and team collaboration —
+> and that IS stored on our servers. We collect the minimum data
+> needed to run the workshop, never sell it, never hand it to ad
+> networks, and give you meaningful rights to access and delete it. If
+> you prefer to skip the legalese, the table in §3 is the short version.
 
 ---
 
@@ -17,10 +21,19 @@
 |---|---|
 | Legal entity | **Hadron Labs Inc.** |
 | Incorporated in | Delaware, USA |
-| Operating address | California, USA |
-| Privacy contact | [privacy@kiln3d.com](mailto:privacy@kiln3d.com) |
-| General contact | [hello@kiln3d.com](mailto:hello@kiln3d.com) |
-| DPO / US privacy officer | Adam Arreola, reachable at privacy@kiln3d.com |
+| Legal mailing address | c/o Harvard Business Services, Inc. (Registered Agent)<br>16192 Coastal Hwy, Lewes, DE 19958, USA |
+| Privacy contact | [adam@kiln3d.com](mailto:adam@kiln3d.com) |
+| General contact | [adam@kiln3d.com](mailto:adam@kiln3d.com) |
+| DPO / US privacy officer | Adam Arreola, reachable at adam@kiln3d.com |
+
+> **One inbox, transparent by design.** Kiln is a small team. Every
+> contact channel in this policy — privacy requests, DPA requests,
+> security reports, legal questions, DMCA notices, CCPA opt-outs,
+> arbitration opt-outs, enterprise inquiries — all route to
+> **adam@kiln3d.com**. Please put the topic in the subject line so
+> the right thing gets prioritized (e.g., `[CCPA]`, `[DPA]`,
+> `[Security]`, `[DMCA]`, `[Arbitration Opt-Out]`). When the team
+> grows, we'll split these out and update this notice.
 
 Throughout this policy, **"Kiln"**, **"we"**, **"us"**, or **"our"** means
 Hadron Labs Inc. **"You"** means the individual or entity using the
@@ -51,11 +64,17 @@ when you **use** Kiln, not when you merely read its code.
 | **Account identity** | Email address from OAuth (Google / Apple / GitHub), verified auth UID, display name, avatar URL, OAuth provider | Supabase Auth (managed), EU or US regions | Contract (§6(1)(b)) |
 | **Entitlement metadata** | Tier (pro / business / enterprise), token ID (JTI), issue + expiry timestamps, hashed email, status, activation counts | Supabase DB (`pilot_entitlements` table) | Contract (§6(1)(b)) |
 | **Payment data** | Stripe customer ID, subscription ID, invoice history, payment method fingerprint (never the card number itself) | Stripe (PCI-DSS certified); we see only references | Contract + legal obligation (§6(1)(b), (c)) |
-| **Local product data** | Print job history, printer configuration, billing records, event logs | On your machine only, in `~/.kiln/` | Not applicable — we can't see it |
+| **Workshop content (git-for-3D)** | Designs you upload or generate, branch commits, version snapshots, release tags, PR-style change proposals, comments on PRs, reflog entries, cherry-picks, features + presets in your libraries | Supabase DB (`kiln_cloud_designs`, `kiln_cloud_branches`, `kiln_cloud_versions`, `kiln_cloud_meshes`, `kiln_cloud_feature_*`, `kiln_cloud_preset_*`, `kiln_cloud_releases`, `kiln_cloud_version_comments`, `kiln_cloud_reflog`) | Contract (§6(1)(b)) |
+| **Rendered previews** | Auto-generated thumbnails + preview images of your designs so you can browse your library visually | Supabase Storage (`kiln_cloud_meshes` blob storage) | Contract (§6(1)(b)) |
+| **Org + team data** | Org names, membership rosters, team assignments, role grants, email addresses of people you invite to your org (before they accept) | Supabase DB (`kiln_cloud_orgs`, `kiln_cloud_org_memberships`, `kiln_cloud_memberships`, `kiln_cloud_team_memberships`, `kiln_cloud_org_teams`) | Contract (§6(1)(b)) |
+| **Workshop access logs** | Who pushed / pulled / viewed / cloned which design + when, for audit trail + collaboration accountability | Supabase DB (`kiln_cloud_reflog`) | Legitimate interest — collaborative-work audit (§6(1)(f)) |
+| **Usage heartbeats** | Per-tier rate-limit counters + paywall-enforcement counters. Scoped to auth_user_id but records only the tool category + timestamp, never the file content | Supabase DB (`usage_heartbeats`) | Legitimate interest — abuse prevention, paywall integrity (§6(1)(f)) |
+| **Local product data** | Print job history, printer configuration, billing records, event logs — everything you do with physical printers | **On your machine only**, in `~/.kiln/`. We cannot see it and cannot retrieve it. | Not applicable — we can't see it |
 | **Support interactions** | Email you send to us, support ticket content | Our email provider + internal tooling | Legitimate interest (§6(1)(f)) |
 | **Security telemetry** | Coarse IP bucket hash, hashed device fingerprint, client version, timestamped security event type — all cryptographically hashed before storage | Supabase (`license_security_events` table) | Legitimate interest — fraud + abuse prevention (§6(1)(f)) |
 | **Cookies (site)** | Supabase auth session cookie, CSRF token | Your browser | Consent for non-essential (§6(1)(a)); contract for session cookies |
 | **Fulfillment orders** | Ship-to address, model file, material + finish choice | Passed through to Craftcloud; not retained by us beyond the order record | Contract (§6(1)(b)) |
+| **Opt-in community datasets** | If you explicitly opt in via `community_share`, we accept anonymized print outcome records (printer model, material, settings hash, success/fail outcome) and recovery strategies — never your email, auth_user_id, tenant_id, file names, or geometry | Supabase DB (`community_prints`, `community_recoveries`) | Consent (§6(1)(a)) |
 
 **What we deliberately do NOT collect:** advertising identifiers,
 analytics / telemetry of product usage, browsing history, your
@@ -70,21 +89,38 @@ Every piece of data above maps to one of these narrow purposes:
 
 1. **Running your account** — authenticating you via OAuth, resolving
    your tier, binding your OAuth identity to your paid entitlement.
-2. **Billing** — processing subscription payments, handling
+2. **Cloud storage + version control for your designs** — the web
+   workshop is a git-style layer for 3D designs. To make that work
+   we store the designs you push, the branches you create, every
+   version in your commit history, the comments on your PRs, the
+   releases you tag, and the access log that tells collaborators
+   who did what and when. We auto-generate thumbnail previews so
+   you can browse your library visually.
+3. **Collaboration** — when you invite someone to an org, we store
+   the pending invite (their email + your org + the role you
+   granted) so we can authenticate them when they accept; we
+   enforce permissions on every cloud endpoint so only people in
+   your org can see your org's designs.
+4. **Billing** — processing subscription payments, handling
    upgrades/downgrades, issuing refunds, mailing invoices.
-3. **Fulfillment** — routing your print order to the manufacturer
+5. **Rate limits + paywall enforcement** — the `usage_heartbeats`
+   table lets us count per-tier usage (how many fulfillment orders,
+   how many cloud writes, etc.) so we can enforce plan limits
+   without reading your content.
+6. **Fulfillment** — routing your print order to the manufacturer
    you selected; tracking status until delivery.
-4. **Support** — responding to issues you open with us and
+7. **Support** — responding to issues you open with us and
    troubleshooting bugs.
-5. **Abuse and fraud prevention** — detecting credential stuffing,
-   license-key sharing, payment chargebacks, and unauthorized
-   access — via the minimal security telemetry described above.
-6. **Legal compliance** — retaining billing records for tax and
+8. **Abuse and fraud prevention** — detecting credential stuffing,
+   license-key sharing, payment chargebacks, unauthorized access,
+   and abuse of the collaboration features (spam invites, bulk
+   scraping) — via the minimal security telemetry described above.
+9. **Legal compliance** — retaining billing records for tax and
    accounting purposes (typically 7 years); responding to lawful
    legal requests (see §10).
-7. **Product improvement** — **only with your explicit opt-in** via
-   aggregated, de-identified statistics. Telemetry is OFF by
-   default and there is no per-user usage tracking.
+10. **Product improvement** — **only with your explicit opt-in** via
+    aggregated, de-identified statistics. Telemetry is OFF by
+    default and there is no per-user usage tracking.
 
 We do not use your data for advertising, profiling for commercial
 purposes, or cross-context behavioral advertising. We do not sell
@@ -129,7 +165,7 @@ necessary data, audit logging) are applied per the EDPB's
 recommendations following Schrems II.
 
 You can request a copy of the SCCs we use with any subprocessor by
-emailing privacy@kiln3d.com.
+emailing adam@kiln3d.com.
 
 ## 7. Data retention
 
@@ -138,6 +174,14 @@ emailing privacy@kiln3d.com.
 | Account + entitlement records | While your account is active, plus 90 days after termination (so you can reinstate), then permanent deletion |
 | Invoices + billing records | 7 years after the transaction — required by US and EU tax law |
 | Stripe payment records | Per Stripe's retention policy (typically 7 years) — we cannot delete these before then, but can request anonymization where permitted |
+| **Your designs + branches + versions + reflog** | Retained as long as your account is active. When you delete a design, it's removed from queries immediately and from backups within 30 days. When you delete your account, all designs you personally own are scheduled for deletion at the end of the 90-day grace period. |
+| **Designs owned by an org** | Retained as long as the org exists. When you leave an org, your access ends but your commits remain attributed to you in the history (like GitHub). The org's admins can delete you from attributed history on request. |
+| **Thumbnails / preview renders** | Regenerated on demand; retained alongside the design. Deleted with the design. |
+| **Comments you posted on others' PRs** | Remain visible on the host design's history (to preserve review context, like GitHub) but the author name can be anonymized on request (your name becomes "a former collaborator"). |
+| **Org + team data** | Retained while the org exists. When the last member of an org leaves, we notify the admins + give 30 days to wind down before deleting org data. Pending invites that are never accepted are purged after 30 days. |
+| **Workshop access logs (reflog)** | 365 days rolling, then automatic purge. Auditors can request longer retention under a DPA. |
+| **Usage heartbeats** | 90 days rolling — then aggregated into tier-level counters and raw rows purged. |
+| **Opt-in community datasets** | Retained indefinitely as anonymous data. You can't delete a specific contribution once it's aggregated (we strip the auth_user_id on ingestion, so we can't trace records back to you). Only opt in if you're comfortable with permanent donation. |
 | Security telemetry (hashed) | 90 days rolling — then automatic purge |
 | Email support threads | 2 years from last reply, then deletion |
 | Local data on your machine | **Indefinitely, until you delete it** — we cannot see it and cannot delete it for you |
@@ -199,7 +243,7 @@ Connecticut CTDPA, Utah UCPA, Texas DPSA, etc.).
 - **Right to correct** — fix inaccurate personal information.
 - **Right to opt out of sale or sharing** — **we don't sell or share
   personal information within the meaning of CCPA §1798.140.**
-  [Do Not Sell or Share My Personal Information link](mailto:privacy@kiln3d.com?subject=Do%20Not%20Sell%20or%20Share%20-%20CCPA%20Request)
+  [Do Not Sell or Share My Personal Information link](mailto:adam@kiln3d.com?subject=Do%20Not%20Sell%20or%20Share%20-%20CCPA%20Request)
   is here for completeness even though it's a no-op for us.
 - **Right to limit use of sensitive personal information** — we
   don't collect sensitive PI (as defined by §1798.140(ae)) that
@@ -208,7 +252,7 @@ Connecticut CTDPA, Utah UCPA, Texas DPSA, etc.).
   result in worse service, higher fees, or reduced features.
 
 **To exercise any right**, email
-[privacy@kiln3d.com](mailto:privacy@kiln3d.com) from the email
+[adam@kiln3d.com](mailto:adam@kiln3d.com) from the email
 address on your Kiln account. We will respond within **30 days**
 (or 45 days for CCPA requests, as permitted). We verify identity
 by confirming the request came from the account email; for
@@ -244,7 +288,7 @@ Kiln is **not directed to individuals under 16 years of age**
 (EU/UK) or **under 13** (US/COPPA jurisdictions). We do not
 knowingly collect personal data from children. If you believe
 a child has provided us personal information, contact
-privacy@kiln3d.com and we will delete it promptly.
+adam@kiln3d.com and we will delete it promptly.
 
 ## 12. Data security
 
@@ -268,7 +312,7 @@ We apply industry-standard security controls:
   owner-only read/write permissions (0600 on Unix-like systems).
 
 No security measure is absolute. If you discover a vulnerability,
-please report it to security@kiln3d.com. We follow **coordinated
+please report it to adam@kiln3d.com. We follow **coordinated
 disclosure** and will acknowledge within 3 business days.
 
 ## 13. Data breach notification
@@ -298,7 +342,7 @@ dispute.
 If you are using Kiln Business or Enterprise tier on behalf of an
 organization, a **Data Processing Addendum (DPA)** incorporating
 Standard Contractual Clauses and Article 28 GDPR terms is available
-on request. Email dpa@kiln3d.com.
+on request. Email adam@kiln3d.com.
 
 ## 16. Changes to this policy
 
@@ -317,11 +361,11 @@ immediately and noted in Git history.
 
 ## 17. Contact
 
-- **Privacy questions** — [privacy@kiln3d.com](mailto:privacy@kiln3d.com)
-- **Legal / DPA requests** — [dpa@kiln3d.com](mailto:dpa@kiln3d.com)
-- **Security issues** — [security@kiln3d.com](mailto:security@kiln3d.com)
-- **General contact** — [hello@kiln3d.com](mailto:hello@kiln3d.com)
-- **Postal mail** — Hadron Labs Inc., c/o Privacy Office, California, USA
+- **Privacy questions** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
+- **Legal / DPA requests** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
+- **Security issues** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
+- **General contact** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
+- **Postal mail** — Hadron Labs Inc., c/o Harvard Business Services, Inc. (Registered Agent), 16192 Coastal Hwy, Lewes, DE 19958, USA
 
 We respond to privacy requests within 30 days (EU/UK) or 45 days
 (CCPA) from receipt.

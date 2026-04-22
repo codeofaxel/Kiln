@@ -1,17 +1,31 @@
 # Kiln Terms of Use
 
-*Last updated: 2026-04-21 · Version 2.0*
+*Last updated: 2026-04-21 · Version 2.1*
 
 > **Plain-English summary** — These terms govern your use of Kiln,
-> operated by Hadron Labs Inc. Kiln is a tool that lets you — and,
-> with your configuration, AI agents acting on your behalf — control
-> 3D printers, route fulfillment orders, and manage printing
-> workflows. You are responsible for what you print, for your
-> printer's safety, and for the actions of any AI agent you
-> authorize. We provide the software "as is," cap our liability,
-> and require binding arbitration for disputes (with a 30-day
-> opt-out and small-claims exception). If any of that is a
-> dealbreaker, don't use Kiln.
+> operated by Hadron Labs Inc. Kiln has two sides:
+>
+> 1. **Locally-installed software** — the CLI, the MCP server,
+>    slicing, printer control, and fulfillment routing all run on
+>    **your machine**. We can't see that data. You're responsible
+>    for what you print, for printer safety, and for the actions of
+>    any AI agent you authorize to drive the MCP tools.
+> 2. **The web workshop at `app.kiln3d.com`** — a **git-style cloud
+>    layer for 3D designs**: versioned designs, branches, commits,
+>    PR-style reviews, releases, cherry-picks, and team
+>    collaboration via orgs. What you push here lives on our
+>    servers.
+>
+> We provide the software "as is," cap our liability, and require
+> binding arbitration for disputes (with a 30-day opt-out and
+> small-claims exception). If any of that is a dealbreaker, don't
+> use Kiln.
+>
+> **One inbox, transparent by design.** Every "email us at…"
+> reference in these Terms routes to **adam@kiln3d.com**. Kiln is
+> a small team; one founder reads everything. Put the topic in the
+> subject line so the right thing gets prioritized (e.g., `[DMCA]`,
+> `[Arbitration Opt-Out]`, `[Billing]`, `[Security]`).
 
 ---
 
@@ -77,7 +91,7 @@ You are responsible for:
 - All activity that occurs under your account, whether or not
   authorized by you — **including all actions taken by AI agents
   you have configured or authorized**;
-- Promptly notifying us at security@kiln3d.com if you suspect
+- Promptly notifying us at adam@kiln3d.com if you suspect
   unauthorized access.
 
 We are not liable for losses arising from your failure to secure
@@ -151,7 +165,7 @@ payment method on each renewal until you cancel.
 ### 5.3 Cancellation
 
 You can cancel your subscription at any time via
-`/app/settings/billing` or by emailing billing@kiln3d.com.
+`/app/settings/billing` or by emailing adam@kiln3d.com.
 Cancellation takes effect **at the end of the current paid
 period** — you retain access through the period you've already
 paid for. We do not issue pro-rated refunds for partial billing
@@ -202,7 +216,7 @@ customer.
 If you dispute a charge directly with your bank or card network
 without first contacting us, we may suspend or terminate your
 account while the chargeback is resolved. Before initiating a
-chargeback, please email billing@kiln3d.com — we almost always
+chargeback, please email adam@kiln3d.com — we almost always
 resolve billing issues without card-network involvement.
 
 ## 6. Orchestration fees for fulfillment
@@ -349,12 +363,26 @@ You agree **not to** use Kiln to:
    Kiln's services, including through denial-of-service
    attacks, malicious code, or attempts to gain unauthorized
    access.
-10. Scrape, harvest, or otherwise collect data from other users.
-11. Impersonate another person, entity, or Kiln representative.
+10. Scrape, harvest, or otherwise collect data from other users —
+    including bulk-downloading other people's designs, branches,
+    versions, PR comments, reflog entries, or org membership rosters.
+11. Impersonate another person, entity, or Kiln representative —
+    including in PR descriptions, commit messages, branch names,
+    comments, or org invites.
 12. Send spam, bulk unsolicited messages, or any content that
     violates the acceptable-use policies of integrated third
     parties (Google, Apple, GitHub, Stripe, Circle, Craftcloud,
     MyMiniFactory, Cults3D).
+13. Abuse the workshop's collaboration features: sending unsolicited
+    org or team invites, forking designs to harass their authors,
+    opening PRs in bad faith, or using reflog access to build
+    profiles of other users' activity patterns.
+14. Use the opt-in community datasets (`community_prints`,
+    `community_recoveries`) to attempt to re-identify or
+    fingerprint individual contributors.
+15. Circumvent the workshop's permission model — attempting to
+    read or modify designs, branches, versions, or org data you
+    have not been granted access to by the owner or by your role.
 
 We may suspend or terminate your account for violations of this
 §10 without prior notice where we believe an immediate response
@@ -365,9 +393,14 @@ is needed to protect users or third parties.
 ### 11.1 Your content stays yours
 
 You retain all right, title, and interest in and to the files,
-models, prompts, configurations, and other content you upload to
-or generate with Kiln ("**Your Content**"). We do not claim
-ownership of Your Content.
+models, prompts, configurations, branches, version commits, PR
+descriptions, PR comments, release notes, cherry-picks, features,
+presets, and every other artifact you upload to or generate with
+Kiln ("**Your Content**"). We do not claim ownership of Your
+Content. When you push a new version of a design to the web
+workshop's git-for-3D layer, you own every commit in the history
+just like you'd own every commit you push to a personal GitHub
+repo.
 
 ### 11.2 The license you grant to us
 
@@ -375,11 +408,23 @@ To operate the service on your behalf, you grant us a
 **worldwide, non-exclusive, royalty-free, sub-licensable
 license** to host, store, copy, transmit, process, and modify
 Your Content **solely to the extent necessary to provide the
-Kiln service to you** — for example, routing a model file to a
-fulfillment provider, storing slicer configurations, or
-retaining event logs for debugging. This license ends when Your
-Content is deleted, subject to our legitimate retention
-requirements (backups, legal holds).
+Kiln service to you** — for example:
+
+- storing your commit history in the git-for-3D cloud layer so
+  you can pull past versions;
+- auto-generating thumbnail previews so you can browse your
+  library visually;
+- propagating commits, branches, PR comments, and releases to
+  collaborators you have explicitly granted access to via an
+  org or team role;
+- routing a model file to a fulfillment provider you selected;
+- storing slicer configurations, features, or presets you
+  choose to save to the cloud;
+- retaining event logs for debugging.
+
+This license ends when Your Content is deleted, subject to our
+legitimate retention requirements documented in the Privacy
+Policy (backups, legal holds).
 
 We will **not** use Your Content to train machine-learning
 models, to generate derivative products, for marketing, or for
@@ -395,7 +440,63 @@ upload and use Your Content through Kiln, and that Your Content
 does not infringe any third party's IP rights, violate any law,
 or breach any agreement you are subject to.
 
-### 11.4 Feedback
+### 11.4 Designs owned by organizations
+
+When you create or push to a design that belongs to an
+organization (an "**Org Design**"), the design itself is owned by
+the organization, not by you personally — even if you authored
+individual commits to it. While you are a member of the org:
+
+- You can push, pull, open PRs, comment, and release per the role
+  the org's admin has granted you;
+- Your individual commits remain attributed to you in the reflog
+  and version history (the "authorship" of each commit);
+- The underlying design files belong to the org and cannot be
+  extracted by you alone.
+
+When you leave an org (or are removed):
+
+- Your access to the org's designs ends immediately;
+- Your authorship attribution on prior commits remains in the
+  history, so collaborators can see who wrote which part
+  (standard git-style audit trail);
+- On your written request, we will anonymize your authorship on
+  Org Design commits — we replace your name with "a former
+  collaborator." We cannot remove your commits from the history
+  without destroying other contributors' work, so we do not
+  offer that.
+
+Ownership of the org itself (and any Org Designs) transfers to
+the remaining admins if you, as owner, leave. If no admin
+remains, the org enters a 30-day wind-down period during which
+a new owner can be appointed; if none is, the org and all its
+designs are permanently deleted.
+
+### 11.5 Public designs and the community datasets
+
+If Kiln adds a "make design public" feature in the future, and
+you explicitly opt in to making a design public, you grant Kiln
+and other users a non-exclusive right to view and clone the
+public version of that design, subject to any license you
+attach to it (e.g., CC-BY-NC-SA, MIT, proprietary). You remain
+the copyright owner; public sharing does not transfer ownership.
+
+If you opt in to contribute to the **community datasets**
+(`community_prints`, `community_recoveries`) by explicitly
+calling a `community_share` tool, you grant Kiln and every user
+a **perpetual, irrevocable, royalty-free, worldwide license** to
+use the anonymized contribution for research, training of
+success-rate models, and aggregate analytics that benefit the
+Kiln user community. The ingestion pipeline strips your email,
+auth_user_id, tenant_id, file names, and geometry before storage
+— only printer model, material, settings hash, outcome, and
+quality grade are retained. **Because the data is anonymized at
+ingestion, we cannot identify or retract individual
+contributions once they're in the dataset.** Only opt in if you
+are comfortable with permanent donation of that (anonymized)
+record.
+
+### 11.6 Feedback
 
 If you submit feedback, feature requests, or suggestions to us
 ("**Feedback**"), you grant us a **perpetual, irrevocable,
@@ -426,7 +527,7 @@ copyright, send a notice under the Digital Millennium Copyright
 Act (17 U.S.C. §512) to our designated agent:
 
 **DMCA Agent, Hadron Labs Inc.**
-Email: [dmca@kiln3d.com](mailto:dmca@kiln3d.com)
+Email: [adam@kiln3d.com](mailto:adam@kiln3d.com)
 
 Your notice must include all elements required by §512(c)(3):
 
@@ -455,7 +556,7 @@ of users who are repeat infringers.
 
 You can terminate your account at any time via
 `/app/settings/account → Delete account` or by emailing
-support@kiln3d.com. Termination cancels all active subscriptions
+adam@kiln3d.com. Termination cancels all active subscriptions
 effective at the end of the current paid period.
 
 ### 14.2 By us
@@ -478,20 +579,61 @@ reasonable opportunity to cure where practicable.
 
 ### 14.3 Effect of termination
 
-On termination:
+On termination, the following cascade applies:
 
-- Your access to paid services ends;
-- Your data is retained for 90 days (the deletion grace period
-  in our Privacy Policy) in case you wish to reinstate;
-- After 90 days, your personal data is deleted subject to the
-  retention requirements in the Privacy Policy §7;
+**Access:**
+
+- Your access to paid services ends immediately;
+- Access to org-owned designs via any org you were a member of
+  ends immediately;
+- Sessions on every device are invalidated.
+
+**Your personal designs and workshop content:**
+
+- All designs, branches, versions, releases, cherry-picks,
+  features, presets, and related metadata that you personally
+  own (not org-owned) are retained for **90 days** in case you
+  reinstate. After 90 days they are permanently deleted along
+  with your account.
+
+**Org-owned designs (where you contributed):**
+
+- Org-owned designs remain with the org. Your individual commits
+  remain attributed to you in the history (like GitHub); the
+  org's admins can request anonymization of your authorship
+  (replacing your name with "a former collaborator") per §11.4.
+- Orgs that you personally own transition to the remaining
+  admins or enter a 30-day wind-down per §11.4.
+
+**PR comments on others' designs:**
+
+- Comments you posted on others' PRs remain visible on the host
+  design's history to preserve review context. On written
+  request to adam@kiln3d.com we will anonymize your authorship.
+
+**Community dataset contributions:**
+
+- Anonymized contributions to `community_prints` and
+  `community_recoveries` remain in the dataset — they cannot be
+  retracted because we can't trace records back to you after
+  ingestion (see §11.5).
+
+**Billing:**
+
+- Outstanding charges remain due;
 - Refunds are governed by §5.6;
-- The following Sections survive termination: §4.3 (reserved
-  rights), §5.6 (refunds), §5.7 (chargebacks), §8 (your
-  responsibilities), §9 (automated control risks), §11.4
-  (feedback), §15 (warranties), §16 (liability), §17
-  (indemnification), §19 (export), §20 (governing law),
-  §21 (arbitration), §23 (notices), §24 (general).
+- Invoices and payment records are retained per Privacy Policy
+  §7 retention schedule (7 years for tax compliance).
+
+**Surviving sections:**
+
+The following Sections survive termination: §4.3 (reserved
+rights), §5.6 (refunds), §5.7 (chargebacks), §8 (your
+responsibilities), §9 (automated control risks), §11.4 (org
+designs + authorship attribution), §11.5 (public + community
+data licenses), §11.6 (feedback), §15 (warranties), §16
+(liability), §17 (indemnification), §19 (export), §20 (governing
+law), §21 (arbitration), §23 (notices), §24 (general).
 
 ## 15. Disclaimer of warranties
 
@@ -670,7 +812,7 @@ Terms will continue to apply.
 ### 21.4 30-day opt-out right
 
 **You can opt out of this arbitration agreement** by emailing
-[arbitration-optout@kiln3d.com](mailto:arbitration-optout@kiln3d.com)
+[adam@kiln3d.com](mailto:adam@kiln3d.com)
 **within 30 days of first accepting these Terms** (or of first
 accepting any material change to this §21). Include your name,
 email, and a clear statement that you opt out of the arbitration
@@ -734,8 +876,8 @@ your account email.
 You may send notices to us at:
 
 **Hadron Labs Inc., Legal Department**
-Email: [legal@kiln3d.com](mailto:legal@kiln3d.com)
-Postal mail: c/o Hadron Labs Inc., Legal Department, California, USA
+Email: [adam@kiln3d.com](mailto:adam@kiln3d.com)
+Postal mail: Hadron Labs Inc., c/o Harvard Business Services, Inc. (Registered Agent), 16192 Coastal Hwy, Lewes, DE 19958, USA
 
 Notices are effective on receipt.
 
@@ -808,15 +950,15 @@ those rights granted to all other end users under these Terms.
 
 ## 25. Contact
 
-- **General support** — [support@kiln3d.com](mailto:support@kiln3d.com)
-- **Billing** — [billing@kiln3d.com](mailto:billing@kiln3d.com)
-- **Legal / agreements** — [legal@kiln3d.com](mailto:legal@kiln3d.com)
-- **DMCA notices** — [dmca@kiln3d.com](mailto:dmca@kiln3d.com)
-- **Security** — [security@kiln3d.com](mailto:security@kiln3d.com)
-- **Privacy** — [privacy@kiln3d.com](mailto:privacy@kiln3d.com)
-- **Enterprise DPA** — [dpa@kiln3d.com](mailto:dpa@kiln3d.com)
-- **Arbitration opt-out** — [arbitration-optout@kiln3d.com](mailto:arbitration-optout@kiln3d.com)
-- **Postal** — Hadron Labs Inc., California, USA
+- **General support** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
+- **Billing** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
+- **Legal / agreements** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
+- **DMCA notices** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
+- **Security** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
+- **Privacy** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
+- **Enterprise DPA** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
+- **Arbitration opt-out** — [adam@kiln3d.com](mailto:adam@kiln3d.com)
+- **Postal** — Hadron Labs Inc., c/o Harvard Business Services, Inc. (Registered Agent), 16192 Coastal Hwy, Lewes, DE 19958, USA
 
 ---
 
