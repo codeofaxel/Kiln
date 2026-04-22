@@ -1,0 +1,18 @@
+<!-- Kiln wordmark — standalone, transparent background, for dark surfaces.
+
+     Matches kiln3d.com's nav + app.kiln3d.com's workshop nav + the new
+     kiln-horizontal-*.svg: Inter 700, 0.25em letter-spacing, white
+     K/L/N, brand-orange I (the ember character).  No logo arch, no
+     background fill — drop into any dark canvas (video slate, email
+     header, slide, PDF) and the wordmark just sits there.
+
+     Inter is the brand typeface; Helvetica Neue / sans-serif is the
+     fallback chain if Inter isn't available at render time.
+
+     Canonical spec reference: when in doubt, this file wins. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 80" width="280" height="80">
+<text x="25.2" y="58.0" font-family="'Inter','Helvetica Neue',sans-serif" font-size="52" font-weight="700" fill="#FFFFFF" text-anchor="middle" letter-spacing="0.25em">K</text>
+<text x="48.6" y="58.0" font-family="'Inter','Helvetica Neue',sans-serif" font-size="52" font-weight="700" fill="#FF6B2B" text-anchor="middle" letter-spacing="0.25em">I</text>
+<text x="72.0" y="58.0" font-family="'Inter','Helvetica Neue',sans-serif" font-size="52" font-weight="700" fill="#FFFFFF" text-anchor="middle" letter-spacing="0.25em">L</text>
+<text x="95.4" y="58.0" font-family="'Inter','Helvetica Neue',sans-serif" font-size="52" font-weight="700" fill="#FFFFFF" text-anchor="middle" letter-spacing="0.25em">N</text>
+</svg>

@@ -1,0 +1,11 @@
+<!-- Kiln wordmark — standalone, transparent background, for light surfaces.
+
+     Same as kiln-wordmark-dark.svg but with #1A1A1A (near-black) K/L/N
+     for use against white or light-grey canvases.  Orange I is brand-
+     constant: the ember color does not change across themes. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 80" width="280" height="80">
+<text x="25.2" y="58.0" font-family="'Inter','Helvetica Neue',sans-serif" font-size="52" font-weight="700" fill="#1A1A1A" text-anchor="middle" letter-spacing="0.25em">K</text>
+<text x="48.6" y="58.0" font-family="'Inter','Helvetica Neue',sans-serif" font-size="52" font-weight="700" fill="#FF6B2B" text-anchor="middle" letter-spacing="0.25em">I</text>
+<text x="72.0" y="58.0" font-family="'Inter','Helvetica Neue',sans-serif" font-size="52" font-weight="700" fill="#1A1A1A" text-anchor="middle" letter-spacing="0.25em">L</text>
+<text x="95.4" y="58.0" font-family="'Inter','Helvetica Neue',sans-serif" font-size="52" font-weight="700" fill="#1A1A1A" text-anchor="middle" letter-spacing="0.25em">N</text>
+</svg>
