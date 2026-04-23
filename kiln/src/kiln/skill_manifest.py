@@ -79,7 +79,7 @@ class SkillManifest:
                 "Product generators (coasters, keychains, ornaments, etc.), "
                 "decoration, procedural textures, cloud sync, design "
                 "versioning, manual speed control, print learning. "
-                "$49/mo. https://kiln3d.com/pro"
+                "$49/mo. https://kiln3d.com/pricing"
             ),
             "business": (
                 "Everything in Pro + fleet-wide ops (up to 50 printers, 5 "

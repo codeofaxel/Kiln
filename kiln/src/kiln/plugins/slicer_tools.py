@@ -1010,13 +1010,14 @@ class _SlicerToolsPlugin:
                         return {
                             "success": False,
                             "error": (
-                                f"The '{profile.display_name}' slicer profile requires a Kiln Pro license. "
+                                f"The '{profile.display_name}' slicer profile requires Kiln Pro. "
                                 f"Free-tier profiles available: default, ender3, prusa_mk3s, klipper_generic. "
-                                f"Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
+                                f"Already subscribed? Run `kiln login` to sync this machine. "
+                                f"Otherwise: https://kiln3d.com/pricing"
                             ),
                             "code": "LICENSE_REQUIRED",
                             "required_tier": "pro",
-                            "upgrade_url": "https://kiln3d.com/pro",
+                            "upgrade_url": "https://kiln3d.com/pricing",
                         }
 
                 return {"success": True, "profile": slicer_profile_to_dict(profile)}

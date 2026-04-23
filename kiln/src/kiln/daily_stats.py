@@ -47,6 +47,14 @@ def _empty_day() -> dict[str, Any]:
         "decoration_types": {},    # {"photo": 2, "qr": 1, "text": 5}
         "slicer_profiles": {},     # {"BambuLab A1 0.4": 2}
         "marketplace_sources": {}, # {"thingiverse": 3, "makerworld": 1}
+        # Tier-denial counters: tool_name → number of TIER_REQUIRED
+        # rejections today.  This is the key funnel-leak signal for
+        # "user paid on the web but never synced their local agent" —
+        # every denial here is a user reaching for a locked door they
+        # should already have a key to.  Rolled up in the daily
+        # heartbeat so we can see which tools are driving upgrades
+        # vs. which are just hitting unsynced machines.
+        "tier_denials": {},        # {"fleet_status": 2, "texture_apply": 1}
     }
 
 
@@ -140,6 +148,38 @@ def record_print_hours(hours: float) -> None:
         _logger.debug("record_print_hours failed: %s", exc)
 
 
+def record_tier_denial(tool_name: str) -> None:
+    """Increment the TIER_REQUIRED denial counter for ``tool_name``.
+
+    Called from :func:`requires_tier`'s error path (both the public-Kiln
+    stub and the kiln-pro decorator).  Lets a post-hoc look at the
+    daily heartbeat show exactly which tools are hit by users whose
+    machines aren't synced to their paid tier — the funnel-leak
+    signal we were missing.
+
+    Thread-safe, never raises — if anything goes wrong we drop the
+    event rather than interfering with tool-call error paths.
+    """
+    name = (tool_name or "").strip() or "<unknown>"
+    # Tight bound on the label: the heartbeat JSON column has a size
+    # budget and someone passing a massive __name__ from a weird
+    # callable shouldn't be able to blow through it.  64 chars is
+    # enough for every tool name we ship and then some.
+    if len(name) > 64:
+        name = name[:64]
+    try:
+        with _lock:
+            data = _read()
+            buckets = data.get("tier_denials", {})
+            if not isinstance(buckets, dict):
+                buckets = {}
+            buckets[name] = int(buckets.get(name, 0)) + 1
+            data["tier_denials"] = buckets
+            _write(data)
+    except Exception as exc:
+        _logger.debug("record_tier_denial(%s) failed: %s", tool_name, exc)
+
+
 def get_daily_stats() -> dict[str, Any]:
     """Return today's counters and breakdowns."""
     data = _read()
@@ -155,4 +195,5 @@ def get_daily_stats() -> dict[str, Any]:
         "decoration_types": data.get("decoration_types", {}),
         "slicer_profiles": data.get("slicer_profiles", {}),
         "marketplace_sources": data.get("marketplace_sources", {}),
+        "tier_denials": data.get("tier_denials", {}),
     }

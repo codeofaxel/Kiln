@@ -31,7 +31,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_UPGRADE_URL = "https://kiln3d.com/pro"
+_UPGRADE_URL = "https://kiln3d.com/pricing"
 
 # ---------------------------------------------------------------------------
 # Constants

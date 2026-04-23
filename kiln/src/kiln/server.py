@@ -181,9 +181,9 @@ except ImportError:
         return (
             False,
             (
-                f"This feature requires a Kiln {str(tier_label).title()} license. "
-                "You're on the Free tier. "
-                "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
+                f"This feature requires Kiln {str(tier_label).title()}. "
+                "Already subscribed? Run `kiln login` to sync this machine. "
+                "Otherwise: https://kiln3d.com/pricing"
             ),
         )
 
@@ -198,18 +198,29 @@ except ImportError:
             @functools.wraps(fn)
             def wrapper(*args, **kwargs):
                 tool_name = fn.__name__
+                # Funnel-leak telemetry: every TIER_REQUIRED on this
+                # path is a user reaching for a locked door.  Counted
+                # in daily_stats and rolled up in the heartbeat so we
+                # can see which tools are driving "I paid but my agent
+                # doesn't know" support volume.  Best-effort; never
+                # blocks the error path.
+                try:
+                    from kiln.daily_stats import record_tier_denial
+                    record_tier_denial(tool_name)
+                except Exception:
+                    pass
                 return {
                     "success": False,
                     "error": (
-                        f"{tool_name} requires a Kiln {str(tier_label).title()} license. "
-                        "You're on the Free tier. "
-                        "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
+                        f"{tool_name} requires Kiln {str(tier_label).title()}. "
+                        "Already subscribed? Run `kiln login` to sync this machine. "
+                        "Otherwise: https://kiln3d.com/pricing"
                     ),
                     "code": "TIER_REQUIRED",
                     "required_tier": str(tier_label),
                     "tool": tool_name,
                     "retryable": False,
-                    "upgrade_url": "https://kiln3d.com/pro",
+                    "upgrade_url": "https://kiln3d.com/pricing",
                 }
 
             return wrapper
@@ -10386,7 +10397,78 @@ def main() -> None:
 
     atexit.register(_stop_all_watchers)
 
+    # One-line identity banner on stderr.  MCP owns stdout (JSON-RPC);
+    # stderr is free.  Silent startup is a bug: a paid user whose CLI
+    # isn't signed in has no visible signal that their tier isn't
+    # loaded — they only find out when a pro tool call fails with
+    # TIER_REQUIRED.  One line at startup turns that into a pre-flight
+    # check the user sees BEFORE Claude Desktop even shows the tool
+    # results panel.
+    _print_startup_banner()
+
     mcp.run()
+
+
+def _print_startup_banner() -> None:
+    """Emit a single identity line on stderr so anyone launching
+    `kiln serve` — whether via Claude Desktop, Claude Code, a custom
+    MCP client, or by hand — sees at a glance whether this process is
+    signed in and which tier it's running as.
+
+    Output shapes:
+
+        ✓ Kiln MCP. Signed in as adam@example.com (Pro).
+        ⚠ Kiln MCP. Not signed in — run `kiln login` to connect your Kiln tier.
+
+    Never raises: if tier resolution throws for any reason, we fall
+    through to the "not signed in" shape rather than crashing the
+    server at launch.  A broken banner beats a broken server.
+    """
+    try:
+        import sys
+
+        tier_label = "Free"
+        email = ""
+        try:
+            # Tier resolution lives in kiln-pro when installed; fall
+            # back to the free-tier stub (always pip-available).  Read
+            # the ~/.kiln/auth_tokens.json directly for email — that's
+            # the file the CLI populates on `kiln login` / `kiln pair`.
+            current_tier = get_tier()
+            tier_value = getattr(current_tier, "value", str(current_tier))
+            tier_label = str(tier_value).title()
+            try:
+                auth_home = os.environ.get("KILN_AUTH_HOME") or str(Path.home())
+                tokens_path = Path(auth_home) / ".kiln" / "auth_tokens.json"
+                if tokens_path.is_file():
+                    import json as _json
+                    data = _json.loads(tokens_path.read_text(encoding="utf-8"))
+                    email = str(data.get("email") or "")
+            except Exception:
+                pass
+        except Exception:
+            # Resolution failed — treat as FREE for the banner.
+            pass
+
+        if email and tier_label.lower() != "free":
+            msg = f"\u2713 Kiln MCP. Signed in as {email} ({tier_label})."
+        elif email:
+            msg = f"\u2713 Kiln MCP. Signed in as {email} (Free)."
+        else:
+            msg = (
+                "\u26a0 Kiln MCP. Not signed in \u2014 run `kiln login` "
+                "or `kiln pair <code>` to connect your Kiln tier."
+            )
+
+        # Print directly to stderr bypassing the logger — loggers can
+        # be silenced by env vars or JSON formatters, and this is a
+        # human affordance, not a log line.  Users piping stderr to a
+        # file still see it; Claude Desktop surfaces stderr in its
+        # MCP server diagnostics panel.
+        print(msg, file=sys.stderr, flush=True)
+    except Exception:
+        # Never let banner output break startup.
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -12639,7 +12721,8 @@ def decorate_surface(
                 return _error_dict(
                     "SVG logo decoration is a Pro feature. "
                     "Free tier supports PNG/JPG photos and text. "
-                    "Upgrade at https://kiln3d.com/pro",
+                    "Already subscribed? Run `kiln login` to sync this machine. "
+                    "Otherwise: https://kiln3d.com/pricing",
                     code="PRO_REQUIRED",
                 )
 

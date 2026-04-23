@@ -8509,8 +8509,8 @@ def upgrade(ctx: click.Context, key: str | None, session: str | None, json_mode:
             if info.tier == LicenseTier.FREE:
                 click.echo("\n  Upgrade to Pro for fleet management, job queue,")
                 click.echo("  analytics, and more.")
-                click.echo("\n  Visit: https://kiln3d.com/pro")
-                click.echo("  Or:    kiln upgrade --key <your-license-key>")
+                click.echo("\n  Already subscribed?  Run `kiln login` to sync this machine.")
+                click.echo("  New?                 https://kiln3d.com/pricing")
             else:
                 click.echo("\n  ✓ Active and valid.")
 
