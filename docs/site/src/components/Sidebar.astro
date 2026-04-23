@@ -14,6 +14,24 @@ const { sections } = Astro.props;
 
 <aside class="sidebar">
   <nav class="sidebar-nav" aria-label="Documentation sections">
+    {/*
+      Reading block — sits above the auto-generated section list so the
+      long-form pieces (whitepaper / litepaper / FAQ) don't live only in
+      the footer.  The project docs page is the canonical docs hub; this
+      is where a visitor lands with "tell me more" energy and should
+      find every other doc without going back to the nav.
+    */}
+    <div class="reading-block">
+      <div class="reading-label">Reading</div>
+      <ul>
+        <li><a href="/whitepaper">Whitepaper</a></li>
+        <li><a href="/litepaper">Litepaper</a></li>
+        <li><a href="/faq">FAQ</a></li>
+      </ul>
+    </div>
+
+    <div class="sections-label">Project Docs</div>
+
     {sections.map((section) => (
       <details class="sidebar-section" open>
         <summary>
@@ -66,6 +84,49 @@ const { sections } = Astro.props;
     display: flex;
     flex-direction: column;
     gap: 2px;
+  }
+
+  /* Reading block — quiet, labeled, above the auto-sections. */
+  .reading-block {
+    margin: 0 0 20px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .reading-label,
+  .sections-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text);
+    margin-bottom: 10px;
+  }
+  .sections-label {
+    margin-top: 4px;
+    margin-bottom: 4px;
+  }
+  .reading-block ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .reading-block li {
+    margin: 0;
+  }
+  .reading-block a {
+    display: block;
+    padding: 6px 0;
+    font-size: 13px;
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: color .12s ease;
+  }
+  .reading-block a:hover {
+    color: var(--text);
+    text-decoration: none;
   }
 
   .sidebar-section {
