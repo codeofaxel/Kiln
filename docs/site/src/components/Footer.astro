@@ -1,99 +1,140 @@
 ---
+// Footer — grouped, quiet, in the same visual language as Nav.astro.
+//
+// The old footer was a single flat row of 10 links + "Built by
+// codeofaxel" vanity byline.  At this stage the byline reads as
+// a personal-project tell; removed.  Links are now grouped by
+// intent (Product / Docs / Company / Connect) with the donate +
+// contact blocks preserved but quieted visually.
 ---
 
 <footer>
   <div class="container">
-    <div class="footer-links">
-      <a href="https://github.com/codeofaxel/Kiln" target="_blank" rel="noopener">GitHub</a>
-      <a href="/install">Install</a>
-      <a href="/docs">Docs</a>
-      <a href="/use-cases">Use Cases</a>
-      <a href="/integrations">Integrations</a>
-      <a href="/whitepaper">Whitepaper</a>
-      <a href="/litepaper">Litepaper</a>
-      <a href="/blog">Blog</a>
-      <a href="/pricing">Pricing</a>
-      <a href="https://github.com/codeofaxel/Kiln/blob/main/LICENSE" target="_blank" rel="noopener">AGPL-3.0 License</a>
+    <div class="footer-grid">
+      <div class="footer-col">
+        <div class="col-label">Product</div>
+        <a href="/install">Install</a>
+        <a href="/use-cases">Use Cases</a>
+        <a href="/integrations">Integrations</a>
+        <a href="/pricing">Pricing</a>
+      </div>
+      <div class="footer-col">
+        <div class="col-label">Docs</div>
+        <a href="/docs">Reference</a>
+        <a href="/whitepaper">Whitepaper</a>
+        <a href="/litepaper">Litepaper</a>
+        <a href="/faq">FAQ</a>
+      </div>
+      <div class="footer-col">
+        <div class="col-label">Company</div>
+        <a href="/blog">Blog</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+        <a href="https://github.com/codeofaxel/Kiln/blob/main/LICENSE" target="_blank" rel="noopener">AGPL-3.0</a>
+      </div>
+      <div class="footer-col">
+        <div class="col-label">Connect</div>
+        <a href="https://github.com/codeofaxel/Kiln" target="_blank" rel="noopener">GitHub</a>
+        <a href="mailto:adam@kiln3d.com">adam@kiln3d.com</a>
+        <a href="https://twitter.com/kiln3d" target="_blank" rel="noopener">@kiln3d</a>
+        <a href="https://twitter.com/adamaarreola" target="_blank" rel="noopener">@adamaarreola</a>
+      </div>
     </div>
-    <div class="donate">
-      Donate &amp; support development: <code>kiln3d.sol</code> <span class="chain">(Solana)</span> &middot; <code>kiln3d.eth</code> <span class="chain">(Ethereum)</span>
+
+    <div class="footer-bottom">
+      <p class="donate">
+        Donate &amp; support development:
+        <code>kiln3d.sol</code>
+        <span class="chain">(Solana)</span>
+        &middot;
+        <code>kiln3d.eth</code>
+        <span class="chain">(Ethereum)</span>
+      </p>
+      <p class="parent-company">Kiln is a project of Hadron Labs Inc.</p>
     </div>
-    <div class="contact">
-      <span class="contact-label">Contact</span>
-      <a href="mailto:adam@kiln3d.com">adam@kiln3d.com</a>
-      <span class="sep">&middot;</span>
-      <a href="https://twitter.com/adamaarreola" target="_blank" rel="noopener">@adamaarreola</a>
-      <span class="sep">&middot;</span>
-      <a href="https://twitter.com/kiln3d" target="_blank" rel="noopener">@kiln3d</a>
-    </div>
-    <p class="parent-company">Kiln is a project of Hadron Labs Inc.</p>
-    <p>Built by <a href="https://github.com/codeofaxel" target="_blank" rel="noopener">codeofaxel</a></p>
   </div>
 </footer>
 
 <style>
   footer {
     border-top: 1px solid var(--border);
-    padding: 32px 0;
-    text-align: center;
+    background: rgba(15, 15, 15, 0.6);
+    padding: 56px 0 40px;
     font-size: 13px;
     color: var(--text-muted);
   }
-  footer a { color: var(--text-muted); }
-  footer a:hover { color: var(--text); }
-  footer code {
+  footer a {
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: color .12s ease;
+  }
+  footer a:hover {
+    color: var(--text);
+  }
+
+  .footer-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 40px;
+    margin-bottom: 48px;
+  }
+
+  .footer-col {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .col-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+
+  .footer-bottom {
+    border-top: 1px solid var(--border);
+    padding-top: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+    text-align: center;
+  }
+
+  .donate {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .donate code {
     font-family: var(--mono);
-    font-size: 14px;
     color: var(--accent);
     font-weight: 600;
-  }
-  .footer-links {
-    display: flex;
-    justify-content: center;
-    gap: 24px;
-    margin-bottom: 16px;
-    flex-wrap: wrap;
-  }
-  .donate {
-    margin-bottom: 16px;
-    color: var(--accent);
-    font-size: 15px;
-    font-weight: 500;
+    font-size: 13px;
   }
   .donate .chain {
     color: var(--text-muted);
-    font-size: 13px;
-    font-weight: 400;
+    opacity: 0.7;
   }
-  .contact {
-    margin-bottom: 16px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-    font-size: 16px;
-    font-weight: 500;
-  }
-  .contact-label {
-    font-weight: 700;
-    color: #f97316;
-    font-size: 16px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-  .contact a {
-    color: #f97316 !important;
-  }
-  .contact a:hover {
-    color: #fb923c !important;
-  }
-  .contact .sep {
-    color: var(--border);
-  }
+
   .parent-company {
-    margin-bottom: 8px;
+    margin: 0;
     font-size: 12px;
-    opacity: 0.85;
+    color: var(--text-muted);
+    opacity: 0.7;
+  }
+
+  @media (max-width: 720px) {
+    footer {
+      padding: 40px 0 32px;
+    }
+    .footer-grid {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 32px 24px;
+      margin-bottom: 36px;
+    }
   }
 </style>

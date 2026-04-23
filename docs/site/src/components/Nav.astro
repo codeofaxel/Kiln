@@ -5,6 +5,13 @@ const { current = '' } = Astro.props;
 // mark the Product trigger active when the visitor is on any of them.
 const productPages = ['features', 'use-cases', 'integrations', 'boundary', 'install'];
 const productActive = productPages.includes(current);
+
+// Pages that live under the "Docs" dropdown.  The bare `/docs` page
+// is the reference manual; the other three are long-form reading
+// that earn discoverability from the same spot so a visitor can go
+// from "how does it work?" to "tell me more" in one click.
+const docsPages = ['docs', 'whitepaper', 'litepaper', 'faq'];
+const docsActive = docsPages.includes(current);
 ---
 
 <nav>
@@ -42,7 +49,26 @@ const productActive = productPages.includes(current);
           <li role="none"><a role="menuitem" href="/install" class:list={[{ active: current === 'install' }]}>Install</a></li>
         </ul>
       </div>
-      <a href="/docs" class:list={[{ active: current === 'docs' }]}>Docs</a>
+      <div class="dropdown" data-dropdown>
+        <button
+          type="button"
+          class:list={['dropdown-trigger', { active: docsActive }]}
+          aria-haspopup="true"
+          aria-expanded="false"
+          aria-controls="nav-docs-menu"
+        >
+          Docs
+          <svg class="caret" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+            <path d="M2 4 L5 7 L8 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <ul class="dropdown-menu" id="nav-docs-menu" role="menu">
+          <li role="none"><a role="menuitem" href="/docs" class:list={[{ active: current === 'docs' }]}>Reference</a></li>
+          <li role="none"><a role="menuitem" href="/whitepaper" class:list={[{ active: current === 'whitepaper' }]}>Whitepaper</a></li>
+          <li role="none"><a role="menuitem" href="/litepaper" class:list={[{ active: current === 'litepaper' }]}>Litepaper</a></li>
+          <li role="none"><a role="menuitem" href="/faq" class:list={[{ active: current === 'faq' }]}>FAQ</a></li>
+        </ul>
+      </div>
       <a href="/blog" class:list={[{ active: current === 'blog' }]}>Blog</a>
       <a href="https://github.com/codeofaxel/Kiln" target="_blank" rel="noopener">GitHub</a>
       <a href="/pricing" class:list={[{ active: current === 'pricing' }]}>Pricing</a>
