@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-22T20:35:11.125734+00:00",
-  "tool_count": 267,
+  "generated": "2026-04-23T06:33:47.126496+00:00",
+  "tool_count": 271,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -552,6 +552,136 @@
           "branch_id"
         ],
         "title": "cloud_push_branchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_push_feature_branch",
+      "description": "Push a local feature branch (+ its versions) to a remote.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "branch_id": {
+            "title": "Branch Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          },
+          "design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Id"
+          }
+        },
+        "required": [
+          "feature_id",
+          "branch_id"
+        ],
+        "title": "cloud_push_feature_branchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_push_feature_release",
+      "description": "Push a locally-signed feature release to the remote.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "release_id": {
+            "title": "Release Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "release_id"
+        ],
+        "title": "cloud_push_feature_releaseArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_push_preset_branch",
+      "description": "Push a local decoration-preset branch to a remote.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "preset_id": {
+            "title": "Preset Id",
+            "type": "string"
+          },
+          "branch_id": {
+            "title": "Branch Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          },
+          "design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Id"
+          }
+        },
+        "required": [
+          "preset_id",
+          "branch_id"
+        ],
+        "title": "cloud_push_preset_branchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_push_preset_release",
+      "description": "Push a locally-signed decoration-preset release to the remote.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "release_id": {
+            "title": "Release Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "release_id"
+        ],
+        "title": "cloud_push_preset_releaseArguments",
         "type": "object"
       }
     },
