@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-23T06:33:47.126496+00:00",
-  "tool_count": 271,
+  "generated": "2026-04-23T21:28:48.590511+00:00",
+  "tool_count": 272,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -391,6 +391,17 @@
           "tier"
         ],
         "title": "start_subscription_checkoutArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "usage_summary",
+      "description": "Return the current billing cycle's usage snapshot.",
+      "tier": "free",
+      "category": "billing",
+      "parameters": {
+        "properties": {},
+        "title": "usage_summaryArguments",
         "type": "object"
       }
     },
