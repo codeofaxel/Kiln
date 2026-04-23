@@ -1113,7 +1113,7 @@ class TestLicenseCommands:
                 result = runner.invoke(cli, ["upgrade"])
         assert result.exit_code == 0
         assert "Free" in result.output
-        assert "kiln3d.com/pro" in result.output
+        assert "kiln3d.com/pricing" in result.output
 
     def test_upgrade_activates_pro_key(self, runner, tmp_path):
         """kiln upgrade --key activates a Pro license."""
@@ -1317,9 +1317,10 @@ class TestFleetCLI:
         from kiln.licensing import LicenseTier
 
         with patch("kiln.licensing.check_tier", return_value=(False, (
-            "This feature requires a Kiln Pro license. "
+            "This feature requires Kiln Pro. "
             "You're on the Free tier. "
-            "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
+            "Already subscribed? Run `kiln login` to sync this machine. "
+            "Otherwise: https://kiln3d.com/pricing"
         ))):
             result = runner.invoke(cli, ["fleet", "status"])
         assert result.exit_code != 0

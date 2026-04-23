@@ -61,14 +61,21 @@ class TestCreateCheckoutSession:
         with patch.dict(sys.modules, {"stripe": mock_stripe}):
             p.create_checkout_session(price_id="price_abc")
 
-        mock_stripe.checkout.Session.create.assert_called_once_with(
-            mode="payment",
-            line_items=[{"price": "price_abc", "quantity": 1}],
-            success_url="https://kiln3d.com/pro/success?session_id={CHECKOUT_SESSION_ID}",
-            cancel_url="https://kiln3d.com/pricing",
-            customer_email=None,
-            metadata={},
-        )
+        # The success URL is resolved via ``kiln_pro.urls.checkout_success_url``
+        # which lands on the signed-in workshop.  The cancel URL lives on the
+        # marketing site's ``/pricing`` page.  We assert the static fields
+        # directly and only check structure for URLs that can vary by env
+        # (``KILN_PUBLIC_URL`` etc. shift the origin between local dev and
+        # prod), so tests don't lie when run against a non-default origin.
+        call = mock_stripe.checkout.Session.create.call_args
+        kwargs = call.kwargs
+        assert kwargs["mode"] == "payment"
+        assert kwargs["line_items"] == [{"price": "price_abc", "quantity": 1}]
+        assert kwargs["customer_email"] is None
+        assert kwargs["metadata"] == {}
+        assert "/checkout/success" in kwargs["success_url"]
+        assert "{CHECKOUT_SESSION_ID}" in kwargs["success_url"]
+        assert kwargs["cancel_url"].endswith("/pricing")
 
     def test_returns_session_id_and_url(self):
         mock_stripe = _build_mock_stripe()

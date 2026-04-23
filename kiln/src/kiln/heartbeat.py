@@ -163,6 +163,14 @@ def _send_heartbeat() -> None:
                 "decoration_types": stats.get("decoration_types", {}),
                 "slicer_profiles": stats.get("slicer_profiles", {}),
                 "marketplace_sources": stats.get("marketplace_sources", {}),
+                # Tier-denial telemetry — {tool_name: count_today}.
+                # Every entry is a user who hit a paywall; if the same
+                # user upgraded on the web but their local session
+                # never synced, we'll see denials spike on one install
+                # for a day or two and then either disappear (they
+                # ran `kiln pair`) or persist (they gave up — a
+                # support-ticket ticker).
+                "tier_denials": stats.get("tier_denials", {}),
             }),
         }).encode()
 

@@ -547,9 +547,9 @@ class _FulfillmentToolsPlugin:
                 def check_tier(required, *_a, **_kw):
                     tier_label = getattr(required, "value", required) if required else "business"
                     return (False, (
-                        f"This feature requires a Kiln {str(tier_label).title()} license. "
-                        "You're on the Free tier. "
-                        "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
+                        f"This feature requires Kiln {str(tier_label).title()}. "
+                        "Already subscribed? Run `kiln login` to sync this machine. "
+                        "Otherwise: https://kiln3d.com/pricing"
                     ))
 
             if err := _srv._check_billing_auth("print"):

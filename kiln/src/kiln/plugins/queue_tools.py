@@ -70,12 +70,13 @@ def submit_job(
                     f"Job queue is limited to {FREE_TIER_MAX_QUEUED_JOBS} pending jobs on the Free tier "
                     f"(you have {pending}). Wait for jobs to complete, "
                     "or upgrade to Kiln Pro for unlimited queue depth with multi-printer scheduling. "
-                    "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
+                    "Already subscribed? Run `kiln login` to sync this machine. "
+                    "Otherwise: https://kiln3d.com/pricing"
                 ),
                 "code": "FREE_TIER_LIMIT",
                 "pending_count": pending,
                 "max_allowed": FREE_TIER_MAX_QUEUED_JOBS,
-                "upgrade_url": "https://kiln3d.com/pro",
+                "upgrade_url": "https://kiln3d.com/pricing",
             }
     try:
         job_id = _srv._queue.submit(

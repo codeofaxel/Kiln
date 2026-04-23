@@ -74,7 +74,7 @@ class _ConsumerToolsPlugin:
             except ImportError:
                 return {
                     "status": "error",
-                    "error": "Tax calculation requires Kiln Pro. Visit https://kiln3d.com/pro to upgrade.",
+                    "error": "Tax calculation requires Kiln Pro. Already subscribed? Run `kiln login` to sync this machine. Otherwise: https://kiln3d.com/pricing",
                     "code": "PRO_REQUIRED",
                 }
 
@@ -105,7 +105,7 @@ class _ConsumerToolsPlugin:
             except ImportError:
                 return {
                     "status": "error",
-                    "error": "Tax calculation requires Kiln Pro. Visit https://kiln3d.com/pro to upgrade.",
+                    "error": "Tax calculation requires Kiln Pro. Already subscribed? Run `kiln login` to sync this machine. Otherwise: https://kiln3d.com/pricing",
                     "code": "PRO_REQUIRED",
                 }
 
@@ -135,7 +135,7 @@ class _ConsumerToolsPlugin:
             except ImportError:
                 return {
                     "status": "error",
-                    "error": "Tax calculation requires Kiln Pro. Visit https://kiln3d.com/pro to upgrade.",
+                    "error": "Tax calculation requires Kiln Pro. Already subscribed? Run `kiln login` to sync this machine. Otherwise: https://kiln3d.com/pricing",
                     "code": "PRO_REQUIRED",
                 }
 
