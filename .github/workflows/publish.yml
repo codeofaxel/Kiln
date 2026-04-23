@@ -153,6 +153,8 @@ jobs:
 
       - name: Publish kiln3d-octoprint to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
 
   # Publish redirect packages (kiln-print, kiln-printer) that point to kiln3d
   build-redirects:
@@ -266,6 +268,11 @@ jobs:
 
       - name: Install ClawHub CLI
         run: npm install -g clawhub
+
+      - name: Log in to ClawHub
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+        run: clawhub login --token "$CLAWHUB_TOKEN" --no-browser
 
       - name: Prepare minimal publish folder
         run: |
