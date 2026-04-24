@@ -1,0 +1,97 @@
+name: Sign release — Sigstore + SLSA build provenance
+
+# Supplemental signing workflow — the real gate lives in publish.yml
+# where the PyPI upload is made to wait on signing.  This workflow
+# also fires on release:published so a GitHub-only release (no PyPI
+# step) still gets Sigstore bundles + SLSA provenance.
+#
+# See SIGNING.md for verification recipes.  All third-party actions
+# are pinned to a commit SHA.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to sign (tag or SHA)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: sign-release-${{ github.event.release.tag_name || github.event.inputs.ref || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    name: Sigstore sign + SLSA attest
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout release tag
+        # actions/checkout v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.inputs.ref || github.event.release.tag_name || github.ref }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        # actions/setup-python v5.3.0
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build wheel + sdist
+        run: cd kiln && python -m build --outdir ../dist/
+
+      - name: Sign artifacts with Sigstore (keyless)
+        # sigstore/gh-action-sigstore-python v3.0.0
+        uses: sigstore/gh-action-sigstore-python@f7ad0af51a5648d09a20d00370f0a91c3bdf8f84
+        with:
+          inputs: |
+            dist/*.whl
+            dist/*.tar.gz
+          release-signing-artifacts: false
+
+      - name: Attest SLSA build provenance
+        # actions/attest-build-provenance v1.4.4
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+
+      - name: Collect signed assets
+        run: |
+          mkdir -p signed
+          cp dist/*.whl signed/
+          cp dist/*.tar.gz signed/
+          cp dist/*.sigstore signed/ 2>/dev/null || true
+          ls -la signed/
+
+      - name: Upload signed artifacts to release
+        if: github.event_name == 'release'
+        # softprops/action-gh-release v2.2.1
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda
+        with:
+          files: |
+            signed/*.sigstore
+          fail_on_unmatched_files: false
+
+      - name: Upload signed artifacts as workflow artifacts
+        # actions/upload-artifact v4.4.3
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882
+        with:
+          name: signed-${{ github.event.release.tag_name || github.run_id }}
+          path: signed/
+          retention-days: 90

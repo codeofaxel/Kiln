@@ -1,0 +1,108 @@
+name: SBOM — CycloneDX + SPDX per release
+
+# Supplemental SBOM workflow — the real gate lives in publish.yml
+# where the PyPI upload is made to wait on SBOM + signing.  This
+# workflow also runs on release:published so a GitHub-only release
+# (no PyPI step) still gets an SBOM attached.  See SIGNING.md for
+# the verification recipe.
+#
+# All third-party actions are pinned to a commit SHA, not a tag
+# — a compromised upstream push cannot silently run in our CI.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to SBOM (tag or SHA)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: sbom-${{ github.event.release.tag_name || github.event.inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sbom:
+    name: Generate + attest SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout release tag
+        # actions/checkout v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.inputs.ref || github.event.release.tag_name || github.ref }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        # actions/setup-python v5.3.0
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build kiln wheel + sdist
+        # The kiln/ subdir is the source root for kiln3d.
+        run: cd kiln && python -m build --outdir ../dist/
+
+      - name: Install syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sh -s -- -b /usr/local/bin v1.18.1
+          syft version
+
+      - name: Generate CycloneDX JSON SBOM
+        run: |
+          VERSION="${{ github.event.release.tag_name || github.event.inputs.ref }}"
+          VERSION="${VERSION#v}"
+          syft dir:dist \
+            --output cyclonedx-json=sbom.cdx.json \
+            --source-name kiln3d \
+            --source-version "${VERSION:-dev}"
+
+      - name: Generate SPDX JSON SBOM
+        run: |
+          VERSION="${{ github.event.release.tag_name || github.event.inputs.ref }}"
+          VERSION="${VERSION#v}"
+          syft dir:dist \
+            --output spdx-json=sbom.spdx.json \
+            --source-name kiln3d \
+            --source-version "${VERSION:-dev}"
+
+      - name: Attest CycloneDX SBOM
+        # actions/attest-sbom v1.4.3
+        uses: actions/attest-sbom@115c3be05ff3974bcbd596578934b3f9ce39bf68
+        with:
+          subject-path: 'dist/*'
+          sbom-path: sbom.cdx.json
+
+      - name: Upload SBOMs as release assets
+        if: github.event_name == 'release'
+        # softprops/action-gh-release v2.2.1
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda
+        with:
+          files: |
+            sbom.cdx.json
+            sbom.spdx.json
+          fail_on_unmatched_files: true
+
+      - name: Upload SBOMs as workflow artifacts
+        # actions/upload-artifact v4.4.3
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882
+        with:
+          name: sbom-${{ github.event.release.tag_name || github.run_id }}
+          path: |
+            sbom.cdx.json
+            sbom.spdx.json
+          retention-days: 90
