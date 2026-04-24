@@ -87,7 +87,7 @@ const printerBackends = [
 ];
 ---
 
-<section id="features">
+<section id="features" class="features-section">
   <div class="container">
     <h2>How Kiln works</h2>
     <p class="lead">
@@ -107,6 +107,16 @@ const printerBackends = [
 </section>
 
 <style>
+  /* Hairline divider matching every other major section transition on
+     the landing page (.bordered class in index.astro).  Without this,
+     the gap between "Explore Kiln by topic" and "How Kiln works" reads
+     as an undesigned empty void instead of an intentional section
+     break.  Same color token + 1px stroke as the section dividers
+     above and below; same visual rhythm. */
+  .features-section {
+    border-top: 1px solid var(--border);
+  }
+
   .features {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
