@@ -209,12 +209,21 @@ def _cli_version() -> str:
 def auth_login(no_browser: bool, timeout: int) -> None:
     """Sign in to your Kiln account via OAuth (Google / Apple / GitHub).
 
+    This is KILN ACCOUNT AUTHENTICATION — use this to log in to the
+    Kiln REST API + workshop as yourself.  Completely distinct from
+    ``kiln identity link``, which attaches a provider identity (e.g.
+    GitHub) to your tenant for design-release signing.  If you want
+    to "log in to Kiln", this is the command.  If you want to
+    "connect my GitHub account so I can sign design releases with my
+    GitHub identity", that's ``kiln identity link``.
+
     Launches the device-code flow: opens your browser to a small
     provider-picker page, polls until you finish signing in, then
     writes your session token to ``~/.kiln/auth_tokens.json``.
 
     The rest of the CLI will pick up your session automatically — no
-    license key needed for OAuth-linked Pro+ accounts.
+    license key needed for OAuth-linked Pro+ accounts.  Backwards-compat
+    alias: ``kiln login`` (same command, same flow).
     """
     # 1) Start the device flow.
     start = _http_post("/api/auth/device/start", {})
@@ -972,22 +981,14 @@ def register_auth_cli(cli_group: click.Group) -> None:
     (free tier + Pro) gets ``kiln pair`` / ``kiln signin`` out of the
     box.
     """
-    # Relocate the legacy identity-linking login, if present.
-    legacy = cli_group.commands.pop("login", None)
-    if legacy is not None:
-        identity = cli_group.commands.get("identity")
-        if identity is not None and hasattr(identity, "add_command"):
-            # ``kiln identity login`` becomes the new home for the
-            # GitHub-identity-linking flow.  Rename via .name so help
-            # text stays consistent.
-            legacy.name = "login"
-            try:
-                identity.add_command(legacy)
-            except Exception:
-                # If the identity group already has a login subcommand
-                # (future-proof), bail out without overwriting it —
-                # better to silently skip than to shadow behaviour.
-                pass
+    # NOTE: There used to be legacy-login relocation logic here —
+    # kiln-pro would register ``cli_login`` as a top-level ``login``
+    # command, and we'd pop it + move it into the ``identity`` group
+    # to free the canonical name.  kiln-pro now registers its
+    # identity-linking command natively as ``kiln identity link`` (see
+    # ``kiln_pro.cli.vcs_commands.register_pro_cli``), so there's
+    # nothing to relocate.  Keeping this comment as an audit trail in
+    # case some future kiln-pro release regresses.
 
     # Canonical names: signin / signout (match the web workshop + MCP tools).
     cli_group.add_command(auth_login)

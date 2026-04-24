@@ -63,47 +63,50 @@ class TestRegisterAuthCli:
         assert auth_pair.name == "pair"
         assert auth_invite.name == "invite"
 
-    def test_relocates_legacy_login_to_identity(self):
+    def test_login_alias_points_to_auth_signin(self):
+        # `kiln login` must be the backcompat alias for our OAuth
+        # signin command — NOT kiln-pro's identity-linking command
+        # (which now lives at `kiln identity link`).  If this invariant
+        # breaks, users typing `kiln login` will suddenly hit a
+        # completely different flow.
+        import click
+        from kiln.cli.auth_commands import register_auth_cli, auth_login
+
+        g = click.Group("kiln")
+        register_auth_cli(g)
+
+        assert "login" in g.commands, "backcompat `kiln login` alias missing"
+        assert g.commands["login"] is auth_login, (
+            "`kiln login` must alias auth_login (OAuth signin), not some "
+            "other command"
+        )
+        assert "signin" in g.commands
+        assert g.commands["signin"] is auth_login
+
+    def test_does_not_touch_identity_group(self):
+        # Regression guard: the old register_auth_cli popped a
+        # top-level `login` and relocated it into the `identity` group
+        # to clear the name for OAuth.  kiln-pro now registers its
+        # identity-linking command natively as `kiln identity link`,
+        # so register_auth_cli must NOT mutate the identity group.
         import click
         from kiln.cli.auth_commands import register_auth_cli
 
-        # Simulate the state where a legacy top-level ``login`` + an
-        # ``identity`` group already exist (kiln-pro's vcs_commands
-        # registers both when installed).
         g = click.Group("kiln")
-
-        @click.command("login")
-        def legacy():
-            pass
-
-        g.add_command(legacy)
         identity_group = click.Group("identity")
-        g.add_command(identity_group)
 
-        register_auth_cli(g)
-
-        # Our new login is at the top level.
-        assert g.commands["login"] is not legacy
-        # Legacy was moved under identity.
-        assert "login" in identity_group.commands
-
-    def test_gracefully_handles_missing_identity_group(self):
-        # If the legacy login exists but there's no identity group
-        # (future reorg), we should still install ours without crashing.
-        import click
-        from kiln.cli.auth_commands import register_auth_cli
-
-        g = click.Group("kiln")
-
-        @click.command("login")
-        def legacy():
+        @identity_group.command("link")
+        def pro_identity_link():
             pass
 
-        g.add_command(legacy)
-        # No identity group this time.
+        g.add_command(identity_group)
         register_auth_cli(g)
-        # Our login wins, and we didn't blow up.
-        assert "login" in g.commands
+
+        # identity group is intact.
+        assert "link" in identity_group.commands
+        assert identity_group.commands["link"] is pro_identity_link
+        # No stray `login` got relocated in.
+        assert "login" not in identity_group.commands
 
 
 # =====================================================================
