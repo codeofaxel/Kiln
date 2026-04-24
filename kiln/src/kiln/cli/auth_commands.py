@@ -458,9 +458,250 @@ def _hostname_label() -> str:
         return "this machine"
 
 
+# ---------------------------------------------------------------------
+# AI-client identity detection
+# ---------------------------------------------------------------------
+#
+# Two rows that both read "Adams-MBP" on /settings/agent is the exact
+# ambiguity this helper exists to resolve.  A user running Claude
+# Desktop + Claude Code + Cursor on one laptop needs to know which row
+# is which before they can meaningfully revoke.  ``client_name``
+# captures the AI client; ``machine_label`` captures the host.
+#
+# Priority ladder (highest → lowest):
+#
+#   1. Explicit ``--client`` flag on the command — user knows best,
+#      so shortcut the ladder.
+#   2. Environment-variable sniff.  Most LLM surfaces export a
+#      distinguishing env var when they spawn an MCP subprocess.
+#      Order matters: CLAUDE_DESKTOP_SESSION beats CLAUDE_CODE_* because
+#      a Claude Desktop session that happens to set both is still
+#      semantically "Claude Desktop."
+#   3. Parent-process name (best-effort, Unix only).  If env sniff
+#      missed (older client versions that don't export a session var)
+#      we try to read the parent's executable name.  Only surface a
+#      well-known set — anything else stays empty rather than leaking
+#      a meaningless name like ``zsh``.
+#   4. Headless detection.  If stdin isn't a TTY AND every sniff
+#      returned nothing, assume this is an MCP-launched subprocess
+#      with no distinguishing identity.  "Unspecified (MCP)" beats
+#      an empty string for giving the user a handle to reason about.
+#   5. Interactive prompt — the caller handles this when appropriate;
+#      the helper itself only returns "" so the caller can decide
+#      whether to prompt.
+#
+# None of this is security-bearing; it's identification only.  A
+# malicious client that sets CLAUDE_DESKTOP_SESSION to impersonate a
+# Claude Desktop row is defeated by /settings/agent's Revoke button —
+# the user sees their OWN list and kicks off anything they don't
+# recognise.  We just need the labels to be *usually correct* so the
+# list is useful in the common case.
+
+# Public map for testing — so test_auth_commands.py can assert the
+# priority order without duplicating the env-var names.
+_CLIENT_NAME_ENV_SIGNALS: tuple[tuple[str, str], ...] = (
+    ("CLAUDE_DESKTOP_SESSION", "Claude Desktop"),
+    ("CLAUDE_CODE_SESSION_ID", "Claude Code"),
+    ("CURSOR_SESSION", "Cursor"),
+    ("CURSOR_EDITOR", "Cursor"),
+    ("CONTINUE_SESSION_ID", "Continue"),
+    ("CODEX_SESSION_ID", "Codex"),
+)
+
+# Parent-process name → canonical client label.  Lowercase match on
+# the basename so we don't care about ``.app`` suffixes, capitalisation
+# variants, or Electron helper names that embed the parent.
+_CLIENT_NAME_PROC_SIGNALS: tuple[tuple[str, str], ...] = (
+    ("claude.app", "Claude Desktop"),
+    ("claude", "Claude Desktop"),
+    ("cursor.app", "Cursor"),
+    ("cursor", "Cursor"),
+    ("codex", "Codex"),
+    ("continue", "Continue"),
+)
+
+
+def _sniff_client_from_env() -> str:
+    """Walk the env-var priority ladder and return the first match.
+
+    Kept pure so tests can patch ``os.environ`` without worrying about
+    process-name side effects.
+    """
+    for var, label in _CLIENT_NAME_ENV_SIGNALS:
+        if os.environ.get(var):
+            return label
+    # Generic CLAUDE_CODE_* fallback — new session-variable names ship
+    # faster than this ladder can track them, so any CLAUDE_CODE_ prefix
+    # with a non-empty value counts as Claude Code.  Isolated to its own
+    # branch (not a tuple entry) because we need the prefix-match, not
+    # an equality-match.
+    for key, value in os.environ.items():
+        if key.startswith("CLAUDE_CODE_") and value:
+            return "Claude Code"
+    # VS Code without Cursor indicates the VS Code MCP host, which is
+    # worth distinguishing from Cursor (they set similar pids but
+    # different identity env).  Placed last so explicit Cursor/Claude
+    # signals always win.
+    if os.environ.get("VSCODE_PID") and not os.environ.get("CURSOR_EDITOR"):
+        return "VS Code"
+    return ""
+
+
+def _sniff_client_from_parent_process() -> str:
+    """Best-effort parent-process name lookup on Unix.
+
+    Uses ``ps`` — present on every macOS and Linux install we care
+    about, including minimal container images.  Never raises;
+    returns empty string on any failure (Windows, locked-down
+    sandbox, truncated stat, unknown parent name).
+    """
+    try:
+        import subprocess as _sp
+        ppid = os.getppid()
+        if ppid <= 0:
+            return ""
+        # -p: filter by pid; -o comm=: just the executable name, no header.
+        result = _sp.run(
+            ["ps", "-p", str(ppid), "-o", "comm="],
+            capture_output=True, text=True, timeout=2.0,
+        )
+        name = (result.stdout or "").strip().lower()
+        if not name:
+            return ""
+        # ps returns the full path on some systems — take the basename.
+        base = name.rsplit("/", 1)[-1]
+        for match, label in _CLIENT_NAME_PROC_SIGNALS:
+            if match in base:
+                return label
+        return ""
+    except Exception:
+        return ""
+
+
+def _is_stdin_tty() -> bool:
+    """Wrapper so tests can patch the TTY check without touching
+    ``sys.stdin`` (which click's CliRunner rewires anyway)."""
+    try:
+        return bool(sys.stdin.isatty())
+    except Exception:
+        return False
+
+
+def _detect_client_name() -> str:
+    """Return a best-guess AI client name for this pairing.
+
+    Priority: env-var signal > parent-process name > "Unspecified (MCP)"
+    (headless fallback) > "" (caller decides whether to prompt).
+
+    Explicit ``--client`` handling is the caller's responsibility; it
+    takes precedence over this helper.
+    """
+    env_hit = _sniff_client_from_env()
+    if env_hit:
+        return env_hit
+    proc_hit = _sniff_client_from_parent_process()
+    if proc_hit:
+        return proc_hit
+    # Headless: no TTY and no env/proc signals → almost certainly an
+    # MCP subprocess launched by a client we don't have a signature
+    # for.  Better to label it "Unspecified (MCP)" than leave it
+    # blank, which shows as "Unspecified client" on /settings/agent
+    # and is indistinguishable from a legit-but-unknown pairing.
+    if not _is_stdin_tty():
+        return "Unspecified (MCP)"
+    return ""
+
+
+def _prompt_for_client_name() -> str:
+    """Interactive TTY fallback — ask the user which agent this is for.
+
+    Only called when env/proc sniffs came up empty AND stdin is a TTY.
+    A headless caller never gets here (``_detect_client_name`` returns
+    "Unspecified (MCP)" first).  The default on Enter is ``[1] Claude
+    Desktop`` — the most common answer, and the safest miss (the user
+    can always edit the label from /settings/agent later).
+    """
+    options = [
+        ("Claude Desktop", "Claude Desktop"),
+        ("Claude Code", "Claude Code"),
+        ("Cursor", "Cursor"),
+        ("Codex", "Codex"),
+        ("Other", None),
+    ]
+    click.echo("  Which agent is this pairing for?", err=True)
+    for i, (label, _value) in enumerate(options, start=1):
+        click.echo(f"    [{i}] {label}", err=True)
+    try:
+        raw = click.prompt(
+            "  Choice", default="1", show_default=True,
+            prompt_suffix=" ", err=True,
+        )
+    except (click.Abort, EOFError, KeyboardInterrupt):
+        return ""
+    try:
+        idx = int(str(raw).strip())
+    except (TypeError, ValueError):
+        idx = 1
+    if idx < 1 or idx > len(options):
+        idx = 1
+    label, value = options[idx - 1]
+    if value is not None:
+        return value
+    # "Other" — free-text label, cap at 40 chars, strip non-printable
+    # + surrounding whitespace.  The server also caps at 40 (same as
+    # machine_label); we trim here so the user sees their final label
+    # without a server round-trip.
+    try:
+        free = click.prompt(
+            "  Label", default="", show_default=False,
+            prompt_suffix=" ", err=True,
+        )
+    except (click.Abort, EOFError, KeyboardInterrupt):
+        return ""
+    cleaned = "".join(c for c in str(free or "")[:40] if c.isprintable()).strip()
+    return cleaned
+
+
+def _resolve_client_name(explicit: str | None) -> str:
+    """One entry point for both ``pair`` and ``invite`` so there's a
+    single source of truth for the priority order.
+
+    ``explicit`` is whatever ``--client`` captured, including the
+    absent-flag sentinel ``None``.  An explicit empty string ("" via
+    ``--client ""``) is treated as "user wants no label" and short-
+    circuits both the detection and the TTY prompt.
+    """
+    if explicit is not None:
+        # User said what they wanted; honour it verbatim, just tidy
+        # the visible characters + cap length.  No prompt, no sniff.
+        cleaned = "".join(c for c in str(explicit)[:40] if c.isprintable()).strip()
+        return cleaned
+    detected = _detect_client_name()
+    if detected:
+        return detected
+    # Env + proc sniffs came up empty AND we're interactive — ask.
+    # _detect_client_name already returned "Unspecified (MCP)" for
+    # the non-TTY case, so reaching this branch means TTY is True.
+    if _is_stdin_tty():
+        return _prompt_for_client_name()
+    return ""
+
+
 @click.command("pair")
 @click.argument("code", required=True)
-def auth_pair(code: str) -> None:
+@click.option(
+    "--client", "client",
+    type=str, default=None,
+    metavar="NAME",
+    help=(
+        "Label this pairing by the AI client running it — e.g. "
+        "\"Claude Desktop\", \"Cursor\", \"Codex\".  If omitted, Kiln "
+        "auto-detects from your environment.  On /settings/agent this "
+        "shows alongside the hostname so you can tell two paired "
+        "machines apart."
+    ),
+)
+def auth_pair(code: str, client: str | None) -> None:
     """Pair this machine with your signed-in Kiln workshop session.
 
     After you upgrade on app.kiln3d.com, the workshop shows a pairing
@@ -492,12 +733,21 @@ def auth_pair(code: str) -> None:
     if not raw.startswith("KLN-"):
         raw = f"KLN-{raw}"
 
+    # Resolve the AI-client identity BEFORE printing the pairing banner
+    # so the interactive prompt (if any) comes first — the user
+    # shouldn't see "Pairing..." then get stopped with a question.
+    client_name = _resolve_client_name(client)
+
     click.echo("")
     click.echo(f"  Pairing {_hostname_label()} with your Kiln workshop\u2026", err=True)
 
     resp = _http_post(
         "/api/auth/pairing/claim",
-        {"code": raw, "machine_label": _hostname_label()},
+        {
+            "code": raw,
+            "machine_label": _hostname_label(),
+            "client_name": client_name,
+        },
     )
 
     if not resp.get("success"):
@@ -605,7 +855,18 @@ def auth_pair(code: str) -> None:
     "--json", "as_json", is_flag=True, default=False,
     help="Emit the invite response as JSON (for piping into scripts).",
 )
-def auth_invite(as_json: bool) -> None:
+@click.option(
+    "--client", "client",
+    type=str, default=None,
+    metavar="NAME",
+    help=(
+        "Label this pairing by the AI client running it — e.g. "
+        "\"Claude Desktop\", \"Cursor\".  The browser's /settings/agent "
+        "list shows it alongside the hostname so two paired machines "
+        "on the same host are distinguishable.  Auto-detected if omitted."
+    ),
+)
+def auth_invite(as_json: bool, client: str | None) -> None:
     """Generate a one-shot code to sign in on another device.
 
     Use this when you're signed in on THIS terminal (``kiln login`` or
@@ -631,6 +892,11 @@ def auth_invite(as_json: bool) -> None:
         )
     refresh_token = str(tokens.get("refresh_token") or "")
 
+    # Resolve AI-client identity BEFORE minting — if we need to prompt
+    # the user, we do it before the "Minting..." spinner so the flow
+    # reads: prompt → mint → print code.
+    client_name = _resolve_client_name(client)
+
     click.echo("")
     click.echo("  Minting a one-shot code for your browser\u2026", err=True)
 
@@ -639,7 +905,10 @@ def auth_invite(as_json: bool) -> None:
     # by the helper itself when a bearer is supplied.
     body = _http_post(
         "/api/auth/pairing/invite",
-        {"refresh_token": refresh_token},
+        {
+            "refresh_token": refresh_token,
+            "client_name": client_name,
+        },
         bearer=access_token,
     )
 

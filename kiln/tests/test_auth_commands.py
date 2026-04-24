@@ -265,7 +265,13 @@ class TestInvite:
         # claim can outlive the short-lived access_token.
         assert captured["path"] == "/api/auth/pairing/invite"
         assert captured["bearer"] == "fake-access-token"
-        assert captured["body"] == {"refresh_token": "fake-refresh-token"}
+        # ``client_name`` is always present (post-migration-028); the
+        # auto-detector fills it when no --client flag is supplied.
+        # The test harness' env may carry CLAUDE_CODE_* or similar
+        # signals, so we assert shape + refresh_token, not an exact
+        # value for client_name.
+        assert captured["body"].get("refresh_token") == "fake-refresh-token"
+        assert "client_name" in captured["body"]
 
         out = r.output
         assert "KLN-ABCD-EFGH" in out
@@ -307,3 +313,339 @@ class TestInvite:
         # stderr status lines must not contaminate the payload.
         parsed = _json.loads(r.stdout)
         assert parsed == body
+
+
+# =====================================================================
+# CLI: _detect_client_name / _resolve_client_name + --client flag wiring
+# =====================================================================
+#
+# Two paired machines on the same laptop both labelled "Adams-MBP" was
+# the bug these tests pin.  The CLI now sends a ``client_name`` body
+# field on every /claim and /invite call, captured by (in priority
+# order) the explicit ``--client`` flag, env-var sniff, parent-process
+# name, or an interactive TTY prompt.
+#
+# Each test isolates one rung of that ladder so a regression shows up
+# on the exact rung that broke.
+
+
+@pytest.fixture
+def clear_client_env(monkeypatch):
+    """Strip every env var the client-name detector reads, so tests
+    start from a known-empty baseline.  Individual tests re-add the
+    one signal they're exercising."""
+    from kiln.cli import auth_commands
+
+    for var, _label in auth_commands._CLIENT_NAME_ENV_SIGNALS:
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("VSCODE_PID", raising=False)
+    # Defensive: nuke any stray CLAUDE_CODE_* prefix-match vars too.
+    for key in list(os.environ.keys()):
+        if key.startswith("CLAUDE_CODE_"):
+            monkeypatch.delenv(key, raising=False)
+    yield
+
+
+class TestDetectClientName:
+    """``_detect_client_name`` walks env → parent-process → fallback.
+
+    We stub parent-process name resolution (``_sniff_client_from_parent_process``)
+    to empty so env-var tests aren't contaminated by whichever binary
+    ran the pytest process (zsh, bash, sh on CI, etc.).
+    """
+
+    def test_env_claude_desktop_wins(self, monkeypatch, clear_client_env):
+        from kiln.cli import auth_commands
+
+        monkeypatch.setenv("CLAUDE_DESKTOP_SESSION", "sess-abc")
+        monkeypatch.setattr(
+            auth_commands, "_sniff_client_from_parent_process", lambda: "",
+        )
+        assert auth_commands._detect_client_name() == "Claude Desktop"
+
+    def test_env_cursor_signal(self, monkeypatch, clear_client_env):
+        from kiln.cli import auth_commands
+
+        monkeypatch.setenv("CURSOR_EDITOR", "1")
+        monkeypatch.setattr(
+            auth_commands, "_sniff_client_from_parent_process", lambda: "",
+        )
+        assert auth_commands._detect_client_name() == "Cursor"
+
+    def test_env_claude_code_prefix_match(self, monkeypatch, clear_client_env):
+        """Any ``CLAUDE_CODE_*`` env var with a non-empty value counts
+        as Claude Code — new session-variable names ship faster than
+        this ladder can be hand-updated."""
+        from kiln.cli import auth_commands
+
+        monkeypatch.setenv("CLAUDE_CODE_SOMETHING_NEW", "yes")
+        monkeypatch.setattr(
+            auth_commands, "_sniff_client_from_parent_process", lambda: "",
+        )
+        assert auth_commands._detect_client_name() == "Claude Code"
+
+    def test_env_claude_desktop_beats_claude_code(
+        self, monkeypatch, clear_client_env,
+    ):
+        """Order matters.  A Claude Desktop session that happens to
+        also set a CLAUDE_CODE_* env var is still semantically
+        Claude Desktop."""
+        from kiln.cli import auth_commands
+
+        monkeypatch.setenv("CLAUDE_DESKTOP_SESSION", "sess")
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "also-set")
+        monkeypatch.setattr(
+            auth_commands, "_sniff_client_from_parent_process", lambda: "",
+        )
+        assert auth_commands._detect_client_name() == "Claude Desktop"
+
+    def test_vscode_without_cursor(self, monkeypatch, clear_client_env):
+        from kiln.cli import auth_commands
+
+        monkeypatch.setenv("VSCODE_PID", "12345")
+        monkeypatch.setattr(
+            auth_commands, "_sniff_client_from_parent_process", lambda: "",
+        )
+        assert auth_commands._detect_client_name() == "VS Code"
+
+    def test_headless_empty_returns_unspecified_mcp(
+        self, monkeypatch, clear_client_env,
+    ):
+        """stdin-not-a-TTY + no env + no proc hit → the MCP-subprocess
+        default label."""
+        from kiln.cli import auth_commands
+
+        monkeypatch.setattr(
+            auth_commands, "_sniff_client_from_parent_process", lambda: "",
+        )
+        monkeypatch.setattr(auth_commands, "_is_stdin_tty", lambda: False)
+        assert auth_commands._detect_client_name() == "Unspecified (MCP)"
+
+    def test_tty_empty_returns_empty_string(
+        self, monkeypatch, clear_client_env,
+    ):
+        """TTY + no signals → empty string.  The caller (``_resolve_
+        client_name``) decides whether to prompt."""
+        from kiln.cli import auth_commands
+
+        monkeypatch.setattr(
+            auth_commands, "_sniff_client_from_parent_process", lambda: "",
+        )
+        monkeypatch.setattr(auth_commands, "_is_stdin_tty", lambda: True)
+        assert auth_commands._detect_client_name() == ""
+
+
+class TestResolveClientName:
+    """``_resolve_client_name`` — explicit flag > detect > prompt."""
+
+    def test_explicit_flag_wins_over_env(self, monkeypatch, clear_client_env):
+        """``--client "Foo"`` must beat whatever the env would detect."""
+        from kiln.cli import auth_commands
+
+        monkeypatch.setenv("CLAUDE_DESKTOP_SESSION", "sess-abc")
+        monkeypatch.setattr(
+            auth_commands, "_sniff_client_from_parent_process", lambda: "",
+        )
+        assert auth_commands._resolve_client_name("Foo") == "Foo"
+
+    def test_explicit_empty_string_is_honoured(
+        self, monkeypatch, clear_client_env,
+    ):
+        """``--client ""`` means 'I don't want a label' — no prompt,
+        no sniff, no fallback."""
+        from kiln.cli import auth_commands
+
+        monkeypatch.setenv("CLAUDE_DESKTOP_SESSION", "sess-abc")
+        # Prompt must NOT be called.
+        monkeypatch.setattr(
+            auth_commands, "_prompt_for_client_name",
+            lambda: pytest.fail("prompt invoked with explicit empty flag"),
+        )
+        assert auth_commands._resolve_client_name("") == ""
+
+    def test_explicit_flag_is_40_char_capped(
+        self, monkeypatch, clear_client_env,
+    ):
+        from kiln.cli import auth_commands
+
+        long_name = "X" * 100
+        result = auth_commands._resolve_client_name(long_name)
+        assert len(result) == 40
+        assert result == "X" * 40
+
+    def test_no_flag_falls_through_to_prompt_on_tty(
+        self, monkeypatch, clear_client_env,
+    ):
+        """No env + no proc + TTY → _prompt_for_client_name is called."""
+        from kiln.cli import auth_commands
+
+        monkeypatch.setattr(
+            auth_commands, "_sniff_client_from_parent_process", lambda: "",
+        )
+        monkeypatch.setattr(auth_commands, "_is_stdin_tty", lambda: True)
+        called: dict[str, bool] = {"prompted": False}
+
+        def fake_prompt() -> str:
+            called["prompted"] = True
+            return "PromptedValue"
+
+        monkeypatch.setattr(
+            auth_commands, "_prompt_for_client_name", fake_prompt,
+        )
+        result = auth_commands._resolve_client_name(None)
+        assert called["prompted"] is True
+        assert result == "PromptedValue"
+
+    def test_no_flag_headless_returns_unspecified_mcp_without_prompt(
+        self, monkeypatch, clear_client_env,
+    ):
+        """No env + no proc + non-TTY → 'Unspecified (MCP)', NOT prompt."""
+        from kiln.cli import auth_commands
+
+        monkeypatch.setattr(
+            auth_commands, "_sniff_client_from_parent_process", lambda: "",
+        )
+        monkeypatch.setattr(auth_commands, "_is_stdin_tty", lambda: False)
+
+        def fail_prompt() -> str:
+            pytest.fail("prompt should not be invoked in headless mode")
+
+        monkeypatch.setattr(
+            auth_commands, "_prompt_for_client_name", fail_prompt,
+        )
+        assert auth_commands._resolve_client_name(None) == "Unspecified (MCP)"
+
+
+class TestPairForwardsClientName:
+    """`kiln pair --client` forwards the resolved name in the request body."""
+
+    def test_pair_sends_client_name_in_body(
+        self, auth_home, monkeypatch, clear_client_env,
+    ):
+        import click
+        from click.testing import CliRunner
+        from kiln.cli import auth_commands
+        from kiln.cli.auth_commands import register_auth_cli
+
+        captured: dict = {}
+
+        def fake_post(path, body, *, bearer=None, timeout=15.0):
+            captured["path"] = path
+            captured["body"] = body
+            # Mimic a successful pairing response.
+            return {
+                "success": True,
+                "access_token": "at",
+                "refresh_token": "rt",
+                "email": "adam@kiln3d.com",
+                "auth_uid": "uid-1",
+                "tier": "pro",
+                "has_entitlement": True,
+            }
+
+        def fake_get(path, *, bearer=None, timeout=10.0):
+            return (200, {})
+
+        monkeypatch.setattr(auth_commands, "_http_post", fake_post)
+        monkeypatch.setattr(auth_commands, "_http_get", fake_get)
+        # Pin the detector off so the --client flag is the only signal.
+        monkeypatch.setattr(
+            auth_commands, "_sniff_client_from_parent_process", lambda: "",
+        )
+
+        g = click.Group("kiln")
+        register_auth_cli(g)
+        r = CliRunner().invoke(
+            g,
+            ["pair", "KLN-ABCD-EFGH", "--client", "Claude Desktop"],
+        )
+        assert r.exit_code == 0, r.output
+        assert captured["path"] == "/api/auth/pairing/claim"
+        assert captured["body"].get("client_name") == "Claude Desktop"
+
+    def test_pair_auto_detects_when_flag_omitted(
+        self, auth_home, monkeypatch, clear_client_env,
+    ):
+        """No ``--client`` flag + a detectable env var → the auto-
+        detected name rides in the body."""
+        import click
+        from click.testing import CliRunner
+        from kiln.cli import auth_commands
+        from kiln.cli.auth_commands import register_auth_cli
+
+        monkeypatch.setenv("CURSOR_EDITOR", "1")
+        monkeypatch.setattr(
+            auth_commands, "_sniff_client_from_parent_process", lambda: "",
+        )
+
+        captured: dict = {}
+
+        def fake_post(path, body, *, bearer=None, timeout=15.0):
+            captured["body"] = body
+            return {
+                "success": True,
+                "access_token": "at",
+                "refresh_token": "rt",
+                "email": "adam@kiln3d.com",
+                "auth_uid": "uid-1",
+                "tier": "pro",
+                "has_entitlement": True,
+            }
+
+        monkeypatch.setattr(auth_commands, "_http_post", fake_post)
+        monkeypatch.setattr(
+            auth_commands, "_http_get",
+            lambda path, *, bearer=None, timeout=10.0: (200, {}),
+        )
+
+        g = click.Group("kiln")
+        register_auth_cli(g)
+        r = CliRunner().invoke(g, ["pair", "KLN-ABCD-EFGH"])
+        assert r.exit_code == 0, r.output
+        assert captured["body"].get("client_name") == "Cursor"
+
+
+class TestInviteForwardsClientName:
+    """`kiln invite --client` forwards the resolved name in the request body."""
+
+    def test_invite_sends_client_name_in_body(
+        self, auth_home, monkeypatch, clear_client_env,
+    ):
+        import json as _json
+        import click
+        from click.testing import CliRunner
+        from kiln.cli import auth_commands
+        from kiln.cli.auth_commands import register_auth_cli
+
+        # Seed a valid saved session — invite needs a bearer to forward.
+        (auth_home / ".kiln").mkdir(mode=0o700, exist_ok=True)
+        (auth_home / ".kiln" / "auth_tokens.json").write_text(
+            _json.dumps({"access_token": "tok", "refresh_token": "ref"})
+        )
+
+        captured: dict = {}
+
+        def fake_post(path, body, *, bearer=None, timeout=15.0):
+            captured["path"] = path
+            captured["body"] = body
+            return {
+                "success": True,
+                "code": "KLN-ABCD-EFGH",
+                "expires_at": "2099-01-01T00:10:00Z",
+                "verify_url": "https://app.kiln3d.com/settings/agent",
+            }
+
+        monkeypatch.setattr(auth_commands, "_http_post", fake_post)
+        monkeypatch.setattr(
+            auth_commands, "_sniff_client_from_parent_process", lambda: "",
+        )
+
+        g = click.Group("kiln")
+        register_auth_cli(g)
+        r = CliRunner().invoke(g, ["invite", "--client", "Codex"])
+        assert r.exit_code == 0, r.output
+        assert captured["path"] == "/api/auth/pairing/invite"
+        assert captured["body"].get("client_name") == "Codex"
+        # Refresh_token must still be there — the --client flag
+        # augments, not replaces, the body shape.
+        assert captured["body"].get("refresh_token") == "ref"
