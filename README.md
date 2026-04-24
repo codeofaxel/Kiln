@@ -117,17 +117,34 @@ Three things make this different from `git`:
 2. **3-way semantic mesh merge.** Z-level / pocket / bounding-box conflict zones rendered as visual diffs, not text patches. Manufacturing tolerance, not character offsets.
 3. **Signed releases with mesh re-fingerprinting.** Ed25519 signatures over a release manifest pinned to an exact mesh; verification re-computes the fingerprint to detect tamper after release.
 
+Here's what `visualize_branch_tree("my-coaster")` actually emits — the same renderer the workshop, CLI, and your agent see (yellow = signed release, light blue = experiment, light red = branch with failed outcomes):
+
 ```mermaid
-flowchart LR
-    M["main"] --> B["3 branches<br/>(test variants)"]
-    B --> O["📊 outcome<br/>scores"]
-    O ==>|winner| MG["merge → main"]
-    MG --> R["🔏 Ed25519<br/>signed release"]
-    style M fill:#0f3460,stroke:#0f3460,color:#fff
-    style B fill:#2d2d44,stroke:#f59e42,color:#fff
-    style O fill:#16213e,stroke:#f59e42,color:#fff
-    style MG fill:#0f3460,stroke:#27ae60,color:#fff
-    style R fill:#1a1a2e,stroke:#e94560,color:#fff
+flowchart TD
+    subgraph tree_coaster["📐 my-coaster · design"]
+        v0[v0: initial]
+        v1[v1: emboss-1mm<br/>83% success]
+        v2[v2: emboss-2mm<br/>92% success · warp 2%]
+        v3[v3: emboss-3mm<br/>warp 5%]
+        v4[v4: merge winner]
+        rel[🔏 1.0.0]
+        v0 --> v1
+        v0 --> v2
+        v0 --> v3
+        v2 --> v4
+        v4 --> rel
+    end
+    classDef root fill:#f3f4f6,stroke:#374151,color:#111
+    classDef released fill:#ffd60a,stroke:#111,stroke-width:3px,color:#111
+    classDef experiment fill:#e0e7ff,stroke:#6366f1,color:#1e1b4b
+    classDef failed fill:#fecaca,stroke:#b91c1c,color:#7f1d1d
+    class v0 root
+    class v1 experiment
+    class v2 experiment
+    class v3 failed
+    class v4 experiment
+    class rel released
+    style tree_coaster fill:#ffffff,stroke:#e5e7eb,stroke-width:1px
 ```
 
 | Tier | What you get |
