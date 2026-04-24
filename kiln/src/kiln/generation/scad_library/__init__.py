@@ -1,4 +1,4 @@
-"""OpenSCAD parametric library for Kiln 3D.
+"""OpenSCAD parametric library for Kiln.
 
 This module loads all .scad files in this directory and concatenates them into
 a single string. The resulting source is prepended to Gemini-generated OpenSCAD

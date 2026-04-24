@@ -77,3 +77,8 @@ prints/
 docs/marketing/
 .vercel
 .env*.local
+
+# Brand-casing policy — private internal doc, not part of public Kiln
+# surface.  Lives at docs/BRAND.md; see Adam directly for the current
+# version.  See CLAUDE.md "Files Never to Commit" for the principle.
+docs/BRAND.md

@@ -7,6 +7,8 @@
 ### Litepaper -- April 2026
 
 > Describe it or draw it. Kiln makes it real.
+>
+> Kiln turns a conversation with an AI agent into a printed object. One install, any printer, start to finish.
 
 ---
 
