@@ -63,6 +63,7 @@ graph TD
     B --> F["🏭 Fulfillment"]
     B --> N["🌐 External Integrations<br/><sub>(third-party providers/networks, as available)</sub>"]
     B --> D["🛒 Marketplaces"]
+    B --> V["📐 Designs (versioned)<br/><sub>Pro+</sub>"]
 
     C --> E1["OctoPrint"]
     C --> E2["Moonraker"]
@@ -78,25 +79,65 @@ graph TD
     D --> J["Cults3D"]
     D --> H["Thingiverse (deprecated)"]
 
+    V --> V1["Branches"]
+    V --> V2["Signed Releases"]
+    V --> V3["Cloud Sync"]
+
     style A fill:#1a1a2e,stroke:#e94560,color:#fff
     style B fill:#16213e,stroke:#0f3460,color:#fff
     style C fill:#0f3460,stroke:#e94560,color:#fff
     style F fill:#0f3460,stroke:#27ae60,color:#fff
     style N fill:#0f3460,stroke:#f39c12,color:#fff
     style D fill:#0f3460,stroke:#533483,color:#fff
+    style V fill:#0f3460,stroke:#f59e42,color:#fff
     style E1 fill:#2d2d44,stroke:#e94560,color:#fff
     style E2 fill:#2d2d44,stroke:#e94560,color:#fff
     style E3 fill:#2d2d44,stroke:#e94560,color:#fff
     style E4 fill:#2d2d44,stroke:#e94560,color:#fff
+    style E5 fill:#2d2d44,stroke:#e94560,color:#fff
     style F1 fill:#2d2d44,stroke:#27ae60,color:#fff
-    style F2 fill:#2d2d44,stroke:#27ae60,color:#fff
     style N1 fill:#2d2d44,stroke:#f39c12,color:#fff
     style H fill:#2d2d44,stroke:#533483,color:#fff
     style I fill:#2d2d44,stroke:#533483,color:#fff
     style J fill:#2d2d44,stroke:#533483,color:#fff
+    style V1 fill:#2d2d44,stroke:#f59e42,color:#fff
+    style V2 fill:#2d2d44,stroke:#f59e42,color:#fff
+    style V3 fill:#2d2d44,stroke:#f59e42,color:#fff
 ```
 
-Kiln connects AI agents to **OctoPrint**, **Moonraker** (Klipper), **Bambu Lab**, **Prusa Link**, and **Elegoo** printers. Agents can also outsource jobs through **Craftcloud** fulfillment, and search models on **MyMiniFactory**, **Cults3D** (search only), and **Thingiverse**.
+Kiln connects AI agents to **OctoPrint**, **Moonraker** (Klipper), **Bambu Lab**, **Prusa Link**, and **Elegoo** printers. Agents can also outsource jobs through **Craftcloud** fulfillment, and search models on **MyMiniFactory**, **Cults3D** (search only), and **Thingiverse**. On Pro and up, the design store itself is versioned — branches, signed releases, and cross-machine cloud sync are first-class outputs of the system, not a side database.
+
+## Git for 3D
+
+Designs aren't text, but they need version control. Kiln treats meshes, decorations, and mechanical features as first-class versioned artifacts: branch a design, print variants, merge what works, sign releases with cryptographic proof the mesh hasn't changed.
+
+Three things make this different from `git`:
+
+1. **Outcome-correlated branches.** Every branch is tagged with empirical print results — success rate, warp, adhesion, cost — so cross-branch A/B is automatic, not anecdotal.
+2. **3-way semantic mesh merge.** Z-level / pocket / bounding-box conflict zones rendered as visual diffs, not text patches. Manufacturing tolerance, not character offsets.
+3. **Signed releases with mesh re-fingerprinting.** Ed25519 signatures over a release manifest pinned to an exact mesh; verification re-computes the fingerprint to detect tamper after release.
+
+```mermaid
+flowchart LR
+    M["main"] --> B["3 branches<br/>(test variants)"]
+    B --> O["📊 outcome<br/>scores"]
+    O ==>|winner| MG["merge → main"]
+    MG --> R["🔏 Ed25519<br/>signed release"]
+    style M fill:#0f3460,stroke:#0f3460,color:#fff
+    style B fill:#2d2d44,stroke:#f59e42,color:#fff
+    style O fill:#16213e,stroke:#f59e42,color:#fff
+    style MG fill:#0f3460,stroke:#27ae60,color:#fff
+    style R fill:#1a1a2e,stroke:#e94560,color:#fff
+```
+
+| Tier | What you get |
+|------|-------------|
+| Free | Linear local design history (save / diff / rollback) |
+| **Pro** | Branch · merge · cherry-pick · Ed25519 signed releases · solo cloud sync |
+| **Business** | Team pull requests · approval gates · orgs / teams / scopes |
+| **Enterprise** | Audit log export · SSO · step-up authentication on releases · access review |
+
+Patent pending across semantic mesh merge, outcome-correlated branching, and signed-release-with-physical-provenance.
 
 ## Packages
 
