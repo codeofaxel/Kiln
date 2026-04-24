@@ -1,18 +1,22 @@
 ---
-// Flagship v1.0 highlight — Git for 3D Printing.
+// Flagship highlight — Git for 3D Printing.
 // Intentionally its own section between Hero and FeatureGrid so the
 // concept gets billboard-level visibility, not a buried grid card.
 //
 // Uses the dark-theme tokens from global.css (--bg, --text, --accent)
 // so it reads as a first-class section, not a retrofit.
+//
+// Tier honesty: the H2 carries a small ``Pro`` pill for users who
+// don't read the paragraph below the list.  Patent-pending does NOT
+// live here — the pricing page's one tasteful footer line is the
+// single considered placement for that claim.
 ---
 
 <section class="g3d-section">
   <div class="container-wide">
     <div class="g3d-inner">
       <div class="g3d-copy">
-        <div class="g3d-badge">NEW in v1.0 &nbsp;·&nbsp; Patent-pending</div>
-        <h2 class="g3d-heading">Git for 3D Printing</h2>
+        <h2 class="g3d-heading">Git for 3D Printing <span class="g3d-pro-pill">Pro</span></h2>
         <p class="g3d-lead">
           Branch new ideas without losing the working version. Merge what prints best.
           Sign a release and prove later that nothing changed.
@@ -98,18 +102,28 @@
     align-items: center;
   }
 
-  .g3d-badge {
+  /* Small tier pill that sits inline with the H2.  Deliberately
+     subordinate to the heading — this is a quiet signal, not a
+     competing callout.  Matches the terracotta accent already in
+     the section's radial-gradient background so it reads as
+     brand-coherent, not a retrofit. */
+  .g3d-pro-pill {
     display: inline-block;
-    padding: 6px 14px;
-    font-size: 11px;
+    vertical-align: middle;
+    margin-left: 14px;
+    padding: 4px 10px;
+    font-size: 12px;
     font-weight: 600;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--accent);
     background: var(--accent-glow);
     border: 1px solid rgba(255, 107, 43, 0.35);
     border-radius: 999px;
-    margin-bottom: 20px;
+    /* Lift slightly so the pill sits on the H2's optical baseline
+       rather than anchoring to descenders. */
+    position: relative;
+    top: -0.15em;
   }
 
   .g3d-heading {
