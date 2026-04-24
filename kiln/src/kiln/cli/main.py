@@ -70,6 +70,8 @@ from kiln.cli.output import (
     format_status,
 )
 
+from kiln.cli.auth_commands import register_auth_cli
+
 logger = logging.getLogger(__name__)
 
 _MATERIAL_CHOICES: tuple[str, ...] = ("PLA", "PETG", "ABS", "TPU", "ASA", "Nylon", "PC")
@@ -9718,6 +9720,13 @@ def repair(file_path: str, output: str | None, json_mode: bool) -> None:
             )
         )
         sys.exit(1)
+
+
+# Auth commands — `kiln login` / `kiln logout` / `kiln whoami` / `kiln pair`.
+# Registered unconditionally (before kiln-pro) so ``pip install kiln3d && kiln
+# pair <code>`` works on a clean machine without private-registry access.
+# These commands call only the public Kiln REST API; no proprietary logic.
+register_auth_cli(cli)
 
 
 # Pro-CLI registration — MUST run after every @cli.group decorator above so
