@@ -1,6 +1,14 @@
 # Kiln — Claude Code Guidelines
 
-## Git Workflow (MANDATORY)
+Sections are tagged with `[SCOPE]` hints so Opus can weight them by task type. Tags: `[ALWAYS]` applies every turn, `[BUG-FIX]` / `[NEW-FEATURE]` / `[RELEASE]` / `[BRAINSTORM]` apply for matching tasks, `[SAFETY]` is non-negotiable regardless of task.
+
+**Playbook skills** — invoke these; do not re-derive them:
+- `/ship-gate` — pre-present gate (compile, test, lint, root-cause, docs). Runs before any non-trivial work is shown to the user.
+- `/judges-panel` — four-judge review (Jobs, Ive, antirez, Andreessen). Runs after ship-gate for non-trivial work.
+- `/chris-audit` — Supabase/RLS security sweep. Runs on any RLS/auth-path change in kiln-pro.
+- `/kiln-stats` — authoritative MCP / CLI / test counts. The skill lives in kiln-pro at `.claude/skills/kiln-stats/SKILL.md` and points at `scripts/check_doc_counts.py`. Use it any time you need to quote a count or check whether docs are stale; do not grep `@mcp.tool()` and do not invent a methodology — past sessions have re-derived these counts five different wrong ways.
+
+## [ALWAYS] Git Workflow
 - **Always run `git branch --show-current` before investigating bugs or making changes.** Do not skip this.
 - Verify you're on the correct branch before reading code, grepping, or proposing fixes.
 - If the user mentions a branch name, switch to it first.
@@ -18,35 +26,101 @@
   they bloat the repo and leak internal context to future contributors.
   The `.gitignore` has patterns for these as a safety net.
 
-## Communication Style
+## [ALWAYS] Communication Style
 - **Be direct. Execute, don't narrate.** Show findings concisely. Don't over-explain reasoning.
 - When asked to investigate or explain, provide findings directly **without asking for approval**. Only ask for approval before making destructive or irreversible changes (deleting files, force pushing, dropping tables).
 - Don't propose plans for simple tasks. Just do them.
 - For complex multi-file changes, briefly state your approach (2-3 sentences max) then execute.
 - Never say "shall I proceed?" or "would you like me to?" for investigation, reading, or analysis tasks.
-- **Brainstorm mode**: When the user says "brainstorm", "discuss", "think through", "talk about", or "let's explore" — stay in **conversation mode**. Do NOT jump into auditing code, proposing implementation plans, or executing changes. Ask questions, explore tradeoffs, and riff on ideas collaboratively. Only shift to execution when the user explicitly says to build/implement/fix something.
+- **[BRAINSTORM] mode**: When the user says "brainstorm", "discuss", "think through", "talk about", "let's explore", or ends with "thoughts?" / "wdyt" — stay in **conversation mode**. Do NOT jump into auditing code, proposing implementation plans, or executing changes. Ask questions, explore tradeoffs, riff collaboratively. Only shift to execution when the user explicitly says to build/implement/fix.
 - **Skip human-only tasks by default**: When given a task list, silently skip items requiring human action (account creation, App Store submissions, manual device testing, credential entry) unless explicitly told to include them. Focus on what you can execute autonomously.
 
-## Relationship to kiln-pro (IMPORTANT — read before moving code)
+## [SAFETY] Relationship to kiln-pro (read before moving code)
 - A **private** paid-tier companion repo (`kiln-pro`) adds premium features (textures, device intelligence, billing, fleet, etc.).
 - Kiln discovers pro features via `try: from kiln_pro.bridge import pro_features` with `except ImportError` fallback.
 - **Free users access pro tools via kiln-pro's REST API server** (`POST /api/tools/{tool_name}`), which runs server-side with all tools loaded. Free users never install kiln-pro locally.
 - **NEVER move proprietary code from kiln-pro into this repo to "make it available to free users."** The REST API proxy pattern keeps IP private while serving tools to any tier. To open a pro tool to free users, change its gate in kiln-pro (e.g., `check_pro()` → quota check), don't move the code here.
 - Quota enforcement (`decoration_quota.py`) lives here. Tier resolution calls `kiln.licensing` which kiln-pro provides; without kiln-pro, tier defaults to `"free"`.
 
-## Project Identity
+## [ALWAYS] Project Identity
 - **Kiln is infrastructure, not software.** Never describe it as "automation software", "an API", or use cloud/SaaS framing. Kiln is local stdio-based infrastructure that AI agents use to control physical printers. It is not cloud-hosted.
 - **Correct framing**: "3D printing infrastructure for AI agents", "printer control layer", "MCP infrastructure"
 - **Wrong framing**: "automation software", "API platform", "cloud service", "printer management app"
-- **Never compare Kiln to other companies.** No "X for 3D printing", no "like Uber/Waze/Shopify but for...", no analogies to other products in code, docs, README, blog posts, or conversation. Kiln stands on its own. Describe what it does, not what it's "like".
 
-## Code Discipline
+## [ALWAYS] Code Discipline
 - **Root causes only.** Never apply band-aid fixes. Trace to the actual source of the problem.
 - **Minimal blast radius.** Only touch what's necessary. Don't refactor adjacent code "while you're in there" unless asked.
 - **Simplicity first.** Prefer the simplest correct solution. Don't over-engineer.
-- **Challenge your own work.** Before presenting a fix, ask: "Is there a simpler way? Did I introduce new issues? Would a staff engineer approve this?"
+- **Challenge your own work.** Before presenting, run `/ship-gate`. For non-trivial work, follow with `/judges-panel`.
 
-## Design Preferences & Taste
+### Critical Contrasts — the five patterns that have bitten us repeatedly
+
+These are lived-in lessons. Each ❌ is something that actually shipped and hurt; each ✅ is the pattern that would have prevented it.
+
+**1. Root cause vs band-aid** — see `/ship-gate` phase 2.1
+
+```
+❌ Bug: calibration fails when printer is warming up.
+   Fix: add sleep(5) before calibration call.
+   Problem: any timing skew re-triggers the bug; the true precondition is hidden.
+
+✅ Bug: calibration fails when printer is warming up.
+   Fix: poll printer.get_state() until status == READY, timeout with clear error.
+   Why: the precondition ("printer must be ready") is now explicit and enforced.
+```
+
+**2. Kiln adapter vs raw protocol** — see Hard Law 0
+
+```
+❌ Need a Bambu camera frame, adapter's get_snapshot() is timing out.
+   Fix: drop to raw ffmpeg with the RTSP URL.
+   Problem: raw path misses TLS quirks, auth retry, and error mapping the adapter handles.
+   When it fails in 2 weeks, nobody knows why.
+
+✅ Need a Bambu camera frame, adapter's get_snapshot() is timing out.
+   Fix: diagnose the adapter (increase timeout, handle new firmware response shape),
+   land the fix in the adapter, ALL callers benefit. If the feature doesn't exist
+   in any adapter, build the MCP tool before shipping the workaround.
+```
+
+**3. REST API proxy vs moving pro code to public** — see "Relationship to kiln-pro"
+
+```
+❌ Free users want access to texture engine (kiln-pro).
+   Fix: copy texture_engine.py into Kiln, gate with check_tier("free").
+   Problem: IP leaks to public repo; kiln-pro's value proposition erodes.
+
+✅ Free users want access to texture engine (kiln-pro).
+   Fix: in kiln-pro, change check_pro() → _check_texture_quota() (3/month free).
+   Free users hit the REST API at api.kiln3d.com; tool runs server-side;
+   source code never leaves kiln-pro; IP stays protected.
+```
+
+**4. Push discipline** — approval is explicit or it didn't happen
+
+```
+❌ Finished the feature. CI green. Push to origin main.
+   Problem: Adam didn't say "push it." Past violations caused irreversible damage
+   (design_styles pushed to public main without permission, April 2026).
+
+✅ Finished the feature. CI green. Show the diff to Adam, wait for "push it" / "merge it".
+   The cost of waiting 2 minutes for approval << the cost of a rollback.
+```
+
+**5. Minimal diff vs scope creep** — one fix per commit
+
+```
+❌ "Fix a typo in the status message."
+   Diff: typo + rename 3 vars + reformat 2 files + extract helper function.
+   Problem: reviewer can't cleanly approve "the typo fix"; rollback is ugly.
+
+✅ "Fix a typo in the status message."
+   Diff: the typo, one character changed.
+   The rename and extraction (if genuinely good ideas) ship in separate commits
+   with their own justification.
+```
+
+## [ALWAYS] Design Preferences & Taste
 
 These encode how Adam wants code to look and feel. Follow these even when not explicitly stated — they're the difference between "done" and "done well."
 
@@ -95,27 +169,28 @@ These encode how Adam wants code to look and feel. Follow these even when not ex
 - **Env vars**: `KILN_` prefix always (e.g., `KILN_PRINTER_HOST`)
 - **MCP tools**: snake_case matching the function name (e.g., `get_printer_status`)
 
-## Reference Implementations (Copy These Patterns)
+## [NEW-FEATURE] Reference Implementations (Copy These Patterns)
 
 When adding new code, find and follow the closest existing pattern. Don't invent new conventions.
 
-| Adding...                  | Copy the pattern in...                                              |
-|----------------------------|---------------------------------------------------------------------|
-| New MCP tool               | `plugins/design_tools.py` or any plugin file (decorator, error handling, return format). **NEVER add new tools to server.py** — it has 120 tools; all new tools go in `plugins/`. |
-| New printer adapter        | `printers/octoprint.py` (method order, retry logic, error wrapping, dataclass returns) |
-| New CLI command            | `cli/main.py` → `status` command (Click decorators, context, `--json` flag, error handling) |
-| New marketplace adapter    | `marketplaces/thingiverse.py` (API client pattern, auth, response normalization) |
-| New test file              | `tests/test_octoprint_adapter.py` (class organization, `responses` mocking, fixture usage) |
-| New dataclass/enum         | `printers/base.py` (string enum values, `to_dict()`, Optional fields) |
-| New config option          | `cli/config.py` → `load_printer_config()` (env var fast path, validation, YAML fallback) |
-| New safety check           | `gcode.py` → temperature validation (per-printer limits, clear error messages) |
-| New JSON data file         | `data/safety_profiles.json` (keyed by printer model, validated on load) |
-| New output formatter       | `cli/output.py` → `format_status()` (JSON envelope, Rich + plain-text fallback) |
+| Adding...                  | ✅ Copy the pattern in...                                           | ❌ Don't mimic                                                      |
+|----------------------------|----------------------------------------------------------------------|----------------------------------------------------------------------|
+| New MCP tool               | `plugins/design_tools.py` or any plugin file (decorator, error handling, return format). | `server.py` — it has 120+ legacy tools. All new tools go in `plugins/`. |
+| New printer adapter        | `printers/octoprint.py` (method order, retry logic, error wrapping, dataclass returns) | Raw `requests` or `httpx` calls sprinkled in the adapter body — wrap in `_request()`. |
+| New CLI command            | `cli/main.py` → `status` command (Click decorators, context, `--json` flag, error handling) | Commands that print without `--json` support, or that raise raw exceptions to the terminal. |
+| New marketplace adapter    | `marketplaces/thingiverse.py` (API client pattern, auth, response normalization) | Returning raw API JSON — always normalize to internal dataclass types first. |
+| New test file              | `tests/test_octoprint_adapter.py` (class organization, `responses` mocking, fixture usage) | `unittest.TestCase` + `self.assertEqual` — native pytest is the standard. |
+| New dataclass/enum         | `printers/base.py` (string enum values, `to_dict()`, Optional fields) | Integer enums or enums without `.value` strings (breaks JSON serialization). |
+| New config option          | `cli/config.py` → `load_printer_config()` (env var fast path, validation, YAML fallback) | Hardcoded defaults with no env-var override path. |
+| New safety check           | `gcode.py` → temperature validation (per-printer limits, clear error messages) | Generic "value out of range" errors with no context. |
+| New JSON data file         | `data/safety_profiles.json` (keyed by printer model, validated on load) | Free-form JSON without a `_meta` header or schema validation. |
+| New output formatter       | `cli/output.py` → `format_status()` (JSON envelope, Rich + plain-text fallback) | Print statements scattered through business logic — formatters go in one place. |
 
 **The rule:** Before writing new code, `grep` for the closest existing example and match its structure exactly. If no reference exists, propose the pattern before implementing.
 
-## Use Existing Tools — Never Reinvent (MANDATORY)
-Before writing ad-hoc scripts for printer operations, **check if an MCP tool already exists**. Kiln has 702 MCP tools. The answer is almost always yes.
+## [ALWAYS] Use Existing Tools — Never Reinvent
+
+Before writing ad-hoc scripts for printer operations, **check if an MCP tool already exists**. Kiln has 728+ MCP tools. The answer is almost always yes.
 
 | Operation                  | Use this tool — don't write a script                                |
 |----------------------------|---------------------------------------------------------------------|
@@ -134,131 +209,150 @@ Before writing ad-hoc scripts for printer operations, **check if an MCP tool alr
 
 **Why this matters:** Context window rotations lose knowledge of what tools exist. This table survives rotations because CLAUDE.md is loaded at session start.
 
-## Subagent Strategy
-- **Solo by default.** Most tasks don't need subagents. Do it inline unless there's a clear reason not to.
-- **Inline first, subagent only if necessary.** Try a direct Grep/Glob/Read first. Only escalate to a subagent if: the search requires 5+ rounds of exploration, touches 5+ files, or would significantly bloat the main context.
-- **One task per subagent.** Give each subagent a focused, specific job. Don't ask a subagent to "investigate and fix" — ask it to "find all usages of X" and process the results yourself.
-- **Always use haiku-model subagents** for research tasks (grepping, file reading, analysis). Only use sonnet/opus subagents when the subagent itself must write non-trivial code or do complex multi-step reasoning.
-- **Never spawn parallel subagents for tasks that could be done sequentially in under 5 minutes.** Two sequential greps are cheaper than two parallel subagent spawns. The overhead of spawning is real — only parallelize when each branch would take significant work independently.
+## [ALWAYS] Working Alone vs Delegating
 
-## Build & Test
-- **Use `python3` and `pip3`** (not `python`/`pip`) — on macOS, `python` may not exist or may point to a system Python 2.
-- Two Python packages in this monorepo:
-  - **kiln** (MCP server): `kiln/` — entry point `python3 -m kiln` or `kiln`
-  - **octoprint-cli** (CLI tool): `octoprint-cli/` — entry point `octoprint-cli`
-- Build system: `pyproject.toml` + setuptools for both packages
-- Tests: `kiln/tests/` and `octoprint-cli/tests/` (pytest)
-- After making Python edits, verify with: `cd kiln && python3 -m py_compile src/kiln/<file>.py` or run `pytest`
-- Install for development: `pip3 install -e "./kiln[dev,bambu]"` and `pip3 install -e "./octoprint-cli[dev]"`
-- **Linting**: Ruff is configured in both `pyproject.toml` files. Pre-commit hooks run Ruff lint + format automatically.
-- **MANDATORY: Run Ruff before every push.** After any Python edits, run `cd kiln && python3 -m ruff check src/kiln/` (and/or the octoprint-cli equivalent). CI runs Ruff lint and will fail on any violation. Never push without verifying lint passes locally first.
-- **CI verification after push**: After pushing, check CI status with `gh run list --limit 1`. If it fails, fix immediately — don't leave CI red.
+One unified policy for "do I handle this, delegate to a subagent, or ask the user?" Consult this decision tree any time you're unsure.
 
-## Release Process (Version Bumps)
-When bumping the version for a new release:
-1. **Update `kiln/pyproject.toml`** — bump `version = "X.Y.Z"`
-2. **Update `server.json`** — bump both top-level `version` and `packages[0].version` to match (the CI workflow auto-syncs this from the git tag, but keep it in sync in the repo too)
-3. **Update `docs/site/src/layouts/BaseLayout.astro`** — bump `softwareVersion` in the JSON-LD structured data
-4. **Update the Kiln Desktop App** — the native macOS SwiftUI app in the private `forge-internal` repo (`kiln-desktop/`) wraps Kiln's MCP tools. On version bumps:
-   - Update any hardcoded Kiln version references in the desktop app
-   - If new MCP tools were added, ensure the desktop app's `KilnToolRegistry` and `KilnToolExecutor` can surface them
-   - If new safety features, alert types, or material profiles were added, update `NativeMonitor` and `AlertInjector` to leverage them
-   - If new design intelligence was added (materials, patterns), update the `DesignVisualizer` material system
-   - The desktop app lives at: `github.com/codeofaxel/forge-internal/kiln-desktop/`
-5. Commit, then Adam creates a GitHub Release (`gh release create vX.Y.Z`) which auto-triggers:
-   - PyPI publish (trusted publishing, no token needed)
-   - MCP Registry publish (OIDC, no token needed)
-6. Both PyPI and MCP Registry are **fully automated** on release — no manual publish commands needed.
+### Default: solo
 
-## Debugging Approach
-- Trace bugs end-to-end: MCP tool call → server.py handler → PrinterAdapter method → HTTP request → OctoPrint API
-- For adapter bugs, check the abstract interface in `base.py` matches the concrete implementation in `octoprint.py`
-- For CLI bugs, trace: Click command → client.py → HTTP → OctoPrint API → output.py formatting
-- Check that printer state mapping covers all edge cases (OctoPrint flags → PrinterStatus enum)
-- Use structured JSON output from the CLI for debugging response formats
+Most tasks don't need subagents. Most tasks don't need to ask permission. Do it inline unless one of the escalation conditions below is met.
 
-## Autonomous Work Loops
+### When to spawn a subagent
 
-### Bug Fix Loop
-When asked to fix bugs or failing tests, work autonomously:
-1. Identify the failure (import error, test failure, runtime bug)
-2. Trace the root cause
-3. Implement the fix
-4. Verify the code compiles (`python3 -m py_compile`)
-5. If tests exist, run them and iterate until passing
-6. Report results only when done or truly blocked
+Subagent IS justified when:
+- Search requires 5+ rounds of exploration, or touches 5+ files
+- The task would significantly bloat the main context (e.g., reading a 2000-line log file for one number)
+- You're running genuinely independent parallel branches of work (each branch is substantial — not "one file each")
 
-Do NOT stop after step 2 to ask permission. Complete the full loop.
+Subagent is NOT justified when:
+- Task is 2–3 greps or file reads
+- "Subtasks" are one-line edits
+- You'd spawn parallel subagents for work that's faster done sequentially (2 greps sequentially < spawning 2 subagents)
 
-### Feature Implementation Loop
-When asked to implement a feature, work autonomously through the full lifecycle:
-1. Find the **reference implementation** (see Reference Implementations table above)
-2. Read the reference file to internalize the pattern
-3. **Collision check**: Before writing any new functions, grep target files for existing function names to avoid collisions. For `server.py`, run `grep "^def \|^async def " src/kiln/server.py` and verify your new names don't clash.
-4. Implement following that pattern exactly — same structure, same error handling, same naming
-5. Add tests following the test reference pattern (`test_octoprint_adapter.py` style)
-6. Run the full test suite for the affected package: `cd kiln && python3 -m pytest tests/ -x -q` or `cd octoprint-cli && python3 -m pytest tests/ -x -q`
-7. Run `python3 -m py_compile` on all changed files
-8. Self-challenge gate (see below)
-9. Update docs per Documentation Auto-Update Triggers if applicable
-10. Report results only when done or truly blocked
+Model choice: haiku for research (grep, read, analyze). sonnet/opus only when the subagent must write non-trivial code.
 
-Do NOT stop after step 1 to propose the plan. If a reference implementation exists, follow it and deliver the finished work.
+### When to swarm (multiple coordinated subagents)
 
-### Refactoring Loop
-When asked to refactor:
-1. Read all affected files first — understand the full dependency graph
-2. Run the test suite BEFORE making changes (establish baseline)
-3. Make changes incrementally, verifying compilation after each file
-4. Run the full test suite AFTER all changes
-5. If tests fail, fix them — refactoring must be behavior-preserving unless told otherwise
-6. Report the diff summary when done
+Swarm only when the task has 4+ genuinely independent substantial components. Don't swarm:
+- Sequential dependencies ("step 1, then step 2, …")
+- Small tasks dressed up with fancy coordination
+- Anything a single session could do in under 30 minutes
 
-### When Stuck — Decision Priority
-If you're unsure how to proceed, work through this list before asking the user:
+**When in doubt, solo.** The coordination overhead of a swarm is never justified for small or medium work.
+
+### When to ask the user (Decision Priority)
+
+If you're unsure how to proceed, walk this list before interrupting the user:
+
 1. **Check `.dev/LESSONS_LEARNED.md`** — has this problem been solved before?
 2. **Check reference implementations** — is there an existing pattern to follow?
 3. **Check tests** — do existing tests document the expected behavior?
 4. **Grep the codebase** — how does similar code elsewhere handle this case?
-5. **Follow the simplest approach** consistent with existing code patterns
+5. **Follow the simplest approach** consistent with existing code patterns.
 6. **Only ask the user** if:
-   - The decision is **irreversible** (schema change, data migration, API contract change)
+   - The decision is **irreversible** (schema change, data migration, API contract change, push to main)
    - The decision involves a **new architectural pattern** not seen anywhere in the codebase
    - There are **2+ equally valid approaches** with meaningfully different tradeoffs
    - The requirement is **genuinely ambiguous** — not just unfamiliar
 
 **Default bias: act, don't ask.** It's faster for Adam to review a finished implementation than to answer a question about a hypothetical one.
 
-## File Lookup Rule (MANDATORY)
+## [ALWAYS] Build & Test
+- **Use `python3` and `pip3`** (not `python`/`pip`) — on macOS, `python` may not exist or may point to a system Python 2.
+- Two Python packages in this monorepo:
+  - **kiln** (MCP server): `kiln/` — entry point `python3 -m kiln` or `kiln`
+  - **octoprint-cli** (CLI tool): `octoprint-cli/` — entry point `octoprint-cli`
+- Build system: `pyproject.toml` + setuptools for both packages
+- Tests: `kiln/tests/` and `octoprint-cli/tests/` (pytest)
+- After making Python edits, verify with `/ship-gate` phase 1 (compile + pytest + ruff).
+- Install for development: `pip3 install -e "./kiln[dev,bambu]"` and `pip3 install -e "./octoprint-cli[dev]"`
+- **Linting**: Ruff is configured in both `pyproject.toml` files. Pre-commit hooks run Ruff lint + format automatically.
+- **MANDATORY: Run Ruff before every push.** `cd kiln && python3 -m ruff check src/kiln/`. CI fails on any violation.
+- **CI verification after push**: `gh run list --limit 1`. If red, fix immediately.
+
+## [BUG-FIX] Debugging Approach
+- Trace bugs end-to-end: MCP tool call → server.py handler → PrinterAdapter method → HTTP request → OctoPrint API
+- For adapter bugs, check the abstract interface in `base.py` matches the concrete implementation in `octoprint.py`
+- For CLI bugs, trace: Click command → client.py → HTTP → OctoPrint API → output.py formatting
+- Check that printer state mapping covers all edge cases (OctoPrint flags → PrinterStatus enum)
+- Use structured JSON output from the CLI for debugging response formats
+- After fixing: `/ship-gate` (all three phases). Skip the judges panel for pure bug fixes unless they touch user-facing surfaces.
+
+## Autonomous Work Loops
+
+### [BUG-FIX] Bug Fix Loop
+1. Identify the failure (import error, test failure, runtime bug)
+2. Trace the root cause (not just the symptom)
+3. Implement the fix
+4. `/ship-gate` phase 1 (compile + tests)
+5. If tests exist, run them and iterate until passing
+6. Report results only when done or truly blocked
+
+Do NOT stop after step 2 to ask permission. Complete the full loop.
+
+### [NEW-FEATURE] Feature Implementation Loop
+1. Find the **reference implementation** (see Reference Implementations table above)
+2. Read the reference file to internalize the pattern
+3. **Collision check**: `grep "^def \|^async def " src/kiln/server.py` (or target file) to verify new function names don't clash
+4. Implement following that pattern exactly — same structure, same error handling, same naming
+5. Add tests following the test reference pattern (`test_octoprint_adapter.py` style)
+6. `/ship-gate` (all three phases)
+7. `/judges-panel` (four-judge review including Andreessen)
+8. Update docs per Documentation Auto-Update Triggers if applicable
+9. Report results only when done or truly blocked
+
+Do NOT stop after step 1 to propose the plan. If a reference implementation exists, follow it and deliver the finished work.
+
+### Refactoring Loop
+1. Read all affected files first — understand the full dependency graph
+2. Run the test suite BEFORE making changes (establish baseline)
+3. Make changes incrementally, verifying compilation after each file
+4. `/ship-gate` phase 1 AFTER all changes
+5. If tests fail, fix them — refactoring must be behavior-preserving unless told otherwise
+6. Report the diff summary when done
+
+## [ALWAYS] File Lookup Rule
 - **Internal working docs live in `.dev/`.** When the user references a file by name (e.g., "longterm_vision_tasks", "tasks", "lessons learned", "completed tasks", "swarm guide"), look in `.dev/` first — never glob the entire repo.
 - **Key directories:** `kiln/src/kiln/` (MCP server), `kiln/src/kiln/cli/` (CLI), `kiln/src/kiln/printers/` (adapters), `kiln/src/kiln/data/` (JSON data files), `kiln/tests/` (pytest), `octoprint-cli/` (CLI tool package), `docs/` (public docs), `.dev/` (internal working docs)
 
-## Desktop App (forge-internal/kiln-desktop)
+## [RELEASE] Desktop App (Kiln-pro/kiln-desktop)
 
-A native macOS SwiftUI desktop app lives in the private `forge-internal` repo at `kiln-desktop/`. It wraps Kiln's MCP tools in a premium desktop experience — Kiln is the brain, the app is the interface.
+The canonical native macOS SwiftUI desktop app lives in the **kiln-pro** repo at `kiln-desktop/` (`/Users/adamarreola/Kiln-pro/kiln-desktop/`). It wraps Kiln + kiln-pro features in a premium desktop experience — Kiln is the brain, the app is the interface.
+
+**Note**: There's also a `kiln-desktop/` folder in `forge-internal/` — this is a separate experimental workspace, NOT the canonical app. Any desktop app changes referenced in version bumps or release notes point to the Kiln-pro location.
 
 When pushing new Kiln version releases:
 - **KilnToolRegistry.swift / KilnAPIClient.swift** may need updating to reflect new or changed MCP tools
 - **NativeMonitor.swift** polls Kiln tools (`monitor_print`, `check_print_health`, `printer_trend_analysis`, etc.) — verify these still match after tool signature changes
 - **AlertInjector.swift** maps Kiln's safety/monitoring responses to native macOS notifications — update when new alert types or safety features are added
 - New materials, design patterns, or safety profiles should be reflected in the **DesignVisualizer**'s material system and the Models tab's Design Library
-- Build and test: `cd forge-internal/kiln-desktop && swift build`
+- Build and test: `cd /Users/adamarreola/Kiln-pro/kiln-desktop && swift build -c release`
 
-The `forge-internal/CLAUDE.md` has the full desktop app architecture reference (key files, tier system, build instructions).
+The `Kiln-pro/CLAUDE.md` § "Desktop App" has the full architecture reference (API client wiring, tier system, install commands).
 
-## Hard Laws (crash/data-loss prevention — never violate these)
+## [RELEASE] Release Process (Version Bumps)
+When bumping the version for a new release:
+1. **Update `kiln/pyproject.toml`** — bump `version = "X.Y.Z"`
+2. **Update `server.json`** — bump both top-level `version` and `packages[0].version` to match (the CI workflow auto-syncs this from the git tag, but keep it in sync in the repo too)
+3. **Update `docs/site/src/layouts/BaseLayout.astro`** — bump `softwareVersion` in the JSON-LD structured data
+4. **Update the Kiln Desktop App** in Kiln-pro (see "Desktop App" section above) — hardcoded version references, new MCP tools surfaced via `KilnToolRegistry`, new safety/material features surfaced via `NativeMonitor`/`AlertInjector`/`DesignVisualizer`.
+5. Commit, then Adam creates a GitHub Release (`gh release create vX.Y.Z`) which auto-triggers:
+   - PyPI publish (trusted publishing, no token needed)
+   - MCP Registry publish (OIDC, no token needed)
+6. Both PyPI and MCP Registry are **fully automated** on release — no manual publish commands needed.
+
+## [SAFETY] Hard Laws (crash/data-loss prevention — never violate these)
 
 ### 0. Always Use Kiln Tools — Never Go Raw
 - **Never use raw MQTT (`paho-mqtt`), FTPS (`ftplib`), ffmpeg, or direct socket connections** for printer operations. Always use `BambuAdapter` / `OctoPrintAdapter` / `MoonrakerAdapter` methods (e.g., `upload_file()`, `start_print()`, `get_snapshot()`, `get_state()`, `list_files()`, `delete_file()`).
-- **If a Kiln tool fails, fix the tool** — don't bypass it with raw commands. The raw approach will fail in different ways because it misses protocol details Kiln already handles (auth packets, TLS quirks, path detection, error mapping).
+- **If a Kiln tool fails, fix the tool** — don't bypass it with raw commands. Raw paths miss protocol details Kiln already handles (auth packets, TLS quirks, path detection, error mapping).
 - **If no Kiln tool exists for the operation, that's a gap** — build the MCP tool first, then use it. Don't ship a workaround.
-- **This applies to ALL printer interactions**: camera snapshots, file uploads, print commands, status queries, temperature control, calibration. Kiln's adapter layer exists precisely so agents don't have to guess at protocol details.
+- See Critical Contrasts #2 above for the concrete pattern.
 
 ### 1. Printer Safety First
-Before any print operation:
 - **Pre-flight check is mandatory**: Never bypass `preflight_check()`. Temperature, file existence, and printer state MUST be validated.
 - **Confirm before destructive ops**: `cancel_print()`, `start_print()`, raw G-code commands always require explicit confirmation context.
-- **Never send raw G-code without validation**: G-code commands that home axes, set temperatures, or move steppers can cause physical damage. Validate command safety.
+- **Never send raw G-code without validation**: commands that home axes, set temperatures, or move steppers can cause physical damage. Validate command safety.
 
 ### 2. Adapter Interface Contract
 Every new printer adapter MUST:
@@ -269,7 +363,7 @@ Every new printer adapter MUST:
 
 ### 3. Error Boundary Discipline
 - **Network calls always fail**: Every HTTP request to a printer MUST be wrapped in try/except. Printers go offline, networks drop, APIs timeout.
-- **Structured error responses**: Never return raw exception messages to agents. Always wrap in the standard `{"error": ..., "status": ...}` format.
+- **Structured error responses**: Never return raw exception messages to agents. Always wrap in `{"error": ..., "status": ...}` format.
 - **No silent failures**: If an operation fails, the agent MUST know. Never swallow exceptions.
 
 ### 4. Configuration Safety
@@ -281,100 +375,47 @@ Every new printer adapter MUST:
 No `// TODO` or `# TODO` in: print job submission, file upload, temperature control, G-code execution, or authentication flows. Code must be fully implemented or error-stubbed with user-visible feedback.
 
 ### 6. Type Safety at Boundaries
-- **Normalize external data**: OctoPrint/Moonraker/Bambu APIs all return different JSON shapes. Adapters MUST normalize to the internal dataclass types.
+- **Normalize external data**: OctoPrint/Moonraker/Bambu APIs all return different JSON shapes. Adapters MUST normalize to internal dataclass types.
 - **Validate before forwarding**: Never pass raw API responses through to the MCP layer. Parse, validate, type-check.
 - **Enum exhaustiveness**: When adding new printer states or capabilities, update ALL switch/match statements across the codebase.
 
-## When to Swarm vs Solo
-- **Solo is the default for most work.** Single-file edits, 2-file changes, sequential dependencies, bug fixes, small features — all solo. Don't swarm unless the task is genuinely large.
-- **Swarm only when it clearly saves significant time**: Multi-file features with 4+ independent components that each require substantial work (not one-line edits), or auditing 4+ unrelated subsystems simultaneously.
-- **Don't swarm small tasks.** If each "subtask" is just a few lines of code or a single file edit, do them sequentially. The coordination overhead of a swarm is never justified for small work.
-- **When in doubt, solo.** The cost of a swarm that wasn't needed is much higher than doing sequential work that could have been parallelized.
+## [ALWAYS] Correction Reflex (Self-Improvement Loop)
 
-## Learning Reflex (Self-Improvement Loop)
-When the user corrects you, points out a mistake, or you discover a non-obvious fix:
-1. **Immediately** append the pattern to `.dev/LESSONS_LEARNED.md` under the relevant section
-2. Write it as a reusable rule: what went wrong, why, and the correct pattern
-3. Keep entries concise (3-5 lines max)
-4. This is NOT optional — every correction becomes institutional knowledge
+Every correction from Adam becomes a permanent rule. **Goal: never get the same correction twice.**
 
-**Triggers:** User says "no, that's wrong", "actually you should...", "that's not how X works", a fix takes 2+ attempts, a test/validation fails for a non-obvious reason. When in doubt, file the lesson.
+**Triggers** — file a lesson when:
+- User says "no, that's wrong", "actually you should...", "that's not how X works"
+- A fix takes 2+ attempts
+- A test/validation fails for a non-obvious reason
+- You discover a non-obvious pattern
 
-### Correction → Rule Flywheel
-Every time Adam edits or corrects AI output, that correction should become a permanent rule. The goal is to **never get the same correction twice.**
-
-- If Adam changes code style → add to "Design Preferences & Taste"
-- If Adam changes architecture → add to "Reference Implementations" or "Design Preferences"
-- If Adam rejects an approach → add to "When Stuck" or "Design Preferences"
-- If a bug fix was non-obvious → add to "Lessons Learned" (already covered)
-- If Adam says "always do X" or "never do Y" → add as a rule in the most relevant section
+**Where the rule lands** depends on what was corrected:
+- Code style / naming → add to "Design Preferences & Taste"
+- Architecture / patterns → add to "Reference Implementations"
+- Approach / workflow → add to "Working Alone vs Delegating" or "Code Discipline"
+- Non-obvious bug fix → append to `.dev/LESSONS_LEARNED.md` (3-5 lines max)
+- "Always do X" / "never do Y" → add to the most relevant section (often Hard Laws if safety-related, or Design Preferences)
 
 **After adding the rule**, briefly confirm: "Added to CLAUDE.md: [one-line summary]" so Adam knows it's captured and can correct it immediately if the rule is wrong.
 
-## Self-Challenge Gate (Mandatory Before Presenting Work)
-Before reporting ANY non-trivial work as complete, run this checklist. If ANY answer is "no," **iterate silently until it's "yes."** Do not present work that fails a check — fix it first.
+## [ALWAYS] Pre-Present Gates (Ship Gate + Judges Panel)
 
-1. **Code valid?** (imports resolve, no syntax errors, type hints consistent)
-2. **Root cause addressed?** Not a band-aid. The actual underlying issue is fixed.
-3. **Blast radius minimal?** Only the necessary files were changed. No drive-by refactors.
-4. **Edge cases handled?** None, empty, error states, offline printer, timeout — not just the happy path.
-5. **Simpler solution exists?** Re-read the code. Is there a 5-line version of your 20-line fix? Use it.
-6. **Staff engineer test:** Would a senior infrastructure engineer at a top company approve this on first review? If "probably not" or "maybe" — iterate. Only present when the answer is "yes, confidently."
+**Every non-trivial work item passes through `/ship-gate` before presenting.** For new features / MCP tools / CLI commands / adapters / safety changes, follow with `/judges-panel`.
 
-**The rule:** Do not present output you wouldn't ship to production. If your internal confidence is below "I'd bet money this is correct and clean," keep working. When in doubt, iterate one more time — the cost of one extra pass is always less than the cost of a sloppy delivery.
+Skip `/judges-panel` only for pure bug fixes and trivial edits. Never skip `/ship-gate`.
 
-## Judges Panel (Mandatory for Non-Trivial Work)
+If `/ship-gate` fails, iterate silently — don't present broken work. If `/judges-panel` has any judge below 95, iterate on their specific concern. See the skill files for full checklists.
 
-After the self-challenge gate passes, run the work through three harsh judges. Each scores 0-100. **The work is not done until all three would score it ≥95.** If any judge is below 95, iterate on their specific feedback before presenting.
+**Andreessen is always the 4th judge.** His role is to stress-test business implications and debate craft-vs-business tradeoffs with Jobs, Ive, and antirez. When he disagrees with the others, surface the debate in the output — don't silently resolve it.
 
-Write the scorecards in first person as each judge. Be genuinely harsh — these judges have zero patience for "good enough."
-
-### Steve Jobs — Product & User Experience
-*"Does this just work? Would a user pay for this? Is the experience seamless or does it leak implementation details? If I have to explain how it works, it's broken. Ship things people love, not things engineers admire."*
-- Does it solve a real user need without requiring the user to think?
-- Is the output good enough that users trust it immediately?
-- Does the error case guide the user, or just fail?
-- Would you demo this on stage with confidence?
-
-### Jony Ive — Design & Craft
-*"Is every detail intentional? Does the surface betray the implementation? Good design is honest — it doesn't pretend to be something it isn't, and it doesn't expose complexity the user didn't ask for."*
-- Does the visual/API output feel intentional and polished?
-- Are there artifacts, seams, or rough edges that break the illusion?
-- Is there unnecessary ornamentation, or is every element earning its place?
-- Does it feel like one coherent system, not a collection of parts?
-
-### antirez (Salvatore Sanfilippo) — Code Quality & Elegance
-*"Is every line earning its place? Code should read like prose — clear intent, no wasted words. Every abstraction must justify its existence. Every magic number is a decision you didn't document."*
-- Could any function be shorter without losing clarity?
-- Are there unnecessary abstractions, indirections, or layers?
-- Are magic numbers named and explained?
-- Does the code read top-to-bottom without needing to jump around?
-- Is the data flow obvious? Would a stranger understand it in one pass?
-
-**Iteration protocol:** When a judge scores below 95, fix their specific concerns silently, then re-score. Don't ask for permission to iterate — just do it and present the improved version. The user should only see work that all three judges approve.
-
-## Definition of Done
-
-A feature/fix is "done" — not "done enough" — when ALL of these are true:
-
-1. **Code works** — compiles, passes all tests, handles edge cases
-2. **Pattern-consistent** — matches the reference implementation's structure, naming, error handling
-3. **Tests exist** — new behavior has tests; modified behavior has updated tests. No untested MCP tools, CLI commands, or adapter methods.
-4. **Docs updated** — if Documentation Auto-Update Triggers apply, the docs are already updated in the same work session. Don't leave this as a follow-up.
-5. **Lint clean** — Ruff passes locally (`python3 -m ruff check src/kiln/`). Don't leave format violations for pre-commit or CI to catch.
-6. **CI green** — After pushing, verify CI passes (`gh run list --limit 1`). If red, fix immediately before reporting work as done.
-7. **Self-challenge gate passed** — the 6-point checklist above all answered "yes"
-
-**NOT done if:** tests are skipped with a comment, docs say "TODO: update", error handling says `pass`, CI is red, or you need to come back and "clean up later." Deliver complete work or flag what's blocking completion.
-
-## Documentation Auto-Update Triggers
+## [RELEASE] Documentation Auto-Update Triggers
 
 Kiln maintains three living documents that must stay in sync with the codebase:
 - `README.md` — Project overview, quick start, feature summary
 - `docs/WHITEPAPER.md` — Technical whitepaper (architecture, protocol, safety model)
 - `docs/PROJECT_DOCS.md` — Full project documentation (CLI reference, MCP tools, adapter details)
 
-**When to update these documents:**
+**When to update:**
 
 1. **New CLI command added** → Update README command table + PROJECT_DOCS CLI Reference section.
 2. **New MCP tool added** → Update README MCP Tools table + PROJECT_DOCS Tool Catalog section.
@@ -393,7 +434,7 @@ Kiln maintains three living documents that must stay in sync with the codebase:
 
 **How to update:** Append or edit the specific section — don't rewrite the entire document. Keep the whitepaper formal and the guide reference-dense.
 
-### Hard rule: NEVER edit historical metrics in old blog posts (MANDATORY)
+### [SAFETY] Hard rule: NEVER edit historical metrics in old blog posts
 
 Old blog posts are **point-in-time snapshots**. The MCP tool count, CLI command count, test count, printer-model count, and any other numeric metric stated in a published post is part of the historical record of what Kiln was on the date of that post. **NEVER update these numbers when doing a doc count sync.**
 
@@ -404,7 +445,7 @@ Old blog posts are **point-in-time snapshots**. The MCP tool count, CLI command 
 - If a published post contains a count that's actually wrong for its post date, restore it to the count that was correct on the post's date — not to the current count, and not to whatever someone else last edited it to.
 - The doc-count sync flow only updates **currently-true marketing surfaces** (README, server.json, SKILL.md, whitepaper, litepaper, PROJECT_DOCS, THREAT_MODEL, llms.txt, the live site shell — Hero/FeatureGrid/pricing/install/integrations/use-cases/faq, the desktop app strings, plus any other surface that asserts a current claim).
 
-## Session Continuity
+## [ALWAYS] Session Continuity
 For long or multi-session work, maintain a lightweight state file so crashed or context-exhausted sessions can be resumed cleanly.
 
 - **File**: `.dev/SESSION_STATE.md` (gitignored — local working state only)
