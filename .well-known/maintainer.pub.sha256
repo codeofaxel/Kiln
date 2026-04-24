@@ -1,0 +1,11 @@
+REPLACE_ME_WITH_YOUR_PUB_KEY_FINGERPRINT
+# The 40-char uppercase GPG fingerprint (no spaces) of the key in
+# maintainer.pub.asc.  An operator doing out-of-band verification
+# copy-pastes THIS string against what they see via `gpg --fingerprint`.
+# If the two don't match, do not trust any artifact signed by that key.
+#
+# Populate with:
+#   gpg --fingerprint security@kiln3d.com \
+#     | awk '/ = /{gsub(" ",""); print $NF}' \
+#     | tr -d '=' \
+#     > .well-known/maintainer.pub.sha256
