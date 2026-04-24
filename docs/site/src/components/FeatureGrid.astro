@@ -138,6 +138,14 @@ const printerBackends = [
     font-size: 14px;
     color: var(--text-muted);
     line-height: 1.5;
+    /* Justify the body copy so the right edge of every card aligns
+       cleanly with its neighbors — pulls the grid from "ragged paragraphs
+       sitting in boxes" up to "intentional editorial layout." Hyphens
+       enabled so a long word in a narrow column doesn't blow the
+       justification spacing into rivers of whitespace. */
+    text-align: justify;
+    text-justify: inter-word;
+    hyphens: auto;
   }
 
   .compat-strip {

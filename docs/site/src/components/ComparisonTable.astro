@@ -213,6 +213,16 @@ const rows: Row[] = [
     font-size: 14px;
     line-height: 1.6;
     border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    /* Kill orphan/widow words.  ``text-wrap: pretty`` is the modern,
+       browser-native widow preventer (Chromium 117+, Safari 17.4+,
+       Firefox 124+ — covers the entire 2026 install base).  It nudges
+       line breaks so the last line of every cell doesn't trail off
+       with a single dangling word ("Email the STL and trust nobody
+       edited / it" → "Email the STL and trust / nobody edited it"
+       once the engine rebalances).  Falls back gracefully on any
+       browser that doesn't support it: the layout looks exactly as
+       it did before. */
+    text-wrap: pretty;
   }
 
   .cmp-cap {
