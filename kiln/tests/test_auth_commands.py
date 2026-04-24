@@ -30,19 +30,26 @@ class TestRegisterAuthCli:
     ``kiln identity login`` so the OAuth device flow owns the
     first-run ``login`` name."""
 
-    def test_installs_four_commands(self):
+    def test_installs_five_commands(self):
         import click
         from kiln.cli.auth_commands import register_auth_cli
 
         g = click.Group("kiln")
         register_auth_cli(g)
-        assert set(g.commands.keys()) >= {"login", "logout", "whoami", "pair"}
+        assert set(g.commands.keys()) >= {
+            "login",
+            "logout",
+            "whoami",
+            "pair",
+            "invite",
+        }
 
     def test_imports_match_registered_names(self):
-        """The four @click.command callables should be importable by
+        """The five @click.command callables should be importable by
         name directly for external wiring (tests, docs, alt entry
         points)."""
         from kiln.cli.auth_commands import (
+            auth_invite,
             auth_login,
             auth_logout,
             auth_pair,
@@ -52,6 +59,7 @@ class TestRegisterAuthCli:
         assert auth_logout.name == "logout"
         assert auth_whoami.name == "whoami"
         assert auth_pair.name == "pair"
+        assert auth_invite.name == "invite"
 
     def test_relocates_legacy_login_to_identity(self):
         import click
@@ -159,3 +167,143 @@ class TestLogoutAndWhoami:
         # Lower 9 bits of st_mode should be 600 (user r/w, no group/other).
         perms = os.stat(path).st_mode & 0o777
         assert perms == 0o600, f"expected 0600 perms, got 0o{perms:o}"
+
+
+# =====================================================================
+# CLI: invite (no network required for the happy-path stubbing)
+# =====================================================================
+
+
+class TestInvite:
+    """``kiln invite`` — CLI-initiated pairing.  The happy-path hits
+    the network, but the "not signed in" failure mode is purely local
+    and worth pinning: ships a clear message pointing at ``kiln
+    login`` instead of a cryptic 401."""
+
+    def test_invite_without_saved_session_fails_clearly(self, auth_home):
+        import click
+        from click.testing import CliRunner
+        from kiln.cli.auth_commands import register_auth_cli
+
+        g = click.Group("kiln")
+        register_auth_cli(g)
+        r = CliRunner().invoke(g, ["invite"])
+        assert r.exit_code != 0
+        # The error message must guide the user back to `kiln login`
+        # (and NOT mention `kiln pair`, which would confuse someone
+        # whose first step is just signing in).
+        out = r.output.lower()
+        assert "not signed in" in out
+        assert "kiln login" in out
+
+    def test_invite_with_empty_access_token_fails_clearly(self, auth_home):
+        """A token file that exists but has an empty access_token
+        (seen on 2026-04-23 as a bad pairing that wrote partial
+        tokens) should be treated the same as "no session" — fail
+        before trying to POST the empty bearer to the API."""
+        import json as _json
+        import click
+        from click.testing import CliRunner
+        from kiln.cli.auth_commands import register_auth_cli
+
+        (auth_home / ".kiln").mkdir(mode=0o700, exist_ok=True)
+        (auth_home / ".kiln" / "auth_tokens.json").write_text(
+            _json.dumps({"access_token": ""})
+        )
+
+        g = click.Group("kiln")
+        register_auth_cli(g)
+        r = CliRunner().invoke(g, ["invite"])
+        assert r.exit_code != 0
+        assert "not signed in" in r.output.lower()
+
+    def test_invite_success_prints_code_and_url(self, auth_home, monkeypatch):
+        """Happy path: with a valid saved session and a mocked server
+        response, `kiln invite` prints the code + verification URL so
+        the user can type it into a browser tab.  The code is the
+        hero of the output."""
+        import json as _json
+        import click
+        from click.testing import CliRunner
+        from kiln.cli import auth_commands
+        from kiln.cli.auth_commands import register_auth_cli
+
+        # Seed a valid saved session.
+        (auth_home / ".kiln").mkdir(mode=0o700, exist_ok=True)
+        (auth_home / ".kiln" / "auth_tokens.json").write_text(
+            _json.dumps({
+                "access_token": "fake-access-token",
+                "refresh_token": "fake-refresh-token",
+            })
+        )
+
+        # Mock the server response.  The invite endpoint returns a
+        # short code + absolute expiration + the verify URL the
+        # browser should visit.
+        captured: dict = {}
+
+        def fake_post(path, body, *, bearer=None, timeout=15.0):
+            captured["path"] = path
+            captured["body"] = body
+            captured["bearer"] = bearer
+            return {
+                "success": True,
+                "code": "KLN-ABCD-EFGH",
+                "expires_at": "2099-01-01T00:10:00Z",
+                "verify_url": "https://app.kiln3d.com/settings/agent",
+            }
+
+        monkeypatch.setattr(auth_commands, "_http_post", fake_post)
+
+        g = click.Group("kiln")
+        register_auth_cli(g)
+        r = CliRunner().invoke(g, ["invite"])
+        assert r.exit_code == 0, r.output
+
+        # The bearer MUST be forwarded so the server can resolve the
+        # user; the refresh_token is in the body so the browser-side
+        # claim can outlive the short-lived access_token.
+        assert captured["path"] == "/api/auth/pairing/invite"
+        assert captured["bearer"] == "fake-access-token"
+        assert captured["body"] == {"refresh_token": "fake-refresh-token"}
+
+        out = r.output
+        assert "KLN-ABCD-EFGH" in out
+        assert "app.kiln3d.com/settings/agent" in out
+
+    def test_invite_json_mode_emits_raw_server_body(self, auth_home, monkeypatch):
+        """`kiln invite --json` pipes the raw server body for scripts,
+        so an automation can parse the code without screen-scraping
+        the human-facing output."""
+        import json as _json
+        import click
+        from click.testing import CliRunner
+        from kiln.cli import auth_commands
+        from kiln.cli.auth_commands import register_auth_cli
+
+        (auth_home / ".kiln").mkdir(mode=0o700, exist_ok=True)
+        (auth_home / ".kiln" / "auth_tokens.json").write_text(
+            _json.dumps({"access_token": "tok", "refresh_token": "ref"})
+        )
+
+        body = {
+            "success": True,
+            "code": "KLN-WXYZ-1234",
+            "expires_at": "2099-01-01T00:10:00Z",
+            "verify_url": "https://app.kiln3d.com/settings/agent",
+        }
+        monkeypatch.setattr(
+            auth_commands, "_http_post",
+            lambda path, payload, *, bearer=None, timeout=15.0: body,
+        )
+
+        g = click.Group("kiln")
+        register_auth_cli(g)
+        r = CliRunner().invoke(g, ["invite", "--json"])
+        assert r.exit_code == 0, r.output
+        # Click 8.2+ keeps stdout and stderr separate in CliRunner
+        # results — ``r.stdout`` alone is parseable JSON.  That
+        # mirrors the real `kiln invite --json | jq ...` pipe, where
+        # stderr status lines must not contaminate the payload.
+        parsed = _json.loads(r.stdout)
+        assert parsed == body

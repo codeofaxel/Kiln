@@ -99,11 +99,21 @@ def _delete_tokens() -> bool:
     return True
 
 
-def _http_post(path: str, body: dict[str, Any], timeout: float = 15.0) -> dict[str, Any]:
+def _http_post(
+    path: str,
+    body: dict[str, Any],
+    *,
+    bearer: str | None = None,
+    timeout: float = 15.0,
+) -> dict[str, Any]:
     """Thin requests.post wrapper that returns a dict or raises
     click.ClickException with a human message.  Keeping the HTTP
     surface tiny (no retry, no session reuse) because these endpoints
-    are called at most a few dozen times across the whole flow."""
+    are called at most a few dozen times across the whole flow.
+
+    ``bearer`` is keyword-only so every existing call site (all
+    unauthenticated pairing/login endpoints) keeps working unchanged;
+    only authed callers like ``kiln invite`` opt in."""
     try:
         import requests  # type: ignore[import-untyped]
     except ImportError as exc:  # pragma: no cover — requests is a hard dep
@@ -112,12 +122,16 @@ def _http_post(path: str, body: dict[str, Any], timeout: float = 15.0) -> dict[s
             "Install with `pip install requests`."
         ) from exc
 
+    headers = {"User-Agent": f"kiln-cli/{_cli_version()}"}
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
+
     try:
         resp = requests.post(
             f"{_api_base()}{path}",
             json=body,
             timeout=timeout,
-            headers={"User-Agent": f"kiln-cli/{_cli_version()}"},
+            headers=headers,
         )
     except requests.exceptions.ConnectionError as exc:
         raise click.ClickException(
@@ -128,6 +142,16 @@ def _http_post(path: str, body: dict[str, Any], timeout: float = 15.0) -> dict[s
             f"Timed out reaching {_api_base()}{path}."
         ) from exc
 
+    if bearer and resp.status_code == 401:
+        # Only surface 401 as a terminal error when an Authorization
+        # header was actually sent.  Unauthenticated callers (the
+        # device-flow / pairing-claim endpoints) never expect 401 and
+        # continue to signal success/failure via the JSON body — hiding
+        # that under a blanket 401 branch would break the login flow.
+        raise click.ClickException(
+            "Your session is not accepted by the Kiln API (HTTP 401). "
+            "Run `kiln login` to refresh, then retry."
+        )
     if resp.status_code >= 500:
         raise click.ClickException(
             f"Kiln API returned {resp.status_code} for {path}. "
@@ -561,13 +585,114 @@ def auth_pair(code: str) -> None:
 
 
 # ═════════════════════════════════════════════════════════════════════
+# `kiln invite` — CLI-initiated pairing (the reverse of `kiln pair`)
+# ═════════════════════════════════════════════════════════════════════
+#
+# The mirror image of ``kiln pair``: the user is already signed in on
+# THIS terminal (``kiln login`` or ``kiln pair``) and wants to open a
+# fresh browser tab at app.kiln3d.com while carrying the same session.
+# ``kiln invite`` mints a one-shot code that the browser's
+# /settings/agent page can claim.
+#
+# Why this matters: pairing is now symmetric.  No matter which surface
+# you sign in on first — web or terminal — you can pair the other in
+# one code.  Before this, CLI-first users had to sign in twice (once
+# in the terminal, once in the browser).
+
+
+@click.command("invite")
+@click.option(
+    "--json", "as_json", is_flag=True, default=False,
+    help="Emit the invite response as JSON (for piping into scripts).",
+)
+def auth_invite(as_json: bool) -> None:
+    """Generate a one-shot code to sign in on another device.
+
+    Use this when you're signed in on THIS terminal (``kiln login`` or
+    ``kiln pair``) and want to open a fresh browser tab at
+    app.kiln3d.com carrying the same session — no re-signin.
+
+    How it works:
+        1. Run ``kiln invite`` here.
+        2. The terminal prints a short code + the URL to visit.
+        3. Open app.kiln3d.com/settings/agent in a browser, sign in if
+           you haven't already (SAME account), and paste the code into
+           the "Link from another device" box.
+        4. The browser tab is now paired with this terminal's session.
+
+    The code is single-use and expires in 10 minutes.
+    """
+    tokens = _read_tokens()
+    access_token = str(tokens.get("access_token") or "")
+    if not access_token:
+        raise click.ClickException(
+            "Not signed in on this terminal.  Run `kiln login` first, "
+            "then `kiln invite` to pair a browser tab."
+        )
+    refresh_token = str(tokens.get("refresh_token") or "")
+
+    click.echo("")
+    click.echo("  Minting a one-shot code for your browser\u2026", err=True)
+
+    # POST /api/auth/pairing/invite — authed with our access_token via
+    # the shared _http_post helper.  401 is surfaced as a ClickException
+    # by the helper itself when a bearer is supplied.
+    body = _http_post(
+        "/api/auth/pairing/invite",
+        {"refresh_token": refresh_token},
+        bearer=access_token,
+    )
+
+    if not body.get("success"):
+        raise click.ClickException(body.get("error") or "Could not mint an invite code.")
+
+    code = str(body.get("code") or "")
+    expires_at = str(body.get("expires_at") or "")
+    verify_url = str(body.get("verify_url") or "https://app.kiln3d.com/settings/agent")
+
+    if as_json:
+        click.echo(json.dumps(body, indent=2, sort_keys=True))
+        return
+
+    # Human output — match the `kiln login` / `kiln pair` voice.
+    # The code is the hero; render it letter-spaced so it's easy to
+    # read off the terminal and type into a browser.  A single blank
+    # line of breathing room above and below.
+    click.echo("")
+    click.echo(f"    {code}")
+    click.echo("")
+    click.echo(f"  Enter this code at:  {verify_url}", err=True)
+
+    # Countdown — same 10-min window as the forward flow.  Best-effort
+    # parse; if the ISO timestamp doesn't round-trip (timezone weirdness
+    # on some platforms) we just skip the countdown.  Users have the
+    # absolute timestamp from the API if they need it.
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        exp_dt = _dt.fromisoformat(expires_at.replace("Z", "+00:00"))
+        now = _dt.now(tz=_tz.utc)
+        mins = max(0, int((exp_dt - now).total_seconds() // 60))
+        if mins:
+            click.echo(f"  Expires in ~{mins} minute{'s' if mins != 1 else ''}.", err=True)
+    except Exception:
+        pass
+
+    click.echo("")
+    click.echo(
+        "  After you enter the code in the browser, that tab will be "
+        "signed in with the same account as this terminal.",
+        err=True,
+    )
+
+
+# ═════════════════════════════════════════════════════════════════════
 # registration
 # ═════════════════════════════════════════════════════════════════════
 
 
 def register_auth_cli(cli_group: click.Group) -> None:
     """Attach ``kiln login`` / ``kiln logout`` / ``kiln whoami`` /
-    ``kiln pair``.
+    ``kiln pair`` / ``kiln invite``.
 
     If the group already has a command named ``login`` (the legacy
     identity-linking flow in kiln-pro's ``vcs_commands.cli_login``), we
@@ -600,3 +725,4 @@ def register_auth_cli(cli_group: click.Group) -> None:
     cli_group.add_command(auth_logout)
     cli_group.add_command(auth_whoami)
     cli_group.add_command(auth_pair)
+    cli_group.add_command(auth_invite)
