@@ -24,7 +24,7 @@ pre-commit install
 ## Running Tests
 
 ```bash
-# Kiln public (8,699 tests — combined w/ kiln-pro: 11,568)
+# Kiln public (8,673 tests — combined w/ kiln-pro: 11,926)
 cd kiln && python3 -m pytest tests/ -q
 
 # OctoPrint CLI (223 tests)

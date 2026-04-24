@@ -1,6 +1,6 @@
 # Kiln — From Thought to Thing
 
-> Kiln is an open-source platform that turns text descriptions (or sketches) into physical objects via 3D printing. It provides 734 MCP tools and a 202-command CLI that handle the entire pipeline: design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, and cost estimation. Works with any MCP-compatible agent (Claude, GPT, custom).
+> Kiln is an open-source platform that turns text descriptions (or sketches) into physical objects via 3D printing. It provides 737 MCP tools and a 202-command CLI that handle the entire pipeline: design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, and cost estimation. Works with any MCP-compatible agent (Claude, GPT, custom).
 
 ## What Kiln Does
 

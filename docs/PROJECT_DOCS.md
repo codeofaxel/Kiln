@@ -368,7 +368,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **<!-- KILN_MCP_COUNT:OLD --> 734 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
+Kiln exposes **<!-- KILN_MCP_COUNT:OLD --> 737 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
 
 #### Printer Control
 
@@ -1248,7 +1248,7 @@ pip install -e "./octoprint-cli[dev]"
 ### Running Tests
 
 ```bash
-cd kiln && python3 -m pytest tests/ -v    # 8,699 tests
+cd kiln && python3 -m pytest tests/ -v    # 8,673 tests (11,926 combined w/ kiln-pro)
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 223 tests
 ```
 

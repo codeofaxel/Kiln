@@ -1,10 +1,10 @@
-"""``kiln login`` / ``kiln logout`` / ``kiln whoami`` / ``kiln pair`` —
+"""``kiln signin`` / ``kiln signout`` / ``kiln whoami`` / ``kiln pair`` —
 the CLI's device-code OAuth flow + web-initiated pairing against the
 Kiln REST API.
 
 How the login flow works end-to-end:
 
-  1. ``kiln login`` POSTs ``/api/auth/device/start``.  Gets back a
+  1. ``kiln signin`` POSTs ``/api/auth/device/start``.  Gets back a
      ``device_code`` (secret), a ``user_code`` (human-typeable), and a
      ``verification_uri`` (URL to open in the browser).
   2. CLI prints the ``user_code`` + URL, opens the URL in the user's
@@ -20,12 +20,12 @@ How the login flow works end-to-end:
   5. CLI writes the tokens to ``~/.kiln/auth_tokens.json`` (mode 0600)
      and prints ``Signed in as {email} ({tier})``.
 
-``kiln logout`` deletes the token file.
+``kiln signout`` deletes the token file.
 
 ``kiln whoami`` reads the file, hits ``GET /api/auth/whoami`` with the
 access_token, and prints the resolved email + tier.
 
-``kiln pair <code>`` is the web-initiated mirror of ``kiln login`` —
+``kiln pair <code>`` is the web-initiated mirror of ``kiln signin`` —
 the user has already signed in on app.kiln3d.com; this command claims
 a short-lived pairing code and writes the tokens locally without a
 second browser round-trip.
@@ -118,7 +118,7 @@ def _http_post(
         import requests  # type: ignore[import-untyped]
     except ImportError as exc:  # pragma: no cover — requests is a hard dep
         raise click.ClickException(
-            "The `requests` package is required for `kiln login`. "
+            "The `requests` package is required for `kiln signin`. "
             "Install with `pip install requests`."
         ) from exc
 
@@ -150,7 +150,7 @@ def _http_post(
         # that under a blanket 401 branch would break the login flow.
         raise click.ClickException(
             "Your session is not accepted by the Kiln API (HTTP 401). "
-            "Run `kiln login` to refresh, then retry."
+            "Run `kiln signin` to refresh, then retry."
         )
     if resp.status_code >= 500:
         raise click.ClickException(
@@ -193,11 +193,11 @@ def _cli_version() -> str:
 
 
 # ═════════════════════════════════════════════════════════════════════
-# `kiln login`
+# `kiln signin`  (also aliased as `kiln signin` for backwards compat)
 # ═════════════════════════════════════════════════════════════════════
 
 
-@click.command("login")
+@click.command("signin")
 @click.option(
     "--no-browser", is_flag=True, default=False,
     help="Don't open the browser automatically. Print the URL and wait.",
@@ -213,9 +213,8 @@ def auth_login(no_browser: bool, timeout: int) -> None:
     provider-picker page, polls until you finish signing in, then
     writes your session token to ``~/.kiln/auth_tokens.json``.
 
-    The rest of the CLI (and the desktop app, when it reuses the same
-    tokens file) will pick up your session automatically — no license
-    key needed for OAuth-linked Pro+ accounts.
+    The rest of the CLI will pick up your session automatically — no
+    license key needed for OAuth-linked Pro+ accounts.
     """
     # 1) Start the device flow.
     start = _http_post("/api/auth/device/start", {})
@@ -299,7 +298,7 @@ def auth_login(no_browser: bool, timeout: int) -> None:
             click.echo("\r" + " " * 60 + "\r", nl=False, err=True)
         raise click.ClickException(
             "Sign-in timed out before the browser flow completed. "
-            "Run `kiln login` again."
+            "Run `kiln signin` again."
         )
 
     # Clear the spinner line cleanly before printing the final verdict.
@@ -333,17 +332,17 @@ def auth_login(no_browser: bool, timeout: int) -> None:
         )
     if status == "expired":
         raise click.ClickException(
-            result.get("message") or "Sign-in code expired. Run `kiln login` again."
+            result.get("message") or "Sign-in code expired. Run `kiln signin` again."
         )
     raise click.ClickException(f"Unexpected sign-in status: {status!r}")
 
 
 # ═════════════════════════════════════════════════════════════════════
-# `kiln logout`
+# `kiln signout`  (also aliased as `kiln logout` for backwards compat)
 # ═════════════════════════════════════════════════════════════════════
 
 
-@click.command("logout")
+@click.command("signout")
 def auth_logout() -> None:
     """Delete the locally-stored Kiln session token.
 
@@ -380,13 +379,13 @@ def auth_whoami(as_json: bool) -> None:
     access_token = str(tokens.get("access_token") or "")
     if not access_token:
         raise click.ClickException(
-            "Not signed in. Run `kiln login` to sign in."
+            "Not signed in. Run `kiln signin` to sign in."
         )
 
     code, body = _http_get("/api/auth/whoami", bearer=access_token)
     if code == 401:
         raise click.ClickException(
-            "Session expired. Run `kiln login` to sign in again."
+            "Session expired. Run `kiln signin` to sign in again."
         )
     if code >= 400 or not body.get("success"):
         raise click.ClickException(
@@ -426,16 +425,16 @@ def auth_whoami(as_json: bool) -> None:
 # `kiln pair <code>` — web-initiated pairing
 # ═════════════════════════════════════════════════════════════════════
 #
-# The mirror image of ``kiln login``: instead of this machine bootstrapping
+# The mirror image of ``kiln signin``: instead of this machine bootstrapping
 # an OAuth session from cold, the user has already signed in on the web
 # (usually right after upgrading their tier at app.kiln3d.com/checkout/
 # success → /welcome).  The workshop minted a short-lived code tied to
 # their session; ``kiln pair <code>`` hands the tokens to this machine
 # without any browser round-trip here.
 #
-# Why this is the preferred post-upgrade path (even though ``kiln login``
+# Why this is the preferred post-upgrade path (even though ``kiln signin``
 # still works): after paying, the user is already in a browser, already
-# signed in.  Asking them to run ``kiln login`` which opens ANOTHER
+# signed in.  Asking them to run ``kiln signin`` which opens ANOTHER
 # browser to sign in AGAIN is a jarring re-authentication.  Pairing
 # reuses the session they already have in one command.
 
@@ -829,7 +828,7 @@ def auth_pair(code: str, client: str | None) -> None:
         )
 
     # Final one-line confirmation on stdout (so `kiln pair ... | tail
-    # -1` captures it).  Matches the `kiln login` voice for source
+    # -1` captures it).  Matches the `kiln signin` voice for source
     # consistency.
     click.echo(f"\u2713 Paired \u2014 {email} ({tier}).")
 
@@ -839,7 +838,7 @@ def auth_pair(code: str, client: str | None) -> None:
 # ═════════════════════════════════════════════════════════════════════
 #
 # The mirror image of ``kiln pair``: the user is already signed in on
-# THIS terminal (``kiln login`` or ``kiln pair``) and wants to open a
+# THIS terminal (``kiln signin`` or ``kiln pair``) and wants to open a
 # fresh browser tab at app.kiln3d.com while carrying the same session.
 # ``kiln invite`` mints a one-shot code that the browser's
 # /settings/agent page can claim.
@@ -869,7 +868,7 @@ def auth_pair(code: str, client: str | None) -> None:
 def auth_invite(as_json: bool, client: str | None) -> None:
     """Generate a one-shot code to sign in on another device.
 
-    Use this when you're signed in on THIS terminal (``kiln login`` or
+    Use this when you're signed in on THIS terminal (``kiln signin`` or
     ``kiln pair``) and want to open a fresh browser tab at
     app.kiln3d.com carrying the same session — no re-signin.
 
@@ -887,7 +886,7 @@ def auth_invite(as_json: bool, client: str | None) -> None:
     access_token = str(tokens.get("access_token") or "")
     if not access_token:
         raise click.ClickException(
-            "Not signed in on this terminal.  Run `kiln login` first, "
+            "Not signed in on this terminal.  Run `kiln signin` first, "
             "then `kiln invite` to pair a browser tab."
         )
     refresh_token = str(tokens.get("refresh_token") or "")
@@ -923,7 +922,7 @@ def auth_invite(as_json: bool, client: str | None) -> None:
         click.echo(json.dumps(body, indent=2, sort_keys=True))
         return
 
-    # Human output — match the `kiln login` / `kiln pair` voice.
+    # Human output — match the `kiln signin` / `kiln pair` voice.
     # The code is the hero; render it letter-spaced so it's easy to
     # read off the terminal and type into a browser.  A single blank
     # line of breathing room above and below.
@@ -960,7 +959,7 @@ def auth_invite(as_json: bool, client: str | None) -> None:
 
 
 def register_auth_cli(cli_group: click.Group) -> None:
-    """Attach ``kiln login`` / ``kiln logout`` / ``kiln whoami`` /
+    """Attach ``kiln signin`` / ``kiln signout`` / ``kiln whoami`` /
     ``kiln pair`` / ``kiln invite``.
 
     If the group already has a command named ``login`` (the legacy
@@ -970,7 +969,7 @@ def register_auth_cli(cli_group: click.Group) -> None:
     vast majority of users type first.
 
     Called from ``kiln.cli.main`` unconditionally so every install
-    (free tier + Pro) gets ``kiln pair`` / ``kiln login`` out of the
+    (free tier + Pro) gets ``kiln pair`` / ``kiln signin`` out of the
     box.
     """
     # Relocate the legacy identity-linking login, if present.
@@ -990,8 +989,13 @@ def register_auth_cli(cli_group: click.Group) -> None:
                 # better to silently skip than to shadow behaviour.
                 pass
 
+    # Canonical names: signin / signout (match the web workshop + MCP tools).
     cli_group.add_command(auth_login)
     cli_group.add_command(auth_logout)
     cli_group.add_command(auth_whoami)
     cli_group.add_command(auth_pair)
     cli_group.add_command(auth_invite)
+    # Legacy aliases: `kiln signin` / `kiln logout` keep working for existing
+    # scripts + muscle memory.  Docs point at signin/signout.
+    cli_group.add_command(auth_login, name="login")
+    cli_group.add_command(auth_logout, name="logout")

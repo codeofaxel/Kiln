@@ -9722,22 +9722,32 @@ def repair(file_path: str, output: str | None, json_mode: bool) -> None:
         sys.exit(1)
 
 
-# Auth commands — `kiln login` / `kiln logout` / `kiln whoami` / `kiln pair`.
-# Registered unconditionally (before kiln-pro) so ``pip install kiln3d && kiln
-# pair <code>`` works on a clean machine without private-registry access.
-# These commands call only the public Kiln REST API; no proprietary logic.
-register_auth_cli(cli)
-
-
 # Pro-CLI registration — MUST run after every @cli.group decorator above so
 # kiln-pro can extend public groups (e.g. graft `versions alerts`, `versions
 # record-outcome`, `versions best` onto the public `versions` group).
+#
+# Pro registers FIRST (before register_auth_cli) so that two pieces of
+# bookkeeping work correctly: (1) kiln-pro adds its own `identity` group
+# which `register_auth_cli` then relocates a legacy top-level `login`
+# onto (`kiln identity login`); (2) on a public-only install this
+# block is a no-op via the ImportError guard, so the auth CLI still
+# wires up unconditionally below.
 try:
     from kiln_pro.cli.pro_commands import register_pro_cli
 
     register_pro_cli(cli)
 except ImportError:
     pass  # kiln-pro not installed — pro CLI commands not available
+
+
+# Auth commands — `kiln signin` / `kiln signout` / `kiln whoami` / `kiln pair`.
+# Registered unconditionally so ``pip install kiln3d && kiln pair <code>``
+# works on a clean machine without private-registry access.  These commands
+# call only the public Kiln REST API; no proprietary logic.  Runs AFTER
+# register_pro_cli so kiln-pro's legacy top-level `login` (identity-linking)
+# can be relocated to `kiln identity login` and the canonical `kiln signin`
+# (OAuth device flow) takes the name everyone actually reaches for first.
+register_auth_cli(cli)
 
 
 def main() -> None:

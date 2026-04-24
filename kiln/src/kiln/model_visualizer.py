@@ -5,8 +5,7 @@ images. Works everywhere — CLI, Claude Desktop, MCP over stdio — because
 the output is just PNG files that any multimodal client can display.
 
 This is the universal "show me this model from all angles" capability
-that agents and humans use before printing. The desktop app can offer
-a richer interactive experience on top, but this is the baseline.
+that agents and humans use before printing.
 
 Usage::
 

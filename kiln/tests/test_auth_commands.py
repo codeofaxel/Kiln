@@ -1,4 +1,4 @@
-"""Tests for ``kiln.cli.auth_commands`` — the ``kiln login`` / ``logout``
+"""Tests for ``kiln.cli.auth_commands`` — the ``kiln signin`` / ``signout``
 / ``whoami`` / ``pair`` device-code + pairing flow that ships in the
 public CLI.
 
@@ -55,8 +55,10 @@ class TestRegisterAuthCli:
             auth_pair,
             auth_whoami,
         )
-        assert auth_login.name == "login"
-        assert auth_logout.name == "logout"
+        # Canonical click names (match the web workshop + MCP tools).
+        # `login` / `logout` stay reachable as aliases via register_auth_cli.
+        assert auth_login.name == "signin"
+        assert auth_logout.name == "signout"
         assert auth_whoami.name == "whoami"
         assert auth_pair.name == "pair"
         assert auth_invite.name == "invite"
@@ -189,12 +191,12 @@ class TestInvite:
         register_auth_cli(g)
         r = CliRunner().invoke(g, ["invite"])
         assert r.exit_code != 0
-        # The error message must guide the user back to `kiln login`
+        # The error message must guide the user back to `kiln signin`
         # (and NOT mention `kiln pair`, which would confuse someone
         # whose first step is just signing in).
         out = r.output.lower()
         assert "not signed in" in out
-        assert "kiln login" in out
+        assert "kiln signin" in out
 
     def test_invite_with_empty_access_token_fails_clearly(self, auth_home):
         """A token file that exists but has an empty access_token

@@ -182,7 +182,7 @@ except ImportError:
             False,
             (
                 f"This feature requires Kiln {str(tier_label).title()}. "
-                "Already subscribed? Run `kiln login` to sync this machine. "
+                "Already subscribed? Run `kiln signin` to sync this machine. "
                 "Otherwise: https://kiln3d.com/pricing"
             ),
         )
@@ -213,7 +213,7 @@ except ImportError:
                     "success": False,
                     "error": (
                         f"{tool_name} requires Kiln {str(tier_label).title()}. "
-                        "Already subscribed? Run `kiln login` to sync this machine. "
+                        "Already subscribed? Run `kiln signin` to sync this machine. "
                         "Otherwise: https://kiln3d.com/pricing"
                     ),
                     "code": "TIER_REQUIRED",
@@ -9943,9 +9943,9 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
         return {
             "status": "error",
             "error": (
-                f"'{tool_name}' is available through the Kiln server. "
+                f"'{tool_name}' requires a Kiln server. "
                 "Set KILN_API_URL to your server address (e.g. http://localhost:8742) "
-                "or use the Kiln desktop app."
+                "or sign up at https://kiln3d.com to use the hosted API."
             ),
             "code": "PRO_TOOL_REQUIRES_SERVER",
             "tool": tool_name,
@@ -10418,7 +10418,7 @@ def _print_startup_banner() -> None:
     Output shapes:
 
         ✓ Kiln MCP. Signed in as adam@example.com (Pro).
-        ⚠ Kiln MCP. Not signed in — run `kiln login` to connect your Kiln tier.
+        ⚠ Kiln MCP. Not signed in — run `kiln signin` to connect your Kiln tier.
 
     Never raises: if tier resolution throws for any reason, we fall
     through to the "not signed in" shape rather than crashing the
@@ -10433,7 +10433,7 @@ def _print_startup_banner() -> None:
             # Tier resolution lives in kiln-pro when installed; fall
             # back to the free-tier stub (always pip-available).  Read
             # the ~/.kiln/auth_tokens.json directly for email — that's
-            # the file the CLI populates on `kiln login` / `kiln pair`.
+            # the file the CLI populates on `kiln signin` / `kiln pair`.
             current_tier = get_tier()
             tier_value = getattr(current_tier, "value", str(current_tier))
             tier_label = str(tier_value).title()
@@ -10456,7 +10456,7 @@ def _print_startup_banner() -> None:
             msg = f"\u2713 Kiln MCP. Signed in as {email} (Free)."
         else:
             msg = (
-                "\u26a0 Kiln MCP. Not signed in \u2014 run `kiln login` "
+                "\u26a0 Kiln MCP. Not signed in \u2014 run `kiln signin` "
                 "or `kiln pair <code>` to connect your Kiln tier."
             )
 
@@ -12721,7 +12721,7 @@ def decorate_surface(
                 return _error_dict(
                     "SVG logo decoration is a Pro feature. "
                     "Free tier supports PNG/JPG photos and text. "
-                    "Already subscribed? Run `kiln login` to sync this machine. "
+                    "Already subscribed? Run `kiln signin` to sync this machine. "
                     "Otherwise: https://kiln3d.com/pricing",
                     code="PRO_REQUIRED",
                 )

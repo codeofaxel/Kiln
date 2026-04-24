@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-23T21:28:48.590511+00:00",
-  "tool_count": 272,
+  "generated": "2026-04-24T16:31:35.318936+00:00",
+  "tool_count": 275,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -58,9 +58,43 @@
     "billing": {
       "label": "Billing & Subscription",
       "pitch": "Self-serve Stripe Checkout, customer portal, lost-key reissue, and live license status \u2014 for agents and humans."
+    },
+    "account_management": {
+      "label": "Account & Sign-in",
+      "pitch": "Sign in, sign out, and manage your Kiln account from inside an agent chat \u2014 no terminal required."
     }
   },
   "tools": [
+    {
+      "name": "kiln_signin",
+      "description": "Start a Kiln sign-in via OAuth.",
+      "tier": "free",
+      "category": "account_management",
+      "parameters": {
+        "properties": {},
+        "title": "kiln_signinArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "kiln_signin_poll",
+      "description": "Check whether a sign-in started by ``kiln_signin`` is done.",
+      "tier": "free",
+      "category": "account_management",
+      "parameters": {
+        "properties": {
+          "device_code": {
+            "title": "Device Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_code"
+        ],
+        "title": "kiln_signin_pollArguments",
+        "type": "object"
+      }
+    },
     {
       "name": "billing_alerts",
       "description": "Check billing system health and active alerts.",
@@ -3872,6 +3906,71 @@
           "onto_branch_id"
         ],
         "title": "rebase_preset_branchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_decoration_preset_outcome",
+      "description": "Record a print outcome against a specific preset version.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "preset_version_id": {
+            "title": "Preset Version Id",
+            "type": "string"
+          },
+          "print_job_id": {
+            "title": "Print Job Id",
+            "type": "string"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "quality_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Quality Score"
+          },
+          "adhesion_quality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Adhesion Quality"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Notes"
+          }
+        },
+        "required": [
+          "preset_version_id",
+          "print_job_id",
+          "outcome"
+        ],
+        "title": "record_decoration_preset_outcomeArguments",
         "type": "object"
       }
     },

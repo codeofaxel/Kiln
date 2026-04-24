@@ -2,7 +2,9 @@
 
 <!-- mcp-name: io.github.codeofaxel/kiln -->
 
-Agentic infrastructure for physical fabrication. Kiln enables AI agents to design, slice, queue, monitor, and fulfill 3D print jobs through a unified MCP (Model Context Protocol) server and CLI.
+**Describe it or draw it. Kiln makes it real.**
+
+Kiln turns a conversation with an AI agent into a printed object. One install, any printer, start to finish — design, slice, queue, monitor, and fulfill 3D print jobs through a unified MCP (Model Context Protocol) server and CLI.
 
 ## What Kiln Does
 
@@ -84,7 +86,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ## Features
 
-- **<!-- KILN_MCP_COUNT:OLD --> 734 MCP tools** for design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, fleet management, and fulfillment
+- **<!-- KILN_MCP_COUNT:OLD --> 737 MCP tools** for design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, fleet management, and fulfillment
 - **<!-- KILN_CLI_COUNT:OLD --> 202 CLI commands** with `--json` output for agent consumption
 - **Multi-printer fleet** management with job queue and background scheduler
 - **Model marketplaces** — search/download from MyMiniFactory, Cults3D (Thingiverse deprecated — acquired by MMF, Feb 2026)
@@ -136,7 +138,7 @@ Prusa   Voron    X1C/P1S  MK4/XL
 
 ```bash
 pip install -e ".[dev]"
-cd kiln && python -m pytest tests/ -v  # 8,699 tests
+cd kiln && python -m pytest tests/ -v  # 8,673 tests
 ```
 
 ## License

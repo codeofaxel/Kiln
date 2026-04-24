@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kiln3d"
 version = "0.5.0"
-description = "MCP server + CLI that gives AI agents safe access to 3D printers (OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo) — 728 tools for AI-driven print workflows"
+description = "MCP server + CLI that gives AI agents safe access to 3D printers (OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo) — 737 tools for AI-driven print workflows"
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
 requires-python = ">=3.10"
@@ -52,7 +52,10 @@ dependencies = [
 bambu = []  # Bambu support is now included by default
 elegoo = ["websocket-client>=1.6"]
 postgres = ["psycopg2-binary>=2.9"]
-rest = ["kiln-pro[rest]"]  # REST API lives in kiln-pro
+# NOTE: `kiln3d[rest]` used to pull `kiln-pro[rest]`, but kiln-pro is a
+# private package and the extra would fail on every public `pip install`.
+# The REST API ships in kiln-pro itself; install it directly from the
+# private repo (see kiln3d.com/docs) — don't promise it here.
 stripe = ["stripe>=5.0"]
 payments = ["stripe>=5.0", "cryptography>=41.0"]
 serial = ["pyserial>=3.5"]
@@ -80,6 +83,10 @@ Changelog = "https://github.com/codeofaxel/Kiln/releases"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# Vendored third-party SCAD libraries (MCAD, BOSL2, etc.) contain their
+# own pytest hooks using pre-8.x API; they are not our tests and must
+# not be collected.
+norecursedirs = ["src/kiln/data"]
 markers = [
     "live: requires a real OctoPrint instance (deselect with '-m \"not live\"')",
 ]
