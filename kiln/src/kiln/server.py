@@ -10099,6 +10099,18 @@ def _ensure_internal_tool_plugins_registered() -> None:
     callers import :mod:`kiln.server` without running :func:`main`. Those
     paths still need the plugin-backed tools to exist on the shared MCP
     instance, or they get a false, incomplete capability surface.
+
+    Note on the kiln-pro path: this function is auto-called once at the
+    bottom of :mod:`kiln.server` module load (the line right above
+    "Backward-compatible re-exports").  When the call fires *during* the
+    module's own load — which happens for every caller that imports
+    ``kiln.server`` for the first time — the kiln-pro plugin discovery
+    can silently no-op due to a circular-import / FastMCP-state
+    interaction (kiln_pro plugins import names from ``kiln.server`` that
+    haven't been bound yet).  The recovery path is
+    :func:`_ensure_pro_plugins_registered`, which any caller needing the
+    full pro surface (e.g. ``kiln_pro.generate_manifest``) calls
+    explicitly *after* the import chain has fully settled.
     """
     global _INTERNAL_TOOL_PLUGINS_REGISTERED
     if _INTERNAL_TOOL_PLUGINS_REGISTERED:
@@ -10127,6 +10139,57 @@ def _ensure_internal_tool_plugins_registered() -> None:
         logger.warning("Failed to load kiln-pro plugins: %s", exc)
 
     _INTERNAL_TOOL_PLUGINS_REGISTERED = True
+
+
+def _ensure_pro_plugins_registered() -> None:
+    """Recovery hook: register kiln-pro plugins if missing from the registry.
+
+    The mid-module-load call inside
+    :func:`_ensure_internal_tool_plugins_registered` can silently fail to
+    register kiln-pro plugins when triggered during kiln.server's own
+    import (see that function's docstring).  This recovery hook detects
+    the no-op state and re-runs registration *after* the import chain
+    has settled.
+
+    Idempotent.  Safe to call multiple times.  Callers that need a
+    fully-populated pro tool surface (manifest generators, REST tool
+    discovery, agent skill listings) should call this once after they
+    import :mod:`kiln.server`.
+
+    No-op for callers without kiln-pro installed (free tier).  The
+    existing stubs from :func:`_register_pro_tool_stubs` continue to
+    serve them.
+    """
+    # Cheap check: already have kiln-pro tools?  Nothing to recover.
+    has_pro = any(
+        (getattr(t.fn, "__module__", "") or "").startswith("kiln_pro")
+        for t in mcp._tool_manager.list_tools()
+    )
+    if has_pro:
+        return
+
+    # Try the registration directly (no deduping proxy — that's only
+    # needed for the load-order-sensitive path inside
+    # _ensure_internal_tool_plugins_registered).  By the time this
+    # recovery hook is called, the kiln.server module has fully loaded
+    # and the circular-import window has closed.
+    try:
+        import kiln_pro  # noqa: F401
+        registered = register_all_plugins(mcp, plugin_package="kiln_pro.plugins")
+        if registered:
+            logger.info(
+                "kiln-pro plugins registered via recovery hook (%d plugin(s))",
+                registered,
+            )
+    except ImportError:
+        # kiln-pro not installed — stubs from the earlier auto-call
+        # continue to serve free-tier callers.  Nothing to do.
+        pass
+    except Exception as exc:
+        logger.warning(
+            "Failed to register kiln-pro plugins via recovery hook: %s",
+            exc,
+        )
 
 
 def main() -> None:
