@@ -9,12 +9,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/codeofaxel/Kiln/actions/workflows/ci.yml"><img src="https://github.com/codeofaxel/Kiln/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://pypi.org/project/kiln3d/"><img src="https://img.shields.io/pypi/v/kiln3d" alt="PyPI"></a>
   <a href="https://pypi.org/project/kiln3d/"><img src="https://img.shields.io/pypi/pyversions/kiln3d" alt="Python"></a>
   <a href="https://github.com/codeofaxel/Kiln/blob/main/LICENSE"><img src="https://img.shields.io/github/license/codeofaxel/Kiln" alt="License"></a>
   <a href="https://github.com/codeofaxel/Kiln/blob/main/SIGNING.md"><img src="https://img.shields.io/badge/verified%20by-sigstore%20%2B%20SLSA-0f6fdc?logo=sigstore&logoColor=white" alt="Verified by Sigstore + SLSA"></a>
-  <a href="https://glama.ai/mcp/servers/codeofaxel/kiln"><img src="https://glama.ai/mcp/servers/codeofaxel/kiln/badge" alt="Kiln MCP server" width="120"></a>
 </p>
 
 ---
@@ -151,6 +148,12 @@ This monorepo contains two packages:
 |---------|-------------|-------------|
 | **kiln** | CLI + MCP server for multi-printer control (OctoPrint, Moonraker, Bambu, Elegoo, Prusa Link) | `kiln` or `python -m kiln` |
 | **octoprint-cli** | Lightweight standalone CLI for OctoPrint-only setups | `octoprint-cli` |
+
+### Paid tiers
+
+Kiln is open source and free for local printing. **Pro / Business / Enterprise** tiers add a private companion package, `kiln-pro`, with **Git for 3D** (branch designs, merge mesh geometry, sign releases), **fleet management** for multi-printer orchestration, **enterprise controls**, and more.
+
+→ [Compare tiers and pick yours at kiln3d.com/pricing](https://kiln3d.com/pricing)
 
 ## Prerequisites
 
