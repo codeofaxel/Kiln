@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-24T18:14:02.282186+00:00",
-  "tool_count": 275,
+  "generated": "2026-04-25T17:31:48.673243+00:00",
+  "tool_count": 280,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -73,107 +73,6 @@
       "parameters": {
         "properties": {},
         "title": "kiln_signinArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "kiln_spend_caps_show",
-      "description": "Show your current Kiln spend caps + opt-in status.",
-      "tier": "free",
-      "category": "billing",
-      "parameters": {
-        "properties": {},
-        "title": "kiln_spend_caps_showArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "kiln_spend_caps_request_change",
-      "description": "Request to raise the per-order and/or monthly spend cap. BEAT 1 of the two-beat agent flow; returns a challenge_id the user confirms with their authenticator-app TOTP code.",
-      "tier": "free",
-      "category": "billing",
-      "parameters": {
-        "properties": {
-          "per_order_dollars": {
-            "default": null,
-            "title": "Per Order Dollars",
-            "type": "number"
-          },
-          "monthly_dollars": {
-            "default": null,
-            "title": "Monthly Dollars",
-            "type": "number"
-          },
-          "reason": {
-            "default": null,
-            "title": "Reason",
-            "type": "string"
-          }
-        },
-        "title": "kiln_spend_caps_request_changeArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "kiln_spend_caps_confirm_change",
-      "description": "Confirm a cap-change challenge by passing the user's TOTP code. BEAT 2 of the two-beat agent flow.",
-      "tier": "free",
-      "category": "billing",
-      "parameters": {
-        "properties": {
-          "challenge_id": {
-            "title": "Challenge Id",
-            "type": "string"
-          },
-          "totp_code": {
-            "title": "Totp Code",
-            "type": "string"
-          }
-        },
-        "required": ["challenge_id", "totp_code"],
-        "title": "kiln_spend_caps_confirm_changeArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "kiln_spend_caps_request_order_approval",
-      "description": "Request a one-shot approval for an over-cap order. BEAT 1 of the two-beat agent flow for over-cap orders.",
-      "tier": "free",
-      "category": "billing",
-      "parameters": {
-        "properties": {
-          "order_id": {
-            "title": "Order Id",
-            "type": "string"
-          },
-          "max_dollars": {
-            "title": "Max Dollars",
-            "type": "number"
-          }
-        },
-        "required": ["order_id", "max_dollars"],
-        "title": "kiln_spend_caps_request_order_approvalArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "kiln_spend_caps_confirm_order_approval",
-      "description": "Confirm a one-shot order approval with the user's TOTP code. BEAT 2 of the two-beat agent flow for over-cap orders; returns the approval_token to re-supply on the order retry.",
-      "tier": "free",
-      "category": "billing",
-      "parameters": {
-        "properties": {
-          "challenge_id": {
-            "title": "Challenge Id",
-            "type": "string"
-          },
-          "totp_code": {
-            "title": "Totp Code",
-            "type": "string"
-          }
-        },
-        "required": ["challenge_id", "totp_code"],
-        "title": "kiln_spend_caps_confirm_order_approvalArguments",
         "type": "object"
       }
     },
@@ -351,6 +250,137 @@
           "payment_id"
         ],
         "title": "check_payment_statusArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "kiln_spend_caps_confirm_change",
+      "description": "Confirm a cap-change challenge by passing the user's TOTP code.",
+      "tier": "free",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "challenge_id": {
+            "title": "Challenge Id",
+            "type": "string"
+          },
+          "totp_code": {
+            "title": "Totp Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "challenge_id",
+          "totp_code"
+        ],
+        "title": "kiln_spend_caps_confirm_changeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "kiln_spend_caps_confirm_order_approval",
+      "description": "Confirm a one-shot order approval with the user's TOTP code.",
+      "tier": "free",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "challenge_id": {
+            "title": "Challenge Id",
+            "type": "string"
+          },
+          "totp_code": {
+            "title": "Totp Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "challenge_id",
+          "totp_code"
+        ],
+        "title": "kiln_spend_caps_confirm_order_approvalArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "kiln_spend_caps_request_change",
+      "description": "Request to raise the per-order and/or monthly spend cap.",
+      "tier": "free",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "per_order_dollars": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Per Order Dollars"
+          },
+          "monthly_dollars": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Monthly Dollars"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reason"
+          }
+        },
+        "title": "kiln_spend_caps_request_changeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "kiln_spend_caps_request_order_approval",
+      "description": "Request a one-shot approval for an over-cap order.",
+      "tier": "free",
+      "category": "billing",
+      "parameters": {
+        "properties": {
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          },
+          "max_dollars": {
+            "title": "Max Dollars",
+            "type": "number"
+          }
+        },
+        "required": [
+          "order_id",
+          "max_dollars"
+        ],
+        "title": "kiln_spend_caps_request_order_approvalArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "kiln_spend_caps_show",
+      "description": "Show your current Kiln spend caps + opt-in status.",
+      "tier": "free",
+      "category": "billing",
+      "parameters": {
+        "properties": {},
+        "title": "kiln_spend_caps_showArguments",
         "type": "object"
       }
     },

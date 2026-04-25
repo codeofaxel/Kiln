@@ -10093,12 +10093,37 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
 
 
 def _ensure_internal_tool_plugins_registered() -> None:
-    """Register internal MCP tool plugins exactly once.
+    """Register internal MCP tool plugins; idempotent and self-healing.
 
     Tool-schema generation, agent-loop tool discovery, and other in-process
     callers import :mod:`kiln.server` without running :func:`main`. Those
     paths still need the plugin-backed tools to exist on the shared MCP
     instance, or they get a false, incomplete capability surface.
+
+    **Self-healing behaviour for kiln-pro plugins.**  This function is
+    auto-called once at the bottom of :mod:`kiln.server` module load
+    (the line right above "Backward-compatible re-exports").  When that
+    auto-call fires *during* the module's own load, the kiln-pro plugin
+    discovery can silently produce zero registered tools — a circular-
+    import / FastMCP-state interaction that bites because most kiln-pro
+    plugins do ``import kiln.server`` lazily inside their ``register()``
+    methods, and kiln.server is only partially loaded at that moment.
+
+    Rather than papering over the silent failure, this function detects
+    it (post-call check: are any ``kiln_pro.*`` tools actually in the
+    registry?) and *leaves the success flag False so the next call
+    retries*.  By the time any caller invokes the function a second time
+    — explicitly, e.g. from ``kiln_pro.generate_manifest`` or the REST
+    server's startup — the import chain has settled and the retry
+    succeeds.  The first call still registers the kiln-side plugins
+    (which is load-order safe), so the partial-state window only
+    affects kiln-pro tools.
+
+    Terminal states (flag set True, no further retry):
+      * kiln-pro tools registered successfully
+      * kiln-pro not installed (ImportError → stubs registered)
+      * kiln-pro raised a non-ImportError during registration (logged
+        at WARNING; retrying wouldn't help)
     """
     global _INTERNAL_TOOL_PLUGINS_REGISTERED
     if _INTERNAL_TOOL_PLUGINS_REGISTERED:
@@ -10118,15 +10143,54 @@ def _ensure_internal_tool_plugins_registered() -> None:
             _DedupingToolRegistrationProxy(mcp),
             plugin_package="kiln_pro.plugins",
         )
-        logger.info("kiln-pro plugins loaded successfully")
+
+        # Verify the registration actually populated the registry.
+        # When this function is called mid-kiln.server-load, kiln-pro
+        # plugin discovery can silently produce zero registered tools.
+        # In that case, leave the flag False so the next call retries.
+        has_pro = any(
+            (getattr(t.fn, "__module__", "") or "").startswith("kiln_pro")
+            for t in mcp._tool_manager.list_tools()
+        )
+        if has_pro:
+            logger.info("kiln-pro plugins loaded successfully")
+        else:
+            # Silent zero-registration during the mid-load window.  Do
+            # NOT log at WARNING here — the situation is benign as long
+            # as some later call retries (which it will, because the
+            # flag stays False).  DEBUG is enough for diagnosis.
+            logger.debug(
+                "kiln-pro plugin registration produced 0 tools "
+                "(likely mid-kiln.server-load) — deferring; next call "
+                "to _ensure_internal_tool_plugins_registered() will retry"
+            )
+            return  # NOT a bug — leaves _INTERNAL_TOOL_PLUGINS_REGISTERED False
     except ImportError:
         # kiln-pro not installed — register lightweight stubs so agents
         # and users can DISCOVER pro tools and call them via the REST API.
         _register_pro_tool_stubs(mcp)
     except Exception as exc:
+        # Genuine error during registration (not the silent zero-
+        # registration above).  Retrying won't help; log + commit to
+        # the terminal state so we don't loop forever.
         logger.warning("Failed to load kiln-pro plugins: %s", exc)
 
     _INTERNAL_TOOL_PLUGINS_REGISTERED = True
+
+
+def _ensure_pro_plugins_registered() -> None:
+    """Explicit alias for callers that want to be defensive about pro plugins.
+
+    Now redundant with the self-healing logic baked into
+    :func:`_ensure_internal_tool_plugins_registered` — but kept as a
+    documented entry point for callers (manifest generators, REST tool
+    discovery, agent skill listings) that want the *intent* to be
+    visible at the call site.
+
+    Safe to call multiple times.  Idempotent.  No-op for free-tier
+    callers (no kiln-pro installed).
+    """
+    _ensure_internal_tool_plugins_registered()
 
 
 def main() -> None:
