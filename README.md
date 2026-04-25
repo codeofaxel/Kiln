@@ -142,12 +142,6 @@ flowchart TD
 
 Patent pending across semantic mesh merge, outcome-correlated branching, and signed-release-with-physical-provenance.
 
-## Editions
-
-Kiln is open source and free for local printing. **Pro / Business / Enterprise** tiers add a private companion package, `kiln-pro`, with **Git for 3D** (branch designs, merge mesh geometry, sign releases), **fleet management** for multi-printer orchestration, **enterprise controls**, and more.
-
-→ [Compare tiers and pick yours at kiln3d.com/pricing](https://kiln3d.com/pricing)
-
 ## Packages
 
 This monorepo contains two packages:
