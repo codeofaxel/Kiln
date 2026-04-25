@@ -1,6 +1,6 @@
-"""``kiln signin`` / ``kiln signout`` / ``kiln whoami`` / ``kiln pair`` —
-the CLI's device-code OAuth flow + web-initiated pairing against the
-Kiln REST API.
+"""``kiln signin`` / ``kiln signout`` / ``kiln whoami`` / ``kiln pair`` /
+``kiln link`` — the CLI's device-code OAuth flow + bidirectional pairing
+against the Kiln REST API.
 
 How the login flow works end-to-end:
 
@@ -113,7 +113,7 @@ def _http_post(
 
     ``bearer`` is keyword-only so every existing call site (all
     unauthenticated pairing/login endpoints) keeps working unchanged;
-    only authed callers like ``kiln invite`` opt in."""
+    only authed callers like ``kiln link`` opt in."""
     try:
         import requests  # type: ignore[import-untyped]
     except ImportError as exc:  # pragma: no cover — requests is a hard dep
@@ -843,25 +843,33 @@ def auth_pair(code: str, client: str | None) -> None:
 
 
 # ═════════════════════════════════════════════════════════════════════
-# `kiln invite` — CLI-initiated pairing (the reverse of `kiln pair`)
+# `kiln link` — CLI-initiated pairing (the reverse of `kiln pair`)
 # ═════════════════════════════════════════════════════════════════════
 #
 # The mirror image of ``kiln pair``: the user is already signed in on
 # THIS terminal (``kiln signin`` or ``kiln pair``) and wants to open a
 # fresh browser tab at app.kiln3d.com while carrying the same session.
-# ``kiln invite`` mints a one-shot code that the browser's
+# ``kiln link`` mints a one-shot code that the browser's
 # /settings/agent page can claim.
 #
 # Why this matters: pairing is now symmetric.  No matter which surface
 # you sign in on first — web or terminal — you can pair the other in
 # one code.  Before this, CLI-first users had to sign in twice (once
 # in the terminal, once in the browser).
+#
+# Naming history: this command shipped briefly as ``kiln invite``
+# (2026-04-23 → 2026-04-25) before the rename.  ``invite`` read as
+# "invite another USER to Kiln" (referral / team-invite semantics)
+# rather than "link my own browser tab to my own CLI session" — and
+# it boxed us out of the ``invite`` namespace for the eventual
+# referral system.  ``kiln invite`` survives one release as a hidden
+# deprecation alias that prints a stderr warning and forwards.
 
 
-@click.command("invite")
+@click.command("link")
 @click.option(
     "--json", "as_json", is_flag=True, default=False,
-    help="Emit the invite response as JSON (for piping into scripts).",
+    help="Emit the link response as JSON (for piping into scripts).",
 )
 @click.option(
     "--client", "client",
@@ -874,7 +882,7 @@ def auth_pair(code: str, client: str | None) -> None:
         "on the same host are distinguishable.  Auto-detected if omitted."
     ),
 )
-def auth_invite(as_json: bool, client: str | None) -> None:
+def auth_link(as_json: bool, client: str | None) -> None:
     """Generate a one-shot code to sign in on another device.
 
     Use this when you're signed in on THIS terminal (``kiln signin`` or
@@ -882,7 +890,7 @@ def auth_invite(as_json: bool, client: str | None) -> None:
     app.kiln3d.com carrying the same session — no re-signin.
 
     How it works:
-        1. Run ``kiln invite`` here.
+        1. Run ``kiln link`` here.
         2. The terminal prints a short code + the URL to visit.
         3. Open app.kiln3d.com/settings/agent in a browser, sign in if
            you haven't already (SAME account), and paste the code into
@@ -896,7 +904,7 @@ def auth_invite(as_json: bool, client: str | None) -> None:
     if not access_token:
         raise click.ClickException(
             "Not signed in on this terminal.  Run `kiln signin` first, "
-            "then `kiln invite` to pair a browser tab."
+            "then `kiln link` to pair a browser tab."
         )
     refresh_token = str(tokens.get("refresh_token") or "")
 
@@ -911,6 +919,12 @@ def auth_invite(as_json: bool, client: str | None) -> None:
     # POST /api/auth/pairing/invite — authed with our access_token via
     # the shared _http_post helper.  401 is surfaced as a ClickException
     # by the helper itself when a bearer is supplied.
+    #
+    # NOTE: the SERVER endpoint is still /api/auth/pairing/invite — this
+    # is internal CLI/web wiring that users never see.  Renaming it
+    # would force every test + the web client to migrate in lockstep
+    # for zero user-visible benefit, so we leave it.  The user-facing
+    # name (this command) is what changed.
     body = _http_post(
         "/api/auth/pairing/invite",
         {
@@ -921,7 +935,7 @@ def auth_invite(as_json: bool, client: str | None) -> None:
     )
 
     if not body.get("success"):
-        raise click.ClickException(body.get("error") or "Could not mint an invite code.")
+        raise click.ClickException(body.get("error") or "Could not mint a link code.")
 
     code = str(body.get("code") or "")
     expires_at = str(body.get("expires_at") or "")
@@ -963,13 +977,67 @@ def auth_invite(as_json: bool, client: str | None) -> None:
 
 
 # ═════════════════════════════════════════════════════════════════════
+# `kiln invite` — deprecated alias for `kiln link` (one-release grace)
+# ═════════════════════════════════════════════════════════════════════
+
+
+@click.command(
+    "invite",
+    hidden=True,
+    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+)
+@click.pass_context
+def _auth_invite_deprecated(ctx: click.Context) -> None:
+    """[deprecated] alias for ``kiln link``.
+
+    Forwards every flag through unchanged so existing scripts keep
+    working.  Will be removed one PyPI release after the rename ships.
+    """
+    click.echo(
+        "warning: `kiln invite` has been renamed to `kiln link` "
+        "(this alias will be removed in the next release).",
+        err=True,
+    )
+    ctx.invoke(auth_link, **{k: v for k, v in _parse_link_args(ctx.args).items()})
+
+
+def _parse_link_args(args: list[str]) -> dict[str, Any]:
+    """Tiny re-parser for the deprecation alias.
+
+    Click's ``ctx.forward`` doesn't compose well with ``allow_extra_args``
+    when the source and target commands have the same option set, so we
+    reconstruct the kwargs by hand.  Keep this dumb on purpose — only
+    the two flags ``auth_link`` actually accepts (``--json``,
+    ``--client``).  Anything else is silently dropped (with a stderr
+    warning above flagging the deprecation, the user already knows
+    they're on a legacy code path).
+    """
+    out: dict[str, Any] = {"as_json": False, "client": None}
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--json":
+            out["as_json"] = True
+            i += 1
+        elif a == "--client" and i + 1 < len(args):
+            out["client"] = args[i + 1]
+            i += 2
+        elif a.startswith("--client="):
+            out["client"] = a.split("=", 1)[1]
+            i += 1
+        else:
+            i += 1
+    return out
+
+
+# ═════════════════════════════════════════════════════════════════════
 # registration
 # ═════════════════════════════════════════════════════════════════════
 
 
 def register_auth_cli(cli_group: click.Group) -> None:
     """Attach ``kiln signin`` / ``kiln signout`` / ``kiln whoami`` /
-    ``kiln pair`` / ``kiln invite``.
+    ``kiln pair`` / ``kiln link``.
 
     If the group already has a command named ``login`` (the legacy
     identity-linking flow in kiln-pro's ``vcs_commands.cli_login``), we
@@ -995,8 +1063,14 @@ def register_auth_cli(cli_group: click.Group) -> None:
     cli_group.add_command(auth_logout)
     cli_group.add_command(auth_whoami)
     cli_group.add_command(auth_pair)
-    cli_group.add_command(auth_invite)
+    cli_group.add_command(auth_link)
     # Legacy aliases: `kiln signin` / `kiln logout` keep working for existing
     # scripts + muscle memory.  Docs point at signin/signout.
     cli_group.add_command(auth_login, name="login")
     cli_group.add_command(auth_logout, name="logout")
+    # Deprecation alias: `kiln invite` was the original name for this
+    # command (2026-04-23 → 2026-04-25).  Hidden from --help so docs
+    # point at `kiln link`, but still callable so any script / muscle
+    # memory written in those two days keeps working for ONE release.
+    # Drop after the next PyPI release ships and shows green metrics.
+    cli_group.add_command(_auth_invite_deprecated, name="invite")

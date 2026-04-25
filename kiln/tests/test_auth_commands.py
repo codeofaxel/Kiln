@@ -41,7 +41,8 @@ class TestRegisterAuthCli:
             "logout",
             "whoami",
             "pair",
-            "invite",
+            "link",
+            "invite",  # deprecated alias for `link`; hidden, kept one release.
         }
 
     def test_imports_match_registered_names(self):
@@ -49,7 +50,7 @@ class TestRegisterAuthCli:
         name directly for external wiring (tests, docs, alt entry
         points)."""
         from kiln.cli.auth_commands import (
-            auth_invite,
+            auth_link,
             auth_login,
             auth_logout,
             auth_pair,
@@ -57,11 +58,12 @@ class TestRegisterAuthCli:
         )
         # Canonical click names (match the web workshop + MCP tools).
         # `login` / `logout` stay reachable as aliases via register_auth_cli.
+        # `invite` stays reachable as a deprecation alias for `link`.
         assert auth_login.name == "signin"
         assert auth_logout.name == "signout"
         assert auth_whoami.name == "whoami"
         assert auth_pair.name == "pair"
-        assert auth_invite.name == "invite"
+        assert auth_link.name == "link"
 
     def test_login_alias_points_to_auth_signin(self):
         # `kiln login` must be the backcompat alias for our OAuth
@@ -175,24 +177,29 @@ class TestLogoutAndWhoami:
 
 
 # =====================================================================
-# CLI: invite (no network required for the happy-path stubbing)
+# CLI: link (no network required for the happy-path stubbing)
 # =====================================================================
 
 
-class TestInvite:
-    """``kiln invite`` — CLI-initiated pairing.  The happy-path hits
-    the network, but the "not signed in" failure mode is purely local
-    and worth pinning: ships a clear message pointing at ``kiln
-    login`` instead of a cryptic 401."""
+class TestLink:
+    """``kiln link`` — CLI-initiated pairing.  The happy-path hits the
+    network, but the "not signed in" failure mode is purely local and
+    worth pinning: ships a clear message pointing at ``kiln signin``
+    instead of a cryptic 401.
 
-    def test_invite_without_saved_session_fails_clearly(self, auth_home):
+    Naming history: this command shipped briefly as ``kiln invite``
+    (2026-04-23 → 2026-04-25).  The deprecation alias is exercised in
+    ``TestInviteDeprecationAlias`` below.
+    """
+
+    def test_link_without_saved_session_fails_clearly(self, auth_home):
         import click
         from click.testing import CliRunner
         from kiln.cli.auth_commands import register_auth_cli
 
         g = click.Group("kiln")
         register_auth_cli(g)
-        r = CliRunner().invoke(g, ["invite"])
+        r = CliRunner().invoke(g, ["link"])
         assert r.exit_code != 0
         # The error message must guide the user back to `kiln signin`
         # (and NOT mention `kiln pair`, which would confuse someone
@@ -201,7 +208,7 @@ class TestInvite:
         assert "not signed in" in out
         assert "kiln signin" in out
 
-    def test_invite_with_empty_access_token_fails_clearly(self, auth_home):
+    def test_link_with_empty_access_token_fails_clearly(self, auth_home):
         """A token file that exists but has an empty access_token
         (seen on 2026-04-23 as a bad pairing that wrote partial
         tokens) should be treated the same as "no session" — fail
@@ -218,13 +225,13 @@ class TestInvite:
 
         g = click.Group("kiln")
         register_auth_cli(g)
-        r = CliRunner().invoke(g, ["invite"])
+        r = CliRunner().invoke(g, ["link"])
         assert r.exit_code != 0
         assert "not signed in" in r.output.lower()
 
-    def test_invite_success_prints_code_and_url(self, auth_home, monkeypatch):
+    def test_link_success_prints_code_and_url(self, auth_home, monkeypatch):
         """Happy path: with a valid saved session and a mocked server
-        response, `kiln invite` prints the code + verification URL so
+        response, `kiln link` prints the code + verification URL so
         the user can type it into a browser tab.  The code is the
         hero of the output."""
         import json as _json
@@ -262,7 +269,7 @@ class TestInvite:
 
         g = click.Group("kiln")
         register_auth_cli(g)
-        r = CliRunner().invoke(g, ["invite"])
+        r = CliRunner().invoke(g, ["link"])
         assert r.exit_code == 0, r.output
 
         # The bearer MUST be forwarded so the server can resolve the
@@ -282,8 +289,8 @@ class TestInvite:
         assert "KLN-ABCD-EFGH" in out
         assert "app.kiln3d.com/settings/agent" in out
 
-    def test_invite_json_mode_emits_raw_server_body(self, auth_home, monkeypatch):
-        """`kiln invite --json` pipes the raw server body for scripts,
+    def test_link_json_mode_emits_raw_server_body(self, auth_home, monkeypatch):
+        """`kiln link --json` pipes the raw server body for scripts,
         so an automation can parse the code without screen-scraping
         the human-facing output."""
         import json as _json
@@ -310,14 +317,135 @@ class TestInvite:
 
         g = click.Group("kiln")
         register_auth_cli(g)
-        r = CliRunner().invoke(g, ["invite", "--json"])
+        r = CliRunner().invoke(g, ["link", "--json"])
         assert r.exit_code == 0, r.output
         # Click 8.2+ keeps stdout and stderr separate in CliRunner
         # results — ``r.stdout`` alone is parseable JSON.  That
-        # mirrors the real `kiln invite --json | jq ...` pipe, where
+        # mirrors the real `kiln link --json | jq ...` pipe, where
         # stderr status lines must not contaminate the payload.
         parsed = _json.loads(r.stdout)
         assert parsed == body
+
+
+# =====================================================================
+# CLI: invite (deprecated alias for link)
+# =====================================================================
+
+
+class TestInviteDeprecationAlias:
+    """``kiln invite`` is the original name for what is now ``kiln link``.
+    It survives one PyPI release as a hidden alias so existing scripts
+    + muscle memory written between 2026-04-23 and the rename keep
+    working.  The alias prints a stderr deprecation warning AND
+    forwards every flag to ``auth_link`` unchanged."""
+
+    def test_invite_alias_forwards_to_link(self, auth_home, monkeypatch):
+        """`kiln invite` should mint a code via the SAME server endpoint
+        as `kiln link`, with the SAME bearer + body shape.  Functionally
+        indistinguishable from the canonical command.
+        """
+        import json as _json
+        import click
+        from click.testing import CliRunner
+        from kiln.cli import auth_commands
+        from kiln.cli.auth_commands import register_auth_cli
+
+        (auth_home / ".kiln").mkdir(mode=0o700, exist_ok=True)
+        (auth_home / ".kiln" / "auth_tokens.json").write_text(
+            _json.dumps({
+                "access_token": "tok",
+                "refresh_token": "ref",
+            })
+        )
+
+        captured: dict = {}
+
+        def fake_post(path, body, *, bearer=None, timeout=15.0):
+            captured["path"] = path
+            captured["body"] = body
+            captured["bearer"] = bearer
+            return {
+                "success": True,
+                "code": "KLN-DEPR-ALIA",
+                "expires_at": "2099-01-01T00:10:00Z",
+                "verify_url": "https://app.kiln3d.com/settings/agent",
+            }
+
+        monkeypatch.setattr(auth_commands, "_http_post", fake_post)
+
+        g = click.Group("kiln")
+        register_auth_cli(g)
+        r = CliRunner().invoke(g, ["invite"])
+        assert r.exit_code == 0, r.output
+
+        # Forwarded to the same endpoint with the same bearer.
+        assert captured["path"] == "/api/auth/pairing/invite"
+        assert captured["bearer"] == "tok"
+
+        # Deprecation warning must surface (humans running interactively
+        # see the rename hint).  Click ≥8.2 separates stdout/stderr in
+        # CliRunner by default; we check the combined output here so the
+        # test works on the click version actually installed.
+        full = (r.output or "").lower()
+        assert "kiln invite" in full
+        assert "kiln link" in full
+        assert "renamed" in full or "deprecat" in full
+
+        # The code still surfaces — the alias is functionally
+        # transparent to scripts that screen-scrape it.
+        assert "KLN-DEPR-ALIA" in (r.output or "")
+
+    def test_invite_alias_forwards_client_flag(self, auth_home, monkeypatch):
+        """``kiln invite --client Cursor`` must reach the server with
+        ``client_name = "Cursor"`` exactly as ``kiln link --client Cursor``
+        does.  The deprecation warning prints, but the flag round-trips."""
+        import json as _json
+        import click
+        from click.testing import CliRunner
+        from kiln.cli import auth_commands
+        from kiln.cli.auth_commands import register_auth_cli
+
+        (auth_home / ".kiln").mkdir(mode=0o700, exist_ok=True)
+        (auth_home / ".kiln" / "auth_tokens.json").write_text(
+            _json.dumps({"access_token": "tok", "refresh_token": "ref"})
+        )
+
+        captured: dict = {}
+
+        def fake_post(path, body, *, bearer=None, timeout=15.0):
+            captured["body"] = body
+            return {
+                "success": True,
+                "code": "KLN-FLAG-FRWD",
+                "expires_at": "2099-01-01T00:10:00Z",
+                "verify_url": "https://app.kiln3d.com/settings/agent",
+            }
+
+        monkeypatch.setattr(auth_commands, "_http_post", fake_post)
+
+        g = click.Group("kiln")
+        register_auth_cli(g)
+        r = CliRunner().invoke(g, ["invite", "--client", "Cursor"])
+        assert r.exit_code == 0, r.output
+        assert captured["body"].get("client_name") == "Cursor"
+
+    def test_invite_alias_is_hidden_from_help(self):
+        """The deprecation alias must NOT appear in --help output so
+        new users / docs converge on `kiln link`.  Click respects the
+        ``hidden=True`` flag on the alias command itself, not on the
+        registration call."""
+        import click
+        from click.testing import CliRunner
+        from kiln.cli.auth_commands import register_auth_cli
+
+        g = click.Group("kiln")
+        register_auth_cli(g)
+        r = CliRunner().invoke(g, ["--help"])
+        assert r.exit_code == 0
+        # `link` IS in the help output as the canonical name.
+        assert "link" in r.output
+        # `invite` is NOT — it's hidden.
+        assert "invite" not in r.output
 
 
 # =====================================================================
@@ -610,10 +738,10 @@ class TestPairForwardsClientName:
         assert captured["body"].get("client_name") == "Cursor"
 
 
-class TestInviteForwardsClientName:
-    """`kiln invite --client` forwards the resolved name in the request body."""
+class TestLinkForwardsClientName:
+    """`kiln link --client` forwards the resolved name in the request body."""
 
-    def test_invite_sends_client_name_in_body(
+    def test_link_sends_client_name_in_body(
         self, auth_home, monkeypatch, clear_client_env,
     ):
         import json as _json
@@ -622,7 +750,7 @@ class TestInviteForwardsClientName:
         from kiln.cli import auth_commands
         from kiln.cli.auth_commands import register_auth_cli
 
-        # Seed a valid saved session — invite needs a bearer to forward.
+        # Seed a valid saved session — link needs a bearer to forward.
         (auth_home / ".kiln").mkdir(mode=0o700, exist_ok=True)
         (auth_home / ".kiln" / "auth_tokens.json").write_text(
             _json.dumps({"access_token": "tok", "refresh_token": "ref"})
@@ -647,7 +775,7 @@ class TestInviteForwardsClientName:
 
         g = click.Group("kiln")
         register_auth_cli(g)
-        r = CliRunner().invoke(g, ["invite", "--client", "Codex"])
+        r = CliRunner().invoke(g, ["link", "--client", "Codex"])
         assert r.exit_code == 0, r.output
         assert captured["path"] == "/api/auth/pairing/invite"
         assert captured["body"].get("client_name") == "Codex"
