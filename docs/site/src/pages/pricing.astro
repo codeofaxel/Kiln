@@ -218,14 +218,13 @@ const pricingFaqSchema = {
             <div class="price">
               <span class="amount monthly-price">$1,999</span>
               <span class="amount annual-price" style="display:none">$1,599</span>
-              <span class="period monthly-price-period">/ mo base</span>
-              <span class="period annual-price-period" style="display:none">/ mo base, billed annually</span>
+              <span class="period monthly-price-period">/ month</span>
+              <span class="period annual-price-period" style="display:none">/ month, billed annually</span>
             </div>
-            <p class="price-note">20 printers included, then $15/printer/mo</p>
           </div>
           <ul class="features">
             <li><span class="check">&#10003;</span> Everything in Business</li>
-            <li><span class="check">&#10003;</span> Unlimited printers</li>
+            <li><span class="check">&#10003;</span> Unlimited printers <span class="feature-note">(50 included; $15/each above)</span></li>
             <li><span class="check">&#10003;</span> Unlimited team seats</li>
             <li><span class="check">&#10003;</span> Role-based access control</li>
             <li><span class="check">&#10003;</span> SSO (SAML/OIDC)</li>
@@ -270,11 +269,11 @@ const pricingFaqSchema = {
         </details>
         <details>
           <summary>What's included in Enterprise?</summary>
-          <p>Enterprise is for teams running production print operations. It includes a dedicated single-tenant MCP server, SSO, role-based access control, full audit trails, lockable safety profiles, and a 99.9% uptime SLA. Base price includes 20 printers, with additional printers at $15/mo each.</p>
+          <p>Enterprise is for teams running production print operations. It includes a dedicated single-tenant MCP server, SSO, role-based access control, full audit trails, lockable safety profiles, and a 99.9% uptime SLA. Base price includes 50 printers, with additional printers at $15/mo each.</p>
         </details>
         <details>
           <summary>Can I try Enterprise before committing?</summary>
-          <p>Yes. We offer a pilot program for qualified teams. Email adam@kiln3d.com and we'll set you up with full Enterprise access to evaluate.</p>
+          <p>Yes. Email <a href="mailto:adam@kiln3d.com?subject=Kiln%20Enterprise%20evaluation">adam@kiln3d.com</a> and we'll set you up with full Enterprise access to evaluate.</p>
         </details>
         <details>
           <summary>What about commercial licensing?</summary>
@@ -491,6 +490,15 @@ const pricingFaqSchema = {
     align-items: flex-start;
     gap: 10px;
     line-height: 1.5;
+  }
+  /* Inline detail next to a feature label — used for usage-pricing
+     footnotes like "(50 included; $15/each above)" so the per-printer
+     math reads as a parenthetical, not as a competing claim against
+     the bullet's headline ("Unlimited printers"). */
+  .features .feature-note {
+    color: var(--text-muted);
+    font-size: 12px;
+    opacity: 0.85;
   }
   .features .check {
     color: var(--accent);
