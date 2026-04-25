@@ -27,17 +27,17 @@
 
 Kiln lets AI agents design, queue, and execute physical manufacturing jobs on real 3D printers with zero human intervention. It exposes printer control through both a **CLI** and the **Model Context Protocol (MCP)**, making any MCP-compatible agent (OpenClaw, Claude, GPT, custom) a first-class operator of your print farm.
 
-Kiln is **open source for local printing.** Pro / Business / Enterprise tiers add **Git for 3D**, fleet management, and enterprise controls — see [kiln3d.com/pricing](https://kiln3d.com/pricing).
+Kiln is **open source for local printing.** Pro / Business / Enterprise tiers add **Git for 3D**, fleet management, enterprise controls, and more — see [kiln3d.com/pricing](https://kiln3d.com/pricing).
 
 ### Why Kiln?
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
 - **No printer? No problem** — Outsource any job to Craftcloud's 150+ manufacturing services. Kiln handles quoting, ordering, and tracking. No API key required.
 - **AI-native** — <!-- KILN_MCP_COUNT:OLD --> 742 MCP tools built for AI agents. Not a web UI with an API bolted on.
-- **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print. Patent pending.
-- **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command. Patent pending.
-- **Resume, don't restart** — Cancelled or failed print? Resume from the exact layer it stopped on any supported FDM printer. No filament wasted. Patent pending (Pro).
-- **Modify mid-print** — Add decorations, append features, or swap materials on a live print with atomic revert if anything goes wrong. Patent pending (Pro).
+- **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print.
+- **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command.
+- **Resume, don't restart** — Cancelled or failed print? Resume from the exact layer it stopped on any supported FDM printer. No filament wasted. (Pro)
+- **Modify mid-print** — Add decorations, append features, or swap materials on a live print with atomic revert if anything goes wrong. (Pro)
 - **Smart material routing** — 25 materials, 45 brand-specific filament profiles (Bambu, Prusament, Polymaker, and more) across 11 material families. Intent-based recommendations with printer capability awareness.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure recovery, closed-loop AI generation feedback (failed prints auto-improve future generations), preflight safety checks on every job.
 - **Search → Slice → Print** — Search and download 3D models from MyMiniFactory and Cults3D (search only), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
