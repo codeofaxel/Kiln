@@ -27,6 +27,8 @@
 
 Kiln lets AI agents design, queue, and execute physical manufacturing jobs on real 3D printers with zero human intervention. It exposes printer control through both a **CLI** and the **Model Context Protocol (MCP)**, making any MCP-compatible agent (OpenClaw, Claude, GPT, custom) a first-class operator of your print farm.
 
+Kiln is **open source for local printing.** Pro / Business / Enterprise tiers add **Git for 3D**, fleet management, and enterprise controls — see [kiln3d.com/pricing](https://kiln3d.com/pricing).
+
 ### Why Kiln?
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
@@ -140,6 +142,12 @@ flowchart TD
 
 Patent pending across semantic mesh merge, outcome-correlated branching, and signed-release-with-physical-provenance.
 
+## Editions
+
+Kiln is open source and free for local printing. **Pro / Business / Enterprise** tiers add a private companion package, `kiln-pro`, with **Git for 3D** (branch designs, merge mesh geometry, sign releases), **fleet management** for multi-printer orchestration, **enterprise controls**, and more.
+
+→ [Compare tiers and pick yours at kiln3d.com/pricing](https://kiln3d.com/pricing)
+
 ## Packages
 
 This monorepo contains two packages:
@@ -148,12 +156,6 @@ This monorepo contains two packages:
 |---------|-------------|-------------|
 | **kiln** | CLI + MCP server for multi-printer control (OctoPrint, Moonraker, Bambu, Elegoo, Prusa Link) | `kiln` or `python -m kiln` |
 | **octoprint-cli** | Lightweight standalone CLI for OctoPrint-only setups | `octoprint-cli` |
-
-### Paid tiers
-
-Kiln is open source and free for local printing. **Pro / Business / Enterprise** tiers add a private companion package, `kiln-pro`, with **Git for 3D** (branch designs, merge mesh geometry, sign releases), **fleet management** for multi-printer orchestration, **enterprise controls**, and more.
-
-→ [Compare tiers and pick yours at kiln3d.com/pricing](https://kiln3d.com/pricing)
 
 ## Prerequisites
 
