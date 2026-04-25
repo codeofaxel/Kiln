@@ -71,6 +71,7 @@ from kiln.cli.output import (
 )
 
 from kiln.cli.auth_commands import register_auth_cli
+from kiln.cli.spend_caps_commands import register_spend_caps_cli
 
 logger = logging.getLogger(__name__)
 
@@ -9748,6 +9749,15 @@ except ImportError:
 # can be relocated to `kiln identity login` and the canonical `kiln signin`
 # (OAuth device flow) takes the name everyone actually reaches for first.
 register_auth_cli(cli)
+
+
+# Spend-cap subcommand — `kiln spend-caps {show,raise,approve-order}`.
+# Registered unconditionally for the same reason as the auth commands:
+# the CLI talks only to the public Kiln REST API, and the agent-flow
+# opt-in lives server-side, so a free-tier or paid user with the
+# opt-in enabled can drive cap changes from the CLI without kiln-pro
+# being installed locally.
+register_spend_caps_cli(cli)
 
 
 def main() -> None:
