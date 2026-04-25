@@ -30,19 +30,10 @@
 
 Kiln lets AI agents design, queue, and execute physical manufacturing jobs on real 3D printers with zero human intervention. It exposes printer control through both a **CLI** and the **Model Context Protocol (MCP)**, making any MCP-compatible agent (OpenClaw, Claude, GPT, custom) a first-class operator of your print farm.
 
-### Three ways to print
-
-| Mode | What it is | You need |
-|------|-----------|----------|
-| **🖨️ Your printer** | Control OctoPrint, Moonraker, Bambu, or Prusa Link printers on your LAN — or remotely via Bambu Cloud | A 3D printer |
-| **🏭 Fulfillment centers** | Outsource to Craftcloud (150+ services — no API key required). Kiln handles quoting, ordering, and tracking. More providers as integrations launch | Nothing — no printer required |
-| **🌐 External provider integrations** | Route jobs through connected third-party provider/network adapters. Kiln does not operate a first-party network marketplace | Integrations as available |
-
-All three modes use the same MCP tools and CLI commands. An agent can seamlessly fall back from a busy local printer to a fulfillment center or connected external provider integration — all in one workflow.
-
 ### Why Kiln?
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
+- **No printer? No problem** — Outsource any job to Craftcloud's 150+ manufacturing services. Kiln handles quoting, ordering, and tracking. No API key required.
 - **AI-native** — <!-- KILN_MCP_COUNT:OLD --> 737 MCP tools built for AI agents. Not a web UI with an API bolted on.
 - **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print. Patent pending.
 - **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command. Patent pending.
@@ -62,7 +53,6 @@ graph TD
 
     B --> C["🖨️ Your Printers"]
     B --> F["🏭 Fulfillment"]
-    B --> N["🌐 External Integrations<br/><sub>(third-party providers/networks, as available)</sub>"]
     B --> D["🛒 Marketplaces"]
     B --> V["📐 Designs (versioned)<br/><sub>Pro+</sub>"]
 
@@ -73,8 +63,6 @@ graph TD
     C --> E5["Elegoo"]
 
     F --> F1["Craftcloud"]
-
-    N --> N1["Third-Party Network Providers"]
 
     D --> I["MyMiniFactory"]
     D --> J["Cults3D"]
@@ -88,7 +76,6 @@ graph TD
     style B fill:#16213e,stroke:#0f3460,color:#fff
     style C fill:#0f3460,stroke:#e94560,color:#fff
     style F fill:#0f3460,stroke:#27ae60,color:#fff
-    style N fill:#0f3460,stroke:#f39c12,color:#fff
     style D fill:#0f3460,stroke:#533483,color:#fff
     style V fill:#0f3460,stroke:#f59e42,color:#fff
     style E1 fill:#2d2d44,stroke:#e94560,color:#fff
@@ -97,7 +84,6 @@ graph TD
     style E4 fill:#2d2d44,stroke:#e94560,color:#fff
     style E5 fill:#2d2d44,stroke:#e94560,color:#fff
     style F1 fill:#2d2d44,stroke:#27ae60,color:#fff
-    style N1 fill:#2d2d44,stroke:#f39c12,color:#fff
     style H fill:#2d2d44,stroke:#533483,color:#fff
     style I fill:#2d2d44,stroke:#533483,color:#fff
     style J fill:#2d2d44,stroke:#533483,color:#fff
