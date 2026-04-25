@@ -1,6 +1,6 @@
 # Kiln Terms of Use
 
-*Last updated: 2026-04-24 · Version 2.4*
+*Last updated: 2026-04-24 · Version 2.5*
 
 > **Plain-English summary** — These terms govern your use of Kiln,
 > operated by Hadron Labs Inc. Kiln has two sides:
@@ -246,18 +246,43 @@ change-notification rules in §22; an increase or decrease is a
 material change and will be communicated at least 30 days before
 it takes effect.
 
-**Adjusting your caps.** Paid users can raise either cap above
-the default through the web app at
+**Adjusting your caps from the web.** Paid users can raise either
+cap above the default through the web app at
 `app.kiln3d.com/settings/billing/spend-caps`. Cap raises require
 two-factor authentication and are limited to values at or above
 the protective default ($500 / $2,000); you may not lower a cap
-below those defaults. Every change is logged, and you receive an
-email confirmation with a 24-hour revert link. Per-order one-shot
-approvals — for orders that exceed your standing caps without
-changing them — are also available via the web app when an order
-is refused at the cap. **No CLI or MCP tool can raise your caps
-or self-approve an order on your behalf**; only an action
-initiated from the browser can change them.
+below those defaults.
+
+**Adjusting your caps from the CLI or an MCP agent (opt-in).**
+Power users can opt in to a CLI/MCP path under the same web-app
+settings page, by enabling **Allow CLI / MCP cap changes**. When
+opt-in is enabled, the same two-factor challenge is required for
+every change — your CLI or AI agent will display the requested
+change and ask you for the current 6-digit code from your
+authenticator app. The opt-in toggle itself can only be flipped
+from the web app and itself requires two-factor authentication.
+
+**Rate limit and lockout.** Cap-change attempts are rate-limited
+across all surfaces: a maximum of three attempts in any rolling
+24-hour window. The third attempt (whether successful or not)
+pauses further cap-change requests for 24 hours and triggers an
+email to your account with the attempt details. This protects you
+against a compromised agent or session.
+
+**Audit and revert.** Every change is logged with the surface
+('web', 'cli', or 'mcp'), an IP, and a user-agent string. Each
+change triggers an email confirmation with a 24-hour revert
+link. **No agent can self-approve an order or raise a cap
+without your authenticator code** — possession of your second
+factor is the load-bearing security primitive across every
+surface.
+
+**Per-order one-shot approvals.** When an order would exceed
+your standing caps, Kiln refuses it with a clear error containing
+an `approve_url`. From the web — or from your CLI/MCP if opt-in
+is enabled — you can mint a single-use, 5-minute approval token
+bound to that specific order; the agent then resubmits the order
+with the token and the cap is bypassed for that order only.
 
 ## 6. Orchestration fees for fulfillment
 
