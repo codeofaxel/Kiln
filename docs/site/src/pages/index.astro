@@ -32,6 +32,97 @@ import CTA from '../components/CTA.astro';
     </div>
   </section>
 
+  <!--
+    Receipts — promoted to the second screen on 2026-04-25 after a
+    Jobs/Ive war-room round 2.  The two existing object photos
+    already carry the page's two strongest promises (one thing
+    today / a hundred this week / your factory at home / your
+    startup's merch from your bedroom).  Hiding them in section 9
+    meant 80% of visitors decided to stay or leave before they
+    ever saw the proof.  Promoting the section + re-captioning to
+    name the buyer + the time turns the same two assets into the
+    page's whole sales pitch on the second scroll.
+
+    Heading is the single load-bearing sentence on the page after
+    the hero: "One thing today. Or a hundred this week." — both of
+    Adam's bullets in nine words.  Sub-line "Same printer. Same
+    desk. One prompt each." carries the at-home / your-own-factory
+    half so neither promise has to wait for the captions.
+
+    Captions retain yesterday's italic-quote pattern (the strongest
+    typography on the page) and add a time + buyer beat to the
+    meta line so each photo proves a different door.
+
+    Earlier shape (centered "A few words. A picture you already
+    had. A real object in your hand." with two anonymous coasters
+    and the run video) is preserved in git history at
+    HEAD~ on 2026-04-24 if a rollback is ever needed.
+  -->
+  <section id="demo" class="receipts bordered">
+    <div class="container">
+      <h2 class="receipts-heading">One thing today. Or a hundred this week.</h2>
+      <p class="receipts-sub">Same printer. Same desk. One prompt each.</p>
+
+      <div class="receipts-grid">
+        <!-- Door 1: one thing, today.  Ash coaster — the
+             personal-prototype-by-dinner promise. -->
+        <figure class="receipt">
+          <div class="receipt-img-wrap">
+            <img
+              src="/demo/ash-coaster.jpg"
+              alt="A white 3D-printed round coaster showing a relief portrait of a French bulldog and the name ASH along the bottom edge, held in a hand"
+              loading="lazy"
+              width="1200"
+              height="1600"
+            />
+          </div>
+          <figcaption class="receipt-caption">
+            <p class="receipt-kicker">One thing, today</p>
+            <q class="receipt-sentence">a coaster with a photo of my dog Ash</q>
+            <p class="receipt-meta">Photo taken at lunch. Sentence sent. In hand by dinner.</p>
+            <p class="receipt-printer">Bambu Lab A1 Mini</p>
+          </figcaption>
+        </figure>
+
+        <!-- Door 2: a hundred this week.  Kiln-branded ashtray —
+             the startup-merch / your-own-factory promise. -->
+        <figure class="receipt">
+          <div class="receipt-img-wrap">
+            <img
+              src="/demo/kiln-ashtray.jpg"
+              alt="A red 3D-printed circular ashtray held in a hand, with the Kiln mark debossed into the inside"
+              loading="lazy"
+              width="1200"
+              height="1600"
+            />
+          </div>
+          <figcaption class="receipt-caption">
+            <p class="receipt-kicker">Or a hundred, this week</p>
+            <q class="receipt-sentence">an ashtray with our startup&rsquo;s logo</q>
+            <p class="receipt-meta">Logo dropped in. Run queued. First of 100 by launch night.</p>
+            <p class="receipt-printer">Bambu Lab A1 Mini</p>
+          </figcaption>
+        </figure>
+      </div>
+
+      <div class="receipts-video">
+        <p class="receipts-video-label">The full run</p>
+        <div class="receipts-video-wrap">
+          <video
+            src="/demo/kiln-demo-real.mp4"
+            autoplay
+            muted
+            loop
+            playsinline
+            controls
+            preload="metadata"
+            aria-label="A Kiln agent runs the end-to-end pipeline: design, slice, print, monitor"
+          ></video>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <GitForThreeDHighlight />
 
   <section class="compat-strip-section bordered">
@@ -51,6 +142,21 @@ import CTA from '../components/CTA.astro';
     </div>
   </section>
 
+  <FeatureGrid
+    limit={5}
+    moreLink="/features"
+    lead="The five capabilities that make Kiln, Kiln."
+  />
+  <Steps />
+  <ComparisonTable />
+
+  <!--
+    Topic hub — demoted on 2026-04-25 (war-room round 2) from
+    section 5 to section 9.  Rationale: docs navigation doesn't
+    sell, it reassures.  Reassurance belongs after the visitor is
+    already convinced.  Curious researchers and existing users
+    still find it; they're patient enough to scroll.
+  -->
   <section class="topic-hub bordered">
     <div class="container">
       <h2>Explore Kiln by topic</h2>
@@ -81,87 +187,6 @@ import CTA from '../components/CTA.astro';
           <h3>FAQ</h3>
           <p>Answers on pricing, compatibility, deployment, safety, and operations.</p>
         </a>
-      </div>
-    </div>
-  </section>
-
-  <FeatureGrid
-    limit={5}
-    moreLink="/features"
-    lead="The five capabilities that make Kiln, Kiln."
-  />
-  <Steps />
-  <ComparisonTable />
-
-  <!--
-    Receipts — demo section rebuilt on 2026-04-24 after the
-    Jobs/Ive war-room flagged the previous "Real prints. Real
-    agents." layout as the weakest surface on the page (produced
-    video next to raw Telegram screenshots; printer-in-a-bedroom
-    webcam chrome; "Read the full story →" CTA that punted off-
-    page).  New shape follows Ive's "single object in studio
-    conditions" instinct paired with Jobs' "homepage IS the story"
-    rule: two real prints sit side-by-side captioned with the
-    sentence that could have produced them, then the unedited
-    full-run video underneath as proof-of-loop.  When better
-    photography + more prints come in (tracked in
-    kiln-pro/tasks.md), add a third card and consider a proper
-    named-testimonial moat card beneath the grid.
-  -->
-  <section id="demo" class="receipts bordered">
-    <div class="container">
-      <h2 class="receipts-heading">A few words. A picture you already had. A real object in your hand.</h2>
-
-      <div class="receipts-grid">
-        <!-- Ash the dog, photo-decorated coaster -->
-        <figure class="receipt">
-          <div class="receipt-img-wrap">
-            <img
-              src="/demo/ash-coaster.jpg"
-              alt="A white 3D-printed round coaster showing a relief portrait of a French bulldog and the name ASH along the bottom edge, held in a hand"
-              loading="lazy"
-              width="1200"
-              height="1600"
-            />
-          </div>
-          <figcaption class="receipt-caption">
-            <q class="receipt-sentence">a coaster with a photo of my dog Ash</q>
-            <p class="receipt-meta">Printed on a Bambu Lab A1 Mini</p>
-          </figcaption>
-        </figure>
-
-        <!-- Kiln-branded ashtray — startup-merch prototype -->
-        <figure class="receipt">
-          <div class="receipt-img-wrap">
-            <img
-              src="/demo/kiln-ashtray.jpg"
-              alt="A red 3D-printed circular ashtray held in a hand, with the Kiln mark debossed into the inside"
-              loading="lazy"
-              width="1200"
-              height="1600"
-            />
-          </div>
-          <figcaption class="receipt-caption">
-            <q class="receipt-sentence">an ashtray with our startup&rsquo;s logo</q>
-            <p class="receipt-meta">Printed on a Bambu Lab A1 Mini</p>
-          </figcaption>
-        </figure>
-      </div>
-
-      <div class="receipts-video">
-        <p class="receipts-video-label">The full run</p>
-        <div class="receipts-video-wrap">
-          <video
-            src="/demo/kiln-demo-real.mp4"
-            autoplay
-            muted
-            loop
-            playsinline
-            controls
-            preload="metadata"
-            aria-label="A Kiln agent runs the end-to-end pipeline: design, slice, print, monitor"
-          ></video>
-        </div>
       </div>
     </div>
   </section>
@@ -255,17 +280,42 @@ import CTA from '../components/CTA.astro';
     text-align: center;
   }
   .receipts-heading {
-    font-size: clamp(24px, 3.4vw, 40px);
+    font-size: clamp(28px, 4vw, 48px);
     font-weight: 800;
-    line-height: 1.15;
-    letter-spacing: -0.02em;
+    line-height: 1.1;
+    letter-spacing: -0.022em;
     color: var(--text);
-    /* Slightly narrower max-width than the hero to encourage the
-       three-beat heading to wrap into 2–3 visual lines, which makes
-       the cadence visible: input. input. output. */
-    margin: 0 auto 72px;
-    max-width: 600px;
+    /* Heading + subtitle act as a tight pair — keep them visually
+       glued (16px gap) and let the subtitle carry the breath
+       before the photo grid below.  Heading max-width tuned so
+       "One thing today. Or a hundred this week." wraps into two
+       balanced lines on every viewport, making the cadence
+       visible: promise A. promise B. */
+    margin: 0 auto 16px;
+    max-width: 760px;
     text-wrap: balance;
+  }
+  /* Subtitle under the new two-promise heading.  Carries the
+     "at-home / your-own-factory" half of Adam's value props so
+     neither door has to wait for the captions to deliver it. */
+  .receipts-sub {
+    font-size: clamp(15px, 1.7vw, 18px);
+    line-height: 1.5;
+    color: var(--text-muted);
+    max-width: 560px;
+    margin: 0 auto 64px;
+    text-wrap: pretty;
+  }
+  /* Per-photo kicker — names which door the visitor is looking
+     at without making them parse the caption.  Same uppercase
+     voice as the run-video label below for vertical symmetry. */
+  .receipt-kicker {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--accent);
+    margin: 0 0 10px;
   }
 
   .receipts-grid {
@@ -326,6 +376,18 @@ import CTA from '../components/CTA.astro';
     color: var(--text-muted);
     margin: 0;
     letter-spacing: 0.01em;
+  }
+  /* Printer attribution — split off the meta line on the
+     2026-04-25 war-room round to let the three-beat poem above
+     ("Photo taken at lunch. Sentence sent. In hand by dinner.")
+     keep its rhythm without competing with a model number.  Reads
+     as the receipt's printed-at-the-bottom strip. */
+  .receipt-printer {
+    font-size: 12px;
+    color: var(--text-subtle, var(--text-muted));
+    margin: 6px 0 0;
+    letter-spacing: 0.04em;
+    opacity: 0.75;
   }
 
   /* Full-run video block — framed the same as the object cards
