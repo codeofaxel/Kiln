@@ -46,26 +46,73 @@ class _ConsumerToolsPlugin:
 
         @mcp.tool()
         def tax_estimate(
-            fee_amount: float,
-            jurisdiction: str,
+            fee_amount: float = 0.0,
+            jurisdiction: str = "",
             business_tax_id: str = "",
+            manufacturer_quote_usd: float = 0.0,
+            currency: str = "USD",
+            user_email: str = "",
         ) -> dict:
-            """Preview the complete price breakdown -- including tax -- before placing an order.
+            """Preview the complete price breakdown — including tax — before placing an order.
 
-            Call this after ``fulfillment_quote`` to show the user exactly what
-            they'll pay: manufacturing cost + Kiln fee + applicable tax.  No
-            surprises at checkout.
+            Terms §7 contract: "Preview the tax for any order with the
+            ``tax_estimate`` tool before placing it.  We display the full
+            fee + tax breakdown before charging.  No hidden fees."
+
+            This tool fulfills that contract by returning the same line
+            items the order will commit to at charge time.  Per Terms §7
+            tax is computed on the orchestration fee ONLY — never on
+            the manufacturer's quoted total.  The manufacturer is
+            responsible for any taxes on their own charges.
+
+            Two calling shapes are supported:
+
+            1. **Canonical preview** (recommended): pass
+               ``manufacturer_quote_usd`` and the tool returns the
+               full breakdown — ``manufacturer_quote``,
+               ``orchestration_fee``, ``tax_on_fee``, ``total`` — so
+               the agent can show the user the exact line items that
+               match the eventual charge.  This is the shape Terms §7
+               commits to.
+            2. **Tax-only legacy** (compatibility): pass ``fee_amount``
+               with no ``manufacturer_quote_usd`` and the tool returns
+               the older ``{tax: {...}}`` shape, useful for callers
+               that already know the fee and only want the tax line.
 
             Args:
-                fee_amount: The platform fee amount (from the quote's ``kiln_fee``).
-                jurisdiction: Where the buyer is located (e.g. "US-CA", "DE", "AU").
-                    Use ``tax_jurisdictions`` to see all supported codes.
-                business_tax_id: If the buyer is a business, their tax ID
-                    (e.g. EU VAT number).  In the EU, UK, Australia, and Japan,
-                    businesses are exempt -- the tax line will show $0.00 with
-                    a note that reverse charge applies.
+                fee_amount: Legacy — the platform fee amount (from the
+                    quote's ``kiln_fee``).  Used only when
+                    ``manufacturer_quote_usd`` is omitted.
+                jurisdiction: Where the buyer is located (e.g.
+                    ``"US-CA"``, ``"DE"``, ``"AU"``).  Use
+                    ``tax_jurisdictions`` to see all supported codes.
+                    When empty in canonical-preview mode, no tax is
+                    applied (preview shows manuf + fee only).
+                business_tax_id: If the buyer is a business, their tax
+                    ID (e.g. EU VAT number).  In the EU, UK, Australia,
+                    and Japan, businesses are exempt — the tax line
+                    shows $0.00 with a note that reverse charge
+                    applies.
+                manufacturer_quote_usd: Provider's quoted price (e.g.
+                    from ``fulfillment_quote``).  When non-zero,
+                    triggers canonical-preview mode.
+                currency: Currency of the manufacturer quote (default
+                    USD).  Tax rates are applied at the standard
+                    jurisdiction rate regardless.
+                user_email: Buyer's email — affects the free-tier
+                    waiver (first 3 fulfillment orders/month per user
+                    are fee-free).  Available in canonical mode only.
 
-            Returns the tax amount, rate, type, and exemption status.
+            Returns:
+                Canonical mode (``manufacturer_quote_usd > 0``):
+                    ``{success, manufacturer_quote, orchestration_fee,
+                    tax_on_fee, total, currency, fee_waived,
+                    fee_waiver_reason, tax_jurisdiction,
+                    tax_rate_percent, tax_reverse_charge, note}``.
+                Legacy mode (``manufacturer_quote_usd == 0``):
+                    ``{success, tax: {...}}``.
+
+            Read-only — charges no card, contacts no provider.
             """
             from kiln.server import _error_dict
 
@@ -78,6 +125,50 @@ class _ConsumerToolsPlugin:
                     "code": "PRO_REQUIRED",
                 }
 
+            # Canonical-preview mode: walk the fee through BillingLedger
+            # so the tax-on-fee invariant (Terms §7) is enforced by the
+            # same code path that fires at charge time — no shape drift.
+            if manufacturer_quote_usd and manufacturer_quote_usd > 0:
+                try:
+                    from kiln.server import _get_billing
+                    ledger = _get_billing()
+                    fee_calc = ledger.calculate_fee(
+                        manufacturer_quote_usd,
+                        currency=currency,
+                        jurisdiction=jurisdiction or None,
+                        business_tax_id=business_tax_id or None,
+                        user_email=user_email or None,
+                    )
+                    fee_dict = fee_calc.to_dict()
+                    return {
+                        "success": True,
+                        "manufacturer_quote": float(fee_calc.job_cost),
+                        "orchestration_fee": float(fee_calc.fee_amount),
+                        "tax_on_fee": float(fee_calc.tax_amount),
+                        "total": float(fee_calc.total_cost),
+                        "currency": fee_calc.currency,
+                        "fee_waived": bool(fee_calc.waived),
+                        "fee_waiver_reason": fee_calc.waiver_reason,
+                        "tax_jurisdiction": fee_calc.tax_jurisdiction,
+                        "tax_rate_percent": fee_dict.get(
+                            "tax_rate_percent", 0.0,
+                        ),
+                        "tax_reverse_charge": bool(
+                            fee_calc.tax_reverse_charge,
+                        ),
+                        "note": (
+                            "Tax is computed on the orchestration fee "
+                            "only (Kiln's slice).  The manufacturer is "
+                            "responsible for any taxes on their charges."
+                        ),
+                    }
+                except Exception as exc:
+                    return _error_dict(
+                        f"Preview failed: {exc}",
+                        code="PREVIEW_ERROR",
+                    )
+
+            # Legacy tax-only mode — preserved for compatibility.
             try:
                 calc = TaxCalculator()
                 result = calc.calculate_tax(
