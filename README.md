@@ -33,7 +33,7 @@ Kiln is **open source for local printing.** Pro / Business / Enterprise tiers ad
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
 - **No printer? No problem** — Outsource any job to Craftcloud's 150+ manufacturing services. Kiln handles quoting, ordering, and tracking. No API key required.
-- **AI-native** — <!-- KILN_MCP_COUNT:OLD --> 737 MCP tools built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — <!-- KILN_MCP_COUNT:OLD --> 742 MCP tools built for AI agents. Not a web UI with an API bolted on.
 - **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print. Patent pending.
 - **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command. Patent pending.
 - **Resume, don't restart** — Cancelled or failed print? Resume from the exact layer it stopped on any supported FDM printer. No filament wasted. Patent pending (Pro).
@@ -493,7 +493,7 @@ pip install kiln3d[rest]
 
 When binding REST to non-localhost addresses (for hosted deployments), set `KILN_API_AUTH_TOKEN` or pass `--auth-token`.
 
-Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All <!-- KILN_MCP_COUNT:OLD --> 737 tools are available via MCP (`kiln serve`).
+Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All <!-- KILN_MCP_COUNT:OLD --> 742 tools are available via MCP (`kiln serve`).
 
 ### OctoPrint CLI
 
@@ -512,7 +512,7 @@ octoprint-cli print myfile.gcode --confirm
 
 ## MCP Tools (Selected)
 
-The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_COUNT:OLD --> 737 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
+The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_COUNT:OLD --> 742 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
 
 | Tool | Description |
 |------|-------------|
@@ -939,7 +939,7 @@ The server also exposes read-only resources that agents can use for context:
 | `uptime.py` | Rolling uptime health monitoring (1h/24h/7d/30d windows, 99.9% SLA target) |
 | `project_costs.py` | Per-project cost tracking for manufacturing bureaus (material, labor, printer time, fulfillment) |
 | `wallets.py` | Crypto wallet configuration (Solana/Ethereum for donations and fees) |
-| `cli/` | Click CLI with <!-- KILN_CLI_COUNT:OLD --> 202 commands and JSON output |
+| `cli/` | Click CLI with <!-- KILN_CLI_COUNT:OLD --> 206 commands and JSON output |
 | `deploy/` | Kubernetes manifests and Helm chart for on-prem Enterprise deployment |
 
 ## Authentication (Optional)
