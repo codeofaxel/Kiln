@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-04-25T17:31:48.673243+00:00",
+  "generated": "2026-04-25T21:32:49.003258+00:00",
   "tool_count": 280,
   "categories": {
     "product_generators": {
@@ -1207,8 +1207,8 @@
     },
     {
       "name": "generate_qr_decoration",
-      "description": "Generate a QR code heightmap for embossing onto 3D models (Pro) (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Generate a QR code heightmap for embossing onto 3D models (Business).\n\nRequires Kiln Business.\nLearn more: https://kiln3d.com/enterprise",
+      "tier": "business",
       "category": "decoration",
       "parameters": {
         "properties": {
@@ -7686,8 +7686,8 @@
     },
     {
       "name": "add_qr_to_product",
-      "description": "Add a scannable QR code to any product STL (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Add a scannable QR code to any product STL (Business).\n\nRequires Kiln Business.\nLearn more: https://kiln3d.com/enterprise",
+      "tier": "business",
       "category": "product_intelligence",
       "parameters": {
         "properties": {
@@ -8005,8 +8005,8 @@
     },
     {
       "name": "print_qr_product",
-      "description": "One-shot QR product pipeline: generate base, add QR, slice, merge, wrap 3MF, upload, and print (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "One-shot QR product pipeline: generate base, add QR, slice, merge, wrap 3MF, upload, and print (Business).\n\nRequires Kiln Business.\nLearn more: https://kiln3d.com/enterprise",
+      "tier": "business",
       "category": "product_intelligence",
       "parameters": {
         "properties": {
