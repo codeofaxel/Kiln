@@ -1,0 +1,67 @@
+---
+/**
+ * /features — the full capability matrix.
+ *
+ * Exists because the homepage cut the FeatureGrid from fifteen cards
+ * to five (Jobs' "homepage is an argument, not an inventory" pass on
+ * 2026-04-24).  The ten other capabilities still matter for SEO and
+ * for engineers verifying the toolbox is deep, so they live here.
+ *
+ * Uses the same FeatureGrid component with no `limit` prop so all
+ * fifteen cards render in order.  Keep the copy in the component
+ * as the single source of truth — do not inline features here.
+ */
+import BaseLayout from '../layouts/BaseLayout.astro';
+import FeatureGrid from '../components/FeatureGrid.astro';
+import CTA from '../components/CTA.astro';
+---
+
+<BaseLayout
+  title="Kiln 3D features | Capabilities for AI-driven 3D printing"
+  description="What Kiln 3D ships — Git for 3D printing, text & sketch to 3D generation, printability analysis, multi-part assembly, autonomous failure recovery, fleet orchestration, and more."
+  keywords={[
+    'kiln 3d features',
+    'ai 3d printer capabilities',
+    'git for 3d printing',
+    'text to 3d model',
+    'autonomous 3d printing',
+    'printability analysis',
+  ]}
+>
+  <div class="features-hero">
+    <div class="container">
+      <h1>What Kiln can do.</h1>
+      <p class="sub">
+        Design, printability, lifecycle, fleet, safety, and the agent protocol that ties them together &mdash; every capability currently shipping.
+      </p>
+    </div>
+  </div>
+
+  <FeatureGrid />
+
+  <CTA />
+</BaseLayout>
+
+<style>
+  .features-hero {
+    padding: 80px 0 40px;
+    text-align: center;
+  }
+  .features-hero h1 {
+    font-size: clamp(32px, 5vw, 56px);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    color: var(--text);
+    margin: 0 0 18px;
+    text-wrap: balance;
+  }
+  .features-hero .sub {
+    font-size: clamp(15px, 1.8vw, 18px);
+    line-height: 1.55;
+    color: var(--text-muted);
+    max-width: 640px;
+    margin: 0 auto;
+    text-wrap: pretty;
+  }
+</style>

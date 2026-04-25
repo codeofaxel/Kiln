@@ -1,10 +1,14 @@
 ---
 // Flagship highlight — Git for 3D Printing.
-// Intentionally its own section between Hero and FeatureGrid so the
-// concept gets billboard-level visibility, not a buried grid card.
 //
-// Uses the dark-theme tokens from global.css (--bg, --text, --accent)
-// so it reads as a first-class section, not a retrofit.
+// Originally a two-column billboard (copy + fake agent-chat mock).
+// The mock was cut in the 2026-04-24 Jobs/Ive pass ("no image is
+// better than a fake image"), which meant the section's atmospheric
+// background (orange radials + slightly-darker base) was doing
+// nothing except creating a seam between this section and the
+// learning-curve section above it.  The section now shares the
+// page's main canvas and differentiates itself through content and
+// typographic weight, not paint.
 //
 // Tier honesty: the H2 carries a small ``Pro`` pill for users who
 // don't read the paragraph below the list.  Patent-pending does NOT
@@ -13,7 +17,7 @@
 ---
 
 <section class="g3d-section">
-  <div class="container-wide">
+  <div class="container">
     <div class="g3d-inner">
       <div class="g3d-copy">
         <h2 class="g3d-heading">Git for 3D Printing <span class="g3d-pro-pill">Pro</span></h2>
@@ -35,78 +39,32 @@
           <a href="#features" class="btn btn-ghost g3d-btn-secondary">See all features</a>
         </div>
       </div>
-
-      <div class="g3d-visual" aria-hidden="true">
-        <div class="g3d-chat">
-          <div class="g3d-chat-header">
-            <div class="g3d-avatar">K</div>
-            <div class="g3d-chat-title">
-              <div class="g3d-chat-name">Kiln</div>
-              <div class="g3d-chat-sub">via Claude &middot; 737 MCP tools</div>
-            </div>
-          </div>
-
-          <div class="g3d-msg g3d-msg-user">
-            <div class="g3d-bubble g3d-bubble-user">
-              Branch my coaster, try three emboss depths, tell me which prints best, then sign the winner as v1.0.
-            </div>
-          </div>
-
-          <div class="g3d-msg">
-            <div class="g3d-bubble">
-              <div class="g3d-bubble-text">
-                On it. Running the flow:
-              </div>
-              <div class="g3d-toolchips">
-                <span class="g3d-chip">create_design_branch &times;3</span>
-                <span class="g3d-chip">apply_decoration &times;3</span>
-                <span class="g3d-chip">start_print &times;3</span>
-                <span class="g3d-chip">record_outcome &times;3</span>
-                <span class="g3d-chip g3d-chip-win">best &rarr; emboss-2mm</span>
-                <span class="g3d-chip">merge_branches</span>
-                <span class="g3d-chip g3d-chip-sign">sign_release 1.0.0</span>
-              </div>
-              <div class="g3d-bubble-text g3d-bubble-result">
-                <span class="g3d-ok">&#x2713;</span> Release <strong>1.0.0</strong> signed &middot; key <span class="g3d-mono">a3f9b2c1&hellip;</span>
-                <br />
-                <span class="g3d-muted">Any downstream party can verify later that the mesh hasn&rsquo;t changed.</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </section>
 
 <style is:global>
+  /* Shares the page's main dark canvas — no distinct background.
+     Only a hairline border-top delimits the section, matching the
+     rhythm every other ``.bordered`` section on the page follows. */
   .g3d-section {
-    /* Match the global dark theme; lift the section with a subtle
-       radial so it reads as its own beat without breaking the palette.
-       Global scope so there's no Astro CSS-scoping quirk swallowing
-       the background on class names nested deeper in the tree. */
-    padding: 96px 0;
-    background:
-      radial-gradient(ellipse at 15% 30%, rgba(255, 107, 43, 0.10), transparent 55%),
-      radial-gradient(ellipse at 85% 80%, rgba(255, 107, 43, 0.06), transparent 60%),
-      #0F0F0F;
-    border-top: 1px solid #2A2A2A;
-    border-bottom: 1px solid #2A2A2A;
-    color: #E8E8E8;
+    padding: 80px 0;
+    border-top: 1px solid var(--border);
   }
 
+  /* Single-column layout.  Content centers on the page's vertical
+     spine to match the hero + learning-curve sections above;
+     individual sub-blocks (list, tier footnote) reset their text-
+     align to left for readability where centered multi-line bodies
+     would otherwise look ragged. */
   .g3d-inner {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 64px;
-    align-items: center;
+    max-width: 720px;
+    margin: 0 auto;
+    text-align: center;
   }
 
-  /* Small tier pill that sits inline with the H2.  Deliberately
-     subordinate to the heading — this is a quiet signal, not a
-     competing callout.  Matches the terracotta accent already in
-     the section's radial-gradient background so it reads as
-     brand-coherent, not a retrofit. */
+  /* Pro pill, inline with the H2.  Subordinate to the heading —
+     this is a quiet tier signal, not a competing callout. */
   .g3d-pro-pill {
     display: inline-block;
     vertical-align: middle;
@@ -120,8 +78,6 @@
     background: var(--accent-glow);
     border: 1px solid rgba(255, 107, 43, 0.35);
     border-radius: 999px;
-    /* Lift slightly so the pill sits on the H2's optical baseline
-       rather than anchoring to descenders. */
     position: relative;
     top: -0.15em;
   }
@@ -133,9 +89,8 @@
     font-weight: 800;
     letter-spacing: -0.02em;
     margin: 0 0 20px;
-    /* Explicitly override global section h2 font-size + any inherited
-       muted tone.  This needs to POP on the dark bg. */
     color: var(--text);
+    text-wrap: balance;
   }
   .g3d-heading::after {
     content: "";
@@ -144,17 +99,31 @@
     height: 4px;
     background: linear-gradient(90deg, var(--accent), #f59e42);
     border-radius: 2px;
-    margin-top: 16px;
+    /* Auto side-margins center the accent bar under the now-
+       centered heading. */
+    margin: 16px auto 0;
   }
 
   .g3d-lead {
     font-size: 18px;
     line-height: 1.55;
     color: var(--text);
-    margin: 0 0 20px;
+    /* Centered block so the 540px paragraph sits on the spine. */
+    margin: 0 auto 20px;
     max-width: 540px;
+    /* Prevent last-line orphans. */
+    text-wrap: pretty;
   }
-  .g3d-lead-small { font-size: 15px; color: var(--text-muted); }
+  /* Tier footnote — wider column + left-aligned body text because
+     centering 4+ lines of dense text reads as ragged.  Block still
+     sits on the spine via auto margins. */
+  .g3d-lead-small {
+    font-size: 15px;
+    color: var(--text-muted);
+    text-wrap: pretty;
+    max-width: 640px;
+    text-align: left;
+  }
 
   .g3d-sub {
     font-size: 14px;
@@ -167,7 +136,12 @@
   .g3d-list {
     list-style: none;
     padding: 0;
-    margin: 0 0 24px;
+    /* Centered block — the cluster of bullets sits on the spine,
+       but items inside read left-aligned so the arrow + label line
+       up naturally and long items don't go ragged on both edges. */
+    margin: 0 auto 24px;
+    max-width: 560px;
+    text-align: left;
   }
   .g3d-list li {
     padding: 8px 0 8px 28px;
@@ -189,107 +163,12 @@
     gap: 12px;
     flex-wrap: wrap;
     margin-top: 8px;
+    /* Center the button row on the spine. */
+    justify-content: center;
   }
-  .g3d-btn-primary { /* inherits .btn */ }
   .g3d-btn-secondary { margin-left: 0; }
 
-  /* ---- Agent-chat mock ---- */
-
-  .g3d-visual {
-    display: flex;
-    justify-content: center;
-  }
-  .g3d-chat {
-    width: 100%;
-    max-width: 540px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 20px;
-    box-shadow:
-      0 30px 60px rgba(0, 0, 0, 0.4),
-      0 0 0 1px rgba(255, 255, 255, 0.02);
-  }
-
-  .g3d-chat-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 16px;
-  }
-  .g3d-avatar {
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
-    background: linear-gradient(135deg, var(--accent), #f59e42);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
-    font-weight: 700;
-    font-size: 16px;
-  }
-  .g3d-chat-name { font-weight: 600; font-size: 14px; color: var(--text); }
-  .g3d-chat-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
-
-  .g3d-msg {
-    display: flex;
-    margin-bottom: 12px;
-  }
-  .g3d-msg-user { justify-content: flex-end; }
-
-  .g3d-bubble {
-    max-width: 85%;
-    padding: 12px 16px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    font-size: 14px;
-    line-height: 1.55;
-    color: var(--text);
-  }
-  .g3d-bubble-user {
-    background: var(--accent-glow);
-    border-color: rgba(255, 107, 43, 0.35);
-    color: var(--text);
-  }
-  .g3d-bubble-text { color: var(--text); }
-  .g3d-bubble-result { margin-top: 12px; font-size: 13px; }
-
-  .g3d-toolchips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin: 10px 0 4px;
-  }
-  .g3d-chip {
-    font-family: var(--mono);
-    font-size: 11.5px;
-    padding: 4px 9px;
-    background: var(--bg-code);
-    color: var(--text-muted);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-  }
-  .g3d-chip-win {
-    background: rgba(195, 155, 58, 0.12);
-    color: #d4b256;
-    border-color: rgba(195, 155, 58, 0.3);
-  }
-  .g3d-chip-sign {
-    background: rgba(122, 140, 90, 0.12);
-    color: #9cb078;
-    border-color: rgba(122, 140, 90, 0.3);
-  }
-
-  .g3d-ok { color: #9cb078; font-weight: 700; }
-  .g3d-muted { color: var(--text-muted); }
-  .g3d-mono { font-family: var(--mono); font-size: 0.9em; color: var(--text-muted); }
-
   @media (max-width: 900px) {
-    .g3d-inner { grid-template-columns: 1fr; gap: 40px; }
-    .g3d-section { padding: 64px 0; }
+    .g3d-section { padding: 56px 0; }
   }
 </style>

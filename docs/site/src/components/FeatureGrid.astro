@@ -1,19 +1,70 @@
 ---
+// FeatureGrid — renders the capability cards.
+//
+// The component is used in TWO places with different posture:
+//
+//   1. Homepage  →  <FeatureGrid limit={5} moreLink="/features" ... />
+//      Shows Jobs' five "positioning cards" — the ones that do the
+//      most narrative work for a first-time visitor.  A small link
+//      routes curious engineers to the full list.  The homepage is
+//      an ARGUMENT, not an inventory (Jobs' framing after the 15-
+//      card dump was cut on 2026-04-24).
+//
+//   2. /features  →  <FeatureGrid />
+//      Shows the full 15-card matrix for SEO + depth.  Anyone who
+//      wants to verify the toolbox is deep lands here.
+//
+// Card order is load-bearing: the first five are Jobs' picks in the
+// order they should read.  Do not reorder without a positioning
+// conversation.
+
+interface Props {
+  limit?: number;
+  moreLink?: string;
+  title?: string;
+  lead?: string;
+}
+
+const {
+  limit,
+  moreLink,
+  title = 'What Kiln does',
+  lead = 'Every capability in the box \u2014 from parametric generation to signed releases.',
+} = Astro.props as Props;
+
 const features = [
+  // --- Jobs' five (homepage surface) ---
   {
     icon: '\u{1F33F}',
     title: 'Git for 3D Printing',
     desc: 'Branch new ideas without losing the working version. Merge what prints best. Sign a release and prove later that nothing changed. Works on your designs, your decorations, and your mechanical features. Runs offline on free tier; Pro+ syncs across machines via Kiln\u2019s cloud.',
   },
   {
-    icon: '\u{1F4A1}',
-    title: 'Design Intelligence',
-    desc: '25 FDM materials with full engineering properties, 45 brand-specific filament profiles, 20 proven design patterns (snap-fits, living hinges, threads), and structural load estimation. Kiln understands what makes a good print before generating anything.',
-  },
-  {
     icon: '\u2728',
     title: 'Text & Sketch to 3D',
     desc: 'Describe what you want or sketch it. Kiln generates printable models via Gemini Deep Think, Meshy, Tripo3D, Stability AI, or parametric OpenSCAD with a 14-component catalog (gears, threads, hinges, bearings). Design DNA preserves the source for iteration.',
+  },
+  {
+    icon: '\u{1F504}',
+    title: 'Print \u2192 Monitor \u2192 Recover',
+    desc: 'Full lifecycle: slice, validate safety, upload, print, control speed with natural language, monitor with camera vision, detect failures, diagnose root cause, auto-fix slicer settings, and retry. One conversation, start to finish.',
+  },
+  {
+    icon: '\u{1F6E1}\uFE0F',
+    title: 'Safety at Every Step',
+    desc: "29 per-printer safety profiles with temperature and speed limits. G-code validation before every send. Preflight checks, emergency stop, heater watchdog, G-code interception. Agents can\u2019t bypass safety.",
+  },
+  {
+    icon: '\u{1F517}',
+    title: '737 Tools, One Protocol',
+    desc: "737 MCP tools and 202 CLI commands with --json output. Any MCP-compatible agent (Claude, GPT, custom) gets full access. Open source, AGPL-3.0 licensed, plugin-extensible.",
+  },
+
+  // --- The remaining ten (full /features page only) ---
+  {
+    icon: '\u{1F4A1}',
+    title: 'Design Intelligence',
+    desc: '25 FDM materials with full engineering properties, 45 brand-specific filament profiles, 20 proven design patterns (snap-fits, living hinges, threads), and structural load estimation. Kiln understands what makes a good print before generating anything.',
   },
   {
     icon: '\u{1F52C}',
@@ -29,16 +80,6 @@ const features = [
     icon: '\u{1F9EE}',
     title: 'Smart Cost Estimation',
     desc: 'Know what a print will cost before it starts \u2014 material, electricity, time. Get recommendations for cheaper filament alternatives, faster speed profiles, and quality tradeoffs.',
-  },
-  {
-    icon: '\u{1F504}',
-    title: 'Print \u2192 Monitor \u2192 Recover',
-    desc: 'Full lifecycle: slice, validate safety, upload, print, control speed with natural language, monitor with camera vision, detect failures, diagnose root cause, auto-fix slicer settings, and retry. One conversation, start to finish.',
-  },
-  {
-    icon: '\u{1F6E1}\uFE0F',
-    title: 'Safety at Every Step',
-    desc: "29 per-printer safety profiles with temperature and speed limits. G-code validation before every send. Preflight checks, emergency stop, heater watchdog, G-code interception. Agents can\u2019t bypass safety.",
   },
   {
     icon: '\u{1F30D}',
@@ -61,7 +102,7 @@ const features = [
     desc: '45 brand-specific filaments with purchase links and compatibility matching. Plus mesh repair, boolean ops, hollowing, chamfers, fillets, and wall thickening. Know what spool to buy and fix broken STLs.',
   },
   {
-    icon: '\u{2728}',
+    icon: '\u2728',
     title: 'Mid-print Modification',
     desc: 'Decorate, add features, or swap material on a live print \u2014 without restarting. Atomic revert if anything goes wrong. The G-code rewriter re-slices from the current layer, splices the change, and resumes with tamper-evident provenance. Pro feature, patent-pending.',
   },
@@ -70,38 +111,34 @@ const features = [
     title: 'Autonomous Failure Recovery',
     desc: 'Detect failures via camera vision, diagnose root cause, auto-fix slicer settings, and resume from the exact layer \u2014 no filament wasted. Cross-printer learning compounds: every recovery on one machine improves recovery decisions on the rest. Pro feature, patent-pending.',
   },
-  {
-    icon: '\u{1F517}',
-    title: '737 Tools, One Protocol',
-    desc: "737 MCP tools and 202 CLI commands with --json output. Any MCP-compatible agent (Claude, GPT, custom) gets full access. Open source, AGPL-3.0 licensed, plugin-extensible.",
-  },
 ];
 
-const printerBackends = [
-  'OctoPrint',
-  'Moonraker/Klipper',
-  'Bambu Lab',
-  'Prusa Link',
-  'Elegoo',
-  'Direct USB',
-];
+const visibleFeatures = limit ? features.slice(0, limit) : features;
+const hiddenCount = limit ? features.length - limit : 0;
 ---
 
 <section id="features" class="features-section">
   <div class="container">
-    <h2>How Kiln works</h2>
-    <p class="lead">
-      From your idea to a physical object &mdash; with intelligence at every step.
-    </p>
+    <h2>{title}</h2>
+    <p class="lead">{lead}</p>
 
     <div class="features">
-      {features.map((f) => (
+      {visibleFeatures.map((f) => (
         <div class="feature">
           <div class="icon">{f.icon}</div>
           <h3>{f.title}</h3>
           <p>{f.desc}</p>
         </div>
       ))}
+      {moreLink && hiddenCount > 0 && (
+        <a class="feature feature-more" href={moreLink}>
+          <div class="icon icon-more" aria-hidden="true">&rarr;</div>
+          <h3>More capabilities</h3>
+          <p>
+            See more of what Kiln does &mdash; printability engine, multi-part assembly, autonomous failure recovery, mid-print modification, fleet &amp; fulfillment, and more.
+          </p>
+        </a>
+      )}
     </div>
   </div>
 </section>
@@ -109,12 +146,16 @@ const printerBackends = [
 <style>
   /* Hairline divider matching every other major section transition on
      the landing page (.bordered class in index.astro).  Without this,
-     the gap between "Explore Kiln by topic" and "How Kiln works" reads
+     the gap between "Explore Kiln by topic" and "What Kiln does" reads
      as an undesigned empty void instead of an intentional section
      break.  Same color token + 1px stroke as the section dividers
      above and below; same visual rhythm. */
   .features-section {
     border-top: 1px solid var(--border);
+    /* Match the vertical breathing room of the other major sections
+       (Git-for-3D, ComparisonTable, Receipts).  Without explicit
+       padding the H2 sat flush against the section divider line. */
+    padding: 80px 0;
   }
 
   .features {
@@ -156,6 +197,41 @@ const printerBackends = [
     text-align: justify;
     text-justify: inter-word;
     hyphens: auto;
+  }
+
+  /* The 6th cell — "Plus N more → see all capabilities" — rendered
+     as a peer to the five capability cards so the grid lands as a
+     clean 2×3 composition instead of the 3+2 orphan shape.  Same
+     silhouette + padding as .feature, differentiated by dashed
+     border + accent-colored arrow affordance so users read it as
+     navigational, not a sixth feature they forgot to learn about. */
+  .feature-more {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    border-style: dashed;
+    transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+  }
+  .feature-more:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    text-decoration: none;
+    background: var(--bg-card);
+  }
+  .feature-more h3 {
+    color: var(--text);
+  }
+  .feature-more p {
+    color: var(--text-muted);
+    text-align: left;  /* override justify — too short to justify cleanly */
+    hyphens: manual;
+  }
+  .feature-more .icon-more {
+    background: var(--accent);
+    color: #fff;
+    font-weight: 700;
+    font-size: 22px;
+    line-height: 1;
   }
 
   .compat-strip {

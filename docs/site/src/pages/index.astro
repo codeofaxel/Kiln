@@ -23,21 +23,16 @@ import CTA from '../components/CTA.astro';
 >
   <Hero />
 
-  <GitForThreeDHighlight />
-
-  <section class="bordered search-intent">
+  <section class="bordered learning-curve">
     <div class="container">
-      <h2>What is Kiln 3D?</h2>
-      <p class="lead what-is-lead" style="font-weight:500">
-        Kiln turns a conversation with an AI agent into a printed object. One install, any printer, start to finish.
-      </p>
-      <p class="lead what-is-lead">
-        Kiln 3D is open-source infrastructure that lets AI agents design new objects, discover existing models,
-        and autonomously slice, print, and monitor jobs — recovering from failures
-        with safety guardrails built in.
+      <h2 class="lc-heading">The 3D printing learning curve is over. Kiln ended it.</h2>
+      <p class="lc-lead">
+        No Blender. No Fusion. No YouTube rabbit hole. Kiln turns a sentence into a physical object &mdash; on any 3D printer, start to finish.
       </p>
     </div>
   </section>
+
+  <GitForThreeDHighlight />
 
   <section class="compat-strip-section bordered">
     <div class="container">
@@ -90,74 +85,84 @@ import CTA from '../components/CTA.astro';
     </div>
   </section>
 
-  <FeatureGrid />
+  <FeatureGrid
+    limit={5}
+    moreLink="/features"
+    lead="The five capabilities that make Kiln, Kiln."
+  />
   <Steps />
   <ComparisonTable />
 
-  <!-- Real Prints — social proof -->
-  <section id="demo" class="real-prints bordered">
+  <!--
+    Receipts — demo section rebuilt on 2026-04-24 after the
+    Jobs/Ive war-room flagged the previous "Real prints. Real
+    agents." layout as the weakest surface on the page (produced
+    video next to raw Telegram screenshots; printer-in-a-bedroom
+    webcam chrome; "Read the full story →" CTA that punted off-
+    page).  New shape follows Ive's "single object in studio
+    conditions" instinct paired with Jobs' "homepage IS the story"
+    rule: two real prints sit side-by-side captioned with the
+    sentence that could have produced them, then the unedited
+    full-run video underneath as proof-of-loop.  When better
+    photography + more prints come in (tracked in
+    kiln-pro/tasks.md), add a third card and consider a proper
+    named-testimonial moat card beneath the grid.
+  -->
+  <section id="demo" class="receipts bordered">
     <div class="container">
-      <h2>Real prints. Real agents.</h2>
-      <p class="lead">Two users. Two printers. Zero manual steps.</p>
+      <h2 class="receipts-heading">A few words. A picture you already had. A real object in your hand.</h2>
 
-      <div class="demo-video-wrap">
-        <video
-          src="/demo/kiln-demo-real.mp4"
-          autoplay
-          muted
-          loop
-          playsinline
-          controls
-          aria-label="Demo: Chris and Dillon use AI agents to print coasters end-to-end"
-        ></video>
+      <div class="receipts-grid">
+        <!-- Ash the dog, embossed on a coaster -->
+        <figure class="receipt">
+          <div class="receipt-img-wrap">
+            <img
+              src="/demo/ash-coaster.jpg"
+              alt="A white 3D-printed round coaster with a photo-emboss of a French bulldog and the name ASH debossed at the bottom, held in a hand"
+              loading="lazy"
+              width="1200"
+              height="1600"
+            />
+          </div>
+          <figcaption class="receipt-caption">
+            <q class="receipt-sentence">a coaster with a photo of my dog Ash, embossed</q>
+            <p class="receipt-meta">Printed on a Bambu Lab A1 Mini</p>
+          </figcaption>
+        </figure>
+
+        <!-- Kiln-branded ashtray — startup-merch prototype -->
+        <figure class="receipt">
+          <div class="receipt-img-wrap">
+            <img
+              src="/demo/kiln-ashtray.jpg"
+              alt="A red 3D-printed circular ashtray held in a hand, with the Kiln mark debossed into the inside"
+              loading="lazy"
+              width="1200"
+              height="1600"
+            />
+          </div>
+          <figcaption class="receipt-caption">
+            <q class="receipt-sentence">a Kiln-branded ashtray, prototyped at home</q>
+            <p class="receipt-meta">Printed on a Bambu Lab A1 Mini</p>
+          </figcaption>
+        </figure>
       </div>
 
-      <div class="testimonial-grid">
-        <!-- Chris -->
-        <div class="testimonial-card">
-          <div class="tcard-img-wrap">
-            <img
-              src="/demo/chris-wren-chat.jpg"
-              alt="Chris asking his Wren agent to print a coaster via chat"
-              loading="lazy"
-            >
-          </div>
-          <div class="tcard-body">
-            <div class="tcard-meta">
-              <span class="tcard-name">Chris</span>
-              <span class="tcard-printer">Bambu Lab A1 Mini</span>
-              <span class="tcard-agent">Agent: Wren</span>
-            </div>
-            <blockquote>"Yo actually can you print me another coaster"</blockquote>
-            <p class="tcard-result">Agent sent the gcode, started the job, monitored it, and pinged Chris when done — <strong>all done. 100% complete.</strong></p>
-          </div>
-        </div>
-
-        <!-- Dillon -->
-        <div class="testimonial-card">
-          <div class="tcard-img-wrap">
-            <img
-              src="/demo/dillon-clawd-monitor.jpg"
-              alt="Clawdence agent sending webcam snapshots with live print progress to Dillon"
-              loading="lazy"
-            >
-          </div>
-          <div class="tcard-body">
-            <div class="tcard-meta">
-              <span class="tcard-name">Dillon</span>
-              <span class="tcard-printer">Prusa Mini</span>
-              <span class="tcard-agent">Agent: Clawdence</span>
-            </div>
-            <blockquote>Asked his agent to print. Got live webcam updates with progress every 30 minutes.</blockquote>
-            <p class="tcard-result">Print completed. Dillon walked over, popped the coaster off, and cracked open a sparkling water.</p>
-          </div>
+      <div class="receipts-video">
+        <p class="receipts-video-label">The full run</p>
+        <div class="receipts-video-wrap">
+          <video
+            src="/demo/kiln-demo-real.mp4"
+            autoplay
+            muted
+            loop
+            playsinline
+            controls
+            preload="metadata"
+            aria-label="A Kiln agent runs the end-to-end pipeline: design, slice, print, monitor"
+          ></video>
         </div>
       </div>
-
-      <p class="proof-note">
-        Different agents. Different printer brands. Same Kiln.
-        <a href="/blog/first-real-prints">Read the full story →</a>
-      </p>
     </div>
   </section>
 
@@ -169,24 +174,40 @@ import CTA from '../components/CTA.astro';
     border-top: 1px solid var(--border);
   }
 
-  /* What is Kiln section */
-  .search-intent {
+  /* Learning-curve kill — the second-beat angle, sized to read as
+     a hero echo, not a body section.  Pairs typographically with
+     Hero.astro's .tagline (weight 800, tight tracking) so the two
+     most important sentences on the page visibly rhyme. */
+  .learning-curve {
     text-align: center;
-    padding: 72px 0;
+    padding: 112px 0 96px;
   }
-
-  .search-intent h2 {
-    font-size: clamp(22px, 3vw, 32px);
-    margin-bottom: 16px;
+  .lc-heading {
+    font-size: clamp(30px, 4.8vw, 54px);
+    font-weight: 800;
+    line-height: 1.08;
+    letter-spacing: -0.022em;
+    color: var(--text);
+    margin: 0 auto 22px;
+    max-width: 880px;
+    text-wrap: balance;
   }
-
-  .what-is-lead {
-    max-width: 640px;
-    margin: 0 auto !important;
+  .lc-lead {
+    font-size: clamp(15px, 1.8vw, 18px);
+    line-height: 1.55;
+    color: var(--text-muted);
+    max-width: 620px;
+    margin: 0 auto;
+    text-wrap: pretty;
+  }
+  @media (max-width: 640px) {
+    .learning-curve { padding: 72px 0 60px; }
   }
 
   .topic-hub {
-    padding-top: 56px;
+    /* Symmetric vertical padding so the section breathes evenly
+       between its border-top and the next section's border. */
+    padding: 72px 0 80px;
   }
 
   .hub-grid {
@@ -223,109 +244,126 @@ import CTA from '../components/CTA.astro';
     line-height: 1.6;
   }
 
-  /* Real Prints section */
-  .real-prints { padding: 80px 0; }
-  .real-prints h2 {
-    font-size: clamp(24px, 4vw, 40px);
-    font-weight: 700;
-    margin-bottom: 12px;
+  /* Receipts — demo section.  Object-first, no Telegram-screenshot
+     grid, no "Read the full story" link punt.  Two hero prints
+     captioned with the sentence that produced them, sitting above
+     the unedited 1:18 agent-run video.  Typography matches the
+     learning-curve + Git-for-3D sections above so the page reads
+     as one unified system. */
+  .receipts {
+    padding: 120px 0;
     text-align: center;
   }
-  .real-prints .lead {
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 18px;
-    margin-bottom: 48px;
+  .receipts-heading {
+    font-size: clamp(24px, 3.4vw, 40px);
+    font-weight: 800;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    /* Slightly narrower max-width than the hero to encourage the
+       three-beat heading to wrap into 2–3 visual lines, which makes
+       the cadence visible: input. input. output. */
+    margin: 0 auto 72px;
+    max-width: 600px;
+    text-wrap: balance;
   }
 
-  .demo-video-wrap {
-    border-radius: 12px;
+  .receipts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+    margin: 0 auto 96px;
+    max-width: 880px;
+  }
+  @media (max-width: 720px) {
+    .receipts-grid {
+      grid-template-columns: 1fr;
+      gap: 64px;
+    }
+  }
+
+  .receipt {
+    margin: 0;
+    text-align: left;
+  }
+  .receipt-img-wrap {
+    /* Portrait 3:4 frame — natural iPhone photo shape without
+       cropping the object.  Subject stays comfortably in view. */
+    aspect-ratio: 3 / 4;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    margin-bottom: 24px;
+  }
+  .receipt-img-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .receipt-caption {
+    padding: 0 4px;
+  }
+  /* The sentence — rendered as a soft italic quote.  This is the
+     "what they said" half of the prompt/result pair; the image is
+     the "what they got."  Together they ARE the demo. */
+  .receipt-sentence {
+    display: block;
+    font-size: clamp(17px, 1.7vw, 20px);
+    font-weight: 500;
+    line-height: 1.45;
+    color: var(--text);
+    font-style: italic;
+    margin-bottom: 10px;
+    text-wrap: pretty;
+    quotes: "\201C" "\201D";
+  }
+  .receipt-sentence::before { content: open-quote; }
+  .receipt-sentence::after { content: close-quote; }
+  .receipt-meta {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0;
+    letter-spacing: 0.01em;
+  }
+
+  /* Full-run video block — framed the same as the object cards
+     (same border radius, same border, same dark fill) so the
+     section reads as one designed surface.  Quiet uppercase label
+     above mirrors the kicker at the top of the section for
+     vertical symmetry. */
+  .receipts-video {
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  .receipts-video-label {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--text-muted);
+    margin: 0 0 18px;
+  }
+  .receipts-video-wrap {
+    border-radius: 14px;
     overflow: hidden;
     border: 1px solid var(--border);
-    margin-bottom: 48px;
     background: #000;
+    aspect-ratio: 16 / 9;
   }
-  .demo-video-wrap video {
+  .receipts-video-wrap video {
     width: 100%;
+    height: 100%;
     display: block;
-    max-height: 500px;
     object-fit: contain;
   }
 
-  .testimonial-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 24px;
-    margin-bottom: 32px;
+  @media (max-width: 720px) {
+    .receipts { padding: 72px 0; }
+    .receipts-heading { margin-bottom: 48px; }
+    .receipts-grid { margin-bottom: 64px; }
   }
-  @media (max-width: 700px) {
-    .testimonial-grid { grid-template-columns: 1fr; }
-  }
-
-  .testimonial-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-  .tcard-img-wrap {
-    background: #000;
-  }
-  .tcard-img-wrap img {
-    width: 100%;
-    height: auto;
-    display: block;
-  }
-  .tcard-body {
-    padding: 20px;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-  .tcard-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-  }
-  .tcard-name {
-    font-weight: 700;
-    font-size: 15px;
-  }
-  .tcard-printer, .tcard-agent {
-    font-size: 12px;
-    color: var(--text-muted);
-    background: var(--bg-code);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 2px 8px;
-    font-family: var(--mono);
-  }
-  .tcard-body blockquote {
-    font-style: italic;
-    color: var(--text-muted);
-    border-left: 2px solid var(--accent);
-    padding-left: 12px;
-    font-size: 14px;
-    line-height: 1.5;
-  }
-  .tcard-result {
-    font-size: 14px;
-    line-height: 1.5;
-    color: var(--text-muted);
-    margin-top: auto;
-  }
-  .tcard-result strong { color: var(--text); }
-
-  .proof-note {
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 15px;
-  }
-  .proof-note a { color: var(--accent); }
 
   /* Printer compat strip (after "What is Kiln 3D?") */
   .compat-strip-section {
