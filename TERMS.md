@@ -1,6 +1,6 @@
 # Kiln Terms of Use
 
-*Last updated: 2026-04-21 · Version 2.2*
+*Last updated: 2026-04-24 · Version 2.3*
 
 > **Plain-English summary** — These terms govern your use of Kiln,
 > operated by Hadron Labs Inc. Kiln has two sides:
@@ -218,6 +218,33 @@ without first contacting us, we may suspend or terminate your
 account while the chargeback is resolved. Before initiating a
 chargeback, please email adam@kiln3d.com — we almost always
 resolve billing issues without card-network involvement.
+
+### 5.8 Spend caps on fulfillment orders
+
+To protect you from runaway charges — including charges caused by
+an AI agent or automated workflow misfiring — we cap how much you
+can spend through Kiln on external fulfillment (Craftcloud and
+any future fulfillment provider routed through Kiln):
+
+- **Per-order cap**: a single fulfillment order may not exceed
+  **$500.00 USD**, summing the manufacturing provider's quoted
+  price and any orchestration fee charged under §6.
+- **Monthly cap**: your cumulative fulfillment spend in any
+  calendar month (UTC) may not exceed **$2,000.00 USD**, summed
+  over every fulfillment order placed that month, including each
+  order's manufacturer total and orchestration fee.
+
+If a job would exceed either cap, Kiln refuses the order **before
+any charge is created**. You receive a clear error identifying
+which cap was reached; nothing is deducted from your card.
+
+These caps apply to all paid tiers and protect your downside
+only — they do not commit Kiln to any minimum order size, nor
+guarantee that an order under the cap will be accepted. We may
+adjust these caps in future versions of these Terms under the
+change-notification rules in §22; an increase or decrease is a
+material change and will be communicated at least 30 days before
+it takes effect.
 
 ## 6. Orchestration fees for fulfillment
 
