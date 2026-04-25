@@ -17,11 +17,11 @@
 ---
 
 <p align="center">
-  <img src="docs/site/public/demo/chris-wren-chat.jpg" alt="Kiln agent completing a print job over chat" width="380">
+  <img src="docs/site/public/demo/ash-coaster.jpg" alt="A 3D-printed coaster with a relief portrait of a French bulldog and the name ASH along the bottom edge, held in a hand" width="640">
 </p>
 
 <p align="center">
-  <em>Ask your agent to print something. It just does it — start to finish.</em><br>
+  <em>"a coaster with a photo of my dog Ash" — start to finish, from one sentence.</em><br>
   <a href="https://kiln3d.com#demo">Watch the demo →</a>
 </p>
 
