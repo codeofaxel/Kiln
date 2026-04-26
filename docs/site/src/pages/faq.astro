@@ -76,7 +76,7 @@ const sections: Section[] = [
     id: "setup-troubleshooting",
     items: [
       {
-        q: "&quot;kiln: command not found&quot; after install",
+        q: '"kiln: command not found" after install',
         a: "Your shell can't find the <code>kiln</code> binary. Add <code>~/.local/bin</code> to your PATH by running <code>pipx ensurepath</code>, then restart your terminal. If you installed with pip into a virtualenv, make sure the virtualenv is activated."
       },
       {
@@ -85,7 +85,7 @@ const sections: Section[] = [
       },
       {
         q: "Does Kiln work on Windows?",
-        a: "Not natively. Use WSL 2 (Windows Subsystem for Linux) with an Ubuntu distribution — Kiln runs fully inside the WSL environment. The <a href='/install'>install page</a> includes a WSL 2 tab with the exact commands."
+        a: "Yes. Kiln runs natively on Windows — install Python 3.10+ from <a href='https://python.org/downloads/' target='_blank' rel='noopener'>python.org</a> (or via <code>winget install Python.Python.3.12</code>) and then <code>pip install kiln3d</code>. macOS, Linux, and Windows are all first-class. Some users prefer WSL 2 for a more Unix-like shell experience, and Kiln runs fine inside WSL too — but it's not required. If mDNS printer discovery is flaky on your Windows LAN, connect to your printer by IP address (<code>kiln auth --host http://192.168.1.x:port --type octoprint --api-key YOUR_KEY</code>)."
       },
       {
         q: "WSL 2 can't discover printers on my LAN",
