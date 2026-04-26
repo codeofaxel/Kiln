@@ -57,7 +57,20 @@ _FLOW_ANOMALY_THRESHOLD = 0.3  # ratio below expected
 _TEMP_DROP_ADHESION_THRESHOLD = 10.0
 _SPAGHETTI_EXTRUSION_RATIO_MIN = 0.2
 _WARPING_TEMP_GRADIENT_MAX = 5.0  # degrees across bed
-_MONITORING_CHECKS_REQUIRED = 3
+
+# Per patent claim 78: the monitoring-checks-required threshold is
+# resolved from the failure severity at session-creation time.
+# Critical failures (thermal runaway, bed adhesion) demand more passing
+# observations before recovery may be declared COMPLETED.
+_MIN_MONITORING_CHECKS = 3
+_CRITICAL_MONITORING_CHECKS = 5
+
+
+def _required_monitoring_checks(severity: str | None) -> int:
+    """Return the monitoring-checks threshold for a given failure severity."""
+    if (severity or "").strip().lower() == "critical":
+        return _CRITICAL_MONITORING_CHECKS
+    return _MIN_MONITORING_CHECKS
 
 # Material-dependent overlap depth for layer resumption.
 # More layers = stronger bonding at the recovery seam.
@@ -240,6 +253,7 @@ class RecoverySession:
     steps_remaining: list[str] = field(default_factory=list)
     monitoring_checks: int = 0
     monitoring_passed: int = 0
+    monitoring_required: int = _MIN_MONITORING_CHECKS
     result_notes: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -255,7 +269,60 @@ class RecoverySession:
             "steps_remaining": self.steps_remaining,
             "monitoring_checks": self.monitoring_checks,
             "monitoring_passed": self.monitoring_passed,
+            "monitoring_required": self.monitoring_required,
             "result_notes": self.result_notes,
+        }
+
+
+class MonitoringThresholdNotMet(ValueError):
+    """Raised when ``complete_recovery(success=True)`` is called before
+    ``monitoring_passed >= monitoring_required`` (patent claim 76).
+
+    Subclasses :class:`ValueError` so existing handlers still catch it,
+    but exposes structured fields for the MCP tool wrapper to surface
+    per claim 79.
+    """
+
+    def __init__(
+        self,
+        *,
+        session_id: str,
+        monitoring_checks: int,
+        monitoring_passed: int,
+        monitoring_required: int,
+        severity: str,
+    ) -> None:
+        self.session_id = session_id
+        self.monitoring_checks = monitoring_checks
+        self.monitoring_passed = monitoring_passed
+        self.monitoring_required = monitoring_required
+        self.severity = severity
+        self.deficit = monitoring_required - monitoring_passed
+        plural = "" if self.deficit == 1 else "s"
+        # Telling the operator what to DO next is the difference between
+        # a useful safety gate and a confusing one.
+        self.remediation = (
+            f"Record {self.deficit} more passing monitoring check{plural} via "
+            f"record_recovery_check before calling complete_recovery again."
+        )
+        super().__init__(
+            f"Cannot complete recovery {session_id!r}: "
+            f"{monitoring_passed}/{monitoring_required} passing checks recorded "
+            f"({self.deficit} more required for severity={severity!r}). "
+            f"{self.remediation}"
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "code": "MONITORING_THRESHOLD_NOT_MET",
+            "session_id": self.session_id,
+            "monitoring_checks": self.monitoring_checks,
+            "monitoring_passed": self.monitoring_passed,
+            "monitoring_required": self.monitoring_required,
+            "deficit": self.deficit,
+            "severity": self.severity,
+            "remediation": self.remediation,
+            "message": str(self),
         }
 
 
@@ -428,6 +495,7 @@ class PrintRecovery:
             started_at=now,
             steps_completed=[],
             steps_remaining=list(recovery_steps),
+            monitoring_required=_required_monitoring_checks(failure.severity),
         )
 
         with self._lock:
@@ -557,6 +625,17 @@ class PrintRecovery:
             if session.status in terminal:
                 raise ValueError(
                     f"Session {session_id!r} is already in terminal state: {session.status.value}"
+                )
+            # Patent claim 76: success completion requires the
+            # monitoring-checks threshold to be met. Failure completion is
+            # always allowed (operator may give up at any time).
+            if success and session.monitoring_passed < session.monitoring_required:
+                raise MonitoringThresholdNotMet(
+                    session_id=session_id,
+                    monitoring_checks=session.monitoring_checks,
+                    monitoring_passed=session.monitoring_passed,
+                    monitoring_required=session.monitoring_required,
+                    severity=session.failure.severity,
                 )
             session.status = RecoveryStatus.COMPLETED if success else RecoveryStatus.FAILED
             session.completed_at = datetime.now(tz=timezone.utc).isoformat()

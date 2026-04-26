@@ -35,12 +35,16 @@ import pytest
 from kiln.print_recovery import (
     FailureReport,
     FailureType,
+    MonitoringThresholdNotMet,
     PrintRecovery,
     RecoveryConfidence,
     RecoveryPlan,
     RecoverySession,
     RecoveryStatus,
     RecoveryStrategy,
+    _CRITICAL_MONITORING_CHECKS,
+    _MIN_MONITORING_CHECKS,
+    _required_monitoring_checks,
     get_recovery_engine,
 )
 
@@ -79,6 +83,26 @@ def _make_job_info(**overrides: Any) -> dict[str, Any]:
     }
     base.update(overrides)
     return base
+
+
+def _satisfy_monitoring_threshold(
+    engine: PrintRecovery,
+    session_id: str,
+    *,
+    extra: int = 0,
+) -> None:
+    """Record enough passing checks for ``complete_recovery(success=True)``.
+
+    Patent claim 76 requires ``monitoring_passed >= monitoring_required``
+    before COMPLETED.  Tests that exercise downstream behaviour (stats,
+    cancellation rules, etc.) call this helper to satisfy the gate
+    without re-asserting the threshold logic in every test.
+    """
+    session = engine.get_session(session_id)
+    assert session is not None, f"Session not found: {session_id!r}"
+    needed = max(0, session.monitoring_required - session.monitoring_passed)
+    for _ in range(needed + extra):
+        engine.record_monitoring_check(session_id, passed=True)
 
 
 def _detect_and_plan(
@@ -831,14 +855,17 @@ class TestRecoverySession:
         session = engine.start_recovery(plan, failure)
         assert session.status == RecoveryStatus.EXECUTING
 
-        # 4. Monitor
+        # 4. Monitor — thermal_runaway is critical so the session was
+        # provisioned with the 5-check threshold per patent claim 78.
+        assert session.monitoring_required == _CRITICAL_MONITORING_CHECKS
         session = engine.record_monitoring_check(session.session_id, passed=True, notes="Temps falling")
         assert session.status == RecoveryStatus.MONITORING
         assert session.monitoring_checks == 1
         assert session.monitoring_passed == 1
 
-        session = engine.record_monitoring_check(session.session_id, passed=True, notes="All clear")
-        assert session.monitoring_checks == 2
+        for note in ("Bed cooling", "All clear", "Steppers off", "No smoke"):
+            session = engine.record_monitoring_check(session.session_id, passed=True, notes=note)
+        assert session.monitoring_passed == _CRITICAL_MONITORING_CHECKS
 
         # 5. Complete
         session = engine.complete_recovery(session.session_id, success=True, notes="Safe shutdown")
@@ -860,6 +887,7 @@ class TestRecoverySession:
         session = engine.confirm_recovery(session.session_id)
         assert session.status == RecoveryStatus.EXECUTING
 
+        _satisfy_monitoring_threshold(engine, session.session_id)
         session = engine.complete_recovery(session.session_id, success=True)
         assert session.status == RecoveryStatus.COMPLETED
 
@@ -883,6 +911,7 @@ class TestRecoverySession:
         active = engine.get_active_sessions()
         assert len(active) == 2
 
+        _satisfy_monitoring_threshold(engine, s1.session_id)
         engine.complete_recovery(s1.session_id, success=True)
         active = engine.get_active_sessions()
         assert len(active) == 1
@@ -931,6 +960,7 @@ class TestRecoveryConfirmation:
     def test_confirm_completed_raises(self, engine: PrintRecovery):
         failure, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
         session = engine.start_recovery(plan, failure)
+        _satisfy_monitoring_threshold(engine, session.session_id)
         engine.complete_recovery(session.session_id, success=True)
 
         with pytest.raises(ValueError, match="not awaiting_confirmation"):
@@ -981,6 +1011,7 @@ class TestRecoveryCancellation:
     def test_cancel_completed_raises(self, engine: PrintRecovery):
         failure, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
         session = engine.start_recovery(plan, failure)
+        _satisfy_monitoring_threshold(engine, session.session_id)
         engine.complete_recovery(session.session_id, success=True)
 
         with pytest.raises(ValueError, match="terminal state"):
@@ -1068,9 +1099,13 @@ class TestConcurrency:
                 failure_type=FailureType.THERMAL_RUNAWAY,
                 detected_at="2024-01-01T00:00:00+00:00",
                 printer_name=f"printer-{i}",
+                severity="critical",
             )
             plan = engine.plan_recovery(failure)
             session = engine.start_recovery(plan, failure)
+            # Pre-record monitoring checks for the half that will complete.
+            if i % 2 == 0:
+                _satisfy_monitoring_threshold(engine, session.session_id)
             sessions.append(session)
 
         errors: list[Exception] = []
@@ -1121,6 +1156,7 @@ class TestStatistics:
     def test_statistics_after_successful_recovery(self, engine: PrintRecovery):
         failure, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
         session = engine.start_recovery(plan, failure)
+        _satisfy_monitoring_threshold(engine, session.session_id)
         engine.complete_recovery(session.session_id, success=True)
 
         stats = engine.get_recovery_statistics()
@@ -1133,6 +1169,7 @@ class TestStatistics:
         # Successful recovery
         f1, p1 = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
         s1 = engine.start_recovery(p1, f1)
+        _satisfy_monitoring_threshold(engine, s1.session_id)
         engine.complete_recovery(s1.session_id, success=True)
 
         # Failed recovery
@@ -1165,6 +1202,7 @@ class TestStatistics:
     def test_strategy_statistics(self, engine: PrintRecovery):
         f1, p1 = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
         s1 = engine.start_recovery(p1, f1)
+        _satisfy_monitoring_threshold(engine, s1.session_id)
         engine.complete_recovery(s1.session_id, success=True)
 
         stats = engine.get_recovery_statistics()
@@ -1189,6 +1227,7 @@ class TestEdgeCases:
     def test_complete_already_completed_raises(self, engine: PrintRecovery):
         failure, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
         session = engine.start_recovery(plan, failure)
+        _satisfy_monitoring_threshold(engine, session.session_id)
         engine.complete_recovery(session.session_id, success=True)
 
         with pytest.raises(ValueError, match="terminal state"):
@@ -1201,6 +1240,7 @@ class TestEdgeCases:
     def test_monitor_completed_session_raises(self, engine: PrintRecovery):
         failure, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
         session = engine.start_recovery(plan, failure)
+        _satisfy_monitoring_threshold(engine, session.session_id)
         engine.complete_recovery(session.session_id, success=True)
 
         with pytest.raises(ValueError, match="cannot record"):
@@ -1381,6 +1421,102 @@ class TestSingleton:
         assert e1 is e2
         # Clean up.
         mod._engine = None
+
+
+# ---------------------------------------------------------------------------
+# 20. Monitoring-checks threshold (patent KILN-003 claims 76, 78, 79)
+# ---------------------------------------------------------------------------
+
+
+class TestMonitoringThreshold:
+    """Severity-aware monitoring-checks threshold enforcement."""
+
+    def test_required_resolver_critical_returns_five(self):
+        assert _required_monitoring_checks("critical") == _CRITICAL_MONITORING_CHECKS
+        assert _CRITICAL_MONITORING_CHECKS == 5
+
+    def test_required_resolver_default_returns_three(self):
+        for sev in ("high", "medium", "low", "", None, "unknown"):
+            assert _required_monitoring_checks(sev) == _MIN_MONITORING_CHECKS
+        assert _MIN_MONITORING_CHECKS == 3
+
+    def test_required_resolver_is_case_insensitive(self):
+        assert _required_monitoring_checks("CRITICAL") == _CRITICAL_MONITORING_CHECKS
+        assert _required_monitoring_checks("  Critical  ") == _CRITICAL_MONITORING_CHECKS
+
+    def test_critical_session_provisions_five_checks(self, engine: PrintRecovery):
+        # Thermal runaway is severity=critical per the detector.
+        failure, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
+        assert failure.severity == "critical"
+        session = engine.start_recovery(plan, failure)
+        assert session.monitoring_required == _CRITICAL_MONITORING_CHECKS
+
+    def test_default_session_provisions_three_checks(self, engine: PrintRecovery):
+        # Filament runout is severity=medium per the detector.
+        failure, plan = _detect_and_plan(engine, _make_telemetry(filament_detected=False))
+        assert failure.severity != "critical"
+        session = engine.start_recovery(plan, failure)
+        assert session.monitoring_required == _MIN_MONITORING_CHECKS
+
+    def test_session_to_dict_includes_monitoring_required(self, engine: PrintRecovery):
+        failure, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
+        session = engine.start_recovery(plan, failure)
+        assert session.to_dict()["monitoring_required"] == _CRITICAL_MONITORING_CHECKS
+
+    def test_complete_below_threshold_raises_structured_error(self, engine: PrintRecovery):
+        failure, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
+        session = engine.start_recovery(plan, failure)
+        # Two passing checks against a critical session that wants five.
+        engine.record_monitoring_check(session.session_id, passed=True)
+        engine.record_monitoring_check(session.session_id, passed=True)
+        with pytest.raises(MonitoringThresholdNotMet) as excinfo:
+            engine.complete_recovery(session.session_id, success=True)
+        err = excinfo.value
+        assert err.monitoring_passed == 2
+        assert err.monitoring_required == _CRITICAL_MONITORING_CHECKS
+        assert err.severity == "critical"
+        assert err.session_id == session.session_id
+        # Subclasses ValueError so existing handlers still catch it.
+        assert isinstance(err, ValueError)
+
+    def test_failed_completion_bypasses_threshold(self, engine: PrintRecovery):
+        # Operator may give up on a recovery attempt at any time.
+        failure, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
+        session = engine.start_recovery(plan, failure)
+        # Zero monitoring checks recorded.
+        session = engine.complete_recovery(session.session_id, success=False, notes="abandoning")
+        assert session.status == RecoveryStatus.FAILED
+
+    def test_failed_checks_do_not_count_toward_threshold(self, engine: PrintRecovery):
+        failure, plan = _detect_and_plan(engine, _make_telemetry(filament_detected=False))
+        session = engine.start_recovery(plan, failure)
+        # Plan requires confirmation; satisfy that first.
+        if session.status == RecoveryStatus.AWAITING_CONFIRMATION:
+            engine.confirm_recovery(session.session_id)
+        for _ in range(5):
+            engine.record_monitoring_check(session.session_id, passed=False, notes="still bad")
+        with pytest.raises(MonitoringThresholdNotMet) as excinfo:
+            engine.complete_recovery(session.session_id, success=True)
+        assert excinfo.value.monitoring_passed == 0
+        assert excinfo.value.monitoring_checks == 5
+
+    def test_threshold_error_to_dict_carries_all_fields(self, engine: PrintRecovery):
+        failure, plan = _detect_and_plan(engine, _make_telemetry(hotend_temp=320))
+        session = engine.start_recovery(plan, failure)
+        engine.record_monitoring_check(session.session_id, passed=True)
+        try:
+            engine.complete_recovery(session.session_id, success=True)
+        except MonitoringThresholdNotMet as exc:
+            d = exc.to_dict()
+            assert d["code"] == "MONITORING_THRESHOLD_NOT_MET"
+            assert d["session_id"] == session.session_id
+            assert d["monitoring_required"] == _CRITICAL_MONITORING_CHECKS
+            assert d["monitoring_passed"] == 1
+            assert d["deficit"] == _CRITICAL_MONITORING_CHECKS - 1
+            assert d["severity"] == "critical"
+            assert "passing checks recorded" in d["message"]
+        else:
+            pytest.fail("MonitoringThresholdNotMet was not raised")
 
     def test_singleton_is_print_recovery(self):
         import kiln.print_recovery as mod

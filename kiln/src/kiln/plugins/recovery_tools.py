@@ -891,7 +891,10 @@ class _RecoveryToolsPlugin:
                 notes: Final notes about the recovery outcome.
             """
             import kiln.server as _srv
-            from kiln.print_recovery import get_recovery_engine
+            from kiln.print_recovery import (
+                MonitoringThresholdNotMet,
+                get_recovery_engine,
+            )
 
             if err := _srv._check_auth("queue"):
                 return err
@@ -939,6 +942,12 @@ class _RecoveryToolsPlugin:
                 if pro_outcome is not None:
                     response["pro_outcome_recorded"] = True
                 return response
+            except MonitoringThresholdNotMet as exc:
+                # Patent claim 79: structured error includes the deficit
+                # so the orchestrator/UI can prompt for additional checks.
+                err = _srv._error_dict(str(exc), code=exc.to_dict()["code"])
+                err.update(exc.to_dict())
+                return err
             except ValueError as exc:
                 return _srv._error_dict(str(exc), code="INVALID_STATE")
             except Exception as exc:
