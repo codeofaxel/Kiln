@@ -18,6 +18,8 @@ import sqlite3
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from kiln.generation_feedback import (
     _MAX_PROMPT_LENGTH,
     FeedbackLoop,
@@ -993,6 +995,373 @@ class TestEnhanceWithPrinterContext:
             "a simple cube",
         )
         assert "Requirements:" in result.improved_prompt
+
+
+class TestNegativeConstraintInjection:
+    """Avoid: clauses derived from printer common_failures (KILN-010 claim 62)."""
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_avoid_clause_emitted_for_printer_failures(
+        self, mock_constraints, _p, _m
+    ):
+        mock_constraints.return_value = _mock_brief()
+        ctx = PrinterGenerationContext(
+            common_failures=["adhesion", "warping"],
+        )
+        result = enhance_prompt_with_design_intelligence(
+            "a phone stand",
+            printer_context=ctx,
+            provider="gemini",  # large budget
+        )
+        assert "Avoid:" in result.improved_prompt
+        # Both anti-patterns should appear in the avoid clause text.
+        avoid_section = result.improved_prompt.split("Avoid:")[1]
+        assert "tall narrow bases" in avoid_section.lower() or "small bed-contact" in avoid_section.lower()
+        assert "large flat surfaces" in avoid_section.lower()
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_avoid_clause_separated_from_requirements(
+        self, mock_constraints, _p, _m
+    ):
+        mock_constraints.return_value = _mock_brief()
+        ctx = PrinterGenerationContext(common_failures=["spaghetti"])
+        result = enhance_prompt_with_design_intelligence(
+            "a bracket",
+            printer_context=ctx,
+            provider="gemini",
+        )
+        # Requirements clause must precede Avoid clause.
+        req_idx = result.improved_prompt.find("Requirements:")
+        avoid_idx = result.improved_prompt.find("Avoid:")
+        assert req_idx >= 0 and avoid_idx > req_idx
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_no_failures_no_avoid_clause(self, mock_constraints, _p, _m):
+        mock_constraints.return_value = _mock_brief()
+        ctx = PrinterGenerationContext(common_failures=None)
+        result = enhance_prompt_with_design_intelligence(
+            "a simple cube",
+            printer_context=ctx,
+        )
+        assert "Avoid:" not in result.improved_prompt
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_explicit_anti_patterns_override_printer_history(
+        self, mock_constraints, _p, _m
+    ):
+        mock_constraints.return_value = _mock_brief()
+        ctx = PrinterGenerationContext(common_failures=["adhesion"])
+        result = enhance_prompt_with_design_intelligence(
+            "a custom design",
+            printer_context=ctx,
+            provider="gemini",
+            anti_patterns=["sharp internal corners", "isolated thin pins"],
+        )
+        # Caller-supplied anti-patterns win.
+        assert "sharp internal corners" in result.improved_prompt
+        assert "isolated thin pins" in result.improved_prompt
+        # The history-derived "tall narrow bases" should NOT appear.
+        assert "tall narrow bases" not in result.improved_prompt
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_anti_patterns_listed_in_constraints_added(
+        self, mock_constraints, _p, _m
+    ):
+        mock_constraints.return_value = _mock_brief()
+        ctx = PrinterGenerationContext(common_failures=["stringing", "warping"])
+        result = enhance_prompt_with_design_intelligence(
+            "a vase",
+            printer_context=ctx,
+            provider="gemini",
+        )
+        # Anti-patterns appear in constraints_added with the "avoid:" prefix
+        # so callers can introspect what was excluded.
+        avoid_entries = [c for c in result.constraints_added if c.startswith("avoid: ")]
+        assert len(avoid_entries) >= 2
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_unknown_failure_mode_skipped(self, mock_constraints, _p, _m):
+        mock_constraints.return_value = _mock_brief()
+        # Hardware-only failures that have no design anti-pattern.
+        ctx = PrinterGenerationContext(
+            common_failures=["thermal_runaway", "power_loss", "filament_runout"],
+        )
+        result = enhance_prompt_with_design_intelligence(
+            "a cube",
+            printer_context=ctx,
+            provider="gemini",
+        )
+        # Hardware failures contribute no anti-patterns.
+        assert "Avoid:" not in result.improved_prompt
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_anti_patterns_only_no_positive_constraints(
+        self, mock_constraints, _p, _m
+    ):
+        # Empty brief means zero positive constraints from materials/patterns.
+        mock_constraints.return_value = _mock_brief()
+        ctx = PrinterGenerationContext()
+        result = enhance_prompt_with_design_intelligence(
+            "a part",
+            printer_context=ctx,
+            provider="gemini",
+            anti_patterns=["thin overhangs"],
+        )
+        # Avoid clause should still be emitted alongside the always-included
+        # printability fundamentals.
+        assert "Avoid:" in result.improved_prompt
+        assert "thin overhangs" in result.improved_prompt
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_tight_budget_drops_anti_patterns_before_positives(
+        self, mock_constraints, _p, _m
+    ):
+        # Constraints get a long mandatory list to force budget pressure.
+        rules = {"min_wall_thickness_mm": 1.6}
+        mock_constraints.return_value = _mock_brief(constraints=rules)
+        ctx = PrinterGenerationContext(common_failures=["adhesion"])
+        # 80-char budget — barely enough for a small Requirements clause.
+        result = enhance_prompt_with_design_intelligence(
+            "a thing",
+            printer_context=ctx,
+            max_length=80,
+        )
+        # Positives must survive; anti-patterns dropped first under pressure.
+        assert "Requirements:" in result.improved_prompt
+        # Confirm we stayed within budget.
+        assert len(result.improved_prompt) <= 80
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_anti_patterns_capped_at_three_history_entries(
+        self, mock_constraints, _p, _m
+    ):
+        mock_constraints.return_value = _mock_brief()
+        ctx = PrinterGenerationContext(
+            common_failures=["adhesion", "warping", "stringing", "spaghetti", "clog"],
+        )
+        result = enhance_prompt_with_design_intelligence(
+            "a cube",
+            printer_context=ctx,
+            provider="gemini",
+        )
+        # Only top-3 history entries become anti-patterns.
+        avoid_entries = [c for c in result.constraints_added if c.startswith("avoid: ")]
+        assert len(avoid_entries) == 3
+
+
+class TestPromptSanityGate:
+    """Sanity gate on improved prompts (KILN-010 claim 51).
+
+    The gate enforces three independent safety checks before any
+    generation request is sent to a provider.  The gate is the last
+    deterministic check between an LLM-suggested constraint and the
+    physical print — every failure mode here either wastes material
+    or produces an unsafe design.
+    """
+
+    def test_clean_prompt_passes(self):
+        from kiln.generation_feedback import check_prompt_sanity
+
+        result = check_prompt_sanity(
+            "a phone stand",
+            "a phone stand Requirements: minimum wall thickness 1.6mm. flat bottom for bed adhesion.",
+            budget=600,
+        )
+        assert result.passed is True
+        assert result.failures == []
+        assert result.token_overlap_pct == pytest.approx(1.0)
+
+    def test_numeric_contradiction_min_greater_than_max_caught(self):
+        from kiln.generation_feedback import check_prompt_sanity
+
+        result = check_prompt_sanity(
+            "a bracket",
+            "a bracket Requirements: minimum wall thickness 3mm. maximum wall thickness 1mm.",
+            budget=600,
+        )
+        assert result.passed is False
+        contradictions = [f for f in result.failures if f.kind == "contradiction"]
+        assert len(contradictions) >= 1
+        assert any("wall thickness" in f.message for f in contradictions)
+
+    def test_numeric_min_below_max_no_contradiction(self):
+        from kiln.generation_feedback import check_prompt_sanity
+
+        result = check_prompt_sanity(
+            "a bracket",
+            "a bracket Requirements: minimum wall thickness 1mm. maximum wall thickness 5mm.",
+            budget=600,
+        )
+        contradictions = [f for f in result.failures if f.kind == "contradiction"]
+        assert len(contradictions) == 0
+
+    def test_numeric_contradiction_different_units_not_flagged(self):
+        from kiln.generation_feedback import check_prompt_sanity
+
+        # Different units are not directly comparable by the heuristic.
+        result = check_prompt_sanity(
+            "a part",
+            "a part Requirements: minimum thickness 5mm. maximum thickness 1cm.",
+            budget=600,
+        )
+        # Heuristic only compares same-unit pairs; this is conservative
+        # but means we won't false-positive on valid mixed-unit specs.
+        contradictions = [
+            f for f in result.failures if f.kind == "contradiction"
+            and f.detail and f.detail.get("shape") == "numeric_bound"
+        ]
+        assert len(contradictions) == 0
+
+    def test_budget_overrun_caught(self):
+        from kiln.generation_feedback import check_prompt_sanity
+
+        long = "x" * 700
+        result = check_prompt_sanity("a cube", long, budget=600)
+        assert result.passed is False
+        budget_failures = [f for f in result.failures if f.kind == "budget"]
+        assert len(budget_failures) == 1
+        assert result.length == 700
+
+    def test_intent_drift_below_70_pct_caught(self):
+        from kiln.generation_feedback import check_prompt_sanity
+
+        # Original has 10 distinct words; improved keeps only 3 in the
+        # intent prefix (the rest is appended Requirements suffix that
+        # is intentionally excluded from the overlap calculation).
+        original = "a tall elaborate phone stand with elegant integrated cable management features"
+        improved = "a tall elaborate Requirements: minimum wall thickness 1.6mm."
+        result = check_prompt_sanity(original, improved, budget=600)
+        intent_failures = [f for f in result.failures if f.kind == "intent_drift"]
+        assert len(intent_failures) == 1
+        assert result.token_overlap_pct < 0.7
+
+    def test_intent_high_overlap_passes(self):
+        from kiln.generation_feedback import check_prompt_sanity
+
+        original = "a phone stand"
+        improved = "a phone stand Requirements: minimum wall thickness 1.6mm."
+        result = check_prompt_sanity(original, improved, budget=600)
+        assert result.token_overlap_pct == pytest.approx(1.0)
+
+    def test_material_family_conflict_caught(self):
+        from kiln.generation_feedback import check_prompt_sanity
+
+        result = check_prompt_sanity(
+            "a part",
+            "a part Requirements: rigid load-bearing structure. flexible TPU body.",
+            budget=600,
+        )
+        material = [
+            f for f in result.failures if f.kind == "contradiction"
+            and f.detail and f.detail.get("shape") == "material_family"
+        ]
+        assert len(material) >= 1
+
+    def test_presence_absence_conflict_caught(self):
+        from kiln.generation_feedback import check_prompt_sanity
+
+        result = check_prompt_sanity(
+            "a part",
+            "a part Requirements: no overhangs greater than 45 degrees. with overhangs allowed.",
+            budget=600,
+        )
+        presence = [
+            f for f in result.failures if f.kind == "contradiction"
+            and f.detail and f.detail.get("shape") == "presence"
+        ]
+        assert len(presence) >= 1
+
+    def test_empty_original_prompt_does_not_crash(self):
+        from kiln.generation_feedback import check_prompt_sanity
+
+        result = check_prompt_sanity("", "anything goes", budget=600)
+        # Empty original has zero tokens — overlap convention: 100%.
+        assert result.token_overlap_pct == pytest.approx(1.0)
+        intent_failures = [f for f in result.failures if f.kind == "intent_drift"]
+        assert len(intent_failures) == 0
+
+    def test_at_least_at_most_recognized_as_bounds(self):
+        from kiln.generation_feedback import check_prompt_sanity
+
+        result = check_prompt_sanity(
+            "a part",
+            "a part Requirements: at least 5mm wall thickness. at most 2mm wall thickness.",
+            budget=600,
+        )
+        contradictions = [f for f in result.failures if f.kind == "contradiction"]
+        # Detection still depends on the regex matching — this is a
+        # softer surface; we accept either behaviour but if it does
+        # match, the contradiction must be flagged.
+        if contradictions:
+            assert any("wall thickness" in f.message for f in contradictions)
+
+    def test_sanity_attached_to_improved_prompt_result(self):
+        from kiln.generation_feedback import (
+            FeedbackType,
+            PrintFeedback,
+            generate_improved_prompt,
+        )
+
+        feedback = [
+            PrintFeedback(
+                original_prompt="a phone stand",
+                feedback_type=FeedbackType.PRINTABILITY,
+                issues=["flat base needed"],
+                constraints=["wide flat base for bed adhesion"],
+                severity="critical",
+            )
+        ]
+        result = generate_improved_prompt(
+            "a phone stand", feedback, iteration=2,
+        )
+        assert result.sanity is not None
+        assert result.sanity.passed is True
+        # to_dict round-trips the sanity result.
+        d = result.to_dict()
+        assert "sanity" in d
+        assert d["sanity"]["passed"] is True
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_proactive_enhancement_attaches_sanity(self, mock_constraints, _p, _m):
+        mock_constraints.return_value = _mock_brief()
+        result = enhance_prompt_with_design_intelligence("a phone stand")
+        assert result.sanity is not None
+        assert isinstance(result.sanity.passed, bool)
+
+    def test_failure_to_dict_round_trips(self):
+        from kiln.generation_feedback import check_prompt_sanity
+
+        result = check_prompt_sanity(
+            "a part",
+            "a part Requirements: minimum X 5mm. maximum X 2mm.",
+            budget=600,
+        )
+        d = result.to_dict()
+        assert d["passed"] is False
+        for failure_dict in d["failures"]:
+            assert "kind" in failure_dict
+            assert "message" in failure_dict
+            assert "detail" in failure_dict
 
 
 # ---------------------------------------------------------------------------

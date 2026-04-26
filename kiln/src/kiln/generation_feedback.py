@@ -17,11 +17,62 @@ from __future__ import annotations
 import enum
 import json
 import logging
+import re
 import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Prompt sanity gate (KILN-010 claim 51)
+# ---------------------------------------------------------------------------
+
+# Minimum fraction of original-prompt tokens that must survive into the
+# improved prompt, per claim 51's "at least 70 percent token overlap".
+_MIN_TOKEN_OVERLAP_PCT = 0.70
+
+# Detects "minimum X 2.5mm" / "max X 30 degrees" style numeric clauses.
+# Capture groups: (1) bound kind, (2) noun phrase, (3) number, (4) unit.
+_NUMERIC_BOUND_RE = re.compile(
+    r"\b(min(?:imum)?|max(?:imum)?|no\s+more\s+than|at\s+least|at\s+most)\b"
+    r"\s+([a-z][a-z\s\-]*?)\s+"
+    r"(\d+(?:\.\d+)?)\s*"
+    r"(mm|cm|m|degrees?|deg|%|percent|pct)?",
+    re.IGNORECASE,
+)
+_LOWER_BOUND_KINDS = {"min", "minimum", "at least"}
+_UPPER_BOUND_KINDS = {"max", "maximum", "no more than", "at most"}
+# Token splitter — alphanumeric runs, lowercased.  Numbers count as
+# tokens so "1.6mm" stays distinguishable from "1mm".
+_TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
+_NORMALIZE_NOUN_RE = re.compile(r"\s+")
+
+# Material-family conflicts — clauses claiming both a rigid and a
+# flexible material, or both a high-temp and a low-temp service envelope,
+# can't coexist in a single generated design.  The lists below are short
+# on purpose: only confidently-conflicting families.
+_MATERIAL_CONFLICT_GROUPS: list[tuple[str, list[str]]] = [
+    ("rigid",      ["rigid", "stiff", "load-bearing", "structural"]),
+    ("flexible",   ["flexible", "tpu", "elastomer", "rubber-like"]),
+    ("food-safe",  ["food safe", "food-safe", "food contact"]),
+    ("high-temp",  ["high temperature", "high-temp", "ultra high-performance"]),
+]
+# Pairs that conflict if both groups have at least one clause hit.
+_MATERIAL_CONFLICT_PAIRS: list[tuple[str, str]] = [
+    ("rigid", "flexible"),
+]
+
+# Textual presence/absence contradictions — "no X" with "with X" on the
+# same noun.  Limited to small set of design nouns we actually emit.
+_NEG_PRESENCE_RE = re.compile(
+    r"\b(no|without|avoid|minimize)\s+([a-z][a-z\-]*(?:\s+[a-z][a-z\-]*){0,3})",
+    re.IGNORECASE,
+)
+_POS_PRESENCE_RE = re.compile(
+    r"\b(with|include|add|require[sd]?)\s+([a-z][a-z\-]*(?:\s+[a-z][a-z\-]*){0,3})",
+    re.IGNORECASE,
+)
 
 # Default maximum prompt length (Meshy API limit).  Use
 # ``get_provider_prompt_limit()`` for provider-aware limits.
@@ -254,6 +305,55 @@ class PrintFeedback:
         return data
 
 
+class SanityFailureKind(str, enum.Enum):
+    """Categories of sanity-gate violations (KILN-010 claim 51)."""
+
+    CONTRADICTION = "contradiction"
+    BUDGET = "budget"
+    INTENT_DRIFT = "intent_drift"
+
+
+@dataclass
+class SanityFailure:
+    """A single sanity-gate violation on an improved prompt."""
+
+    kind: SanityFailureKind
+    message: str
+    detail: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind.value,
+            "message": self.message,
+            "detail": self.detail or {},
+        }
+
+
+@dataclass
+class SanityResult:
+    """Sanity-gate verdict for an improved prompt (KILN-010 claim 51).
+
+    Three checks: no contradictions between constraints, prompt fits the
+    provider budget, and at least 70% token overlap between the improved
+    and original prompts (intent preservation).
+    """
+
+    passed: bool
+    failures: list[SanityFailure]
+    token_overlap_pct: float
+    length: int
+    budget: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "passed": self.passed,
+            "failures": [f.to_dict() for f in self.failures],
+            "token_overlap_pct": round(self.token_overlap_pct, 4),
+            "length": self.length,
+            "budget": self.budget,
+        }
+
+
 @dataclass
 class ImprovedPrompt:
     """An improved prompt with feedback constraints applied."""
@@ -264,10 +364,13 @@ class ImprovedPrompt:
     constraints_added: list[str]
     iteration: int  # which retry attempt this is
     expected_improvements: list[str]
+    sanity: SanityResult | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["feedback_applied"] = [f.to_dict() for f in self.feedback_applied]
+        if self.sanity is not None:
+            data["sanity"] = self.sanity.to_dict()
         return data
 
 
@@ -284,6 +387,240 @@ class FeedbackLoop:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+# ---------------------------------------------------------------------------
+# Sanity gate
+# ---------------------------------------------------------------------------
+
+
+def _tokenize(text: str) -> list[str]:
+    """Lowercase alphanumeric tokenization."""
+    return [m.group(0).lower() for m in _TOKEN_RE.finditer(text or "")]
+
+
+def _strip_suffix(improved: str) -> str:
+    """Drop the appended ``Requirements:`` / ``Avoid:`` clauses.
+
+    Token-overlap is computed against the user-intent prefix only —
+    otherwise the appended constraints would always inflate the
+    intersection toward 100% and the check would never fire.
+    """
+    cut = len(improved)
+    for marker in (" Requirements:", " Avoid:"):
+        idx = improved.find(marker)
+        if idx >= 0 and idx < cut:
+            cut = idx
+    return improved[:cut]
+
+
+def _normalize_noun(noun: str) -> str:
+    """Collapse whitespace and lowercase a constraint noun phrase."""
+    return _NORMALIZE_NOUN_RE.sub(" ", noun.strip().lower())
+
+
+def _detect_numeric_contradictions(text: str) -> list[tuple[str, str]]:
+    """Return contradicting (lower-bound, upper-bound) clause pairs.
+
+    Looks for ``minimum X N unit`` and ``maximum X M unit`` in the same
+    text where ``min > max`` for matching noun phrases and units.
+    """
+    bounds: list[dict[str, Any]] = []
+    for m in _NUMERIC_BOUND_RE.finditer(text):
+        kind = m.group(1).lower().strip()
+        kind = _NORMALIZE_NOUN_RE.sub(" ", kind)
+        noun = _normalize_noun(m.group(2))
+        if not noun:
+            continue
+        try:
+            value = float(m.group(3))
+        except ValueError:
+            continue
+        unit = (m.group(4) or "").lower()
+        bounds.append({
+            "kind": kind,
+            "noun": noun,
+            "value": value,
+            "unit": unit,
+            "raw": m.group(0).strip(),
+        })
+
+    contradictions: list[tuple[str, str]] = []
+    for i, a in enumerate(bounds):
+        for b in bounds[i + 1 :]:
+            if a["noun"] != b["noun"] or a["unit"] != b["unit"]:
+                continue
+            a_lower = a["kind"] in _LOWER_BOUND_KINDS
+            b_lower = b["kind"] in _LOWER_BOUND_KINDS
+            a_upper = a["kind"] in _UPPER_BOUND_KINDS
+            b_upper = b["kind"] in _UPPER_BOUND_KINDS
+            if a_lower and b_upper and a["value"] > b["value"]:
+                contradictions.append((a["raw"], b["raw"]))
+            elif b_lower and a_upper and b["value"] > a["value"]:
+                contradictions.append((b["raw"], a["raw"]))
+    return contradictions
+
+
+def _detect_material_conflicts(text: str) -> list[tuple[str, str]]:
+    """Return material-family conflict pairs found in *text*.
+
+    A flexible-material clause adjacent to a rigid-material clause in
+    the same prompt is the canonical conflict.  Both clauses must have
+    a textual hit for the conflict to register.
+    """
+    lower = text.lower()
+    hits: dict[str, str] = {}
+    for group, terms in _MATERIAL_CONFLICT_GROUPS:
+        for term in terms:
+            if term in lower:
+                hits[group] = term
+                break
+    conflicts: list[tuple[str, str]] = []
+    for a, b in _MATERIAL_CONFLICT_PAIRS:
+        if a in hits and b in hits:
+            conflicts.append((hits[a], hits[b]))
+    return conflicts
+
+
+def _detect_presence_contradictions(text: str) -> list[tuple[str, str]]:
+    """Return presence/absence contradiction pairs.
+
+    Catches "no X" + "with X" on the same noun phrase.  Conservative:
+    only flags exact-noun matches to avoid noise from partial overlaps.
+    """
+    negatives: dict[str, str] = {}
+    for m in _NEG_PRESENCE_RE.finditer(text):
+        noun = _normalize_noun(m.group(2))
+        # Tokenise the noun phrase head and use it as the lookup key —
+        # "thin walls" vs "with thin walls" should match on the head.
+        head = noun.split()[0] if noun else ""
+        if head and head not in negatives:
+            negatives[head] = m.group(0).strip()
+
+    conflicts: list[tuple[str, str]] = []
+    if not negatives:
+        return conflicts
+    for m in _POS_PRESENCE_RE.finditer(text):
+        noun = _normalize_noun(m.group(2))
+        head = noun.split()[0] if noun else ""
+        if head in negatives:
+            conflicts.append((negatives[head], m.group(0).strip()))
+    return conflicts
+
+
+def check_prompt_sanity(
+    original_prompt: str,
+    improved_prompt: str,
+    *,
+    budget: int,
+    min_token_overlap: float = _MIN_TOKEN_OVERLAP_PCT,
+) -> SanityResult:
+    """Run the three-check sanity gate from KILN-010 claim 51.
+
+    The gate is a deterministic stand-in for the patent's "second model"
+    — it catches the contradiction shapes a model would catch, plus the
+    cheaper budget and intent-overlap checks.  Callers re-generate when
+    the result is not ``passed``.
+
+    :param original_prompt: User-supplied prompt before enhancement.
+    :param improved_prompt: Enhanced prompt with constraints appended.
+    :param budget: Maximum prompt length the provider will accept.
+    :param min_token_overlap: Minimum fraction of original tokens that
+        must appear in the improved prompt's intent prefix.  Defaults to
+        the patent's 0.70 threshold.
+    :returns: A :class:`SanityResult` summarising the verdict.
+    """
+    failures: list[SanityFailure] = []
+
+    # (b) Budget check first — cheap, and a bust here makes other checks
+    # irrelevant.
+    length = len(improved_prompt)
+    if length > budget:
+        over = length - budget
+        failures.append(
+            SanityFailure(
+                kind=SanityFailureKind.BUDGET,
+                message=(
+                    f"Improved prompt is {length} chars — {over} over the "
+                    f"provider budget of {budget}.  Trim {over} chars from the "
+                    f"original prompt or drop the lowest-priority constraints."
+                ),
+                detail={"length": length, "budget": budget, "over_by": over},
+            )
+        )
+
+    # (a) Contradictions — three independent shapes.  Numeric bound
+    # inversions (min > max), material family conflicts (rigid vs
+    # flexible), and presence/absence conflicts (no X + with X).
+    for lower, upper in _detect_numeric_contradictions(improved_prompt):
+        failures.append(
+            SanityFailure(
+                kind=SanityFailureKind.CONTRADICTION,
+                message=(
+                    f"Contradicting numeric bounds: {lower!r} and {upper!r}.  "
+                    f"Drop one of the two bounds before sending to the provider."
+                ),
+                detail={"shape": "numeric_bound", "lower": lower, "upper": upper},
+            )
+        )
+    for a, b in _detect_material_conflicts(improved_prompt):
+        failures.append(
+            SanityFailure(
+                kind=SanityFailureKind.CONTRADICTION,
+                message=(
+                    f"Conflicting material families: {a!r} and {b!r}.  "
+                    f"Pick one material family — the design can't be both."
+                ),
+                detail={"shape": "material_family", "a": a, "b": b},
+            )
+        )
+    for negative, positive in _detect_presence_contradictions(improved_prompt):
+        failures.append(
+            SanityFailure(
+                kind=SanityFailureKind.CONTRADICTION,
+                message=(
+                    f"Presence/absence conflict: {negative!r} and {positive!r}.  "
+                    f"Resolve by removing whichever clause was added by mistake."
+                ),
+                detail={"shape": "presence", "negative": negative, "positive": positive},
+            )
+        )
+
+    # (c) Intent-preservation: ≥70% of original tokens must appear in the
+    # improved prompt's prefix (excluding the appended Requirements /
+    # Avoid clauses, which would otherwise inflate the overlap to ~100%).
+    original_tokens = _tokenize(original_prompt)
+    intent_prefix_tokens = set(_tokenize(_strip_suffix(improved_prompt)))
+    if original_tokens:
+        kept = sum(1 for t in original_tokens if t in intent_prefix_tokens)
+        overlap = kept / len(original_tokens)
+    else:
+        overlap = 1.0
+    if overlap < min_token_overlap:
+        failures.append(
+            SanityFailure(
+                kind=SanityFailureKind.INTENT_DRIFT,
+                message=(
+                    f"The improved prompt only retains {overlap:.0%} of the "
+                    f"original tokens (required: {min_token_overlap:.0%}).  The "
+                    f"appended constraints are crowding out the user's request "
+                    f"— shorten the constraint suffix or raise the budget."
+                ),
+                detail={
+                    "overlap_pct": round(overlap, 4),
+                    "required": min_token_overlap,
+                    "original_tokens": len(original_tokens),
+                },
+            )
+        )
+
+    return SanityResult(
+        passed=not failures,
+        failures=failures,
+        token_overlap_pct=overlap,
+        length=length,
+        budget=budget,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -689,6 +1026,14 @@ def generate_improved_prompt(
     if len(improved) > limit:
         improved = improved[: limit - 3] + "..."
 
+    sanity = check_prompt_sanity(original_prompt, improved, budget=limit)
+    if not sanity.passed:
+        logger.warning(
+            "Prompt sanity gate failed (iteration %d): %s",
+            iteration,
+            [f.kind for f in sanity.failures],
+        )
+
     return ImprovedPrompt(
         original_prompt=original_prompt,
         improved_prompt=improved,
@@ -696,6 +1041,7 @@ def generate_improved_prompt(
         constraints_added=all_constraints,
         iteration=iteration,
         expected_improvements=expected_improvements,
+        sanity=sanity,
     )
 
 
@@ -1011,6 +1357,7 @@ def enhance_prompt_with_design_intelligence(
     provider: str | None = None,
     max_length: int | None = None,
     printer_context: PrinterGenerationContext | None = None,
+    anti_patterns: list[str] | None = None,
 ) -> ImprovedPrompt:
     """Enhance a generation prompt with design intelligence constraints.
 
@@ -1034,6 +1381,11 @@ def enhance_prompt_with_design_intelligence(
         from :func:`resolve_printer_generation_context`.  When provided,
         auto-resolved material and printer-specific failure mitigations
         are included in the prompt.
+    :param anti_patterns: Optional list of explicit anti-pattern clauses
+        to inject as ``Avoid:`` guidance (KILN-010 claim 62).  When
+        omitted, anti-patterns are derived from
+        ``printer_context.common_failures`` via
+        :func:`kiln.failure_vocabulary.anti_pattern_for`.
     :returns: An :class:`ImprovedPrompt` with design constraints applied.
     """
     # Merge printer context into explicit parameters when available.
@@ -1069,6 +1421,7 @@ def enhance_prompt_with_design_intelligence(
             constraints_added=[],
             iteration=0,
             expected_improvements=[],
+            sanity=check_prompt_sanity(prompt, prompt, budget=limit),
         )
 
     # Material design limits — use actual per-material values, not hardcoded
@@ -1240,7 +1593,23 @@ def enhance_prompt_with_design_intelligence(
     else:
         constraints = core_constraints
 
-    if not constraints:
+    # Negative-constraint anti-patterns (KILN-010 claim 62) — explicit
+    # exclusions of patterns known to cause failures for the current
+    # (material, printer) context.  Caller-supplied ``anti_patterns``
+    # take precedence; otherwise derive from the printer's recurring
+    # failure history.
+    anti_clauses: list[str] = []
+    if anti_patterns:
+        anti_clauses = [c.strip() for c in anti_patterns if c and c.strip()]
+    elif printer_context is not None and printer_context.common_failures:
+        from kiln.failure_vocabulary import anti_pattern_for
+
+        for failure in printer_context.common_failures[:3]:
+            ap = anti_pattern_for(failure)
+            if ap and ap not in anti_clauses:
+                anti_clauses.append(ap)
+
+    if not constraints and not anti_clauses:
         return ImprovedPrompt(
             original_prompt=prompt,
             improved_prompt=prompt,
@@ -1248,17 +1617,31 @@ def enhance_prompt_with_design_intelligence(
             constraints_added=[],
             iteration=0,
             expected_improvements=[],
+            sanity=check_prompt_sanity(prompt, prompt, budget=limit),
         )
 
     # Build the enhanced prompt — use more constraints when budget allows
     max_constraints = 8 if limit <= 600 else 15
-    requirements = ". ".join(constraints[:max_constraints])
-    suffix = f" Requirements: {requirements}."
 
+    def _build_suffix(positive: list[str], negative: list[str]) -> str:
+        parts: list[str] = []
+        if positive:
+            parts.append(f"Requirements: {'. '.join(positive)}.")
+        if negative:
+            parts.append(f"Avoid: {'; '.join(negative)}.")
+        return (" " + " ".join(parts)) if parts else ""
+
+    suffix = _build_suffix(constraints[:max_constraints], anti_clauses)
     max_original = limit - len(suffix)
     if max_original < 20:
-        suffix = f" Requirements: {'. '.join(constraints[:4])}."
+        # Tight budget — reduce to top-4 positives and top-2 anti-patterns.
+        suffix = _build_suffix(constraints[:4], anti_clauses[:2])
         max_original = limit - len(suffix)
+    if max_original < 20 and anti_clauses:
+        # Still tight — drop anti-patterns rather than positives.
+        suffix = _build_suffix(constraints[:4], [])
+        max_original = limit - len(suffix)
+        anti_clauses = []
 
     trimmed = prompt[:max_original].rstrip()
     improved = trimmed + suffix
@@ -1266,15 +1649,27 @@ def enhance_prompt_with_design_intelligence(
     if len(improved) > limit:
         improved = improved[: limit - 3] + "..."
 
+    # Tag anti-patterns in constraints_added so callers can introspect.
+    constraints_added = list(constraints) + [f"avoid: {c}" for c in anti_clauses]
+
+    sanity = check_prompt_sanity(prompt, improved, budget=limit)
+    if not sanity.passed:
+        logger.warning(
+            "Proactive prompt sanity gate failed: %s",
+            [f.kind for f in sanity.failures],
+        )
+
     return ImprovedPrompt(
         original_prompt=prompt,
         improved_prompt=improved,
         feedback_applied=[],
-        constraints_added=constraints,
+        constraints_added=constraints_added,
         iteration=0,
         expected_improvements=[
-            f"Design-aware generation with {len(constraints)} constraints applied",
+            f"Design-aware generation with {len(constraints)} constraints "
+            f"and {len(anti_clauses)} anti-patterns applied",
         ],
+        sanity=sanity,
     )
 
 

@@ -118,6 +118,44 @@ def mitigation_for(mode: str | None) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Negative-constraint anti-patterns (KILN-010 claim 62)
+# ---------------------------------------------------------------------------
+
+# Symmetric counterpart to MITIGATIONS: short clauses describing what
+# the design must *not* contain, given a recurring failure mode.  These
+# emit as "Avoid: ..." clauses in the proactive prompt enhancement so
+# the generative model has explicit exclusion guidance in addition to
+# the positive mitigations above.  Each entry is a single
+# noun-phrase fragment so multiple can be joined with "; " inside the
+# Avoid clause.
+ANTI_PATTERNS: dict[str, str] = {
+    "adhesion": "tall narrow bases or small bed-contact footprints",
+    "stringing": "long unsupported travel moves between disconnected geometry",
+    "warping": "large flat surfaces and sharp 90-degree corners on the build plate",
+    "layer_shift": "tall thin towers and aggressive overhanging cantilevers",
+    "spaghetti": "unsupported overhangs greater than 45 degrees",
+    "under_extrusion": "walls thinner than 1.2mm",
+    "over_extrusion": "tight press-fits requiring sub-tenth-mm tolerances",
+    "clog": "rapid retraction zones and tight infill on small features",
+    "elephant_foot": "sharp 90-degree bottom edges",
+}
+
+
+def anti_pattern_for(mode: str | None) -> str | None:
+    """Return the anti-pattern clause for a failure_mode, or ``None``.
+
+    Symmetric to :func:`mitigation_for` — accepts either canonical or
+    classifier-vocabulary strings and returns ``None`` for hardware
+    failures that have no design-level anti-pattern.
+    """
+    if not mode:
+        return None
+    lower = mode.lower()
+    canonical = CLASSIFIER_TO_CANONICAL.get(lower, lower)
+    return ANTI_PATTERNS.get(canonical) or ANTI_PATTERNS.get(lower)
+
+
+# ---------------------------------------------------------------------------
 # Auto-classify threshold
 # ---------------------------------------------------------------------------
 
