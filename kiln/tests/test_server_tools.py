@@ -147,13 +147,15 @@ class TestKilnHealth:
         assert "m" in human
         assert "s" in human
 
-    @patch("kiln.server._start_time", new=time.time() - 3661)
     def test_uptime_human_format(self):
         """Human-readable uptime is correctly formatted for ~1h 1m."""
-        result = kiln_health()
+        fake_now = 1_700_000_000.0
+        with patch("kiln.plugins.utility_tools.time.time", return_value=fake_now), \
+             patch("kiln.server._start_time", new=fake_now - 3661):
+            result = kiln_health()
 
         assert result["uptime_human"].startswith("1h")
-        assert result["uptime_seconds"] == pytest.approx(3661.0, abs=300.0)
+        assert result["uptime_seconds"] == 3661
 
     def test_module_status_flags(self):
         """modules dict contains all expected boolean flags."""
