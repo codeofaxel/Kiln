@@ -35,15 +35,25 @@ code {
 .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
 .container-wide { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
 
-/* Buttons */
+/* Buttons.  font/border/line-height/box-sizing are explicit so that
+ * <a class="btn"> and <button class="btn"> render at the same height —
+ * UA defaults for <button> include a border and a different font, which
+ * otherwise produces a 2-3px height delta in mixed-element CTA rows
+ * (e.g. the pricing page's Free CTA is an <a>, Pro/Business are
+ * <button>). */
 .btn {
   display: inline-block;
+  box-sizing: border-box;
   padding: 14px 32px;
   background: var(--accent);
   color: #fff;
+  font-family: inherit;
   font-weight: 600;
   font-size: 15px;
+  line-height: 1.2;
+  border: none;
   border-radius: 8px;
+  cursor: pointer;
   transition: all 0.15s;
 }
 .btn:hover { background: var(--accent-hover); text-decoration: none; }

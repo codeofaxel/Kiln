@@ -628,11 +628,15 @@ const pricingFaqSchema = {
     margin-top: 1px;
   }
 
-  /* CTA button */
+  /* CTA button — bottom-pinned by .features { flex: 1 } absorbing leftover
+   * space.  We deliberately do NOT use margin-top: auto here: combined with
+   * the same on .upgrade-note it splits leftover space between the two,
+   * making short-feature cards (Free) "float" the button mid-card while
+   * dense cards (Pro/Business) anchor it correctly.  Letting flex grow do
+   * the work keeps all four CTAs y-aligned regardless of bullet count. */
   .card-cta {
     width: 100%;
     text-align: center;
-    margin-top: auto;
   }
 
   /* Featured card (Business — recommended for commercial use) */
@@ -666,13 +670,18 @@ const pricingFaqSchema = {
     opacity: 0.9;
   }
 
-  /* Upgrade note under CTA */
+  /* Upgrade note under CTA.  min-height pins notes to a 2-line block so
+   * their varying lengths ("Install with…", "Already installed? Run…",
+   * "Custom pricing tailored…") don't shift the CTA y-position between
+   * cards.  The code chip can flex-wrap to a second line on narrow
+   * columns without crowding the button above. */
   .upgrade-note {
     text-align: center;
     font-size: 12px;
+    line-height: 1.5;
     color: var(--text-muted);
-    margin-top: auto;
-    margin-bottom: 8px;
+    margin: 12px 0 0;
+    min-height: 36px;
   }
   .upgrade-note code {
     font-size: 12px;
@@ -680,6 +689,7 @@ const pricingFaqSchema = {
     padding: 2px 6px;
     border-radius: 4px;
     border: 1px solid var(--border);
+    white-space: nowrap;
   }
 
   /* Commercial-use modal */
