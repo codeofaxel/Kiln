@@ -24,7 +24,7 @@ pydantic_core==2.41.5
 pydantic-settings==2.13.1
 Pygments==2.19.2
 pytest==9.0.2
-pytest-cov==7.0.0
+pytest-cov==7.1.0
 pytest-mock==3.15.1
 python-dotenv==1.2.1
 PyYAML==6.0.3
