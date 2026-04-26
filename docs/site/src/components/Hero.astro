@@ -17,14 +17,14 @@
          "any machine" when CNC / laser adapters land. -->
     <h2 class="compat-heading">Bring your AI. We brought the rest.</h2>
     <div class="compat-strip-inline">
+      <p class="compat-row-label">Agents</p>
       <div class="compat-list-inline">
         <span class="compat-pill">Claude</span>
-        <span class="compat-pill">ChatGPT</span>
-        <span class="compat-pill">Cursor</span>
         <span class="compat-pill">Codex</span>
-        <span class="compat-pill">Continue</span>
+        <span class="compat-pill">Cursor</span>
         <span class="compat-pill compat-pill-more">+ any MCP agent</span>
       </div>
+      <p class="compat-row-label">Printers</p>
       <div class="compat-list-inline">
         <span class="compat-pill">OctoPrint</span>
         <span class="compat-pill">Moonraker/Klipper</span>
@@ -136,15 +136,28 @@
     max-width: 720px;
     margin: 0 auto;
   }
+  /* Tiny uppercase row label — separates the agents row from the
+     printers row so a normie can parse the strip at a glance.
+     Same typographic shape as .receipts-video-label / receipt-
+     kicker on index.astro for cross-page consistency. */
+  .compat-row-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--text-muted);
+    margin: 0 0 12px;
+    text-align: center;
+  }
+  .compat-list-inline + .compat-row-label {
+    margin-top: 22px;
+  }
   .compat-list-inline {
     display: flex;
     align-items: center;
     justify-content: center;
     flex-wrap: wrap;
     gap: 10px;
-  }
-  .compat-list-inline + .compat-list-inline {
-    margin-top: 12px;
   }
   .compat-pill {
     display: inline-block;

@@ -8,12 +8,16 @@ interface FAQ {
 
 interface Section {
   title: string;
+  // Anchor id so the rest of the site can deep-link to a section
+  // (e.g. /install footer points to /faq#setup-troubleshooting).
+  id: string;
   items: FAQ[];
 }
 
 const sections: Section[] = [
   {
     title: "General",
+    id: "general",
     items: [
       {
         q: "What is Kiln?",
@@ -39,6 +43,7 @@ const sections: Section[] = [
   },
   {
     title: "Getting Started",
+    id: "getting-started",
     items: [
       {
         q: "What printers does Kiln support?",
@@ -67,7 +72,42 @@ const sections: Section[] = [
     ]
   },
   {
+    title: "Setup & Troubleshooting",
+    id: "setup-troubleshooting",
+    items: [
+      {
+        q: "&quot;kiln: command not found&quot; after install",
+        a: "Your shell can't find the <code>kiln</code> binary. Add <code>~/.local/bin</code> to your PATH by running <code>pipx ensurepath</code>, then restart your terminal. If you installed with pip into a virtualenv, make sure the virtualenv is activated."
+      },
+      {
+        q: "What Python version do I need?",
+        a: "Python 3.10 or newer. Check with <code>python3 --version</code>. If you're below 3.10, install via Homebrew (<code>brew install python@3.12</code>), apt (<code>sudo apt install python3.12</code>), or pyenv."
+      },
+      {
+        q: "Does Kiln work on Windows?",
+        a: "Not natively. Use WSL 2 (Windows Subsystem for Linux) with an Ubuntu distribution — Kiln runs fully inside the WSL environment. The <a href='/install'>install page</a> includes a WSL 2 tab with the exact commands."
+      },
+      {
+        q: "WSL 2 can't discover printers on my LAN",
+        a: "WSL 2 uses NAT networking, which blocks mDNS (Bonjour) discovery. Connect to your printer by IP address instead:<br><code>kiln auth --name my-printer --host http://192.168.1.x:port --type octoprint --api-key YOUR_KEY</code><br>Works for Ethernet and Wi-Fi LAN setups."
+      },
+      {
+        q: "Can I use Ethernet instead of Wi-Fi?",
+        a: "Yes — Kiln works over LAN IP, so Ethernet-only printers are fully supported. If <code>kiln discover</code> doesn't find your printer (firewall, mDNS blocked, etc.), register it directly by IP:<br><code>kiln auth --name my-printer --host http://192.168.1.x:port --type prusaconnect --api-key YOUR_KEY</code>"
+      },
+      {
+        q: "PrusaSlicer (or OrcaSlicer) not found",
+        a: "Kiln auto-detects PrusaSlicer and OrcaSlicer on your <code>PATH</code> and in standard macOS app bundle locations. If yours is installed somewhere unusual, point at it explicitly:<br><code>export KILN_SLICER_PATH=/path/to/prusa-slicer</code>"
+      },
+      {
+        q: "How do I uninstall Kiln?",
+        a: "If you used pipx: <code>pipx uninstall kiln3d</code><br>If you used pip: <code>pip uninstall kiln3d</code><br>If you used the one-line installer: <code>~/.kiln/src/install.sh --uninstall</code>"
+      },
+    ]
+  },
+  {
     title: "Safety & Privacy",
+    id: "safety-privacy",
     items: [
       {
         q: "Can the AI damage my printer?",
@@ -89,6 +129,7 @@ const sections: Section[] = [
   },
   {
     title: "Features & Capabilities",
+    id: "features-capabilities",
     items: [
       {
         q: "Can I run multiple printers?",
@@ -162,6 +203,7 @@ const sections: Section[] = [
   },
   {
     title: "Technical",
+    id: "technical",
     items: [
       {
         q: "What's the difference between the litepaper and whitepaper?",
@@ -218,7 +260,7 @@ const faqSchema = {
   <section class="faq-body">
     <div class="container">
       {sections.map((section) => (
-        <div class="faq-section">
+        <div class="faq-section" id={section.id}>
           <h2 class="section-title">{section.title}</h2>
           <div class="faq-list">
             {section.items.map((item) => (
