@@ -10,7 +10,7 @@ markdown-it-py==4.0.0
 mdurl==0.1.2
 packaging==26.0
 pluggy==1.6.0
-Pygments==2.19.2
+Pygments==2.20.0
 pytest==9.0.2
 pytest-cov==7.1.0
 pytest-mock==3.15.1
