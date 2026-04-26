@@ -580,6 +580,170 @@ class TestGetRecoveryStatistics:
         assert result["statistics"]["total_recoveries"] == 5
 
 
+class TestCompletePrintRecoveryProOutcome:
+    """Regression tests for the kiln-pro outcome-recording side path.
+
+    The path from ``complete_print_recovery`` into
+    ``kiln_pro.recovery.outcome_learning.record_outcome`` is wrapped in a
+    broad ``except Exception`` so any AttributeError or ImportError is
+    silently swallowed.  That swallowing previously masked a bug where
+    the plugin referenced ``session.failure_report`` (no such attribute)
+    instead of ``session.failure``, resulting in *every* recovery
+    completion silently failing to record an outcome.
+
+    These tests use a REAL :class:`RecoverySession` (not a MagicMock) so
+    attribute typos surface as AttributeError.  A MagicMock would
+    auto-generate the bogus attribute and the bug would survive.
+    """
+
+    @staticmethod
+    def _build_session_with_failure():
+        """Build a real RecoverySession ready for completion."""
+        from kiln.print_recovery import (
+            FailureReport,
+            FailureType,
+            RecoveryConfidence,
+            RecoveryPlan,
+            RecoverySession,
+            RecoveryStatus,
+            RecoveryStrategy,
+        )
+
+        failure = FailureReport(
+            failure_id="f-test",
+            failure_type=FailureType.LAYER_SHIFT,
+            detected_at="2026-04-26T00:00:00+00:00",
+            printer_name="bambu-a1",
+            material_type="pla",
+            severity="high",
+        )
+        plan = RecoveryPlan(
+            plan_id="p-test",
+            failure_id="f-test",
+            strategy=RecoveryStrategy.RESUME_FROM_LAYER,
+            confidence=RecoveryConfidence.MEDIUM,
+            requires_confirmation=False,
+        )
+        session = RecoverySession(
+            session_id="s-test",
+            plan=plan,
+            failure=failure,
+            status=RecoveryStatus.MONITORING,
+            started_at="2026-04-26T00:00:00+00:00",
+            monitoring_required=3,
+            monitoring_passed=3,
+            monitoring_checks=3,
+        )
+        return session
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_pro_outcome_recorded_with_correct_args(
+        self,
+        _mock_auth,
+        recovery_tools,
+    ) -> None:
+        """Pro outcome learning must receive failure_type + strategy + printer.
+
+        Regression for the ``session.failure_report`` typo.  With the
+        bug, the AttributeError is swallowed and ``record_outcome`` is
+        never called, so the assertion below would fire on the call
+        count.
+        """
+        session = self._build_session_with_failure()
+
+        # The MCP tool calls engine.complete_recovery and uses the
+        # returned session for the kiln-pro path.  Stub the engine to
+        # return our real session.
+        mock_engine = MagicMock()
+        mock_engine.complete_recovery.return_value = session
+
+        # Build a fake pro_features that looks installed.
+        fake_pro_features = MagicMock()
+        fake_pro_features.recovery = MagicMock()  # truthy
+
+        recorded: dict = {}
+
+        def _capture_record_outcome(**kwargs):
+            recorded.update(kwargs)
+            return {"recorded_at": 0.0, "strategy": kwargs["strategy"]}
+
+        with (
+            patch(
+                "kiln.print_recovery.get_recovery_engine",
+                return_value=mock_engine,
+            ),
+            patch.dict(
+                "sys.modules",
+                {
+                    "kiln_pro": MagicMock(),
+                    "kiln_pro.bridge": MagicMock(pro_features=fake_pro_features),
+                    "kiln_pro.recovery": MagicMock(),
+                    "kiln_pro.recovery.outcome_learning": MagicMock(
+                        record_outcome=_capture_record_outcome,
+                    ),
+                },
+            ),
+        ):
+            result = recovery_tools["complete_print_recovery"](
+                session_id="s-test",
+                success=True,
+                notes="finished",
+            )
+
+        assert result["success"] is True
+        # The bug under regression: with session.failure_report (typo),
+        # AttributeError is swallowed and record_outcome is NEVER called,
+        # so `recorded` stays empty and `pro_outcome_recorded` is absent.
+        assert recorded, (
+            "kiln-pro record_outcome was never called — the recovery "
+            "outcome silently failed to record (regression for "
+            "session.failure_report typo at recovery_tools.py:920)"
+        )
+        assert recorded["failure_type"] == "layer_shift"
+        assert recorded["strategy"] == "resume_from_layer"
+        assert recorded["printer_name"] == "bambu-a1"
+        assert recorded["material_type"] == "pla"
+        assert recorded["session_id"] == "s-test"
+        assert recorded["success"] is True
+        assert result.get("pro_outcome_recorded") is True
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_pro_outcome_skipped_when_kiln_pro_not_installed(
+        self,
+        _mock_auth,
+        recovery_tools,
+    ) -> None:
+        """Free tier path: ImportError is swallowed, no outcome recorded."""
+        session = self._build_session_with_failure()
+
+        mock_engine = MagicMock()
+        mock_engine.complete_recovery.return_value = session
+
+        # Make every kiln_pro.* import raise ImportError.
+        import builtins
+        real_import = builtins.__import__
+
+        def _blocking_import(name, *args, **kwargs):
+            if name.startswith("kiln_pro"):
+                raise ImportError(f"blocked for test: {name}")
+            return real_import(name, *args, **kwargs)
+
+        with (
+            patch(
+                "kiln.print_recovery.get_recovery_engine",
+                return_value=mock_engine,
+            ),
+            patch("builtins.__import__", side_effect=_blocking_import),
+        ):
+            result = recovery_tools["complete_print_recovery"](
+                session_id="s-test",
+                success=True,
+            )
+
+        assert result["success"] is True
+        assert "pro_outcome_recorded" not in result
+
+
 class TestGenerationFeedbackLoopStatus:
     """Tests for generation_feedback_loop_status tool."""
 

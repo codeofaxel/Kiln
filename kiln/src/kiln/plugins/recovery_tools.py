@@ -917,7 +917,7 @@ class _RecoveryToolsPlugin:
                         from kiln_pro.recovery.outcome_learning import record_outcome
 
                         plan = session.plan
-                        failure = session.failure_report
+                        failure = session.failure
                         pro_outcome = record_outcome(
                             failure_type=failure.failure_type.value if failure else "unknown",
                             strategy=plan.strategy.value if plan else "unknown",
