@@ -1,6 +1,17 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 
+// Pricing structure locked 2026-04-25 (war-room rounds 1-11):
+//   Free       $0/mo            1 printer  · 1 seat   · non-commercial
+//   Pro        $49/mo           1 printer  · 1 seat   · non-commercial (hobbyists)
+//   Business   $199/mo          3 printers · 3 seats · commercial
+//                                +$15/printer over 3 (cap 50)
+//                                +$50/seat over 3 (cap 10)
+//   Enterprise hidden            50 printers · flexible · custom
+//                                Contact us — quoted per deal.
+//
+// Annual ~20% off for Pro and Business.  Enterprise is custom.
+
 const pricingSchema = {
   '@type': 'OfferCatalog',
   name: 'Kiln Pricing Plans',
@@ -24,19 +35,16 @@ const pricingSchema = {
     {
       '@type': 'Offer',
       name: 'Business',
-      price: '99',
+      price: '199',
       priceCurrency: 'USD',
       availability: 'https://schema.org/InStock',
       url: 'https://kiln3d.com/pricing',
     },
-    {
-      '@type': 'Offer',
-      name: 'Enterprise',
-      price: '1999',
-      priceCurrency: 'USD',
-      availability: 'https://schema.org/InStock',
-      url: 'https://kiln3d.com/pricing',
-    },
+    // Enterprise omitted from schema — pricing is custom-quoted per
+    // deal, not a public number.  Keeping it in the schema would
+    // anchor every Google rich-result viewer to a specific dollar
+    // figure that varies wildly by customer profile (compliance-grade
+    // verticals vs SMB-leaning Enterprise).
   ],
 };
 
@@ -64,7 +72,7 @@ const pricingFaqSchema = {
       name: 'Do I need a paid plan for multiple printers?',
       acceptedAnswer: {
         '@type': 'Answer',
-        text: 'The free tier supports up to 2 printers. For 3 or more printers, use Pro or above.',
+        text: 'Free and Pro tiers each support 1 printer. Business includes 3 printers ($15/mo per additional, up to 50). For larger fleets, Enterprise is custom-quoted.',
       },
     },
     {
@@ -72,7 +80,7 @@ const pricingFaqSchema = {
       name: "What's included in Enterprise?",
       acceptedAnswer: {
         '@type': 'Answer',
-        text: 'Enterprise includes a dedicated MCP server, SSO, role-based access control, audit trails, lockable safety profiles, and a 99.9% uptime SLA.',
+        text: 'Enterprise is for teams running production print operations. It includes a dedicated single-tenant MCP server, SSO, role-based access control, full audit trails, lockable safety profiles, and a 99.9% uptime SLA. Pricing is custom — contact us for a quote that fits your team and use case.',
       },
     },
   ],
@@ -94,7 +102,6 @@ const pricingFaqSchema = {
   <section class="pricing-hero">
     <div class="container">
       <h1>Pricing</h1>
-      <p class="lead">Local printing is free forever. Pay only when you need fleet management or outsourced manufacturing.</p>
     </div>
   </section>
 
@@ -114,6 +121,7 @@ const pricingFaqSchema = {
         <div class="card pricing-card">
           <div class="card-header">
             <h3>Free</h3>
+            <p class="tier-tagline">For trying Kiln on your own printer.</p>
             <div class="price">
               <span class="amount">$0</span>
               <span class="period">/ forever</span>
@@ -121,30 +129,31 @@ const pricingFaqSchema = {
           </div>
           <ul class="features">
             <li><span class="check">&#10003;</span> Unlimited local printing</li>
-            <li><span class="check">&#10003;</span> Up to 2 printers</li>
+            <li><span class="check">&#10003;</span> 1 printer</li>
+            <li><span class="check">&#10003;</span> Personal / non-commercial use</li>
             <li><span class="check">&#10003;</span> 10-job queue</li>
             <li><span class="check">&#10003;</span> Design intelligence (25 FDM materials, 45 brand-specific filament profiles, 20 patterns)</li>
             <li><span class="check">&#10003;</span> Natural-language to physical fabrication &mdash; text/image to validated 3D print</li>
-            <li><span class="check">&#10003;</span> Multi-modal decoration engine &mdash; 3/mo (photos, text, SVG, brand assets)</li>
+            <li><span class="check">&#10003;</span> Multi-modal decoration engine &mdash; 3/mo (QR, photos, text, SVG, brand assets)</li>
             <li><span class="check">&#10003;</span> Closed-loop AI generation feedback &mdash; failed prints auto-improve future generations</li>
             <li><span class="check">&#10003;</span> Printability engine (7-dimension analysis)</li>
             <li><span class="check">&#10003;</span> Multi-part assembly (up to 10 parts)</li>
             <li><span class="check">&#10003;</span> Cost estimation &amp; recommendations</li>
             <li><span class="check">&#10003;</span> 14-component parametric catalog</li>
             <li><span class="check">&#10003;</span> Local design history (linear) &mdash; branching, merge, and signed releases require Pro</li>
-            <li><span class="check">&#10003;</span> 742 MCP tools &amp; 206 CLI commands</li>
+            <li><span class="check">&#10003;</span> 737 MCP tools &amp; 202 CLI commands</li>
             <li><span class="check">&#10003;</span> Community support</li>
-            <li><span class="check">&#10003;</span> First 3 fulfillment orders/month &mdash; no orchestration fee</li>
-            <li><span class="check">&#10003;</span> 5% Kiln orchestration fee on additional fulfillment orders</li>
+            <li><span class="check">&#10003;</span> 3 fulfillment orders/month free</li>
+            <li><span class="check">&#10003;</span> 5% orchestration fee on fulfillment</li>
           </ul>
           <a href="/install" class="btn card-cta">Let's build &#8594;</a>
         </div>
 
         <!-- Pro Tier -->
-        <div class="card pricing-card featured">
-          <div class="badge">Most Popular</div>
+        <div class="card pricing-card">
           <div class="card-header">
             <h3>Pro</h3>
+            <p class="tier-tagline">For hobbyists &amp; personal projects.</p>
             <div class="price">
               <span class="amount monthly-price">$49</span>
               <span class="amount annual-price" style="display:none">$39</span>
@@ -154,7 +163,8 @@ const pricingFaqSchema = {
           </div>
           <ul class="features">
             <li><span class="check">&#10003;</span> Everything in Free</li>
-            <li><span class="check">&#10003;</span> Up to 5 printers</li>
+            <li><span class="check">&#10003;</span> 1 printer (single-printer use)</li>
+            <li><span class="check">&#10003;</span> Personal / non-commercial license</li>
             <li><span class="check">&#10003;</span> Unlimited job queue</li>
             <li><span class="check">&#10003;</span> Unlimited assembly parts</li>
             <li><span class="check">&#10003;</span> Git for 3D &mdash; branch, merge, cherry-pick, and Ed25519-sign releases for designs, decorations, and mechanical features</li>
@@ -165,39 +175,41 @@ const pricingFaqSchema = {
             <li><span class="check">&#10003;</span> Solo cloud sync to Kiln Cloud &mdash; tenant-isolated RLS + Merkle push receipts</li>
             <li><span class="check">&#10003;</span> Product templates (coasters, keychains, ornaments, and more)</li>
             <li><span class="check">&#10003;</span> Procedural textures (tiger stripe, camo, marble, lava, wood, honeycomb)</li>
-            <li><span class="check">&#10003;</span> Unlimited decorations &mdash; photo, text, SVG, brand assets <span class="feature-note">(QR codes require Business)</span></li>
+            <li><span class="check">&#10003;</span> Unlimited decorations &mdash; photo, text, SVG, brand assets <span class="feature-note">(QR codes are Business)</span></li>
             <li><span class="check">&#10003;</span> Mid-print modification engine &mdash; decorate, add features, swap material mid-job</li>
             <li><span class="check">&#10003;</span> Autonomous failure recovery &amp; print resume</li>
             <li><span class="check">&#10003;</span> Design provenance, regression detection, cross-branch outcome A/B</li>
             <li><span class="check">&#10003;</span> Manual speed control &amp; print learning</li>
-            <li><span class="check">&#10003;</span> Cross-printer learning</li>
-            <li><span class="check">&#10003;</span> Fleet orchestration &amp; analytics</li>
             <li><span class="check">&#10003;</span> REST API server</li>
             <li><span class="check">&#10003;</span> Community support</li>
-            <li><span class="check">&#10003;</span> First 3 fulfillment orders/month &mdash; no orchestration fee</li>
-            <li><span class="check">&#10003;</span> 5% Kiln orchestration fee on additional fulfillment orders</li>
+            <li><span class="check">&#10003;</span> 3 fulfillment orders/month free</li>
+            <li><span class="check">&#10003;</span> 5% orchestration fee on fulfillment</li>
           </ul>
           <button type="button" class="btn card-cta checkout-cta" data-tier="pro">Get Pro &#8594;</button>
           <p class="upgrade-note">Already installed? Run <code>kiln license activate &lt;key&gt;</code></p>
         </div>
 
         <!-- Business Tier -->
-        <div class="card pricing-card">
+        <div class="card pricing-card featured">
+          <div class="badge">Recommended</div>
           <div class="card-header">
             <h3>Business</h3>
+            <p class="tier-tagline">For anyone selling &mdash; Etsy, Shopify, custom orders, commercial work.</p>
             <div class="price">
-              <span class="amount monthly-price">$99</span>
-              <span class="amount annual-price" style="display:none">$79</span>
+              <span class="amount monthly-price">$199</span>
+              <span class="amount annual-price" style="display:none">$159</span>
               <span class="period monthly-period">/ month</span>
               <span class="period annual-period" style="display:none">/ mo, billed annually</span>
             </div>
           </div>
           <ul class="features">
             <li><span class="check">&#10003;</span> Everything in Pro</li>
-            <li><span class="check">&#10003;</span> Scannable QR codes &mdash; embed any URL or text into coasters, ashtrays, jewelry trays, magnets, pet tags, and any product STL (multicolor printing on Bambu AMS)</li>
+            <li><span class="check">&#10003;</span> Commercial license &mdash; sell what you make</li>
+            <li><span class="check">&#10003;</span> 3 printers included <span class="feature-note">($15/mo each above, up to 50)</span></li>
+            <li><span class="check">&#10003;</span> 3 team seats included <span class="feature-note">($50/mo each above, up to 10)</span></li>
+            <li><span class="check">&#10003;</span> Multi-printer fleet management &amp; cross-printer learning</li>
+            <li><span class="check">&#10003;</span> QR code generation</li>
             <li><span class="check">&#10003;</span> Layer-scheduled speed adjustments (auto-apply per-layer)</li>
-            <li><span class="check">&#10003;</span> Up to 50 printers</li>
-            <li><span class="check">&#10003;</span> 5 team seats</li>
             <li><span class="check">&#10003;</span> Team pull requests on design versions &mdash; code-review-style approval workflow with latest-decision-wins</li>
             <li><span class="check">&#10003;</span> Approval gates &mdash; required team reviewers, step-up authentication on production releases</li>
             <li><span class="check">&#10003;</span> Cross-organization artifact transfer &mdash; assign IP between orgs with audit trail</li>
@@ -216,28 +228,26 @@ const pricingFaqSchema = {
         <div class="card pricing-card enterprise-card">
           <div class="card-header">
             <h3>Enterprise</h3>
+            <p class="tier-tagline">Built for your team. Let's talk.</p>
             <div class="price">
-              <span class="amount monthly-price">$1,999</span>
-              <span class="amount annual-price" style="display:none">$1,599</span>
-              <span class="period monthly-price-period">/ month</span>
-              <span class="period annual-price-period" style="display:none">/ month, billed annually</span>
+              <span class="amount-text">Contact us</span>
             </div>
           </div>
           <ul class="features">
             <li><span class="check">&#10003;</span> Everything in Business</li>
-            <li><span class="check">&#10003;</span> Unlimited printers <span class="feature-note">(50 included; $15/each above)</span></li>
-            <li><span class="check">&#10003;</span> Unlimited team seats</li>
+            <li><span class="check">&#10003;</span> Unlimited team seats &amp; large fleets</li>
+            <li><span class="check">&#10003;</span> SSO (SAML / OIDC) + SCIM provisioning</li>
             <li><span class="check">&#10003;</span> Role-based access control</li>
-            <li><span class="check">&#10003;</span> SSO (SAML/OIDC)</li>
-            <li><span class="check">&#10003;</span> Full audit trail with export</li>
+            <li><span class="check">&#10003;</span> Full audit trail with long-term retention</li>
             <li><span class="check">&#10003;</span> Lockable safety profiles</li>
             <li><span class="check">&#10003;</span> Encrypted G-code at rest</li>
             <li><span class="check">&#10003;</span> 99.9% uptime SLA</li>
-            <li><span class="check">&#10003;</span> Dedicated onboarding + private Discord channel</li>
-            <li><span class="check">&#10003;</span> Priority feature requests + direct founder support</li>
+            <li><span class="check">&#10003;</span> Dedicated CSM + sub-24h response SLA</li>
+            <li><span class="check">&#10003;</span> On-prem / VPC deployment options</li>
+            <li><span class="check">&#10003;</span> Custom integrations &amp; procurement terms</li>
           </ul>
-          <button type="button" class="btn card-cta checkout-cta" data-tier="enterprise">Get Enterprise &#8594;</button>
-          <p class="upgrade-note">Need custom SSO setup, a contract, or invoice terms? <a href="mailto:adam@kiln3d.com?subject=Kiln%20Enterprise%20custom%20deployment">Talk to us &#8594;</a></p>
+          <a href="mailto:adam@kiln3d.com?subject=Kiln%20Enterprise%20enquiry" class="btn card-cta">Talk to us &#8594;</a>
+          <p class="upgrade-note">Custom pricing tailored to your team, fleet, and compliance needs.</p>
         </div>
       </div>
       <p class="patent-footer">Patent-pending across Git-for-3D, mid-print modification, failure recovery, and AI generation feedback.</p>
@@ -262,15 +272,19 @@ const pricingFaqSchema = {
         </details>
         <details>
           <summary>Do I need a paid plan for multiple printers?</summary>
-          <p>Free tier supports 2 printers. For 3+ printers, you need Pro or above.</p>
+          <p>Free and Pro tiers each support 1 printer. Business includes 3 printers ($15/mo per additional, up to 50). For larger fleets, Enterprise is custom-quoted.</p>
+        </details>
+        <details>
+          <summary>What's the difference between Pro and Business?</summary>
+          <p>Pro is licensed for personal and hobbyist use only — single user, single printer, no commercial selling. Business is for anyone running a real operation: Etsy shops, Shopify stores, custom-order businesses, agencies, schools, manufacturers. Business adds multi-printer fleet management, team seats, QR codes, commercial license, and the workflow features small shops actually need.</p>
         </details>
         <details>
           <summary>What does annual billing save?</summary>
-          <p>Annual plans save roughly 20% compared to monthly. Pro drops from $49/mo to $39/mo ($468/yr). Business drops from $99/mo to $79/mo ($948/yr). Enterprise drops from $1,999/mo to $1,599/mo ($19,188/yr). You can switch between monthly and annual at any time.</p>
+          <p>Annual plans save roughly 20% compared to monthly. Pro drops from $49/mo to $39/mo ($468/yr). Business drops from $199/mo to $159/mo ($1,908/yr). Enterprise pricing is custom — annual savings are part of the conversation. You can switch between monthly and annual at any time.</p>
         </details>
         <details>
           <summary>What's included in Enterprise?</summary>
-          <p>Enterprise is for teams running production print operations. It includes a dedicated single-tenant MCP server, SSO, role-based access control, full audit trails, lockable safety profiles, and a 99.9% uptime SLA. Base price includes 50 printers, with additional printers at $15/mo each.</p>
+          <p>Enterprise is for teams running production print operations — manufacturing, regulated industries, large fleets. It includes a dedicated single-tenant MCP server, SSO, role-based access control, full audit trails, lockable safety profiles, on-prem or VPC deployment options, dedicated CSM, and a 99.9% uptime SLA. Pricing is tailored per deal — contact us for a quote that fits your team and use case.</p>
         </details>
         <details>
           <summary>Can I try Enterprise before committing?</summary>
@@ -283,6 +297,28 @@ const pricingFaqSchema = {
       </div>
     </div>
   </section>
+
+  <!-- Commercial-use modal — fired before Pro checkout to gate
+       commercial sellers into Business.  Defense-in-depth: the
+       /api/billing/create-checkout-session endpoint also rejects
+       Pro signups that declare commercial_use=true. -->
+  <dialog id="commercial-use-modal" class="commercial-use-modal">
+    <form method="dialog" class="commercial-use-content">
+      <h3>Quick question before checkout</h3>
+      <p>Will you be using Kiln for products you sell or commercial work?</p>
+      <div class="commercial-use-buttons">
+        <button type="submit" value="yes" class="btn commercial-use-yes">
+          Yes — I sell or do commercial work
+        </button>
+        <button type="submit" value="no" class="btn commercial-use-no">
+          No — just personal projects
+        </button>
+      </div>
+      <p class="commercial-use-note">
+        Pro is licensed for personal &amp; hobbyist use only. Commercial sellers (Etsy, Shopify, custom orders, agencies) need Business.
+      </p>
+    </form>
+  </dialog>
 </BaseLayout>
 
 <script>
@@ -307,39 +343,108 @@ const pricingFaqSchema = {
     (import.meta as any).env?.PUBLIC_KILN_API_URL ||
     'https://api.kiln3d.com';
 
+  async function startCheckout(
+    tier: string,
+    billing: 'monthly' | 'annual',
+    btn: HTMLButtonElement,
+    extraBody: Record<string, unknown> = {},
+  ) {
+    const originalLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Redirecting to Stripe…';
+    try {
+      const resp = await fetch(`${API_ROOT}/api/billing/create-checkout-session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tier,
+          billing,
+          success_url: `${window.location.origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${window.location.origin}/pricing`,
+          ...extraBody,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success || !data.checkout_url) {
+        // If the API redirects us to a different tier (Pro→Business
+        // when commercial_use=true sneaks through), surface a clear
+        // message rather than a generic error.
+        if (data.upgrade_to) {
+          alert(
+            `Pro is licensed for personal use only.\n\n` +
+            `Click "Get Business" instead — that's the right plan for commercial work.`,
+          );
+          btn.disabled = false;
+          btn.textContent = originalLabel;
+          return;
+        }
+        throw new Error(data.error || `Checkout failed (${resp.status})`);
+      }
+      window.location.href = data.checkout_url;
+    } catch (err: any) {
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+      console.error('Checkout error:', err);
+      alert(
+        `Couldn't start checkout: ${err?.message ?? 'unknown error'}\n\n` +
+        `If this keeps happening, email adam@kiln3d.com and we'll set you up manually.`,
+      );
+    }
+  }
+
+  function pickBusinessButton(): HTMLButtonElement | null {
+    return document.querySelector<HTMLButtonElement>(
+      '.checkout-cta[data-tier="business"]',
+    );
+  }
+
   document.querySelectorAll<HTMLButtonElement>('.checkout-cta').forEach(btn => {
     btn.addEventListener('click', async () => {
       const tier = btn.dataset.tier;
       if (!tier) return;
-      const billing = toggle?.checked ? 'annual' : 'monthly';
-      const originalLabel = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = 'Redirecting to Stripe…';
-      try {
-        const resp = await fetch(`${API_ROOT}/api/billing/create-checkout-session`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tier,
-            billing,
-            success_url: `${window.location.origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${window.location.origin}/pricing`,
-          }),
-        });
-        const data = await resp.json();
-        if (!resp.ok || !data.success || !data.checkout_url) {
-          throw new Error(data.error || `Checkout failed (${resp.status})`);
+      const billing: 'monthly' | 'annual' = toggle?.checked ? 'annual' : 'monthly';
+
+      // Pro CTA → first ask the commercial-use question.  If the
+      // buyer answers "yes", route to the Business CTA instead.  If
+      // they answer "no", continue with Pro.  The modal closes
+      // returning '' if dismissed without choosing — abort silently.
+      if (tier === 'pro') {
+        const modal = document.getElementById(
+          'commercial-use-modal',
+        ) as HTMLDialogElement | null;
+        if (modal) {
+          modal.showModal();
+          const answer = await new Promise<string>(resolve => {
+            modal.addEventListener(
+              'close',
+              () => resolve(modal.returnValue),
+              { once: true },
+            );
+          });
+          if (answer === 'yes') {
+            const businessBtn = pickBusinessButton();
+            if (businessBtn) {
+              businessBtn.click();
+            } else {
+              await startCheckout('business', billing, btn);
+            }
+            return;
+          }
+          if (answer !== 'no') {
+            // User dismissed without choosing — abort.
+            return;
+          }
+          // answer === 'no' → fall through to Pro checkout, with the
+          // commercial_use=false flag passed through to Stripe metadata
+          // so the audit trail captures the explicit declaration.
+          await startCheckout('pro', billing, btn, {
+            commercial_use: false,
+          });
+          return;
         }
-        window.location.href = data.checkout_url;
-      } catch (err: any) {
-        btn.disabled = false;
-        btn.textContent = originalLabel;
-        console.error('Checkout error:', err);
-        alert(
-          `Couldn't start checkout: ${err?.message ?? 'unknown error'}\n\n` +
-          `If this keeps happening, email adam@kiln3d.com and we'll set you up manually.`
-        );
       }
+
+      await startCheckout(tier, billing, btn);
     });
   });
 </script>
@@ -452,8 +557,15 @@ const pricingFaqSchema = {
   .pricing-card h3 {
     font-size: 20px;
     font-weight: 600;
-    margin-bottom: 8px;
+    margin-bottom: 4px;
     color: var(--text);
+  }
+  .tier-tagline {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0 0 12px;
+    line-height: 1.5;
+    min-height: 36px;
   }
   .price {
     display: flex;
@@ -463,6 +575,12 @@ const pricingFaqSchema = {
   .price .amount {
     font-size: 40px;
     font-weight: 700;
+    color: var(--text);
+    line-height: 1;
+  }
+  .price .amount-text {
+    font-size: 26px;
+    font-weight: 600;
     color: var(--text);
     line-height: 1;
   }
@@ -516,7 +634,7 @@ const pricingFaqSchema = {
     margin-top: auto;
   }
 
-  /* Featured card (Pro) */
+  /* Featured card (Business — recommended for commercial use) */
   .pricing-card.featured {
     border-color: var(--accent);
     box-shadow: 0 0 40px var(--accent-glow), 0 0 80px rgba(255, 107, 43, 0.05);
@@ -561,6 +679,61 @@ const pricingFaqSchema = {
     padding: 2px 6px;
     border-radius: 4px;
     border: 1px solid var(--border);
+  }
+
+  /* Commercial-use modal */
+  .commercial-use-modal {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 0;
+    background: var(--bg-card);
+    color: var(--text);
+    max-width: 460px;
+    width: 90%;
+  }
+  .commercial-use-modal::backdrop {
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(2px);
+  }
+  .commercial-use-content {
+    padding: 28px 28px 24px;
+  }
+  .commercial-use-content h3 {
+    margin: 0 0 8px;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  .commercial-use-content p {
+    margin: 0 0 18px;
+    font-size: 14px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+  .commercial-use-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .commercial-use-buttons .btn {
+    width: 100%;
+    text-align: center;
+    cursor: pointer;
+  }
+  .commercial-use-yes {
+    background: var(--accent);
+    color: #fff;
+  }
+  .commercial-use-no {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .commercial-use-note {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: 0 !important;
+    line-height: 1.5;
   }
 
   /* FAQ */
@@ -638,6 +811,9 @@ const pricingFaqSchema = {
     }
     .pricing-cards {
       padding: 20px 0 50px;
+    }
+    .tier-tagline {
+      min-height: 0;
     }
   }
 
