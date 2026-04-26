@@ -743,6 +743,276 @@ class TestCompletePrintRecoveryProOutcome:
         assert result["success"] is True
         assert "pro_outcome_recorded" not in result
 
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_reroute_recommendation_attached_on_failure(
+        self,
+        _mock_auth,
+        recovery_tools,
+    ) -> None:
+        """Failed recovery + supplied fleet -> reroute_recommendation in response.
+
+        Covers the wiring from complete_print_recovery into the kiln-pro
+        rerouter.  Verifies the rerouter is consulted ONLY on failure
+        AND only when alternatives are supplied.
+        """
+        from kiln.print_recovery import RecoveryStatus
+
+        session = self._build_session_with_failure()
+        session.status = RecoveryStatus.FAILED
+
+        mock_engine = MagicMock()
+        mock_engine.complete_recovery.return_value = session
+
+        # Stub a rerouter whose evaluate_reroute returns an approved
+        # decision pointing at "voron-1".
+        mock_decision = MagicMock()
+        mock_decision.to_dict.return_value = {
+            "should_reroute": True,
+            "target_printer_id": "voron-1",
+            "blocked_by_rule": None,
+            "reason": "reroute approved -> 'voron-1'",
+        }
+        mock_rerouter = MagicMock()
+        mock_rerouter.evaluate_reroute.return_value = mock_decision
+
+        fake_pro_features = MagicMock()
+        fake_pro_features.recovery = MagicMock()  # truthy
+
+        with (
+            patch(
+                "kiln.print_recovery.get_recovery_engine",
+                return_value=mock_engine,
+            ),
+            patch.dict(
+                "sys.modules",
+                {
+                    "kiln_pro": MagicMock(),
+                    "kiln_pro.bridge": MagicMock(pro_features=fake_pro_features),
+                    "kiln_pro.recovery": MagicMock(),
+                    "kiln_pro.recovery.outcome_learning": MagicMock(
+                        record_outcome=lambda **kw: {"recorded_at": 0.0},
+                    ),
+                    "kiln_pro.recovery.failure_rerouter": MagicMock(
+                        get_rerouter=lambda: mock_rerouter,
+                    ),
+                },
+            ),
+        ):
+            result = recovery_tools["complete_print_recovery"](
+                session_id="s-test",
+                success=False,
+                alternative_printers=[
+                    {"printer_id": "voron-1", "is_idle": True},
+                ],
+                completion_pct_at_failure=0.45,
+            )
+
+        assert result["success"] is True
+        assert "reroute_recommendation" in result
+        assert result["reroute_recommendation"]["should_reroute"] is True
+        assert result["reroute_recommendation"]["target_printer_id"] == "voron-1"
+        # Confirm the rerouter was actually called with the failure's
+        # printer + failure_type, not stale strings from the caller.
+        mock_rerouter.evaluate_reroute.assert_called_once()
+        call_kwargs = mock_rerouter.evaluate_reroute.call_args.kwargs
+        assert call_kwargs["original_printer_id"] == "bambu-a1"
+        assert call_kwargs["failure_type"] == "layer_shift"
+        assert call_kwargs["completion_pct"] == 0.45
+        assert call_kwargs["material"] == "pla"
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_reroute_recommendation_skipped_on_success(
+        self,
+        _mock_auth,
+        recovery_tools,
+    ) -> None:
+        """Successful recovery does NOT consult the rerouter."""
+        from kiln.print_recovery import RecoveryStatus
+
+        session = self._build_session_with_failure()
+        # already MONITORING with passed checks — complete_recovery
+        # would mark it COMPLETED.
+
+        mock_engine = MagicMock()
+        mock_engine.complete_recovery.return_value = session
+
+        mock_rerouter = MagicMock()
+        fake_pro_features = MagicMock()
+        fake_pro_features.recovery = MagicMock()
+
+        with (
+            patch(
+                "kiln.print_recovery.get_recovery_engine",
+                return_value=mock_engine,
+            ),
+            patch.dict(
+                "sys.modules",
+                {
+                    "kiln_pro": MagicMock(),
+                    "kiln_pro.bridge": MagicMock(pro_features=fake_pro_features),
+                    "kiln_pro.recovery": MagicMock(),
+                    "kiln_pro.recovery.outcome_learning": MagicMock(
+                        record_outcome=lambda **kw: {"recorded_at": 0.0},
+                    ),
+                    "kiln_pro.recovery.failure_rerouter": MagicMock(
+                        get_rerouter=lambda: mock_rerouter,
+                    ),
+                },
+            ),
+        ):
+            result = recovery_tools["complete_print_recovery"](
+                session_id="s-test",
+                success=True,
+                alternative_printers=[
+                    {"printer_id": "voron-1", "is_idle": True},
+                ],
+            )
+
+        assert result["success"] is True
+        assert "reroute_recommendation" not in result
+        mock_rerouter.evaluate_reroute.assert_not_called()
+
+
+class TestImproveGenerationPromptSanityGate:
+    """Tests for the KILN-010 claim 51 sanity gate behavior.
+
+    Before this gate landed, ``improve_generation_prompt`` happily
+    returned contradictory / over-budget / intent-drifted prompts with
+    only a logger warning.  The default contract is now: refuse with
+    ``code="SANITY_GATE_FAILED"`` unless the caller explicitly opts
+    out via ``enforce_sanity=False``.
+    """
+
+    @staticmethod
+    def _build_failed_sanity_result():
+        from kiln.generation_feedback import (
+            SanityFailure,
+            SanityFailureKind,
+            SanityResult,
+        )
+
+        return SanityResult(
+            passed=False,
+            failures=[
+                SanityFailure(
+                    kind=SanityFailureKind.CONTRADICTION,
+                    message="rigid + flexible material conflict",
+                    detail={"shape": "material_family"},
+                ),
+            ],
+            token_overlap_pct=0.85,
+            length=400,
+            budget=600,
+        )
+
+    @staticmethod
+    def _build_passed_sanity_result():
+        from kiln.generation_feedback import SanityResult
+
+        return SanityResult(
+            passed=True,
+            failures=[],
+            token_overlap_pct=0.92,
+            length=300,
+            budget=600,
+        )
+
+    def _build_improved_prompt(self, sanity):
+        from kiln.generation_feedback import ImprovedPrompt
+
+        return ImprovedPrompt(
+            original_prompt="phone stand",
+            improved_prompt="phone stand. Requirements: minimum wall 2mm.",
+            feedback_applied=[],
+            constraints_added=["minimum wall thickness 2mm"],
+            iteration=1,
+            expected_improvements=[],
+            sanity=sanity,
+        )
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_default_refuses_when_sanity_fails(
+        self,
+        _mock_auth,
+        recovery_tools,
+    ) -> None:
+        """Default enforce_sanity=True -> refusal on failed gate."""
+        improved = self._build_improved_prompt(self._build_failed_sanity_result())
+
+        with (
+            patch(
+                "kiln.generation_feedback.analyze_for_feedback",
+                return_value=[],
+            ),
+            patch(
+                "kiln.generation_feedback.generate_improved_prompt",
+                return_value=improved,
+            ),
+        ):
+            result = recovery_tools["improve_generation_prompt"](
+                original_prompt="phone stand",
+            )
+
+        assert result["success"] is False
+        assert result["error"]["code"] == "SANITY_GATE_FAILED"
+        assert "sanity" in result
+        # The would-be prompt is still returned for inspection / repair.
+        assert "improved_prompt" in result
+        assert result["sanity"]["passed"] is False
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_passes_through_when_sanity_passes(
+        self,
+        _mock_auth,
+        recovery_tools,
+    ) -> None:
+        """Healthy prompt always returns success, regardless of enforce_sanity."""
+        improved = self._build_improved_prompt(self._build_passed_sanity_result())
+
+        with (
+            patch(
+                "kiln.generation_feedback.analyze_for_feedback",
+                return_value=[],
+            ),
+            patch(
+                "kiln.generation_feedback.generate_improved_prompt",
+                return_value=improved,
+            ),
+        ):
+            result = recovery_tools["improve_generation_prompt"](
+                original_prompt="phone stand",
+            )
+
+        assert result["success"] is True
+        assert "improved_prompt" in result
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_enforce_sanity_false_returns_failed_prompt(
+        self,
+        _mock_auth,
+        recovery_tools,
+    ) -> None:
+        """Opt-out path: failed sanity returns the prompt for repair."""
+        improved = self._build_improved_prompt(self._build_failed_sanity_result())
+
+        with (
+            patch(
+                "kiln.generation_feedback.analyze_for_feedback",
+                return_value=[],
+            ),
+            patch(
+                "kiln.generation_feedback.generate_improved_prompt",
+                return_value=improved,
+            ),
+        ):
+            result = recovery_tools["improve_generation_prompt"](
+                original_prompt="phone stand",
+                enforce_sanity=False,
+            )
+
+        assert result["success"] is True
+        assert result["improved_prompt"]["sanity"]["passed"] is False
+
 
 class TestGenerationFeedbackLoopStatus:
     """Tests for generation_feedback_loop_status tool."""

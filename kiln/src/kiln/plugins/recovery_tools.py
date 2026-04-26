@@ -454,12 +454,24 @@ class _RecoveryToolsPlugin:
             has_bridges: bool = False,
             iteration: int = 1,
             file_path: str | None = None,
+            enforce_sanity: bool = True,
         ) -> dict:
             """Generate an improved prompt from feedback.
 
             Adds physical constraints to the original prompt to address
             printability and structural issues, without modifying the
             creative intent.
+
+            Patent KILN-010 claim 51 — the improved prompt is run
+            through a three-check sanity gate (no contradictions, fits
+            the provider budget, ≥70% original-token overlap so intent
+            is preserved).  When ``enforce_sanity=True`` (default) and
+            the gate fails, this tool refuses with
+            ``code="SANITY_GATE_FAILED"`` and returns the failure list
+            instead of a contradictory prompt.  Callers that genuinely
+            want the failed prompt — for inspection, repair, or model
+            self-correction — set ``enforce_sanity=False`` and read
+            ``improved_prompt.sanity`` from the response.
 
             Args:
                 original_prompt: The original generation prompt.
@@ -472,6 +484,11 @@ class _RecoveryToolsPlugin:
                     analysis.  When provided, the tool also analyzes
                     structural risks and folds them into the improved
                     prompt.
+                enforce_sanity: When True (default), refuse the
+                    response if the prompt sanity gate fails.  Pass
+                    False to receive a contradictory prompt anyway —
+                    useful when the agent intends to repair it before
+                    sending to the generator.
             """
             import kiln.server as _srv
             from kiln.generation_feedback import (
@@ -521,6 +538,30 @@ class _RecoveryToolsPlugin:
                     feedback,
                     iteration=iteration,
                 )
+
+                # KILN-010 claim 51: refuse contradictory / over-budget /
+                # intent-drifted prompts before they reach the generator.
+                # The agent gets the failure list and the would-be
+                # prompt so it can pick a repair strategy (drop a
+                # constraint, raise the budget, regenerate the original
+                # request).
+                if (
+                    enforce_sanity
+                    and improved.sanity is not None
+                    and not improved.sanity.passed
+                ):
+                    err = _srv._error_dict(
+                        f"Prompt sanity gate failed with "
+                        f"{len(improved.sanity.failures)} issue(s); "
+                        "refusing to forward a contradictory prompt to "
+                        "the generator.  Pass enforce_sanity=False to "
+                        "receive the prompt anyway.",
+                        code="SANITY_GATE_FAILED",
+                    )
+                    err["sanity"] = improved.sanity.to_dict()
+                    err["improved_prompt"] = improved.to_dict()
+                    return err
+
                 return {
                     "success": True,
                     "improved_prompt": improved.to_dict(),
@@ -882,13 +923,34 @@ class _RecoveryToolsPlugin:
             session_id: str,
             success: bool,
             notes: str = "",
+            alternative_printers: list[dict] | None = None,
+            completion_pct_at_failure: float = 0.0,
         ) -> dict:
             """Mark a recovery session as completed.
+
+            On failure (success=False) AND when ``alternative_printers``
+            is supplied AND kiln-pro is installed, the response carries
+            a ``reroute_recommendation`` block — the rerouter's seven-rule
+            verdict on whether the failed job should move to one of the
+            alternatives.  Recommendation only; the agent must run the
+            actual reroute via ``submit_job`` / ``start_print``.
 
             Args:
                 session_id: The session_id to complete.
                 success: Whether the recovery was ultimately successful.
                 notes: Final notes about the recovery outcome.
+                alternative_printers: Optional fleet of alternative
+                    printer dicts (each with ``printer_id`` plus optional
+                    ``is_idle``, ``supported_materials``,
+                    ``build_volume_mm``, ``success_rate``).  When
+                    supplied alongside ``success=False``, the response
+                    will include a ``reroute_recommendation`` from the
+                    pro rerouter (patent KILN-003 claim 5).  Single-printer
+                    setups can omit this.
+                completion_pct_at_failure: How far the failed print got
+                    (0.0–1.0).  Below 10% the rerouter prefers
+                    same-device restart over reroute.  Defaults to 0
+                    (treated as low progress).
             """
             import kiln.server as _srv
             from kiln.print_recovery import (
@@ -934,6 +996,38 @@ class _RecoveryToolsPlugin:
                         "kiln-pro outcome recording failed (non-fatal): %s", exc,
                     )
 
+                # Pro-tier reroute recommendation — only when the
+                # recovery FAILED and the caller supplied a fleet.
+                # Recommendation only; never auto-executes.  Best-effort
+                # — failures here must not break the recovery response.
+                reroute_recommendation: dict | None = None
+                if not success and alternative_printers:
+                    try:
+                        from kiln_pro.bridge import pro_features as _pf
+
+                        if _pf is not None and _pf.recovery is not None:
+                            from kiln_pro.recovery.failure_rerouter import get_rerouter
+
+                            failure = session.failure
+                            if failure is not None:
+                                rerouter = get_rerouter()
+                                decision = rerouter.evaluate_reroute(
+                                    original_printer_id=failure.printer_name,
+                                    original_job_id=failure.failure_id,
+                                    failure_type=failure.failure_type.value,
+                                    completion_pct=completion_pct_at_failure,
+                                    alternative_printers=alternative_printers,
+                                    material=failure.material_type,
+                                )
+                                reroute_recommendation = decision.to_dict()
+                    except ImportError:
+                        pass  # kiln-pro not installed — free tier
+                    except Exception as exc:
+                        _logger.debug(
+                            "kiln-pro reroute evaluation failed (non-fatal): %s",
+                            exc,
+                        )
+
                 response: dict = {
                     "success": True,
                     "session": session.to_dict(),
@@ -941,6 +1035,8 @@ class _RecoveryToolsPlugin:
                 }
                 if pro_outcome is not None:
                     response["pro_outcome_recorded"] = True
+                if reroute_recommendation is not None:
+                    response["reroute_recommendation"] = reroute_recommendation
                 return response
             except MonitoringThresholdNotMet as exc:
                 # Patent claim 79: structured error includes the deficit
