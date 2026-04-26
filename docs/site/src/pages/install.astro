@@ -3,6 +3,19 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import InstallTabs from '../components/InstallTabs.astro';
 import FAQ from '../components/FAQ.astro';
 
+// Install page rebuilt 2026-04-26 for the AI-agent-first happy
+// path.  Three steps: install -> connect agent -> ask.  The legacy
+// CLI tour (kiln setup / verify / status / serve) is hidden because
+// the agent's MCP runtime invokes those itself once the JSON config
+// is pasted; users who want to drive manually find them in the docs
+// + FAQ.  The advanced tabs (pipx / source / one-line installer)
+// stay reachable behind a <details> disclosure so the happy path on
+// top stays visually tight.
+//
+// Pro CTA routes to /pricing, NOT direct-to-Stripe, so the
+// commercial-use modal in pricing.astro can route Etsy / Shopify
+// sellers to Business instead of shipping them the wrong tier.
+
 const mcpConfig = JSON.stringify({
   mcpServers: {
     kiln: {
@@ -35,31 +48,25 @@ const installHowToSchema = {
   '@type': 'HowTo',
   name: 'How to install Kiln for AI-powered 3D printing',
   description:
-    'Install Kiln, connect your 3D printer, and expose Kiln tools to an AI agent through MCP.',
-  totalTime: 'PT10M',
+    'Install Kiln, connect any MCP-capable AI agent, and ask it to design and print an object.',
+  totalTime: 'PT3M',
   step: [
     {
       '@type': 'HowToStep',
       name: 'Install Kiln',
-      text: 'Install Kiln via pip, pipx, or the one-line installer.',
+      text: 'Install Kiln with pip install kiln3d on macOS, Linux, or WSL 2.',
       url: 'https://kiln3d.com/install',
     },
     {
       '@type': 'HowToStep',
-      name: 'Configure printer access',
-      text: 'Run kiln setup to discover printers and save connection settings.',
+      name: 'Connect your AI',
+      text: 'Paste the Kiln MCP server config into Claude Desktop, Cursor, or any MCP-capable agent.',
       url: 'https://kiln3d.com/install',
     },
     {
       '@type': 'HowToStep',
-      name: 'Verify connectivity',
-      text: 'Run kiln verify and kiln status --json to validate dependencies and printer state.',
-      url: 'https://kiln3d.com/install',
-    },
-    {
-      '@type': 'HowToStep',
-      name: 'Start MCP server',
-      text: 'Run kiln serve and connect an MCP-compatible AI agent.',
+      name: 'Ask',
+      text: 'Paste a sentence describing the object you want into your agent. Kiln designs, slices, and prints it.',
       url: 'https://kiln3d.com/install',
     },
   ],
@@ -68,7 +75,7 @@ const installHowToSchema = {
 
 <BaseLayout
   title="Install Kiln — AI 3D Printing Infrastructure"
-  description="Install Kiln in under a minute on macOS, Linux, or WSL 2. Connect OctoPrint, Moonraker, Bambu, or Prusa printers for AI-driven 3D printing."
+  description="Install Kiln in three minutes on macOS, Linux, or WSL 2. Connect any MCP-capable AI agent (Claude, Cursor, ChatGPT) and ask it to make something."
   current="install"
   keywords={[
     'install kiln',
@@ -79,152 +86,130 @@ const installHowToSchema = {
   ]}
   schema={installHowToSchema}
 >
-
-  <!-- Hero -->
-  <section class="hero">
+  <!-- Mini-hero — paradigm echo from the landing page.  One
+       sentence, sized to match the .receipts-heading typography on
+       index.astro so /install reads as the next sentence in the
+       same conversation the visitor started one click ago. -->
+  <section class="install-hero">
     <div class="container">
-      <h1>Get Started with Kiln</h1>
-      <p class="subtitle">Install Kiln in under a minute and connect to your first printer.</p>
+      <h1 class="install-headline">Three minutes. Then ask your AI to make something.</h1>
     </div>
   </section>
 
-  <!-- Platform Tabs -->
-  <section class="install-section">
+  <!-- Three steps — install, connect, ask.  Each step exposes one
+       copyable line (or one config block) and zero extra ceremony. -->
+  <section class="install-steps">
     <div class="container">
-      <h2>Installation</h2>
-      <p class="lead">Choose your platform. Kiln runs on macOS, Linux, and Windows via WSL 2.</p>
-      <InstallTabs />
-    </div>
-  </section>
-
-  <!-- Post-Install Steps -->
-  <section class="steps-section">
-    <div class="container">
-      <h2>After Installing</h2>
-      <p class="lead">Four commands to go from install to your first AI-controlled print.</p>
-
       <ol class="steps">
         <li>
           <div class="step-number">1</div>
           <div class="step-content">
-            <h3>Discover and configure printers</h3>
-            <p>The interactive setup wizard scans your LAN (Ethernet or Wi-Fi) for printers and saves credentials. If discovery misses your printer, use manual IP auth.</p>
+            <h3>Install Kiln</h3>
+            <p>One line.  macOS, Linux, or Windows via WSL&nbsp;2.</p>
             <div class="code-block">
-              <button class="copy-btn" data-code="kiln setup">Copy</button>
-              <code><span class="cmd">kiln setup</span></code>
+              <button class="copy-btn" data-code="pip install kiln3d">Copy</button>
+              <code><span class="cmd">pip install kiln3d</span></code>
             </div>
+            <p class="step-aside"><a href="#advanced-install">More install options &rarr;</a></p>
           </div>
         </li>
         <li>
           <div class="step-number">2</div>
           <div class="step-content">
-            <h3>Verify dependencies and connectivity</h3>
-            <p>Checks that Python, slicer, and printer connections are all working.</p>
+            <h3>Connect your AI</h3>
+            <p>Paste this into Claude Desktop, Cursor, or any MCP-capable agent.</p>
             <div class="code-block">
-              <button class="copy-btn" data-code="kiln verify">Copy</button>
-              <code><span class="cmd">kiln verify</span></code>
+              <button class="copy-btn" data-code={mcpConfigCompact}>Copy</button>
+              <pre><code set:text={mcpConfig} /></pre>
             </div>
+            <p class="config-note">
+              Replace <code>your-printer:port</code>, <code>your_key</code>, and <code>octoprint</code> with your printer host, API key, and backend type (<code>octoprint</code>, <code>moonraker</code>, <code>bambu</code>, <code>prusa-connect</code>, or <code>elegoo</code>).
+            </p>
           </div>
         </li>
         <li>
           <div class="step-number">3</div>
           <div class="step-content">
-            <h3>Confirm your printer is reachable</h3>
-            <p>Returns the full printer state as JSON — temperatures, job status, and connection info.</p>
-            <div class="code-block">
-              <button class="copy-btn" data-code="kiln status --json">Copy</button>
-              <code><span class="cmd">kiln status --json</span></code>
-            </div>
-          </div>
-        </li>
-        <li>
-          <div class="step-number">4</div>
-          <div class="step-content">
-            <h3>Start the MCP server</h3>
-            <p>Exposes 742 tools to any MCP-compatible AI agent (Claude, GPT, custom).</p>
-            <div class="code-block">
-              <button class="copy-btn" data-code="kiln serve">Copy</button>
-              <code><span class="cmd">kiln serve</span></code>
-            </div>
+            <h3>Ask</h3>
+            <p>Paste any sentence like this into your agent.  Kiln does the rest.</p>
+            <blockquote class="example-prompt">make me a coaster with my dog&rsquo;s photo on it</blockquote>
           </div>
         </li>
       </ol>
     </div>
   </section>
 
-  <!-- MCP Server Setup -->
-  <section class="mcp-section">
+  <!-- Pro CTA — post-value, not pre-value.  Free tier covers the
+       first prints; Pro is framed as graduation to the full
+       workflow, not a gate.  Button routes to /pricing so the
+       commercial-use modal there can move Etsy/Shopify sellers to
+       Business.  Single button, single price; tier comparison
+       happens at /pricing. -->
+  <section class="pro-cta-section">
     <div class="container">
-      <h2>Claude Desktop Integration</h2>
-      <p class="lead">Add Kiln to Claude Desktop so Claude can control your printer directly.</p>
-
-      <p class="config-path">
-        Add the following to your Claude Desktop config file:<br>
-        <code>~/.config/Claude/claude_desktop_config.json</code> (Linux / WSL)<br>
-        <code>~/Library/Application Support/Claude/claude_desktop_config.json</code> (macOS)
-      </p>
-
-      <div class="code-block">
-        <button class="copy-btn" data-code={mcpConfigCompact}>Copy</button>
-        <pre><code set:text={mcpConfig} /></pre>
+      <div class="pro-cta-card">
+        <h2 class="pro-cta-headline">You&rsquo;re ready to print.</h2>
+        <p class="pro-cta-body">
+          Free covers your first prints.  Pro covers the rest of the
+          workflow &mdash; version your designs, modify them mid-print,
+          and leave the room while your agent handles the rest.
+        </p>
+        <a href="/pricing" class="btn pro-cta-btn">Get Pro &rarr;</a>
+        <p class="pro-cta-price">$49 / month</p>
       </div>
-
-      <p class="config-note">
-        Replace <code>your-printer:port</code>, <code>your_key</code>, and <code>octoprint</code> with your actual printer host, API key, and backend type (<code>octoprint</code>, <code>moonraker</code>, <code>bambu</code>, <code>prusa-connect</code>, or <code>elegoo</code>).
-      </p>
     </div>
   </section>
 
-  <!-- FAQ -->
+  <!-- Advanced install — pipx, source, one-line installer kept
+       reachable for users who want them, but tucked into a
+       <details> so the happy path above stays tight.  Anchor link
+       from Step 1's "More install options" lands here. -->
+  <section id="advanced-install" class="advanced-section">
+    <div class="container">
+      <details class="advanced-install">
+        <summary>More install options &mdash; pipx, source, one-line installer</summary>
+        <div class="advanced-install-body">
+          <InstallTabs />
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- FAQ — common issues + the manual CLI commands (kiln setup /
+       verify / status / serve) for users who want to drive Kiln
+       directly without an AI agent. -->
   <section class="faq-section">
     <div class="container">
-      <h2>Frequently Asked Questions</h2>
-      <p class="lead">Common issues and quick answers.</p>
+      <h2>Common questions</h2>
       <FAQ />
     </div>
   </section>
-
-  <!-- CTA -->
-  <section class="cta-section">
-    <div class="container">
-      <h2>Ready to print?</h2>
-      <p class="cta-text">Read the full documentation or browse the source on GitHub.</p>
-      <div class="cta-buttons">
-        <a href="/docs" class="btn">Documentation</a>
-        <a href="https://github.com/codeofaxel/Kiln" target="_blank" rel="noopener" class="btn btn-ghost">GitHub</a>
-      </div>
-    </div>
-  </section>
-
 </BaseLayout>
 
 <style>
-  /* Hero */
-  .hero {
-    padding: 100px 0 60px;
+  /* Mini-hero — single sentence sized to match the landing page's
+     .receipts-heading so the visitor reads /install as the next
+     beat in the same voice. */
+  .install-hero {
     text-align: center;
+    padding: 100px 0 64px;
   }
-
-  .hero h1 {
-    font-size: 42px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    margin-bottom: 16px;
-  }
-
-  .hero .subtitle {
-    font-size: 18px;
-    color: var(--text-muted);
-    max-width: 480px;
+  .install-headline {
+    font-size: clamp(28px, 4vw, 48px);
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -0.022em;
+    color: var(--text);
+    max-width: 780px;
     margin: 0 auto;
+    text-wrap: balance;
   }
 
-  /* Install Section */
-  .install-section {
-    padding-top: 40px;
+  /* Three-step list — same .step-number / .step-content shape the
+     legacy install page used so the typography stays familiar. */
+  .install-steps {
+    padding: 16px 0 56px;
   }
-
-  /* Steps Section */
   .steps {
     list-style: none;
     padding: 0;
@@ -232,18 +217,15 @@ const installHowToSchema = {
     flex-direction: column;
     gap: 0;
   }
-
   .steps li {
     display: flex;
     gap: 24px;
-    padding: 32px 0;
+    padding: 36px 0;
     border-bottom: 1px solid var(--border);
   }
-
   .steps li:last-child {
     border-bottom: none;
   }
-
   .step-number {
     flex-shrink: 0;
     width: 36px;
@@ -258,65 +240,61 @@ const installHowToSchema = {
     font-size: 14px;
     border: 1px solid rgba(255, 107, 43, 0.25);
   }
-
   .step-content {
     flex: 1;
     min-width: 0;
   }
-
   .step-content h3 {
-    font-size: 16px;
+    font-size: 17px;
     font-weight: 600;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
   }
-
   .step-content p {
     font-size: 14px;
     color: var(--text-muted);
     margin-bottom: 4px;
     line-height: 1.6;
   }
-
   .step-content .code-block {
     margin: 12px 0 0;
   }
-
-  /* MCP Section */
-  .mcp-section .code-block pre {
+  .step-content pre {
     margin: 0;
     white-space: pre;
   }
-
-  .mcp-section .code-block code {
+  .step-content pre code {
     font-family: var(--mono);
     font-size: 13px;
     line-height: 1.7;
     color: var(--text);
+    background: transparent;
+    padding: 0;
+    border: none;
   }
-
-  .config-path {
-    font-size: 14px;
+  .step-aside {
+    margin-top: 14px !important;
+    font-size: 13px !important;
+  }
+  .step-aside a {
     color: var(--text-muted);
-    margin-bottom: 16px;
-    line-height: 1.8;
+    text-decoration: none;
+    border-bottom: 1px dashed var(--border);
+    padding-bottom: 1px;
+    transition: color 0.15s, border-color 0.15s;
   }
-
-  .config-path code {
-    background: var(--bg-code);
-    border: 1px solid var(--border);
-    padding: 2px 7px;
-    border-radius: 4px;
-    font-size: 0.85em;
+  .step-aside a:hover {
     color: var(--accent);
+    border-bottom-color: var(--accent);
   }
 
+  /* Config note (Step 2) — guides the visitor through the JSON
+     placeholders without competing with the copyable block above. */
   .config-note {
-    font-size: 13px;
+    font-size: 13px !important;
     color: var(--text-muted);
-    margin-top: 8px;
+    margin-top: 12px !important;
     line-height: 1.7;
   }
-
   .config-note code {
     background: var(--bg-code);
     border: 1px solid var(--border);
@@ -326,57 +304,132 @@ const installHowToSchema = {
     color: var(--accent);
   }
 
-  /* FAQ Section */
-  .faq-section {
-    padding-bottom: 40px;
+  /* Example prompt (Step 3) — chat-bubble shape, accent left
+     border, italic so the visitor parses it as "what you'd say to
+     your AI" rather than as another code block. */
+  .example-prompt {
+    display: inline-block;
+    margin: 14px 0 0;
+    padding: 14px 22px;
+    background: rgba(255, 107, 43, 0.06);
+    border: 1px solid rgba(255, 107, 43, 0.2);
+    border-left: 3px solid var(--accent);
+    border-radius: 10px;
+    font-style: italic;
+    font-size: 15px;
+    color: var(--text);
+    line-height: 1.5;
+    quotes: "\201C" "\201D";
+  }
+  .example-prompt::before { content: open-quote; }
+  .example-prompt::after { content: close-quote; }
+
+  /* Pro CTA card — single floating card, post-value placement.
+     One button, one price, no tier table; tier comparison + the
+     commercial-use modal both live at /pricing. */
+  .pro-cta-section {
+    padding: 16px 0 64px;
+  }
+  .pro-cta-card {
+    max-width: 640px;
+    margin: 0 auto;
+    text-align: center;
+    padding: 44px 36px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--bg-card);
+  }
+  .pro-cta-headline {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    margin: 0 0 16px;
+    color: var(--text);
+  }
+  .pro-cta-body {
+    font-size: 15px;
+    color: var(--text-muted);
+    line-height: 1.65;
+    margin: 0 auto 24px;
+    max-width: 480px;
+    text-wrap: pretty;
+  }
+  .pro-cta-btn {
+    display: inline-block;
+    padding: 12px 28px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .pro-cta-price {
+    font-size: 13px !important;
+    color: var(--text-muted);
+    margin: 12px 0 0 !important;
+    letter-spacing: 0.01em;
   }
 
-  /* CTA Section */
-  .cta-section {
-    text-align: center;
-    padding: 60px 0 100px;
+  /* Advanced install disclosure — preserves the legacy macOS /
+     Linux / WSL tabs (pipx, source, one-line installer) without
+     forcing visitors through three tabs of prerequisites before
+     Step 1. */
+  .advanced-section {
+    padding: 0 0 56px;
+  }
+  .advanced-install {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-card);
+    overflow: hidden;
+  }
+  .advanced-install summary {
+    padding: 16px 22px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .advanced-install summary::-webkit-details-marker { display: none; }
+  .advanced-install summary::after {
+    content: '+';
+    font-size: 18px;
+    color: var(--text-muted);
+    font-weight: 400;
+  }
+  .advanced-install[open] summary::after {
+    content: '\2212';
+  }
+  .advanced-install-body {
+    padding: 24px 22px 28px;
     border-top: 1px solid var(--border);
   }
 
-  .cta-section h2 {
-    font-size: 28px;
-    margin-bottom: 12px;
+  /* FAQ */
+  .faq-section {
+    padding: 24px 0 100px;
+    border-top: 1px solid var(--border);
   }
-
-  .cta-text {
-    color: var(--text-muted);
-    font-size: 16px;
-    margin-bottom: 28px;
-  }
-
-  .cta-buttons {
-    display: flex;
-    gap: 12px;
-    justify-content: center;
-    flex-wrap: wrap;
+  .faq-section h2 {
+    text-align: center;
+    margin-bottom: 32px;
   }
 
   @media (max-width: 640px) {
-    .hero {
-      padding: 70px 0 40px;
+    .install-hero {
+      padding: 72px 0 40px;
     }
-
-    .hero h1 {
-      font-size: 30px;
-    }
-
-    .hero .subtitle {
-      font-size: 16px;
-    }
-
     .steps li {
       flex-direction: column;
       gap: 12px;
-      padding: 24px 0;
+      padding: 28px 0;
     }
-
-    .cta-section {
-      padding: 50px 0 70px;
+    .pro-cta-card {
+      padding: 32px 20px;
+    }
+    .pro-cta-headline {
+      font-size: 24px;
     }
   }
 </style>
