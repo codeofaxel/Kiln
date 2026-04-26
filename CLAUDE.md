@@ -14,6 +14,46 @@ Sections are tagged with `[SCOPE]` hints so Opus can weight them by task type. T
 - If the user mentions a branch name, switch to it first.
 - When editing documentation or changelogs, **append** new content rather than replacing existing content unless explicitly told to replace.
 
+### Commit and push as separate Bash calls — never chained
+The Claude Code permission gate that protects pushes to default
+branches reads `git commit && git push origin main` as a single
+"push to main" action and blocks the entire chain — even though
+the commit alone would have been allowed.  Workaround:
+
+1. Run the bare `git commit` in one Bash call.
+2. Run the bare `git push` in a separate Bash call.
+
+Same advice if the chain includes `git add`: split add+commit
+from push, or run all three as separate Bash invocations.  Avoid
+the compound `git commit && git push` form entirely — it costs
+a round-trip and surfaces a confusing denial.
+
+### Never reference internal product-thinking processes in committed artifacts
+Personas like "Jobs", "Ive", "antirez", "Andreessen", and phrases
+like "judges panel", "war room", "round 4", "Steve says", "per
+Jony's note" are an **internal** thinking tool to sharpen taste.
+They are **not** co-authors and they MUST NOT appear in:
+
+- Commit messages (this repo is public on GitHub — every commit ships)
+- Code comments and docstrings
+- File names or branch names
+- PR / issue descriptions
+- Any artifact that gets committed
+
+Describe the *change* and the *reason* neutrally, without citing
+the deliberation process that produced them.
+
+Bad:  `site(landing): receipts promoted after Jobs/Ive war-room round 2`
+Good: `site(landing): promote receipts to second screen for higher proof density`
+
+Bad code comment: `// Heading sized smaller per Jony's "visual hierarchy" note`
+Good code comment: `// Heading sized smaller so the .tagline above stays the visual anchor`
+
+When you catch a slip-up in existing committed code (e.g. an old
+"war room" comment in `docs/site/src/pages/index.astro`), sanitize
+it in the next natural content commit on that file — don't open a
+dedicated cleanup PR for it.
+
 ### Files Never to Commit
 - `.env`, credentials, API keys, access tokens
 - `tasks.md` / `task.md` (gitignored — private task tracking)
