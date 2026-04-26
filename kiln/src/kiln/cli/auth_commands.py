@@ -42,6 +42,7 @@ on any Kiln package at all.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import stat
@@ -74,10 +75,8 @@ def _write_tokens(data: dict[str, Any]) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2, sort_keys=True))
-    try:
+    with contextlib.suppress(OSError):
         os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)  # 0600
-    except OSError:
-        pass
     tmp.replace(path)
 
 
@@ -959,7 +958,8 @@ def auth_link(as_json: bool, client: str | None) -> None:
     # on some platforms) we just skip the countdown.  Users have the
     # absolute timestamp from the API if they need it.
     try:
-        from datetime import datetime as _dt, timezone as _tz
+        from datetime import datetime as _dt
+        from datetime import timezone as _tz
         exp_dt = _dt.fromisoformat(expires_at.replace("Z", "+00:00"))
         now = _dt.now(tz=_tz.utc)
         mins = max(0, int((exp_dt - now).total_seconds() // 60))

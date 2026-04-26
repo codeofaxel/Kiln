@@ -22,53 +22,127 @@ working.
 from __future__ import annotations
 
 import logging
-import os
-import tempfile
 from pathlib import Path
 from typing import Any
 
 # Re-export the internals so tests + callers can reach private symbols
 # from this module path (backward-compatible import surface).
 from kiln.plugins._validation_pipeline_internals import (
-    _ABS_WARP_THRESHOLD_MM,
-    _AUTO_SCALE_LARGE_THRESHOLD_MM,
-    _AUTO_SCALE_MICRON_FACTOR,
-    _AUTO_SCALE_MIN_TRIANGLES,
-    _AUTO_SCALE_SMALL_THRESHOLD_MM,
-    _AUTO_SCALE_TARGET_HEIGHT_MM,
-    _CheckResult,
-    _DEFAULT_INFILL_FACTOR,
-    _MATERIAL_COST_PER_GRAM,
-    _MIN_PASS_SCORE,
-    _PLA_DENSITY_G_PER_CM3,
-    _PipelineReport,
-    _SCORE_PENALTY_ERROR,
-    _SCORE_PENALTY_REPAIR,
-    _SCORE_PENALTY_SKIP,
-    _SCORE_PENALTY_WARNING,
-    _SIMPLIFY_THRESHOLD,
-    _STL_HEADER_SIZE,
-    _STL_TRIANGLE_SIZE,
-    _SUPPORTED_FORMATS,
-    _auto_scale_if_needed,
-    _compute_printability_score,
-    _get_build_volume_for_printer,
-    _inline_stl_analysis,
-    _inline_stl_binary_fallback,
-    _inline_stl_scale,
-    _run_material_check,
-    _sanitize_summary_detail,
-    _step_auto_scale,
-    _step_bed_fit,
-    _step_estimate,
-    _step_format_check,
-    _step_material_check,
-    _step_mesh_analysis,
-    _step_printability,
-    _step_repair,
-    _step_structural,
-    _step_support_assessment,
-    _step_watertight_check,
+    _ABS_WARP_THRESHOLD_MM as _ABS_WARP_THRESHOLD_MM,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _AUTO_SCALE_LARGE_THRESHOLD_MM as _AUTO_SCALE_LARGE_THRESHOLD_MM,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _AUTO_SCALE_MICRON_FACTOR as _AUTO_SCALE_MICRON_FACTOR,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _AUTO_SCALE_MIN_TRIANGLES as _AUTO_SCALE_MIN_TRIANGLES,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _AUTO_SCALE_SMALL_THRESHOLD_MM as _AUTO_SCALE_SMALL_THRESHOLD_MM,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _AUTO_SCALE_TARGET_HEIGHT_MM as _AUTO_SCALE_TARGET_HEIGHT_MM,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _DEFAULT_INFILL_FACTOR as _DEFAULT_INFILL_FACTOR,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _MATERIAL_COST_PER_GRAM as _MATERIAL_COST_PER_GRAM,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _MIN_PASS_SCORE as _MIN_PASS_SCORE,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _PLA_DENSITY_G_PER_CM3 as _PLA_DENSITY_G_PER_CM3,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _SCORE_PENALTY_ERROR as _SCORE_PENALTY_ERROR,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _SCORE_PENALTY_REPAIR as _SCORE_PENALTY_REPAIR,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _SCORE_PENALTY_SKIP as _SCORE_PENALTY_SKIP,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _SCORE_PENALTY_WARNING as _SCORE_PENALTY_WARNING,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _SIMPLIFY_THRESHOLD as _SIMPLIFY_THRESHOLD,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _STL_HEADER_SIZE as _STL_HEADER_SIZE,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _STL_TRIANGLE_SIZE as _STL_TRIANGLE_SIZE,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _SUPPORTED_FORMATS as _SUPPORTED_FORMATS,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _auto_scale_if_needed as _auto_scale_if_needed,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _CheckResult as _CheckResult,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _compute_printability_score as _compute_printability_score,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _get_build_volume_for_printer as _get_build_volume_for_printer,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _inline_stl_analysis as _inline_stl_analysis,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _inline_stl_binary_fallback as _inline_stl_binary_fallback,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _inline_stl_scale as _inline_stl_scale,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _PipelineReport as _PipelineReport,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _run_material_check as _run_material_check,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _sanitize_summary_detail as _sanitize_summary_detail,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _step_auto_scale as _step_auto_scale,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _step_bed_fit as _step_bed_fit,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _step_estimate as _step_estimate,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _step_format_check as _step_format_check,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _step_material_check as _step_material_check,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _step_mesh_analysis as _step_mesh_analysis,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _step_printability as _step_printability,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _step_repair as _step_repair,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _step_structural as _step_structural,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _step_support_assessment as _step_support_assessment,
+)
+from kiln.plugins._validation_pipeline_internals import (
+    _step_watertight_check as _step_watertight_check,
 )
 
 _logger = logging.getLogger(__name__)

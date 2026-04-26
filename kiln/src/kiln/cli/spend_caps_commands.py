@@ -34,24 +34,18 @@ CLI to work; the user just needs a valid bearer in
 from __future__ import annotations
 
 import json
-import os
-import sys
-from pathlib import Path
 from typing import Any
 
 import click
-
 
 # Reuse the shared HTTP helpers from auth_commands.py rather than
 # duplicating the bearer-write / response-shape code.  The point is to
 # keep ONE place where the CLI's request envelope + error shape lives.
 from kiln.cli.auth_commands import (
-    _api_base,
     _http_get,
     _http_post,
     _read_tokens,
 )
-
 
 # Where the user toggles the opt-in flag — printed in every "opt-in
 # off" error message so they know exactly where to go next.

@@ -44,6 +44,7 @@ try:
 except ImportError:
     GenerationError = Exception  # type: ignore[misc,assignment]
 
+from kiln.cli.auth_commands import register_auth_cli
 from kiln.cli.config import (
     list_printers as _list_printers,
 )
@@ -69,8 +70,6 @@ from kiln.cli.output import (
     format_response,
     format_status,
 )
-
-from kiln.cli.auth_commands import register_auth_cli
 from kiln.cli.spend_caps_commands import register_spend_caps_cli
 
 logger = logging.getLogger(__name__)
