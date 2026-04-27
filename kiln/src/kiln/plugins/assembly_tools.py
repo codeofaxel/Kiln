@@ -94,7 +94,7 @@ class _AssemblyToolsPlugin:
                 part = AssemblyPart(
                     part_id=part_id,
                     file_path=file_path,
-                    position=(position_x, position_y, position_z),
+                    position_mm=(position_x, position_y, position_z),
                     material=material,
                     role=role,
                 )
