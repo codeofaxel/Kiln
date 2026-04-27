@@ -394,3 +394,53 @@ class PrinterRegistry:
             if name not in self._printer_locks:
                 self._printer_locks[name] = threading.Lock()
             return self._printer_locks[name]
+
+
+# ---------------------------------------------------------------------------
+# Module-level singleton accessor
+# ---------------------------------------------------------------------------
+
+_registry_singleton: PrinterRegistry | None = None
+_registry_singleton_lock = threading.Lock()
+
+
+def get_printer_registry() -> PrinterRegistry:
+    """Return the lazily-initialised module-level :class:`PrinterRegistry`.
+
+    Modules outside ``kiln.server`` (notably ``print_health_monitor``,
+    ``heartbeat``, ``kiln_pro.recovery.auto_recover_engine``) reach for
+    a registry without a circular dependency on ``kiln.server``.  This
+    accessor is the canonical no-circular import path; ``kiln.server``
+    has its own ``_get_registry`` that wraps the same singleton via
+    ``register_default_singleton`` so both surfaces converge.
+
+    Thread-safe via double-checked locking.  Returns the same instance
+    on every call.
+    """
+    global _registry_singleton
+    if _registry_singleton is not None:
+        return _registry_singleton
+    with _registry_singleton_lock:
+        if _registry_singleton is None:
+            _registry_singleton = PrinterRegistry()
+        return _registry_singleton
+
+
+def register_default_singleton(registry: PrinterRegistry) -> None:
+    """Replace the module-level singleton.
+
+    ``kiln.server._get_registry`` calls this on first registry build
+    so that ``get_printer_registry`` returns the same instance the
+    server has populated with adapters.  Without this convergence,
+    callers that imported ``get_printer_registry`` directly would
+    see an empty registry while the server has the real one.
+    """
+    global _registry_singleton
+    with _registry_singleton_lock:
+        _registry_singleton = registry
+
+
+# Backwards-compat alias used by ``kiln.heartbeat``.  Kept as a thin
+# alias rather than a duplicate function so a future rename only
+# touches one body.
+get_registry = get_printer_registry

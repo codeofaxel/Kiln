@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-27T07:33:49.088492+00:00",
-  "tool_count": 281,
+  "generated": "2026-04-27T07:57:30.382301+00:00",
+  "tool_count": 285,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -5874,6 +5874,146 @@
       }
     },
     {
+      "name": "auto_recover",
+      "description": "One-call autonomous failure recovery (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_name": {
+            "title": "Printer Name",
+            "type": "string"
+          },
+          "telemetry": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Telemetry"
+          },
+          "telemetry_history": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Telemetry History"
+          },
+          "job_info": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Job Info"
+          },
+          "failure_id": {
+            "default": "",
+            "title": "Failure Id",
+            "type": "string"
+          },
+          "alternative_printers": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Alternative Printers"
+          },
+          "auto_confirm": {
+            "default": true,
+            "title": "Auto Confirm",
+            "type": "boolean"
+          },
+          "monitoring_interval_s": {
+            "default": 30.0,
+            "title": "Monitoring Interval S",
+            "type": "number"
+          },
+          "monitoring_max_wall_s": {
+            "default": 600.0,
+            "title": "Monitoring Max Wall S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "printer_name"
+        ],
+        "title": "auto_recoverArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cancel_auto_recover",
+      "description": "Signal an in-flight auto_recover to stop at the next checkpoint (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "auto_recover_id": {
+            "title": "Auto Recover Id",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "auto_recover_id"
+        ],
+        "title": "cancel_auto_recoverArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "confirm_auto_recover",
+      "description": "Confirm an AWAITING_CONFIRMATION auto_recover can proceed (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "auto_recover_id": {
+            "title": "Auto Recover Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "auto_recover_id"
+        ],
+        "title": "confirm_auto_recoverArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "deboss_during_print",
       "description": "Carve a debossed image into the top of an in-flight print (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -6291,6 +6431,25 @@
           "printer_z_known"
         ],
         "title": "generate_recovery_gcodeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_auto_recover_status",
+      "description": "Read the current state of an async auto_recover (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "auto_recover_id": {
+            "title": "Auto Recover Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "auto_recover_id"
+        ],
+        "title": "get_auto_recover_statusArguments",
         "type": "object"
       }
     },

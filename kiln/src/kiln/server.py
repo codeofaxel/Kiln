@@ -1724,10 +1724,26 @@ def _stop_print_watchdog(printer_name: str | None = None) -> None:
 
 
 def _get_registry() -> PrinterRegistry:
-    """Return the lazily-initialised printer registry."""
+    """Return the lazily-initialised printer registry.
+
+    Converges with :func:`kiln.registry.get_printer_registry` so that
+    callers outside ``kiln.server`` (print_health_monitor, heartbeat,
+    auto_recover_engine, etc.) see the same instance the server has
+    populated with adapters.
+    """
     global _registry  # noqa: PLW0603
     if _registry is None:
         _registry = PrinterRegistry()
+        # Publish to the canonical singleton so non-server callers
+        # (kiln.registry.get_printer_registry) see the populated
+        # registry, not an empty one.
+        try:
+            from kiln.registry import register_default_singleton
+
+            register_default_singleton(_registry)
+        except ImportError:
+            # Defensive — registry module changes shouldn't break server boot.
+            pass
     return _registry
 
 
