@@ -1724,3 +1724,234 @@ class TestMonitor:
         # The CLI should not have blocked anywhere near 30s in this
         # stubbed path; sanity-check it returned promptly.
         assert elapsed < 30.0
+
+    # ------------------------------------------------------------------
+    # Tier-1 smart-monitoring fields — JSON + Rich symmetry with MCP
+    # ------------------------------------------------------------------
+
+    def test_monitor_drops_legacy_snapshot_flags(
+        self, runner, mock_adapter, config_file
+    ):
+        """--snapshot-interval and --snapshot-dir were soft no-ops; gone."""
+        mock_instance, _captured = self._stub_monitor_class(mock_adapter)
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3, patch(
+            "kiln.print_health_monitor.PrintHealthMonitor", return_value=mock_instance,
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "monitor",
+                    "--snapshot-interval", "5",
+                    "--snapshot-dir", "/tmp/x",
+                    "--json",
+                ],
+            )
+
+        # Click reports the unknown option with exit code 2 and a
+        # "No such option" message.  Both arms should mention the
+        # flag name we deleted.
+        assert result.exit_code == 2, result.output
+        assert "snapshot" in result.output.lower(), result.output
+
+    def test_monitor_json_includes_signals_block(
+        self, runner, mock_adapter, config_file, tmp_path
+    ):
+        """JSON-Lines envelope must carry the Tier-1 signals block."""
+        from kiln.print_health_monitor import (
+            HealthSeverity,
+            PrintHealthMonitor,
+            PrinterHealthReport,
+        )
+
+        # Build an in-process monitor (so _build_jsonl_envelope runs)
+        # and hand the CLI a stub PrintHealthMonitor whose
+        # start_monitoring writes one envelope to the supplied stream
+        # using the real builder.  This pins the contract end-to-end:
+        # CLI -> monitor -> envelope -> stream.
+        captured: dict = {}
+        real_monitor = PrintHealthMonitor()
+
+        def _start(printer, *, interval_seconds=30, policy=None,
+                   output_stream=None, enable_report_queue=False, **kw):
+            captured["output_stream"] = output_stream
+            # Synthesize one envelope so the JSON line shows up in
+            # stdout the way it would in a real session.
+            sample_signals = {
+                "monitoring_active": True,
+                "session_id": "abc12345-fake",
+                "session_started_at": time.time(),
+                "issue_count": 3,
+                "report_count": 12,
+                "risk": {
+                    "score": 0.55,
+                    "severity": "amber",
+                    "kinds": ["thermal_drift"],
+                },
+                "predictive": None,
+                "detective": None,
+                "auto_pause": None,
+                "as_of": time.time(),
+            }
+            with patch.object(
+                real_monitor,
+                "get_latest_signals",
+                return_value=sample_signals,
+            ):
+                report = PrinterHealthReport(
+                    printer_name=printer,
+                    metrics=[],
+                    overall_status=HealthSeverity.OK,
+                    checked_at=time.time(),
+                )
+                report.session_id = "abc12345-fake"
+                envelope = real_monitor._build_jsonl_envelope(printer, report)
+                if output_stream is not None:
+                    import json as _json
+                    output_stream.write(_json.dumps(envelope, default=str) + "\n")
+                    output_stream.flush()
+            return "abc12345-fake"
+
+        instance = MagicMock()
+        instance.start_monitoring.side_effect = _start
+        from kiln.print_health_monitor import MonitorSession, MonitorStatus
+        instance.get_session.return_value = MonitorSession(
+            session_id="abc12345-fake",
+            printer_name="test-printer",
+            job_id="job-x",
+            policy=None,  # type: ignore[arg-type]
+            status=MonitorStatus.COMPLETED,
+            ended_at=time.time(),
+        )
+
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3, patch(
+            "kiln.print_health_monitor.PrintHealthMonitor", return_value=instance,
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "--printer", "test-printer",
+                    "monitor", "--json",
+                    "--interval", "0.1",
+                    "--timeout", "1",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        # First non-blank line should parse as JSON and carry signals.
+        first_line = next(
+            (ln for ln in result.output.splitlines() if ln.strip().startswith("{")),
+            None,
+        )
+        assert first_line is not None, result.output
+        envelope = json.loads(first_line)
+        assert "signals" in envelope, envelope
+        assert envelope["signals"].get("monitoring_active") is True
+        assert envelope["signals"]["risk"]["severity"] == "amber"
+        # Stable schema: auto_recover and reroute keys exist (None on
+        # free tier).
+        assert "auto_recover" in envelope
+        assert "reroute" in envelope
+
+    def test_monitor_json_omits_auto_recover_when_kiln_pro_unavailable(self):
+        """Free tier (no kiln_pro) -> auto_recover/reroute fields are None."""
+        import sys
+        from kiln.print_health_monitor import (
+            HealthSeverity,
+            PrintHealthMonitor,
+            PrinterHealthReport,
+        )
+
+        # Force the import to fail by stubbing the kiln_pro module out
+        # of sys.modules — the envelope builder should swallow ImportError
+        # and leave both fields null.
+        saved = {
+            k: v for k, v in sys.modules.items()
+            if k.startswith("kiln_pro")
+        }
+        for k in list(saved):
+            sys.modules.pop(k, None)
+        try:
+            with patch.dict(
+                sys.modules,
+                {"kiln_pro": None, "kiln_pro.recovery": None,
+                 "kiln_pro.recovery.auto_recover_engine": None},
+            ):
+                monitor = PrintHealthMonitor()
+                with patch.object(
+                    monitor,
+                    "get_latest_signals",
+                    return_value={
+                        "monitoring_active": True,
+                        "session_id": "s-1",
+                        "session_started_at": time.time(),
+                        "issue_count": 0,
+                        "report_count": 1,
+                        "risk": None,
+                        "predictive": None,
+                        "detective": None,
+                        "auto_pause": None,
+                        "as_of": time.time(),
+                    },
+                ):
+                    report = PrinterHealthReport(
+                        printer_name="voron",
+                        metrics=[],
+                        overall_status=HealthSeverity.OK,
+                        checked_at=time.time(),
+                    )
+                    envelope = monitor._build_jsonl_envelope("voron", report)
+        finally:
+            sys.modules.update(saved)
+
+        # The fields must exist (stable schema) but be None.
+        assert "auto_recover" in envelope
+        assert envelope["auto_recover"] is None
+        assert "reroute" in envelope
+        assert envelope["reroute"] is None
+
+    def test_monitor_rich_renders_smart_panel_when_active(
+        self, runner, mock_adapter, config_file
+    ):
+        """Rich-mode monitor must render the Smart Monitoring panel."""
+        mock_instance, captured = self._stub_monitor_class(mock_adapter)
+
+        # Override get_latest_signals to return an active session with
+        # a populated risk block — that's what the panel keys off.
+        active_signals = {
+            "monitoring_active": True,
+            "session_id": "abc12345-deadbeef",
+            "session_started_at": time.time(),
+            "issue_count": 2,
+            "report_count": 7,
+            "risk": {
+                "score": 0.55,
+                "severity": "amber",
+                "kinds": ["thermal_drift"],
+            },
+            "predictive": None,
+            "detective": None,
+            "auto_pause": None,
+            "as_of": time.time(),
+        }
+        mock_instance.get_latest_signals.return_value = active_signals
+
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3, patch(
+            "kiln.print_health_monitor.PrintHealthMonitor", return_value=mock_instance,
+        ):
+            result = runner.invoke(
+                cli,
+                ["--printer", "test-printer", "monitor", "--timeout", "1"],
+            )
+
+        # Either the Rich panel title shows up, or (if Rich isn't
+        # available in this env) the plain-text fallback marker does.
+        # Either way the risk score string must appear.
+        out = result.output
+        assert (
+            "Smart Monitoring" in out
+            or "[Smart Monitoring]" in out
+        ), out
+        assert "0.55" in out and "amber" in out, out

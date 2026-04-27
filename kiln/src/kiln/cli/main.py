@@ -3455,16 +3455,192 @@ def wait(ctx: click.Context, interval: float, max_timeout: float, json_mode: boo
 # ---------------------------------------------------------------------------
 
 
+_SEVERITY_COLOR = {
+    "clear": "green",
+    "amber": "yellow",
+    "red": "red",
+    "critical": "red",
+    "warning": "yellow",
+    "ok": "green",
+}
+
+
+def _render_smart_monitoring_panel(health_monitor, printer_name: str) -> None:
+    """Render the Smart Monitoring lines under the status row.
+
+    Mirrors the 5 Tier-1 fields from MCP ``monitor_print``: monitoring
+    summary, predictive risk, predictive red issue, detective failure
+    match, auto-pause status, auto-recover stage, and reroute hint.
+    Each line only appears when its underlying state is present.
+
+    Best-effort: any helper failure debug-logs and skips the affected
+    line; the panel itself only renders when monitoring is active.
+    """
+    signals = health_monitor.get_latest_signals(printer_name)
+    if not signals.get("monitoring_active"):
+        return
+
+    # kiln-pro side — auto-recover stage + reroute hint, when installed.
+    auto_recover_block = None
+    reroute_block = None
+    try:
+        from kiln_pro.recovery.auto_recover_engine import (
+            AutoRecoverStatus as _AR_Status,
+            list_sessions as _ar_list_sessions,
+        )
+        ar_sessions = _ar_list_sessions(printer_name=printer_name)
+        if ar_sessions:
+            terminal_states = {
+                _AR_Status.DONE_SUCCESS,
+                _AR_Status.DONE_FAILURE,
+                _AR_Status.NO_FAILURE,
+                _AR_Status.CANCELLED,
+                _AR_Status.ERRORED,
+            }
+            active = [s for s in ar_sessions if s.status not in terminal_states]
+            if active:
+                latest_active = max(active, key=lambda s: s.started_at)
+                auto_recover_block = {
+                    "stage": latest_active.status.value,
+                    "auto_recover_id": latest_active.auto_recover_id,
+                }
+            with_reroute = [s for s in ar_sessions if s.reroute_recommendation]
+            if with_reroute:
+                latest_rr = max(with_reroute, key=lambda s: s.started_at)
+                r = latest_rr.reroute_recommendation or {}
+                reroute_block = {
+                    "target_printer_id": r.get("target_printer_id"),
+                    "should_reroute": bool(r.get("should_reroute")),
+                    "reason": r.get("reason"),
+                    "blocked_by_rule": r.get("blocked_by_rule"),
+                }
+    except ImportError:
+        pass  # kiln-pro not installed — clean skip on free tier
+    except Exception as _ar_exc:
+        logger.debug("auto_recover surfacing skipped in CLI panel: %s", _ar_exc)
+
+    # Render — Rich when available, plain text fallback otherwise.
+    try:
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.text import Text
+        rich_available = True
+    except ImportError:
+        rich_available = False
+
+    sid = signals.get("session_id") or ""
+    sid_short = sid[:8] if sid else "?"
+    body_lines: list[tuple[str, str]] = []
+    body_lines.append((
+        "default",
+        f"Monitoring: {signals.get('report_count', 0)} reports, "
+        f"{signals.get('issue_count', 0)} issues, session {sid_short}",
+    ))
+
+    risk = signals.get("risk")
+    if risk:
+        kinds = risk.get("kinds") or []
+        kinds_str = ", ".join(kinds) if kinds else "(no signals)"
+        severity = (risk.get("severity") or "clear").lower()
+        body_lines.append((
+            _SEVERITY_COLOR.get(severity, "default"),
+            f"Risk: {risk.get('score', 0.0):.2f} {severity} ({kinds_str})",
+        ))
+
+    pred = signals.get("predictive")
+    if pred:
+        severity = (pred.get("severity") or "red").lower()
+        body_lines.append((
+            _SEVERITY_COLOR.get(severity, "red"),
+            f"Predictive: {severity} {pred.get('kind', 'signal')} — "
+            f"{pred.get('detail', '') or '(no detail)'}",
+        ))
+
+    det = signals.get("detective")
+    if det:
+        det_age = ""
+        reported_at = det.get("reported_at")
+        if reported_at:
+            try:
+                age_s = max(0.0, time.time() - float(reported_at))
+                det_age = (
+                    f", {age_s / 60.0:.0f}m ago"
+                    if age_s >= 60
+                    else f", {age_s:.0f}s ago"
+                )
+            except (TypeError, ValueError):
+                pass
+        severity = (det.get("severity") or "warning").lower()
+        body_lines.append((
+            _SEVERITY_COLOR.get(severity, "yellow"),
+            f"Detective: {severity} {det.get('failure_type', 'failure')} "
+            f"({(det.get('failure_id') or 'n/a')[:8]}{det_age})",
+        ))
+
+    if auto_recover_block:
+        ar_id_short = (auto_recover_block["auto_recover_id"] or "?")[:8]
+        body_lines.append((
+            "cyan",
+            f"Auto-recover: {auto_recover_block['stage']} (id {ar_id_short})",
+        ))
+
+    ap = signals.get("auto_pause")
+    if ap:
+        ap_age_s = float(ap.get("age_seconds") or 0.0)
+        ap_age = (
+            f"{ap_age_s / 60.0:.0f}m ago"
+            if ap_age_s >= 60
+            else f"{ap_age_s:.0f}s ago"
+        )
+        ap_status = "paused"
+        if ap.get("skipped"):
+            ap_status = f"skipped ({ap['skipped']})"
+        elif ap.get("error"):
+            ap_status = f"error ({ap['error']})"
+        body_lines.append((
+            "yellow",
+            f"Auto-pause: {ap_age} "
+            f"({ap.get('issue_type', 'issue')} -> {ap_status})",
+        ))
+
+    if reroute_block:
+        if reroute_block.get("should_reroute"):
+            target = reroute_block.get("target_printer_id") or "?"
+            body_lines.append((
+                "cyan",
+                f"Reroute: {target} ready (was {printer_name})",
+            ))
+        else:
+            blocked = reroute_block.get("blocked_by_rule") or "blocked"
+            reason = (reroute_block.get("reason") or "")[:60]
+            body_lines.append((
+                "default",
+                f"Reroute: blocked ({blocked} — {reason})",
+            ))
+
+    if rich_available:
+        text = Text()
+        for idx, (style, line) in enumerate(body_lines):
+            text.append(line, style=style if style != "default" else None)
+            if idx < len(body_lines) - 1:
+                text.append("\n")
+        Console().print(
+            Panel(text, title="Smart Monitoring", border_style="blue", padding=(0, 1)),
+        )
+    else:
+        click.echo("    [Smart Monitoring]")
+        for _, line in body_lines:
+            click.echo(f"    {line}")
+
+
 @cli.command()
 @click.option("--interval", default=10.0, type=float, help="State poll interval in seconds (default: 10).")
-@click.option("--snapshot-interval", default=300, type=int, help="Seconds between snapshots (default: 300, 0 to disable).")
-@click.option("--snapshot-dir", default=None, type=click.Path(), help="Directory for snapshots (default: ~/.kiln/snapshots/).")
 @click.option("--auto-pause/--no-auto-pause", default=True, help="Auto-pause on critical alerts (default: enabled).")
 @click.option("--auto-cancel", is_flag=True, default=False, help="Auto-cancel on emergency alerts (default: disabled).")
 @click.option("--timeout", default=0.0, type=float, help="Max monitoring time in seconds (0 = unlimited).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON Lines to stdout.")
 @click.pass_context
-def monitor(ctx: click.Context, interval: float, snapshot_interval: int, snapshot_dir: str | None,
+def monitor(ctx: click.Context, interval: float,
             auto_pause: bool, auto_cancel: bool, timeout: float, json_mode: bool) -> None:
     """Monitor a print job for safety anomalies.
 
@@ -3472,6 +3648,11 @@ def monitor(ctx: click.Context, interval: float, snapshot_interval: int, snapsho
     Detects temperature drift, stalls, errors, and connection loss using
     the same predictive + detective stack the MCP tools use.  Auto-pauses
     on critical alerts by default.
+
+    Surfaces the same Tier-1 smart-monitoring fields the MCP
+    ``monitor_print`` tool reports — predictive risk, detective failure
+    matches, auto-pause status, auto-recover stage, and reroute hints —
+    in both the Rich terminal panel and the JSON Lines stream.
 
     \b
     Exit codes:
@@ -3485,7 +3666,13 @@ def monitor(ctx: click.Context, interval: float, snapshot_interval: int, snapsho
       kiln monitor --json                 # JSON Lines for agent consumption
       kiln monitor --interval 5           # Poll every 5 seconds
       kiln monitor --auto-cancel          # Also auto-cancel on emergency
-      kiln monitor --snapshot-interval 0  # Disable snapshots
+
+    \b
+    Note: --snapshot-interval and --snapshot-dir were removed in this
+    release; the periodic snapshot-to-disk loop is not currently wired
+    (use --json output for snapshot paths instead).  If you need
+    snapshot-to-disk back, file an issue and the loop can be ported as
+    a real feature rather than a soft no-op flag.
     """
     import time as _time
 
@@ -3501,12 +3688,6 @@ def monitor(ctx: click.Context, interval: float, snapshot_interval: int, snapsho
         # singleton when each tick runs.
         _get_adapter_from_ctx(ctx)
         printer_name = ctx.obj.get("printer") or "default"
-
-        # Sanity-check the snapshot dir exists when requested so the
-        # operator sees the misconfiguration immediately, not 5min in.
-        if snapshot_interval > 0 and snapshot_dir:
-            from pathlib import Path as _Path
-            _Path(snapshot_dir).mkdir(parents=True, exist_ok=True)
 
         # Build the policy directly from the CLI flags.  Wall-clock
         # timeout becomes the session timeout; check_count is set high
@@ -3593,6 +3774,22 @@ def monitor(ctx: click.Context, interval: float, snapshot_interval: int, snapsho
                             click.echo(f"    [CRITICAL] {m.detail}")
                         elif m.severity == HealthSeverity.WARNING and m.detail:
                             click.echo(f"    [WARNING]  {m.detail}")
+
+                    # Smart-monitoring panel — surfaces the same Tier-1
+                    # fields the MCP monitor_print one-shot reports.
+                    # Skipped when monitoring is inactive so a healthy
+                    # tick keeps the existing compact output.  Best-
+                    # effort: any rendering failure debug-logs and the
+                    # tick continues without the panel.
+                    try:
+                        _render_smart_monitoring_panel(
+                            health_monitor, printer_name,
+                        )
+                    except Exception as _smart_exc:
+                        logger.debug(
+                            "Smart-monitoring panel render skipped: %s",
+                            _smart_exc,
+                        )
 
                     # End-of-print detection: print_progress >= 99% and
                     # status is no longer CRITICAL ⇒ treat as completed.

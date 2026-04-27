@@ -1357,7 +1357,8 @@ class PrintHealthMonitor:
 
         if bg.output_stream is not None:
             try:
-                bg.output_stream.write(json.dumps(report.to_dict(), default=str) + "\n")
+                envelope = self._build_jsonl_envelope(bg.printer_name, report)
+                bg.output_stream.write(json.dumps(envelope, default=str) + "\n")
                 bg.output_stream.flush()
             except Exception as exc:
                 logger.debug(
@@ -1365,6 +1366,86 @@ class PrintHealthMonitor:
                     session_id,
                     exc,
                 )
+
+    # -- JSON-Lines envelope builder ---------------------------------------
+
+    def _build_jsonl_envelope(
+        self,
+        printer_name: str,
+        report: PrinterHealthReport,
+    ) -> dict[str, Any]:
+        """Compose the per-tick JSON-Lines envelope written to ``output_stream``.
+
+        Schema mirrors what the MCP ``monitor_print`` one-shot surfaces in
+        its 5 Tier-1 lines, plus the kiln-pro-side auto-recover / reroute
+        hints when the engine is installed.  Stable shape: every key is
+        present even when its underlying state is missing (None) so
+        consumers can rely on the contract.
+        """
+        signals = self.get_latest_signals(printer_name)
+        envelope: dict[str, Any] = {
+            "ts": time.time(),
+            "printer": printer_name,
+            "session_id": report.session_id,
+            "report": report.to_dict(),
+            "signals": signals,
+            "auto_recover": None,
+            "reroute": None,
+        }
+
+        # kiln-pro side — best-effort.  ImportError = clean skip on free
+        # tier; any other exception debug-logs and leaves the fields null.
+        try:
+            from kiln_pro.recovery.auto_recover_engine import (
+                AutoRecoverStatus as _AR_Status,
+                list_sessions as _ar_list_sessions,
+            )
+        except ImportError:
+            return envelope
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.debug(
+                "auto_recover_engine import failed for envelope: %s", exc,
+            )
+            return envelope
+
+        try:
+            ar_sessions = _ar_list_sessions(printer_name=printer_name)
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.debug(
+                "auto_recover list_sessions failed for envelope: %s", exc,
+            )
+            return envelope
+
+        if not ar_sessions:
+            return envelope
+
+        terminal_states = {
+            _AR_Status.DONE_SUCCESS,
+            _AR_Status.DONE_FAILURE,
+            _AR_Status.NO_FAILURE,
+            _AR_Status.CANCELLED,
+            _AR_Status.ERRORED,
+        }
+        active = [s for s in ar_sessions if s.status not in terminal_states]
+        if active:
+            latest_active = max(active, key=lambda s: s.started_at)
+            envelope["auto_recover"] = {
+                "stage": latest_active.status.value,
+                "auto_recover_id": latest_active.auto_recover_id,
+            }
+
+        with_reroute = [s for s in ar_sessions if s.reroute_recommendation]
+        if with_reroute:
+            latest_rr = max(with_reroute, key=lambda s: s.started_at)
+            r = latest_rr.reroute_recommendation or {}
+            envelope["reroute"] = {
+                "target_printer_id": r.get("target_printer_id"),
+                "should_reroute": bool(r.get("should_reroute")),
+                "reason": r.get("reason"),
+                "blocked_by_rule": r.get("blocked_by_rule"),
+            }
+
+        return envelope
 
     # -- auto-cancel honoring ----------------------------------------------
 
