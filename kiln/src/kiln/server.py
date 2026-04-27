@@ -2805,40 +2805,158 @@ def monitor_print(
             monitor_print._last_elapsed = elapsed_s  # type: ignore[attr-defined]
             monitor_print._last_ts = _now  # type: ignore[attr-defined]
 
-        # --- Latest predictive + detective signals ---
-        # If a background health-monitoring session is active, surface
-        # the most recent predictive (KILN-003 cl. 48-49) and detective
-        # (kiln.print_recovery.detect_failure) signals.  This is the
-        # single most important "did the smart monitoring catch
-        # anything?" handoff for an agent doing a one-shot status
-        # check.  Best-effort — never block monitor_print if the
-        # signal helper raises.
+        # --- Smart-monitoring summary (Tier-1 fields) ---
+        # Five conditional lines surfacing the new monitoring/recovery
+        # wiring (predictive, detective, auto_recover, auto_pause,
+        # reroute).  Each line only appears when its underlying state
+        # is present, so a healthy print with no active monitoring
+        # shows the same compact format as before.  Best-effort
+        # throughout — any helper failure debug-logs and skips its
+        # line; never blocks monitor_print.
+        _resolved_printer = (
+            printer_name or _resolve_effective_printer_name(printer_name)
+        )
+        _monitoring_line = ""
+        _risk_line = ""
         _predictive_line = ""
         _detective_line = ""
+        _auto_recover_line = ""
+        _auto_pause_line = ""
+        _reroute_line = ""
+
+        # 1) Public Kiln side — monitoring summary (predictive, detective,
+        #    auto-pause, headline risk score).
         try:
             from kiln.print_health_monitor import get_print_health_monitor
 
             _signals = get_print_health_monitor().get_latest_signals(
-                printer_name or _resolve_effective_printer_name(printer_name),
+                _resolved_printer,
             )
             if _signals.get("monitoring_active"):
+                _sid = _signals.get("session_id") or ""
+                _sid_short = _sid[:8] if _sid else "?"
+                _monitoring_line = (
+                    f"MONITORING: active "
+                    f"({_signals.get('report_count', 0)} reports, "
+                    f"{_signals.get('issue_count', 0)} issues, "
+                    f"session {_sid_short})"
+                )
+
+                _risk = _signals.get("risk")
+                if _risk:
+                    _kinds = _risk.get("kinds") or []
+                    _kinds_str = ", ".join(_kinds) if _kinds else "(no signals)"
+                    _risk_line = (
+                        f"RISK: {_risk.get('score', 0.0):.2f} "
+                        f"{_risk.get('severity', '?')} "
+                        f"({_kinds_str})"
+                    )
+
                 _pred = _signals.get("predictive")
                 if _pred:
                     _predictive_line = (
                         f"PREDICTIVE: {_pred.get('severity', '?')} "
                         f"{_pred.get('kind', 'signal')} — "
-                        f"{_pred.get('detail', _pred.get('message', ''))}"
+                        f"{_pred.get('detail', '') or '(no detail)'}"
                     )
+
                 _det = _signals.get("detective")
                 if _det:
+                    _det_age = ""
+                    _reported_at = _det.get("reported_at")
+                    if _reported_at:
+                        try:
+                            import time as _time_d
+                            _age_s = max(0.0, _time_d.time() - float(_reported_at))
+                            _det_age = f" ({_age_s / 60.0:.0f}m ago)"
+                        except (TypeError, ValueError):
+                            pass
                     _detective_line = (
                         f"DETECTIVE: {_det.get('severity', '?')} "
-                        f"{_det.get('failure_type', _det.get('kind', 'failure'))} — "
-                        f"{_det.get('detail', '')} (failure_id: "
-                        f"{_det.get('failure_id', 'n/a')})"
+                        f"{_det.get('failure_type', 'failure')} "
+                        f"(failure_id "
+                        f"{(_det.get('failure_id') or 'n/a')[:8]}"
+                        f"{_det_age})"
+                    )
+
+                _ap = _signals.get("auto_pause")
+                if _ap:
+                    _ap_age_s = float(_ap.get("age_seconds") or 0.0)
+                    _ap_age = (
+                        f"{_ap_age_s / 60.0:.0f}m ago"
+                        if _ap_age_s >= 60
+                        else f"{_ap_age_s:.0f}s ago"
+                    )
+                    _ap_status = "paused"
+                    if _ap.get("skipped"):
+                        _ap_status = f"skipped ({_ap['skipped']})"
+                    elif _ap.get("error"):
+                        _ap_status = f"error ({_ap['error']})"
+                    _auto_pause_line = (
+                        f"AUTO_PAUSE: {_ap_age} "
+                        f"({_ap.get('issue_type', 'issue')} -> {_ap_status})"
                     )
         except Exception as _sig_exc:
             logger.debug("Signal surfacing skipped: %s", _sig_exc)
+
+        # 2) kiln-pro side — auto_recover + reroute (if installed).
+        try:
+            from kiln_pro.recovery.auto_recover_engine import (
+                AutoRecoverStatus as _AR_Status,
+                list_sessions as _ar_list_sessions,
+            )
+
+            _ar_sessions = _ar_list_sessions(printer_name=_resolved_printer)
+            if _ar_sessions:
+                # Pick the most recently-started session.  Active
+                # sessions take priority over completed ones for the
+                # AUTO_RECOVER line; reroute scans across both.
+                _ar_active = [
+                    s for s in _ar_sessions
+                    if s.status not in (
+                        _AR_Status.DONE_SUCCESS,
+                        _AR_Status.DONE_FAILURE,
+                        _AR_Status.NO_FAILURE,
+                        _AR_Status.CANCELLED,
+                        _AR_Status.ERRORED,
+                    )
+                ]
+                _candidate_for_active = (
+                    max(_ar_active, key=lambda s: s.started_at)
+                    if _ar_active else None
+                )
+                if _candidate_for_active is not None:
+                    _ar_id_short = _candidate_for_active.auto_recover_id[:8]
+                    _auto_recover_line = (
+                        f"AUTO_RECOVER: {_candidate_for_active.status.value} "
+                        f"(id {_ar_id_short})"
+                    )
+
+                # Pick the most-recently-completed session that carries
+                # a reroute recommendation (across active + completed).
+                _ar_with_reroute = [
+                    s for s in _ar_sessions if s.reroute_recommendation
+                ]
+                if _ar_with_reroute:
+                    _latest = max(_ar_with_reroute, key=lambda s: s.started_at)
+                    _r = _latest.reroute_recommendation or {}
+                    if _r.get("should_reroute"):
+                        _target = _r.get("target_printer_id") or "?"
+                        _success = _r.get("estimated_waste_pct")
+                        _reroute_line = (
+                            f"REROUTE: {_target} ready "
+                            f"(was {_resolved_printer})"
+                        )
+                    else:
+                        _blocked = _r.get("blocked_by_rule") or "blocked"
+                        _reroute_line = (
+                            f"REROUTE: blocked ({_blocked} — "
+                            f"{(_r.get('reason') or '')[:60]})"
+                        )
+        except ImportError:
+            pass  # kiln-pro not installed
+        except Exception as _ar_exc:
+            logger.debug("auto_recover surfacing skipped: %s", _ar_exc)
 
         # --- Comments ---
         comment = _generate_print_comment(
@@ -2944,10 +3062,23 @@ def monitor_print(
                 f" = ~${cost_info['total_cost_usd']:.2f} total"
             )
 
+        # Smart-monitoring lines, in stable order so the format is
+        # predictable for prompt-engineering.  Order: state line ->
+        # headline number -> raw signals -> orchestration state.
+        if _monitoring_line:
+            lines.append(f"- {_monitoring_line}")
+        if _risk_line:
+            lines.append(f"- {_risk_line}")
         if _predictive_line:
             lines.append(f"- {_predictive_line}")
         if _detective_line:
             lines.append(f"- {_detective_line}")
+        if _auto_recover_line:
+            lines.append(f"- {_auto_recover_line}")
+        if _auto_pause_line:
+            lines.append(f"- {_auto_pause_line}")
+        if _reroute_line:
+            lines.append(f"- {_reroute_line}")
         lines.extend(
             [
                 f"Camera: {snapshot_line}",

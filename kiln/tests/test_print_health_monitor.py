@@ -1384,6 +1384,130 @@ class TestGetLatestSignals:
         assert out["detective"]["failure_id"] == "fid-runaway-2"
         assert out["detective"]["severity"] == "critical"
 
+    def test_inactive_session_envelope_carries_all_keys(self):
+        """The inactive shape must include EVERY new field at None/0/False.
+
+        Agents prompt-engineer against a stable shape — an inactive
+        printer mustn't omit keys, just zero them.  Otherwise the
+        agent has to handle KeyError separately from None.
+        """
+        monitor = PrintHealthMonitor()
+        out = monitor.get_latest_signals("ghost")
+        # All fields are present, set to safe inactive values.
+        assert out["monitoring_active"] is False
+        assert out["session_id"] is None
+        assert out["session_started_at"] is None
+        assert out["issue_count"] == 0
+        assert out["report_count"] == 0
+        assert out["risk"] is None
+        assert out["predictive"] is None
+        assert out["detective"] is None
+        assert out["auto_pause"] is None
+
+    def test_risk_block_populated_from_assessment_cache(self):
+        """latest_risk_assessment on the session -> risk block surfaces."""
+        monitor, session = self._build_active_session()
+        session.latest_risk_assessment = {
+            "risk_score": 0.55,
+            "severity": "amber",
+            "signals": [
+                {"kind": "thermal_drift", "severity": "amber", "weight": 0.3},
+                {"kind": "flow_drift", "severity": "amber", "weight": 0.25},
+                # info-severity signal — must NOT contribute to kinds list
+                {"kind": "insufficient_history", "severity": "info", "weight": 0.0},
+            ],
+        }
+        out = monitor.get_latest_signals("voron")
+        assert out["risk"] is not None
+        assert out["risk"]["score"] == 0.55
+        assert out["risk"]["severity"] == "amber"
+        # Sorted, deduped, info-severity excluded.
+        assert out["risk"]["kinds"] == ["flow_drift", "thermal_drift"]
+
+    def test_risk_block_none_when_no_assessment_yet(self):
+        """Session active but predict_risk hasn't run yet -> risk None."""
+        monitor, session = self._build_active_session()
+        # Default: no latest_risk_assessment cached
+        out = monitor.get_latest_signals("voron")
+        assert out["risk"] is None
+        # But monitoring_active should still be True.
+        assert out["monitoring_active"] is True
+
+    def test_auto_pause_block_surfaces_most_recent_triggered(self):
+        """auto_pause block reports the freshest issue with the flag set."""
+        monitor, session = self._build_active_session()
+        session.issues.extend([
+            {
+                "issue_type": "health_critical",
+                "confidence": 1.0,
+                "detail": "first auto-pause",
+                "auto_pause_triggered": True,
+                "reported_at": 1000.0,
+                "snapshot_count": 0,
+            },
+            {
+                "issue_type": "predictive_red_thermal_drift",
+                "confidence": 1.0,
+                "detail": "later predictive",
+                "auto_pause_triggered": True,
+                "reported_at": 1500.0,
+                "snapshot_count": 0,
+                "auto_pause_skipped": "kill_switch",
+            },
+            # Below threshold — must NOT count
+            {
+                "issue_type": "predictive_red_other",
+                "confidence": 0.3,
+                "detail": "low-confidence",
+                "auto_pause_triggered": False,
+                "reported_at": 1700.0,
+                "snapshot_count": 0,
+            },
+        ])
+        out = monitor.get_latest_signals("voron")
+        assert out["auto_pause"] is not None
+        # Latest issue with auto_pause_triggered=True (not the False one)
+        assert out["auto_pause"]["issue_type"] == "predictive_red_thermal_drift"
+        assert out["auto_pause"]["triggered_at"] == 1500.0
+        # Skipped reason carried through
+        assert out["auto_pause"]["skipped"] == "kill_switch"
+        assert out["auto_pause"]["error"] is None
+        # Age is non-negative
+        assert out["auto_pause"]["age_seconds"] >= 0.0
+
+    def test_auto_pause_block_none_when_no_triggered_issue(self):
+        """No issue with auto_pause_triggered=True -> auto_pause None."""
+        monitor, session = self._build_active_session()
+        session.issues.append({
+            "issue_type": "low_severity_warning",
+            "confidence": 0.3,
+            "detail": "below threshold",
+            "auto_pause_triggered": False,
+            "reported_at": 1000.0,
+            "snapshot_count": 0,
+        })
+        out = monitor.get_latest_signals("voron")
+        assert out["auto_pause"] is None
+
+    def test_issue_and_report_counts_track_session(self):
+        """issue_count + report_count reflect session state."""
+        monitor, session = self._build_active_session()
+        # Add two issues + three reports.
+        session.issues.extend([{"issue_type": f"i{i}"} for i in range(2)])
+        session.health_reports.extend([
+            PrinterHealthReport(
+                printer_name="voron",
+                metrics=[],
+                overall_status=HealthSeverity.OK,
+                checked_at=time.time(),
+            )
+            for _ in range(3)
+        ])
+        out = monitor.get_latest_signals("voron")
+        assert out["issue_count"] == 2
+        assert out["report_count"] == 3
+        assert out["session_started_at"] == session.started_at
+
 
 # ---------------------------------------------------------------------------
 # Auto-cancel emergency

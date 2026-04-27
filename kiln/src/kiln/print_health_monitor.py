@@ -376,6 +376,12 @@ class MonitorSession:
     issues: list[dict[str, Any]] = field(default_factory=list)
     started_at: float = field(default_factory=time.time)
     ended_at: float | None = None
+    # Cached most recent predictive RiskAssessment dict (kiln-pro
+    # predict_risk output).  Populated by _maybe_record_predictive_signals
+    # so monitor_print one-shot can surface the headline risk_score +
+    # severity without re-running the predictor.  None until the first
+    # tick scores a non-empty assessment.
+    latest_risk_assessment: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
@@ -390,6 +396,7 @@ class MonitorSession:
             "issues": self.issues,
             "started_at": self.started_at,
             "ended_at": self.ended_at,
+            "latest_risk_assessment": self.latest_risk_assessment,
         }
 
 
@@ -1832,6 +1839,11 @@ class PrintHealthMonitor:
             )
             return
 
+        # Cache the assessment so monitor_print one-shot can surface
+        # the headline risk_score + severity without re-running the
+        # predictor against the same history.
+        session.latest_risk_assessment = assessment
+
         for signal in assessment.get("signals", []):
             if signal.get("severity") != "red":
                 continue
@@ -1962,24 +1974,50 @@ class PrintHealthMonitor:
             session.issues[-1]["failure_id"] = failure.failure_id
 
     def get_latest_signals(self, printer_name: str) -> dict[str, Any]:
-        """Return the most recent predictive + detective signals for a printer.
+        """Return the most recent monitoring summary for a printer.
 
-        Looks across all active monitoring sessions for *printer_name*
-        and returns a flat dict an agent can read alongside printer
-        status::
+        Returns a flat dict that the MCP ``monitor_print`` one-shot
+        consumes for status rendering.  Single source of truth for
+        the user-facing "what has the smart monitoring caught?"
+        question::
 
             {
-              "predictive": {"severity": "red", "kind": "thermal_drift", ...} | None,
-              "detective": {"failure_id": "...", "failure_type": "...", "severity": "..."} | None,
               "monitoring_active": bool,
               "session_id": str | None,
-              "as_of": float,  # unix timestamp
+              "session_started_at": float | None,
+              "issue_count": int,                 # total issues so far
+              "report_count": int,                # health reports captured
+              "risk": {                           # most recent predictive
+                "score": 0.55,                    # assessment from predict_risk
+                "severity": "amber",              # (None when monitoring
+                "kinds": ["thermal_drift"],       # has not yet scored)
+              } | None,
+              "predictive": {                     # most recent RED predictive
+                "severity": "red",                # issue (raised to issue
+                "kind": "thermal_drift",          # stream — actionable level)
+                "detail": "...",
+                "reported_at": float,
+              } | None,
+              "detective": {                      # most recent detect_failure
+                "failure_id": "...",              # match
+                "failure_type": "...",
+                "severity": "...",
+                "reported_at": float,
+              } | None,
+              "auto_pause": {                     # most recent issue that
+                "issue_type": "...",              # tripped the auto-pause
+                "triggered_at": float,            # threshold (paused IF
+                "age_seconds": float,             # the pause helper succeeded)
+                "skipped": str | None,            # "kill_switch"
+                                                  # "already_paused" | None
+                "error": str | None,
+              } | None,
+              "as_of": float,
             }
 
-        Used by the MCP ``monitor_print`` one-shot tool to surface the
-        monitor's latest read alongside printer state.  When multiple
-        signals of the same kind exist in the session, the most recent
-        wins (latest first wins, by issue insertion order).
+        ``risk`` reflects the LATEST predict_risk assessment, not just
+        red issues — so a session at amber-severity (which doesn't fire
+        an issue) still shows up here for the headline score.
         """
         now = time.time()
         active_sessions = self.list_sessions(
@@ -1988,10 +2026,15 @@ class PrintHealthMonitor:
         )
         if not active_sessions:
             return {
-                "predictive": None,
-                "detective": None,
                 "monitoring_active": False,
                 "session_id": None,
+                "session_started_at": None,
+                "issue_count": 0,
+                "report_count": 0,
+                "risk": None,
+                "predictive": None,
+                "detective": None,
+                "auto_pause": None,
                 "as_of": now,
             }
 
@@ -1999,13 +2042,32 @@ class PrintHealthMonitor:
         # multiple are active (defensive — should be one in practice).
         session = max(active_sessions, key=lambda s: s.started_at)
 
+        # ---- Risk summary from the cached assessment ----
+        risk: dict[str, Any] | None = None
+        if session.latest_risk_assessment:
+            assessment = session.latest_risk_assessment
+            kinds = sorted({
+                str(s.get("kind"))
+                for s in assessment.get("signals", [])
+                if s.get("severity") in ("amber", "red")
+                and s.get("kind") is not None
+            })
+            risk = {
+                "score": assessment.get("risk_score", 0.0),
+                "severity": assessment.get("severity", "clear"),
+                "kinds": kinds,
+            }
+
+        # ---- Predictive RED issue (most recent) ----
+        # ---- Detective failure issue (most recent) ----
+        # ---- Auto-pause issue (most recent that flagged the threshold) ----
         predictive: dict[str, Any] | None = None
         detective: dict[str, Any] | None = None
+        auto_pause: dict[str, Any] | None = None
 
-        # Walk the issue list in reverse so the latest matching issue
-        # of each kind wins.
         for issue in reversed(session.issues):
             issue_type = issue.get("issue_type", "")
+
             if predictive is None and issue_type.startswith("predictive_red_"):
                 kind = issue_type[len("predictive_red_"):]
                 predictive = {
@@ -2017,8 +2079,6 @@ class PrintHealthMonitor:
                 }
             elif detective is None and issue_type.startswith("detect_failure_"):
                 failure_type = issue_type[len("detect_failure_"):]
-                # Recover the original severity bucket from the recorded
-                # confidence so callers don't need to know the mapping.
                 conf = issue.get("confidence")
                 severity = _confidence_to_detective_severity(conf)
                 detective = {
@@ -2029,14 +2089,34 @@ class PrintHealthMonitor:
                     "confidence": conf,
                     "reported_at": issue.get("reported_at"),
                 }
-            if predictive is not None and detective is not None:
+
+            if auto_pause is None and issue.get("auto_pause_triggered"):
+                triggered_at = float(issue.get("reported_at") or now)
+                auto_pause = {
+                    "issue_type": issue_type or None,
+                    "triggered_at": triggered_at,
+                    "age_seconds": max(0.0, now - triggered_at),
+                    "skipped": issue.get("auto_pause_skipped"),
+                    "error": issue.get("auto_pause_error"),
+                }
+
+            if (
+                predictive is not None
+                and detective is not None
+                and auto_pause is not None
+            ):
                 break
 
         return {
-            "predictive": predictive,
-            "detective": detective,
             "monitoring_active": True,
             "session_id": session.session_id,
+            "session_started_at": session.started_at,
+            "issue_count": len(session.issues),
+            "report_count": len(session.health_reports),
+            "risk": risk,
+            "predictive": predictive,
+            "detective": detective,
+            "auto_pause": auto_pause,
             "as_of": now,
         }
 
