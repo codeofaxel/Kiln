@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-27T10:22:30.071328+00:00",
-  "tool_count": 293,
+  "generated": "2026-04-27T11:48:26.941602+00:00",
+  "tool_count": 294,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -296,6 +296,35 @@
           }
         },
         "title": "diff_assembly_manualsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "find_manual_siblings",
+      "description": "List sibling revisions of a parametric design (Pro+).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "assembly_manuals",
+      "parameters": {
+        "properties": {
+          "manual_id": {
+            "title": "Manual Id",
+            "type": "string"
+          },
+          "include_retired": {
+            "default": false,
+            "title": "Include Retired",
+            "type": "boolean"
+          },
+          "include_self": {
+            "default": false,
+            "title": "Include Self",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "manual_id"
+        ],
+        "title": "find_manual_siblingsArguments",
         "type": "object"
       }
     },
@@ -6520,6 +6549,16 @@
             "default": true,
             "title": "Auto Confirm",
             "type": "boolean"
+          },
+          "retry_mode": {
+            "default": "off",
+            "title": "Retry Mode",
+            "type": "string"
+          },
+          "vision_strictness": {
+            "default": "advisory",
+            "title": "Vision Strictness",
+            "type": "string"
           },
           "monitoring_interval_s": {
             "default": 30.0,
