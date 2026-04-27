@@ -969,8 +969,13 @@ class _RecoveryToolsPlugin:
 
                 # Pro-tier outcome learning — record to kiln-pro's store so
                 # get_recovery_recommendations can rank strategies by
-                # historical success.  Best-effort — failures here must not
-                # break the public recovery flow.
+                # historical success AND replay the winning fix on
+                # next attempt.  Passing the plan's parameter_adjustments
+                # as fix_applied closes the learning loop -- without
+                # it, get_winning_fix (the replay surfacer) only sees
+                # fixes from the auto_recover flow, not from manual
+                # complete_print_recovery flow.  Best-effort — failures
+                # here must not break the public recovery flow.
                 pro_outcome: dict | None = None
                 try:
                     from kiln_pro.bridge import pro_features
@@ -980,6 +985,14 @@ class _RecoveryToolsPlugin:
 
                         plan = session.plan
                         failure = session.failure
+                        # Compose fix_applied from the plan's
+                        # parameter_adjustments.  The kiln-pro side
+                        # stores this for replay-ranked recommendations.
+                        fix_applied: dict | None = None
+                        if plan is not None and getattr(
+                            plan, "parameter_adjustments", None,
+                        ):
+                            fix_applied = dict(plan.parameter_adjustments)
                         pro_outcome = record_outcome(
                             failure_type=failure.failure_type.value if failure else "unknown",
                             strategy=plan.strategy.value if plan else "unknown",
@@ -988,6 +1001,7 @@ class _RecoveryToolsPlugin:
                             material_type=failure.material_type if failure else None,
                             notes=notes,
                             session_id=session_id,
+                            fix_applied=fix_applied,
                         )
                 except ImportError:
                     pass  # kiln-pro not installed — free tier
