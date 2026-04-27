@@ -106,16 +106,29 @@ class TestNormalizeFailureType:
                 f"CLASSIFIER_TO_CANONICAL in failure_vocabulary.py."
             )
 
-    def test_kiln_recovery_enum_coverage(self) -> None:
-        """Same pin for kiln.recovery.FailureType."""
-        from kiln.recovery import FailureType
-
-        for ft in FailureType:
-            normalized = normalize_failure_type(ft.value)
+    def test_legacy_kiln_recovery_strings_still_normalize(self) -> None:
+        """The deprecated kiln.recovery vocabulary still has CLASSIFIER_TO_CANONICAL
+        entries — strings emitted by old code paths or saved data must
+        still resolve to a canonical mode after the kiln.recovery
+        module deletion (commit Option B).  Pin the values explicitly
+        rather than reflecting the deleted enum.
+        """
+        legacy_values = (
+            "bed_adhesion_failure",
+            "first_layer_failure",
+            "network_disconnect",
+            "printer_error",
+            "software_crash",
+            "timeout",
+            "user_cancelled",
+        )
+        for legacy in legacy_values:
+            normalized = normalize_failure_type(legacy)
             assert normalized is not None, (
-                f"kiln.recovery.FailureType.{ft.name} (={ft.value!r}) "
-                f"does not normalize.  Add an entry to "
-                f"CLASSIFIER_TO_CANONICAL in failure_vocabulary.py."
+                f"legacy kiln.recovery value {legacy!r} no longer "
+                f"normalizes — entries in CLASSIFIER_TO_CANONICAL "
+                f"must remain so historical data survives the "
+                f"module deletion."
             )
 
     def test_kiln_failure_recovery_enum_coverage(self) -> None:

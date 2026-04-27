@@ -2789,6 +2789,41 @@ def monitor_print(
             monitor_print._last_elapsed = elapsed_s  # type: ignore[attr-defined]
             monitor_print._last_ts = _now  # type: ignore[attr-defined]
 
+        # --- Latest predictive + detective signals ---
+        # If a background health-monitoring session is active, surface
+        # the most recent predictive (KILN-003 cl. 48-49) and detective
+        # (kiln.print_recovery.detect_failure) signals.  This is the
+        # single most important "did the smart monitoring catch
+        # anything?" handoff for an agent doing a one-shot status
+        # check.  Best-effort — never block monitor_print if the
+        # signal helper raises.
+        _predictive_line = ""
+        _detective_line = ""
+        try:
+            from kiln.print_health_monitor import get_print_health_monitor
+
+            _signals = get_print_health_monitor().get_latest_signals(
+                printer_name or _resolve_effective_printer_name(printer_name),
+            )
+            if _signals.get("monitoring_active"):
+                _pred = _signals.get("predictive")
+                if _pred:
+                    _predictive_line = (
+                        f"PREDICTIVE: {_pred.get('severity', '?')} "
+                        f"{_pred.get('kind', 'signal')} — "
+                        f"{_pred.get('detail', _pred.get('message', ''))}"
+                    )
+                _det = _signals.get("detective")
+                if _det:
+                    _detective_line = (
+                        f"DETECTIVE: {_det.get('severity', '?')} "
+                        f"{_det.get('failure_type', _det.get('kind', 'failure'))} — "
+                        f"{_det.get('detail', '')} (failure_id: "
+                        f"{_det.get('failure_id', 'n/a')})"
+                    )
+        except Exception as _sig_exc:
+            logger.debug("Signal surfacing skipped: %s", _sig_exc)
+
         # --- Comments ---
         comment = _generate_print_comment(
             state_str,
@@ -2893,6 +2928,10 @@ def monitor_print(
                 f" = ~${cost_info['total_cost_usd']:.2f} total"
             )
 
+        if _predictive_line:
+            lines.append(f"- {_predictive_line}")
+        if _detective_line:
+            lines.append(f"- {_detective_line}")
         lines.extend(
             [
                 f"Camera: {snapshot_line}",
@@ -12017,38 +12056,50 @@ def save_print_checkpoint(
     hotend_temp: float | None = None,
     bed_temp: float | None = None,
     filament_used_mm: float | None = None,
+    fan_speed_pct: float | None = None,
+    flow_rate_pct: float | None = None,
 ) -> dict:
-    """Save a checkpoint during an active print for crash recovery.
+    """Save a checkpoint during an active print for accurate resume.
 
-    If the print fails or power is lost, the checkpoint data can be used
-    to plan a recovery strategy.
+    The checkpoint is keyed by ``(printer_name, job_id)`` and read
+    automatically by :func:`detect_print_failure` so that the resulting
+    :class:`FailureReport` carries known-good Z / layer / temps.  The
+    resume planner uses this for accurate ``resume_z_mm`` instead of
+    estimating from ``z_per_layer * resume_layer`` — meaningfully more
+    accurate when the print uses variable-layer-height slicing.
 
     Args:
         printer_name: Name of the printer running the job.
         job_id: Unique job identifier.
         z_height: Current Z height in mm.
-        layer_number: Current layer number.
-        hotend_temp: Hotend temperature at checkpoint time.
-        bed_temp: Bed temperature at checkpoint time.
+        layer_number: Current layer number (0-based).
+        hotend_temp: Hotend temperature at checkpoint time (Celsius).
+        bed_temp: Bed temperature at checkpoint time (Celsius).
         filament_used_mm: Filament consumed so far in mm.
+        fan_speed_pct: Part-cooling fan speed (0-100).
+        flow_rate_pct: Flow-rate multiplier (default 100).
     """
     if err := _check_auth("print"):
         return err
 
     try:
-        from kiln.recovery import get_recovery_manager
+        from kiln.print_recovery import get_recovery_engine
 
-        mgr = get_recovery_manager()
-        cp = mgr.save_checkpoint(
+        engine = get_recovery_engine()
+        cp = engine.save_checkpoint(
             printer_name=printer_name,
             job_id=job_id,
-            z_height=z_height,
-            layer_number=layer_number,
-            hotend_temp=hotend_temp,
-            bed_temp=bed_temp,
-            filament_used_mm=filament_used_mm,
+            z_height_mm=z_height or 0.0,
+            layer_number=layer_number or 0,
+            hotend_temp_c=hotend_temp or 0.0,
+            bed_temp_c=bed_temp or 0.0,
+            filament_used_mm=filament_used_mm or 0.0,
+            fan_speed_pct=fan_speed_pct or 0.0,
+            flow_rate_pct=flow_rate_pct or 100.0,
         )
         return {"success": True, "checkpoint": cp.to_dict()}
+    except ValueError as exc:
+        return _error_dict(str(exc), code="VALIDATION_ERROR")
     except Exception as exc:
         logger.exception("Error in save_print_checkpoint")
         return _error_dict(f"Failed to save print checkpoint: {exc}", code="CHECKPOINT_ERROR")
@@ -12061,10 +12112,12 @@ def plan_print_recovery(
     *,
     failure_type: str | None = None,
 ) -> dict:
-    """Plan a recovery strategy after a print failure.
+    """Plan a recovery strategy from a printer + job + failure type.
 
-    Analyzes the last checkpoint and failure type to recommend whether to
-    resume, restart, or abort the print.
+    Convenience wrapper that synthesizes a :class:`FailureReport` from
+    the supplied args (using the latest checkpoint for the printer/job
+    when available) and runs it through the same planner used by
+    ``plan_failure_recovery``.
 
     **Which recovery tool to use:**
 
@@ -12074,22 +12127,55 @@ def plan_print_recovery(
     Args:
         printer_name: Name of the printer that failed.
         job_id: The failed job's identifier.
-        failure_type: Type of failure (power_loss, filament_runout, nozzle_clog,
-            bed_adhesion, thermal_runaway, layer_shift, first_layer_failure).
+        failure_type: Type of failure (thermal_runaway, layer_shift,
+            adhesion_failure, filament_runout, nozzle_clog,
+            communication_loss, power_loss, blob_detected, spaghetti,
+            stringing, warping).  Defaults to ``communication_loss``.
     """
     if err := _check_auth("print"):
         return err
 
     try:
-        from kiln.recovery import get_recovery_manager
+        import uuid as _uuid
+        from datetime import datetime, timezone
 
-        mgr = get_recovery_manager()
-        rec = mgr.plan_recovery(
-            printer_name=printer_name,
-            job_id=job_id,
-            failure_type=failure_type,
+        from kiln.print_recovery import (
+            FailureReport,
+            FailureType,
+            get_recovery_engine,
         )
-        return {"success": True, "recommendation": rec.to_dict()}
+
+        engine = get_recovery_engine()
+        # Resolve the failure type, defaulting to communication_loss
+        # which has a safe wait_and_retry strategy and matches the
+        # most common "I lost contact with my print" scenario.
+        try:
+            ft = FailureType((failure_type or "communication_loss").lower())
+        except ValueError:
+            return _error_dict(
+                f"Unknown failure_type: {failure_type!r}.  "
+                f"Valid values: {[t.value for t in FailureType]}",
+                code="VALIDATION_ERROR",
+            )
+
+        # Pull the latest checkpoint for the (printer, job) pair so the
+        # planner can read accurate resume Z / layer / temps.
+        checkpoint = engine.get_latest_checkpoint(printer_name, job_id)
+
+        synth = FailureReport(
+            failure_id=str(_uuid.uuid4()),
+            failure_type=ft,
+            detected_at=datetime.now(tz=timezone.utc).isoformat(),
+            printer_name=printer_name,
+            job_name=job_id,
+            failed_layer=checkpoint.layer_number if checkpoint else None,
+            failure_z_mm=checkpoint.z_height_mm if checkpoint else None,
+            severity="critical" if ft == FailureType.THERMAL_RUNAWAY else "high",
+            evidence=[f"plan_print_recovery invoked with failure_type={ft.value}"],
+            checkpoint=checkpoint,
+        )
+        plan = engine.plan_recovery(synth)
+        return {"success": True, "recommendation": plan.to_dict()}
     except Exception as exc:
         logger.exception("Error in plan_print_recovery")
         return _error_dict(f"Failed to plan print recovery: {exc}", code="RECOVERY_ERROR")
@@ -12166,11 +12252,27 @@ def firmware_resume_print(
             z_clearance_mm=z_clearance_mm,
         )
 
-        # Log the recovery event
-        from kiln.recovery import RecoveryStrategy, get_recovery_manager
+        # Stash a resume checkpoint so any subsequent recovery planning
+        # has the firmware-level resume state to read.  Replaces the
+        # previous best-effort log call into RecoveryManager (which was
+        # broken — TypeError-ing on every invocation pre-cleanup).
+        try:
+            from kiln.print_recovery import get_recovery_engine
 
-        mgr = get_recovery_manager()
-        mgr.execute_recovery(job_id, RecoveryStrategy.RESUME_FROM_CHECKPOINT)
+            get_recovery_engine().save_checkpoint(
+                printer_name=printer_name,
+                job_id=job_id,
+                z_height_mm=z_height_mm,
+                layer_number=layer_number or 0,
+                hotend_temp_c=hotend_temp_c,
+                bed_temp_c=bed_temp_c,
+                fan_speed_pct=fan_speed_pct,
+                flow_rate_pct=flow_rate_pct,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Failed to stash resume checkpoint (non-fatal): %s", exc,
+            )
 
         return {
             "success": True,

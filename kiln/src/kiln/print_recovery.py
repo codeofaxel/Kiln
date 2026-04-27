@@ -160,6 +160,57 @@ class RecoveryStatus(str, enum.Enum):
 
 
 @dataclass
+class CheckpointData:
+    """Per-job state snapshot used for resume-accuracy.
+
+    Folded in from the deprecated :mod:`kiln.recovery` module.
+    Populated either explicitly via :meth:`PrintRecovery.save_checkpoint`
+    or implicitly from telemetry inside :meth:`PrintRecovery.detect_failure`.
+
+    When attached to a :class:`FailureReport`, the resume planner reads
+    ``z_height_mm`` directly instead of guessing the resume Z from
+    ``failure_z_mm`` and an assumed layer height — which dramatically
+    improves resume accuracy on prints whose layer heights vary
+    (variable-layer-height slicing, adaptive layers, etc.).
+
+    :param z_height_mm: Z position in millimetres at checkpoint time.
+    :param layer_number: Layer index (0-based) at checkpoint time.
+    :param hotend_temp_c: Hotend temperature in Celsius.
+    :param bed_temp_c: Heated bed temperature in Celsius.
+    :param filament_used_mm: Total filament extruded so far in millimetres.
+    :param fan_speed_pct: Part cooling fan speed as a percentage (0-100).
+    :param flow_rate_pct: Flow rate multiplier percentage (default 100).
+    :param recorded_at: ISO-8601 timestamp the checkpoint was captured.
+    :param extra: Additional printer-specific state (MMU slot, enclosure,
+        accelerometer baselines, etc.).
+    """
+
+    z_height_mm: float = 0.0
+    layer_number: int = 0
+    hotend_temp_c: float = 0.0
+    bed_temp_c: float = 0.0
+    filament_used_mm: float = 0.0
+    fan_speed_pct: float = 0.0
+    flow_rate_pct: float = 100.0
+    recorded_at: str = ""
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serialisable dictionary."""
+        return {
+            "z_height_mm": self.z_height_mm,
+            "layer_number": self.layer_number,
+            "hotend_temp_c": self.hotend_temp_c,
+            "bed_temp_c": self.bed_temp_c,
+            "filament_used_mm": self.filament_used_mm,
+            "fan_speed_pct": self.fan_speed_pct,
+            "flow_rate_pct": self.flow_rate_pct,
+            "recorded_at": self.recorded_at,
+            "extra": dict(self.extra),
+        }
+
+
+@dataclass
 class FailureReport:
     """Detailed analysis of a detected failure."""
 
@@ -180,6 +231,11 @@ class FailureReport:
     # Path to the original G-code file.  Enables kiln-pro to generate a
     # resume-from-layer G-code artifact without re-slicing.
     gcode_path: str | None = None
+    # Optional checkpoint at failure time.  Populated either by an
+    # explicit save_checkpoint call before the failure or synthesized
+    # from telemetry inside detect_failure.  The resume planner reads
+    # ``checkpoint.z_height_mm`` for accurate resume Z.
+    checkpoint: CheckpointData | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
@@ -199,6 +255,7 @@ class FailureReport:
             "telemetry_snapshot": self.telemetry_snapshot,
             "material_type": self.material_type,
             "gcode_path": self.gcode_path,
+            "checkpoint": self.checkpoint.to_dict() if self.checkpoint else None,
         }
 
 
@@ -341,9 +398,120 @@ class PrintRecovery:
     def __init__(self) -> None:
         self._sessions: dict[str, RecoverySession] = {}
         self._failure_history: list[FailureReport] = []
+        # Per-(printer, job) checkpoint stash — the most recent checkpoint
+        # for each running job.  Populated explicitly via save_checkpoint
+        # OR implicitly from telemetry inside detect_failure.  Read by
+        # detect_failure to attach to the FailureReport, and by the
+        # resume planner for accurate resume_z calculation.  Folded in
+        # from the deprecated kiln.recovery.RecoveryManager.
+        self._checkpoints: dict[tuple[str, str], CheckpointData] = {}
         self._max_history: int = 500
         self._lock = threading.Lock()
         self._recovery_strategies = self._build_strategy_map()
+
+    # -- public API: checkpoints -------------------------------------------
+
+    def save_checkpoint(
+        self,
+        *,
+        printer_name: str,
+        job_id: str,
+        z_height_mm: float = 0.0,
+        layer_number: int = 0,
+        hotend_temp_c: float = 0.0,
+        bed_temp_c: float = 0.0,
+        filament_used_mm: float = 0.0,
+        fan_speed_pct: float = 0.0,
+        flow_rate_pct: float = 100.0,
+        extra: dict[str, Any] | None = None,
+    ) -> CheckpointData:
+        """Stash a checkpoint for a running job.
+
+        The checkpoint is keyed by ``(printer_name, job_id)`` and
+        replaces any previous checkpoint for the same job.  The next
+        :meth:`detect_failure` call for that printer attaches the
+        latest checkpoint to the resulting :class:`FailureReport`,
+        which the resume planner then reads for accurate resume Z.
+
+        :param printer_name: Identifier of the printer.
+        :param job_id: Identifier of the print job.
+        :param z_height_mm: Z position in millimetres.
+        :param layer_number: Layer index (0-based).
+        :param hotend_temp_c: Hotend temperature.
+        :param bed_temp_c: Bed temperature.
+        :param filament_used_mm: Filament consumed so far.
+        :param fan_speed_pct: Cooling fan percentage (0-100).
+        :param flow_rate_pct: Flow-rate multiplier percentage.
+        :param extra: Optional printer-specific extras.
+        :returns: The stored :class:`CheckpointData`.
+        """
+        if not printer_name or not printer_name.strip():
+            raise ValueError("printer_name is required")
+        if not job_id or not job_id.strip():
+            raise ValueError("job_id is required")
+
+        cp = CheckpointData(
+            z_height_mm=float(z_height_mm),
+            layer_number=int(layer_number),
+            hotend_temp_c=float(hotend_temp_c),
+            bed_temp_c=float(bed_temp_c),
+            filament_used_mm=float(filament_used_mm),
+            fan_speed_pct=float(fan_speed_pct),
+            flow_rate_pct=float(flow_rate_pct),
+            recorded_at=datetime.now(tz=timezone.utc).isoformat(),
+            extra=dict(extra or {}),
+        )
+        with self._lock:
+            self._checkpoints[(printer_name.strip(), job_id.strip())] = cp
+        return cp
+
+    def get_latest_checkpoint(
+        self,
+        printer_name: str,
+        job_id: str | None = None,
+    ) -> CheckpointData | None:
+        """Return the most recent checkpoint for a printer (or printer+job).
+
+        When ``job_id`` is None, returns the freshest checkpoint across
+        any job on that printer.  Otherwise returns the checkpoint
+        scoped to the specific (printer, job) pair, or ``None``.
+        """
+        with self._lock:
+            if job_id is not None:
+                return self._checkpoints.get(
+                    (printer_name.strip(), job_id.strip())
+                )
+            # Fold across all jobs for this printer; pick freshest.
+            best: CheckpointData | None = None
+            for (p, _j), cp in self._checkpoints.items():
+                if p != printer_name.strip():
+                    continue
+                if best is None or cp.recorded_at > best.recorded_at:
+                    best = cp
+            return best
+
+    def clear_checkpoints(
+        self,
+        printer_name: str | None = None,
+        job_id: str | None = None,
+    ) -> int:
+        """Remove stashed checkpoints, optionally scoped.
+
+        Returns the number of checkpoints cleared.
+        """
+        with self._lock:
+            if printer_name is None and job_id is None:
+                count = len(self._checkpoints)
+                self._checkpoints.clear()
+                return count
+            keys_to_drop = [
+                k for k in self._checkpoints
+                if (printer_name is None or k[0] == printer_name.strip())
+                and (job_id is None or k[1] == job_id.strip())
+            ]
+            for k in keys_to_drop:
+                del self._checkpoints[k]
+            return len(keys_to_drop)
 
     # -- public API --------------------------------------------------------
 
@@ -402,6 +570,14 @@ class PrintRecovery:
                 gp = info.get("gcode_path") or info.get("gcode_file")
                 if isinstance(gp, str) and gp:
                     report.gcode_path = gp
+                # Attach the latest checkpoint for this printer (if any).
+                # Prefers an explicitly-stashed checkpoint via
+                # save_checkpoint; falls back to a synthetic checkpoint
+                # built from current telemetry + job_info so the resume
+                # planner always has SOMETHING to read for resume_z.
+                report.checkpoint = self._resolve_checkpoint_for_failure(
+                    printer_name, telemetry, info,
+                )
                 with self._lock:
                     self._failure_history.append(report)
                     if len(self._failure_history) > self._max_history:
@@ -1162,6 +1338,76 @@ class PrintRecovery:
             )
         return None
 
+    # -- private: checkpoint resolution -----------------------------------
+
+    def _resolve_checkpoint_for_failure(
+        self,
+        printer_name: str,
+        telemetry: dict[str, Any],
+        job_info: dict[str, Any],
+    ) -> CheckpointData | None:
+        """Resolve the best-available checkpoint for a freshly-detected failure.
+
+        Resolution order:
+
+        1. If a checkpoint was explicitly stashed via :meth:`save_checkpoint`
+           for this (printer, job_id), use it — the operator/agent
+           supplied known-good state, which is the highest-fidelity
+           source.
+        2. Else if telemetry + job_info carry enough state to build a
+           synthetic checkpoint (z_mm or z_height_mm + layer + temps),
+           build one inline.  This is the common path: no explicit
+           save_checkpoint, just the telemetry that came in alongside
+           the failure.
+        3. Else return None — the resume planner falls back to its
+           calculated z_per_layer estimate.
+
+        Always best-effort and never raises.  Failure to resolve a
+        checkpoint must NOT block detect_failure — checkpoints are an
+        accuracy improvement, not a correctness requirement.
+        """
+        try:
+            job_id = job_info.get("job_id") or job_info.get("file_name")
+            if isinstance(job_id, str) and job_id.strip():
+                explicit = self.get_latest_checkpoint(printer_name, job_id)
+                if explicit is not None:
+                    return explicit
+
+            # Synthesize from telemetry + job_info.  Prefer explicit
+            # z_height fields; fall back to z_mm (the legacy key).
+            z_height = (
+                job_info.get("z_height_mm")
+                or job_info.get("z_mm")
+                or telemetry.get("z_height_mm")
+                or telemetry.get("z_mm")
+            )
+            layer = job_info.get("layer") or job_info.get("layer_number")
+            if z_height is None and layer is None:
+                return None
+
+            return CheckpointData(
+                z_height_mm=float(z_height) if z_height is not None else 0.0,
+                layer_number=int(layer) if layer is not None else 0,
+                hotend_temp_c=float(telemetry.get("hotend_temp") or 0.0),
+                bed_temp_c=float(telemetry.get("bed_temp") or 0.0),
+                filament_used_mm=float(
+                    job_info.get("filament_used_mm")
+                    or telemetry.get("filament_used_mm")
+                    or 0.0,
+                ),
+                fan_speed_pct=float(telemetry.get("fan_speed_pct") or 0.0),
+                flow_rate_pct=float(telemetry.get("flow_rate_pct") or 100.0),
+                recorded_at=datetime.now(tz=timezone.utc).isoformat(),
+                extra={},
+            )
+        except (TypeError, ValueError) as exc:
+            logger.debug(
+                "Failed to resolve checkpoint for %s: %s",
+                printer_name,
+                exc,
+            )
+            return None
+
     # -- private: recovery planners ----------------------------------------
 
     def _plan_resume(self, failure: FailureReport) -> RecoveryPlan:
@@ -1173,6 +1419,13 @@ class PrintRecovery:
         materials (PLA, HIPS) bond sufficiently with fewer layers.
         Layer shift failures always add one extra overlap layer because
         positional accuracy is already compromised.
+
+        When ``failure.checkpoint`` is populated (from save_checkpoint
+        or telemetry-derived in detect_failure), the resume Z is read
+        directly from the checkpoint instead of being calculated from
+        ``failure_z_mm / failed_layer * resume_layer`` — a meaningfully
+        more accurate value when the print uses variable layer heights
+        or adaptive layers.
         """
         # Determine overlap from material type.
         material = (failure.material_type or "").lower().strip().replace(" ", "_")
@@ -1184,9 +1437,28 @@ class PrintRecovery:
         resume_layer = (failure.failed_layer or 1) - layer_overlap
         resume_layer = max(1, resume_layer)
 
+        # Resume Z resolution.  Checkpoint wins when available — a real
+        # observed Z from telemetry / save_checkpoint beats calculated
+        # estimates from layer * height, especially with variable-layer
+        # slicers.  Falls back to z_per_layer * resume_layer when no
+        # checkpoint exists.
         z_per_layer = 0.2  # default assumption
         if failure.failure_z_mm and failure.failed_layer and failure.failed_layer > 0:
             z_per_layer = failure.failure_z_mm / failure.failed_layer
+
+        if failure.checkpoint is not None and failure.checkpoint.z_height_mm > 0:
+            # Step back layer_overlap layers from the checkpoint's
+            # observed Z, using the per-layer height as a fine-grained
+            # delta.  This handles variable-layer-height prints where
+            # resume_layer alone doesn't tell us the actual Z.
+            checkpoint_z = failure.checkpoint.z_height_mm
+            resume_z_mm = round(
+                max(0.0, checkpoint_z - layer_overlap * z_per_layer), 2,
+            )
+            resume_z_source = "checkpoint"
+        else:
+            resume_z_mm = round(resume_layer * z_per_layer, 2)
+            resume_z_source = "calculated"
 
         estimated_time = None
         if failure.total_layers and failure.failed_layer:
@@ -1205,7 +1477,8 @@ class PrintRecovery:
                 RecoveryStrategy.RESUME_FROM_LAYER, failure
             ),
             parameter_adjustments={
-                "resume_z_mm": round(resume_layer * z_per_layer, 2),
+                "resume_z_mm": resume_z_mm,
+                "resume_z_source": resume_z_source,
                 "material_type": material or "unknown",
                 "overlap_layers": layer_overlap,
             },
@@ -1216,7 +1489,8 @@ class PrintRecovery:
                 f"Material '{material or 'unknown'}' uses {layer_overlap}-layer overlap for bonding",
             ],
             reason=f"Resume printing from layer {resume_layer} with {layer_overlap}-layer "
-            f"overlap for bonding (material: {material or 'unknown'})",
+            f"overlap for bonding (material: {material or 'unknown'}), "
+            f"resume_z={resume_z_mm}mm ({resume_z_source})",
         )
 
     def _plan_restart(self, failure: FailureReport) -> RecoveryPlan:

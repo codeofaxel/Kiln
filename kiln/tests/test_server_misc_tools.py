@@ -516,37 +516,42 @@ class TestUploadFileConfirm:
 
 
 class TestSavePrintCheckpoint:
-    """Tests for save_print_checkpoint()."""
+    """Tests for save_print_checkpoint() — now wraps PrintRecovery."""
 
-    @patch("kiln.recovery.get_recovery_manager")
-    def test_happy_path(self, mock_mgr):
+    def test_happy_path(self):
+        from kiln.print_recovery import PrintRecovery
         from kiln.server import save_print_checkpoint
 
-        cp = MagicMock()
-        cp.to_dict.return_value = {"z_height": 10.5, "layer": 42}
-        mock_mgr.return_value.save_checkpoint.return_value = cp
-
-        result = save_print_checkpoint(
-            printer_name="ender3",
-            job_id="j1",
-            z_height=10.5,
-            layer_number=42,
-        )
+        engine = PrintRecovery()
+        with patch(
+            "kiln.print_recovery.get_recovery_engine",
+            return_value=engine,
+        ):
+            result = save_print_checkpoint(
+                printer_name="ender3",
+                job_id="j1",
+                z_height=10.5,
+                layer_number=42,
+                hotend_temp=205.0,
+                bed_temp=60.0,
+            )
 
         assert result["success"] is True
-        assert result["checkpoint"]["z_height"] == 10.5
+        assert result["checkpoint"]["z_height_mm"] == 10.5
+        assert result["checkpoint"]["layer_number"] == 42
+        assert result["checkpoint"]["hotend_temp_c"] == 205.0
+        # Stash should have it under the (printer, job) key.
+        assert engine.get_latest_checkpoint("ender3", "j1") is not None
 
-    @patch("kiln.recovery.get_recovery_manager")
-    def test_error(self, mock_mgr):
+    def test_validation_error_on_empty_printer(self):
+        from kiln.print_recovery import PrintRecovery
         from kiln.server import save_print_checkpoint
 
-        mock_mgr.return_value.save_checkpoint.side_effect = RuntimeError("boom")
-
-        result = save_print_checkpoint(
-            printer_name="ender3",
-            job_id="j1",
-        )
-
+        with patch(
+            "kiln.print_recovery.get_recovery_engine",
+            return_value=PrintRecovery(),
+        ):
+            result = save_print_checkpoint(printer_name="", job_id="j1")
         assert result["success"] is False
 
 
