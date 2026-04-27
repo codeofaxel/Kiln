@@ -47,13 +47,40 @@ VALID_FAILURE_MODES: frozenset[str] = frozenset({
 # Classifier → canonical translation
 # ---------------------------------------------------------------------------
 
-# Mapping from :class:`kiln.failure_recovery.FailureType` values to the
-# canonical DB vocabulary.  Values absent from this map are assumed to
-# already be canonical (e.g. ``warping`` matches in both directions).
+# Mapping from every known engine vocabulary to the canonical DB
+# vocabulary.  Each entry's key is a value that some engine actually
+# emits (lowercased); the value is the canonical form for storage,
+# rerouter safety checks, and design-constraint lookup.
+#
+# Source vocabularies covered:
+#   * :class:`kiln.failure_recovery.FailureType`
+#       — adhesion_loss, nozzle_clog, unknown
+#   * :class:`kiln.print_recovery.FailureType`
+#       — adhesion_failure, blob_detected, communication_loss
+#   * :class:`kiln.recovery.FailureType`
+#       — bed_adhesion_failure, first_layer_failure, network_disconnect,
+#         printer_error, software_crash, timeout, user_cancelled
+#
+# Values not in this map and not in :data:`VALID_FAILURE_MODES` are
+# rejected (return ``None``) — better to surface "unrecognized" than to
+# silently lose data.
 CLASSIFIER_TO_CANONICAL: dict[str, str] = {
+    # kiln.failure_recovery.FailureType
     "adhesion_loss": "adhesion",
     "nozzle_clog": "clog",
     "unknown": "other",
+    # kiln.print_recovery.FailureType
+    "adhesion_failure": "adhesion",
+    "blob_detected": "spaghetti",
+    "communication_loss": "other",
+    # kiln.recovery.FailureType
+    "bed_adhesion_failure": "adhesion",
+    "first_layer_failure": "adhesion",
+    "network_disconnect": "other",
+    "printer_error": "mechanical",
+    "software_crash": "other",
+    "timeout": "other",
+    "user_cancelled": "other",
 }
 
 
@@ -70,6 +97,141 @@ def to_canonical(mode: str | None) -> str | None:
     lower = mode.lower()
     canonical = CLASSIFIER_TO_CANONICAL.get(lower, lower)
     return canonical if canonical in VALID_FAILURE_MODES else None
+
+
+def normalize_failure_type(value: str | None) -> str | None:
+    """Normalize ANY engine's failure-type string to canonical form.
+
+    Sister to :func:`to_canonical` with two practical extensions:
+
+    * **Whitespace-tolerant.**  Leading/trailing whitespace is stripped
+      before lookup, so ``" Layer Shift "`` resolves to ``"layer_shift"``
+      cleanly.
+    * **Designed as the public boundary translator.**  Every consumer
+      that reads failure-type strings from another engine should call
+      this — outcome storage (so two spellings of "adhesion" don't
+      become two strategies in the recovery_outcomes.json),
+      rerouter safety checks (so ``adhesion_loss`` is treated as
+      safety-critical exactly like ``adhesion_failure``), and any
+      future downstream that compares failure types across engines.
+
+    Returns ``None`` for empty input, all-whitespace input, or strings
+    that don't resolve to any known canonical mode.  Never raises.
+
+    Examples::
+
+        >>> normalize_failure_type("ADHESION_FAILURE")
+        'adhesion'
+        >>> normalize_failure_type("bed_adhesion_failure")
+        'adhesion'
+        >>> normalize_failure_type("Layer Shift")  # spaces tolerated
+        None        # space is preserved in lookup; spelling must match
+        >>> normalize_failure_type("layer_shift")
+        'layer_shift'
+        >>> normalize_failure_type(" thermal_runaway ")
+        'thermal_runaway'
+        >>> normalize_failure_type("nope")
+        None
+    """
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    return to_canonical(stripped)
+
+
+# Severity ladder normalization — the parallel three-vocabulary problem.
+# kiln.print_recovery uses free-form strings like "low/medium/high/critical".
+# kiln.print_health_monitor uses an enum: "ok/warning/critical".
+# kiln_pro.recovery.predictive uses "info/amber/red" plus a "clear"
+# whole-assessment severity.
+#
+# Canonical ladder (lowercase, ordered):
+#   "ok" < "info" < "low" < "medium" < "high" < "critical"
+#
+# This dict translates each engine's spelling into the canonical
+# spelling.  Values not listed here pass through verbatim (lowercased)
+# and are rejected by :func:`normalize_severity` if not in the
+# canonical set.
+_SEVERITY_TO_CANONICAL: dict[str, str] = {
+    # kiln.print_health_monitor.HealthSeverity
+    "ok": "ok",
+    "warning": "medium",
+    # kiln_pro.recovery.predictive RiskSignal severity
+    "info": "info",
+    "amber": "medium",
+    "red": "high",
+    "clear": "ok",
+    # kiln.print_recovery.FailureReport.severity (free-form strings)
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "critical": "critical",
+}
+
+CANONICAL_SEVERITIES: frozenset[str] = frozenset({
+    "ok",
+    "info",
+    "low",
+    "medium",
+    "high",
+    "critical",
+})
+
+
+def normalize_severity(value: str | None) -> str | None:
+    """Normalize ANY engine's severity string to the canonical ladder.
+
+    Canonical ladder (low → high): ``ok`` < ``info`` < ``low``
+    < ``medium`` < ``high`` < ``critical``.
+
+    The mapping merges three engine vocabularies onto this ladder:
+    ``warning`` and ``amber`` both become ``medium``; ``red`` becomes
+    ``high``; ``clear`` becomes ``ok``.  Case- and whitespace-
+    tolerant.  Returns ``None`` for unrecognized input.
+
+    Pair this with :func:`severity_at_least` when you want a
+    threshold check (e.g. "is this signal at least medium severity?")
+    that works regardless of which engine emitted the string.
+    """
+    if value is None:
+        return None
+    stripped = value.strip().lower()
+    if not stripped:
+        return None
+    canonical = _SEVERITY_TO_CANONICAL.get(stripped, stripped)
+    return canonical if canonical in CANONICAL_SEVERITIES else None
+
+
+_SEVERITY_RANK: dict[str, int] = {
+    "ok": 0,
+    "info": 1,
+    "low": 2,
+    "medium": 3,
+    "high": 4,
+    "critical": 5,
+}
+
+
+def severity_at_least(value: str | None, threshold: str) -> bool:
+    """Return True when *value* normalizes to at least *threshold*.
+
+    Both arguments are normalized via :func:`normalize_severity` so
+    callers can pass any engine's spelling.  Unrecognized *value*
+    returns False (defensive — unknown severity is not "above" any
+    known threshold).  Unrecognized *threshold* raises ValueError —
+    that one's a programming error, not data.
+    """
+    norm_threshold = normalize_severity(threshold)
+    if norm_threshold is None:
+        raise ValueError(
+            f"threshold must normalize to a canonical severity, got {threshold!r}"
+        )
+    norm_value = normalize_severity(value)
+    if norm_value is None:
+        return False
+    return _SEVERITY_RANK[norm_value] >= _SEVERITY_RANK[norm_threshold]
 
 
 # ---------------------------------------------------------------------------

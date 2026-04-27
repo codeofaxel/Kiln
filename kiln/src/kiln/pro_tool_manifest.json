@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-25T21:32:49.003258+00:00",
-  "tool_count": 280,
+  "generated": "2026-04-26T23:57:03.740153+00:00",
+  "tool_count": 281,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -6192,6 +6192,59 @@
           "printers"
         ],
         "title": "decorate_during_print_fleetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "evaluate_fleet_reroute",
+      "description": "Decide whether a failed FDM job should move to another printer (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "failure_id": {
+            "title": "Failure Id",
+            "type": "string"
+          },
+          "alternative_printers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Alternative Printers",
+            "type": "array"
+          },
+          "completion_pct": {
+            "default": 0.0,
+            "title": "Completion Pct",
+            "type": "number"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          },
+          "model_size_mm": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model Size Mm"
+          }
+        },
+        "required": [
+          "failure_id",
+          "alternative_printers"
+        ],
+        "title": "evaluate_fleet_rerouteArguments",
         "type": "object"
       }
     },
