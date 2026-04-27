@@ -53,8 +53,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
             type="text"
             inputmode="text"
             autocomplete="off"
+            autocapitalize="off"
             spellcheck="false"
-            placeholder="Paste the release ID from the kit-maker's listing or QR"
+            placeholder="From QR code or kit-maker's listing"
           />
         </div>
 
@@ -77,10 +78,26 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 </BaseLayout>
 
 <style>
+  /* Brand palette comes from src/styles/global.css :root —
+   * --bg, --bg-card, --bg-code, --text, --text-muted, --accent
+   * (orange #FF6B2B), --accent-hover, --accent-glow, --border. */
+
+  /* Status colours read on the dark background.  Authentic uses
+   * a tuned green; mismatch uses a tuned red; warning uses an
+   * amber.  Each has a matching ``-glow`` for the result card
+   * background tint, mirroring --accent-glow's pattern. */
   .verify-page {
+    --ok: #4ADE80;
+    --ok-glow: rgba(74, 222, 128, 0.10);
+    --bad: #F87171;
+    --bad-glow: rgba(248, 113, 113, 0.10);
+    --warn: #FBBF24;
+    --warn-glow: rgba(251, 191, 36, 0.10);
+
     min-height: 80vh;
     padding: 4rem 0 6rem;
-    background: linear-gradient(180deg, #fafaf7 0%, #f5f4ee 100%);
+    background: var(--bg);
+    color: var(--text);
   }
   .verify-stage {
     max-width: 640px;
@@ -93,19 +110,19 @@ import BaseLayout from '../layouts/BaseLayout.astro';
   .eyebrow {
     font-size: 0.7rem;
     letter-spacing: 0.18em;
-    color: #8a8a8a;
+    color: var(--accent);
     font-weight: 700;
     margin: 0 0 0.5rem;
   }
   .verify-head h1 {
     font-size: clamp(2rem, 5vw, 2.75rem);
     line-height: 1.1;
-    color: #1a1a1a;
+    color: var(--text);
     margin: 0 0 0.75rem;
     letter-spacing: -0.02em;
   }
   .lead {
-    color: #555;
+    color: var(--text-muted);
     font-size: 1.05rem;
     line-height: 1.55;
     max-width: 32rem;
@@ -113,28 +130,28 @@ import BaseLayout from '../layouts/BaseLayout.astro';
   }
 
   .verify-form {
-    background: #fff;
-    border-radius: 16px;
+    background: var(--bg-card);
+    border-radius: 14px;
     padding: 1.75rem;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.04);
-    border: 1px solid rgba(0, 0, 0, 0.06);
+    border: 1px solid var(--border);
   }
 
   .dropzone {
     display: block;
-    border: 2px dashed #cfcfc8;
+    border: 2px dashed var(--border);
     border-radius: 12px;
     padding: 2.5rem 1.5rem;
     text-align: center;
     cursor: pointer;
-    transition: border-color 0.15s ease, background 0.15s ease;
-    color: #6a6a6a;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+    color: var(--text-muted);
+    background: var(--bg-code);
   }
   .dropzone:hover,
   .dropzone.is-active {
-    border-color: #1a1a1a;
-    background: #fafaf7;
-    color: #1a1a1a;
+    border-color: var(--accent);
+    background: var(--accent-glow);
+    color: var(--text);
   }
   .dropzone input[type="file"] {
     position: absolute;
@@ -148,17 +165,17 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     border: 0;
   }
   .dropzone-inner svg {
-    color: #8a8a8a;
+    color: var(--accent);
     margin-bottom: 0.75rem;
   }
   .dropzone-prompt {
     margin: 0 0 0.25rem;
-    color: #1a1a1a;
+    color: var(--text);
     font-size: 1.05rem;
   }
   .dropzone-meta {
     margin: 0;
-    color: #8a8a8a;
+    color: var(--text-muted);
     font-size: 0.85rem;
   }
 
@@ -169,31 +186,35 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     gap: 0.45rem;
   }
   .release-row label {
-    color: #1a1a1a;
+    color: var(--text);
     font-size: 0.95rem;
     font-weight: 600;
   }
   .release-id-hint {
-    color: #8a8a8a;
+    color: var(--text-muted);
     font-weight: 400;
     font-size: 0.85rem;
     margin-left: 0.4rem;
   }
   .release-row input {
+    width: 100%;
+    min-width: 0;
     padding: 0.7rem 0.9rem;
     font-size: 0.95rem;
-    border: 1px solid #cfcfc8;
+    border: 1px solid var(--border);
     border-radius: 8px;
-    background: #fafaf7;
-    color: #1a1a1a;
+    background: var(--bg-code);
+    color: var(--text);
     transition: border-color 0.15s ease, background 0.15s ease;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-family: var(--mono);
     letter-spacing: 0.01em;
+    text-overflow: ellipsis;
   }
+  .release-row input::placeholder { color: #555; }
   .release-row input:focus {
     outline: none;
-    border-color: #1a1a1a;
-    background: #fff;
+    border-color: var(--accent);
+    background: var(--bg);
   }
 
   .verify-submit {
@@ -202,29 +223,31 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     padding: 0.9rem 1.25rem;
     font-size: 1rem;
     font-weight: 600;
-    color: #fafaf7;
-    background: #1a1a1a;
+    color: #fff;
+    background: var(--accent);
     border: 0;
     border-radius: 10px;
     cursor: pointer;
-    transition: background 0.15s ease, transform 0.05s ease;
+    transition: background 0.15s ease, transform 0.05s ease, opacity 0.15s ease;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
+    font-family: inherit;
   }
   .verify-submit:disabled {
-    background: #cfcfc8;
+    background: var(--border);
+    color: var(--text-muted);
     cursor: not-allowed;
   }
-  .verify-submit:not(:disabled):hover { background: #2a2a2a; }
+  .verify-submit:not(:disabled):hover { background: var(--accent-hover); }
   .verify-submit:not(:disabled):active { transform: translateY(1px); }
   .btn-spinner {
     display: none;
     width: 14px;
     height: 14px;
     border: 2px solid rgba(255, 255, 255, 0.3);
-    border-top-color: #fafaf7;
+    border-top-color: #fff;
     border-radius: 50%;
     animation: spin 0.7s linear infinite;
   }
@@ -236,21 +259,26 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     margin-top: 1.75rem;
     padding: 1.5rem;
     border-radius: 14px;
-    border: 1px solid rgba(0, 0, 0, 0.06);
-    background: #fff;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.04);
+    border: 1px solid var(--border);
+    background: var(--bg-card);
   }
   .verify-result.is-authentic {
-    border-color: #2e8b57;
-    background: linear-gradient(180deg, #f3fbf5 0%, #fff 100%);
+    border-color: var(--ok);
+    background:
+      linear-gradient(180deg, var(--ok-glow) 0%, transparent 60%),
+      var(--bg-card);
   }
   .verify-result.is-mismatch {
-    border-color: #b03030;
-    background: linear-gradient(180deg, #fdf3f3 0%, #fff 100%);
+    border-color: var(--bad);
+    background:
+      linear-gradient(180deg, var(--bad-glow) 0%, transparent 60%),
+      var(--bg-card);
   }
   .verify-result.is-warning {
-    border-color: #b07c2c;
-    background: linear-gradient(180deg, #fef9ec 0%, #fff 100%);
+    border-color: var(--warn);
+    background:
+      linear-gradient(180deg, var(--warn-glow) 0%, transparent 60%),
+      var(--bg-card);
   }
   .result-headline {
     display: flex;
@@ -258,17 +286,17 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     gap: 0.65rem;
     font-size: 1.45rem;
     font-weight: 700;
-    color: #1a1a1a;
+    color: var(--text);
     margin: 0 0 0.5rem;
   }
-  .verify-result.is-authentic .result-headline { color: #1f6f3f; }
-  .verify-result.is-mismatch .result-headline { color: #8a2424; }
-  .verify-result.is-warning .result-headline { color: #8a5a18; }
+  .verify-result.is-authentic .result-headline { color: var(--ok); }
+  .verify-result.is-mismatch .result-headline { color: var(--bad); }
+  .verify-result.is-warning .result-headline { color: var(--warn); }
   .result-icon {
     font-size: 1.3rem;
   }
   .result-reason {
-    color: #2a2a2a;
+    color: var(--text);
     line-height: 1.55;
     margin: 0 0 1rem;
   }
@@ -277,29 +305,31 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     grid-template-columns: max-content 1fr;
     gap: 0.4rem 1rem;
     font-size: 0.85rem;
-    color: #555;
+    color: var(--text-muted);
   }
   .result-meta dt {
     font-weight: 600;
-    color: #8a8a8a;
+    color: var(--text-muted);
     margin: 0;
   }
   .result-meta dd {
     margin: 0;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    color: #2a2a2a;
+    font-family: var(--mono);
+    color: var(--text);
     word-break: break-all;
   }
 
   .verify-help {
     margin-top: 2rem;
-    color: #6a6a6a;
+    color: var(--text-muted);
     font-size: 0.9rem;
     line-height: 1.55;
   }
   .verify-help code {
-    background: #ededed;
-    padding: 0 4px;
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    padding: 0 6px;
     border-radius: 4px;
     font-size: 0.85em;
   }
