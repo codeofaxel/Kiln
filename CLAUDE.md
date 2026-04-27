@@ -82,32 +82,50 @@ If you reach for a trademark to convey the vibe, that's a signal
 your prose is leaning on someone else's brand instead of describing
 your own product. Rewrite around the actual mechanic.
 
-### Public Kiln describes interfaces, not paid features
-Public Kiln docstrings, comments, and READMEs MUST NOT describe
-kiln-pro's paid features in vivid marketing language. Public Kiln
-describes the **interface contract** (what the metadata dict
-expects, what the response shape looks like) and lets kiln-pro own
-its own copy.
+### Public Kiln describes interfaces — name kiln-pro, skip the strategy
+Public Kiln docstrings, comments, and READMEs MAY name kiln-pro
+and MAY link `https://kiln3d.com` (or `/pricing`) — that's a
+funnel, not a leak — and MAY note in one short sentence which
+tier a feature requires when public-side metadata surfaces it
+(e.g. "Multi-language and co-brand are kiln-pro Business+
+features"). What they MUST NOT contain:
+
+  * Internal product-thinking codenames or session shorthand:
+    "velvet-rope upsell", "iPhone-moment", "war-room",
+    "judges-panel", "Steve says", "per Jony's note",
+    "round 4 of the panel". None of these are co-authors and
+    none of them ship to a public package.
+  * Tier-by-tier behavior breakdowns ("Free → returns X,
+    Pro+ → returns Y, Business+ → returns Z"). That belongs in
+    kiln-pro's own docstring; public Kiln describes the
+    **interface contract**: "when the plugin is installed, the
+    response may include an `assembly_manual` field with this
+    shape."
+  * Vivid marketing prose. Linking the pricing page is the
+    funnel; rephrasing the pricing page in the docstring is not.
 
 Bad public-Kiln docstring:
 ```
-When the caller passes ``metadata["assembly_json"]``, an IKEA-style
-multilingual assembly manual with co-branding and watermark is
-generated...
+When the caller passes ``metadata["assembly_json"]`` and the user
+is on Pro+, an IKEA-style multilingual manual is generated with
+the iPhone-moment auto-trigger; Free-tier callers see a one-time
+velvet-rope upsell.
 ```
 
 Good public-Kiln docstring:
 ```
-When ``metadata["assembly_json"]`` is provided AND a kiln-pro
-extension is installed, the response may include an
-``assembly_manual`` field. See kiln-pro docs for behavior.
+When ``metadata["assembly_json"]`` is provided and kiln-pro
+(https://kiln3d.com) is installed, the response includes an
+``assembly_manual`` field with the cached or expected PDF path.
+Multi-language and co-brand are kiln-pro Business+ features
+(https://kiln3d.com/pricing).
 ```
 
 Why: any user can `pip show kiln3d` and read the public docstring.
-Marketing copy belongs on kiln3d.com or in kiln-pro's own surfaces,
-not bleeding through the public package's API documentation. The
-2026-04-27 cross-repo leak (above) was driven by exactly this
-mistake.
+Naming kiln-pro and linking the pricing page is a funnel; leaking
+codenames or pricing logic is not. The 2026-04-27 incident
+overcorrected and stripped the kiln-pro name entirely, killing
+the funnel; the rule above is the corrected version.
 
 ### Files Never to Commit
 - `.env`, credentials, API keys, access tokens

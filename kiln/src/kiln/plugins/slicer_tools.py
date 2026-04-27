@@ -170,25 +170,19 @@ def _auto_wrap_bambu_3mf(
 
 
 def _maybe_auto_assembly_manual(metadata: dict) -> dict | None:
-    """Optional kiln-pro hook: route ``slice_and_print`` metadata to the
-    assembly-manual auto-trigger.
+    """Optional plugin hook: route ``slice_and_print`` metadata through
+    kiln-pro's assembly-manual generator if it's installed.
 
-    Called from :func:`slice_and_print` when the caller passes an
-    ``assembly_json`` key in ``metadata``.  Behaviour:
-
-    * No-op (returns ``None``) if kiln-pro isn't installed — keeps
-      the public Kiln package free of mandatory pro dependencies.
-    * Free tier → returns dict with ``upsell_text`` set (one-time
-      velvet rope) and ``skipped=True``.
-    * Pro+ multi-part → returns dict with ``cached_path`` (cache hit)
-      or ``pending=True`` + ``expected_path`` (cache miss, generation
-      runs in the background and never blocks the print).
-
+    Returns ``None`` when kiln-pro isn't installed — public Kiln keeps
+    no mandatory dependency on it.  When installed it returns a
+    JSON-friendly dict the caller can pass through to the user
+    verbatim (cached PDF path, pending status, or an upsell hint).
     All errors are caught — never raises out to the print pipeline.
-    The returned dict is the kiln-pro
-    :class:`AutoTriggerResult` flattened to JSON-friendly keys, so
-    the slice-and-print response can carry it straight back to the
-    caller.
+
+    Multi-language manuals and co-brand wordmarks are kiln-pro
+    Business+ features (https://kiln3d.com/pricing); the metadata
+    keys for them are accepted at every tier and ignored where the
+    tier doesn't allow.
     """
     try:
         from kiln_pro.manuals.auto_trigger import (
@@ -206,7 +200,6 @@ def _maybe_auto_assembly_manual(metadata: dict) -> dict | None:
             co_brand_name=metadata.get("manual_co_brand_name"),
             languages=metadata.get("manual_languages"),
             cover_language=metadata.get("manual_cover_language"),
-            tenant_id=metadata.get("tenant_id"),
         )
     except Exception as exc:  # noqa: BLE001 — never block slice_and_print
         _logger.info("auto_assembly_manual integration failed: %s", exc)
@@ -701,21 +694,19 @@ class _SlicerToolsPlugin:
                     auto-selection (e.g. ``"prusa_mini"``).
                 material: Filament material (e.g. ``"PLA"``, ``"ABS"``).  Affects
                     automatic brim/raft decisions.
-                metadata: Optional dict of pass-through hooks consumed by
-                    optional kiln-pro features.  When
-                    ``metadata["assembly_json"]`` is present AND
-                    kiln-pro is installed AND the caller is on Pro+,
-                    a flat-pack-style assembly manual is generated in the
-                    background alongside the print and surfaced under
-                    ``response["assembly_manual"]`` with the cached or
-                    expected PDF path.  Free-tier callers see a
-                    one-time velvet-rope upsell; the integration
-                    no-ops silently if kiln-pro isn't installed.
-                    Recognised keys (all optional): ``assembly_json``,
-                    ``manual_output_dir``, ``manual_design_name``,
-                    ``manual_branding``, ``manual_co_brand_name``,
-                    ``manual_languages``, ``manual_cover_language``,
-                    ``tenant_id``.
+                metadata: Optional dict of pass-through fields.  When
+                    kiln-pro (https://kiln3d.com) is installed it
+                    consumes keys here to generate a printable
+                    assembly manual alongside the print, surfacing it
+                    under ``response["assembly_manual"]``.  Without
+                    kiln-pro the metadata is silently ignored.
+                    Recognised keys (all optional):
+                    ``assembly_json``, ``manual_output_dir``,
+                    ``manual_design_name``, ``manual_branding``,
+                    ``manual_co_brand_name``, ``manual_languages``,
+                    ``manual_cover_language``.  Multi-language and
+                    co-brand are kiln-pro Business+ features
+                    (https://kiln3d.com/pricing).
 
             Combines ``slice_model``, ``upload_file``, and ``start_print`` into
             a single action.
@@ -994,13 +985,9 @@ class _SlicerToolsPlugin:
                 if ams_routing_warnings:
                     resp["warnings"] = ams_routing_warnings
 
-                # Optional kiln-pro hook: when the caller passes an
-                # assembly_json in metadata, fire the auto-trigger so a
-                # Pro+ user gets a flat-pack-style assembly manual generated
-                # alongside the print.  No-op when kiln-pro isn't
-                # installed.  Tier checks (Free → velvet-rope upsell,
-                # Pro+ → manual generated) live inside kiln-pro; this
-                # hook just routes metadata through without blocking.
+                # kiln-pro hook: when installed, generate an assembly
+                # manual alongside the print and add it to the
+                # response.  No-op when kiln-pro isn't installed.
                 if metadata and metadata.get("assembly_json"):
                     auto_manual = _maybe_auto_assembly_manual(metadata)
                     if auto_manual is not None:
