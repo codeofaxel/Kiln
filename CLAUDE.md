@@ -54,6 +54,61 @@ When you catch a slip-up in existing committed code (e.g. an old
 it in the next natural content commit on that file — don't open a
 dedicated cleanup PR for it.
 
+### Never namedrop third-party trademarks as shorthand
+Trademarks like "IKEA", "LEGO", "Apple", "Tesla", "Bambu" (when
+referring to anyone other than the actual Bambu printers we
+integrate with), etc., are NOT shorthand for a category. Don't use
+them as flavor in:
+
+- Commit messages (this repo is public — every commit ships)
+- Code comments and docstrings
+- File names, branch names, function names, variable names
+- PR / issue descriptions
+- ANY artifact that gets committed
+
+The 2026-04-27 incident: a kiln-pro session-shorthand habit ("IKEA-
+style assembly manual") leaked into the public Kiln `slice_and_print`
+docstring AND into 2 public-Kiln commit messages. Source code was
+scrubbed in a follow-up commit but the commit-message leaks remain
+on pushed history because rewriting shared history is destructive.
+
+The rule: describe what the code DOES in neutral category language.
+
+Bad:  `IKEA-style assembly manual is generated`
+Good: `flat-pack-style PDF assembly manual is generated`
+Best: `a multi-page PDF assembly manual is generated`
+
+If you reach for a trademark to convey the vibe, that's a signal
+your prose is leaning on someone else's brand instead of describing
+your own product. Rewrite around the actual mechanic.
+
+### Public Kiln describes interfaces, not paid features
+Public Kiln docstrings, comments, and READMEs MUST NOT describe
+kiln-pro's paid features in vivid marketing language. Public Kiln
+describes the **interface contract** (what the metadata dict
+expects, what the response shape looks like) and lets kiln-pro own
+its own copy.
+
+Bad public-Kiln docstring:
+```
+When the caller passes ``metadata["assembly_json"]``, an IKEA-style
+multilingual assembly manual with co-branding and watermark is
+generated...
+```
+
+Good public-Kiln docstring:
+```
+When ``metadata["assembly_json"]`` is provided AND a kiln-pro
+extension is installed, the response may include an
+``assembly_manual`` field. See kiln-pro docs for behavior.
+```
+
+Why: any user can `pip show kiln3d` and read the public docstring.
+Marketing copy belongs on kiln3d.com or in kiln-pro's own surfaces,
+not bleeding through the public package's API documentation. The
+2026-04-27 cross-repo leak (above) was driven by exactly this
+mistake.
+
 ### Files Never to Commit
 - `.env`, credentials, API keys, access tokens
 - `tasks.md` / `task.md` (gitignored — private task tracking)
