@@ -1,0 +1,474 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Verify Assembly Manual — Kiln"
+  description="Verify that an assembly manual PDF or 3MF is the official, untampered version signed by the kit-maker. Drop the file, get a verified or mismatch answer."
+  keywords={[
+    'verify assembly manual',
+    '3d printing manual authenticity',
+    'kit-maker signed manual',
+    'kiln verify',
+  ]}
+>
+  <main class="verify-page">
+    <section class="container verify-stage">
+      <header class="verify-head">
+        <p class="eyebrow">AUTHENTICITY CHECK</p>
+        <h1>Is your manual the real one?</h1>
+        <p class="lead">
+          Drop the PDF or 3MF you received. We'll re-check the kit-maker's
+          signature and confirm the file you have is the exact one they
+          signed for this release.
+        </p>
+      </header>
+
+      <form id="verify-form" class="verify-form" novalidate>
+        <label for="verify-file" class="dropzone" id="dropzone">
+          <input
+            id="verify-file"
+            name="file"
+            type="file"
+            accept=".pdf,.3mf,application/pdf"
+          />
+          <div class="dropzone-inner">
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+              <path d="M24 32V12M24 12L14 22M24 12L34 22" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M8 32V36C8 38.2091 9.79086 40 12 40H36C38.2091 40 40 38.2091 40 36V32" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            <p class="dropzone-prompt"><strong>Click or drop a PDF / 3MF</strong></p>
+            <p class="dropzone-meta" id="file-meta">No file selected.</p>
+          </div>
+        </label>
+
+        <div class="release-row">
+          <label for="release-id">
+            Release ID
+            <span class="release-id-hint">(optional — auto-detected for 3MFs)</span>
+          </label>
+          <input
+            id="release-id"
+            name="release_id"
+            type="text"
+            inputmode="text"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Paste the release ID from the kit-maker's listing or QR"
+          />
+        </div>
+
+        <button type="submit" class="verify-submit" id="verify-submit" disabled>
+          <span class="btn-label">Verify</span>
+          <span class="btn-spinner" aria-hidden="true"></span>
+        </button>
+      </form>
+
+      <div id="verify-result" class="verify-result" hidden></div>
+
+      <p class="verify-help">
+        Don't have a release ID? If the file you got is a Kiln-augmented
+        <code>.3mf</code>, the release ID is embedded inside — just drop
+        the file and we'll find it. Otherwise, ask the kit-maker for it
+        (it's often on their Etsy listing or the print's QR code).
+      </p>
+    </section>
+  </main>
+</BaseLayout>
+
+<style>
+  .verify-page {
+    min-height: 80vh;
+    padding: 4rem 0 6rem;
+    background: linear-gradient(180deg, #fafaf7 0%, #f5f4ee 100%);
+  }
+  .verify-stage {
+    max-width: 640px;
+    margin: 0 auto;
+  }
+  .verify-head {
+    text-align: center;
+    margin-bottom: 2.5rem;
+  }
+  .eyebrow {
+    font-size: 0.7rem;
+    letter-spacing: 0.18em;
+    color: #8a8a8a;
+    font-weight: 700;
+    margin: 0 0 0.5rem;
+  }
+  .verify-head h1 {
+    font-size: clamp(2rem, 5vw, 2.75rem);
+    line-height: 1.1;
+    color: #1a1a1a;
+    margin: 0 0 0.75rem;
+    letter-spacing: -0.02em;
+  }
+  .lead {
+    color: #555;
+    font-size: 1.05rem;
+    line-height: 1.55;
+    max-width: 32rem;
+    margin: 0 auto;
+  }
+
+  .verify-form {
+    background: #fff;
+    border-radius: 16px;
+    padding: 1.75rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.04);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+  }
+
+  .dropzone {
+    display: block;
+    border: 2px dashed #cfcfc8;
+    border-radius: 12px;
+    padding: 2.5rem 1.5rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+    color: #6a6a6a;
+  }
+  .dropzone:hover,
+  .dropzone.is-active {
+    border-color: #1a1a1a;
+    background: #fafaf7;
+    color: #1a1a1a;
+  }
+  .dropzone input[type="file"] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .dropzone-inner svg {
+    color: #8a8a8a;
+    margin-bottom: 0.75rem;
+  }
+  .dropzone-prompt {
+    margin: 0 0 0.25rem;
+    color: #1a1a1a;
+    font-size: 1.05rem;
+  }
+  .dropzone-meta {
+    margin: 0;
+    color: #8a8a8a;
+    font-size: 0.85rem;
+  }
+
+  .release-row {
+    margin-top: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+  .release-row label {
+    color: #1a1a1a;
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+  .release-id-hint {
+    color: #8a8a8a;
+    font-weight: 400;
+    font-size: 0.85rem;
+    margin-left: 0.4rem;
+  }
+  .release-row input {
+    padding: 0.7rem 0.9rem;
+    font-size: 0.95rem;
+    border: 1px solid #cfcfc8;
+    border-radius: 8px;
+    background: #fafaf7;
+    color: #1a1a1a;
+    transition: border-color 0.15s ease, background 0.15s ease;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    letter-spacing: 0.01em;
+  }
+  .release-row input:focus {
+    outline: none;
+    border-color: #1a1a1a;
+    background: #fff;
+  }
+
+  .verify-submit {
+    margin-top: 1.5rem;
+    width: 100%;
+    padding: 0.9rem 1.25rem;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #fafaf7;
+    background: #1a1a1a;
+    border: 0;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.05s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+  }
+  .verify-submit:disabled {
+    background: #cfcfc8;
+    cursor: not-allowed;
+  }
+  .verify-submit:not(:disabled):hover { background: #2a2a2a; }
+  .verify-submit:not(:disabled):active { transform: translateY(1px); }
+  .btn-spinner {
+    display: none;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #fafaf7;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  .verify-submit.is-loading .btn-spinner { display: inline-block; }
+  .verify-submit.is-loading .btn-label { opacity: 0.8; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .verify-result {
+    margin-top: 1.75rem;
+    padding: 1.5rem;
+    border-radius: 14px;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.04);
+  }
+  .verify-result.is-authentic {
+    border-color: #2e8b57;
+    background: linear-gradient(180deg, #f3fbf5 0%, #fff 100%);
+  }
+  .verify-result.is-mismatch {
+    border-color: #b03030;
+    background: linear-gradient(180deg, #fdf3f3 0%, #fff 100%);
+  }
+  .verify-result.is-warning {
+    border-color: #b07c2c;
+    background: linear-gradient(180deg, #fef9ec 0%, #fff 100%);
+  }
+  .result-headline {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    font-size: 1.45rem;
+    font-weight: 700;
+    color: #1a1a1a;
+    margin: 0 0 0.5rem;
+  }
+  .verify-result.is-authentic .result-headline { color: #1f6f3f; }
+  .verify-result.is-mismatch .result-headline { color: #8a2424; }
+  .verify-result.is-warning .result-headline { color: #8a5a18; }
+  .result-icon {
+    font-size: 1.3rem;
+  }
+  .result-reason {
+    color: #2a2a2a;
+    line-height: 1.55;
+    margin: 0 0 1rem;
+  }
+  .result-meta {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.4rem 1rem;
+    font-size: 0.85rem;
+    color: #555;
+  }
+  .result-meta dt {
+    font-weight: 600;
+    color: #8a8a8a;
+    margin: 0;
+  }
+  .result-meta dd {
+    margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: #2a2a2a;
+    word-break: break-all;
+  }
+
+  .verify-help {
+    margin-top: 2rem;
+    color: #6a6a6a;
+    font-size: 0.9rem;
+    line-height: 1.55;
+  }
+  .verify-help code {
+    background: #ededed;
+    padding: 0 4px;
+    border-radius: 4px;
+    font-size: 0.85em;
+  }
+</style>
+
+<script>
+  // Public verifier — POSTs to api.kiln3d.com which runs the same
+  // two-factor verification logic the Pro+ MCP tool does, but
+  // unauthenticated.  See kiln_pro/_rest/public_verify.py.
+  const API_ENDPOINT = 'https://api.kiln3d.com/api/public/verify';
+
+  const fileInput = document.getElementById('verify-file') as HTMLInputElement;
+  const dropzone = document.getElementById('dropzone') as HTMLLabelElement;
+  const fileMeta = document.getElementById('file-meta') as HTMLElement;
+  const releaseInput = document.getElementById('release-id') as HTMLInputElement;
+  const submitBtn = document.getElementById('verify-submit') as HTMLButtonElement;
+  const form = document.getElementById('verify-form') as HTMLFormElement;
+  const resultBox = document.getElementById('verify-result') as HTMLElement;
+
+  // Preload release_id from query string when QR codes deep-link in.
+  const params = new URLSearchParams(window.location.search);
+  const preloadedReleaseId = params.get('release_id') || params.get('r');
+  if (preloadedReleaseId) {
+    releaseInput.value = preloadedReleaseId;
+  }
+
+  function fmtBytes(n: number): string {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function refreshState(): void {
+    const f = fileInput.files?.[0];
+    if (f) {
+      fileMeta.textContent = `${f.name} · ${fmtBytes(f.size)}`;
+      submitBtn.disabled = false;
+    } else {
+      fileMeta.textContent = 'No file selected.';
+      submitBtn.disabled = true;
+    }
+  }
+
+  fileInput.addEventListener('change', refreshState);
+
+  // Drag-and-drop affordance — the dropzone label already triggers
+  // the file input on click, but native drop sets the dataTransfer
+  // not the input value, so we wire it explicitly.
+  ['dragenter', 'dragover'].forEach((ev) => {
+    dropzone.addEventListener(ev, (e) => {
+      e.preventDefault();
+      dropzone.classList.add('is-active');
+    });
+  });
+  ['dragleave', 'drop'].forEach((ev) => {
+    dropzone.addEventListener(ev, (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('is-active');
+    });
+  });
+  dropzone.addEventListener('drop', (e) => {
+    const dt = (e as DragEvent).dataTransfer;
+    if (dt?.files && dt.files.length > 0) {
+      fileInput.files = dt.files;
+      refreshState();
+    }
+  });
+
+  function renderResult(html: string, kind: 'authentic' | 'mismatch' | 'warning'): void {
+    resultBox.innerHTML = html;
+    resultBox.classList.remove('is-authentic', 'is-mismatch', 'is-warning');
+    resultBox.classList.add(`is-${kind}`);
+    resultBox.hidden = false;
+    resultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function escapeHtml(s: string): string {
+    return s
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;');
+  }
+
+  function fmtTimestamp(ts: number | string | null | undefined): string {
+    if (!ts) return '—';
+    const n = typeof ts === 'string' ? parseFloat(ts) : ts;
+    if (!isFinite(n)) return String(ts);
+    const d = new Date(n * 1000);
+    return d.toISOString().slice(0, 10);
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = fileInput.files?.[0];
+    if (!f) return;
+
+    submitBtn.classList.add('is-loading');
+    submitBtn.disabled = true;
+    resultBox.hidden = true;
+
+    const fd = new FormData();
+    fd.append('file', f);
+    if (releaseInput.value.trim()) {
+      fd.append('release_id', releaseInput.value.trim());
+    }
+
+    try {
+      const res = await fetch(API_ENDPOINT, { method: 'POST', body: fd });
+      const json = await res.json();
+
+      if (json.status === 'error') {
+        const code = json.code || 'UNKNOWN';
+        const reason = json.error || 'Unknown error.';
+        const headline =
+          code === 'RELEASE_NOT_FOUND'
+            ? 'Release not found'
+            : code === 'THREE_MF_NO_MANUAL'
+              ? 'No embedded manual'
+              : code === 'INVALID_INPUT'
+                ? 'Need a release ID'
+                : 'Could not verify';
+        renderResult(
+          `<h2 class="result-headline"><span class="result-icon">⚠</span>${escapeHtml(headline)}</h2>` +
+            `<p class="result-reason">${escapeHtml(reason)}</p>`,
+          'warning',
+        );
+        return;
+      }
+
+      const d = json.data || {};
+      const authentic = !!d.authentic;
+      const reason = d.reason || (authentic ? 'Verified.' : 'Could not verify.');
+      const headline = authentic ? 'Verified' : 'Mismatch';
+      const icon = authentic ? '✓' : '✗';
+
+      const meta: [string, string][] = [];
+      if (d.design_id) meta.push(['Design', String(d.design_id)]);
+      if (d.release_name) meta.push(['Release', String(d.release_name)]);
+      if (d.public_key_fingerprint)
+        meta.push(['Signing key', String(d.public_key_fingerprint)]);
+      if (d.signed_at !== undefined && d.signed_at !== null)
+        meta.push(['Signed', fmtTimestamp(d.signed_at)]);
+      if (d.buyer_pdf_hash)
+        meta.push(['Your PDF SHA-256', `${String(d.buyer_pdf_hash).slice(0, 32)}…`]);
+      if (d.manifest_hash && d.manifest_hash !== d.buyer_pdf_hash)
+        meta.push(['Signed PDF SHA-256', `${String(d.manifest_hash).slice(0, 32)}…`]);
+
+      const metaHtml = meta
+        .map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`)
+        .join('');
+
+      renderResult(
+        `<h2 class="result-headline"><span class="result-icon">${icon}</span>${headline}</h2>` +
+          `<p class="result-reason">${escapeHtml(reason)}</p>` +
+          (metaHtml ? `<dl class="result-meta">${metaHtml}</dl>` : ''),
+        authentic ? 'authentic' : 'mismatch',
+      );
+    } catch (err) {
+      renderResult(
+        `<h2 class="result-headline"><span class="result-icon">⚠</span>Could not reach the verifier</h2>` +
+          `<p class="result-reason">${escapeHtml(String(err))} — check your connection and try again.</p>`,
+        'warning',
+      );
+    } finally {
+      submitBtn.classList.remove('is-loading');
+      submitBtn.disabled = !fileInput.files?.[0];
+    }
+  });
+
+  refreshState();
+</script>
