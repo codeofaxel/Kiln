@@ -705,7 +705,7 @@ class _SlicerToolsPlugin:
                     optional kiln-pro features.  When
                     ``metadata["assembly_json"]`` is present AND
                     kiln-pro is installed AND the caller is on Pro+,
-                    an IKEA-style assembly manual is generated in the
+                    a flat-pack-style assembly manual is generated in the
                     background alongside the print and surfaced under
                     ``response["assembly_manual"]`` with the cached or
                     expected PDF path.  Free-tier callers see a
@@ -996,7 +996,7 @@ class _SlicerToolsPlugin:
 
                 # Optional kiln-pro hook: when the caller passes an
                 # assembly_json in metadata, fire the auto-trigger so a
-                # Pro+ user gets an IKEA-style assembly manual generated
+                # Pro+ user gets a flat-pack-style assembly manual generated
                 # alongside the print.  No-op when kiln-pro isn't
                 # installed.  Tier checks (Free → velvet-rope upsell,
                 # Pro+ → manual generated) live inside kiln-pro; this
