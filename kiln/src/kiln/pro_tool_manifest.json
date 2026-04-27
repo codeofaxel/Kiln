@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-27T11:48:26.941602+00:00",
-  "tool_count": 294,
+  "generated": "2026-04-27T18:36:58.036435+00:00",
+  "tool_count": 295,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -296,6 +296,78 @@
           }
         },
         "title": "diff_assembly_manualsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "embed_manual_in_3mf",
+      "description": "Augment a 3MF with the assembly manual + signed manifest (Pro+).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "assembly_manuals",
+      "parameters": {
+        "properties": {
+          "threemf_path": {
+            "title": "Threemf Path",
+            "type": "string"
+          },
+          "output_path": {
+            "title": "Output Path",
+            "type": "string"
+          },
+          "manual_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Manual Id"
+          },
+          "pdf_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pdf Path"
+          },
+          "spec_json_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Spec Json Path"
+          },
+          "release_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Release Id"
+          }
+        },
+        "required": [
+          "threemf_path",
+          "output_path"
+        ],
+        "title": "embed_manual_in_3mfArguments",
         "type": "object"
       }
     },
