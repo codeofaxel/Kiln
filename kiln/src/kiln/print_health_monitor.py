@@ -1083,6 +1083,15 @@ class PrintHealthMonitor:
                 # enough data has accumulated.
                 self._maybe_record_predictive_signals(session)
 
+                # Reactive (detective) failure detection — runs the
+                # threshold-based detectors against the current health
+                # report so conditions that have ALREADY crossed a
+                # critical line (thermal runaway, communication loss,
+                # filament runout, etc.) produce a FailureReport the
+                # recovery pipeline can act on.  See
+                # :meth:`_maybe_detect_failure` for the rationale.
+                self._maybe_detect_failure(session, report)
+
             except KeyError:
                 logger.error(
                     "Printer %s not found in registry, stopping monitor",
@@ -1376,15 +1385,25 @@ class PrintHealthMonitor:
     def _telemetry_from_health_report(
         report: PrinterHealthReport,
     ) -> dict[str, Any]:
-        """Translate a health report into a predict_risk-shaped telemetry dict.
+        """Translate a health report into a telemetry dict.
 
-        ``predict_risk`` consumes ``hotend_temp``/``hotend_target`` /
-        ``bed_temp``/``bed_target`` keys with a ``timestamp`` for slope
-        calculations.  Health reports carry the same data under
-        :class:`HealthMetric` objects keyed by ``metric_name``; this
-        helper flattens the relevant ones into the predictor's expected
-        shape.  Missing metrics are silently skipped — the predictor
-        already handles None / missing values.
+        Used by both the predictive (predict_risk) and detective
+        (PrintRecovery.detect_failure) pipelines.  Both consumers read
+        the same key shape — ``hotend_temp`` / ``hotend_target`` /
+        ``bed_temp`` / ``bed_target`` for thermal logic, ``connected``
+        for comms loss, ``filament_detected`` for runout, and
+        ``timestamp`` for slope calculations.
+
+        Health reports carry the same data under :class:`HealthMetric`
+        objects keyed by ``metric_name``; this helper flattens the
+        relevant ones into the consumers' expected shape.  Note: temp
+        metrics surface ``current_value`` (the raw observed value) —
+        detect_failure compares against ``hotend_target`` to decide if
+        the delta crosses runaway thresholds, not against the deviation
+        itself.
+
+        Missing metrics are silently skipped — both consumers already
+        handle None / missing values.
         """
         telemetry: dict[str, Any] = {"timestamp": report.checked_at}
         for m in report.metrics:
@@ -1394,6 +1413,13 @@ class PrintHealthMonitor:
             elif m.metric_name == "bed_temperature":
                 telemetry["bed_temp"] = m.current_value
                 telemetry["bed_target"] = m.expected_value
+            elif m.metric_name == "connection_status":
+                # current_value is 1.0 if connected else 0.0; the
+                # detector reads ``connected is False`` so map to bool.
+                telemetry["connected"] = m.current_value >= 0.5
+            elif m.metric_name == "filament_sensor":
+                # Same shape: 1.0 means filament detected.
+                telemetry["filament_detected"] = m.current_value >= 0.5
         return telemetry
 
     def _maybe_record_predictive_signals(
@@ -1463,6 +1489,208 @@ class PrintHealthMonitor:
                     session.session_id,
                     exc,
                 )
+
+    # Maps PrintRecovery's severity scale (critical/high/medium/low) onto
+    # the report_issue confidence scale.  ``critical`` and ``high`` sit
+    # above the default 0.8 auto-pause threshold so a real-time runaway
+    # or comms loss drives a pause; ``medium`` and ``low`` stay visible
+    # in the issue stream but don't trip pause.
+    _DETECTIVE_SEVERITY_TO_CONFIDENCE: dict[str, float] = {
+        "critical": 1.0,
+        "high": 0.85,
+        "medium": 0.6,
+        "low": 0.4,
+    }
+
+    def _maybe_detect_failure(
+        self,
+        session: MonitorSession,
+        report: PrinterHealthReport,
+    ) -> None:
+        """Run the reactive failure detector on the latest health report.
+
+        Detective alongside predictive — every monitor tick runs both
+        engines so we catch (a) trends approaching failure (predictive)
+        and (b) conditions that have already crossed thresholds
+        (detective).  Both surface as issues; both feed the same
+        auto-pause path.
+
+        The recovery engine returns a :class:`FailureReport` when a
+        threshold is crossed.  This helper:
+
+        * Translates the latest health metrics into a telemetry dict
+          shape ``PrintRecovery.detect_failure`` accepts (raw current
+          temps, connected/filament booleans).
+        * Calls the singleton recovery engine with a job_info dict
+          synthesised from the session.
+        * Maps ``failure.severity`` → ``report_issue`` confidence via
+          :attr:`_DETECTIVE_SEVERITY_TO_CONFIDENCE` so critical/high
+          findings clear the auto-pause threshold while medium/low
+          stay visible but non-pausing.
+        * Annotates the recorded issue with ``failure_id`` so
+          downstream consumers can correlate the issue back to the
+          ``FailureReport`` record in the recovery engine.
+
+        Best-effort and signal-only:
+
+        * ``ImportError`` (recovery engine unavailable) → silent no-op.
+        * Detector returns ``None`` (no failure crossed) → no issue.
+        * Any exception inside the detector is caught and debug-logged
+          — a busted heuristic must not break the monitor loop.
+        """
+        try:
+            from kiln.print_recovery import get_recovery_engine
+        except ImportError:
+            return  # recovery engine unavailable — clean no-op
+
+        try:
+            telemetry = self._telemetry_from_health_report(report)
+            job_info: dict[str, Any] = {
+                "printer_name": session.printer_name,
+                "file_name": session.job_id,
+            }
+            # Best-effort material fill-in — health reports don't carry
+            # material directly; leave it absent rather than guessing.
+            engine = get_recovery_engine()
+            failure = engine.detect_failure(
+                printer_name=session.printer_name,
+                telemetry=telemetry,
+                job_info=job_info,
+            )
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.debug(
+                "Detective failure detection failed for session %s: %s",
+                session.session_id,
+                exc,
+            )
+            return
+
+        if failure is None:
+            return
+
+        confidence = self._DETECTIVE_SEVERITY_TO_CONFIDENCE.get(
+            (failure.severity or "").strip().lower(),
+            0.4,
+        )
+        detail = failure.probable_cause or ", ".join(failure.evidence)
+
+        try:
+            self.report_issue(
+                session.session_id,
+                f"detect_failure_{failure.failure_type.value}",
+                confidence,
+                detail=detail or None,
+            )
+        except (KeyError, ValueError) as exc:
+            # Session may have transitioned out of MONITORING between
+            # the detector call and the report — log and move on.
+            logger.debug(
+                "Could not record detective issue for session %s: %s",
+                session.session_id,
+                exc,
+            )
+            return
+
+        # Patch the just-recorded issue with the failure_id so callers
+        # can correlate the issue back to the FailureReport.  Guard
+        # against an empty issue list in case report_issue changed
+        # ordering semantics under us.
+        if session.issues:
+            session.issues[-1]["failure_id"] = failure.failure_id
+
+    def get_latest_signals(self, printer_name: str) -> dict[str, Any]:
+        """Return the most recent predictive + detective signals for a printer.
+
+        Looks across all active monitoring sessions for *printer_name*
+        and returns a flat dict an agent can read alongside printer
+        status::
+
+            {
+              "predictive": {"severity": "red", "kind": "thermal_drift", ...} | None,
+              "detective": {"failure_id": "...", "failure_type": "...", "severity": "..."} | None,
+              "monitoring_active": bool,
+              "session_id": str | None,
+              "as_of": float,  # unix timestamp
+            }
+
+        Used by the MCP ``monitor_print`` one-shot tool to surface the
+        monitor's latest read alongside printer state.  When multiple
+        signals of the same kind exist in the session, the most recent
+        wins (latest first wins, by issue insertion order).
+        """
+        now = time.time()
+        active_sessions = self.list_sessions(
+            printer_name=printer_name,
+            status=MonitorStatus.MONITORING,
+        )
+        if not active_sessions:
+            return {
+                "predictive": None,
+                "detective": None,
+                "monitoring_active": False,
+                "session_id": None,
+                "as_of": now,
+            }
+
+        # Pick the session with the most recent start time when
+        # multiple are active (defensive — should be one in practice).
+        session = max(active_sessions, key=lambda s: s.started_at)
+
+        predictive: dict[str, Any] | None = None
+        detective: dict[str, Any] | None = None
+
+        # Walk the issue list in reverse so the latest matching issue
+        # of each kind wins.
+        for issue in reversed(session.issues):
+            issue_type = issue.get("issue_type", "")
+            if predictive is None and issue_type.startswith("predictive_red_"):
+                kind = issue_type[len("predictive_red_"):]
+                predictive = {
+                    "kind": kind,
+                    "severity": "red",
+                    "detail": issue.get("detail"),
+                    "confidence": issue.get("confidence"),
+                    "reported_at": issue.get("reported_at"),
+                }
+            elif detective is None and issue_type.startswith("detect_failure_"):
+                failure_type = issue_type[len("detect_failure_"):]
+                # Recover the original severity bucket from the recorded
+                # confidence so callers don't need to know the mapping.
+                conf = issue.get("confidence")
+                severity = _confidence_to_detective_severity(conf)
+                detective = {
+                    "failure_id": issue.get("failure_id"),
+                    "failure_type": failure_type,
+                    "severity": severity,
+                    "detail": issue.get("detail"),
+                    "confidence": conf,
+                    "reported_at": issue.get("reported_at"),
+                }
+            if predictive is not None and detective is not None:
+                break
+
+        return {
+            "predictive": predictive,
+            "detective": detective,
+            "monitoring_active": True,
+            "session_id": session.session_id,
+            "as_of": now,
+        }
+
+
+def _confidence_to_detective_severity(confidence: float | None) -> str | None:
+    """Inverse of ``_DETECTIVE_SEVERITY_TO_CONFIDENCE`` for surfacing.
+
+    Returns the severity bucket whose mapped confidence equals the
+    recorded value (within a small tolerance).  Returns ``None`` when
+    the confidence doesn't match any known bucket.
+    """
+    if confidence is None:
+        return None
+    for severity, mapped in PrintHealthMonitor._DETECTIVE_SEVERITY_TO_CONFIDENCE.items():
+        if abs(confidence - mapped) < 1e-6:
+            return severity
+    return None
 
 
 # ---------------------------------------------------------------------------

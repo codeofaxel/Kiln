@@ -1011,6 +1011,381 @@ class TestPredictiveRiskIntegration:
 
 
 # ---------------------------------------------------------------------------
+# Detective failure detection integration
+# ---------------------------------------------------------------------------
+
+
+class TestDetectiveIntegration:
+    """Tests for the kiln.print_recovery.detect_failure integration.
+
+    The detective runs alongside the predictive engine on every monitor
+    tick.  Critical/high failures clear the auto-pause threshold via
+    the severity-to-confidence mapping; medium/low stay visible in the
+    issue stream but don't trip pause.  ImportError on the recovery
+    engine is a silent no-op.
+    """
+
+    def _make_health_report(
+        self,
+        printer_name: str = "voron",
+        hotend_actual: float = 220.0,
+        hotend_target: float = 200.0,
+        bed_actual: float = 60.0,
+        bed_target: float = 60.0,
+        connected: bool = True,
+        timestamp: float = 1000.0,
+    ) -> PrinterHealthReport:
+        """Build a health report with thermal + connection metrics."""
+        metrics = [
+            HealthMetric(
+                metric_name="hotend_temperature",
+                current_value=hotend_actual,
+                expected_value=hotend_target,
+                deviation=abs(hotend_actual - hotend_target),
+                is_warning=False,
+                timestamp=timestamp,
+                severity=HealthSeverity.OK,
+                unit="°C",
+            ),
+            HealthMetric(
+                metric_name="bed_temperature",
+                current_value=bed_actual,
+                expected_value=bed_target,
+                deviation=abs(bed_actual - bed_target),
+                is_warning=False,
+                timestamp=timestamp,
+                severity=HealthSeverity.OK,
+                unit="°C",
+            ),
+            HealthMetric(
+                metric_name="connection_status",
+                current_value=1.0 if connected else 0.0,
+                expected_value=1.0,
+                deviation=0.0 if connected else 1.0,
+                is_warning=not connected,
+                timestamp=timestamp,
+                severity=HealthSeverity.OK if connected else HealthSeverity.CRITICAL,
+                unit="bool",
+            ),
+        ]
+        return PrinterHealthReport(
+            printer_name=printer_name,
+            metrics=metrics,
+            overall_status=HealthSeverity.OK,
+            checked_at=timestamp,
+        )
+
+    def _build_active_session(self) -> tuple[PrintHealthMonitor, MonitorSession]:
+        """Build a real MonitorSession in MONITORING state."""
+        from kiln.print_health_monitor import _StallTracker
+        import uuid as _uuid
+
+        monitor = PrintHealthMonitor()
+        session_id = str(_uuid.uuid4())
+        session = MonitorSession(
+            session_id=session_id,
+            printer_name="voron",
+            job_id="my_print.gcode",
+            policy=MonitorPolicy(),
+        )
+        monitor._sessions[session_id] = session
+        monitor._stall_state[session_id] = _StallTracker()
+        return monitor, session
+
+    @staticmethod
+    def _make_failure_report(
+        *,
+        failure_type=None,
+        severity: str = "critical",
+        printer_name: str = "voron",
+        probable_cause: str = "Heater control failure or thermistor malfunction",
+        evidence=None,
+        failure_id: str = "fid-test-1",
+    ):
+        """Build a FailureReport without exercising the live detector."""
+        from kiln.print_recovery import FailureReport, FailureType
+
+        return FailureReport(
+            failure_id=failure_id,
+            failure_type=failure_type or FailureType.THERMAL_RUNAWAY,
+            detected_at="2026-04-26T00:00:00+00:00",
+            printer_name=printer_name,
+            evidence=list(evidence or ["Hotend temperature exceeds threshold"]),
+            severity=severity,
+            probable_cause=probable_cause,
+        )
+
+    def test_detect_failure_creates_issue_when_telemetry_critical(self):
+        """A critical thermal failure surfaces as an issue with confidence 1.0."""
+        monitor, session = self._build_active_session()
+        report = self._make_health_report(
+            hotend_actual=300.0, hotend_target=200.0,
+        )
+
+        failure = self._make_failure_report(severity="critical")
+
+        from unittest.mock import patch
+
+        fake_engine = MagicMock()
+        fake_engine.detect_failure.return_value = failure
+        with patch(
+            "kiln.print_recovery.get_recovery_engine",
+            return_value=fake_engine,
+        ):
+            monitor._maybe_detect_failure(session, report)
+
+        det_issues = [
+            i for i in session.issues
+            if i["issue_type"] == "detect_failure_thermal_runaway"
+        ]
+        assert len(det_issues) == 1
+        assert det_issues[0]["confidence"] == 1.0
+        # Telemetry should have flowed: detector got hotend_temp=300 + target=200.
+        called_kwargs = fake_engine.detect_failure.call_args.kwargs
+        assert called_kwargs["printer_name"] == "voron"
+        assert called_kwargs["telemetry"]["hotend_temp"] == 300.0
+        assert called_kwargs["telemetry"]["hotend_target"] == 200.0
+        assert called_kwargs["job_info"]["file_name"] == "my_print.gcode"
+
+    def test_no_failure_no_issue(self):
+        """Detector returns None -> helper produces no issue."""
+        monitor, session = self._build_active_session()
+        report = self._make_health_report()  # all green
+
+        from unittest.mock import patch
+
+        fake_engine = MagicMock()
+        fake_engine.detect_failure.return_value = None
+        with patch(
+            "kiln.print_recovery.get_recovery_engine",
+            return_value=fake_engine,
+        ):
+            monitor._maybe_detect_failure(session, report)
+
+        assert not session.issues
+
+    @pytest.mark.parametrize(
+        ("severity", "expected_confidence"),
+        [
+            ("critical", 1.0),
+            ("high", 0.85),
+            ("medium", 0.6),
+            ("low", 0.4),
+        ],
+    )
+    def test_severity_to_confidence_mapping(self, severity, expected_confidence):
+        """Each severity bucket maps to its prescribed confidence."""
+        monitor, session = self._build_active_session()
+        report = self._make_health_report()
+        failure = self._make_failure_report(severity=severity)
+
+        from unittest.mock import patch
+
+        fake_engine = MagicMock()
+        fake_engine.detect_failure.return_value = failure
+        with patch(
+            "kiln.print_recovery.get_recovery_engine",
+            return_value=fake_engine,
+        ):
+            monitor._maybe_detect_failure(session, report)
+
+        assert len(session.issues) == 1
+        assert session.issues[0]["confidence"] == expected_confidence
+
+    def test_failure_id_attached_to_issue_metadata(self):
+        """The recorded issue dict carries the FailureReport's failure_id."""
+        monitor, session = self._build_active_session()
+        report = self._make_health_report()
+        failure = self._make_failure_report(
+            severity="critical",
+            failure_id="fid-correlation-xyz",
+        )
+
+        from unittest.mock import patch
+
+        fake_engine = MagicMock()
+        fake_engine.detect_failure.return_value = failure
+        with patch(
+            "kiln.print_recovery.get_recovery_engine",
+            return_value=fake_engine,
+        ):
+            monitor._maybe_detect_failure(session, report)
+
+        assert session.issues[-1]["failure_id"] == "fid-correlation-xyz"
+
+    def test_kiln_print_recovery_import_failure_silent(self):
+        """ImportError on the recovery engine is a clean skip; no issue raised."""
+        monitor, session = self._build_active_session()
+        report = self._make_health_report(hotend_actual=300.0, hotend_target=200.0)
+
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _blocking_import(name, *args, **kwargs):
+            if name == "kiln.print_recovery":
+                raise ImportError(f"blocked for test: {name}")
+            return real_import(name, *args, **kwargs)
+
+        from unittest.mock import patch
+
+        with patch("builtins.__import__", side_effect=_blocking_import):
+            # Must not raise.
+            monitor._maybe_detect_failure(session, report)
+
+        assert not session.issues
+
+
+# ---------------------------------------------------------------------------
+# get_latest_signals — agent-facing surface
+# ---------------------------------------------------------------------------
+
+
+class TestGetLatestSignals:
+    """Contract tests for PrintHealthMonitor.get_latest_signals.
+
+    The MCP ``monitor_print`` one-shot tool reads this surface to show
+    agents the latest predictive + detective signals alongside printer
+    state.  These tests pin the shape and the latest-wins selection
+    behaviour.
+    """
+
+    def _build_active_session(
+        self,
+        monitor: PrintHealthMonitor | None = None,
+        printer_name: str = "voron",
+    ) -> tuple[PrintHealthMonitor, MonitorSession]:
+        from kiln.print_health_monitor import _StallTracker
+        import uuid as _uuid
+
+        monitor = monitor or PrintHealthMonitor()
+        session_id = str(_uuid.uuid4())
+        session = MonitorSession(
+            session_id=session_id,
+            printer_name=printer_name,
+            job_id="job-x",
+            policy=MonitorPolicy(),
+        )
+        monitor._sessions[session_id] = session
+        monitor._stall_state[session_id] = _StallTracker()
+        return monitor, session
+
+    def test_returns_inactive_when_no_session(self):
+        monitor = PrintHealthMonitor()
+        out = monitor.get_latest_signals("ghost-printer")
+        assert out["monitoring_active"] is False
+        assert out["predictive"] is None
+        assert out["detective"] is None
+        assert out["session_id"] is None
+        assert isinstance(out["as_of"], float)
+
+    def test_surfaces_predictive_red(self):
+        monitor, session = self._build_active_session()
+        session.issues.append({
+            "issue_type": "predictive_red_thermal_drift",
+            "confidence": 1.0,
+            "detail": "Pause now and inspect heater wiring.",
+            "auto_pause_triggered": True,
+            "reported_at": 1234.0,
+            "snapshot_count": 0,
+        })
+
+        out = monitor.get_latest_signals("voron")
+        assert out["monitoring_active"] is True
+        assert out["session_id"] == session.session_id
+        assert out["predictive"] is not None
+        assert out["predictive"]["kind"] == "thermal_drift"
+        assert out["predictive"]["severity"] == "red"
+        assert out["predictive"]["detail"] == "Pause now and inspect heater wiring."
+        assert out["detective"] is None
+
+    def test_surfaces_detective_failure(self):
+        monitor, session = self._build_active_session()
+        session.issues.append({
+            "issue_type": "detect_failure_thermal_runaway",
+            "confidence": 1.0,
+            "detail": "Heater control failure or thermistor malfunction",
+            "auto_pause_triggered": True,
+            "reported_at": 1234.0,
+            "snapshot_count": 0,
+            "failure_id": "fid-runaway-1",
+        })
+
+        out = monitor.get_latest_signals("voron")
+        assert out["detective"] is not None
+        assert out["detective"]["failure_type"] == "thermal_runaway"
+        assert out["detective"]["failure_id"] == "fid-runaway-1"
+        assert out["detective"]["severity"] == "critical"
+        assert out["predictive"] is None
+
+    def test_returns_latest_when_multiple_signals(self):
+        """Multiple signals in the same session -> latest wins."""
+        monitor, session = self._build_active_session()
+        session.issues.extend([
+            {
+                "issue_type": "predictive_red_thermal_drift",
+                "confidence": 1.0,
+                "detail": "first amber-style alert",
+                "auto_pause_triggered": True,
+                "reported_at": 1000.0,
+                "snapshot_count": 0,
+            },
+            {
+                "issue_type": "predictive_red_thermal_drift",
+                "confidence": 1.0,
+                "detail": "second amber-style alert",
+                "auto_pause_triggered": True,
+                "reported_at": 1100.0,
+                "snapshot_count": 0,
+            },
+            {
+                "issue_type": "predictive_red_layer_time",
+                "confidence": 1.0,
+                "detail": "latest red signal — layer time spiking",
+                "auto_pause_triggered": True,
+                "reported_at": 1200.0,
+                "snapshot_count": 0,
+            },
+        ])
+
+        out = monitor.get_latest_signals("voron")
+        assert out["predictive"] is not None
+        assert out["predictive"]["kind"] == "layer_time"
+        assert out["predictive"]["detail"] == "latest red signal — layer time spiking"
+
+    def test_predictive_and_detective_independent(self):
+        """One predictive + one detective in the same session -> both populated."""
+        monitor, session = self._build_active_session()
+        session.issues.extend([
+            {
+                "issue_type": "predictive_red_thermal_drift",
+                "confidence": 1.0,
+                "detail": "predictive trend",
+                "auto_pause_triggered": True,
+                "reported_at": 1000.0,
+                "snapshot_count": 0,
+            },
+            {
+                "issue_type": "detect_failure_thermal_runaway",
+                "confidence": 1.0,
+                "detail": "detective threshold cross",
+                "auto_pause_triggered": True,
+                "reported_at": 1100.0,
+                "snapshot_count": 0,
+                "failure_id": "fid-runaway-2",
+            },
+        ])
+
+        out = monitor.get_latest_signals("voron")
+        assert out["predictive"] is not None
+        assert out["predictive"]["kind"] == "thermal_drift"
+        assert out["detective"] is not None
+        assert out["detective"]["failure_type"] == "thermal_runaway"
+        assert out["detective"]["failure_id"] == "fid-runaway-2"
+        assert out["detective"]["severity"] == "critical"
+
+
+# ---------------------------------------------------------------------------
 # Singleton
 # ---------------------------------------------------------------------------
 
