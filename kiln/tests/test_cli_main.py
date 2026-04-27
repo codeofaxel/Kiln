@@ -1542,3 +1542,185 @@ class TestQueueCLI:
                  patch("kiln.plugins.queue_tools.submit_job", return_value=mock_result):
                 result = runner.invoke(cli, ["queue", "submit", "test.gcode"])
         assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# monitor — CLI redirect onto PrintHealthMonitor
+# ---------------------------------------------------------------------------
+
+
+class TestMonitor:
+    """The kiln monitor CLI must drive the canonical PrintHealthMonitor.
+
+    Pre-fold (commit 7db5ab6 era), the CLI ran a separate
+    PrintSafetyMonitor with its own loop, so the operator's experience
+    diverged from the MCP tool's predictive+detective stack.  These
+    tests pin that the click flags map onto MonitorPolicy / start_monitoring
+    correctly so the CLI now runs through the same engine.
+    """
+
+    def _stub_monitor_class(self, mock_adapter):
+        """Build a MagicMock class whose .start_monitoring captures kwargs.
+
+        Returns the (MockClass, captured_calls) pair.  The mock's
+        get_session yields a COMPLETED session immediately so the CLI's
+        post-iter teardown returns clean.
+        """
+        from kiln.print_health_monitor import (
+            HealthSeverity,
+            MonitorSession,
+            MonitorStatus,
+            PrinterHealthReport,
+        )
+
+        captured: dict = {}
+
+        # A single-report iterator so the CLI's Rich loop has something
+        # to consume before exiting.  print_progress is reported at
+        # 99.5% so the CLI's "end-of-print" branch terminates the loop.
+        def _make_one_report():
+            return PrinterHealthReport(
+                printer_name="test-printer",
+                metrics=[],
+                overall_status=HealthSeverity.OK,
+                checked_at=time.time(),
+            )
+
+        instance = MagicMock()
+
+        def _start(printer, *, interval_seconds=30, policy=None,
+                   output_stream=None, enable_report_queue=False, **kw):
+            captured["printer"] = printer
+            captured["interval_seconds"] = interval_seconds
+            captured["policy"] = policy
+            captured["output_stream"] = output_stream
+            captured["enable_report_queue"] = enable_report_queue
+            captured["t_start"] = time.time()
+            return "session-id-stub"
+
+        instance.start_monitoring.side_effect = _start
+
+        def _iter_reports(session_id, *, timeout=None):
+            # Yield one report whose progress >= 99% so the CLI breaks
+            # out of the loop without touching real adapters.
+            report = _make_one_report()
+            from kiln.print_health_monitor import HealthMetric
+            report.metrics.append(
+                HealthMetric(
+                    metric_name="print_progress",
+                    current_value=99.5,
+                    expected_value=100.0,
+                    deviation=0.5,
+                    is_warning=False,
+                    timestamp=time.time(),
+                    severity=HealthSeverity.OK,
+                    unit="%",
+                )
+            )
+            yield report
+
+        instance.iter_reports.side_effect = _iter_reports
+
+        # Final session has COMPLETED status and no auto-cancel issues
+        # so the CLI's post-loop check picks exit code 0.
+        completed_session = MonitorSession(
+            session_id="session-id-stub",
+            printer_name="test-printer",
+            job_id="job-x",
+            policy=None,  # type: ignore[arg-type]
+            status=MonitorStatus.COMPLETED,
+            ended_at=time.time(),
+        )
+        instance.get_session.return_value = completed_session
+
+        # JSON-mode path polls get_session; same response.
+
+        return instance, captured
+
+    def test_monitor_command_invokes_print_health_monitor(
+        self, runner, mock_adapter, config_file
+    ):
+        """kiln monitor must construct and invoke PrintHealthMonitor."""
+        mock_instance, captured = self._stub_monitor_class(mock_adapter)
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3, patch(
+            "kiln.print_health_monitor.PrintHealthMonitor", return_value=mock_instance,
+        ):
+            # Use --json so the CLI takes the polling path which
+            # terminates as soon as get_session returns COMPLETED.
+            # --timeout 1 caps the safety-net wait in case anything
+            # blocks.
+            result = runner.invoke(
+                cli, ["--printer", "test-printer", "monitor", "--json", "--timeout", "1"],
+            )
+
+        assert mock_instance.start_monitoring.called, result.output
+        # The CLI resolves the printer name from --printer (set above).
+        assert captured.get("printer") == "test-printer"
+        # Exit cleanly when the session ends in COMPLETED status.
+        assert result.exit_code == 0, result.output
+
+    def test_monitor_command_passes_interval_flag(
+        self, runner, mock_adapter, config_file
+    ):
+        """--interval flag must reach start_monitoring's interval_seconds."""
+        mock_instance, captured = self._stub_monitor_class(mock_adapter)
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3, patch(
+            "kiln.print_health_monitor.PrintHealthMonitor", return_value=mock_instance,
+        ):
+            result = runner.invoke(
+                cli, ["monitor", "--interval", "5", "--json", "--timeout", "1"],
+            )
+
+        assert mock_instance.start_monitoring.called, result.output
+        assert captured.get("interval_seconds") == 5.0
+        # Policy should also have check_interval_seconds=5 so the
+        # underlying loop respects the same cadence.
+        policy = captured.get("policy")
+        assert policy is not None
+        assert policy.check_interval_seconds == 5
+
+    def test_monitor_command_auto_cancel_flag(
+        self, runner, mock_adapter, config_file
+    ):
+        """--auto-cancel flag must set policy.auto_cancel_on_emergency=True."""
+        mock_instance, captured = self._stub_monitor_class(mock_adapter)
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3, patch(
+            "kiln.print_health_monitor.PrintHealthMonitor", return_value=mock_instance,
+        ):
+            result = runner.invoke(
+                cli, ["monitor", "--auto-cancel", "--json", "--timeout", "1"],
+            )
+
+        assert mock_instance.start_monitoring.called, result.output
+        policy = captured.get("policy")
+        assert policy is not None
+        assert policy.auto_cancel_on_emergency is True
+
+    def test_monitor_command_timeout_flag_caps_session(
+        self, runner, mock_adapter, config_file
+    ):
+        """--timeout flag must cap the wall-clock session duration."""
+        mock_instance, captured = self._stub_monitor_class(mock_adapter)
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3, patch(
+            "kiln.print_health_monitor.PrintHealthMonitor", return_value=mock_instance,
+        ):
+            t0 = time.time()
+            result = runner.invoke(
+                cli, ["monitor", "--timeout", "30", "--json"],
+            )
+            elapsed = time.time() - t0
+
+        assert mock_instance.start_monitoring.called, result.output
+        # Session must end at or before 30 seconds (well below — the
+        # stub completes immediately, but the policy must carry the
+        # cap so the underlying loop honours it in real use).
+        policy = captured.get("policy")
+        assert policy is not None
+        assert policy.session_timeout_seconds == 30.0
+        # The CLI should not have blocked anywhere near 30s in this
+        # stubbed path; sanity-check it returned promptly.
+        assert elapsed < 30.0

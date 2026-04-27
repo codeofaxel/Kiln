@@ -3469,8 +3469,9 @@ def monitor(ctx: click.Context, interval: float, snapshot_interval: int, snapsho
     """Monitor a print job for safety anomalies.
 
     Runs for the duration of the print, polling printer state at --interval.
-    Detects temperature drift, stalls, errors, and connection loss.
-    Auto-pauses on critical alerts by default.
+    Detects temperature drift, stalls, errors, and connection loss using
+    the same predictive + detective stack the MCP tools use.  Auto-pauses
+    on critical alerts by default.
 
     \b
     Exit codes:
@@ -3486,21 +3487,38 @@ def monitor(ctx: click.Context, interval: float, snapshot_interval: int, snapsho
       kiln monitor --auto-cancel          # Also auto-cancel on emergency
       kiln monitor --snapshot-interval 0  # Disable snapshots
     """
-    from pathlib import Path as _Path
+    import time as _time
 
-    from kiln.print_safety_monitor import MonitorConfig, PrintSafetyMonitor
+    from kiln.print_health_monitor import (
+        HealthSeverity,
+        MonitorPolicy,
+        PrintHealthMonitor,
+    )
 
     try:
-        adapter = _get_adapter_from_ctx(ctx)
+        # Resolve adapter early for friendly error messages, but the
+        # health monitor itself looks the printer up via the registry
+        # singleton when each tick runs.
+        _get_adapter_from_ctx(ctx)
         printer_name = ctx.obj.get("printer") or "default"
 
-        config = MonitorConfig(
-            poll_interval=interval,
-            snapshot_interval=snapshot_interval,
-            snapshot_dir=_Path(snapshot_dir) if snapshot_dir else _Path.home() / ".kiln" / "snapshots",
-            auto_pause=auto_pause,
-            auto_cancel=auto_cancel,
-            timeout=timeout,
+        # Sanity-check the snapshot dir exists when requested so the
+        # operator sees the misconfiguration immediately, not 5min in.
+        if snapshot_interval > 0 and snapshot_dir:
+            from pathlib import Path as _Path
+            _Path(snapshot_dir).mkdir(parents=True, exist_ok=True)
+
+        # Build the policy directly from the CLI flags.  Wall-clock
+        # timeout becomes the session timeout; check_count is set high
+        # so a long print isn't capped by the default 5-tick limit; the
+        # user-facing --timeout flag is the authoritative wall-clock cap.
+        policy = MonitorPolicy(
+            check_delay_seconds=0,       # CLI mode: start checking immediately
+            check_count=10**9,           # effectively unlimited; --timeout caps
+            check_interval_seconds=int(max(1.0, interval)),
+            auto_pause_on_failure=auto_pause,
+            auto_cancel_on_emergency=auto_cancel,
+            session_timeout_seconds=float(timeout) if timeout > 0 else 0.0,
         )
 
         if not json_mode:
@@ -3515,14 +3533,89 @@ def monitor(ctx: click.Context, interval: float, snapshot_interval: int, snapsho
                 click.echo(f"  Safety: {', '.join(flags)}")
             click.echo()
 
-        mon = PrintSafetyMonitor(
-            adapter=adapter,
-            printer_name=printer_name,
-            config=config,
-            json_mode=json_mode,
+        health_monitor = PrintHealthMonitor()
+        session_id = health_monitor.start_monitoring(
+            printer_name,
+            interval_seconds=float(interval),
+            policy=policy,
+            output_stream=sys.stdout if json_mode else None,
+            enable_report_queue=not json_mode,
         )
 
-        exit_code = mon.run()
+        # In JSON mode the monitor itself writes the NDJSON stream;
+        # the CLI just blocks until the session ends (timeout, stop,
+        # or terminal status).  In Rich mode, consume the iterator
+        # and render each report.
+        exit_code = 0
+        try:
+            if json_mode:
+                # Wait for the loop to finish or timeout.  Polling on
+                # session.status keeps this dependency-free.
+                start = _time.time()
+                while True:
+                    session = health_monitor.get_session(session_id)
+                    if session.status.value not in ("monitoring",):
+                        break
+                    if timeout > 0 and (_time.time() - start) >= timeout + 5.0:
+                        break  # safety net beyond the policy's own timeout
+                    _time.sleep(0.5)
+            else:
+                from kiln.cli.output import progress_bar
+
+                for report in health_monitor.iter_reports(session_id, timeout=30.0):
+                    metrics = {m.metric_name: m for m in report.metrics}
+
+                    parts: list[str] = []
+                    hotend = metrics.get("hotend_temperature")
+                    if hotend is not None:
+                        parts.append(
+                            f"Hotend: {hotend.current_value:.1f}°C → {hotend.expected_value:.0f}°C"
+                        )
+                    bed = metrics.get("bed_temperature")
+                    if bed is not None:
+                        parts.append(
+                            f"Bed: {bed.current_value:.1f}°C → {bed.expected_value:.0f}°C"
+                        )
+
+                    progress = metrics.get("print_progress")
+                    if progress is not None:
+                        parts.append(progress_bar(progress.current_value))
+
+                    parts.append(f"phase={report.phase.value}")
+                    parts.append(f"status={report.overall_status.value}")
+
+                    click.echo("  " + "  ".join(parts))
+
+                    # Surface any critical metric details right after
+                    # the status line so the operator sees what tripped.
+                    for m in report.metrics:
+                        if m.severity == HealthSeverity.CRITICAL and m.detail:
+                            click.echo(f"    [CRITICAL] {m.detail}")
+                        elif m.severity == HealthSeverity.WARNING and m.detail:
+                            click.echo(f"    [WARNING]  {m.detail}")
+
+                    # End-of-print detection: print_progress >= 99% and
+                    # status is no longer CRITICAL ⇒ treat as completed.
+                    if progress is not None and progress.current_value >= 99.0:
+                        break
+
+            # Determine final exit code from session state.
+            session = health_monitor.get_session(session_id)
+            if session.status.value in ("failed", "stalled", "aborted"):
+                exit_code = 1
+            elif any(
+                issue.get("auto_cancel_triggered")
+                for issue in session.issues
+            ):
+                exit_code = 1
+        finally:
+            # Always tear down the background monitor so the daemon
+            # thread stops.  KeyError if it already exited cleanly.
+            try:
+                health_monitor.stop_monitoring(printer_name)
+            except KeyError:
+                pass
+
         sys.exit(exit_code)
 
     except KeyboardInterrupt:

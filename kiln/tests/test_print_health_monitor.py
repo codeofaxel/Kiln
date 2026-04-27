@@ -1386,6 +1386,130 @@ class TestGetLatestSignals:
 
 
 # ---------------------------------------------------------------------------
+# Auto-cancel emergency
+# ---------------------------------------------------------------------------
+
+
+class TestAutoCancel:
+    """Auto-cancel only fires after sustained thermal critical AND a pause attempt.
+
+    Pause is the first response; cancel is the last-resort second
+    response when the pause didn't restore safe conditions.  These
+    tests pin the persistence rule so a single noisy tick can't
+    cancel a print, and the cancel path stays gated behind
+    ``policy.auto_cancel_on_emergency`` (which is False by default).
+    """
+
+    def _session(self, monitor, *, sid="autocancel-test", printer="voron",
+                 auto_cancel: bool = True):
+        from kiln.print_health_monitor import _EmergencyTracker
+
+        session = MonitorSession(
+            session_id=sid,
+            printer_name=printer,
+            job_id="job-cancel",
+            policy=MonitorPolicy(auto_cancel_on_emergency=auto_cancel),
+        )
+        monitor._sessions[sid] = session
+        monitor._emergency_state[sid] = _EmergencyTracker()
+        return session
+
+    def _patched_registry(self, monkeypatch, adapter):
+        """Make ``from kiln.registry import get_printer_registry`` return our fake."""
+        fake_registry = MagicMock()
+        fake_registry.get.return_value = adapter
+
+        import sys
+        import types
+
+        fake_module = types.ModuleType("kiln.registry")
+        fake_module.get_printer_registry = lambda: fake_registry  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "kiln.registry", fake_module)
+        return fake_registry
+
+    def _thermal_critical_report(self, *, session_id, printer="voron"):
+        now = time.time()
+        return PrinterHealthReport(
+            printer_name=printer,
+            metrics=[
+                HealthMetric(
+                    metric_name="hotend_temperature",
+                    current_value=290.0,
+                    expected_value=210.0,
+                    deviation=80.0,
+                    is_warning=True,
+                    timestamp=now,
+                    severity=HealthSeverity.CRITICAL,
+                    unit="°C",
+                    detail="Hotend runaway",
+                ),
+            ],
+            overall_status=HealthSeverity.CRITICAL,
+            checked_at=now,
+            session_id=session_id,
+        )
+
+    def test_auto_cancel_triggers_on_sustained_thermal_runaway_after_pause(
+        self, monkeypatch
+    ):
+        monkeypatch.delenv("KILN_MONITOR_PAUSE_DISABLED", raising=False)
+        monitor = PrintHealthMonitor()
+        session = self._session(monitor, auto_cancel=True)
+        adapter = MagicMock()
+        self._patched_registry(monkeypatch, adapter)
+
+        report = self._thermal_critical_report(session_id=session.session_id)
+
+        # Tick 1 — first thermal critical, pause fires.  No cancel
+        # yet because pause is the first response and persistence
+        # has only reached 1.
+        monitor._maybe_auto_cancel(session, report, pause_fired_this_tick=True)
+        assert adapter.cancel_print.call_count == 0
+
+        # Tick 2 — still thermal critical AFTER the pause attempt.
+        # Persistence reaches 2 ⇒ auto_cancel fires.
+        monitor._maybe_auto_cancel(session, report, pause_fired_this_tick=False)
+        adapter.cancel_print.assert_called_once()
+        assert any(
+            issue.get("auto_cancel_triggered") for issue in session.issues
+        )
+
+    def test_auto_cancel_does_not_fire_when_disabled(self, monkeypatch):
+        monitor = PrintHealthMonitor()
+        session = self._session(monitor, auto_cancel=False)
+        adapter = MagicMock()
+        self._patched_registry(monkeypatch, adapter)
+
+        report = self._thermal_critical_report(session_id=session.session_id)
+
+        # Both ticks see thermal critical AND a pause attempt; auto_cancel
+        # disabled means cancel must not fire even though persistence
+        # would otherwise satisfy the rule.
+        monitor._maybe_auto_cancel(session, report, pause_fired_this_tick=True)
+        monitor._maybe_auto_cancel(session, report, pause_fired_this_tick=False)
+        adapter.cancel_print.assert_not_called()
+        assert not any(
+            issue.get("auto_cancel_triggered") for issue in session.issues
+        )
+
+    def test_auto_cancel_does_not_fire_on_first_critical(self, monkeypatch):
+        # Persistence rule: cancel must not fire on the very first
+        # thermal-critical tick — the pause path gets the first turn.
+        monitor = PrintHealthMonitor()
+        session = self._session(monitor, auto_cancel=True)
+        adapter = MagicMock()
+        self._patched_registry(monkeypatch, adapter)
+
+        report = self._thermal_critical_report(session_id=session.session_id)
+        monitor._maybe_auto_cancel(session, report, pause_fired_this_tick=True)
+
+        adapter.cancel_print.assert_not_called()
+        assert not any(
+            issue.get("auto_cancel_triggered") for issue in session.issues
+        )
+
+
+# ---------------------------------------------------------------------------
 # Singleton
 # ---------------------------------------------------------------------------
 

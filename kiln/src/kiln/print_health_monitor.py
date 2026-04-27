@@ -22,14 +22,16 @@ Configure via environment variables:
 from __future__ import annotations
 
 import enum
+import json
 import logging
 import os
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from queue import Empty, Queue
+from typing import Any, TextIO
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +218,16 @@ class MonitorPolicy:
         in degrees Celsius before flagging a warning (default 5.0).
     :param history_max_hours: Maximum number of hours of health history
         to retain in memory (default 72).
+    :param auto_cancel_on_emergency: When *True* AND a "fire-class"
+        emergency is detected (sustained thermal runaway after at
+        least one prior pause attempt), the adapter's
+        :meth:`cancel_print` is invoked.  Conservative — only fires
+        after pause already failed to bring the printer back into
+        spec.  Default *False* so existing behavior is unchanged.
+    :param session_timeout_seconds: Optional wall-clock cap on a
+        monitoring session.  When > 0, the background loop exits
+        after this many seconds even if ``check_count`` is not
+        exhausted.  Default 0 = unlimited.
     """
 
     check_delay_seconds: int = 60
@@ -227,6 +239,8 @@ class MonitorPolicy:
     stall_timeout: int = 600
     temp_drift_threshold: float = 5.0
     history_max_hours: int = 72
+    auto_cancel_on_emergency: bool = False
+    session_timeout_seconds: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
@@ -253,10 +267,12 @@ class MonitorPolicy:
         - ``KILN_MONITOR_CHECK_COUNT``
         - ``KILN_MONITOR_CHECK_INTERVAL``
         - ``KILN_MONITOR_AUTO_PAUSE``
+        - ``KILN_MONITOR_AUTO_CANCEL``
         - ``KILN_MONITOR_REQUIRE_CAMERA``
         - ``KILN_MONITOR_STALL_TIMEOUT``
         - ``KILN_MONITOR_TEMP_DRIFT_THRESHOLD``
         - ``KILN_MONITOR_HISTORY_MAX_HOURS``
+        - ``KILN_MONITOR_SESSION_TIMEOUT``
         """
         policy = cls()
 
@@ -277,6 +293,7 @@ class MonitorPolicy:
 
         _bool_vars: list[tuple[str, str]] = [
             ("KILN_MONITOR_AUTO_PAUSE", "auto_pause_on_failure"),
+            ("KILN_MONITOR_AUTO_CANCEL", "auto_cancel_on_emergency"),
             ("KILN_MONITOR_REQUIRE_CAMERA", "require_camera"),
         ]
         for env_name, attr_name in _bool_vars:
@@ -290,6 +307,13 @@ class MonitorPolicy:
                 policy.temp_drift_threshold = float(env_drift)
             except ValueError:
                 logger.warning("Invalid KILN_MONITOR_TEMP_DRIFT_THRESHOLD=%r", env_drift)
+
+        env_timeout = os.environ.get("KILN_MONITOR_SESSION_TIMEOUT")
+        if env_timeout is not None:
+            try:
+                policy.session_timeout_seconds = float(env_timeout)
+            except ValueError:
+                logger.warning("Invalid KILN_MONITOR_SESSION_TIMEOUT=%r", env_timeout)
 
         return policy
 
@@ -388,19 +412,65 @@ class _StallTracker:
 
 
 # ---------------------------------------------------------------------------
+# Emergency tracking for auto-cancel
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _EmergencyTracker:
+    """Internal state for per-session auto-cancel decision making.
+
+    Auto-cancel only fires when a thermal critical metric persists
+    across consecutive ticks AND a pause has already been attempted
+    on the session.  This prevents single-tick noise from cancelling
+    a print and lets pause act as the first line of defense.
+
+    :param consecutive_thermal_critical: Number of back-to-back ticks
+        with a CRITICAL hotend or bed temperature metric.
+    :param pause_attempted: Whether the session has already issued at
+        least one pause attempt (regardless of outcome).
+    :param cancel_attempted: Whether the auto-cancel path has already
+        fired on this session (idempotency guard).
+    """
+
+    consecutive_thermal_critical: int = 0
+    pause_attempted: bool = False
+    cancel_attempted: bool = False
+
+
+# ---------------------------------------------------------------------------
 # Background monitor thread state
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class _BackgroundMonitor:
-    """Internal state for a background monitoring thread."""
+    """Internal state for a background monitoring thread.
+
+    :param thread: The daemon thread running :meth:`_monitor_loop`.
+    :param stop_event: Set to request a clean shutdown.
+    :param session_id: ID of the session this monitor backs.
+    :param printer_name: Printer name for registry lookup.
+    :param interval_seconds: Wall-clock seconds between checks.
+    :param report_queue: When set, every :class:`PrinterHealthReport`
+        produced by the loop is enqueued here so consumers (the CLI,
+        future event hooks) can stream reports in order without
+        polling session state.  When *None*, the loop runs without
+        the queueing overhead — agent / MCP callers don't need it.
+    :param output_stream: When set, every report is also serialised
+        as a JSON line to this stream (one ``json.dumps(report.to_dict())``
+        per line, flushed after each write).  Used by the CLI's
+        ``--json`` mode and by any consumer that wants a raw NDJSON
+        feed without subscribing to the queue.
+    """
 
     thread: threading.Thread
     stop_event: threading.Event
     session_id: str
     printer_name: str
     interval_seconds: float
+    report_queue: Queue[PrinterHealthReport | None] | None = None
+    output_stream: TextIO | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -433,6 +503,7 @@ class PrintHealthMonitor:
     def __init__(self) -> None:
         self._sessions: dict[str, MonitorSession] = {}
         self._stall_state: dict[str, _StallTracker] = {}
+        self._emergency_state: dict[str, _EmergencyTracker] = {}
         self._background_monitors: dict[str, _BackgroundMonitor] = {}
         self._health_history: dict[str, list[PrinterHealthReport]] = {}
         self._lock = threading.Lock()
@@ -624,6 +695,8 @@ class PrintHealthMonitor:
         job_id: str | None = None,
         policy: MonitorPolicy | None = None,
         callback: Callable[[PrinterHealthReport], None] | None = None,
+        output_stream: TextIO | None = None,
+        enable_report_queue: bool = False,
     ) -> str:
         """Start background health monitoring for a printer.
 
@@ -635,6 +708,19 @@ class PrintHealthMonitor:
         :param job_id: Optional job identifier to associate with the session.
         :param policy: Optional custom monitoring policy.
         :param callback: Optional function invoked with each health report.
+        :param output_stream: Optional text stream to receive a JSON line
+            per report (NDJSON / JSON-Lines format).  Each line is a
+            ``json.dumps`` of :meth:`PrinterHealthReport.to_dict`.  The
+            stream is flushed after every write.  Used by the
+            ``kiln monitor --json`` CLI mode and any agent that wants a
+            raw report feed.  Best-effort: errors writing to the stream
+            are logged at debug level and do not interrupt monitoring.
+        :param enable_report_queue: When *True*, attaches a thread-safe
+            queue to the session so :meth:`iter_reports` can yield each
+            report as it arrives.  When *False* (default), reports are
+            still appended to ``session.health_reports`` but no live
+            iterator is exposed.  Defaults to off so existing MCP
+            callers don't pay the queue overhead.
         :returns: The session ID.
         :raises ValueError: If the printer already has an active monitor.
         """
@@ -654,6 +740,11 @@ class PrintHealthMonitor:
             )
             self._sessions[session_id] = session
             self._stall_state[session_id] = _StallTracker()
+            self._emergency_state[session_id] = _EmergencyTracker()
+
+            report_queue: Queue[PrinterHealthReport | None] | None = (
+                Queue() if enable_report_queue else None
+            )
 
             stop_event = threading.Event()
             thread = threading.Thread(
@@ -669,6 +760,8 @@ class PrintHealthMonitor:
                 session_id=session_id,
                 printer_name=printer_name,
                 interval_seconds=interval_seconds,
+                report_queue=report_queue,
+                output_stream=output_stream,
             )
             self._background_monitors[printer_name] = bg
 
@@ -702,13 +795,74 @@ class PrintHealthMonitor:
             session.status = MonitorStatus.COMPLETED
             session.ended_at = time.time()
 
+        # Sentinel to release any iter_reports consumer that's still
+        # blocked waiting for the next report.  Only needed when the
+        # session was started with enable_report_queue=True.
+        if bg.report_queue is not None:
+            bg.report_queue.put(None)
+
         self._stall_state.pop(bg.session_id, None)
+        self._emergency_state.pop(bg.session_id, None)
         logger.info(
             "Stopped health monitoring for printer=%s session=%s",
             printer_name,
             bg.session_id,
         )
         return session  # type: ignore[return-value]
+
+    # -- public API: live report iteration ---------------------------------
+
+    def iter_reports(
+        self,
+        session_id: str,
+        *,
+        timeout: float | None = None,
+    ) -> Iterator[PrinterHealthReport]:
+        """Yield health reports as they arrive on the session's queue.
+
+        Requires the session to have been started with
+        ``enable_report_queue=True``.  Yields each report in the order
+        the monitor loop produced it; terminates when the loop signals
+        completion (by enqueueing ``None``) or when the optional
+        per-yield ``timeout`` elapses without a new report.
+
+        Example::
+
+            sid = monitor.start_monitoring(name, enable_report_queue=True)
+            for report in monitor.iter_reports(sid, timeout=60):
+                render(report)
+
+        :param session_id: ID of the active session.
+        :param timeout: Maximum seconds to wait for the next report.
+            ``None`` blocks indefinitely until a report arrives or the
+            session ends.
+        :yields: :class:`PrinterHealthReport` objects in chronological
+            order.
+        :raises KeyError: If *session_id* has no active background
+            monitor or wasn't started with ``enable_report_queue=True``.
+        """
+        # Resolve queue under the lock so we don't race a concurrent stop.
+        queue: Queue[PrinterHealthReport | None] | None = None
+        with self._lock:
+            for bg in self._background_monitors.values():
+                if bg.session_id == session_id:
+                    queue = bg.report_queue
+                    break
+
+        if queue is None:
+            raise KeyError(
+                f"No active queue-enabled monitoring session for {session_id!r}; "
+                "start_monitoring(... enable_report_queue=True) first."
+            )
+
+        while True:
+            try:
+                report = queue.get(timeout=timeout) if timeout is not None else queue.get()
+            except Empty:
+                return  # timeout — caller can decide whether to retry
+            if report is None:
+                return  # session ended
+            yield report
 
     # -- public API: history -----------------------------------------------
 
@@ -1012,12 +1166,35 @@ class PrintHealthMonitor:
         if stop_event.wait(timeout=session.policy.check_delay_seconds):
             return
 
+        loop_started_at = time.time()
+        session_timeout = max(0.0, float(session.policy.session_timeout_seconds))
         checks_remaining = session.policy.check_count
         while not stop_event.is_set() and checks_remaining > 0:
+            # Wall-clock cap (separate from check_count); fires even when
+            # check_count would otherwise carry the loop further.
+            if session_timeout > 0 and (time.time() - loop_started_at) >= session_timeout:
+                with self._lock:
+                    if session.status == MonitorStatus.MONITORING:
+                        session.status = MonitorStatus.COMPLETED
+                        session.ended_at = time.time()
+                logger.info(
+                    "Session %s timed out after %.0fs — stopping monitor loop",
+                    session_id,
+                    session_timeout,
+                )
+                break
+
             try:
                 report = self.check_health(printer_name)
                 report.session_id = session_id
                 session.health_reports.append(report)
+
+                # Push the freshly-built report onto the live consumer
+                # surfaces (in-memory queue + JSON-Lines stream) before
+                # any of the auto-pause / auto-cancel branches mutate
+                # session state.  Best-effort: failures here are
+                # debug-logged so they never break the loop.
+                self._fanout_report(session_id, report)
 
                 if callback is not None:
                     try:
@@ -1042,6 +1219,7 @@ class PrintHealthMonitor:
                 # visible in the issue stream but don't trip the pause
                 # threshold — a brief disconnect is the reconnect
                 # machinery's job, not the pause path's.
+                pause_fired_this_tick = False
                 if report.overall_status == HealthSeverity.CRITICAL and session.policy.auto_pause_on_failure:
                     critical_metric_names = {
                         m.metric_name for m in report.metrics if m.severity == HealthSeverity.CRITICAL
@@ -1071,6 +1249,7 @@ class PrintHealthMonitor:
                                 + ", ".join(sorted(critical_metric_names))
                             ),
                         )
+                        pause_fired_this_tick = True
 
                 # Pro-tier predictive risk — score the recent health
                 # reports against KILN-003 thermal/flow/layer-time
@@ -1091,6 +1270,13 @@ class PrintHealthMonitor:
                 # recovery pipeline can act on.  See
                 # :meth:`_maybe_detect_failure` for the rationale.
                 self._maybe_detect_failure(session, report)
+
+                # Auto-cancel — fire-class emergency only.  Tracks
+                # consecutive thermal-critical ticks and only cancels
+                # AFTER at least one pause has been attempted on this
+                # session.  This keeps cancel as a true last-resort
+                # action; pause is the first response.
+                self._maybe_auto_cancel(session, report, pause_fired_this_tick)
 
             except KeyError:
                 logger.error(
@@ -1118,8 +1304,185 @@ class PrintHealthMonitor:
             if session.status == MonitorStatus.MONITORING:
                 session.status = MonitorStatus.COMPLETED
                 session.ended_at = time.time()
-            self._background_monitors.pop(printer_name, None)
+            bg = self._background_monitors.pop(printer_name, None)
             self._stall_state.pop(session_id, None)
+            self._emergency_state.pop(session_id, None)
+
+        # Sentinel to release any iter_reports() consumer that's still
+        # blocked.  Done outside the lock to avoid holding it during
+        # any consumer wakeup work.
+        if bg is not None and bg.report_queue is not None:
+            bg.report_queue.put(None)
+
+    # -- live report fanout -------------------------------------------------
+
+    def _fanout_report(
+        self,
+        session_id: str,
+        report: PrinterHealthReport,
+    ) -> None:
+        """Publish *report* to the session's queue and JSON-Lines stream.
+
+        Both surfaces are best-effort — exceptions writing to the
+        stream or pushing to the queue are debug-logged and never
+        propagate.  The MCP / agent paths don't enable the queue, so
+        this is a no-op for them.
+        """
+        # Resolve the bg under the lock so we don't race a stop().
+        bg: _BackgroundMonitor | None = None
+        with self._lock:
+            for candidate in self._background_monitors.values():
+                if candidate.session_id == session_id:
+                    bg = candidate
+                    break
+        if bg is None:
+            return
+
+        if bg.report_queue is not None:
+            try:
+                bg.report_queue.put(report)
+            except Exception as exc:  # pragma: no cover — defensive
+                logger.debug(
+                    "iter_reports queue push failed for session %s: %s",
+                    session_id,
+                    exc,
+                )
+
+        if bg.output_stream is not None:
+            try:
+                bg.output_stream.write(json.dumps(report.to_dict(), default=str) + "\n")
+                bg.output_stream.flush()
+            except Exception as exc:
+                logger.debug(
+                    "JSON-Lines stream write failed for session %s: %s",
+                    session_id,
+                    exc,
+                )
+
+    # -- auto-cancel honoring ----------------------------------------------
+
+    # Metric names treated as "fire-class": sustained criticality on
+    # one of these warrants an auto-cancel after pause didn't help.
+    # Connection / filament / power / webcam don't qualify — those are
+    # recoverable through the existing pause/reconnect path.
+    _FIRE_CLASS_METRICS: frozenset[str] = frozenset(
+        {"hotend_temperature", "bed_temperature"}
+    )
+
+    # Minimum number of consecutive thermal-critical ticks before
+    # auto-cancel can fire.  Two means: one tick triggers a pause,
+    # the next tick (still critical) becomes the cancel trigger.
+    _AUTO_CANCEL_PERSISTENCE_TICKS: int = 2
+
+    def _maybe_auto_cancel(
+        self,
+        session: MonitorSession,
+        report: PrinterHealthReport,
+        pause_fired_this_tick: bool,
+    ) -> None:
+        """Decide whether the session has earned an auto-cancel.
+
+        Persistence rules:
+
+        * Auto-cancel is gated on ``policy.auto_cancel_on_emergency``.
+        * Only fire-class metrics (hotend / bed temperature CRITICAL)
+          count toward the ticker; connection blips never escalate.
+        * The ticker must have crossed
+          :attr:`_AUTO_CANCEL_PERSISTENCE_TICKS` AND at least one
+          pause must have been attempted on this session — pause is
+          the first line of defense, cancel is the second.
+        * Each session is cancelled at most once
+          (``cancel_attempted=True`` after a successful invocation).
+
+        Best-effort and idempotent — never raises.
+        """
+        tracker = self._emergency_state.get(session.session_id)
+        if tracker is None:
+            return
+
+        thermal_critical_now = any(
+            m.severity == HealthSeverity.CRITICAL
+            and m.metric_name in self._FIRE_CLASS_METRICS
+            for m in report.metrics
+        )
+
+        if pause_fired_this_tick:
+            tracker.pause_attempted = True
+
+        if thermal_critical_now:
+            tracker.consecutive_thermal_critical += 1
+        else:
+            tracker.consecutive_thermal_critical = 0
+
+        if not session.policy.auto_cancel_on_emergency:
+            return
+
+        if tracker.cancel_attempted:
+            return
+
+        if (
+            tracker.consecutive_thermal_critical < self._AUTO_CANCEL_PERSISTENCE_TICKS
+            or not tracker.pause_attempted
+        ):
+            return
+
+        # Conditions met — execute cancel best-effort.
+        tracker.cancel_attempted = True
+        try:
+            from kiln.registry import get_printer_registry
+
+            registry = get_printer_registry()
+            adapter = registry.get(session.printer_name)
+        except Exception as exc:
+            logger.warning(
+                "Auto-cancel skipped for session %s: adapter lookup failed: %s",
+                session.session_id,
+                exc,
+            )
+            return
+
+        try:
+            adapter.cancel_print()
+        except Exception as exc:
+            logger.warning(
+                "Auto-cancel failed for session %s: %s",
+                session.session_id,
+                exc,
+            )
+            return
+
+        logger.warning(
+            "Auto-cancelled printer %s — sustained thermal critical "
+            "for %d consecutive checks after pause (session %s)",
+            session.printer_name,
+            tracker.consecutive_thermal_critical,
+            session.session_id,
+        )
+
+        # Record as an issue so the iter_reports / event consumer sees
+        # the cancellation in the same stream as pause issues.
+        try:
+            session.issues.append(
+                {
+                    "issue_type": "auto_cancel_emergency",
+                    "confidence": 1.0,
+                    "detail": (
+                        "Sustained thermal critical for "
+                        f"{tracker.consecutive_thermal_critical} consecutive checks "
+                        "after pause attempt — printer cancelled."
+                    ),
+                    "auto_pause_triggered": False,
+                    "auto_cancel_triggered": True,
+                    "reported_at": time.time(),
+                    "snapshot_count": len(session.snapshots),
+                }
+            )
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.debug(
+                "Failed to record auto-cancel issue on session %s: %s",
+                session.session_id,
+                exc,
+            )
 
     # -- health check helpers ----------------------------------------------
 
