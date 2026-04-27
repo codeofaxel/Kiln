@@ -51,6 +51,11 @@
         <span class="chain">(Ethereum)</span>
       </p>
       <p class="parent-company">Kiln is a project of Hadron Labs Inc. &middot; built by <a href="https://x.com/adamaarreola" target="_blank" rel="noopener">Adam Arreola</a></p>
+      <p class="status">
+        <a href="https://status.kiln3d.com" target="_blank" rel="noopener" aria-label="Kiln system status">
+          <span class="status-dot" aria-hidden="true"></span>System status
+        </a>
+      </p>
     </div>
   </div>
 </footer>
@@ -125,6 +130,33 @@
     font-size: 12px;
     color: var(--text-muted);
     opacity: 0.7;
+  }
+
+  /* System-status indicator — clicking through goes to the live
+     BetterStack page.  The dot is intentionally static (no JS / no
+     polling): it's a "we have a status surface" signal, not a live
+     uptime light.  Truth lives at status.kiln3d.com. */
+  .status {
+    margin: 0;
+    font-size: 12px;
+  }
+  .status a {
+    color: var(--text-muted);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .status a:hover {
+    color: var(--text);
+  }
+  .status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.18);
   }
 
   @media (max-width: 720px) {

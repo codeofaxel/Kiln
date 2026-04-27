@@ -4,17 +4,26 @@
 </p>
 
 <p align="center">
-  <strong>Describe it or draw it. Kiln makes it real.</strong><br>
-  <em>Kiln turns a conversation with an AI agent into a printed object. One install, any printer, start to finish.</em>
-</p>
-
-<p align="center">
   <a href="https://pypi.org/project/kiln3d/"><img src="https://img.shields.io/pypi/pyversions/kiln3d" alt="Python"></a>
   <a href="https://github.com/codeofaxel/Kiln/blob/main/LICENSE"><img src="https://img.shields.io/github/license/codeofaxel/Kiln" alt="License"></a>
   <a href="https://github.com/codeofaxel/Kiln/blob/main/SIGNING.md"><img src="https://img.shields.io/badge/verified%20by-sigstore%20%2B%20SLSA-0f6fdc?logo=sigstore&logoColor=white" alt="Verified by Sigstore + SLSA"></a>
 </p>
 
 ---
+
+**Kiln is an open-source MCP server that lets AI agents (Claude, ChatGPT, Cursor, or any custom MCP client) drive real 3D printers end to end — Bambu Lab, Prusa, OctoPrint, Moonraker, and Elegoo.**
+
+In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result. No human in the middle.
+
+```bash
+pip install kiln3d
+```
+
+Then add Kiln to any MCP client. Open source for local printing.
+
+<p align="center">
+  <strong>Describe it or draw it. Kiln makes it real.</strong>
+</p>
 
 <p align="center">
   <img src="docs/site/public/demo/ash-coaster.jpg" alt="A 3D-printed coaster with a relief portrait of a French bulldog and the name ASH along the bottom edge, held in a hand" width="640">
@@ -25,9 +34,7 @@
   <a href="https://kiln3d.com#demo">Watch the demo →</a>
 </p>
 
-Kiln lets AI agents design, queue, and execute physical manufacturing jobs on real 3D printers with zero human intervention. It exposes printer control through both a **CLI** and the **Model Context Protocol (MCP)**, making any MCP-compatible agent (OpenClaw, Claude, GPT, custom) a first-class operator of your print farm.
-
-Kiln is **open source for local printing.** Pro / Business / Enterprise tiers add **Git for 3D**, fleet management, enterprise controls, and more — see [kiln3d.com/pricing](https://kiln3d.com/pricing).
+Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing)) add fleet management, Git-for-3D versioning, SSO + SCIM, ERP webhooks, and 7-year audit logs.
 
 ### Why Kiln?
 
