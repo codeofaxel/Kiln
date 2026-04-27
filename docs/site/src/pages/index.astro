@@ -125,7 +125,7 @@ import CTA from '../components/CTA.astro';
 
   <section class="bordered kit-promise">
     <div class="container">
-      <h2 class="lc-heading">From idea to a printed product in an afternoon. Manual included.</h2>
+      <h2 class="lc-heading">From idea to a printed product in an afternoon. Manual included. <span class="kit-pro-pill">Pro</span></h2>
       <p class="lc-lead">Multi-part prints ship with a printable PDF assembly manual &mdash; Bill of Materials, isometric step renders, pause-and-check verification gates.</p>
       <div class="manual-proof">
         <figure>
@@ -245,6 +245,26 @@ import CTA from '../components/CTA.astro';
   }
   @media (max-width: 640px) {
     .kit-promise { padding: 72px 0 60px; }
+  }
+
+  /* Pro pill on the kit-promise heading.  Mirrors .g3d-pro-pill in
+     GitForThreeDHighlight.astro so both Pro-tier sections wear the
+     same quiet tier signal — visual consistency across the page. */
+  .kit-pro-pill {
+    display: inline-block;
+    vertical-align: middle;
+    margin-left: 14px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-glow);
+    border: 1px solid rgba(255, 107, 43, 0.35);
+    border-radius: 999px;
+    position: relative;
+    top: -0.15em;
   }
 
   /* 3-image proof strip below the kit-promise heading.  Square

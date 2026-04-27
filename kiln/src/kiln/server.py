@@ -6559,7 +6559,9 @@ def restart_server(clean_env: bool = True) -> dict:
                     del new_env[key]
 
     def _do_restart() -> None:
-        time.sleep(0.3)  # let the tool response flush
+        # Bumped from 0.3 -> 0.5 so the tool response has more headroom
+        # to round-trip back to the client before stdio gets exec'd over.
+        time.sleep(0.5)
         if stripped:
             logger.info(
                 "Kiln MCP server restarting; stripped %d stale env var(s) so "
@@ -6569,6 +6571,18 @@ def restart_server(clean_env: bool = True) -> dict:
             )
         else:
             logger.info("Kiln MCP server restarting via restart_server tool...")
+        # Hard-flush stdio so the new process doesn't inherit half-written
+        # MCP framing.  Without this, MCP clients (notably Claude Code) can
+        # see garbled JSON-RPC framing after exec and every subsequent tool
+        # call returns -32602 "Invalid request parameters" — the user has to
+        # restart the client to recover.  Best-effort: never fail restart on
+        # a flush exception.
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.flush()
+                os.fsync(stream.fileno())
+            except (OSError, AttributeError, ValueError):
+                pass
         # ``serve`` is the only subcommand that runs the MCP server; without
         # it ``python -m kiln`` just prints help and exits, which makes the
         # MCP host think the child died and spawn a fresh one with its own
