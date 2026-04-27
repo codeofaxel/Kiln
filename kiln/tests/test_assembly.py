@@ -318,6 +318,32 @@ class TestSerialization:
         assert restored.parts[1].material == "PETG"
         assert restored.interfaces[0].joint_type == "snap_fit"
 
+    def test_magnetic_polarity_field_round_trips(self, two_box_stls):
+        """magnet_polarity_aligned survives to_dict -> from_dict for
+        magnetic joints — needed by the kiln-pro manuals certainty
+        gate (estimated unless polarity is explicitly declared)."""
+        a_path, b_path = two_box_stls
+        asm = create_assembly("magnetic_roundtrip")
+        asm.add_part(AssemblyPart(part_id="a", file_path=a_path, material="PETG"))
+        asm.add_part(AssemblyPart(part_id="b", file_path=b_path, material="PETG"))
+        asm.add_interface(MatingInterface(
+            part_a_id="a", part_b_id="b", joint_type="magnetic",
+            magnet_polarity_aligned=True,
+        ))
+
+        restored = Assembly.from_dict(json.loads(json.dumps(asm.to_dict())))
+        assert restored.interfaces[0].magnet_polarity_aligned is True
+
+        # Default (None) round-trips as None — caller never declared polarity.
+        asm2 = create_assembly("magnetic_unknown_polarity")
+        asm2.add_part(AssemblyPart(part_id="a", file_path=a_path, material="PETG"))
+        asm2.add_part(AssemblyPart(part_id="b", file_path=b_path, material="PETG"))
+        asm2.add_interface(MatingInterface(
+            part_a_id="a", part_b_id="b", joint_type="magnetic",
+        ))
+        restored2 = Assembly.from_dict(json.loads(json.dumps(asm2.to_dict())))
+        assert restored2.interfaces[0].magnet_polarity_aligned is None
+
     def test_assembly_from_dict(self):
         """from_dict correctly reconstructs Assembly with all fields."""
         data = {

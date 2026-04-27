@@ -113,6 +113,7 @@ class _AssemblyToolsPlugin:
             part_b_id: str,
             joint_type: str = "clearance_fit",
             clearance_mm: float = 0.2,
+            magnet_polarity_aligned: bool | None = None,
         ) -> dict:
             """Add a mating interface between two parts in an assembly.
 
@@ -124,7 +125,17 @@ class _AssemblyToolsPlugin:
                 part_a_id: ID of the first part in the interface.
                 part_b_id: ID of the second part in the interface.
                 joint_type: Type of joint (default ``"clearance_fit"``).
-                clearance_mm: Clearance gap in mm (default 0.2).
+                clearance_mm: Clearance gap in mm (default 0.2).  For
+                    ``"interference_fit"`` pass a NEGATIVE value (the
+                    part is intentionally larger than its socket);
+                    interference geometry is the entire point.
+                magnet_polarity_aligned: Only meaningful when
+                    ``joint_type == "magnetic"``.  ``True`` declares
+                    the designer has confirmed which poles face each
+                    other in each magnet pocket; ``None`` means
+                    unknown.  Downstream tooling refuses to ship a
+                    hand-wavy "make sure they pull together"
+                    instruction when polarity is unknown.
             """
             try:
                 from kiln.assembly import Assembly, MatingInterface
@@ -135,6 +146,7 @@ class _AssemblyToolsPlugin:
                     part_b_id=part_b_id,
                     joint_type=joint_type,
                     clearance_mm=clearance_mm,
+                    magnet_polarity_aligned=magnet_polarity_aligned,
                 )
                 assembly.interfaces.append(interface)
                 return {"success": True, "data": assembly.to_dict()}

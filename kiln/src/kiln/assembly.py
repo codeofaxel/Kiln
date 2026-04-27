@@ -79,14 +79,23 @@ class AssemblyPart:
 
 @dataclass
 class MatingInterface:
-    """Describes a joint between two parts."""
+    """Describes a joint between two parts.
+
+    ``magnet_polarity_aligned`` is meaningful for ``joint_type ==
+    "magnetic"``: ``True`` declares the designer has confirmed which
+    poles face each other in each magnet pocket, ``None`` means
+    "unknown" (downstream tooling treats this as low-confidence and
+    refuses to ship a hand-wavy "make sure they pull together"
+    instruction).  Ignored for non-magnetic joints.
+    """
 
     part_a_id: str
     part_b_id: str
-    joint_type: str  # snap_fit, press_fit, clearance_fit, threaded, glued, loose
+    joint_type: str  # snap_fit, press_fit, clearance_fit, threaded, glued, magnetic, loose
     clearance_mm: float = 0.2
     tolerance_mm: float = 0.1
     contact_area_mm2: float = 0.0
+    magnet_polarity_aligned: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -213,6 +222,7 @@ class Assembly:
                     clearance_mm=i.get("clearance_mm", 0.2),
                     tolerance_mm=i.get("tolerance_mm", 0.1),
                     contact_area_mm2=i.get("contact_area_mm2", 0.0),
+                    magnet_polarity_aligned=i.get("magnet_polarity_aligned"),
                 )
             )
         for c in data.get("clearance_checks", []):
