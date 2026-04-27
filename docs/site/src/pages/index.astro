@@ -123,6 +123,13 @@ import CTA from '../components/CTA.astro';
     </div>
   </section>
 
+  <section class="bordered kit-promise">
+    <div class="container">
+      <h2 class="lc-heading">From idea to a printed product in an afternoon. Manual included.</h2>
+      <p class="lc-lead">Multi-part prints ship with a printable PDF assembly manual &mdash; Bill of Materials, isometric step renders, pause-and-check verification gates.</p>
+    </div>
+  </section>
+
   <GitForThreeDHighlight />
 
   <FeatureGrid
@@ -210,6 +217,19 @@ import CTA from '../components/CTA.astro';
   }
   @media (max-width: 640px) {
     .learning-curve { padding: 72px 0 60px; }
+  }
+
+  /* Kit-promise — sister section to .learning-curve, sells the
+     "from object to product" escalation after the receipts grid.
+     Reuses .lc-heading + .lc-lead typography so both second-screen
+     statements rhyme visually; layout duplicated here so the section
+     is self-contained and removable. */
+  .kit-promise {
+    text-align: center;
+    padding: 112px 0 96px;
+  }
+  @media (max-width: 640px) {
+    .kit-promise { padding: 72px 0 60px; }
   }
 
   .topic-hub {
