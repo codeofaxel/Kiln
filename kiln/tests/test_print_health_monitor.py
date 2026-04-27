@@ -565,6 +565,201 @@ class TestDataclassSerialization:
 
 
 # ---------------------------------------------------------------------------
+# Predictive risk integration
+# ---------------------------------------------------------------------------
+
+
+class TestPredictiveRiskIntegration:
+    """Tests for the kiln-pro predict_risk integration in the monitor loop.
+
+    The wiring is signal-only: red signals get recorded as issues via
+    report_issue (so they sit alongside vision-based and health-based
+    detections in the agent's view).  Amber signals are NOT recorded
+    as issues — they're informational.  ImportError (free tier) is a
+    silent no-op.
+    """
+
+    def _make_health_report_with_temps(
+        self,
+        printer_name: str,
+        hotend_actual: float,
+        hotend_target: float,
+        timestamp: float,
+    ) -> PrinterHealthReport:
+        """Build a health report carrying a hotend temp metric."""
+        metric = HealthMetric(
+            metric_name="hotend_temperature",
+            current_value=hotend_actual,
+            expected_value=hotend_target,
+            deviation=abs(hotend_actual - hotend_target),
+            is_warning=False,
+            timestamp=timestamp,
+            severity=HealthSeverity.OK,
+            unit="°C",
+        )
+        return PrinterHealthReport(
+            printer_name=printer_name,
+            metrics=[metric],
+            overall_status=HealthSeverity.OK,
+            checked_at=timestamp,
+        )
+
+    def _build_active_session(self) -> tuple[PrintHealthMonitor, MonitorSession]:
+        """Build a real MonitorSession in MONITORING state without spawning a thread."""
+        from kiln.print_health_monitor import _StallTracker
+        import uuid as _uuid
+
+        monitor = PrintHealthMonitor()
+        session_id = str(_uuid.uuid4())
+        session = MonitorSession(
+            session_id=session_id,
+            printer_name="voron",
+            job_id="j-test",
+            policy=MonitorPolicy(),
+        )
+        monitor._sessions[session_id] = session
+        monitor._stall_state[session_id] = _StallTracker()
+        return monitor, session
+
+    def test_telemetry_translation_extracts_hotend_pair(self):
+        """Helper translates HealthMetric -> predictor's telemetry shape."""
+        report = self._make_health_report_with_temps(
+            "voron", hotend_actual=205.0, hotend_target=200.0, timestamp=1000.0,
+        )
+        out = PrintHealthMonitor._telemetry_from_health_report(report)
+        assert out["hotend_temp"] == 205.0
+        assert out["hotend_target"] == 200.0
+        assert out["timestamp"] == 1000.0
+
+    def test_red_signal_becomes_issue(self):
+        """A red predictive signal produces an issue in the session."""
+        monitor, session = self._build_active_session()
+        session.health_reports.append(
+            self._make_health_report_with_temps("voron", 220.0, 200.0, 1000.0)
+        )
+
+        fake_assessment = {
+            "risk_score": 0.7,
+            "severity": "red",
+            "signals": [
+                {
+                    "kind": "thermal_drift",
+                    "severity": "red",
+                    "weight": 0.55,
+                    "message": "Pause now and inspect heater wiring.",
+                    "evidence": {"slope_c_per_min": 2.0},
+                },
+            ],
+        }
+
+        from unittest.mock import patch
+        with patch.dict(
+            "sys.modules",
+            {
+                "kiln_pro": MagicMock(),
+                "kiln_pro.recovery": MagicMock(),
+                "kiln_pro.recovery.predictive": MagicMock(
+                    predict_risk=lambda **kw: fake_assessment,
+                ),
+            },
+        ):
+            monitor._maybe_record_predictive_signals(session)
+
+        red_issues = [
+            i for i in session.issues
+            if i["issue_type"] == "predictive_red_thermal_drift"
+        ]
+        assert len(red_issues) == 1
+        assert red_issues[0]["confidence"] == 1.0
+        assert "Pause now" in red_issues[0]["detail"]
+
+    def test_amber_signal_does_not_create_issue(self):
+        """Amber severity signals are informational only — never an issue."""
+        monitor, session = self._build_active_session()
+        session.health_reports.append(
+            self._make_health_report_with_temps("voron", 205.0, 200.0, 1000.0)
+        )
+
+        fake_assessment = {
+            "risk_score": 0.3,
+            "severity": "amber",
+            "signals": [
+                {
+                    "kind": "thermal_drift",
+                    "severity": "amber",
+                    "weight": 0.3,
+                    "message": "Hotend drifting slightly.",
+                    "evidence": {"slope_c_per_min": 0.7},
+                },
+            ],
+        }
+
+        from unittest.mock import patch
+        with patch.dict(
+            "sys.modules",
+            {
+                "kiln_pro": MagicMock(),
+                "kiln_pro.recovery": MagicMock(),
+                "kiln_pro.recovery.predictive": MagicMock(
+                    predict_risk=lambda **kw: fake_assessment,
+                ),
+            },
+        ):
+            monitor._maybe_record_predictive_signals(session)
+
+        assert not session.issues
+
+    def test_kiln_pro_not_installed_silent_no_op(self):
+        """ImportError on kiln_pro.recovery.predictive is a clean skip."""
+        monitor, session = self._build_active_session()
+        session.health_reports.append(
+            self._make_health_report_with_temps("voron", 220.0, 200.0, 1000.0)
+        )
+
+        import builtins
+        real_import = builtins.__import__
+
+        def _blocking_import(name, *args, **kwargs):
+            if name.startswith("kiln_pro"):
+                raise ImportError(f"blocked for test: {name}")
+            return real_import(name, *args, **kwargs)
+
+        from unittest.mock import patch
+        with patch("builtins.__import__", side_effect=_blocking_import):
+            # Must not raise.
+            monitor._maybe_record_predictive_signals(session)
+
+        assert not session.issues
+
+    def test_empty_history_does_not_call_predict(self):
+        """No health reports yet -> nothing to translate, predictor not called."""
+        monitor, session = self._build_active_session()
+        # Intentionally no health_reports appended.
+
+        called = {"yes": False}
+
+        def _spy_predict_risk(**kw):
+            called["yes"] = True
+            return {"risk_score": 0.0, "severity": "clear", "signals": []}
+
+        from unittest.mock import patch
+        with patch.dict(
+            "sys.modules",
+            {
+                "kiln_pro": MagicMock(),
+                "kiln_pro.recovery": MagicMock(),
+                "kiln_pro.recovery.predictive": MagicMock(
+                    predict_risk=_spy_predict_risk,
+                ),
+            },
+        ):
+            monitor._maybe_record_predictive_signals(session)
+
+        assert called["yes"] is False
+        assert not session.issues
+
+
+# ---------------------------------------------------------------------------
 # Singleton
 # ---------------------------------------------------------------------------
 

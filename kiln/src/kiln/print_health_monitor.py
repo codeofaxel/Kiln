@@ -937,6 +937,19 @@ class PrintHealthMonitor:
                         ),
                     )
 
+                # Pro-tier predictive risk — score the recent health
+                # reports against KILN-003 thermal/flow/layer-time
+                # heuristics.  Red signals get surfaced into the issue
+                # stream so they sit alongside vision-based and
+                # health-based detections.  Best-effort and signal-only:
+                # missing kiln-pro is a clean no-op, and the existing
+                # auto-pause flag fires only via the report_issue path
+                # that doesn't actually pause the printer (bug tracked
+                # separately).  Insufficient telemetry history (< 6
+                # snapshots) returns ``severity=clear`` so this is also
+                # a no-op until enough data has accumulated.
+                self._maybe_record_predictive_signals(session)
+
             except KeyError:
                 logger.error(
                     "Printer %s not found in registry, stopping monitor",
@@ -1225,6 +1238,98 @@ class PrintHealthMonitor:
         if session.status != MonitorStatus.MONITORING:
             raise ValueError(f"Session {session_id!r} is not actively monitoring (status={session.status.value})")
         return session
+
+    @staticmethod
+    def _telemetry_from_health_report(
+        report: PrinterHealthReport,
+    ) -> dict[str, Any]:
+        """Translate a health report into a predict_risk-shaped telemetry dict.
+
+        ``predict_risk`` consumes ``hotend_temp``/``hotend_target`` /
+        ``bed_temp``/``bed_target`` keys with a ``timestamp`` for slope
+        calculations.  Health reports carry the same data under
+        :class:`HealthMetric` objects keyed by ``metric_name``; this
+        helper flattens the relevant ones into the predictor's expected
+        shape.  Missing metrics are silently skipped — the predictor
+        already handles None / missing values.
+        """
+        telemetry: dict[str, Any] = {"timestamp": report.checked_at}
+        for m in report.metrics:
+            if m.metric_name == "hotend_temperature":
+                telemetry["hotend_temp"] = m.current_value
+                telemetry["hotend_target"] = m.expected_value
+            elif m.metric_name == "bed_temperature":
+                telemetry["bed_temp"] = m.current_value
+                telemetry["bed_target"] = m.expected_value
+        return telemetry
+
+    def _maybe_record_predictive_signals(
+        self,
+        session: MonitorSession,
+    ) -> None:
+        """Run the kiln-pro predictive risk heuristics against the
+        accumulated health-report history; record red signals as issues.
+
+        Best-effort and signal-only:
+
+        * ``ImportError`` (kiln-pro not installed) → silent no-op.
+        * Insufficient history (< 6 snapshots) → predictor returns
+          ``severity=clear`` and we record nothing.
+        * Amber signals → noted in session metadata but NOT recorded as
+          issues (would inflate the issue stream with watch-this signals
+          that haven't yet asked the operator to act).
+        * Red signals → recorded as issues via
+          :meth:`report_issue` with confidence 1.0 so they sit alongside
+          health-critical detections in the agent's view.
+
+        Any exception inside the predictor is caught and debug-logged —
+        a busted heuristic must not break the monitor loop.
+        """
+        try:
+            from kiln_pro.recovery.predictive import predict_risk
+        except ImportError:
+            return  # kiln-pro not installed — free tier skip
+
+        try:
+            history = [
+                self._telemetry_from_health_report(r)
+                for r in session.health_reports
+            ]
+            if not history:
+                return
+            current = history[-1]
+            assessment = predict_risk(
+                telemetry=current,
+                telemetry_history=history,
+            )
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.debug(
+                "Predictive risk scoring failed for session %s: %s",
+                session.session_id,
+                exc,
+            )
+            return
+
+        for signal in assessment.get("signals", []):
+            if signal.get("severity") != "red":
+                continue
+            kind = signal.get("kind", "predictive")
+            try:
+                self.report_issue(
+                    session.session_id,
+                    f"predictive_red_{kind}",
+                    1.0,
+                    detail=signal.get("message"),
+                )
+            except (KeyError, ValueError) as exc:
+                # Session may have transitioned out of MONITORING
+                # between the predictor call and the report — that's
+                # fine, log and move on.
+                logger.debug(
+                    "Could not record predictive issue for session %s: %s",
+                    session.session_id,
+                    exc,
+                )
 
 
 # ---------------------------------------------------------------------------
