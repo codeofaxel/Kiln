@@ -570,6 +570,17 @@ def validate_joint(
                 f"typical minimum {clearance_range[0]} mm."
             )
 
+    elif jtype == "magnetic":
+        rules_checked.append("magnet_pocket_material")
+        for mat_label, mat_val in [("Part A", mat_a), ("Part B", mat_b)]:
+            if mat_val in _BRITTLE_MATERIALS:
+                recommendations.append(
+                    f"Magnetic joint with {mat_val} {mat_label}: heat-pressing "
+                    f"magnets into {mat_val} can soften the surrounding material; "
+                    "print the magnet pocket undersized and use CA glue, OR "
+                    "switch to PETG/ABS. Cooling under load minimizes the risk."
+                )
+
     else:
         issues.append(f"Unknown joint type '{jtype}' — no design rules available for validation.")
 
