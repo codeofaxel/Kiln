@@ -324,6 +324,257 @@ class TestIssueReporting:
 
 
 # ---------------------------------------------------------------------------
+# Auto-pause honoring (KILN_MONITOR_AUTO_PAUSE flag actually pauses)
+# ---------------------------------------------------------------------------
+
+
+class TestAutoPauseHonoring:
+    """The auto_pause_triggered flag must drive a real pause_print() call.
+
+    Before this contract was honored, report_issue() set the flag on
+    the issue dict but no code ever called the adapter's pause_print().
+    These tests pin that the flag now drives a real call, scoped by
+    the KILN_MONITOR_PAUSE_DISABLED kill-switch and idempotency
+    against an already-paused printer.
+    """
+
+    def _session(self, monitor, sid="autopause-test", printer="voron"):
+        session = MonitorSession(
+            session_id=sid,
+            printer_name=printer,
+            job_id="job-1",
+            policy=MonitorPolicy(),
+        )
+        monitor._sessions[sid] = session
+        return session
+
+    def _patched_registry(self, monkeypatch, adapter):
+        """Make ``from kiln.registry import get_printer_registry`` return our fake."""
+        fake_registry = MagicMock()
+        fake_registry.get.return_value = adapter
+
+        import sys
+        import types
+
+        fake_module = types.ModuleType("kiln.registry")
+        fake_module.get_printer_registry = lambda: fake_registry  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "kiln.registry", fake_module)
+        return fake_registry
+
+    def _make_adapter(self, *, is_paused: bool = False):
+        adapter = MagicMock()
+        state = MagicMock()
+        state.is_paused = is_paused
+        adapter.get_state.return_value = state
+        return adapter
+
+    def test_pause_called_when_auto_pause_triggered(self, monkeypatch):
+        monkeypatch.delenv("KILN_MONITOR_PAUSE_DISABLED", raising=False)
+        monitor = PrintHealthMonitor()
+        self._session(monitor)
+        adapter = self._make_adapter(is_paused=False)
+        self._patched_registry(monkeypatch, adapter)
+
+        issue = monitor.report_issue("autopause-test", "thermal_runaway", 1.0)
+
+        assert issue["auto_pause_triggered"] is True
+        assert "auto_pause_skipped" not in issue
+        assert "auto_pause_error" not in issue
+        adapter.pause_print.assert_called_once()
+
+    def test_pause_skipped_when_KILN_MONITOR_PAUSE_DISABLED_is_true(self, monkeypatch):
+        monkeypatch.setenv("KILN_MONITOR_PAUSE_DISABLED", "true")
+        monitor = PrintHealthMonitor()
+        self._session(monitor)
+        adapter = self._make_adapter(is_paused=False)
+        self._patched_registry(monkeypatch, adapter)
+
+        issue = monitor.report_issue("autopause-test", "thermal_runaway", 1.0)
+
+        assert issue["auto_pause_triggered"] is True
+        assert issue["auto_pause_skipped"] == "kill_switch"
+        adapter.pause_print.assert_not_called()
+
+    def test_kill_switch_accepts_alternate_truthy_values(self, monkeypatch):
+        # Sanity: spot-check the parser also accepts "1" and "yes".
+        monitor = PrintHealthMonitor()
+        adapter = self._make_adapter(is_paused=False)
+        self._patched_registry(monkeypatch, adapter)
+
+        for raw in ("1", "YES", "Yes"):
+            adapter.reset_mock()
+            self._session(monitor, sid=f"kill-{raw}")
+            monkeypatch.setenv("KILN_MONITOR_PAUSE_DISABLED", raw)
+            issue = monitor.report_issue(f"kill-{raw}", "thermal_runaway", 1.0)
+            assert issue["auto_pause_skipped"] == "kill_switch", raw
+            adapter.pause_print.assert_not_called()
+
+    def test_pause_skipped_when_already_paused(self, monkeypatch):
+        monkeypatch.delenv("KILN_MONITOR_PAUSE_DISABLED", raising=False)
+        monitor = PrintHealthMonitor()
+        self._session(monitor)
+        adapter = self._make_adapter(is_paused=True)
+        self._patched_registry(monkeypatch, adapter)
+
+        issue = monitor.report_issue("autopause-test", "thermal_runaway", 1.0)
+
+        assert issue["auto_pause_triggered"] is True
+        assert issue["auto_pause_skipped"] == "already_paused"
+        adapter.pause_print.assert_not_called()
+
+    def test_pause_failure_does_not_break_monitor(self, monkeypatch):
+        monkeypatch.delenv("KILN_MONITOR_PAUSE_DISABLED", raising=False)
+        monitor = PrintHealthMonitor()
+        self._session(monitor)
+        adapter = self._make_adapter(is_paused=False)
+        adapter.pause_print.side_effect = RuntimeError("printer offline")
+        self._patched_registry(monkeypatch, adapter)
+
+        # Must not raise.
+        issue = monitor.report_issue("autopause-test", "thermal_runaway", 1.0)
+
+        assert issue["auto_pause_triggered"] is True
+        assert "auto_pause_error" in issue
+        assert "printer offline" in issue["auto_pause_error"]
+        adapter.pause_print.assert_called_once()
+
+    def test_state_probe_failure_still_attempts_pause(self, monkeypatch):
+        # Defensive: if the adapter's get_state() blows up we should
+        # still try to pause (better to over-pause than under-pause).
+        monkeypatch.delenv("KILN_MONITOR_PAUSE_DISABLED", raising=False)
+        monitor = PrintHealthMonitor()
+        self._session(monitor)
+        adapter = MagicMock()
+        adapter.get_state.side_effect = RuntimeError("state unavailable")
+        self._patched_registry(monkeypatch, adapter)
+
+        issue = monitor.report_issue("autopause-test", "thermal_runaway", 1.0)
+
+        assert issue["auto_pause_triggered"] is True
+        assert "auto_pause_skipped" not in issue
+        assert "auto_pause_error" not in issue
+        adapter.pause_print.assert_called_once()
+
+    def test_low_confidence_does_not_pause(self, monkeypatch):
+        monkeypatch.delenv("KILN_MONITOR_PAUSE_DISABLED", raising=False)
+        monitor = PrintHealthMonitor()
+        self._session(monitor)
+        adapter = self._make_adapter(is_paused=False)
+        self._patched_registry(monkeypatch, adapter)
+
+        issue = monitor.report_issue("autopause-test", "minor_stringing", 0.5)
+
+        assert issue["auto_pause_triggered"] is False
+        adapter.pause_print.assert_not_called()
+
+    def test_connection_only_critical_does_not_pause(self, monkeypatch):
+        # The _monitor_loop carveout should down-rank connection-only
+        # criticals to confidence 0.5 (below threshold), so report_issue
+        # records the issue but auto_pause_triggered is False.
+        monkeypatch.delenv("KILN_MONITOR_PAUSE_DISABLED", raising=False)
+        monitor = PrintHealthMonitor()
+        session = self._session(monitor, sid="conn-only", printer="voron")
+        adapter = self._make_adapter(is_paused=False)
+        self._patched_registry(monkeypatch, adapter)
+
+        # Build a CRITICAL report whose only critical metric is connection_status.
+        now = time.time()
+        report = PrinterHealthReport(
+            printer_name="voron",
+            metrics=[
+                HealthMetric(
+                    metric_name="connection_status",
+                    current_value=0.0,
+                    expected_value=1.0,
+                    deviation=1.0,
+                    is_warning=True,
+                    timestamp=now,
+                    severity=HealthSeverity.CRITICAL,
+                    unit="bool",
+                    detail="Printer is offline",
+                ),
+                HealthMetric(
+                    metric_name="hotend_temperature",
+                    current_value=210.0,
+                    expected_value=210.0,
+                    deviation=0.0,
+                    is_warning=False,
+                    timestamp=now,
+                    severity=HealthSeverity.OK,
+                    unit="°C",
+                ),
+            ],
+            overall_status=HealthSeverity.CRITICAL,
+            checked_at=now,
+            session_id=session.session_id,
+        )
+
+        # Replicate the _monitor_loop carveout logic.
+        from kiln.print_health_monitor import _CONNECTION_HEALTH_METRICS
+        critical_names = {m.metric_name for m in report.metrics if m.severity == HealthSeverity.CRITICAL}
+        connection_only = bool(critical_names) and critical_names.issubset(_CONNECTION_HEALTH_METRICS)
+        assert connection_only is True
+
+        confidence = 0.5 if connection_only else 1.0
+        issue = monitor.report_issue(session.session_id, "health_critical", confidence)
+
+        assert confidence == 0.5
+        assert issue["auto_pause_triggered"] is False
+        adapter.pause_print.assert_not_called()
+
+    def test_mixed_critical_with_connection_still_pauses(self, monkeypatch):
+        # Connection + hotend both CRITICAL -> NOT connection-only ->
+        # full confidence 1.0 -> pause fires.
+        monkeypatch.delenv("KILN_MONITOR_PAUSE_DISABLED", raising=False)
+        monitor = PrintHealthMonitor()
+        session = self._session(monitor, sid="mixed-crit", printer="voron")
+        adapter = self._make_adapter(is_paused=False)
+        self._patched_registry(monkeypatch, adapter)
+
+        now = time.time()
+        report = PrinterHealthReport(
+            printer_name="voron",
+            metrics=[
+                HealthMetric(
+                    metric_name="connection_status",
+                    current_value=0.0,
+                    expected_value=1.0,
+                    deviation=1.0,
+                    is_warning=True,
+                    timestamp=now,
+                    severity=HealthSeverity.CRITICAL,
+                    unit="bool",
+                ),
+                HealthMetric(
+                    metric_name="hotend_temperature",
+                    current_value=260.0,
+                    expected_value=210.0,
+                    deviation=50.0,
+                    is_warning=True,
+                    timestamp=now,
+                    severity=HealthSeverity.CRITICAL,
+                    unit="°C",
+                ),
+            ],
+            overall_status=HealthSeverity.CRITICAL,
+            checked_at=now,
+            session_id=session.session_id,
+        )
+
+        from kiln.print_health_monitor import _CONNECTION_HEALTH_METRICS
+        critical_names = {m.metric_name for m in report.metrics if m.severity == HealthSeverity.CRITICAL}
+        connection_only = bool(critical_names) and critical_names.issubset(_CONNECTION_HEALTH_METRICS)
+        assert connection_only is False
+
+        confidence = 0.5 if connection_only else 1.0
+        issue = monitor.report_issue(session.session_id, "health_critical", confidence)
+
+        assert confidence == 1.0
+        assert issue["auto_pause_triggered"] is True
+        adapter.pause_print.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
 # Stall detection
 # ---------------------------------------------------------------------------
 

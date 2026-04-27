@@ -117,6 +117,16 @@ class HealthSeverity(str, enum.Enum):
     CRITICAL = "critical"
 
 
+# Metric names treated as "connection-only" criticals.  When the only
+# CRITICAL metrics in a health report are in this set, the monitor
+# downgrades the issue confidence below the auto-pause threshold —
+# brief disconnects belong to the reconnect path, not the pause path.
+# Future-proofed against rename / alias drift in connection metrics.
+_CONNECTION_HEALTH_METRICS: frozenset[str] = frozenset(
+    {"connection_status", "connection_lost", "connection_health"}
+)
+
+
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
@@ -828,9 +838,13 @@ class PrintHealthMonitor:
         """Report a detected issue during a monitoring session.
 
         If the session policy has ``auto_pause_on_failure`` enabled and
-        the confidence exceeds the threshold, the issue is flagged for
-        auto-pause (the caller is responsible for actually pausing the
-        printer).
+        the confidence exceeds the threshold, the printer adapter's
+        ``pause_print()`` is invoked best-effort.  The pause call is
+        idempotent (skipped when the adapter already reports paused),
+        gated by the ``KILN_MONITOR_PAUSE_DISABLED`` env-var
+        kill-switch (set to ``"true"``, ``"1"``, or ``"yes"`` to
+        disable), and never raises out — failures are surfaced via
+        the ``auto_pause_error`` field on the returned issue dict.
 
         :param session_id: The session to report against.
         :param issue_type: Category of the issue
@@ -838,7 +852,9 @@ class PrintHealthMonitor:
             ``"layer_shift"``, ``"adhesion_failure"``).
         :param confidence: Confidence score (0.0--1.0).
         :param detail: Optional human-readable description.
-        :returns: Issue record dict including ``auto_pause_triggered``.
+        :returns: Issue record dict including ``auto_pause_triggered``
+            and (when relevant) ``auto_pause_skipped`` /
+            ``auto_pause_error``.
         :raises KeyError: If *session_id* is not found.
         :raises ValueError: If the session is not actively monitoring,
             or if confidence is outside 0.0--1.0.
@@ -874,8 +890,105 @@ class PrintHealthMonitor:
                 issue_type,
                 confidence,
             )
+            self._honor_auto_pause(session, issue, issue_type)
 
         return issue
+
+    # -- auto-pause honoring -----------------------------------------------
+
+    @staticmethod
+    def _pause_kill_switch_enabled() -> bool:
+        """Return ``True`` iff the operator has flipped the kill-switch.
+
+        Honors ``KILN_MONITOR_PAUSE_DISABLED`` set to any of
+        ``"true"``, ``"1"``, ``"yes"`` (case-insensitive).  Anything
+        else (including unset) means the auto-pause path is live.
+        """
+        raw = os.environ.get("KILN_MONITOR_PAUSE_DISABLED", "")
+        return raw.strip().lower() in {"true", "1", "yes"}
+
+    def _honor_auto_pause(
+        self,
+        session: MonitorSession,
+        issue: dict[str, Any],
+        issue_type: str,
+    ) -> None:
+        """Best-effort, idempotent printer pause when auto_pause fires.
+
+        Mutates the *issue* dict to surface the outcome:
+
+        - ``auto_pause_skipped="kill_switch"`` when the env var is set
+        - ``auto_pause_skipped="already_paused"`` when state reports paused
+        - ``auto_pause_error=<repr>`` when the adapter or pause call raises
+
+        Never re-raises; the monitor loop must keep running even when
+        the pause attempt fails.
+        """
+        if self._pause_kill_switch_enabled():
+            issue["auto_pause_skipped"] = "kill_switch"
+            logger.info(
+                "Auto-pause kill-switch active (KILN_MONITOR_PAUSE_DISABLED) — "
+                "skipping pause for session %s issue %s",
+                session.session_id,
+                issue_type,
+            )
+            return
+
+        try:
+            from kiln.registry import get_printer_registry
+
+            registry = get_printer_registry()
+            adapter = registry.get(session.printer_name)
+        except Exception as exc:
+            issue["auto_pause_error"] = repr(exc)
+            logger.warning(
+                "Auto-pause skipped for session %s: adapter lookup failed: %s",
+                session.session_id,
+                exc,
+            )
+            return
+
+        # Idempotency check: if the adapter already reports paused,
+        # don't issue another pause.  Adapter shapes vary, so be
+        # defensive — any failure during the state probe falls back
+        # to "unknown, attempt pause."
+        try:
+            state = adapter.get_state()
+            already_paused = bool(getattr(state, "is_paused", False))
+        except Exception as exc:
+            already_paused = False
+            logger.debug(
+                "State probe failed for session %s; attempting pause anyway: %s",
+                session.session_id,
+                exc,
+            )
+
+        if already_paused:
+            issue["auto_pause_skipped"] = "already_paused"
+            logger.info(
+                "Auto-pause skipped for session %s: printer already paused",
+                session.session_id,
+            )
+            return
+
+        try:
+            adapter.pause_print()
+        except Exception as exc:
+            issue["auto_pause_error"] = repr(exc)
+            logger.warning(
+                "Auto-pause failed for session %s issue %s: %s",
+                session.session_id,
+                issue_type,
+                exc,
+            )
+            return
+
+        logger.warning(
+            "Auto-paused printer %s for issue %s (session %s)",
+            session.printer_name,
+            issue_type,
+            session.session_id,
+        )
 
     # -- background monitor loop -------------------------------------------
 
@@ -924,30 +1037,50 @@ class PrintHealthMonitor:
                             self._publish_stall_event(stall_result)
                         break
 
-                # Auto-pause on critical health
+                # Auto-pause on critical health.  Connection-only
+                # criticals downgrade to confidence 0.5 so they stay
+                # visible in the issue stream but don't trip the pause
+                # threshold — a brief disconnect is the reconnect
+                # machinery's job, not the pause path's.
                 if report.overall_status == HealthSeverity.CRITICAL and session.policy.auto_pause_on_failure:
-                    self.report_issue(
-                        session_id,
-                        "health_critical",
-                        1.0,
-                        detail=(
-                            f"Critical health status detected on "
-                            f"{printer_name}: "
-                            + ", ".join(m.metric_name for m in report.metrics if m.severity == HealthSeverity.CRITICAL)
-                        ),
+                    critical_metric_names = {
+                        m.metric_name for m in report.metrics if m.severity == HealthSeverity.CRITICAL
+                    }
+                    connection_only = bool(critical_metric_names) and critical_metric_names.issubset(
+                        _CONNECTION_HEALTH_METRICS
                     )
+                    if connection_only:
+                        self.report_issue(
+                            session_id,
+                            "health_critical",
+                            0.5,
+                            detail=(
+                                f"Connection-only critical on {printer_name}: "
+                                + ", ".join(sorted(critical_metric_names))
+                                + " — reconnect handler owns this; not pausing."
+                            ),
+                        )
+                    else:
+                        self.report_issue(
+                            session_id,
+                            "health_critical",
+                            1.0,
+                            detail=(
+                                f"Critical health status detected on "
+                                f"{printer_name}: "
+                                + ", ".join(sorted(critical_metric_names))
+                            ),
+                        )
 
                 # Pro-tier predictive risk — score the recent health
                 # reports against KILN-003 thermal/flow/layer-time
                 # heuristics.  Red signals get surfaced into the issue
                 # stream so they sit alongside vision-based and
                 # health-based detections.  Best-effort and signal-only:
-                # missing kiln-pro is a clean no-op, and the existing
-                # auto-pause flag fires only via the report_issue path
-                # that doesn't actually pause the printer (bug tracked
-                # separately).  Insufficient telemetry history (< 6
-                # snapshots) returns ``severity=clear`` so this is also
-                # a no-op until enough data has accumulated.
+                # missing kiln-pro is a clean no-op.  Insufficient
+                # telemetry history (< 6 snapshots) returns
+                # ``severity=clear`` so this is also a no-op until
+                # enough data has accumulated.
                 self._maybe_record_predictive_signals(session)
 
             except KeyError:

@@ -256,3 +256,101 @@ If any line fails: capture the response payload, the printer model,
 the kiln-pro version, and the kiln3d version into a comment on this
 runbook.  Re-run the corresponding unit test to confirm the regression
 is reproducible in CI before patching live.
+
+---
+
+## 5. Auto-pause smoke test
+
+Validates that `report_issue` actually calls `pause_print()` when
+auto_pause_triggered fires, and that the
+`KILN_MONITOR_PAUSE_DISABLED` kill-switch behaves as a true
+operator override.  Use the live Bambu A1 here — kill-switch
+behavior is too easy to fake in unit tests.
+
+### 5a. Auto-pause fires on a real thermal spike
+
+```bash
+# Set up a small print (a coaster works well — short and cheap to
+# abandon) and start the health monitor.
+kiln tool start_monitored_print --model-path /tmp/coaster.3mf
+SESSION_ID=$(kiln tool start_printer_health_monitoring --json | jq -r '.session_id')
+
+# Wait until the print is mid-infill (so a pause is meaningful),
+# then artificially heat the nozzle 30°C above its current target
+# to trip the temp_drift CRITICAL threshold.
+kiln tool printer_status --json | jq '.tool_temp_actual, .tool_temp_target'
+kiln tool send_gcode --command "M104 S270"
+
+# Within ~2 monitoring intervals the monitor should:
+#   1. log "Auto-pause triggered for session ..."
+#   2. log "Auto-paused printer ... for issue health_critical"
+#   3. show pause state on the printer
+kiln tool printer_status --json | jq '.is_paused'
+# Expect: true
+
+# Pull the issue list to confirm auto_pause_triggered=True with no
+# auto_pause_skipped / auto_pause_error fields.
+kiln tool get_session_log --session-id "$SESSION_ID" --json \
+  | jq '.issues[] | select(.issue_type == "health_critical")'
+# Expect: auto_pause_triggered: true, no auto_pause_skipped, no auto_pause_error.
+```
+
+### 5b. Resume after restoring the temperature
+
+```bash
+# Restore the original target (replace 220 with whatever your slicer set).
+kiln tool send_gcode --command "M104 S220"
+
+# Wait for the hotend to settle back to target, then resume.
+kiln tool resume_print
+kiln tool printer_status --json | jq '.is_paused, .is_printing'
+# Expect: false, true
+```
+
+**Red flag:**
+- `pause_print()` was logged but `is_paused` is still `false` →
+  adapter pause_print is no-op'ing.  Inspect the Bambu MQTT
+  publish path (Dev Mode + access code).
+- `auto_pause_triggered: true` with `auto_pause_error` set → the
+  adapter rejected the pause; capture the error string into the
+  comment on this runbook.
+
+### 5c. Kill-switch disables auto-pause
+
+```bash
+# Restart the monitor with the kill-switch on.
+kiln tool stop_printer_health_monitoring
+KILN_MONITOR_PAUSE_DISABLED=true \
+  kiln tool start_printer_health_monitoring --json
+
+# Repeat the heat-spike from 5a.
+kiln tool send_gcode --command "M104 S270"
+
+# Within ~2 intervals the issue should be recorded but NO pause.
+kiln tool printer_status --json | jq '.is_paused'
+# Expect: false (printer keeps printing despite the spike)
+
+kiln tool get_session_log --session-id "$SESSION_ID" --json \
+  | jq '.issues[] | select(.issue_type == "health_critical") | .auto_pause_skipped'
+# Expect: "kill_switch"
+
+# Restore target before the print actually fails.
+kiln tool send_gcode --command "M104 S220"
+```
+
+**Red flag:**
+- `is_paused: true` while `KILN_MONITOR_PAUSE_DISABLED=true` →
+  the kill-switch isn't being honored.  Inspect
+  `_pause_kill_switch_enabled` in `print_health_monitor.py`.
+- `auto_pause_skipped` is null/missing → the issue dict isn't
+  being mutated; check the `_honor_auto_pause` mutation path.
+
+### Sign-off additions
+
+- [ ] Auto-pause: heat-spike trips `health_critical` and the printer
+      actually pauses (5a)
+- [ ] Auto-pause: `resume_print` returns to `is_printing: true`
+      after restoring the target (5b)
+- [ ] Kill-switch: `KILN_MONITOR_PAUSE_DISABLED=true` records the
+      issue with `auto_pause_skipped: "kill_switch"` and does NOT
+      pause the printer (5c)
