@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-27T18:36:58.036435+00:00",
-  "tool_count": 295,
+  "generated": "2026-04-28T08:10:28.535302+00:00",
+  "tool_count": 297,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -66,6 +66,10 @@
     "assembly_manuals": {
       "label": "Assembly Manuals",
       "pitch": "Auto-generate flat-pack-style PDF assembly instructions for multi-part prints \u2014 exploded cover, bill of materials, step-by-step isometric renders with confidence calibration."
+    },
+    "part_economics": {
+      "label": "Part Economics",
+      "pitch": "Break sliced plates into per-part time, filament, and cost estimates for quoting, kit pricing, and replacement parts."
     }
   },
   "tools": [
@@ -101,7 +105,7 @@
     },
     {
       "name": "auto_generate_manual_for_print",
-      "description": "Fire the iPhone-moment auto-trigger for a multi-part print (Pro+).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Fire the automatic manual trigger for a multi-part print (Pro+).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "assembly_manuals",
       "parameters": {
@@ -229,6 +233,90 @@
             "default": null,
             "title": "Manual Id New"
           },
+          "design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Id"
+          },
+          "version_id_old": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version Id Old"
+          },
+          "version_id_new": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version Id New"
+          },
+          "release_id_old": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Release Id Old"
+          },
+          "release_id_new": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Release Id New"
+          },
+          "release_name_old": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Release Name Old"
+          },
+          "release_name_new": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Release Name New"
+          },
           "spec_old_path": {
             "anyOf": [
               {
@@ -288,6 +376,16 @@
             ],
             "default": null,
             "title": "Output Pdf Path"
+          },
+          "include_intermediate": {
+            "default": false,
+            "title": "Include Intermediate",
+            "type": "boolean"
+          },
+          "include_retired": {
+            "default": false,
+            "title": "Include Retired",
+            "type": "boolean"
           },
           "lang": {
             "default": "en",
@@ -1739,7 +1837,7 @@
     },
     {
       "name": "generate_qr_decoration",
-      "description": "Generate a QR code heightmap for embossing onto 3D models (Business).\n\nRequires Kiln Business.\nLearn more: https://kiln3d.com/enterprise",
+      "description": "Generate a QR code heightmap for embossing onto 3D models (Business).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "category": "decoration",
       "parameters": {
@@ -2109,7 +2207,7 @@
     },
     {
       "name": "smart_redesign",
-      "description": "Interpret a natural language instruction and modify the design (Business).\n\nRequires Kiln Business.\nLearn more: https://kiln3d.com/enterprise",
+      "description": "Interpret a natural language instruction and modify the design (Business).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "category": "design_modification",
       "parameters": {
@@ -6306,6 +6404,122 @@
       }
     },
     {
+      "name": "batch_estimate_plate_part_costs",
+      "description": "Batch-estimate per-part economics for many sliced plates (Business).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "category": "part_economics",
+      "parameters": {
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "cost_per_kg_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cost Per Kg Usd"
+          },
+          "electricity_rate": {
+            "default": 0.12,
+            "title": "Electricity Rate",
+            "type": "number"
+          },
+          "printer_wattage": {
+            "default": 200.0,
+            "title": "Printer Wattage",
+            "type": "number"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "batch_estimate_plate_part_costsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "estimate_plate_part_costs",
+      "description": "Estimate per-part print time, filament, and cost for a sliced plate (Business).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "category": "part_economics",
+      "parameters": {
+        "properties": {
+          "file_path": {
+            "title": "File Path",
+            "type": "string"
+          },
+          "plate_number": {
+            "default": 1,
+            "title": "Plate Number",
+            "type": "integer"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "material_by_object": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Material By Object"
+          },
+          "cost_per_kg_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cost Per Kg Usd"
+          },
+          "electricity_rate": {
+            "default": 0.12,
+            "title": "Electricity Rate",
+            "type": "number"
+          },
+          "printer_wattage": {
+            "default": 200.0,
+            "title": "Printer Wattage",
+            "type": "number"
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "title": "estimate_plate_part_costsArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "add_feature_during_print",
       "description": "Slice a new mesh at pause_z and resume printing it (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -8578,7 +8792,7 @@
     },
     {
       "name": "add_qr_to_product",
-      "description": "Add a scannable QR code to any product STL (Business).\n\nRequires Kiln Business.\nLearn more: https://kiln3d.com/enterprise",
+      "description": "Add a scannable QR code to any product STL (Business).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "category": "product_intelligence",
       "parameters": {
@@ -8897,7 +9111,7 @@
     },
     {
       "name": "print_qr_product",
-      "description": "One-shot QR product pipeline: generate base, add QR, slice, merge, wrap 3MF, upload, and print (Business).\n\nRequires Kiln Business.\nLearn more: https://kiln3d.com/enterprise",
+      "description": "One-shot QR product pipeline: generate base, add QR, slice, merge, wrap 3MF, upload, and print (Business).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "category": "product_intelligence",
       "parameters": {
@@ -9118,7 +9332,7 @@
     },
     {
       "name": "fleet_set_speed",
-      "description": "Set speed across all registered printers in the fleet (Business).\n\nRequires Kiln Business.\nLearn more: https://kiln3d.com/enterprise",
+      "description": "Set speed across all registered printers in the fleet (Business).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "category": "speed_control",
       "parameters": {
@@ -9179,7 +9393,7 @@
     },
     {
       "name": "set_speed_schedule",
-      "description": "Set layer-based speed schedule with automatic adjustments (Business).\n\nRequires Kiln Business.\nLearn more: https://kiln3d.com/enterprise",
+      "description": "Set layer-based speed schedule with automatic adjustments (Business).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "category": "speed_control",
       "parameters": {

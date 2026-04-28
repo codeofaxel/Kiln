@@ -125,6 +125,63 @@ class TestAddAssemblyInterface:
         assert result["success"] is False
         assert "Invalid assembly JSON" in result["error"]
 
+    def test_fastener_json_string_round_trips(self, assembly_tools):
+        result = assembly_tools["add_assembly_interface"](
+            assembly_json=_assembly_json(),
+            part_a_id="p1",
+            part_b_id="p2",
+            joint_type="clearance_fit",
+            clearance_mm=2.0,
+            fastener=json.dumps({
+                "size": "M5",
+                "family": "metric_machine_screw",
+                "length_mm": 12,
+                "head_type": "socket",
+                "drive_type": "hex",
+                "surface_type": "metal",
+                "quantity_per_interface": 4,
+            }),
+        )
+
+        assert result["success"] is True
+        spec = result["data"]["interfaces"][0]["fastener_spec"]
+        assert spec["size"] == "M5"
+        assert spec["length_mm"] == 12.0
+        assert spec["quantity_per_interface"] == 4
+
+    def test_fastener_dict_round_trips(self, assembly_tools):
+        result = assembly_tools["add_assembly_interface"](
+            assembly_json=_assembly_json(),
+            part_a_id="p1",
+            part_b_id="p2",
+            joint_type="clearance_fit",
+            fastener={
+                "size": "#8",
+                "family": "wood_screw",
+                "length_range_mm": [16, 20],
+                "head_type": "pan",
+                "drive_type": "cross",
+                "surface_type": "wood",
+                "quantity_per_interface": 2,
+            },
+        )
+
+        assert result["success"] is True
+        spec = result["data"]["interfaces"][0]["fastener_spec"]
+        assert spec["size"] == "#8"
+        assert spec["length_range_mm"] == [16.0, 20.0]
+
+    def test_invalid_fastener_json_is_reported(self, assembly_tools):
+        result = assembly_tools["add_assembly_interface"](
+            assembly_json=_assembly_json(),
+            part_a_id="p1",
+            part_b_id="p2",
+            fastener="{bad",
+        )
+
+        assert result["success"] is False
+        assert "Invalid fastener JSON" in result["error"]
+
 
 # ---------------------------------------------------------------------------
 # TestCheckAssemblyClearances

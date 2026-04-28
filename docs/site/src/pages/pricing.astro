@@ -64,7 +64,7 @@ const pricingFaqSchema = {
       name: 'Can I self-host everything?',
       acceptedAnswer: {
         '@type': 'Answer',
-        text: 'Yes. Kiln runs locally, and paid tiers add optional hosted features without removing local functionality.',
+        text: 'Yes. Kiln runs entirely locally. Pro/Business/Enterprise tiers add optional cloud features, but free tier local basic functionality never requires a subscription.',
       },
     },
     {
@@ -141,7 +141,7 @@ const pricingFaqSchema = {
             <li><span class="check">&#10003;</span> Cost estimation &amp; recommendations</li>
             <li><span class="check">&#10003;</span> 14-component parametric catalog</li>
             <li><span class="check">&#10003;</span> Local design history (linear) &mdash; branching, merge, and signed releases require Pro</li>
-            <li><span class="check">&#10003;</span> 757 MCP tools &amp; 214 CLI commands</li>
+            <li><span class="check">&#10003;</span> 759 MCP capabilities &amp; 214 CLI commands</li>
             <li><span class="check">&#10003;</span> Community support</li>
             <li><span class="check">&#10003;</span> 3 fulfillment orders/month free</li>
             <li><span class="check">&#10003;</span> 5% orchestration fee on fulfillment</li>
@@ -274,7 +274,7 @@ const pricingFaqSchema = {
         </details>
         <details>
           <summary>Can I self-host everything?</summary>
-          <p>Yes. Kiln runs entirely locally. Pro/Business tiers add optional cloud features but local functionality never requires a subscription.</p>
+          <p>Yes. Kiln runs entirely locally. Pro/Business/Enterprise tiers add optional cloud features, but free tier local basic functionality never requires a subscription.</p>
         </details>
         <details>
           <summary>Do I need a paid plan for multiple printers?</summary>
@@ -365,7 +365,6 @@ const pricingFaqSchema = {
         body: JSON.stringify({
           tier,
           billing,
-          success_url: `${window.location.origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${window.location.origin}/pricing`,
           ...extraBody,
         }),

@@ -276,6 +276,15 @@ class _UtilityToolsPlugin:
                 live_tool_count = len(_srv.mcp._tool_manager.list_tools())
             except Exception:
                 live_tool_count = 0
+            try:
+                live_prompt_count = len(_srv.mcp._prompt_manager.list_prompts())
+            except Exception:
+                live_prompt_count = 0
+            try:
+                live_resource_count = len(_srv.mcp._resource_manager.list_resources())
+            except Exception:
+                live_resource_count = 0
+            live_capability_count = live_tool_count + live_prompt_count + live_resource_count
 
             # Detect whether kiln-pro is providing real tools (not just stubs)
             kiln_pro_installed = False
@@ -363,9 +372,11 @@ class _UtilityToolsPlugin:
                 "success": True,
                 "overview": (
                     f"Kiln is agent infrastructure for 3D printing. This session "
-                    f"has {live_tool_count} MCP tools covering printer monitoring, "
-                    f"file management, slicing, marketplaces, model generation, "
-                    f"design intelligence, safety controls"
+                    f"has {live_tool_count} MCP tools ({live_capability_count} "
+                    f"total MCP capabilities including {live_prompt_count} prompts "
+                    f"and {live_resource_count} resources) covering printer "
+                    f"monitoring, file management, slicing, marketplaces, model "
+                    f"generation, design intelligence, safety controls"
                     + (
                         ", and kiln-pro features (product generators, decoration, "
                         "print intelligence, fleet ops, billing)."
@@ -377,6 +388,9 @@ class _UtilityToolsPlugin:
                 ),
                 "tool_discovery": {
                     "total_tools": live_tool_count,
+                    "total_mcp_capabilities": live_capability_count,
+                    "prompts": live_prompt_count,
+                    "resources": live_resource_count,
                     "how_to_discover": (
                         "MCP clients don't load all tool schemas upfront when "
                         "the count is large — use ToolSearch(keyword) to surface "

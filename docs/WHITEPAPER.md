@@ -10,13 +10,13 @@
 
 ## Abstract
 
-We present Kiln, a protocol and reference implementation that enables autonomous AI agents to transform ideas -- expressed as natural language, sketches, or parametric specifications -- into physical objects through 3D printing. Kiln bridges the gap between digital intelligence and physical fabrication by providing: (1) a Design Intelligence layer with 25 FDM materials with full engineering properties, 45 brand-specific filament profiles, and 20 proven design patterns; (2) text-to-3D and sketch-to-3D generation via Gemini Deep Think, Meshy, Tripo3D, Stability AI, and OpenSCAD; (3) 7-dimension printability analysis before parts reach a slicer; (4) direct control of local printers via OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link adapters; (5) fulfillment routing through third-party providers such as Craftcloud; (6) multi-part assembly planning with clearance validation and tolerance stacking; and (7) real-time G-code interception for in-flight safety filtering. The system enforces safety invariants at the protocol level across 29 printer safety profiles, and preserves parametric Design DNA for iterative refinement. Kiln does not operate its own marketplace or manufacturing network -- it searches existing 3rd-party marketplaces and routes to existing fulfillment providers.
+We present Kiln, a protocol and reference implementation that enables autonomous AI agents to transform ideas -- expressed as natural language, sketches, or parametric specifications -- into physical objects through 3D printing. Kiln bridges the gap between digital intelligence and physical fabrication by providing: (1) a Design Intelligence layer with 25 FDM materials with full engineering properties, 45 brand-specific filament profiles, and 20 proven design patterns; (2) text-to-3D and sketch-to-3D generation via Gemini Deep Think, Meshy, Tripo3D, Stability AI, and OpenSCAD; (3) 7-dimension printability analysis before parts reach a slicer; (4) direct control of local printers via OctoPrint, Moonraker, Bambu Lab, Elegoo, Prusa Link, and Direct USB/Serial adapters; (5) fulfillment routing through third-party providers such as Craftcloud; (6) multi-part assembly planning with clearance validation, tolerance stacking, and optional kiln-pro assembly manuals; (7) preview-confirmed print starts; and (8) real-time G-code interception for in-flight safety filtering. The system enforces safety invariants at the protocol level across 29 printer safety profiles, and preserves parametric Design DNA for iterative refinement. Kiln does not operate its own marketplace or manufacturing network -- it searches existing 3rd-party marketplaces and routes to existing fulfillment providers.
 
 ## 1. Introduction
 
 ### 1.1 The Problem
 
-The distance between "I need a part" and holding that part is filled with fragmented software, specialized knowledge, and manual labor. Every printer ecosystem -- OctoPrint, Klipper/Moonraker, Bambu Lab, Elegoo -- exposes its own incompatible API. Designing printable parts requires CAD expertise. Validating printability requires tribal knowledge about overhangs, bridging distances, and material behavior. Managing a mixed fleet means maintaining separate integrations for each backend.
+The distance between "I need a part" and holding that part is filled with fragmented tooling, specialized knowledge, and manual labor. Every printer ecosystem -- OctoPrint, Klipper/Moonraker, Bambu Lab, Elegoo, Prusa Link, and Serial/USB-connected Marlin printers -- exposes its own incompatible control surface. Designing printable parts requires CAD expertise. Validating printability requires tribal knowledge about overhangs, bridging distances, and material behavior. Managing a mixed fleet means maintaining separate integrations for each backend.
 
 AI agents are now capable enough to plan and execute multi-step physical tasks. But no protocol exists to give these agents safe, structured access to the full pipeline from idea to physical object.
 
@@ -30,11 +30,11 @@ Kiln solves the entire pipeline:
 
 3. **Printability Engine.** 7-dimension analysis -- overhangs, thin walls, bridging, bed adhesion, supports, warping, and thermal stress -- catches problems before they waste filament. Thermal stress heuristics and adhesion force estimation provide quantitative risk assessment.
 
-4. **Unified Adapter Layer.** A single `PrinterAdapter` abstract interface normalizes OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link APIs into consistent Python dataclasses. Adding a new backend requires implementing ~12 methods; all upstream consumers work automatically.
+4. **Unified Adapter Layer.** A single `PrinterAdapter` abstract interface normalizes OctoPrint, Moonraker, Bambu Lab, Elegoo, Prusa Link, and Direct USB/Serial printer control into consistent Python dataclasses. Adding a new backend requires implementing the adapter contract; all upstream consumers work automatically.
 
-5. **Agent-Native Interface.** <!-- KILN_MCP_COUNT:OLD --> 757 typed MCP tools with structured JSON input/output make Kiln a first-class tool for any MCP-compatible agent. <!-- KILN_CLI_COUNT:OLD --> 214 CLI commands with `--json` flags cover the same surface for scripting.
+5. **Agent-Native Interface.** <!-- KILN_MCP_TOOL_COUNT:OLD --> 752 typed MCP tools and <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 759 total MCP capabilities make Kiln a first-class control layer for any MCP-compatible agent. <!-- KILN_CLI_COUNT:OLD --> 214 CLI commands with `--json` flags cover the same surface for scripting.
 
-6. **Safety-First Design.** Pre-flight checks, G-code validation, temperature limits, and confirmation gates are enforced at the protocol layer. 29 safety profiles define hardware-specific limits. An agent cannot bypass safety checks even if instructed to.
+6. **Safety-First Design.** Pre-flight checks, preview-confirmed print starts, G-code validation, temperature limits, and confirmation gates are enforced at the protocol layer. 29 safety profiles define hardware-specific limits. An agent cannot bypass safety checks even if instructed to.
 
 ## 2. Architecture
 
@@ -56,7 +56,7 @@ Kiln solves the entire pipeline:
         [Design    [Generation [Print-  [Your      [Fulfillment
         Intelligence] Backends] ability] Printers]  Providers]
          25 mats    Gemini DT   7-dim   OP/MR/BL   Craftcloud
-         45 filaments Meshy     analysis PL/EG
+        45 filaments Meshy     analysis PL/EG/Serial
          20 patterns Tripo3D
                     Stability
                     OpenSCAD
@@ -66,7 +66,13 @@ Kiln solves the entire pipeline:
 
 The system is organized into five functional layers. Design Intelligence informs what to build and how. Generation backends convert descriptions into geometry. The Printability Engine validates geometry before slicing. Printer adapters handle hardware communication. Fulfillment providers handle outsourced manufacturing. All layers are accessible through the same MCP tools and CLI commands.
 
-### 2.2 The Adapter Contract
+### 2.2 Public/Pro Extension Boundary
+
+Public Kiln is the local printer-control layer, MCP server, CLI, safety system, adapter framework, generation/validation pipeline, and third-party marketplace/fulfillment interface. kiln-pro extends that surface with paid-tier capabilities such as product generators, procedural textures, design versioning, cloud sync, team workflows, assembly manuals, recovery intelligence, and billing.
+
+The boundary is explicit. Public Kiln discovers local paid features through `try: from kiln_pro.bridge import pro_features` and otherwise falls back cleanly. It also bundles `pro_tool_manifest.json`, a generated manifest of kiln-pro tools that lets free-tier agents discover tier-gated capabilities and return structured upgrade guidance without shipping proprietary code in the public package. When a machine is paired to the hosted Kiln REST endpoint, public Kiln can proxy tier-gated tool calls server-side; the source of paid-tier implementations remains in kiln-pro.
+
+### 2.3 The Adapter Contract
 
 Every printer backend implements `PrinterAdapter`, an abstract base class defining the complete surface area of printer control:
 
@@ -87,15 +93,17 @@ Every printer backend implements `PrinterAdapter`, an abstract base class defini
 
 Each method returns typed dataclasses -- never raw dicts or API-specific JSON. State is normalized to a `PrinterStatus` enum (`IDLE`, `PRINTING`, `PAUSED`, `ERROR`, `OFFLINE`). This normalization is critical: OctoPrint encodes state as boolean flags, Moonraker uses string identifiers, Bambu uses numeric codes, Elegoo uses SDCP numeric status codes over WebSocket, and Prusa Link uses nine string states. The adapter translates all of these into a single enum.
 
-### 2.3 Safety Layer
+### 2.4 Safety Layer
 
-Physical machines can be damaged by software errors. Kiln enforces safety at three levels:
+Physical machines can be damaged by integration errors. Kiln enforces safety at four levels:
 
 **Level 1: G-code Validation.** Before any G-code reaches a printer, it passes through `validate_gcode()`. This blocks commands known to be dangerous without explicit context: firmware reset (`M502`), EEPROM wipe (`M500` without prior `M501`), and movements beyond axis limits.
 
 **Level 2: Pre-flight Checks.** The `preflight_check()` gate runs before every print job. It validates: printer is online and idle, target file exists on the printer, temperatures are within safe ranges for the declared material, and no existing job is active.
 
 **Level 3: Temperature Limits and Safety Profiles.** 29 safety profiles define per-printer-model limits -- maximum hotend and bed temperatures, axis travel bounds, and maximum feedrates. Hard limits (300C hotend, 130C bed) are enforced regardless of what the caller requests. Material-specific ranges generate warnings when targets fall outside expected bounds. A background heater watchdog automatically cools idle heaters after a configurable timeout (default 30 minutes) to prevent fire hazards.
+
+**Level 4: Preview Confirmation.** `start_print` refuses new non-resume jobs unless the agent has rendered a recent preview, shown it to the user, and supplied a single-use confirmation token bound to the file and printer. Advanced users can bypass the gate through an explicit environment variable, and bypasses are logged.
 
 An agent may request any operation, but Kiln will refuse operations that violate safety invariants and return a structured error explaining why.
 
@@ -175,6 +183,12 @@ Parts too large for a single print bed are automatically split into printable se
 
 Multi-part assemblies undergo clearance validation (minimum gap between mating surfaces), joint detection (identifying snap-fit, press-fit, and threaded connections), and tolerance stacking analysis (cumulative dimensional error across assembled parts). The system flags assemblies where accumulated tolerances may prevent proper fit.
 
+### 6.3 Assembly Manuals
+
+When kiln-pro (https://kiln3d.com) is installed, the assembly interface can generate a printable PDF manual from the same assembly JSON. The public contract is simple: assemblies declare parts, positions, materials, mating interfaces, clearances, magnet polarity when relevant, and optional fastener metadata. kiln-pro turns that into a cover render, bill of materials, per-step isometric pages, verification gates, sidecar JSON, and per-page PNG previews that agents can display inline.
+
+Manual generation is deliberately evidence-based. If an assembly lacks the metadata needed to describe a joint confidently, the generator returns a structured remediation error instead of shipping a vague instruction. Multi-language and co-brand options are kiln-pro Business+ features (https://kiln3d.com/pricing). Manuals can also be embedded into 3MF packages with a signed manifest so downstream recipients can verify authenticity.
+
 ## 7. Search 3rd-Party Marketplaces
 
 Kiln mirrors its printer adapter pattern for model discovery. A `MarketplaceAdapter` abstract base class defines a uniform interface -- `search()`, `get_details()`, `get_files()`, `download_file()` -- implemented by concrete adapters for MyMiniFactory (REST v2), Cults3D (GraphQL; metadata-only, no direct downloads), and Thingiverse (REST). Each adapter normalizes API-specific JSON into shared dataclasses (`ModelSummary`, `ModelDetail`, `ModelFile`).
@@ -218,6 +232,8 @@ The `Scheduler` runs a background loop that matches pending jobs to idle printer
 
 The cost estimator parses G-code to compute filament length, weight, and material cost based on material profiles. It extracts estimated print time from slicer comments and calculates electricity costs. Combined with smart recommendations, agents can compare the cost of local printing versus fulfillment services before committing.
 
+For manufacturing bureaus and kit sellers, kiln-pro Business adds per-part economics for sliced multi-object `.gcode.3mf` plates. The public interface remains whole-job cost estimation; the paid extension breaks a plate into object-level time, filament, material cost, electricity, and totals for quoting and replacement-part pricing.
+
 ## 12. Event System and Webhooks
 
 All significant state changes emit events through a pub/sub event bus: job state transitions, printer status changes, errors. Events are persisted to SQLite. External systems can register HTTP webhook endpoints for specific event types. Payloads are signed with HMAC-SHA256 when a secret is provided.
@@ -248,13 +264,13 @@ Agents record structured print outcomes after each job: success/failure, quality
 
 ### 15.1 Physical Safety
 
-The safety system is described in Section 2.3. Additionally, 29 printer-specific safety profiles define model-specific limits loaded at startup and checked on every temperature and G-code command.
+The safety system is described in Section 2.4. Additionally, 29 printer-specific safety profiles define model-specific limits loaded at startup and checked on every temperature and G-code command.
 
 ### 15.2 Authentication and Authorization
 
 Authentication is optional and disabled by default for local deployments. When enabled, the `AuthManager` enforces API key verification with SHA-256 hashed keys, scope-based access control (`read`, `write`, `admin`), key rotation with grace periods, and auto-generated session keys.
 
-Enterprise deployments support SSO via OIDC or SAML (Okta, Google Workspace, Azure AD, Auth0) and hierarchical RBAC with three roles: admin, engineer, operator.
+Enterprise deployments support SSO via OIDC or SAML, hierarchical RBAC, team/org scopes, approval gates, session policy, MFA step-up for sensitive operations, and SCIM 2.0 provisioning endpoints.
 
 ### 15.3 Network Security
 
@@ -268,7 +284,7 @@ Tool output sanitization strips prompt injection patterns and truncates to confi
 
 Parameterized SQL queries, no `eval()` or `exec()`, explicit plugin allow-lists with fault isolation, and credential file permission checks.
 
-Enterprise features include encrypted G-code at rest (Fernet symmetric encryption with PBKDF2 key derivation), lockable safety profiles that prevent agent modification, and full audit trail export in JSON/CSV for compliance.
+Enterprise features include encrypted G-code at rest (Fernet symmetric encryption with PBKDF2 key derivation), lockable safety profiles that prevent agent modification, hash-chained REST audit events, and full audit trail export in JSON/CSV for compliance.
 
 ### 15.6 Enterprise Deployment
 
@@ -279,9 +295,9 @@ On-premises deployment via Kubernetes manifests and Helm chart with namespace is
 Local printer control is free and unrestricted. Kiln uses a four-tier model:
 
 - **Free** -- All local printing, design intelligence, generation, and printability analysis. Up to 2 printers, 10-job queue.
-- **Pro ($49/mo, $39/mo annual)** -- Up to 5 printers, fleet orchestration, analytics, cloud sync, git-for-3D version control, product templates, procedural textures, decoration system, speed control, print learning, and cross-printer intelligence. Positioning: Claude made generating virtual artifacts trivial; Kiln Pro does the same for physical ones.
-- **Business ($99/mo, $79/mo annual)** -- Up to 50 printers, 5 team seats, fulfillment brokering, shared hosted MCP server, priority support, custom safety profiles.
-- **Enterprise (from $499/mo, $399/mo annual)** -- Unlimited printers (20 included, $15/mo each additional), unlimited team seats, dedicated MCP server, on-premises deployment, SSO, RBAC, audit trail, encrypted G-code, 99.9% SLA.
+- **Pro ($49/mo, $39/mo annual)** -- Up to 5 printers, fleet orchestration, analytics, cloud sync, git-for-3D version control, product templates, procedural textures, surface decoration, assembly manuals, speed control, print learning, recovery intelligence, and cross-printer intelligence.
+- **Business ($99/mo, $79/mo annual)** -- Up to 50 printers, 5 team seats, team pull requests, approval gates, fulfillment brokering, shared hosted MCP server, priority support, custom safety profiles, QR product workflows, co-branded/multi-language assembly manuals, and per-part plate economics.
+- **Enterprise (from $499/mo, $399/mo annual)** -- Unlimited printers (20 included, $15/mo each additional), unlimited team seats, dedicated MCP server, on-premises deployment, SSO, SCIM, RBAC, audit trail, encrypted G-code, lockable safety profiles, 99.9% SLA.
 
 Fulfillment orders carry a 5% orchestration fee (first 3/month free, $0.25 min, $200 max). Providers remain merchant of record.
 

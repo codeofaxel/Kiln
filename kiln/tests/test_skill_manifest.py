@@ -58,24 +58,26 @@ class TestSkillManifest:
         assert "cli" in m.interfaces
         assert "mcp" in m.interfaces
         assert m.tool_count == 0
+        assert m.mcp_capability_count == 0
         assert "safe" in m.safety_levels
         assert m.setup_command == "kiln verify"
         assert m.health_command == "kiln status --json"
 
     def test_to_dict_returns_dict(self):
-        m = SkillManifest(version="1.0.0", tool_count=42)
+        m = SkillManifest(version="1.0.0", tool_count=42, mcp_capability_count=49)
         d = m.to_dict()
         assert isinstance(d, dict)
         assert d["name"] == "kiln"
         assert d["version"] == "1.0.0"
         assert d["tool_count"] == 42
+        assert d["mcp_capability_count"] == 49
 
     def test_to_dict_all_keys_present(self):
         d = SkillManifest().to_dict()
         expected_keys = {
             "name", "version", "description",
             "required_env", "optional_env",
-            "interfaces", "tool_count", "safety_levels",
+            "interfaces", "tool_count", "mcp_capability_count", "safety_levels",
             "setup_command", "health_command",
             "discovery", "tiers",
             "agent_rules", "tool_recommendations", "workflows",
@@ -155,6 +157,7 @@ class TestGenerateManifest:
     def test_populates_tool_count(self):
         m = generate_manifest()
         assert m.tool_count > 0
+        assert m.mcp_capability_count >= m.tool_count
 
     def test_returns_skill_manifest_instance(self):
         m = generate_manifest()
@@ -165,6 +168,7 @@ class TestGenerateManifest:
         d = m.to_dict()
         assert d["name"] == "kiln"
         assert isinstance(d["tool_count"], int)
+        assert isinstance(d["mcp_capability_count"], int)
 
 
 # ===================================================================

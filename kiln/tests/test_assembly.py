@@ -12,6 +12,7 @@ from kiln.assembly import (
     Assembly,
     AssemblyPart,
     ClearanceCheck,
+    FastenerSpec,
     JointValidation,
     MatingInterface,
     check_clearance,
@@ -292,6 +293,26 @@ class TestClearanceRecommendation:
 
 
 class TestSerialization:
+    def test_fastener_spec_validates_required_shape(self):
+        spec = FastenerSpec(
+            size="M5",
+            family="metric_machine_screw",
+            length_mm=12,
+            head_type="socket",
+            drive_type="hex",
+            surface_type="metal",
+            quantity_per_interface=4,
+        )
+        assert spec.to_dict()["size"] == "M5"
+        assert spec.to_dict()["quantity_per_interface"] == 4
+
+        with pytest.raises(ValueError, match="size"):
+            FastenerSpec(size="")
+        with pytest.raises(ValueError, match="quantity"):
+            FastenerSpec(size="M3", quantity_per_interface=0)
+        with pytest.raises(ValueError, match="ordered"):
+            FastenerSpec(size="M3", length_range_mm=(20, 10))
+
     def test_assembly_to_dict_roundtrip(self, two_box_stls):
         """to_dict -> from_dict preserves assembly structure."""
         a_path, b_path = two_box_stls
@@ -343,6 +364,54 @@ class TestSerialization:
         ))
         restored2 = Assembly.from_dict(json.loads(json.dumps(asm2.to_dict())))
         assert restored2.interfaces[0].magnet_polarity_aligned is None
+
+    def test_fastener_spec_field_round_trips(self, two_box_stls):
+        """Explicit hardware metadata survives assembly JSON round-trip."""
+        a_path, b_path = two_box_stls
+        asm = create_assembly("fastener_roundtrip")
+        asm.add_part(AssemblyPart(part_id="a", file_path=a_path, material="PETG"))
+        asm.add_part(AssemblyPart(part_id="b", file_path=b_path, material="PETG"))
+        asm.add_interface(MatingInterface(
+            part_a_id="a",
+            part_b_id="b",
+            joint_type="clearance_fit",
+            clearance_mm=2.0,
+            fastener_spec=FastenerSpec(
+                size="M5",
+                family="metric_machine_screw",
+                length_mm=12,
+                head_type="socket",
+                drive_type="hex",
+                surface_type="metal",
+                quantity_per_interface=4,
+                notes="Use washers on slotted brackets.",
+            ),
+        ))
+
+        restored = Assembly.from_dict(json.loads(json.dumps(asm.to_dict())))
+        spec = restored.interfaces[0].fastener_spec
+        assert spec is not None
+        assert spec.size == "M5"
+        assert spec.length_mm == 12
+        assert spec.quantity_per_interface == 4
+        assert spec.notes == "Use washers on slotted brackets."
+
+    def test_missing_fastener_spec_loads_as_none(self):
+        data = {
+            "assembly_id": "asm-legacy",
+            "name": "legacy",
+            "parts": [],
+            "interfaces": [
+                {
+                    "part_a_id": "a",
+                    "part_b_id": "b",
+                    "joint_type": "clearance_fit",
+                    "clearance_mm": 2.0,
+                }
+            ],
+        }
+        restored = Assembly.from_dict(data)
+        assert restored.interfaces[0].fastener_spec is None
 
     def test_assembly_from_dict(self):
         """from_dict correctly reconstructs Assembly with all fields."""

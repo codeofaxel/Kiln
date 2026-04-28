@@ -86,7 +86,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ## Features
 
-- **<!-- KILN_MCP_COUNT:OLD --> 757 MCP tools** for design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, fleet management, and fulfillment
+- **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 759 MCP capabilities** for design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, fleet management, and fulfillment
 - **<!-- KILN_CLI_COUNT:OLD --> 214 CLI commands** with `--json` output for agent consumption
 - **Multi-printer fleet** management with job queue and background scheduler
 - **Model marketplaces** — search/download from MyMiniFactory, Cults3D (Thingiverse deprecated — acquired by MMF, Feb 2026)
@@ -126,19 +126,19 @@ AI Agent (Claude, GPT, custom)
 +--------------------+
 |        Kiln        |
 +--------------------+
-  |       |        |        |
-  v       v        v        v
-OctoPrint Moonraker Bambu  PrusaConnect
-  |       |        |        |
-  v       v        v        v
-Prusa   Voron    X1C/P1S  MK4/XL
+  |       |        |        |       |       |
+  v       v        v        v       v       v
+OctoPrint Moonraker Bambu  PrusaLink Elegoo Serial
+  |       |        |        |       |       |
+  v       v        v        v       v       v
+Prusa   Voron    X1C/P1S  MK4/XL  Saturn  Ender
 ```
 
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-cd kiln && python -m pytest tests/ -v  # 8,673 tests
+cd kiln && python3 -m pytest tests/ -v
 ```
 
 ## License

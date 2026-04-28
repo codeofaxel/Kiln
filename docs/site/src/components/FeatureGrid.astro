@@ -4,18 +4,16 @@
 // The component is used in TWO places with different posture:
 //
 //   1. Homepage  →  <FeatureGrid limit={5} moreLink="/features" ... />
-//      Shows Jobs' five "positioning cards" — the ones that do the
-//      most narrative work for a first-time visitor.  A small link
-//      routes curious engineers to the full list.  The homepage is
-//      an ARGUMENT, not an inventory (Jobs' framing after the 15-
-//      card dump was cut on 2026-04-24).
+//      Shows five positioning cards that do the most narrative work
+//      for a first-time visitor. A small link routes curious engineers
+//      to the full list. The homepage is an argument, not an inventory.
 //
 //   2. /features  →  <FeatureGrid />
 //      Shows the full 15-card matrix for SEO + depth.  Anyone who
 //      wants to verify the toolbox is deep lands here.
 //
-// Card order is load-bearing: the first five are Jobs' picks in the
-// order they should read.  Do not reorder without a positioning
+// Card order is load-bearing: the first five are the homepage set in
+// the order they should read. Do not reorder without a positioning
 // conversation.
 
 interface Props {
@@ -33,7 +31,7 @@ const {
 } = Astro.props as Props;
 
 const features = [
-  // --- Jobs' five (homepage surface) ---
+  // --- Homepage set ---
   {
     icon: '\u{1F33F}',
     title: 'Git for 3D Printing',
@@ -56,8 +54,8 @@ const features = [
   },
   {
     icon: '\u{1F517}',
-    title: '757 Tools, One Protocol',
-    desc: "757 MCP tools and 214 CLI commands with --json output. Any MCP-compatible agent (Claude, GPT, custom) gets full access. Open source, AGPL-3.0 licensed, plugin-extensible.",
+    title: '759 Capabilities, One Protocol',
+    desc: "759 MCP capabilities and 214 CLI commands with --json output. Any MCP-compatible agent gets full access. Open source, AGPL-3.0 licensed, plugin-extensible.",
   },
 
   // --- The remaining ten (full /features page only) ---

@@ -12,11 +12,11 @@ Kiln is the intelligence layer between idea and physical object. It provides a u
 
 **Clarification:** Kiln does **not** operate its own marketplace or manufacturing network. It integrates with third-party marketplaces for model discovery and third-party fulfillment providers for outsourced manufacturing. Kiln is orchestration and agent infrastructure, not a supply-side platform.
 
-**Three ways to print:**
+**Three ways to get to a print:**
 
-- **🖨️ Your printers.** Control OctoPrint, Moonraker, Bambu Lab, or Prusa Link machines on your LAN — or remotely via Bambu Cloud.
-- **🏭 Fulfillment providers.** Route to third-party fulfillment services like Craftcloud (150+ services — no API key required). No printer required — or use alongside local printers for overflow and specialty materials.
-- **🌐 External provider integrations.** Route jobs through connected third-party provider APIs.
+- **🖨️ Your printers.** Control OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo, or Direct USB/Serial machines on your LAN — or remotely via Bambu Cloud when configured.
+- **🌐 Third-party model search.** Search external model repositories such as MyMiniFactory, Cults3D, and Thingiverse, then download where the provider permits, slice, and print.
+- **🏭 Fulfillment providers.** Route jobs to third-party fulfillment services like Craftcloud, or through connected provider APIs for overflow and specialty materials.
 
 All three modes use the same MCP tools and CLI commands.
 
@@ -30,7 +30,7 @@ All three modes use the same MCP tools and CLI commands.
 **Key properties:**
 
 - **Local-first.** Local printer communication stays on your network. No cloud relay, no accounts, no telemetry.
-- **Adapter-based.** One interface covers OctoPrint, Moonraker, Bambu Lab, and Prusa Link. New backends plug in without changing upstream consumers.
+- **Adapter-based.** One interface covers OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo, and Direct USB/Serial. New backends plug in without changing upstream consumers.
 - **Safety-enforced.** Pre-flight checks, G-code validation, and temperature limits are protocol-level — not optional.
 - **Agent-native.** Every operation returns structured JSON. Every error includes machine-readable status codes. `--json` on every CLI command.
 
@@ -47,7 +47,7 @@ All three modes use the same MCP tools and CLI commands.
 
 ### Key Concepts
 
-**PrinterAdapter** — Abstract base class defining the contract for all printer backends. Implements: status, files, upload, print, cancel, pause, resume, temperature, G-code, snapshot.
+**PrinterAdapter** — Abstract base class defining the contract for all printer backends. Implements: status, files, upload, print, cancel, pause, resume, temperature, G-code, snapshot, stream URL, and optional bed mesh where the backend supports it.
 
 **PrinterStatus** — Normalized enum: `IDLE`, `PRINTING`, `PAUSED`, `ERROR`, `OFFLINE`. Every backend maps its native state model to this enum.
 
@@ -75,7 +75,11 @@ All three modes use the same MCP tools and CLI commands.
 
 **HeaterWatchdog** — Background daemon that monitors heater state and auto-cools idle heaters after a configurable timeout (default 30 min). Prevents heaters from being left on when no print is active.
 
-**LicenseManager** — Offline-first license tier management. Resolves tier from key prefix (`kiln_pro_`, `kiln_biz_`, `kiln_ent_`) with cached remote validation fallback. Supports Free, Pro, Business, and Enterprise tiers. Enterprise unlocks RBAC, SSO (OIDC/SAML), audit trail export, lockable safety profiles, encrypted G-code at rest, per-printer overage billing, uptime SLA monitoring, and on-prem deployment. Never blocks printer operations.
+**PreviewGate** — Single-use confirmation-token registry for print starts. A new non-resume `start_print` call must be preceded by a rendered preview that the user has approved; the token is bound to the file and printer and expires after a short TTL.
+
+**Pro Tool Manifest** — Generated kiln-pro capability catalog bundled into public Kiln as `pro_tool_manifest.json`. It lets free-tier agents discover paid features, return structured tier-required messages, and proxy eligible calls through the hosted Kiln REST endpoint when a machine is paired, without moving proprietary kiln-pro source into the public repository.
+
+**LicenseManager** — Provided by kiln-pro when installed. Public Kiln treats missing licensing as Free tier, while kiln-pro resolves Free, Pro, Business, and Enterprise entitlements and gates paid tools. Enterprise unlocks RBAC, SSO (OIDC/SAML), SCIM provisioning endpoints, audit trail export, lockable safety profiles, encrypted G-code at rest, per-printer overage billing, uptime SLA monitoring, and on-prem deployment. Local printer safety checks remain active regardless of license state.
 
 ---
 
@@ -162,9 +166,10 @@ A typical session strings all four together:
 2. The mesh flows through **the validation pipeline** → score, grade, and any auto-fixes applied before slicing.
 3. You **branch**, add a **decoration** or **mechanical feature**, maybe tweak depth or size, and start a print.
 4. The **intelligence layer** suggests proven settings for your material and printer and flags any regression against past prints of this design family.
-5. The print outcome is recorded against the version, so the next iteration is smarter than this one. If you like the result, **sign the release** — any downstream party can verify the exact mesh that shipped.
+5. For multi-part work, the assembly JSON can also produce a PDF manual, page PNGs, BOM, verification gates, and a signed/embeddable 3MF manual manifest when kiln-pro is installed.
+6. The print outcome is recorded against the version, so the next iteration is smarter than this one. If you like the result, **sign the release** — any downstream party can verify the exact mesh that shipped.
 
-Every subsystem is optional. Free tier gets validation and basic design tools; decoration presets, mid-print modification, git-for-3D, and cross-printer learning unlock with Pro. Nothing about the pipeline requires a cloud account — sync is opt-in and lands in *your* cloud, not a vendor's.
+Every subsystem is optional. Free tier gets validation and basic design tools; decoration presets, mid-print modification, git-for-3D, assembly manuals, and cross-printer learning unlock with Pro. Business adds team approval gates, co-branded/multi-language manuals, QR product workflows, and per-part plate economics. Nothing about local printer control requires a cloud account — sync is opt-in.
 
 ---
 
@@ -205,6 +210,12 @@ kiln auth --name prusa-mini --host http://192.168.1.44 --type prusaconnect --api
 
 # Bambu Lab
 kiln auth --name x1c --host 192.168.1.100 --type bambu --access-code 12345678 --serial 01P00A000000001
+
+# Elegoo SDCP
+kiln auth --name saturn --host 192.168.1.50 --type elegoo
+
+# Direct USB / Serial
+kiln auth --name ender3-usb --host /dev/tty.usbserial-0001 --type serial
 ```
 
 ### Ethernet-Only Setup (No Wi-Fi)
@@ -264,10 +275,10 @@ Save printer credentials to `~/.kiln/config.yaml`.
 |---|---|---|
 | `--name` | Yes | Friendly name for this printer |
 | `--host` | Yes | Printer URL (e.g., `http://octopi.local`) |
-| `--type` | Yes | Backend: `octoprint`, `moonraker`, `bambu`, `prusaconnect` |
+| `--type` | Yes | Backend: `octoprint`, `moonraker`, `bambu`, `prusaconnect`, `elegoo`, `serial` |
 | `--api-key` | OctoPrint, Prusa Link | OctoPrint or Prusa Link API key |
 | `--access-code` | Bambu | Bambu Lab access code |
-| `--serial` | Bambu | Bambu Lab serial number |
+| `--serial` | Bambu, Elegoo optional | Bambu Lab serial number or SDCP mainboard identifier |
 
 #### `kiln status`
 Get printer state, temperatures, and active job progress.
@@ -338,6 +349,15 @@ Cloud sync management. `status` shows sync state. `now` triggers immediate sync.
 #### `kiln plugins list|info`
 Plugin management. `list` shows all discovered plugins. `info` shows details for a specific plugin.
 
+#### `kiln install-mcp` / `kiln uninstall-mcp`
+Install or remove Kiln from supported MCP clients. The installer detects common client config locations and writes the `kiln serve` entry for the current environment.
+
+#### `kiln preview <file>` / `kiln validate <file>` / `kiln repair <file>`
+Render a model preview, check print readiness, or repair common STL/3MF mesh defects before slicing.
+
+#### `kiln assembly-manual --assembly <assembly.json> --out <dir>`
+Generate a printable assembly manual when kiln-pro is installed. Public Kiln defines the assembly JSON contract; kiln-pro generates the PDF, per-page PNGs, BOM, and verification gates.
+
 ---
 
 ## MCP Server Reference
@@ -368,7 +388,9 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **<!-- KILN_MCP_COUNT:OLD --> 757 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
+Kiln exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 752 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 759 total MCP capabilities**. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
+
+kiln-pro tools are discoverable through the public `pro_tool_manifest.json` even when kiln-pro is not installed locally. Free-tier callers receive structured `TIER_REQUIRED` responses with the required tier and pricing URL; paired machines can proxy eligible paid-tier tool calls through the hosted Kiln REST endpoint so the paid code stays server-side.
 
 #### Printer Control
 
@@ -781,6 +803,22 @@ Splits large models or multi-part assemblies across multiple printers for parall
 | `split_plan_status` | `plan_id` | `SplitProgress` with per-part status and estimated remaining time |
 | `cancel_split_plan` | `plan_id` | Cancellation confirmation |
 
+#### Assembly Manuals (Pro Tier)
+
+Public Kiln owns the assembly JSON contract: parts, positions, materials, mating interfaces, clearances, optional fastener metadata, and magnet polarity when relevant. When kiln-pro is installed, the manual tools turn that contract into PDF instructions and page PNG previews. Multi-language and co-brand options require Business+.
+
+| Tool | Description |
+|---|---|
+| `generate_assembly_manual` | Generate a PDF manual with cover render, BOM, per-step isometric pages, verification gates, sidecar JSON, and page PNGs |
+| `auto_generate_manual_for_print` | Trigger manual generation for a multi-part print, returning cached/expected PDF paths or a pending background status |
+| `embed_manual_in_3mf` | Embed the manual and signed manifest into a 3MF package |
+| `verify_manual_authenticity` | Verify a manual or 3MF manual manifest against the signed release metadata |
+| `list_manual_history` | List manual revisions for a design |
+| `get_manual_revision` | Fetch one manual revision and its cached PDF path |
+| `find_manual_siblings` | Find manuals for sibling parameter values of the same design |
+| `diff_assembly_manuals` | Generate a "what changed" PDF between two manual revisions |
+| `retire_manual_revision` | Soft-delete a manual revision while preserving audit history |
+
 #### Cost Estimation
 
 G-code and 3MF cost analysis. Parses extrusion totals, calculates filament weight and cost from a 9-material database (PLA, PETG, ABS, TPU, ASA, Nylon, PC, PVA, HIPS), and optionally includes electricity cost from slicer-embedded time estimates. For 3MF files (including Bambu `.gcode.3mf`), extracts slicer metadata directly from the archive.
@@ -792,6 +830,12 @@ G-code and 3MF cost analysis. Parses extrusion totals, calculates filament weigh
 | `compare_print_options` | `file_path`, `material` | Local vs. fulfillment provider cost comparison |
 | `slice_and_estimate` | `input_path`, `material`, `printer_model` | Slice + cost + printability + adhesion recommendation (no print) |
 | `list_materials` | -- | All material profiles with densities and costs |
+
+#### Part Economics (Business Tier)
+
+| Tool | Input | Output |
+|---|---|---|
+| `estimate_plate_part_costs` | `.gcode.3mf` file, plate number, default material, optional per-object materials | Per-object time, filament, material cost, electricity cost, totals, and warnings for quote/margin work |
 
 #### Pipelines (Runtime)
 
@@ -1129,6 +1173,17 @@ Every print job should pass through `preflight_check()`:
 4. **Temperature safe** — Targets within safe bounds
 5. **Material validation** — When `--material` specified, temperatures match expected ranges
 
+### Preview Confirmation
+
+New non-resume print starts require a preview-confirmation token:
+
+1. Render a model preview with `visualize_model`, `preview_generated_model`, or `kiln preview`.
+2. Show the preview to the user and get approval.
+3. Issue a preview token for the file/printer.
+4. Pass that token to `start_print`.
+
+Tokens are single-use, short-lived, and bound to the file plus printer. `KILN_SKIP_PREVIEW_GATE=1` is the explicit advanced-user bypass and is logged whenever used.
+
 ### G-code Validation
 
 The `validate_gcode()` function screens commands before they reach hardware:
@@ -1215,13 +1270,18 @@ settings:
 | `KILN_PRINTER_HOST` | Printer URL (fallback when no config) |
 | `KILN_PRINTER_API_KEY` | API key for OctoPrint |
 | `KILN_PRINTER_TYPE` | Backend type |
+| `KILN_PRINTER_SERIAL` | Bambu serial number or Elegoo mainboard ID |
 | `KILN_SLICER_PATH` | Explicit path to slicer binary |
+| `KILN_BAMBU_TLS_MODE` | Bambu TLS validation mode: `pin` (default), `ca`, or `insecure` |
+| `KILN_BAMBU_TLS_FINGERPRINT` | Optional explicit Bambu certificate pin |
+| `KILN_SKIP_PREVIEW_GATE` | Advanced-user bypass for preview confirmation; logged when used |
 | `KILN_MMF_API_KEY` | MyMiniFactory API key |
 | `KILN_CULTS3D_USERNAME` | Cults3D account username |
 | `KILN_CULTS3D_API_KEY` | Cults3D API key |
 | `KILN_THINGIVERSE_TOKEN` | Thingiverse API token *(deprecated — acquired by MyMiniFactory, Feb 2026)* |
 | `KILN_AUTH_ENABLED` | Enable API key auth (1/0) |
 | `KILN_AUTH_KEY` | Secret key for auth |
+| `KILN_PROXY_URL` | Hosted Kiln REST endpoint for paired-machine pro tool proxying |
 | `KILN_ENCRYPTION_KEY` | Encryption key for G-code at rest (Enterprise) |
 | `KILN_SSO_PROVIDER` | SSO provider type: `oidc` or `saml` (Enterprise) |
 | `KILN_SSO_ISSUER` | OIDC issuer URL or SAML IdP metadata URL (Enterprise) |
@@ -1248,7 +1308,7 @@ pip install -e "./octoprint-cli[dev]"
 ### Running Tests
 
 ```bash
-cd kiln && python3 -m pytest tests/ -v    # 8,673 tests (11,926 combined w/ kiln-pro)
+cd kiln && python3 -m pytest tests/ -v    # public Kiln test suite
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 223 tests
 ```
 
@@ -1266,99 +1326,93 @@ cd ../octoprint-cli && python3 -m pytest tests/ -v  # 223 tests
 
 ```
 kiln/src/kiln/
-    __init__.py
-    __main__.py          # Entry point
-    server.py            # MCP server + all tools
-    slicer.py            # PrusaSlicer/OrcaSlicer integration
-    registry.py          # Fleet printer registry
-    queue.py             # Priority job queue
-    scheduler.py         # Background job dispatcher with smart routing
-    events.py            # Pub/sub event bus
-    persistence.py       # SQLite storage
-    webhooks.py          # Webhook delivery
-    auth.py              # API key authentication
-    billing.py           # Fee tracking
-    gcode.py             # G-code safety validator (per-printer limits)
-    safety_profiles.py   # Bundled safety database (29 printer models)
-    slicer_profiles.py   # Bundled slicer profiles (auto .ini generation)
-    printer_intelligence.py  # Printer knowledge base (quirks, materials, fixes)
-    design_intelligence.py   # Design knowledge queries (materials, patterns, constraints)
-    design_validator.py      # Design validation + feedback bridge
-    pipelines.py         # Pre-validated print pipelines (quick_print, calibrate, benchmark)
-    cost_estimator.py    # Print cost estimation (G-code + 3MF, 9 materials)
-    printability.py      # 7-dimension printability engine (overhangs, thin walls, bridging, adhesion, supports, thermal stress, adhesion force)
-    job_splitter.py      # Multi-printer job splitting (multi-copy, assembly, build volume overflow)
-    original_design.py   # Original design audit pipeline (multi-gate readiness)
-    materials.py         # Multi-material tracking
-    bed_leveling.py      # Bed leveling trigger system
-    streaming.py         # MJPEG webcam proxy
-    cloud_sync.py        # Cloud sync manager
-    heater_watchdog.py   # Auto-cooldown watchdog for idle heaters
-    licensing.py         # License tier management (Free/Pro/Business/Enterprise)
-    sso.py               # SSO authentication (OIDC/SAML, IdP role mapping, email domain allowlists)
-    gcode_encryption.py  # G-code encryption at rest (Fernet/PBKDF2)
-    printer_billing.py   # Per-printer overage billing (metered via Stripe)
-    teams.py             # Team seat management with RBAC (admin/engineer/operator)
-    uptime.py            # Rolling uptime health monitoring (1h/24h/7d/30d, 99.9% SLA)
-    project_costs.py     # Per-project cost tracking for manufacturing bureaus
-    model_metadata.py    # Model metadata management
-    wallets.py           # Crypto wallet configuration (Solana/Ethereum donations)
-    plugins.py           # Plugin system
-    backup.py            # Database backup and restore
-    log_config.py        # Structured logging configuration
-    model_cache.py       # Local model cache with metadata tracking
-    plugins/             # Auto-discovered MCP tool plugins (22 modules)
-        printability_tools.py    # Printability analysis, auto-orient, adhesion
-        recovery_tools.py        # Job splitting, print recovery, checkpoint
-        estimate_tools.py        # Slice-and-estimate (no-print cost preview)
-        smart_print_tools.py     # Smart reprint, AMS-aware printing
-        design_tools.py          # Design intelligence MCP tools
-        generation_tools.py      # Model generation + original design
-        fulfillment_tools.py     # Third-party fulfillment provider tools
-        mesh_diagnostic_tools.py # Advanced mesh diagnostics
-        ...                      # + 14 more plugin modules
-    payments/
-        base.py          # PaymentProvider interface, PaymentRail enum
-        manager.py       # Payment orchestration across providers
-        stripe_provider.py   # Stripe payment provider
-        circle_provider.py   # Circle USDC payment provider
-    gateway/
-        network.py       # Provider-integration gateway client (canonical partner_* tools + legacy network_* aliases)
-    data/
-        safety_profiles.json     # Per-printer safety limits (temps, feedrates, flow)
-        slicer_profiles.json     # Per-printer slicer settings (INI key-values)
-        printer_intelligence.json  # Firmware quirks, materials, failure modes
-        design_knowledge/          # Design intelligence data files
-            material_troubleshooting.json   # 20 materials × 5-7 failure modes each
-            printer_material_compatibility.json  # 29 printers × 20 materials
-            multi_material_pairing.json     # Soluble support pairs, co-print matrix
-            post_processing.json            # Finishing techniques per material
+    server.py                 # FastMCP server, core tools, pro manifest stubs
+    plugin_loader.py          # Auto-discovers public plugin modules
+    preview_gate.py           # Preview-token gate for print starts
+    slicer.py                 # PrusaSlicer/OrcaSlicer integration
+    registry.py               # Fleet printer registry
+    queue.py                  # Priority job queue
+    scheduler.py              # Background dispatcher with smart routing
+    events.py                 # Pub/sub event bus
+    persistence.py            # SQLite storage
+    webhooks.py               # HMAC-signed webhook delivery
+    auth.py                   # API key authentication
+    gcode.py                  # G-code safety validator
+    safety_profiles.py        # Bundled safety database (29 printer models)
+    slicer_profiles.py        # Bundled slicer profiles
+    printer_intelligence.py   # Printer knowledge base
+    design_intelligence.py    # Material/pattern/constraint queries
+    design_reasoning.py       # Design brief and reasoning helpers
+    design_recipe.py          # Parametric design recipe persistence
+    design_versions.py        # Public/local version metadata
+    original_design.py        # Original design audit pipeline
+    printability.py           # 7-dimension printability engine
+    assembly.py               # Assembly JSON contract, joints, fasteners
+    cost_estimator.py         # Whole-job cost estimation
+    job_splitter.py           # Multi-copy, assembly, build-volume splitting
+    model_visualizer.py       # Preview rendering and framing
+    model_cache.py            # Local model cache
+    backup.py                 # Database backup and restore
+    skill_manifest.py         # Agent-facing capability manifest
+    pro_tool_manifest.json    # Generated paid-tier discovery/proxy manifest
+    plugins/                  # Auto-discovered public MCP tool plugins
+        assembly_tools.py
+        slicer_tools.py
+        monitoring_tools.py
+        printer_management_tools.py
+        printability_tools.py
+        recovery_tools.py
+        estimate_tools.py
+        smart_print_tools.py
+        design_tools.py
+        generation_tools.py
+        fulfillment_tools.py
+        marketplace_tools.py
+        mesh_tools.py
+        utility_tools.py
+        ...
     printers/
-        base.py          # Abstract PrinterAdapter + dataclasses
-        octoprint.py     # OctoPrint REST adapter
-        moonraker.py     # Moonraker REST adapter
-        bambu.py         # Bambu Lab MQTT adapter
-        prusaconnect.py  # Prusa Link adapter
-        elegoo.py        # Elegoo SDCP adapter (WebSocket)
-    fulfillment/
-        base.py          # Fulfillment adapter interface
-        registry.py      # Provider registry and factory
-        craftcloud.py    # Craftcloud v5 API client (third-party; upload → price → cart → order)
-        sculpteo.py      # Sculpteo partner API client (third-party; inactive — pending partner credentials)
+        base.py               # PrinterAdapter + dataclasses
+        octoprint.py
+        moonraker.py
+        bambu.py
+        prusaconnect.py
+        elegoo.py
+        serial_adapter.py
     marketplaces/
-        base.py          # Marketplace adapter interface
-        myminifactory.py # MyMiniFactory API client (primary)
-        cults3d.py       # Cults3D API client
-        thingiverse.py   # Thingiverse API client (deprecated — acquired by MMF)
+        base.py
+        myminifactory.py
+        cults3d.py
+        thingiverse.py
+    generation/
+        base.py
+        registry.py
+        gemini.py
+        meshy.py
+        tripo3d.py
+        stability.py
+        openscad.py
     cli/
-        main.py          # Click CLI entry point
-        config.py        # Config management
-        discovery.py     # mDNS printer scanning
-        output.py        # JSON/text formatting
+        main.py
+        config.py
+        discovery.py
+        install_mcp.py
+        output.py
 
 deploy/                  # On-prem Enterprise deployment
     k8s/                 # Kubernetes manifests (9 files: namespace, deployment, service, ingress, configmap, secrets, PVC, network policies, HPA)
     helm/kiln/           # Helm chart (12 files: Chart.yaml, values.yaml, templates/)
+
+octoprint-cli/           # Auxiliary OctoPrint-only CLI package
+
+docs/
+    WHITEPAPER.md
+    LITEPAPER.md
+    PROJECT_DOCS.md
+    THREAT_MODEL.md
+    site/                # Astro docs site; whitepaper/litepaper/project docs render from these markdown files
 ```
+
+The private kiln-pro companion repo extends the public surface through `kiln_pro.bridge`, `kiln_pro.generate_manifest`, and `kiln_pro.rest_api`. Its feature directories include paid-tier plugins, assembly manuals, design versioning, recovery intelligence, cloud sync, enterprise identity/compliance, billing/spend caps, fulfillment proxying, the web workshop, and the native desktop app. Public Kiln should depend only on the bridge, generated manifest, and documented response contracts.
 
 *Kiln is a project of Hadron Labs Inc.*

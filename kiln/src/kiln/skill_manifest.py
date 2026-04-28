@@ -49,6 +49,7 @@ class SkillManifest:
     # Capabilities
     interfaces: list[str] = field(default_factory=lambda: ["cli", "mcp"])
     tool_count: int = 0  # populated dynamically
+    mcp_capability_count: int = 0  # tools + prompts + resources
     safety_levels: list[str] = field(
         default_factory=lambda: [
             "safe",
@@ -243,6 +244,30 @@ def get_tool_count() -> int:
     return 0
 
 
+def get_mcp_capability_counts() -> dict[str, int]:
+    """Return live MCP counts split by first-class surface type.
+
+    MCP exposes tools, prompts, and resources.  Tools are callable
+    functions; prompts and resources are also first-class MCP
+    capabilities and count toward the full MCP surface area.
+    """
+    try:
+        import kiln.server as _srv
+
+        tools = len(_srv.mcp._tool_manager.list_tools())
+        prompts = len(_srv.mcp._prompt_manager.list_prompts())
+        resources = len(_srv.mcp._resource_manager.list_resources())
+        return {
+            "tools": tools,
+            "prompts": prompts,
+            "resources": resources,
+            "total": tools + prompts + resources,
+        }
+    except Exception:  # noqa: BLE001 — any registry error → fallback
+        tools = get_tool_count()
+        return {"tools": tools, "prompts": 0, "resources": 0, "total": tools}
+
+
 def get_cli_count() -> int:
     """Count total CLI commands — leaves + groups, incl. kiln-pro extensions.
 
@@ -292,14 +317,17 @@ def _build_discovery_section() -> dict[str, Any]:
     (public + kiln-pro) rather than a stale hand-edited blurb.
     """
     split = get_tool_counts_split()
+    mcp_counts = get_mcp_capability_counts()
     if split["total"]:
         total_tools_note = (
             f"Public Kiln ships {split['public']} MCP tools; kiln-pro adds "
             f"{split['pro']} more (product generators, decoration, fleet ops, "
             f"billing). When kiln-pro is installed, agents see {split['total']} "
-            "live tools. When it isn't, agents still see manifest stubs for "
-            "pro tools labeled with their tier + upgrade URL so they can "
-            "recommend upgrades."
+            f"live tools and {mcp_counts['total']} total MCP capabilities "
+            f"including {mcp_counts['prompts']} prompts and "
+            f"{mcp_counts['resources']} resources. When it isn't, agents still "
+            "see manifest stubs for pro tools labeled with their tier + "
+            "upgrade URL so they can recommend upgrades."
         )
     else:
         # Registry not reachable (cold import path). Keep the copy
@@ -321,7 +349,7 @@ def _build_discovery_section() -> dict[str, Any]:
             "ToolSearch('ams filament'), ToolSearch('billing')."
         ),
         "entry_points": [
-            "get_started() — quick-start + live tool count + core workflows",
+            "get_started() — quick-start + live tool/capability count + core workflows",
             "get_skill_manifest() — this tool; full capability map",
             "printer_status() — first concrete probe for any agent",
         ],
@@ -368,9 +396,11 @@ def get_tool_counts_split() -> dict[str, int]:
 
 def generate_manifest() -> SkillManifest:
     """Generate a complete skill manifest."""
+    mcp_counts = get_mcp_capability_counts()
     return SkillManifest(
         version=get_version(),
-        tool_count=get_tool_count(),
+        tool_count=mcp_counts["tools"],
+        mcp_capability_count=mcp_counts["total"],
     )
 
 

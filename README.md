@@ -40,7 +40,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing)) add Git-for-3D ver
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
 - **No printer? No problem** — Outsource any job to Craftcloud's 150+ manufacturing services. Kiln handles quoting, ordering, and tracking. No API key required.
-- **AI-native** — 757 MCP tools and 214 CLI commands built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — 759 MCP capabilities and 214 CLI commands built for AI agents. Not a web UI with an API bolted on.
 - **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print.
 - **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command.
 - **Manuals included** — Multi-part prints can generate printable PDF assembly manuals with Bill of Materials, isometric step renders, mating arrows, and pause-and-check verification gates. (Pro)
@@ -494,7 +494,7 @@ kiln signin
 kiln pair KLN-ABCD-EFGH
 ```
 
-Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 757 tools are available via MCP (`kiln serve`).
+Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for stronger models. All 752 tools are available via MCP (`kiln serve`).
 
 ### OctoPrint CLI
 
@@ -513,7 +513,7 @@ octoprint-cli print myfile.gcode --confirm
 
 ## MCP Tools (Selected)
 
-The Kiln MCP server (`kiln serve`) exposes **757 tools** to agents. Key tools are listed below — MCP clients can use `get_skill_manifest` and ToolSearch-style discovery to browse the complete catalog.
+The Kiln MCP server (`kiln serve`) exposes **752 tools** to agents, plus prompts and resources for **759 total MCP capabilities**. Key tools are listed below — MCP clients can use `get_skill_manifest` and ToolSearch-style discovery to browse the complete catalog.
 
 | Tool | Description |
 |------|-------------|

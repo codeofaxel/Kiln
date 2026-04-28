@@ -114,11 +114,15 @@ class _AssemblyToolsPlugin:
             joint_type: str = "clearance_fit",
             clearance_mm: float = 0.2,
             magnet_polarity_aligned: bool | None = None,
+            fastener: dict[str, Any] | str | None = None,
         ) -> dict:
             """Add a mating interface between two parts in an assembly.
 
             Defines how two parts connect (joint type and clearance),
-            which is used during validation and clearance checking.
+            which is used during validation and clearance checking.  For
+            screw/anchor-based joints, ``fastener`` may provide an
+            explicit hardware spec so downstream manuals and BOM tools do
+            not have to guess from clearance alone.
 
             Args:
                 assembly_json: JSON string of the current assembly state.
@@ -136,17 +140,24 @@ class _AssemblyToolsPlugin:
                     unknown.  Downstream tooling refuses to ship a
                     hand-wavy "make sure they pull together"
                     instruction when polarity is unknown.
+                fastener: Optional FastenerSpec as a dict or JSON object
+                    string.  Supported keys include ``size``, ``family``,
+                    ``length_mm``, ``length_range_mm``, ``head_type``,
+                    ``drive_type``, ``surface_type``,
+                    ``quantity_per_interface``, and ``notes``.
             """
             try:
-                from kiln.assembly import Assembly, MatingInterface
+                from kiln.assembly import Assembly, FastenerSpec, MatingInterface
 
                 assembly = Assembly.from_dict(json.loads(assembly_json))
+                fastener_spec = _parse_fastener_spec_arg(fastener, FastenerSpec)
                 interface = MatingInterface(
                     part_a_id=part_a_id,
                     part_b_id=part_b_id,
                     joint_type=joint_type,
                     clearance_mm=clearance_mm,
                     magnet_polarity_aligned=magnet_polarity_aligned,
+                    fastener_spec=fastener_spec,
                 )
                 assembly.interfaces.append(interface)
                 return {"success": True, "data": assembly.to_dict()}
@@ -269,6 +280,27 @@ class _AssemblyToolsPlugin:
                 return {"success": False, "error": str(exc)}
 
         _logger.debug("Registered assembly tools")
+
+
+def _parse_fastener_spec_arg(fastener: Any, fastener_spec_cls: Any) -> Any | None:
+    """Parse an optional MCP fastener argument into ``FastenerSpec``.
+
+    MCP clients vary: some send nested JSON objects, others send JSON as
+    a string because their schema layer only exposes primitive
+    arguments.  Accept both shapes and fail clearly for anything else.
+    """
+    if fastener is None:
+        return None
+    if isinstance(fastener, str):
+        if not fastener.strip():
+            return None
+        try:
+            fastener = json.loads(fastener)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid fastener JSON: {exc}") from exc
+    if not isinstance(fastener, dict):
+        raise ValueError("fastener must be a JSON object or JSON object string")
+    return fastener_spec_cls.from_dict(fastener)
 
 
 plugin = _AssemblyToolsPlugin()

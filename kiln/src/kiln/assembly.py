@@ -78,6 +78,95 @@ class AssemblyPart:
 
 
 @dataclass
+class FastenerSpec:
+    """Explicit per-interface fastener metadata.
+
+    ``family`` is a stable taxonomy slot (for example
+    ``"metric_machine_screw"``, ``"imperial_machine_screw"``,
+    ``"wood_screw"``, ``"sheet_metal_screw"``, or
+    ``"concrete_anchor"``).  ``size`` keeps the user-facing callout
+    such as ``"M3"``, ``"#8"``, or ``"wood-8"``.  Length can be a
+    single value or a range for kits that include a length pack.
+    """
+
+    size: str
+    family: str = "metric_machine_screw"
+    length_mm: float | None = None
+    length_range_mm: tuple[float, float] | None = None
+    head_type: str | None = None
+    drive_type: str | None = None
+    surface_type: str | None = None
+    quantity_per_interface: int = 1
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        self.size = str(self.size).strip()
+        if not self.size:
+            raise ValueError("FastenerSpec.size is required")
+        self.family = str(self.family or "metric_machine_screw").strip()
+        if self.length_mm is not None:
+            self.length_mm = float(self.length_mm)
+            if self.length_mm <= 0:
+                raise ValueError("FastenerSpec.length_mm must be positive")
+        if self.length_range_mm is not None:
+            if (
+                not isinstance(self.length_range_mm, (list, tuple))
+                or len(self.length_range_mm) != 2
+            ):
+                raise ValueError("FastenerSpec.length_range_mm must contain two values")
+            lo, hi = (float(self.length_range_mm[0]), float(self.length_range_mm[1]))
+            if lo <= 0 or hi <= 0 or lo > hi:
+                raise ValueError("FastenerSpec.length_range_mm must be positive and ordered")
+            self.length_range_mm = (lo, hi)
+        for field_name in ("head_type", "drive_type", "surface_type"):
+            value = getattr(self, field_name)
+            if value is not None:
+                value = str(value).strip()
+                setattr(self, field_name, value or None)
+        self.quantity_per_interface = int(self.quantity_per_interface)
+        if self.quantity_per_interface < 1:
+            raise ValueError("FastenerSpec.quantity_per_interface must be >= 1")
+        self.notes = str(self.notes or "")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "size": self.size,
+            "family": self.family,
+            "length_mm": self.length_mm,
+            "length_range_mm": (
+                list(self.length_range_mm) if self.length_range_mm is not None else None
+            ),
+            "head_type": self.head_type,
+            "drive_type": self.drive_type,
+            "surface_type": self.surface_type,
+            "quantity_per_interface": self.quantity_per_interface,
+            "notes": self.notes,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> FastenerSpec | None:
+        if data is None:
+            return None
+        if not isinstance(data, dict):
+            raise ValueError("FastenerSpec data must be a dict")
+        if not data.get("size"):
+            raise ValueError("FastenerSpec.size is required")
+        return cls(
+            size=str(data["size"]),
+            family=str(data.get("family") or "metric_machine_screw"),
+            length_mm=(
+                float(data["length_mm"]) if data.get("length_mm") is not None else None
+            ),
+            length_range_mm=data.get("length_range_mm"),
+            head_type=data.get("head_type"),
+            drive_type=data.get("drive_type"),
+            surface_type=data.get("surface_type"),
+            quantity_per_interface=int(data.get("quantity_per_interface", 1)),
+            notes=str(data.get("notes") or ""),
+        )
+
+
+@dataclass
 class MatingInterface:
     """Describes a joint between two parts.
 
@@ -87,6 +176,10 @@ class MatingInterface:
     "unknown" (downstream tooling treats this as low-confidence and
     refuses to ship a hand-wavy "make sure they pull together"
     instruction).  Ignored for non-magnetic joints.
+
+    ``fastener_spec`` is optional explicit hardware metadata for
+    screw/anchor-based interfaces.  When omitted, downstream tools may
+    infer a generic fastener from ``joint_type`` and ``clearance_mm``.
     """
 
     part_a_id: str
@@ -96,9 +189,14 @@ class MatingInterface:
     tolerance_mm: float = 0.1
     contact_area_mm2: float = 0.0
     magnet_polarity_aligned: bool | None = None
+    fastener_spec: FastenerSpec | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data["fastener_spec"] = (
+            self.fastener_spec.to_dict() if self.fastener_spec is not None else None
+        )
+        return data
 
 
 @dataclass
@@ -223,6 +321,9 @@ class Assembly:
                     tolerance_mm=i.get("tolerance_mm", 0.1),
                     contact_area_mm2=i.get("contact_area_mm2", 0.0),
                     magnet_polarity_aligned=i.get("magnet_polarity_aligned"),
+                    fastener_spec=FastenerSpec.from_dict(
+                        i.get("fastener_spec") or i.get("fastener")
+                    ),
                 )
             )
         for c in data.get("clearance_checks", []):

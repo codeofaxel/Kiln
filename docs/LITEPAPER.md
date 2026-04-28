@@ -16,11 +16,11 @@ Kiln is the intelligence layer between an idea and a physical object. It connect
 
 ## The Problem
 
-The gap between "I need a part" and holding that part in your hand is filled with fragmented, incompatible software. Every printer brand speaks a different language -- OctoPrint, Klipper, Bambu Lab, Elegoo, and Prusa Link each have their own interfaces. Designing parts requires specialized CAD skills. Validating printability requires tribal knowledge. Managing even a small fleet means juggling multiple dashboards. Meanwhile, AI agents are increasingly capable of planning and executing multi-step physical tasks, but there's no safe, standardized way to connect them to design tools and real hardware.
+The gap between "I need a part" and holding that part in your hand is filled with fragmented, incompatible tooling. Every printer brand speaks a different language -- OctoPrint, Klipper, Bambu Lab, Elegoo, Prusa Link, and USB-connected Marlin printers each have their own interfaces. Designing parts requires specialized CAD skills. Validating printability requires tribal knowledge. Managing even a small fleet means juggling multiple dashboards. Meanwhile, AI agents are increasingly capable of planning and executing multi-step physical tasks, but there's no safe, standardized way to connect them to design tools and real hardware.
 
 ## The Solution
 
-Kiln acts as a universal intelligence layer between AI agents and physical fabrication. One interface, any idea, any printer. With <!-- KILN_MCP_COUNT:OLD --> 757 MCP tools and <!-- KILN_CLI_COUNT:OLD --> 214 CLI commands, agents have everything they need to go from concept to physical object.
+Kiln acts as a universal intelligence layer between AI agents and physical fabrication. One interface, any idea, any printer. With <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 759 MCP capabilities and <!-- KILN_CLI_COUNT:OLD --> 214 CLI commands, agents have everything they need to go from concept to physical object.
 
 **From idea to object.** Kiln gives agents multiple paths to turn a thought into a physical part:
 
@@ -46,7 +46,7 @@ An agent can prototype on your desk printer, send the production version to Craf
 
 **Beyond printing:**
 
-- **Multi-part assembly.** Split large designs into printable sections with clearance validation, joint detection, tolerance stacking analysis, and split planning (10 parts free).
+- **Multi-part assembly.** Split large designs into printable sections with clearance validation, joint detection, tolerance stacking analysis, and split planning (10 parts free). With kiln-pro, multi-part prints can also generate printable PDF assembly manuals with a bill of materials, step renders, verification gates, and optional 3MF embedding.
 
 - **Cost estimation.** Material cost, electricity, and time estimates with smart recommendations -- before you commit to a print.
 
@@ -60,7 +60,7 @@ An agent can prototype on your desk printer, send the production version to Craf
 
 - **Print recovery.** Automatic root cause analysis when prints fail, guided recovery workflows, and the ability to retry with corrective settings applied.
 
-- **Cloud sync.** Printer settings, print history, and agent knowledge stay synchronized across devices.
+- **Cloud sync.** Printer settings, print history, and agent knowledge can stay synchronized across devices when kiln-pro is installed.
 
 - **Webhooks.** Notifications for print events enable integration with external monitoring, alerting, and automation systems.
 
@@ -70,7 +70,7 @@ An agent can prototype on your desk printer, send the production version to Craf
 
 Agents are powerful, but they shouldn't be trusted blindly with physical hardware. Kiln enforces safety at the protocol level -- not as an afterthought, but as a core design constraint.
 
-Before any print starts, Kiln runs pre-flight checks: validating temperatures against per-printer limits, scanning G-code for dangerous commands, and confirming the printer is in a safe state. These checks cannot be bypassed by the agent. 29 safety profiles cover popular printer models with hardware-specific limits. A background watchdog auto-cools idle heaters after 30 minutes to prevent fire hazards. Real-time G-code interception lets agents monitor and modify printer commands on the fly -- blocking unsafe operations before they reach the hardware.
+Before any print starts, Kiln runs pre-flight checks: validating temperatures against per-printer limits, scanning G-code for dangerous commands, confirming the printer is in a safe state, and requiring a preview-confirmation token for new non-resume print starts. These checks cannot be bypassed by the agent. 29 safety profiles cover popular printer models with hardware-specific limits. A background watchdog auto-cools idle heaters after 30 minutes to prevent fire hazards. Real-time G-code interception lets agents monitor and modify printer commands on the fly -- blocking unsafe operations before they reach the hardware.
 
 ## How It Works
 
@@ -82,7 +82,7 @@ You (or your agent) --> Kiln --> Design Intelligence (materials, patterns, templ
                                  Fulfillment Providers (Craftcloud)
 ```
 
-Kiln uses the Model Context Protocol (MCP), an open standard for connecting AI agents to external tools. Any MCP-compatible agent can talk to Kiln natively. There's also a full CLI and a REST API for custom integrations.
+Kiln uses the Model Context Protocol (MCP), an open standard for connecting AI agents to external tools. Any MCP-compatible agent can talk to Kiln natively. There's also a full CLI for scripts and operators; when kiln-pro is installed or a machine is paired, Kiln can expose the same tool surface through REST for custom integrations.
 
 ## Business Model
 
@@ -91,9 +91,9 @@ Local printing with Kiln is free and always will be. The core infrastructure is 
 Revenue comes from optional services:
 
 - **Free tier** -- All local printing features, up to 2 printers and a 10-job queue. No cost, no account required.
-- **Pro ($49/month)** -- Claude made generating virtual artifacts trivial; Kiln Pro does the same for physical ones. Up to 5 printers + fleet orchestration, analytics, cloud sync, git-for-3D version control, product templates for consumer goods (coasters, keychains, ornaments, pet tags, jewelry trays, and more -- with built-in QR code embedding and batch generation), procedural textures (marble, tiger stripe, wood grain, ocean, lava, and more -- applied directly to mesh surfaces with 2D preview before printing), decoration system, speed control, print learning, and cross-printer intelligence. Annual: $39/mo.
-- **Business ($99/month)** -- Up to 50 printers, 5 team seats, fulfillment brokering, shared hosted MCP server, priority support, custom safety profiles. Annual: $79/mo.
-- **Enterprise (from $499/month)** -- Unlimited printers (20 included, $15/mo each additional) and unlimited team seats, dedicated single-tenant MCP server, on-premises deployment via Kubernetes and Helm (air-gapped support included), single sign-on via OIDC and SAML, role-based access control, full audit trail with JSON/CSV export, lockable safety profiles, encrypted G-code at rest, 99.9% uptime SLA, and dedicated support channel with onboarding. Annual: $399/mo.
+- **Pro ($49/month)** -- Up to 5 printers + fleet orchestration, analytics, cloud sync, git-for-3D version control, product templates for consumer goods (coasters, keychains, ornaments, pet tags, jewelry trays, and more), procedural textures (marble, tiger stripe, wood grain, ocean, lava, and more -- applied directly to mesh surfaces with 2D preview before printing), decoration system, assembly manuals, speed control, print learning, recovery intelligence, and cross-printer intelligence. Annual: $39/mo.
+- **Business ($99/month)** -- Up to 50 printers, 5 team seats, team pull requests, approval gates, fulfillment brokering, shared hosted MCP server, priority support, custom safety profiles, QR product workflows, co-branded/multi-language assembly manuals, and per-part plate economics for quoting kits and replacement parts. Annual: $79/mo.
+- **Enterprise (from $499/month)** -- Unlimited printers (20 included, $15/mo each additional) and unlimited team seats, dedicated single-tenant MCP server, on-premises deployment via Kubernetes and Helm (air-gapped support included), single sign-on via OIDC and SAML, SCIM provisioning endpoints, role-based access control, full audit trail with JSON/CSV export, lockable safety profiles, encrypted G-code at rest, 99.9% uptime SLA, and dedicated support channel with onboarding. Annual: $399/mo.
 
 Outsourced manufacturing orders carry a 5% orchestration fee (first 3 per month are free, with a $0.25 minimum and $200 maximum per order). Fulfillment providers remain merchant of record.
 
