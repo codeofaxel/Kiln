@@ -55,6 +55,7 @@ from kiln.cli.config import (
     set_active_printer,
     validate_printer_config,
 )
+from kiln.cli.install_mcp import register_install_mcp_cli
 from kiln.cli.output import (
     format_action,
     format_discovered,
@@ -10383,6 +10384,11 @@ except ImportError:
 # can be relocated to `kiln identity login` and the canonical `kiln signin`
 # (OAuth device flow) takes the name everyone actually reaches for first.
 register_auth_cli(cli)
+
+
+# MCP install command — public because a clean ``pip install kiln3d`` should
+# be enough to pair this machine and expose the hosted tool surface.
+register_install_mcp_cli(cli)
 
 
 # Spend-cap subcommand — `kiln spend-caps {show,raise,approve-order}`.
