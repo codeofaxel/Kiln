@@ -143,4 +143,4 @@ cd kiln && python -m pytest tests/ -v  # 8,673 tests
 
 ## License
 
-MIT
+AGPL-3.0-or-later. Commercial licensing is available for companies that need proprietary use.

@@ -34,15 +34,16 @@ Then add Kiln to any MCP client. Open source for local printing.
   <a href="https://kiln3d.com#demo">Watch the demo →</a>
 </p>
 
-Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing)) add fleet management, Git-for-3D versioning, SSO + SCIM, ERP webhooks, and 7-year audit logs.
+Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing)) add Git-for-3D versioning, product templates, assembly manuals, fleet workflows, SSO + SCIM, ERP webhooks, and long-term audit logs.
 
 ### Why Kiln?
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
 - **No printer? No problem** — Outsource any job to Craftcloud's 150+ manufacturing services. Kiln handles quoting, ordering, and tracking. No API key required.
-- **AI-native** — <!-- KILN_MCP_COUNT:OLD --> 757 MCP tools built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — 757 MCP tools and 214 CLI commands built for AI agents. Not a web UI with an API bolted on.
 - **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print.
 - **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command.
+- **Manuals included** — Multi-part prints can generate printable PDF assembly manuals with Bill of Materials, isometric step renders, mating arrows, and pause-and-check verification gates. (Pro)
 - **Resume, don't restart** — Cancelled or failed print? Resume from the exact layer it stopped on any supported FDM printer. No filament wasted. (Pro)
 - **Modify mid-print** — Add decorations, append features, or swap materials on a live print with atomic revert if anything goes wrong. (Pro)
 - **Smart material routing** — 25 materials, 45 brand-specific filament profiles (Bambu, Prusament, Polymaker, and more) across 11 material families. Intent-based recommendations with printer capability awareness.
@@ -393,10 +394,16 @@ kiln ingest watch --dir ~/incoming [--auto-queue] [--once] [--state-file ~/.kiln
 kiln ingest service install --dir ~/incoming [--auto-queue]  # Install opt-in background watcher config (detect-only by default)
 kiln ingest service start|stop|status                           # Run and manage watcher as a background service
 kiln plugins list|info                        # Plugin management
+kiln install-mcp                              # Install Kiln into supported MCP clients
+kiln uninstall-mcp                            # Remove Kiln from supported MCP clients
+kiln preview model.stl                        # Render a visual preview before slicing/printing
+kiln validate model.stl                       # Check a model for print readiness
+kiln repair model.stl                         # Repair common mesh defects
 kiln generate "a phone stand" --provider meshy --json   # Generate 3D model from text (meshy/tripo3d/stability/gemini/openscad)
 kiln generate-and-print "a phone stand" --provider gemini --material PLA   # One-command generate -> preview -> slice -> upload
 kiln generate-status <job_id> --json                    # Check generation status
 kiln generate-download <job_id> -o ./models --json      # Download generated model
+kiln assembly-manual --assembly assembly.json --out ./assembly_manual  # Generate a printable assembly manual (Pro)
 kiln firmware status --json                # Check for firmware updates
 kiln firmware update [--component klipper] # Apply firmware updates
 kiln firmware rollback <component>         # Roll back firmware
@@ -411,11 +418,11 @@ kiln partner sync <id> --available         # Sync provider capacity availability
 # kiln network register|find|submit|status|list|update
 kiln setup                                 # Interactive printer setup wizard
 kiln serve                                 # Start MCP server
-kiln rest [--port 8420] [--tier full] [--auth-token TOKEN]  # Start REST API server
+kiln rest [--port 8420] [--tier full] [--auth-token TOKEN]  # Start kiln-pro REST API server when installed
 kiln agent [--model openai/gpt-4o]         # Interactive agent REPL (any LLM)
 ```
 
-The REST API can be deployed to Fly.io for production use — see `deploy.sh` for one-command deployment.
+The REST API server is provided by kiln-pro. Public Kiln also knows how to proxy tier-gated pro tool calls through the hosted Kiln REST API when the machine is paired.
 
 Global option: `--printer <name>` to target a specific printer per-command.
 
@@ -428,7 +435,7 @@ kiln serve
 # Or override with environment variables
 export KILN_PRINTER_HOST=http://192.168.1.100    # Your printer's IP or hostname
 export KILN_PRINTER_API_KEY=your_api_key          # API key (OctoPrint/Moonraker/Prusa Link)
-export KILN_PRINTER_TYPE=prusaconnect             # octoprint | moonraker | bambu | prusaconnect
+export KILN_PRINTER_TYPE=prusaconnect             # octoprint | moonraker | bambu | prusaconnect | elegoo | serial
 kiln serve
 ```
 
@@ -457,7 +464,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "kiln": {
-      "command": "python",
+      "command": "python3",
       "args": ["-m", "kiln", "serve"],
       "env": {
         "KILN_PRINTER_HOST": "http://192.168.1.100",
@@ -469,7 +476,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 }
 ```
 
-> **Tip:** Replace `KILN_PRINTER_TYPE` with your backend: `octoprint`, `moonraker`, `bambu`, or `prusaconnect`. Or skip env vars entirely if you've already run `kiln setup`.
+> **Tip:** Replace `KILN_PRINTER_TYPE` with your backend: `octoprint`, `moonraker`, `bambu`, `prusaconnect`, `elegoo`, or `serial`. Or skip env vars entirely if you've already run `kiln setup`.
 
 ### Multi-Model Support (OpenRouter / Any LLM)
 
@@ -482,19 +489,12 @@ kiln agent --model openai/gpt-4o
 kiln agent --model anthropic/claude-sonnet-4
 kiln agent --model meta-llama/llama-3.1-70b-instruct --tier essential
 
-# REST API mode — any HTTP client can call Kiln tools
-export KILN_API_AUTH_TOKEN=CHANGE_ME_long_random_token
-kiln rest --port 8420 --tier full
-# POST http://localhost:8420/api/tools/printer_status
-# GET  http://localhost:8420/api/tools
-
-# Install with REST API support
-pip install kiln3d[rest]
+# Hosted/pro REST calls are available when the machine is paired
+kiln signin
+kiln pair KLN-ABCD-EFGH
 ```
 
-When binding REST to non-localhost addresses (for hosted deployments), set `KILN_API_AUTH_TOKEN` or pass `--auth-token`.
-
-Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All <!-- KILN_MCP_COUNT:OLD --> 757 tools are available via MCP (`kiln serve`).
+Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 757 tools are available via MCP (`kiln serve`).
 
 ### OctoPrint CLI
 
@@ -513,7 +513,7 @@ octoprint-cli print myfile.gcode --confirm
 
 ## MCP Tools (Selected)
 
-The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_COUNT:OLD --> 757 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
+The Kiln MCP server (`kiln serve`) exposes **757 tools** to agents. Key tools are listed below — MCP clients can use `get_skill_manifest` and ToolSearch-style discovery to browse the complete catalog.
 
 | Tool | Description |
 |------|-------------|
@@ -543,7 +543,7 @@ The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_COUNT:OLD --> 757 too
 | `register_webhook` | Register a webhook for event notifications |
 | `list_webhooks` | List all registered webhooks |
 | `delete_webhook` | Remove a webhook endpoint |
-| `search_all_models` | Search MyMiniFactory, Cults3D (search only), and Thingiverse simultaneously |
+| `search_all_models` | Search configured model marketplaces simultaneously |
 | `marketplace_info` | Show connected marketplaces and setup hints |
 | `search_models` | Search a single marketplace for 3D models |
 | `model_details` | Get details for a marketplace model |
@@ -898,7 +898,7 @@ The server also exposes read-only resources that agents can use for context:
 |---|---|
 | `server.py` | MCP server with tools, resources, and subsystem wiring |
 | `printers/` | Printer adapter abstraction (OctoPrint, Moonraker, Bambu, Elegoo, Prusa Link) |
-| `marketplaces/` | Model marketplace adapters (MyMiniFactory, Cults3D, Thingiverse) |
+| `marketplaces/` | Model marketplace adapters (MyMiniFactory, Cults3D, Thingiverse, metadata-only sources) |
 | `slicer.py` | Slicer integration (PrusaSlicer, OrcaSlicer) with auto-detection |
 | `registry.py` | Fleet registry for multi-printer management |
 | `queue.py` | Priority job queue with status tracking |
@@ -907,41 +907,43 @@ The server also exposes read-only resources that agents can use for context:
 | `persistence.py` | SQLite storage for jobs, events, and settings |
 | `webhooks.py` | Event-driven webhook delivery with HMAC signing |
 | `auth.py` | Optional API key authentication with scope-based access |
-| `billing.py` | Fee tracking for fulfillment and network-routed jobs |
 | `discovery.py` | Network printer discovery (mDNS + HTTP probe) |
 | `generation/` | Text-to-model generation providers (Meshy, Tripo3D, Stability AI, Gemini Deep Think, OpenSCAD) with auto-discovery, mesh validation, and printability analysis |
 | `consumer.py` | Consumer workflow for non-printer users (address validation, material recommendations, timeline/price estimation, onboarding) |
-| `fulfillment/` | External manufacturing service adapters (Craftcloud) with intelligence layer (provider health, multi-provider comparison, batch quoting, retry/fallback, order history, shipping insurance) |
+| `plugins/fulfillment_tools.py` | External manufacturing fulfillment tools (Craftcloud) |
 | `cost_estimator.py` | Print cost estimation from G-code analysis |
 | `materials.py` | Multi-material and spool tracking |
+| `material_catalog.py` | Material brand catalog, properties, and purchase-link metadata |
+| `material_inventory.py` | Fleet material inventory and assignment tracking |
 | `bed_leveling.py` | Automated bed leveling trigger system |
 | `streaming.py` | MJPEG webcam streaming proxy |
 | `cloud_sync.py` | Cloud sync for printer configs and job history |
-| `plugins.py` | Plugin system with entry-point discovery |
+| `plugin_loader.py` | Internal tool-plugin discovery and registration |
+| `plugins/` | Focused MCP tool modules loaded by the plugin loader |
 | `gcode.py` | G-code safety validator with per-printer limits |
+| `gcode_interceptor.py` | Rule-based G-code interception and safety rewriting |
 | `safety_profiles.py` | Bundled safety database (29 printer models, temps/feedrates/flow) |
 | `slicer_profiles.py` | Bundled slicer profiles (auto-generates .ini files per printer) |
 | `printer_intelligence.py` | Printer knowledge base (firmware quirks, materials, failure modes) |
 | `pipelines.py` | Pre-validated print pipelines (quick_print, calibrate, benchmark) |
+| `assembly.py` | Multi-part assembly validation and manual planning support |
+| `design_versions.py` | Local design history, version records, diffs, and rollback primitives |
+| `mesh_validation_pipeline.py` | Multi-gate printability validation pipeline |
+| `model_visualizer.py` | Local model preview rendering |
 | `tool_schema.py` | OpenAI function-calling schema converter (MCP → OpenAI format) |
 | `tool_tiers.py` | Tool tier definitions (essential/standard/full) for model capability matching |
 | `agent_loop.py` | Generic agent loop for any OpenAI-compatible API (OpenRouter, direct, etc.) |
 | `openrouter.py` | OpenRouter integration with model catalog and auto-tier detection |
-| `rest_api.py` | REST API wrapper (FastAPI) exposing all MCP tools as HTTP endpoints |
 | `data/` | Bundled JSON databases (safety profiles, slicer profiles, printer intelligence) |
-| `payments/` | Payment processing (Stripe, Circle USDC, crypto rails) |
 | `gateway/` | External-provider integration gateway *(as integrations launch)* |
 | `heater_watchdog.py` | Auto-cooldown watchdog for idle heaters |
-| `licensing.py` | License tier management (Free/Pro/Business/Enterprise, offline-first) |
-| `sso.py` | SSO authentication (OIDC/SAML) with IdP role mapping and email domain allowlists |
-| `gcode_encryption.py` | G-code encryption at rest (Fernet/PBKDF2 via KILN_ENCRYPTION_KEY) |
-| `printer_billing.py` | Per-printer overage billing (20 included, $15/mo each additional) |
-| `teams.py` | Team seat management with RBAC (admin/engineer/operator roles) |
-| `uptime.py` | Rolling uptime health monitoring (1h/24h/7d/30d windows, 99.9% SLA target) |
-| `project_costs.py` | Per-project cost tracking for manufacturing bureaus (material, labor, printer time, fulfillment) |
 | `wallets.py` | Crypto wallet configuration (Solana/Ethereum for donations and fees) |
-| `cli/` | Click CLI with <!-- KILN_CLI_COUNT:OLD --> 214 commands and JSON output |
+| `pro_tool_manifest.json` | Public manifest for kiln-pro tool discovery and REST proxy stubs |
+| `decoration_quota.py` | Free-tier decoration quota tracking and tier resolution hooks |
+| `cli/` | Click CLI with 214 commands and JSON output |
 | `deploy/` | Kubernetes manifests and Helm chart for on-prem Enterprise deployment |
+
+kiln-pro (https://kiln3d.com) extends public Kiln with paid-tier REST serving, billing, licensing, SSO, RBAC, G-code encryption, uptime reporting, team administration, and project-cost workflows. Public Kiln exposes only the interface/proxy surface for those capabilities; the private implementation stays in kiln-pro.
 
 ## Authentication (Optional)
 
@@ -1000,7 +1002,7 @@ export KILN_PLUGIN_POLICY=permissive
 
 ## Model Marketplaces
 
-Kiln includes adapters for discovering and downloading 3D models from popular marketplaces:
+Kiln includes adapters for discovering 3D models and downloading them where direct downloads are supported:
 
 | Marketplace | Status | Features |
 |---|---|---|
@@ -1023,7 +1025,7 @@ export KILN_CULTS3D_API_KEY=your_key            # Cults3D
 export KILN_THINGIVERSE_TOKEN=your_token       # Thingiverse (deprecated)
 ```
 
-All configured marketplaces are searched simultaneously via `search_all_models`. Agents can inspect details, download files, and upload directly to a printer — enabling a full design-to-print workflow without human intervention.
+All configured marketplaces are searched simultaneously via `search_all_models`. Agents can inspect details, download files when direct downloads are supported, and upload downloaded models directly to a printer — enabling a full design-to-print workflow without human intervention.
 
 ## AI Model Generation
 
@@ -1154,7 +1156,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (11,568 total across Kiln + kiln-pro)
+# Run tests
 cd kiln && python3 -m pytest tests/ -v
 cd ../octoprint-cli && python3 -m pytest tests/ -v
 ```
@@ -1176,10 +1178,10 @@ For provider-routed orders, the provider remains merchant of record and support 
 
 | Tier | Price | What You Get |
 |------|-------|-------------|
-| **Free** | $0 | All local printing, slicing, marketplace, safety profiles. Job queue (10 jobs). Up to 2 printers. Billing visibility. |
-| **Pro** | $49/mo | Up to 5 printers + fleet orchestration, fleet analytics, unlimited queue depth, git-for-3D version control (branch / merge / signed releases on designs, decorations, and mechanical features), cloud push/pull to Kiln Cloud, priority scheduler, product templates (coasters, keychains, bookmarks, ornaments, fridge magnets, pet tags, pet bowls, jewelry trays, ashtrays, wall plaques) with QR code embedding and batch generation. Annual: $39/mo ($468/yr). |
-| **Business** | $99/mo | Everything in Pro + up to 50 printers, 5 team seats, unlimited fulfillment orders (5% orchestration fee), shared hosted MCP server, priority support, custom safety profiles, webhook integrations. Annual: $79/mo ($948/yr). |
-| **Enterprise** | From $499/mo | Everything in Business + unlimited printers (20 included, $15/mo each after), unlimited seats, role-based access control, dedicated single-tenant MCP server, on-prem/cloud/hybrid deployment, SSO (SAML/OIDC), full audit trail with export, lockable safety profiles, encrypted G-code at rest, 99.9% uptime SLA, dedicated Slack channel. Annual: $399/mo ($4,788/yr). |
+| **Free** | $0 | Unlimited local printing, slicing, marketplace search, safety profiles, 10-job queue, one printer, personal/non-commercial use, design intelligence, printability analysis, and local linear design history. |
+| **Pro** | $49/mo | Everything in Free + one-printer personal use, unlimited queue depth, unlimited assembly parts, auto-generated assembly manuals, Git-for-3D branch/merge/cherry-pick/signed releases, solo cloud sync, product templates, procedural textures, unlimited non-QR decorations, mid-print modification, failure recovery, print resume, design provenance, manual speed control, and print learning. Annual: $39/mo ($468/yr). |
+| **Business** | $199/mo | Everything in Pro + commercial use, 3 printers, 3 team seats, multi-printer fleet management, cross-printer learning, co-branded and multilingual assembly manuals, QR code generation, layer-scheduled speed adjustments, team pull requests, approval gates, federated design sharing, unlimited fulfillment orders, material compliance tracking, priority support, custom safety profiles, and webhooks. Annual: $159/mo ($1,908/yr). |
+| **Enterprise** | Contact us | Everything in Business + large fleets, unlimited team seats, SSO (SAML/OIDC) + SCIM, RBAC, full audit trail with long-term retention, lockable safety profiles, encrypted G-code at rest, white-label manuals, buyer-side authenticity verification, 99.9% uptime SLA, dedicated CSM, on-prem/VPC deployment, custom integrations, and procurement terms. |
 
 Run `kiln upgrade` to activate a license key.
 
