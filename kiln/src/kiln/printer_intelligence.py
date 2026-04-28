@@ -71,6 +71,7 @@ class PrinterIntel:
         hotend_type: ``"all_metal"`` or ``"ptfe_lined"``.
         has_enclosure: Whether the printer has a stock enclosure.
         has_abl: Whether automatic bed leveling is available.
+        capabilities: Extended model facts such as camera and multicolor support.
         materials: Material compatibility map (name → settings).
         quirks: List of printer-specific gotchas and tips.
         calibration: Calibration guidance keyed by procedure name.
@@ -84,6 +85,7 @@ class PrinterIntel:
     hotend_type: str
     has_enclosure: bool
     has_abl: bool
+    capabilities: dict[str, Any]
     materials: dict[str, MaterialProfile]
     quirks: list[str]
     calibration: dict[str, str]
@@ -141,6 +143,7 @@ def _load() -> None:
                 hotend_type=data.get("hotend_type", "all_metal"),
                 has_enclosure=bool(data.get("has_enclosure", False)),
                 has_abl=bool(data.get("has_abl", False)),
+                capabilities=dict(data.get("capabilities", {})),
                 materials=materials,
                 quirks=list(data.get("quirks", [])),
                 calibration=dict(data.get("calibration", {})),
@@ -165,13 +168,18 @@ def get_printer_intel(printer_id: str) -> PrinterIntel:
     """
     _load()
     normalised = printer_id.lower().replace("-", "_").strip()
-    profile = _cache.get(normalised)
-    if profile is not None:
-        return profile
+    candidates = [normalised]
+    if normalised.startswith("creality_"):
+        candidates.append(normalised.removeprefix("creality_"))
+    for candidate in candidates:
+        profile = _cache.get(candidate)
+        if profile is not None:
+            return profile
 
     for key in _cache:
-        if normalised.startswith(key) or key.startswith(normalised):
-            return _cache[key]
+        for candidate in candidates:
+            if candidate.startswith(key) or key.startswith(candidate):
+                return _cache[key]
 
     default = _cache.get("default")
     if default is not None:
@@ -234,6 +242,7 @@ def intel_to_dict(intel: PrinterIntel) -> dict[str, Any]:
         "hotend_type": intel.hotend_type,
         "has_enclosure": intel.has_enclosure,
         "has_abl": intel.has_abl,
+        "capabilities": intel.capabilities,
         "materials": {
             name: {"hotend": mp.hotend, "bed": mp.bed, "fan": mp.fan, "notes": mp.notes}
             for name, mp in intel.materials.items()

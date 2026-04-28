@@ -14,7 +14,7 @@ Kiln is the intelligence layer between idea and physical object. It provides a u
 
 **Three ways to get to a print:**
 
-- **🖨️ Your printers.** Control OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo, or Direct USB/Serial machines on your LAN — or remotely via Bambu Cloud when configured.
+- **🖨️ Your printers.** Control OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, or Direct USB/Serial machines on your LAN — or remotely via Bambu Cloud when configured.
 - **🌐 Third-party model search.** Search external model repositories such as MyMiniFactory, Cults3D, and Thingiverse, then download where the provider permits, slice, and print.
 - **🏭 Fulfillment providers.** Route jobs to third-party fulfillment services like Craftcloud, or through connected provider APIs for overflow and specialty materials.
 
@@ -30,7 +30,7 @@ All three modes use the same MCP tools and CLI commands.
 **Key properties:**
 
 - **Local-first.** Local printer communication stays on your network. No cloud relay, no accounts, no telemetry.
-- **Adapter-based.** One interface covers OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo, and Direct USB/Serial. New backends plug in without changing upstream consumers.
+- **Adapter-based.** One interface covers OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, and Direct USB/Serial. New backends plug in without changing upstream consumers.
 - **Safety-enforced.** Pre-flight checks, G-code validation, and temperature limits are protocol-level — not optional.
 - **Agent-native.** Every operation returns structured JSON. Every error includes machine-readable status codes. `--json` on every CLI command.
 
@@ -40,6 +40,7 @@ All three modes use the same MCP tools and CLI commands.
 |---|---|---|---|
 | OctoPrint | HTTP REST | Any OctoPrint-connected printer | Stable |
 | Moonraker | HTTP REST | Klipper-based (Voron, RatRig, etc.) | Stable |
+| Creality | HTTP REST via Moonraker | K1/K2/Hi/Ender V3 KE-class printers when local Moonraker is reachable; older Marlin Creality machines use OctoPrint or Direct USB | Stable when Moonraker is reachable |
 | Bambu Lab | MQTT/LAN | X1C, P1S, A1 | Stable |
 | Prusa Link | HTTP REST | MK4, XL, Mini+ | Stable |
 | Elegoo | WebSocket/SDCP | Centauri Carbon, Saturn, Mars series. Neptune 4/OrangeStorm Giga use Moonraker. | Stable |
@@ -205,6 +206,10 @@ kiln auth --name ender3 --host http://octopi.local --type octoprint --api-key YO
 # Moonraker
 kiln auth --name voron --host http://voron.local:7125 --type moonraker
 
+# Creality K1/K2/Hi-class local Moonraker
+kiln doctor-creality --host 192.168.1.55 --model k1_max
+kiln auth --name k1max --host 192.168.1.55 --type creality --printer-model k1_max
+
 # Prusa Link
 kiln auth --name prusa-mini --host http://192.168.1.44 --type prusaconnect --api-key YOUR_KEY
 
@@ -226,6 +231,7 @@ Kiln works the same over Ethernet and Wi-Fi because it talks to printer APIs ove
 # Verify endpoint from your host:
 curl http://192.168.1.44/api/v1/status                  # Prusa Link
 curl http://192.168.1.50:7125/server/info               # Moonraker
+curl http://192.168.1.55:7125/server/info               # Creality when local Moonraker is reachable
 curl http://192.168.1.60/api/version                    # OctoPrint
 
 # Register directly by IP (no discovery required):
@@ -275,10 +281,11 @@ Save printer credentials to `~/.kiln/config.yaml`.
 |---|---|---|
 | `--name` | Yes | Friendly name for this printer |
 | `--host` | Yes | Printer URL (e.g., `http://octopi.local`) |
-| `--type` | Yes | Backend: `octoprint`, `moonraker`, `bambu`, `prusaconnect`, `elegoo`, `serial` |
-| `--api-key` | OctoPrint, Prusa Link | OctoPrint or Prusa Link API key |
+| `--type` | Yes | Backend: `octoprint`, `moonraker`, `creality`, `bambu`, `prusaconnect`, `elegoo`, `serial` |
+| `--api-key` | OctoPrint, Moonraker/Creality, Prusa Link | API key when the backend requires one |
 | `--access-code` | Bambu | Bambu Lab access code |
 | `--serial` | Bambu, Elegoo optional | Bambu Lab serial number or SDCP mainboard identifier |
+| `--printer-model` | Optional | Safety/profile hint such as `k1_max` or `bambu_a1` |
 
 #### `kiln status`
 Get printer state, temperatures, and active job progress.
@@ -984,7 +991,7 @@ Constraint-aware design reasoning — agents query material properties, design p
 |---|---|
 | `plan_mid_print_decoration` | Plan a decoration injection on a paused/running print |
 | `apply_mid_print_decoration_plan` | Execute a planned mid-print decoration with atomic dual-artifact revert |
-| `resume_interrupted_print` | One-call resume from the exact layer a print stopped — works on any FDM printer (Bambu, OctoPrint, Moonraker/Klipper, Prusa Connect, Elegoo, Serial) |
+| `resume_interrupted_print` | One-call resume from the exact layer a print stopped — works on any FDM printer (OctoPrint, Moonraker/Klipper, Creality when exposed through Moonraker, Bambu, Prusa Connect, Elegoo, Serial) |
 | `analyze_mid_print_impact` | Structural impact analysis of a proposed mid-print modification |
 | `preview_mid_print_session` | Preview what a mid-print modification will look like before committing |
 | `cancel_print_recovery` | Cancel an in-progress recovery session |
@@ -1061,6 +1068,21 @@ host: http://voron.local:7125
 **State Mapping:** Moonraker returns Klipper state as a string (`ready`, `printing`, `paused`, `error`, `shutdown`). Direct mapping to `PrinterStatus`.
 
 **Webcam:** Discovers cameras via `GET /server/webcams/list`, then fetches the snapshot URL.
+
+### Creality
+
+Modern CrealityOS/Klipper FDM printers are supported through local Moonraker when it is reachable on the printer LAN. The `creality` backend probes common Creality Moonraker ports (`7125`, `80`, `4408`) and then delegates standard printer operations to the Moonraker adapter. Older Marlin-based Creality machines should use `octoprint` or `serial`.
+
+**Configuration:**
+```yaml
+type: creality
+host: 192.168.1.55
+printer_model: k1_max
+```
+
+**Diagnostics:** Run `kiln doctor-creality --host 192.168.1.55 --model k1_max` to verify `/server/info`, see the resolved Moonraker URL, and get same-LAN/IP/port/API-key guidance when local Moonraker is not reachable.
+
+**Caveat:** Kiln should not claim every stock Creality firmware exposes local Moonraker. K1/K2/Hi/Ender V3 KE-class support depends on `/server/info` answering locally.
 
 ### Bambu Lab
 
@@ -1268,7 +1290,7 @@ settings:
 | Variable | Description |
 |---|---|
 | `KILN_PRINTER_HOST` | Printer URL (fallback when no config) |
-| `KILN_PRINTER_API_KEY` | API key for OctoPrint |
+| `KILN_PRINTER_API_KEY` | API key for OctoPrint, Moonraker/Creality, or Prusa Link when required |
 | `KILN_PRINTER_TYPE` | Backend type |
 | `KILN_PRINTER_SERIAL` | Bambu serial number or Elegoo mainboard ID |
 | `KILN_SLICER_PATH` | Explicit path to slicer binary |
@@ -1338,7 +1360,7 @@ kiln/src/kiln/
     webhooks.py               # HMAC-signed webhook delivery
     auth.py                   # API key authentication
     gcode.py                  # G-code safety validator
-    safety_profiles.py        # Bundled safety database (29 printer models)
+    safety_profiles.py        # Bundled safety database (44 named printer models)
     slicer_profiles.py        # Bundled slicer profiles
     printer_intelligence.py   # Printer knowledge base
     design_intelligence.py    # Material/pattern/constraint queries

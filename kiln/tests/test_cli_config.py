@@ -99,6 +99,20 @@ class TestSaveAndLoad:
         assert cfg["type"] == "moonraker"
         assert cfg["host"] == "http://voron.local:7125"
 
+    def test_save_and_load_creality_with_model(self, tmp_path):
+        cfg_path = tmp_path / "config.yaml"
+        save_printer(
+            "k1-max",
+            "creality",
+            "192.168.1.55",
+            printer_model="creality_k1_max",
+            config_path=cfg_path,
+        )
+        cfg = load_printer_config("k1-max", config_path=cfg_path)
+        assert cfg["type"] == "creality"
+        assert cfg["host"] == "http://192.168.1.55"
+        assert cfg["printer_model"] == "creality_k1_max"
+
     def test_save_and_load_bambu(self, tmp_path):
         cfg_path = tmp_path / "config.yaml"
         save_printer(
@@ -166,6 +180,15 @@ class TestSaveAndLoad:
         cfg = load_printer_config(config_path=tmp_path / "config.yaml")
         assert cfg["host"] == "http://env-host"
         assert cfg["type"] == "moonraker"
+
+    def test_env_var_includes_printer_model(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("KILN_PRINTER_HOST", "192.168.1.55")
+        monkeypatch.setenv("KILN_PRINTER_TYPE", "creality")
+        monkeypatch.setenv("KILN_PRINTER_MODEL", "creality_k1_max")
+        cfg = load_printer_config(config_path=tmp_path / "config.yaml")
+        assert cfg["host"] == "http://192.168.1.55"
+        assert cfg["type"] == "creality"
+        assert cfg["printer_model"] == "creality_k1_max"
 
     def test_default_settings_applied(self, tmp_path):
         cfg_path = tmp_path / "config.yaml"
@@ -272,6 +295,11 @@ class TestValidate:
     def test_valid_moonraker(self):
         ok, err = validate_printer_config({"type": "moonraker", "host": "http://h"})
         assert ok is True
+
+    def test_valid_creality_without_api_key(self):
+        ok, err = validate_printer_config({"type": "creality", "host": "http://h"})
+        assert ok is True
+        assert err is None
 
     def test_valid_bambu(self):
         ok, err = validate_printer_config({

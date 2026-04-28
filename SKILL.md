@@ -11,6 +11,7 @@ Kiln gives AI agents (Claude, GPT, OpenClaw, custom) safe, direct control of 3D 
 - **Bambu Lab** — A1, A1 Mini, P1S, P1P, X1C (MQTT + FTP)
 - **OctoPrint** — Any printer running OctoPrint
 - **Moonraker/Klipper** — Voron, Ender, etc.
+- **Creality** — K1/K2/Hi/Ender V3 KE-class printers when local Moonraker is reachable; older Marlin models via OctoPrint or serial
 - **Prusa Link** — MK4, Mini, XL
 - **Elegoo** — Saturn, Mars, Centauri Carbon (SDCP V2 + V3)
 

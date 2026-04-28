@@ -80,7 +80,11 @@
         "fix": "Check lead screw for bends \u2014 spin by hand and look for wobble. Lubricate Z rods. Ensure Z coupler is not over-tightened"
       }
     ],
-    "build_volume_mm": [200, 200, 200],
+    "build_volume_mm": [
+      200,
+      200,
+      200
+    ],
     "max_hotend_temp": 250,
     "max_bed_temp": 100
   },
@@ -116,7 +120,10 @@
       "Bowden tube couplers loosen over time \u2014 check and replace couplers every 6 months.",
       "Stock bed springs are weak \u2014 upgrade to yellow springs or silicone spacers for stable leveling.",
       "V2 uses a 32-bit board (4.2.2/4.2.7) \u2014 flash Marlin firmware for thermal runaway protection if not updated.",
-      "Extruder arm is plastic and cracks \u2014 inspect regularly, replace with aluminum extruder kit."
+      "Extruder arm is plastic and cracks \u2014 inspect regularly, replace with aluminum extruder kit.",
+      "Camera support is not stock; use OctoPrint/webcam or another external host if snapshots are required.",
+      "No Creality CFS path is assumed; multicolor is manual M600 or third-party add-on territory.",
+      "PTFE-lined hotend should stay below sustained high-temperature engineering-material ranges unless upgraded."
     ],
     "calibration": {
       "first_steps": "Manual mesh bed leveling with paper method. Set Z-offset. Print bed level test pattern.",
@@ -144,11 +151,64 @@
         "symptom": "Stringing between parts",
         "cause": "Retraction too short for bowden setup",
         "fix": "Increase retraction to 5-6mm at 45mm/s"
+      },
+      {
+        "symptom": "OctoPrint or serial connection works but snapshots are unavailable",
+        "cause": "Stock printer has no built-in camera and no LAN camera endpoint",
+        "fix": "Configure an external webcam through OctoPrint or run without camera-dependent monitoring."
+      },
+      {
+        "symptom": "Flexible filament jams or under-extrudes",
+        "cause": "Long Bowden path lets TPU buckle before the hotend",
+        "fix": "Use very slow speeds, constrain the filament path, or upgrade to direct drive."
+      },
+      {
+        "symptom": "ABS/ASA layers split or corners lift",
+        "cause": "Open frame and PTFE-lined hotend are not suited to sustained high-temperature enclosed-material printing",
+        "fix": "Use PLA/PETG, add an enclosure and all-metal hotend, or choose an enclosed profile."
       }
     ],
-    "build_volume_mm": [220, 220, 250],
+    "build_volume_mm": [
+      220,
+      220,
+      250
+    ],
     "max_hotend_temp": 260,
-    "max_bed_temp": 110
+    "max_bed_temp": 110,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": true,
+      "camera_options": [
+        "OctoPrint USB webcam"
+      ],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "manual_M600",
+        "Mosaic Palette 3",
+        "3D Chameleon"
+      ],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "hardened_nozzle_stock": false,
+      "input_shaping": false,
+      "filament_runout_sensor": false,
+      "power_loss_recovery": true,
+      "enclosure": "open",
+      "source_notes": [
+        "Stock Ender 3 family is Marlin/Bowden and single-material; camera requires external host such as OctoPrint."
+      ],
+      "notes": "Stock Ender 3 family is single-material, open-frame, and usually camera-less unless paired with OctoPrint/webcam hardware."
+    }
   },
   "ender3_s1": {
     "display_name": "Creality Ender 3 S1 / S1 Pro",
@@ -186,7 +246,10 @@
     "quirks": [
       "CR-Touch probe occasionally gives false readings \u2014 clean probe tip regularly.",
       "Sprite extruder gear tension spring can be too tight for TPU \u2014 loosen one turn.",
-      "S1 Pro has a higher temp hotend (300C) than S1 (260C) \u2014 check your model before printing high-temp materials."
+      "S1 Pro has a higher temp hotend (300C) than S1 (260C) \u2014 check your model before printing high-temp materials.",
+      "Camera support is not stock; use OctoPrint/webcam or another external host if snapshots are required.",
+      "No Creality CFS path is assumed; multicolor is manual M600 or third-party add-on territory.",
+      "PTFE-lined hotend should stay below sustained high-temperature engineering-material ranges unless upgraded."
     ],
     "calibration": {
       "first_steps": "Run CR-Touch auto-level. Fine-tune Z-offset with live babystep during first layer.",
@@ -203,14 +266,67 @@
         "symptom": "Nozzle clogs with PETG",
         "cause": "Heat creep in all-metal hotend",
         "fix": "Ensure heatsink fan runs at 100%. Print PETG at 230-235C, not higher."
+      },
+      {
+        "symptom": "OctoPrint or serial connection works but snapshots are unavailable",
+        "cause": "Stock printer has no built-in camera and no LAN camera endpoint",
+        "fix": "Configure an external webcam through OctoPrint or run without camera-dependent monitoring."
+      },
+      {
+        "symptom": "ABS/ASA warps despite acceptable nozzle temperature",
+        "cause": "Open frame loses chamber heat and exposes the part to drafts",
+        "fix": "Use an enclosure, brim, and lower fan; avoid large ABS/ASA parts on stock open-frame setups."
+      },
+      {
+        "symptom": "Manual multicolor print resumes with the wrong filament",
+        "cause": "No stock automatic material mapping exists; M600 depends on operator swap accuracy",
+        "fix": "Use clear pause prompts, purge enough after each swap, or use a supported external multi-material add-on."
       }
     ],
-    "build_volume_mm": [220, 220, 270],
+    "build_volume_mm": [
+      220,
+      220,
+      270
+    ],
     "max_hotend_temp": 260,
-    "max_bed_temp": 100
+    "max_bed_temp": 100,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": true,
+      "camera_options": [
+        "OctoPrint USB webcam"
+      ],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "manual_M600",
+        "Mosaic Palette 3",
+        "3D Chameleon"
+      ],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "hardened_nozzle_stock": false,
+      "input_shaping": false,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "open",
+      "source_notes": [
+        "Ender 3 S1 is direct-drive but still stock single-material/open-frame."
+      ],
+      "notes": "Direct-drive S1 improves TPU over Bowden Enders, but stock hardware remains open-frame and single-material."
+    }
   },
   "k1": {
-    "display_name": "Creality K1 / K1 Max",
+    "display_name": "Creality K1",
     "firmware": "klipper",
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
@@ -244,9 +360,12 @@
     },
     "quirks": [
       "Input shaping must be tuned per-machine \u2014 run ADXL345 calibration after any hardware changes.",
-      "Stock Klipper firmware is customized \u2014 community firmware (Guilouz) unlocks more features.",
+      "Stock Klipper firmware is customized \u2014 community firmware may expose more controls.",
       "Print PLA with door open \u2014 enclosed chamber causes heat creep and jams at high speeds.",
-      "LIDAR on K1 Max sometimes miscalibrates \u2014 verify Z offset manually if first layer issues."
+      "CFS-C is an optional retrofit path, not stock multicolor; verify accessory kit, firmware, and nozzle/hotend compatibility before slicing as CFS.",
+      "CFS-C supports one four-slot unit, not four daisy-chained units; treat it as four colors max.",
+      "When CFS-C is installed, usable XY can shrink and the PTFE path/top cover alignment becomes part of print reliability.",
+      "CrealityOS/Moonraker access can vary by firmware/root/local-network settings; verify /server/info before promising network control."
     ],
     "calibration": {
       "first_steps": "Run built-in self-test. Input shaping auto-tune. Verify Z offset with first layer print.",
@@ -263,11 +382,1977 @@
         "symptom": "Ringing/ghosting artifacts",
         "cause": "Input shaping not tuned or belt tension off",
         "fix": "Re-run input shaper calibration. Check belt tension on both X and Y."
+      },
+      {
+        "symptom": "CFS-C job starts as manual or fails tool-change validation",
+        "cause": "CFS-C add-on was not selected, firmware was not updated, or the printer variant lacks required quick-swap/integrated-nozzle hardware",
+        "fix": "Select the creality_cfs add-on only after installing the CFS-C kit and firmware; verify the hotend/nozzle compatibility first."
+      },
+      {
+        "symptom": "CFS-C feed clicks, grinds, or stalls before the extruder",
+        "cause": "PTFE alignment, cutter/buffer friction, or spool path resistance in the retrofit feed path",
+        "fix": "Reseat PTFE vertically, check cutter/buffer installation, reduce spool drag, and test each slot before a long print."
+      },
+      {
+        "symptom": "Part exceeds bed after CFS-C install",
+        "cause": "CFS-C tube path changes usable dimensions on K1-series machines",
+        "fix": "Use the CFS-aware bed volume, re-slice after installing CFS-C, and avoid jobs near the reduced edge."
+      },
+      {
+        "symptom": "Camera/lidar reports success but first layer is visibly poor",
+        "cause": "AI inspection is advisory and can miss dirty plate, wrong Z offset, or partial-bed mesh errors",
+        "fix": "Watch the first layer, clean the plate, rerun self-test/mesh, and do not rely solely on camera/LiDAR acceptance."
       }
     ],
-    "build_volume_mm": [220, 220, 250],
+    "build_volume_mm": [
+      220,
+      220,
+      250
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 100,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "optional_ai_camera",
+      "camera_out_of_box": false,
+      "camera_optional": true,
+      "camera_options": [
+        "Creality AI Camera for K1/K1 Max/K1C"
+      ],
+      "multicolor_system": "cfs_c",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "Creality CFS-C",
+        "manual_M600"
+      ],
+      "multicolor_max_colors": 4,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": true,
+      "cfs_variant": "CFS-C",
+      "cfs_max_units": 1,
+      "hardened_nozzle_stock": false,
+      "input_shaping": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "passive",
+      "source_notes": [
+        "Creality CFS-C page lists K1 as compatible; AI camera is sold as optional K1/K1 Max/K1C accessory."
+      ],
+      "notes": "Stock K1 is single-material; CFS-C and AI camera are accessory paths that must be configured explicitly."
+    }
+  },
+  "ender3_v2": {
+    "display_name": "Creality Ender 3 V2",
+    "firmware": "marlin",
+    "extruder_type": "bowden",
+    "hotend_type": "ptfe_lined",
+    "has_enclosure": false,
+    "has_abl": false,
+    "materials": {
+      "PLA": {
+        "hotend": 200,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Conservative Ender profile."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 75,
+        "fan": 50,
+        "notes": "Keep speeds moderate."
+      },
+      "TPU": {
+        "hotend": 220,
+        "bed": 50,
+        "fan": 60,
+        "notes": "Bowden path requires very slow TPU printing."
+      }
+    },
+    "quirks": [
+      "Stock Bowden path needs longer retraction than direct-drive Creality printers.",
+      "Manual bed leveling drift is common; recheck first layer often.",
+      "Camera support is not stock; use OctoPrint/webcam or another external host if snapshots are required.",
+      "No Creality CFS path is assumed; multicolor is manual M600 or third-party add-on territory.",
+      "PTFE-lined hotend should stay below sustained high-temperature engineering-material ranges unless upgraded."
+    ],
+    "calibration": {
+      "first_steps": "Level bed manually, set Z offset, then run a first-layer test.",
+      "flow_rate_test": "Run flow calibration after changing filament brand.",
+      "retraction_test": "Start around 5mm at 45mm/s for the stock Bowden setup."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Stringing",
+        "cause": "Bowden retraction not tuned or filament is wet",
+        "fix": "Dry filament and tune retraction length/speed."
+      },
+      {
+        "symptom": "OctoPrint or serial connection works but snapshots are unavailable",
+        "cause": "Stock printer has no built-in camera and no LAN camera endpoint",
+        "fix": "Configure an external webcam through OctoPrint or run without camera-dependent monitoring."
+      },
+      {
+        "symptom": "Flexible filament jams or under-extrudes",
+        "cause": "Long Bowden path lets TPU buckle before the hotend",
+        "fix": "Use very slow speeds, constrain the filament path, or upgrade to direct drive."
+      },
+      {
+        "symptom": "ABS/ASA layers split or corners lift",
+        "cause": "Open frame and PTFE-lined hotend are not suited to sustained high-temperature enclosed-material printing",
+        "fix": "Use PLA/PETG, add an enclosure and all-metal hotend, or choose an enclosed profile."
+      }
+    ],
+    "build_volume_mm": [
+      220,
+      220,
+      250
+    ],
+    "max_hotend_temp": 260,
+    "max_bed_temp": 110,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": true,
+      "camera_options": [
+        "OctoPrint USB webcam"
+      ],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "manual_M600",
+        "Mosaic Palette 3",
+        "3D Chameleon"
+      ],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "hardened_nozzle_stock": false,
+      "input_shaping": false,
+      "filament_runout_sensor": false,
+      "power_loss_recovery": true,
+      "enclosure": "open",
+      "source_notes": [
+        "Ender 3 V2 stock control path is serial/OctoPrint, not CrealityOS/Moonraker."
+      ],
+      "notes": "Older Marlin/Bowden machine; use serial or OctoPrint for local control and external camera support."
+    }
+  },
+  "sparkx_i7": {
+    "display_name": "Creality SPARKX i7",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "ai_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [
+        "built_in_ai_monitoring_camera"
+      ],
+      "multicolor_system": "cfs",
+      "multicolor_out_of_box": true,
+      "multicolor_optional": false,
+      "multicolor_options": [
+        "built_in_CFS"
+      ],
+      "multicolor_max_colors": 4,
+      "multicolor_max_colors_out_of_box": 4,
+      "cfs_compatible": true,
+      "cfs_variant": "CFS",
+      "cfs_max_units": 1,
+      "hardened_nozzle_stock": false,
+      "input_shaping": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "open",
+      "source_notes": [
+        "Creality SPARKX i7 support page lists AI monitoring camera yes and auto filament relay with CFS yes."
+      ],
+      "notes": "Built as an open-frame four-color Creality CFS printer with stock AI monitoring camera."
+    },
+    "materials": {
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100,
+        "notes": "High-speed PLA starting point."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 75,
+        "fan": 45,
+        "notes": "Slow down for PETG."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Print TPU slowly; avoid automatic multicolor feeding for flexible TPU unless validated."
+      },
+      "PLA-CF": {
+        "hotend": 230,
+        "bed": 60,
+        "fan": 70,
+        "notes": "Use hardened nozzle where installed."
+      }
+    },
+    "quirks": [
+      "Four-color workflow should verify material mapping before unattended jobs.",
+      "Open frame limits ABS/ASA and other warp-prone materials.",
+      "AI monitoring helps detect failures but should not replace first-layer verification.",
+      "CFS may be bundled or optional depending on SKU; confirm installed unit count before estimating multicolor capacity.",
+      "K2-family CFS can scale to four units for sixteen colors, but slot mapping and purge behavior must be verified before unattended work.",
+      "Flexible filaments should be treated as direct-spool/manual unless the actual CFS filament path is proven with that material.",
+      "Nozzle AI camera is only on K2 Pro/K2 Plus; do not infer nozzle-camera inspection from base K2 or K2 SE."
+    ],
+    "calibration": {
+      "first_steps": "Run full-auto leveling, input shaping, and the built-in pre-print checks.",
+      "flow_rate_test": "Run flow calibration per material and color path.",
+      "retraction_test": "Start around 0.5mm at 40mm/s for PLA/PETG."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Wrong color loads",
+        "cause": "Material mapping mismatch",
+        "fix": "Verify all color slots before starting the job."
+      },
+      {
+        "symptom": "ABS or ASA warps",
+        "cause": "Open-frame chamber cannot hold stable ambient temperature",
+        "fix": "Use enclosure or choose PLA/PETG for large parts."
+      },
+      {
+        "symptom": "Wrong color or material loads during a multicolor job",
+        "cause": "CFS slot mapping or RFID/material mapping does not match the slicer assignment",
+        "fix": "Verify each CFS slot in Creality Print, dry-run the first color change, and label spools before production."
+      },
+      {
+        "symptom": "TPU or soft filament jams in CFS path",
+        "cause": "Flexible filament buckles in multi-material feed hardware even when direct drive can print it manually",
+        "fix": "Feed TPU directly from a single spool unless the exact CFS setup has been validated with that filament."
+      },
+      {
+        "symptom": "Multicolor print time or waste is much higher than estimate",
+        "cause": "CFS purge volume, tower strategy, and slot-to-slot sequence vary by slicer and material pair",
+        "fix": "Use a purge-tower estimate, group colors by region, and validate with a small multi-color calibration job."
+      },
+      {
+        "symptom": "Engineering-material part lifts on K2 Pro/Plus despite chamber support",
+        "cause": "Large part footprint, insufficient chamber preheat, or cooling too aggressive for ABS/ASA/PA blends",
+        "fix": "Preheat chamber/bed, use brim or adhesive, reduce fan, and monitor first layers before leaving the job."
+      },
+      {
+        "symptom": "Four-color relay pauses or picks the wrong spool",
+        "cause": "Built-in CFS slot mapping/RFID mismatch",
+        "fix": "Verify material/color mapping on the printer and run a short two-color validation job first."
+      },
+      {
+        "symptom": "Open-frame multicolor part warps during long print",
+        "cause": "CFS enables longer jobs but the printer still lacks chamber temperature control",
+        "fix": "Prefer PLA/PETG for multicolor, use brim, and avoid ABS/ASA unless enclosed."
+      }
+    ],
+    "build_volume_mm": [
+      260,
+      260,
+      255
+    ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100
+  },
+  "k1_max": {
+    "display_name": "Creality K1 Max",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 220,
+        "bed": 55,
+        "fan": 100,
+        "notes": "Open door or lid for PLA to reduce chamber heat creep."
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 40,
+        "notes": "Reduce speed for cleaner surfaces."
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Enclosure helps reduce warping."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Reduce speed to 50-80mm/s."
+      }
+    },
+    "quirks": [
+      "Large bed makes first-layer verification more important than on the smaller K1.",
+      "AI/LiDAR calibration should be sanity-checked manually if the first layer looks wrong.",
+      "Moonraker availability depends on firmware/root setup on some units.",
+      "CFS-C is an optional retrofit path, not stock multicolor; verify accessory kit, firmware, and nozzle/hotend compatibility before slicing as CFS.",
+      "CFS-C supports one four-slot unit, not four daisy-chained units; treat it as four colors max.",
+      "When CFS-C is installed, usable XY can shrink and the PTFE path/top cover alignment becomes part of print reliability.",
+      "CrealityOS/Moonraker access can vary by firmware/root/local-network settings; verify /server/info before promising network control."
+    ],
+    "calibration": {
+      "first_steps": "Run built-in self-test and bed mesh. Verify Z offset with a full-bed first-layer print.",
+      "flow_rate_test": "Print a flow tower at the actual production speed.",
+      "retraction_test": "0.5mm retraction at 40mm/s is a safe starting point."
+    },
+    "failure_modes": [
+      {
+        "symptom": "First layer varies across the large bed",
+        "cause": "Mesh or Z offset needs recalibration",
+        "fix": "Run bed mesh/self-test and verify the first layer on all four corners."
+      },
+      {
+        "symptom": "PLA jams during fast enclosed printing",
+        "cause": "Heat creep in the passive chamber",
+        "fix": "Open door/lid for PLA and confirm hotend fan operation."
+      },
+      {
+        "symptom": "CFS-C job starts as manual or fails tool-change validation",
+        "cause": "CFS-C add-on was not selected, firmware was not updated, or the printer variant lacks required quick-swap/integrated-nozzle hardware",
+        "fix": "Select the creality_cfs add-on only after installing the CFS-C kit and firmware; verify the hotend/nozzle compatibility first."
+      },
+      {
+        "symptom": "CFS-C feed clicks, grinds, or stalls before the extruder",
+        "cause": "PTFE alignment, cutter/buffer friction, or spool path resistance in the retrofit feed path",
+        "fix": "Reseat PTFE vertically, check cutter/buffer installation, reduce spool drag, and test each slot before a long print."
+      },
+      {
+        "symptom": "Part exceeds bed after CFS-C install",
+        "cause": "CFS-C tube path changes usable dimensions on K1-series machines",
+        "fix": "Use the CFS-aware bed volume, re-slice after installing CFS-C, and avoid jobs near the reduced edge."
+      },
+      {
+        "symptom": "Camera/lidar reports success but first layer is visibly poor",
+        "cause": "AI inspection is advisory and can miss dirty plate, wrong Z offset, or partial-bed mesh errors",
+        "fix": "Watch the first layer, clean the plate, rerun self-test/mesh, and do not rely solely on camera/LiDAR acceptance."
+      }
+    ],
+    "build_volume_mm": [
+      300,
+      300,
+      300
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 100,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "ai_camera_lidar",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [
+        "built_in_ai_camera",
+        "built_in_ai_lidar"
+      ],
+      "multicolor_system": "cfs_c",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "Creality CFS-C",
+        "manual_M600"
+      ],
+      "multicolor_max_colors": 4,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": true,
+      "cfs_variant": "CFS-C",
+      "cfs_max_units": 1,
+      "hardened_nozzle_stock": false,
+      "input_shaping": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "passive",
+      "source_notes": [
+        "Creality K1 Max support lists AI monitoring and calibration cameras; CFS auto filament relay is no on stock page; CFS-C page lists K1 Max compatible."
+      ],
+      "notes": "K1 Max stock hardware has AI camera/LiDAR but is single-material until a CFS-C retrofit is installed and mapped."
+    }
+  },
+  "k1c": {
+    "display_name": "Creality K1C",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 220,
+        "bed": 55,
+        "fan": 100,
+        "notes": "Open door for long PLA jobs."
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 40,
+        "notes": "Moderate speed improves finish."
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Use enclosure."
+      },
+      "PLA-CF": {
+        "hotend": 230,
+        "bed": 60,
+        "fan": 70,
+        "notes": "Hardened nozzle path is intended for filled filaments."
+      }
+    },
+    "quirks": [
+      "Hardened nozzle path is better suited to abrasive filled filaments than the base K1.",
+      "Moonraker availability depends on firmware/root setup on some units.",
+      "CFS-C is an optional retrofit path, not stock multicolor; verify accessory kit, firmware, and nozzle/hotend compatibility before slicing as CFS.",
+      "CFS-C supports one four-slot unit, not four daisy-chained units; treat it as four colors max.",
+      "When CFS-C is installed, usable XY can shrink and the PTFE path/top cover alignment becomes part of print reliability.",
+      "CrealityOS/Moonraker access can vary by firmware/root/local-network settings; verify /server/info before promising network control."
+    ],
+    "calibration": {
+      "first_steps": "Run built-in self-test and verify first layer.",
+      "flow_rate_test": "Calibrate flow separately for filled filaments.",
+      "retraction_test": "Start around 0.5mm at 40mm/s."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Rough surfaces with carbon-filled filament",
+        "cause": "Flow and pressure advance not tuned for abrasive filament",
+        "fix": "Slow the print and run flow calibration for the exact material."
+      },
+      {
+        "symptom": "CFS-C job starts as manual or fails tool-change validation",
+        "cause": "CFS-C add-on was not selected, firmware was not updated, or the printer variant lacks required quick-swap/integrated-nozzle hardware",
+        "fix": "Select the creality_cfs add-on only after installing the CFS-C kit and firmware; verify the hotend/nozzle compatibility first."
+      },
+      {
+        "symptom": "CFS-C feed clicks, grinds, or stalls before the extruder",
+        "cause": "PTFE alignment, cutter/buffer friction, or spool path resistance in the retrofit feed path",
+        "fix": "Reseat PTFE vertically, check cutter/buffer installation, reduce spool drag, and test each slot before a long print."
+      },
+      {
+        "symptom": "Part exceeds bed after CFS-C install",
+        "cause": "CFS-C tube path changes usable dimensions on K1-series machines",
+        "fix": "Use the CFS-aware bed volume, re-slice after installing CFS-C, and avoid jobs near the reduced edge."
+      },
+      {
+        "symptom": "Camera/lidar reports success but first layer is visibly poor",
+        "cause": "AI inspection is advisory and can miss dirty plate, wrong Z offset, or partial-bed mesh errors",
+        "fix": "Watch the first layer, clean the plate, rerun self-test/mesh, and do not rely solely on camera/LiDAR acceptance."
+      }
+    ],
+    "build_volume_mm": [
+      220,
+      220,
+      250
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 100,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "ai_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [
+        "built_in_ai_camera"
+      ],
+      "multicolor_system": "cfs_c",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "Creality CFS-C",
+        "manual_M600"
+      ],
+      "multicolor_max_colors": 4,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": true,
+      "cfs_variant": "CFS-C",
+      "cfs_max_units": 1,
+      "hardened_nozzle_stock": true,
+      "input_shaping": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "passive",
+      "source_notes": [
+        "Creality K1C support lists AI monitoring camera yes and CFS relay no; CFS-C page lists K1C compatible."
+      ],
+      "notes": "K1C stock hardware has AI monitoring and steel-tipped nozzle support; CFS-C remains an explicit accessory workflow."
+    }
+  },
+  "k1_se": {
+    "display_name": "Creality K1 SE",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100,
+        "notes": "Default high-speed PLA starting point."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 75,
+        "fan": 45,
+        "notes": "Slow down for PETG quality."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Print TPU slowly."
+      }
+    },
+    "quirks": [
+      "Use K1 SE-specific build volume; do not reuse K1 Max profiles.",
+      "Moonraker availability depends on firmware/root setup on some units.",
+      "CFS-C is an optional retrofit path, not stock multicolor; verify accessory kit, firmware, and nozzle/hotend compatibility before slicing as CFS.",
+      "CFS-C supports one four-slot unit, not four daisy-chained units; treat it as four colors max.",
+      "When CFS-C is installed, usable XY can shrink and the PTFE path/top cover alignment becomes part of print reliability.",
+      "CrealityOS/Moonraker access can vary by firmware/root/local-network settings; verify /server/info before promising network control."
+    ],
+    "calibration": {
+      "first_steps": "Run hands-free leveling/self-test and verify first layer.",
+      "flow_rate_test": "Run flow calibration for high-speed PLA.",
+      "retraction_test": "Start around 0.5mm at 40mm/s."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Ringing",
+        "cause": "Input shaping or belt tension is off",
+        "fix": "Re-run vibration/input-shaping calibration and check belt tension."
+      },
+      {
+        "symptom": "CFS-C job starts as manual or fails tool-change validation",
+        "cause": "CFS-C add-on was not selected, firmware was not updated, or the printer variant lacks required quick-swap/integrated-nozzle hardware",
+        "fix": "Select the creality_cfs add-on only after installing the CFS-C kit and firmware; verify the hotend/nozzle compatibility first."
+      },
+      {
+        "symptom": "CFS-C feed clicks, grinds, or stalls before the extruder",
+        "cause": "PTFE alignment, cutter/buffer friction, or spool path resistance in the retrofit feed path",
+        "fix": "Reseat PTFE vertically, check cutter/buffer installation, reduce spool drag, and test each slot before a long print."
+      },
+      {
+        "symptom": "Part exceeds bed after CFS-C install",
+        "cause": "CFS-C tube path changes usable dimensions on K1-series machines",
+        "fix": "Use the CFS-aware bed volume, re-slice after installing CFS-C, and avoid jobs near the reduced edge."
+      },
+      {
+        "symptom": "Camera/lidar reports success but first layer is visibly poor",
+        "cause": "AI inspection is advisory and can miss dirty plate, wrong Z offset, or partial-bed mesh errors",
+        "fix": "Watch the first layer, clean the plate, rerun self-test/mesh, and do not rely solely on camera/LiDAR acceptance."
+      }
+    ],
+    "build_volume_mm": [
+      220,
+      220,
+      250
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 100,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "cfs_c",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "Creality CFS-C",
+        "manual_M600"
+      ],
+      "multicolor_max_colors": 4,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": true,
+      "cfs_variant": "CFS-C",
+      "cfs_max_units": 1,
+      "hardened_nozzle_stock": true,
+      "input_shaping": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "open",
+      "source_notes": [
+        "Creality K1 SE support lists steel-tipped nozzle; CFS-C page lists K1 SE compatible."
+      ],
+      "notes": "K1 SE is open-frame and stock single-material; CFS-C is supported as an accessory path, camera is not assumed."
+    }
+  },
+  "k2": {
+    "display_name": "Creality K2",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 220,
+        "bed": 55,
+        "fan": 100,
+        "notes": "High-speed PLA starting point."
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 45,
+        "notes": "Reduce speed for finish."
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Use enclosure if available."
+      }
+    },
+    "quirks": [
+      "CrealityOS/Moonraker access should be verified before relying on local control.",
+      "CFS behavior needs slot validation before unattended multi-material jobs.",
+      "CFS may be bundled or optional depending on SKU; confirm installed unit count before estimating multicolor capacity.",
+      "K2-family CFS can scale to four units for sixteen colors, but slot mapping and purge behavior must be verified before unattended work.",
+      "Flexible filaments should be treated as direct-spool/manual unless the actual CFS filament path is proven with that material.",
+      "Nozzle AI camera is only on K2 Pro/K2 Plus; do not infer nozzle-camera inspection from base K2 or K2 SE."
+    ],
+    "calibration": {
+      "first_steps": "Run built-in calibration and verify CFS/material mapping if used.",
+      "flow_rate_test": "Run flow calibration for each material.",
+      "retraction_test": "Start around 0.5mm at 40mm/s."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Wrong color or material loads",
+        "cause": "CFS slot mapping mismatch",
+        "fix": "Verify slots in Creality Print before starting the job."
+      },
+      {
+        "symptom": "Wrong color or material loads during a multicolor job",
+        "cause": "CFS slot mapping or RFID/material mapping does not match the slicer assignment",
+        "fix": "Verify each CFS slot in Creality Print, dry-run the first color change, and label spools before production."
+      },
+      {
+        "symptom": "TPU or soft filament jams in CFS path",
+        "cause": "Flexible filament buckles in multi-material feed hardware even when direct drive can print it manually",
+        "fix": "Feed TPU directly from a single spool unless the exact CFS setup has been validated with that filament."
+      },
+      {
+        "symptom": "Multicolor print time or waste is much higher than estimate",
+        "cause": "CFS purge volume, tower strategy, and slot-to-slot sequence vary by slicer and material pair",
+        "fix": "Use a purge-tower estimate, group colors by region, and validate with a small multi-color calibration job."
+      },
+      {
+        "symptom": "Engineering-material part lifts on K2 Pro/Plus despite chamber support",
+        "cause": "Large part footprint, insufficient chamber preheat, or cooling too aggressive for ABS/ASA/PA blends",
+        "fix": "Preheat chamber/bed, use brim or adhesive, reduce fan, and monitor first layers before leaving the job."
+      }
+    ],
+    "build_volume_mm": [
+      260,
+      260,
+      260
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 100,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "ai_monitoring_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [
+        "built_in_ai_monitoring_camera"
+      ],
+      "multicolor_system": "cfs",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "Creality CFS",
+        "K2 Combo bundle"
+      ],
+      "multicolor_max_colors": 16,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": true,
+      "cfs_variant": "CFS",
+      "cfs_max_units": 4,
+      "hardened_nozzle_stock": true,
+      "input_shaping": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "open",
+      "source_notes": [
+        "Creality K2 guide lists multicolor printing with 4 CFS units up to 16 colors; nozzle AI camera is only K2 Pro/Plus.",
+        "Creality K2 support/compare pages list steel-tipped tri-metal nozzle and PLA-CF support."
+      ],
+      "notes": "K2 is CFS-capable but base-vs-combo hardware must be confirmed before multicolor jobs."
+    }
+  },
+  "k2_pro": {
+    "display_name": "Creality K2 Pro",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 220,
+        "bed": 55,
+        "fan": 100,
+        "notes": "Vent enclosure for long PLA jobs."
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 45,
+        "notes": "Moderate speed improves finish."
+      },
+      "ABS": {
+        "hotend": 255,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Enclosure supports ABS/ASA."
+      },
+      "ASA": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 20,
+        "notes": "Use enclosure and avoid drafts."
+      }
+    },
+    "quirks": [
+      "Heated/passive chamber behavior should be checked before engineering materials.",
+      "CFS behavior needs slot validation before unattended multi-material jobs.",
+      "CFS may be bundled or optional depending on SKU; confirm installed unit count before estimating multicolor capacity.",
+      "K2-family CFS can scale to four units for sixteen colors, but slot mapping and purge behavior must be verified before unattended work.",
+      "Flexible filaments should be treated as direct-spool/manual unless the actual CFS filament path is proven with that material.",
+      "Nozzle AI camera is only on K2 Pro/K2 Plus; do not infer nozzle-camera inspection from base K2 or K2 SE."
+    ],
+    "calibration": {
+      "first_steps": "Run built-in calibration and verify first layer across the 300mm bed.",
+      "flow_rate_test": "Run flow calibration per material.",
+      "retraction_test": "Start around 0.5mm at 40mm/s."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Engineering material warps",
+        "cause": "Chamber/bed not hot enough or door opened too early",
+        "fix": "Preheat chamber/bed and keep enclosure closed until cooldown."
+      },
+      {
+        "symptom": "Wrong color or material loads during a multicolor job",
+        "cause": "CFS slot mapping or RFID/material mapping does not match the slicer assignment",
+        "fix": "Verify each CFS slot in Creality Print, dry-run the first color change, and label spools before production."
+      },
+      {
+        "symptom": "TPU or soft filament jams in CFS path",
+        "cause": "Flexible filament buckles in multi-material feed hardware even when direct drive can print it manually",
+        "fix": "Feed TPU directly from a single spool unless the exact CFS setup has been validated with that filament."
+      },
+      {
+        "symptom": "Multicolor print time or waste is much higher than estimate",
+        "cause": "CFS purge volume, tower strategy, and slot-to-slot sequence vary by slicer and material pair",
+        "fix": "Use a purge-tower estimate, group colors by region, and validate with a small multi-color calibration job."
+      },
+      {
+        "symptom": "Engineering-material part lifts on K2 Pro/Plus despite chamber support",
+        "cause": "Large part footprint, insufficient chamber preheat, or cooling too aggressive for ABS/ASA/PA blends",
+        "fix": "Preheat chamber/bed, use brim or adhesive, reduce fan, and monitor first layers before leaving the job."
+      }
+    ],
+    "build_volume_mm": [
+      300,
+      300,
+      300
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 110,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "dual_ai_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [
+        "built_in_ai_monitoring_camera",
+        "built_in_nozzle_ai_camera"
+      ],
+      "multicolor_system": "cfs",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "Creality CFS",
+        "K2 Pro Combo bundle"
+      ],
+      "multicolor_max_colors": 16,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": true,
+      "cfs_variant": "CFS",
+      "cfs_max_units": 4,
+      "hardened_nozzle_stock": true,
+      "input_shaping": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "heated_or_passive",
+      "source_notes": [
+        "Creality K2 guide lists heated chamber for K2 Pro/Plus and nozzle AI camera only on K2 Pro/Plus.",
+        "Creality K2 Pro support page lists steel-tipped tri-metal nozzle and PA-CF/PLA-CF/PPA-CF support."
+      ],
+      "notes": "K2 Pro adds chamber and dual-camera monitoring; CFS hardware/bundle must be confirmed."
+    }
+  },
+  "k2_plus": {
+    "display_name": "Creality K2 Plus",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 220,
+        "bed": 55,
+        "fan": 100,
+        "notes": "Vent enclosure for PLA."
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 45,
+        "notes": "Reduce speed for large parts."
+      },
+      "ABS": {
+        "hotend": 255,
+        "bed": 105,
+        "fan": 0,
+        "notes": "Use enclosure and chamber preheat."
+      },
+      "PC": {
+        "hotend": 295,
+        "bed": 115,
+        "fan": 0,
+        "notes": "Use dry filament and enclosure."
+      }
+    },
+    "quirks": [
+      "Large 350mm bed makes first-layer verification critical.",
+      "350C hotend enables engineering filaments; keep material-specific limits explicit.",
+      "CFS behavior needs slot validation before unattended multi-material jobs.",
+      "CFS may be bundled or optional depending on SKU; confirm installed unit count before estimating multicolor capacity.",
+      "K2-family CFS can scale to four units for sixteen colors, but slot mapping and purge behavior must be verified before unattended work.",
+      "Flexible filaments should be treated as direct-spool/manual unless the actual CFS filament path is proven with that material.",
+      "Nozzle AI camera is only on K2 Pro/K2 Plus; do not infer nozzle-camera inspection from base K2 or K2 SE."
+    ],
+    "calibration": {
+      "first_steps": "Run built-in calibration and verify full-bed first layer.",
+      "flow_rate_test": "Run flow calibration per material and nozzle.",
+      "retraction_test": "Start around 0.5mm at 40mm/s."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Large part corners lift",
+        "cause": "Bed/chamber prep or cooling not tuned for large geometry",
+        "fix": "Use brim, preheat chamber/bed, and slow first layers."
+      },
+      {
+        "symptom": "Wrong color or material loads during a multicolor job",
+        "cause": "CFS slot mapping or RFID/material mapping does not match the slicer assignment",
+        "fix": "Verify each CFS slot in Creality Print, dry-run the first color change, and label spools before production."
+      },
+      {
+        "symptom": "TPU or soft filament jams in CFS path",
+        "cause": "Flexible filament buckles in multi-material feed hardware even when direct drive can print it manually",
+        "fix": "Feed TPU directly from a single spool unless the exact CFS setup has been validated with that filament."
+      },
+      {
+        "symptom": "Multicolor print time or waste is much higher than estimate",
+        "cause": "CFS purge volume, tower strategy, and slot-to-slot sequence vary by slicer and material pair",
+        "fix": "Use a purge-tower estimate, group colors by region, and validate with a small multi-color calibration job."
+      },
+      {
+        "symptom": "Engineering-material part lifts on K2 Pro/Plus despite chamber support",
+        "cause": "Large part footprint, insufficient chamber preheat, or cooling too aggressive for ABS/ASA/PA blends",
+        "fix": "Preheat chamber/bed, use brim or adhesive, reduce fan, and monitor first layers before leaving the job."
+      }
+    ],
+    "build_volume_mm": [
+      350,
+      350,
+      350
+    ],
+    "max_hotend_temp": 350,
+    "max_bed_temp": 120,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "dual_ai_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [
+        "built_in_ai_monitoring_camera",
+        "built_in_nozzle_ai_camera"
+      ],
+      "multicolor_system": "cfs",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "Creality CFS",
+        "K2 Plus Combo bundle"
+      ],
+      "multicolor_max_colors": 16,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": true,
+      "cfs_variant": "CFS",
+      "cfs_max_units": 4,
+      "hardened_nozzle_stock": true,
+      "input_shaping": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "heated_or_passive",
+      "source_notes": [
+        "Creality K2 guide lists K2 Plus 350 C hotend, 120 C bed, broad engineering filament support, dual AI camera, and 4 CFS/16-color support."
+      ],
+      "notes": "K2 Plus is the high-temperature CFS-capable model; confirm bundle/CFS count and chamber prep before engineering or multicolor jobs."
+    }
+  },
+  "k2_se": {
+    "display_name": "Creality K2 SE",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100,
+        "notes": "High-speed PLA starting point."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 75,
+        "fan": 45,
+        "notes": "Slow down for PETG."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Print TPU slowly."
+      },
+      "PLA-CF": {
+        "hotend": 230,
+        "bed": 60,
+        "fan": 70,
+        "notes": "Use hardened nozzle where installed."
+      }
+    },
+    "quirks": [
+      "K2 SE has a smaller asymmetric bed than the K2/K2 Pro.",
+      "CFS behavior needs slot validation before unattended multi-material jobs.",
+      "CFS may be bundled or optional depending on SKU; confirm installed unit count before estimating multicolor capacity.",
+      "K2-family CFS can scale to four units for sixteen colors, but slot mapping and purge behavior must be verified before unattended work.",
+      "Flexible filaments should be treated as direct-spool/manual unless the actual CFS filament path is proven with that material.",
+      "Nozzle AI camera is only on K2 Pro/K2 Plus; do not infer nozzle-camera inspection from base K2 or K2 SE."
+    ],
+    "calibration": {
+      "first_steps": "Run built-in calibration and verify CFS/material mapping if used.",
+      "flow_rate_test": "Run flow calibration per material.",
+      "retraction_test": "Start around 0.5mm at 40mm/s."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Part does not fit bed",
+        "cause": "Profile from larger K2 model was used",
+        "fix": "Use k2_se profile with 220x215x245 build volume."
+      },
+      {
+        "symptom": "Wrong color or material loads during a multicolor job",
+        "cause": "CFS slot mapping or RFID/material mapping does not match the slicer assignment",
+        "fix": "Verify each CFS slot in Creality Print, dry-run the first color change, and label spools before production."
+      },
+      {
+        "symptom": "TPU or soft filament jams in CFS path",
+        "cause": "Flexible filament buckles in multi-material feed hardware even when direct drive can print it manually",
+        "fix": "Feed TPU directly from a single spool unless the exact CFS setup has been validated with that filament."
+      },
+      {
+        "symptom": "Multicolor print time or waste is much higher than estimate",
+        "cause": "CFS purge volume, tower strategy, and slot-to-slot sequence vary by slicer and material pair",
+        "fix": "Use a purge-tower estimate, group colors by region, and validate with a small multi-color calibration job."
+      },
+      {
+        "symptom": "Engineering-material part lifts on K2 Pro/Plus despite chamber support",
+        "cause": "Large part footprint, insufficient chamber preheat, or cooling too aggressive for ABS/ASA/PA blends",
+        "fix": "Preheat chamber/bed, use brim or adhesive, reduce fan, and monitor first layers before leaving the job."
+      }
+    ],
+    "build_volume_mm": [
+      220,
+      215,
+      245
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 100,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "optional_ai_camera",
+      "camera_out_of_box": false,
+      "camera_optional": true,
+      "camera_options": [
+        "Creality AI Camera accessory"
+      ],
+      "multicolor_system": "cfs",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "Creality CFS",
+        "K2 SE Combo bundle"
+      ],
+      "multicolor_max_colors": 16,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": true,
+      "cfs_variant": "CFS",
+      "cfs_max_units": 4,
+      "hardened_nozzle_stock": true,
+      "input_shaping": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "open",
+      "source_notes": [
+        "Creality K2 SE Combo page lists AI camera as optional accessory, CFS compatibility yes, and max CFS units up to 4."
+      ],
+      "notes": "K2 SE is open-frame and CFS-capable; camera is accessory-dependent and CFS hardware must be present."
+    }
+  },
+  "creality_hi": {
+    "display_name": "Creality Hi",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100,
+        "notes": "Open-frame PLA default."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 75,
+        "fan": 45,
+        "notes": "Slow down for PETG."
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 95,
+        "fan": 0,
+        "notes": "Enclosure recommended for ABS."
+      },
+      "PLA-CF": {
+        "hotend": 230,
+        "bed": 60,
+        "fan": 70,
+        "notes": "Use hardened nozzle where installed."
+      }
+    },
+    "quirks": [
+      "Open frame limits engineering-material reliability.",
+      "CFS behavior needs slot validation before unattended multi-material jobs.",
+      "CFS may be bundled or optional depending on SKU; confirm installed unit count before estimating multicolor capacity.",
+      "K2-family CFS can scale to four units for sixteen colors, but slot mapping and purge behavior must be verified before unattended work.",
+      "Flexible filaments should be treated as direct-spool/manual unless the actual CFS filament path is proven with that material.",
+      "Nozzle AI camera is only on K2 Pro/K2 Plus; do not infer nozzle-camera inspection from base K2 or K2 SE."
+    ],
+    "calibration": {
+      "first_steps": "Run built-in calibration and verify first layer.",
+      "flow_rate_test": "Run flow calibration per material.",
+      "retraction_test": "Start around 0.5mm at 40mm/s."
+    },
+    "failure_modes": [
+      {
+        "symptom": "ABS warps",
+        "cause": "Open-frame cooling drafts",
+        "fix": "Use an enclosure or choose ASA/ABS only for smaller parts."
+      },
+      {
+        "symptom": "Wrong color or material loads during a multicolor job",
+        "cause": "CFS slot mapping or RFID/material mapping does not match the slicer assignment",
+        "fix": "Verify each CFS slot in Creality Print, dry-run the first color change, and label spools before production."
+      },
+      {
+        "symptom": "TPU or soft filament jams in CFS path",
+        "cause": "Flexible filament buckles in multi-material feed hardware even when direct drive can print it manually",
+        "fix": "Feed TPU directly from a single spool unless the exact CFS setup has been validated with that filament."
+      },
+      {
+        "symptom": "Multicolor print time or waste is much higher than estimate",
+        "cause": "CFS purge volume, tower strategy, and slot-to-slot sequence vary by slicer and material pair",
+        "fix": "Use a purge-tower estimate, group colors by region, and validate with a small multi-color calibration job."
+      },
+      {
+        "symptom": "Engineering-material part lifts on K2 Pro/Plus despite chamber support",
+        "cause": "Large part footprint, insufficient chamber preheat, or cooling too aggressive for ABS/ASA/PA blends",
+        "fix": "Preheat chamber/bed, use brim or adhesive, reduce fan, and monitor first layers before leaving the job."
+      }
+    ],
+    "build_volume_mm": [
+      260,
+      260,
+      300
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 100,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "ai_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [
+        "built_in_ai_monitoring_camera"
+      ],
+      "multicolor_system": "cfs",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "Creality CFS",
+        "Creality Hi Combo bundle"
+      ],
+      "multicolor_max_colors": 16,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": true,
+      "cfs_variant": "CFS",
+      "cfs_max_units": 4,
+      "hardened_nozzle_stock": true,
+      "input_shaping": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": false,
+      "enclosure": "open",
+      "source_notes": [
+        "Creality Hi Combo support lists AI monitoring camera yes, auto filament relay with CFS yes, RFID yes, and power-loss recovery no."
+      ],
+      "notes": "Creality Hi Combo includes camera/CFS features; base-vs-combo hardware should be checked before multicolor jobs."
+    }
+  },
+  "ender3_v4": {
+    "display_name": "Creality Ender-3 V4",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "cfs",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "Creality CFS",
+        "Ender-3 V4 Combo bundle"
+      ],
+      "multicolor_max_colors": 16,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": true,
+      "cfs_variant": "CFS",
+      "cfs_max_units": 4,
+      "hardened_nozzle_stock": true,
+      "input_shaping": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "open",
+      "source_notes": [
+        "Creality Ender-3 V4 Combo page lists CFS compatibility yes, up to 4 CFS units, and CFS sold separately."
+      ],
+      "notes": "Ender-3 V4 is CFS-compatible but CFS is accessory/bundle-dependent; no stock camera is assumed."
+    },
+    "materials": {
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100,
+        "notes": "High-speed PLA starting point."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 75,
+        "fan": 45,
+        "notes": "Moderate speed improves finish."
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 95,
+        "fan": 0,
+        "notes": "Enclosure recommended for ABS."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Print TPU slowly."
+      },
+      "PLA-CF": {
+        "hotend": 230,
+        "bed": 60,
+        "fan": 70,
+        "notes": "Use hardened nozzle for abrasive filaments."
+      }
+    },
+    "quirks": [
+      "CFS is accessory-dependent; verify whether the connected unit includes CFS before multicolor jobs.",
+      "Open-frame motion and 235mm Z height are distinct from V3 and K-series profiles.",
+      "Open frame limits ABS/ASA/nylon reliability without an enclosure even when the hotend can reach the target temperature.",
+      "Camera and multicolor fields are accessory-dependent unless the profile explicitly marks them out-of-box.",
+      "High-speed open-frame beds need first-layer verification; mesh compensation does not fix dirty plates or drafts."
+    ],
+    "calibration": {
+      "first_steps": "Run full-auto leveling and verify first layer.",
+      "flow_rate_test": "Run flow calibration at the intended speed.",
+      "retraction_test": "Start around 0.5mm at 40mm/s."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Model exceeds Z height",
+        "cause": "A taller Ender profile was selected",
+        "fix": "Use ender3_v4 with 220x220x235 build volume."
+      },
+      {
+        "symptom": "Wrong color or material loads",
+        "cause": "CFS slot mapping mismatch",
+        "fix": "Verify CFS mapping before starting the job."
+      },
+      {
+        "symptom": "ABS/ASA corners lift or layers crack",
+        "cause": "Open-frame printer lacks stable chamber temperature",
+        "fix": "Use an enclosure, brim, draft shield, and reduced fan, or switch to PETG/PLA for large parts."
+      },
+      {
+        "symptom": "Optional camera is expected but snapshots fail",
+        "cause": "Camera is an accessory and was not installed or enabled in firmware/cloud settings",
+        "fix": "Confirm the actual accessory is installed, enable it in the printer UI, then configure Kiln camera access."
+      },
+      {
+        "symptom": "First layer looks good near center but fails at edges",
+        "cause": "Large/open bed mesh, plate contamination, or thermal gradient across the sheet",
+        "fix": "Heat-soak the bed, clean PEI with soap and water, rerun mesh, and verify a full-bed first-layer pattern."
+      },
+      {
+        "symptom": "CFS print is offered but the machine behaves as single-material",
+        "cause": "Ender-3 V4 CFS is accessory/bundle-dependent and the connected unit may not have CFS installed",
+        "fix": "Confirm CFS hardware, firmware, and slot mapping before selecting CFS profiles."
+      },
+      {
+        "symptom": "Multicolor job misloads or tangles",
+        "cause": "CFS slot mapping, RFID, or spool path was not validated before print start",
+        "fix": "Run a small two-color validation print and verify every slot assignment in Creality Print."
+      }
+    ],
+    "build_volume_mm": [
+      220,
+      220,
+      235
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 100
+  },
+  "ender3_v3": {
+    "display_name": "Creality Ender-3 V3",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100,
+        "notes": "High-speed PLA starting point."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 75,
+        "fan": 45,
+        "notes": "Moderate speed improves finish."
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Enclosure recommended for ABS."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Print TPU slowly."
+      }
+    },
+    "quirks": [
+      "CoreXZ motion is not the same mechanical class as K-series CoreXY.",
+      "Open-frame drafts matter for tall materials.",
+      "Open frame limits ABS/ASA/nylon reliability without an enclosure even when the hotend can reach the target temperature.",
+      "Camera and multicolor fields are accessory-dependent unless the profile explicitly marks them out-of-box.",
+      "High-speed open-frame beds need first-layer verification; mesh compensation does not fix dirty plates or drafts."
+    ],
+    "calibration": {
+      "first_steps": "Run auto-leveling and verify Z offset.",
+      "flow_rate_test": "Run flow calibration at the intended speed.",
+      "retraction_test": "Start around 0.8mm at 40mm/s."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Tall prints ring or wobble",
+        "cause": "Input shaping/speed too aggressive for the geometry",
+        "fix": "Reduce outer-wall speed and re-run vibration calibration."
+      },
+      {
+        "symptom": "ABS/ASA corners lift or layers crack",
+        "cause": "Open-frame printer lacks stable chamber temperature",
+        "fix": "Use an enclosure, brim, draft shield, and reduced fan, or switch to PETG/PLA for large parts."
+      },
+      {
+        "symptom": "Optional camera is expected but snapshots fail",
+        "cause": "Camera is an accessory and was not installed or enabled in firmware/cloud settings",
+        "fix": "Confirm the actual accessory is installed, enable it in the printer UI, then configure Kiln camera access."
+      },
+      {
+        "symptom": "First layer looks good near center but fails at edges",
+        "cause": "Large/open bed mesh, plate contamination, or thermal gradient across the sheet",
+        "fix": "Heat-soak the bed, clean PEI with soap and water, rerun mesh, and verify a full-bed first-layer pattern."
+      }
+    ],
+    "build_volume_mm": [
+      220,
+      220,
+      250
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 110,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "manual_M600",
+        "Mosaic Palette 3",
+        "3D Chameleon"
+      ],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "hardened_nozzle_stock": true,
+      "input_shaping": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "open",
+      "source_notes": [
+        "Creality Ender-3 V3 support page does not list stock AI monitoring camera or CFS relay."
+      ],
+      "notes": "Open-frame direct-drive V3 profile; stock workflow is single-material and camera-less unless externally modified."
+    }
+  },
+  "ender3_v3_ke": {
+    "display_name": "Creality Ender-3 V3 KE",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100,
+        "notes": "High-speed PLA starting point."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 75,
+        "fan": 45,
+        "notes": "Moderate speed improves finish."
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 95,
+        "fan": 0,
+        "notes": "Enclosure recommended for ABS."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Print TPU slowly."
+      }
+    },
+    "quirks": [
+      "Use the KE-specific 240mm Z height.",
+      "Optional camera features depend on installed accessories.",
+      "Open frame limits ABS/ASA/nylon reliability without an enclosure even when the hotend can reach the target temperature.",
+      "Camera and multicolor fields are accessory-dependent unless the profile explicitly marks them out-of-box.",
+      "High-speed open-frame beds need first-layer verification; mesh compensation does not fix dirty plates or drafts."
+    ],
+    "calibration": {
+      "first_steps": "Run full-auto leveling and verify Z offset.",
+      "flow_rate_test": "Run flow calibration at the intended speed.",
+      "retraction_test": "Start around 0.8mm at 40mm/s."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Part exceeds Z height",
+        "cause": "Generic Ender-3 profile used instead of KE profile",
+        "fix": "Use ender3_v3_ke with 240mm max height."
+      },
+      {
+        "symptom": "ABS/ASA corners lift or layers crack",
+        "cause": "Open-frame printer lacks stable chamber temperature",
+        "fix": "Use an enclosure, brim, draft shield, and reduced fan, or switch to PETG/PLA for large parts."
+      },
+      {
+        "symptom": "Optional camera is expected but snapshots fail",
+        "cause": "Camera is an accessory and was not installed or enabled in firmware/cloud settings",
+        "fix": "Confirm the actual accessory is installed, enable it in the printer UI, then configure Kiln camera access."
+      },
+      {
+        "symptom": "First layer looks good near center but fails at edges",
+        "cause": "Large/open bed mesh, plate contamination, or thermal gradient across the sheet",
+        "fix": "Heat-soak the bed, clean PEI with soap and water, rerun mesh, and verify a full-bed first-layer pattern."
+      }
+    ],
+    "build_volume_mm": [
+      220,
+      220,
+      240
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 100,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "optional_ai_camera",
+      "camera_out_of_box": false,
+      "camera_optional": true,
+      "camera_options": [
+        "Creality AI Camera accessory"
+      ],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "manual_M600",
+        "Mosaic Palette 3",
+        "3D Chameleon"
+      ],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "hardened_nozzle_stock": false,
+      "input_shaping": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "open",
+      "source_notes": [
+        "Creality Ender-3 V3 KE support page lists AI camera for monitoring as optional and no CFS auto filament relay."
+      ],
+      "notes": "V3 KE can add camera monitoring, but stock profile stays single-material and open-frame."
+    }
+  },
+  "ender3_v3_se": {
+    "display_name": "Creality Ender-3 V3 SE",
+    "firmware": "marlin",
+    "extruder_type": "direct_drive",
+    "hotend_type": "ptfe_lined",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 205,
+        "bed": 55,
+        "fan": 100,
+        "notes": "Conservative PLA default."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 75,
+        "fan": 50,
+        "notes": "Keep speeds moderate."
+      },
+      "TPU": {
+        "hotend": 220,
+        "bed": 50,
+        "fan": 60,
+        "notes": "Direct drive handles TPU at low speed."
+      }
+    },
+    "quirks": [
+      "Lower hotend temperature ceiling than V3/KE/K-series models.",
+      "Use Marlin G-code flavor.",
+      "Open frame limits ABS/ASA/nylon reliability without an enclosure even when the hotend can reach the target temperature.",
+      "Camera and multicolor fields are accessory-dependent unless the profile explicitly marks them out-of-box.",
+      "High-speed open-frame beds need first-layer verification; mesh compensation does not fix dirty plates or drafts."
+    ],
+    "calibration": {
+      "first_steps": "Run auto-leveling and verify Z offset.",
+      "flow_rate_test": "Run flow calibration after filament changes.",
+      "retraction_test": "Start around 0.8mm at 40mm/s."
+    },
+    "failure_modes": [
+      {
+        "symptom": "High-temperature material fails",
+        "cause": "SE hotend profile is lower-temperature than other V3 models",
+        "fix": "Stay within the 260C profile or use a validated all-metal upgrade profile."
+      },
+      {
+        "symptom": "ABS/ASA corners lift or layers crack",
+        "cause": "Open-frame printer lacks stable chamber temperature",
+        "fix": "Use an enclosure, brim, draft shield, and reduced fan, or switch to PETG/PLA for large parts."
+      },
+      {
+        "symptom": "Optional camera is expected but snapshots fail",
+        "cause": "Camera is an accessory and was not installed or enabled in firmware/cloud settings",
+        "fix": "Confirm the actual accessory is installed, enable it in the printer UI, then configure Kiln camera access."
+      },
+      {
+        "symptom": "First layer looks good near center but fails at edges",
+        "cause": "Large/open bed mesh, plate contamination, or thermal gradient across the sheet",
+        "fix": "Heat-soak the bed, clean PEI with soap and water, rerun mesh, and verify a full-bed first-layer pattern."
+      }
+    ],
+    "build_volume_mm": [
+      220,
+      220,
+      250
+    ],
+    "max_hotend_temp": 260,
+    "max_bed_temp": 100,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "manual_M600",
+        "Mosaic Palette 3",
+        "3D Chameleon"
+      ],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "hardened_nozzle_stock": false,
+      "input_shaping": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "open",
+      "source_notes": [
+        "Ender-3 V3 SE is treated as stock open-frame single-material without CFS or camera."
+      ],
+      "notes": "Lower-cost V3 SE profile: open frame, single-material, no stock camera/CFS."
+    }
+  },
+  "ender3_v3_plus": {
+    "display_name": "Creality Ender-3 V3 Plus",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100,
+        "notes": "High-speed PLA starting point."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 75,
+        "fan": 45,
+        "notes": "Moderate speed improves finish."
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 95,
+        "fan": 0,
+        "notes": "Enclosure recommended for ABS."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Print TPU slowly."
+      }
+    },
+    "quirks": [
+      "Large open bed needs careful first-layer verification.",
+      "CoreXZ motion is not the same mechanical class as K-series CoreXY.",
+      "Open frame limits ABS/ASA/nylon reliability without an enclosure even when the hotend can reach the target temperature.",
+      "Camera and multicolor fields are accessory-dependent unless the profile explicitly marks them out-of-box.",
+      "High-speed open-frame beds need first-layer verification; mesh compensation does not fix dirty plates or drafts."
+    ],
+    "calibration": {
+      "first_steps": "Run auto-leveling and verify first layer across the 300mm bed.",
+      "flow_rate_test": "Run flow calibration at the intended speed.",
+      "retraction_test": "Start around 0.8mm at 40mm/s."
+    },
+    "failure_modes": [
+      {
+        "symptom": "First layer varies across bed",
+        "cause": "Large bed mesh or Z offset needs attention",
+        "fix": "Re-run leveling and verify all corners."
+      },
+      {
+        "symptom": "ABS/ASA corners lift or layers crack",
+        "cause": "Open-frame printer lacks stable chamber temperature",
+        "fix": "Use an enclosure, brim, draft shield, and reduced fan, or switch to PETG/PLA for large parts."
+      },
+      {
+        "symptom": "Optional camera is expected but snapshots fail",
+        "cause": "Camera is an accessory and was not installed or enabled in firmware/cloud settings",
+        "fix": "Confirm the actual accessory is installed, enable it in the printer UI, then configure Kiln camera access."
+      },
+      {
+        "symptom": "First layer looks good near center but fails at edges",
+        "cause": "Large/open bed mesh, plate contamination, or thermal gradient across the sheet",
+        "fix": "Heat-soak the bed, clean PEI with soap and water, rerun mesh, and verify a full-bed first-layer pattern."
+      }
+    ],
+    "build_volume_mm": [
+      300,
+      300,
+      330
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 100,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "manual_M600",
+        "Mosaic Palette 3",
+        "3D Chameleon"
+      ],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "hardened_nozzle_stock": true,
+      "input_shaping": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "open",
+      "source_notes": [
+        "Ender-3 V3 Plus is treated as a larger stock open-frame single-material profile."
+      ],
+      "notes": "Large V3 open-frame profile; no stock camera/CFS assumed."
+    }
+  },
+  "ender5_max": {
+    "display_name": "Creality Ender-5 Max",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100,
+        "notes": "High-speed PLA starting point."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 75,
+        "fan": 45,
+        "notes": "Slow down for large parts."
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 95,
+        "fan": 0,
+        "notes": "Enclosure recommended for ABS."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Print TPU slowly."
+      }
+    },
+    "quirks": [
+      "Large 400mm bed makes bed fit and first-layer verification critical.",
+      "Optional enclosure changes thermal behavior for ABS/ASA.",
+      "Open frame limits ABS/ASA/nylon reliability without an enclosure even when the hotend can reach the target temperature.",
+      "Camera and multicolor fields are accessory-dependent unless the profile explicitly marks them out-of-box.",
+      "High-speed open-frame beds need first-layer verification; mesh compensation does not fix dirty plates or drafts."
+    ],
+    "calibration": {
+      "first_steps": "Run 64-point leveling and verify full-bed first layer.",
+      "flow_rate_test": "Run flow calibration at production speed.",
+      "retraction_test": "Start around 0.8mm at 40mm/s."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Large part corners lift",
+        "cause": "Open-frame drafts or first-layer adhesion issues",
+        "fix": "Use brim, slow first layer, and enclosure for warp-prone materials."
+      },
+      {
+        "symptom": "ABS/ASA corners lift or layers crack",
+        "cause": "Open-frame printer lacks stable chamber temperature",
+        "fix": "Use an enclosure, brim, draft shield, and reduced fan, or switch to PETG/PLA for large parts."
+      },
+      {
+        "symptom": "Optional camera is expected but snapshots fail",
+        "cause": "Camera is an accessory and was not installed or enabled in firmware/cloud settings",
+        "fix": "Confirm the actual accessory is installed, enable it in the printer UI, then configure Kiln camera access."
+      },
+      {
+        "symptom": "First layer looks good near center but fails at edges",
+        "cause": "Large/open bed mesh, plate contamination, or thermal gradient across the sheet",
+        "fix": "Heat-soak the bed, clean PEI with soap and water, rerun mesh, and verify a full-bed first-layer pattern."
+      }
+    ],
+    "build_volume_mm": [
+      400,
+      400,
+      400
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 100,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "optional_ai_camera",
+      "camera_out_of_box": false,
+      "camera_optional": true,
+      "camera_options": [
+        "Creality AI Camera accessory"
+      ],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "manual_M600",
+        "Mosaic Palette 3",
+        "3D Chameleon"
+      ],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "hardened_nozzle_stock": true,
+      "input_shaping": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "open",
+      "source_notes": [
+        "Creality Ender-5 Max support page lists AI camera for monitoring as optional and auto filament relay no."
+      ],
+      "notes": "Large open-frame machine with optional AI camera; no stock CFS/multicolor path is assumed."
+    }
+  },
+  "cr10_se": {
+    "display_name": "Creality CR-10 SE",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100,
+        "notes": "High-speed PLA starting point."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 75,
+        "fan": 45,
+        "notes": "Moderate speed improves finish."
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Enclosure recommended for ABS."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Print TPU slowly."
+      }
+    },
+    "quirks": [
+      "Linear rails and input shaping support higher speeds than older CR-10 machines.",
+      "Use the CR-10 SE volume, not older CR-10 300x300 profiles.",
+      "Open frame limits ABS/ASA/nylon reliability without an enclosure even when the hotend can reach the target temperature.",
+      "Camera and multicolor fields are accessory-dependent unless the profile explicitly marks them out-of-box.",
+      "High-speed open-frame beds need first-layer verification; mesh compensation does not fix dirty plates or drafts."
+    ],
+    "calibration": {
+      "first_steps": "Run auto-leveling and verify Z offset.",
+      "flow_rate_test": "Run flow calibration at the intended speed.",
+      "retraction_test": "Start around 0.8mm at 40mm/s."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Model is sliced for too-large bed",
+        "cause": "Older CR-10 profile was used",
+        "fix": "Use cr10_se with 220x220x265 build volume."
+      },
+      {
+        "symptom": "ABS/ASA corners lift or layers crack",
+        "cause": "Open-frame printer lacks stable chamber temperature",
+        "fix": "Use an enclosure, brim, draft shield, and reduced fan, or switch to PETG/PLA for large parts."
+      },
+      {
+        "symptom": "Optional camera is expected but snapshots fail",
+        "cause": "Camera is an accessory and was not installed or enabled in firmware/cloud settings",
+        "fix": "Confirm the actual accessory is installed, enable it in the printer UI, then configure Kiln camera access."
+      },
+      {
+        "symptom": "First layer looks good near center but fails at edges",
+        "cause": "Large/open bed mesh, plate contamination, or thermal gradient across the sheet",
+        "fix": "Heat-soak the bed, clean PEI with soap and water, rerun mesh, and verify a full-bed first-layer pattern."
+      }
+    ],
+    "build_volume_mm": [
+      220,
+      220,
+      265
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 110,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "manual_M600",
+        "Mosaic Palette 3",
+        "3D Chameleon"
+      ],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "hardened_nozzle_stock": false,
+      "input_shaping": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "open",
+      "source_notes": [
+        "CR-10 SE profile is handled as single-material CrealityOS/Klipper unless user adds external host/accessories."
+      ],
+      "notes": "CR-10 SE is treated as a single-material CrealityOS/Klipper printer with no stock camera/CFS assumed."
+    }
   },
   "prusa_mk3s": {
     "display_name": "Prusa i3 MK3S / MK3S+",
@@ -331,7 +2416,11 @@
         "fix": "Do cold pull with nylon at 285C \u2192 pull at 90C. Replace nozzle if persists."
       }
     ],
-    "build_volume_mm": [250, 210, 210],
+    "build_volume_mm": [
+      250,
+      210,
+      210
+    ],
     "max_hotend_temp": 300,
     "max_bed_temp": 120
   },
@@ -391,7 +2480,11 @@
         "fix": "Reset retraction to 0.4mm in slicer profile. Nextruder requires very short retraction."
       }
     ],
-    "build_volume_mm": [250, 210, 220],
+    "build_volume_mm": [
+      250,
+      210,
+      220
+    ],
     "max_hotend_temp": 290,
     "max_bed_temp": 120
   },
@@ -462,7 +2555,11 @@
         "fix": "Move printer closer to router, or use USB serial via OctoPrint on a Raspberry Pi for reliable monitoring."
       }
     ],
-    "build_volume_mm": [180, 180, 180],
+    "build_volume_mm": [
+      180,
+      180,
+      180
+    ],
     "max_hotend_temp": 280,
     "max_bed_temp": 100
   },
@@ -541,7 +2638,11 @@
         "fix": "Clean with IPA. Pre-heat chamber by running bed at 100C for 10 min before print."
       }
     ],
-    "build_volume_mm": [256, 256, 256],
+    "build_volume_mm": [
+      256,
+      256,
+      256
+    ],
     "max_hotend_temp": 300,
     "max_bed_temp": 120
   },
@@ -622,7 +2723,11 @@
         "fix": "Lower hotend temp to 230-235C. Increase retraction to 0.8-1.0mm. Enable wipe on retract in slicer. Reduce flow rate by 2-3%"
       }
     ],
-    "build_volume_mm": [256, 256, 256],
+    "build_volume_mm": [
+      256,
+      256,
+      256
+    ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100
   },
@@ -633,7 +2738,11 @@
     "hotend_type": "all_metal",
     "has_enclosure": false,
     "has_abl": true,
-    "build_volume_mm": [256, 256, 256],
+    "build_volume_mm": [
+      256,
+      256,
+      256
+    ],
     "max_speed_mm_s": 500,
     "max_acceleration_mm_s2": 10000,
     "max_nozzle_temp": 300,
@@ -810,7 +2919,11 @@
         "fix": "Re-tune PID with chamber at target temp. Ensure thermistor readings are accurate."
       }
     ],
-    "build_volume_mm": [300, 300, 300],
+    "build_volume_mm": [
+      300,
+      300,
+      300
+    ],
     "max_hotend_temp": 300,
     "max_bed_temp": 120
   },
@@ -886,7 +2999,11 @@
         "fix": "Use a short, shielded USB cable. Disable USB power management in host OS. Route USB cable away from stepper motor wires. Prefer SD card for long prints"
       }
     ],
-    "build_volume_mm": [225, 225, 265],
+    "build_volume_mm": [
+      225,
+      225,
+      265
+    ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100
   },
@@ -951,7 +3068,11 @@
         "fix": "Ensure no firewall blocks the ephemeral port. Verify printer and host are on same network segment."
       }
     ],
-    "build_volume_mm": [256, 256, 256],
+    "build_volume_mm": [
+      256,
+      256,
+      256
+    ],
     "max_hotend_temp": 320,
     "max_bed_temp": 110
   },
@@ -1026,12 +3147,16 @@
         "fix": "Use Gates GT2 belts rated for sustained tension. Check belt tension every 100 print hours. Add stepper driver cooling if motors exceed 50C. Reduce acceleration for long prints"
       }
     ],
-    "build_volume_mm": [800, 800, 1000],
+    "build_volume_mm": [
+      800,
+      800,
+      1000
+    ],
     "max_hotend_temp": 300,
     "max_bed_temp": 110
   },
   "qidi_x_plus3": {
-    "display_name": "QIDI X-Plus 3 / X-Max 3",
+    "display_name": "QIDI X-Plus 3",
     "firmware": "klipper",
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
@@ -1114,7 +3239,11 @@
         "fix": "Use Magigoo or specialized adhesive for engineering materials. Increase first layer width to 150%. Lower chamber temp by 5C if adhesion is marginal"
       }
     ],
-    "build_volume_mm": [280, 280, 270],
+    "build_volume_mm": [
+      280,
+      280,
+      270
+    ],
     "max_hotend_temp": 350,
     "max_bed_temp": 120
   },
@@ -1197,7 +3326,11 @@
         "fix": "Check probe wiring. Increase probe travel height (probe_hop). Ensure probe is not triggering from bed vibration."
       }
     ],
-    "build_volume_mm": [220, 220, 250],
+    "build_volume_mm": [
+      220,
+      220,
+      250
+    ],
     "max_hotend_temp": 260,
     "max_bed_temp": 110
   },
@@ -1233,7 +3366,10 @@
       "Ender 5 Plus has BLTouch for ABL \u2014 standard Ender 5 requires manual leveling.",
       "PTFE tube degrades above 240\u00b0C \u2014 same limit as Ender 3.",
       "Bowden tube is longer than Ender 3 \u2014 may need slightly higher retraction (6mm).",
-      "Z-axis lead screw can develop wobble over time \u2014 ensure anti-backlash nut is snug."
+      "Z-axis lead screw can develop wobble over time \u2014 ensure anti-backlash nut is snug.",
+      "Camera support is not stock; use OctoPrint/webcam or another external host if snapshots are required.",
+      "No Creality CFS path is assumed; multicolor is manual M600 or third-party add-on territory.",
+      "PTFE-lined hotend should stay below sustained high-temperature engineering-material ranges unless upgraded."
     ],
     "calibration": {
       "first_steps": "Manual bed leveling with paper method. Ender 5 Plus: run BLTouch auto-level.",
@@ -1250,11 +3386,64 @@
         "symptom": "Bed leveling won't hold",
         "cause": "Stock springs too weak for heavy glass bed",
         "fix": "Upgrade to stiffer yellow springs or silicone spacers."
+      },
+      {
+        "symptom": "OctoPrint or serial connection works but snapshots are unavailable",
+        "cause": "Stock printer has no built-in camera and no LAN camera endpoint",
+        "fix": "Configure an external webcam through OctoPrint or run without camera-dependent monitoring."
+      },
+      {
+        "symptom": "Flexible filament jams or under-extrudes",
+        "cause": "Long Bowden path lets TPU buckle before the hotend",
+        "fix": "Use very slow speeds, constrain the filament path, or upgrade to direct drive."
+      },
+      {
+        "symptom": "ABS/ASA layers split or corners lift",
+        "cause": "Open frame and PTFE-lined hotend are not suited to sustained high-temperature enclosed-material printing",
+        "fix": "Use PLA/PETG, add an enclosure and all-metal hotend, or choose an enclosed profile."
       }
     ],
-    "build_volume_mm": [220, 220, 300],
+    "build_volume_mm": [
+      220,
+      220,
+      300
+    ],
     "max_hotend_temp": 260,
-    "max_bed_temp": 110
+    "max_bed_temp": 110,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": true,
+      "camera_options": [
+        "OctoPrint USB webcam"
+      ],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "manual_M600",
+        "Mosaic Palette 3",
+        "3D Chameleon"
+      ],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "hardened_nozzle_stock": false,
+      "input_shaping": false,
+      "filament_runout_sensor": false,
+      "power_loss_recovery": true,
+      "enclosure": "open",
+      "source_notes": [
+        "Ender 5 stock workflow is Marlin single-material; camera requires external host hardware."
+      ],
+      "notes": "Cube-frame motion helps stability, but stock Ender 5 remains open-frame and single-material."
+    }
   },
   "cr10": {
     "display_name": "Creality CR-10 / CR-10S",
@@ -1288,7 +3477,10 @@
       "Long bowden tube (>50cm) requires higher retraction (6-7mm).",
       "PTFE tube degrades above 240\u00b0C \u2014 upgrade to all-metal hotend for ABS/PETG at higher temps.",
       "CR-10S adds filament runout sensor and dual Z lead screws \u2014 improved stability.",
-      "Stock Marlin may lack thermal runaway protection \u2014 flash updated firmware immediately."
+      "Stock Marlin may lack thermal runaway protection \u2014 flash updated firmware immediately.",
+      "Camera support is not stock; use OctoPrint/webcam or another external host if snapshots are required.",
+      "No Creality CFS path is assumed; multicolor is manual M600 or third-party add-on territory.",
+      "PTFE-lined hotend should stay below sustained high-temperature engineering-material ranges unless upgraded."
     ],
     "calibration": {
       "first_steps": "Manual mesh bed leveling. Large bed needs extra attention to corners. Use glass bed for flatness.",
@@ -1305,11 +3497,64 @@
         "symptom": "Under-extrusion after long prints",
         "cause": "PTFE tube degradation or plastic extruder arm crack",
         "fix": "Replace PTFE tube. Upgrade to metal extruder arm."
+      },
+      {
+        "symptom": "OctoPrint or serial connection works but snapshots are unavailable",
+        "cause": "Stock printer has no built-in camera and no LAN camera endpoint",
+        "fix": "Configure an external webcam through OctoPrint or run without camera-dependent monitoring."
+      },
+      {
+        "symptom": "Flexible filament jams or under-extrudes",
+        "cause": "Long Bowden path lets TPU buckle before the hotend",
+        "fix": "Use very slow speeds, constrain the filament path, or upgrade to direct drive."
+      },
+      {
+        "symptom": "ABS/ASA layers split or corners lift",
+        "cause": "Open frame and PTFE-lined hotend are not suited to sustained high-temperature enclosed-material printing",
+        "fix": "Use PLA/PETG, add an enclosure and all-metal hotend, or choose an enclosed profile."
       }
     ],
-    "build_volume_mm": [300, 300, 400],
+    "build_volume_mm": [
+      300,
+      300,
+      400
+    ],
     "max_hotend_temp": 260,
-    "max_bed_temp": 100
+    "max_bed_temp": 100,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": true,
+      "camera_options": [
+        "OctoPrint USB webcam"
+      ],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "manual_M600",
+        "Mosaic Palette 3",
+        "3D Chameleon"
+      ],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "hardened_nozzle_stock": false,
+      "input_shaping": false,
+      "filament_runout_sensor": false,
+      "power_loss_recovery": true,
+      "enclosure": "open",
+      "source_notes": [
+        "CR-10 stock workflow is Marlin single-material; large-bed risk is first-layer and warping, not multicolor automation."
+      ],
+      "notes": "Large open-frame CR-10 class profile; camera and multicolor require third-party host/accessory hardware."
+    }
   },
   "voron_0": {
     "display_name": "Voron 0 / 0.2",
@@ -1368,7 +3613,11 @@
         "fix": "Clean bed with IPA. Re-calibrate Z offset. For ABS, let chamber soak at temp 10 min before printing."
       }
     ],
-    "build_volume_mm": [120, 120, 120],
+    "build_volume_mm": [
+      120,
+      120,
+      120
+    ],
     "max_hotend_temp": 300,
     "max_bed_temp": 120
   },
@@ -1430,7 +3679,11 @@
         "fix": "Re-tension belts evenly. Verify linear rails are parallel using straight edge."
       }
     ],
-    "build_volume_mm": [300, 300, 300],
+    "build_volume_mm": [
+      300,
+      300,
+      300
+    ],
     "max_hotend_temp": 300,
     "max_bed_temp": 120
   },
@@ -1485,7 +3738,11 @@
         "fix": "Print PETG at 225-230C max. Replace PTFE tube if deformed."
       }
     ],
-    "build_volume_mm": [220, 220, 280],
+    "build_volume_mm": [
+      220,
+      220,
+      280
+    ],
     "max_hotend_temp": 260,
     "max_bed_temp": 100
   },
@@ -1540,7 +3797,11 @@
         "fix": "Clean PEI sheet with IPA. Adjust Z offset in 0.05mm increments."
       }
     ],
-    "build_volume_mm": [235, 235, 250],
+    "build_volume_mm": [
+      235,
+      235,
+      250
+    ],
     "max_hotend_temp": 260,
     "max_bed_temp": 100
   },
@@ -1601,7 +3862,11 @@
         "fix": "Use high-quality USB cable. Avoid USB hubs."
       }
     ],
-    "build_volume_mm": [240, 240, 260],
+    "build_volume_mm": [
+      240,
+      240,
+      260
+    ],
     "max_hotend_temp": 260,
     "max_bed_temp": 110
   },
@@ -1662,7 +3927,11 @@
         "fix": "Tighten probe mounting screws. Re-run auto-level."
       }
     ],
-    "build_volume_mm": [220, 220, 250],
+    "build_volume_mm": [
+      220,
+      220,
+      250
+    ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100
   },
@@ -1723,7 +3992,11 @@
         "fix": "Power cycle printer. Check network settings via touchscreen."
       }
     ],
-    "build_volume_mm": [250, 250, 240],
+    "build_volume_mm": [
+      250,
+      250,
+      240
+    ],
     "max_hotend_temp": 300,
     "max_bed_temp": 110
   },
@@ -1778,7 +4051,11 @@
         "fix": "Remove and re-seat nozzle. Ensure it clicks into place. Tighten if thread-based."
       }
     ],
-    "build_volume_mm": [220, 220, 220],
+    "build_volume_mm": [
+      220,
+      220,
+      220
+    ],
     "max_hotend_temp": 280,
     "max_bed_temp": 110
   },
@@ -1845,7 +4122,11 @@
         "fix": "Allow extra bed soak time (5-10 min) for zones to equalize."
       }
     ],
-    "build_volume_mm": [360, 360, 360],
+    "build_volume_mm": [
+      360,
+      360,
+      360
+    ],
     "max_hotend_temp": 290,
     "max_bed_temp": 120
   },
@@ -1894,7 +4175,11 @@
         "fix": "Add aftermarket enclosure. Or switch to draft-resistant materials (PLA, PETG)."
       }
     ],
-    "build_volume_mm": [256, 256, 256],
+    "build_volume_mm": [
+      256,
+      256,
+      256
+    ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100
   },
@@ -1942,7 +4227,11 @@
         "fix": "Reduce acceleration for tall or heavy prints."
       }
     ],
-    "build_volume_mm": [180, 180, 180],
+    "build_volume_mm": [
+      180,
+      180,
+      180
+    ],
     "max_hotend_temp": 300,
     "max_bed_temp": 80
   }

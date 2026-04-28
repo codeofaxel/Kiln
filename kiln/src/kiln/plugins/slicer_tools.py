@@ -1066,7 +1066,7 @@ class _SlicerToolsPlugin:
 
             Args:
                 printer_id: Printer model identifier (e.g. ``"ender3"``,
-                    ``"bambu_x1c"``).
+                    ``"bambu_x1c"``, ``"creality_k1_max"``).
             """
             if err := _srv._check_auth("slicer"):
                 return err

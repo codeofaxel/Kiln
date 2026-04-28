@@ -959,6 +959,13 @@ class TestPrusaProfileDetection:
 
         assert profile == "prusa_mini"
 
+    def test_map_creality_k1_max_hint(self):
+        from kiln.cli.main import _map_printer_hint_to_profile_id
+
+        assert _map_printer_hint_to_profile_id("Creality K1 Max 2025") == "k1_max"
+        assert _map_printer_hint_to_profile_id("K2 Plus") == "k2_plus"
+        assert _map_printer_hint_to_profile_id("Ender-3 V3 KE") == "ender3_v3_ke"
+
 
 class TestDoctorPrusa:
     def test_doctor_prusa_json_success(self, runner):
@@ -989,6 +996,63 @@ class TestDoctorPrusa:
         assert result.exit_code != 0
         data = json.loads(result.output)
         assert data["status"] == "error"
+
+
+class TestDoctorCreality:
+    def test_doctor_creality_json_success_with_host(self, runner):
+        with patch("kiln.cli.main._run_creality_diagnostics", return_value={
+            "ok": True,
+            "checks": [{"name": "moonraker_probe", "ok": True, "detail": "ok"}],
+            "resolved_url": "http://192.168.1.55:7125",
+            "browser_test_url": "http://192.168.1.55:7125/server/info",
+            "cfs_status": {
+                "detected": True,
+                "hardware_unverified": True,
+                "slot_count": 4,
+            },
+        }):
+            result = runner.invoke(
+                cli,
+                ["doctor-creality", "--host", "192.168.1.55", "--model", "k1_max", "--json"],
+            )
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["status"] == "success"
+        assert data["data"]["resolved_url"] == "http://192.168.1.55:7125"
+
+    def test_doctor_creality_wrong_backend(self, runner):
+        with patch("kiln.cli.main.load_printer_config", return_value={
+            "type": "moonraker",
+            "host": "http://test.local",
+        }):
+            result = runner.invoke(cli, ["doctor-creality", "--json"])
+
+        assert result.exit_code != 0
+        data = json.loads(result.output)
+        assert data["status"] == "error"
+
+    def test_doctor_creality_human_failure_prints_reachability_guidance(self, runner):
+        with patch("kiln.cli.main._run_creality_diagnostics", return_value={
+            "ok": False,
+            "checks": [{"name": "moonraker_probe", "ok": False, "detail": "HTTP 404"}],
+            "likely_cause": "firmware_locked_or_wrong_port",
+            "user_message": "Something answered, but /server/info was not Moonraker.",
+            "firmware_lockdown_possible": True,
+            "connection_checklist": [
+                "Keep the printer and this computer on the same Wi-Fi/LAN.",
+                "Confirm the printer IP address.",
+                "Check http://<printer-ip>:7125/server/info.",
+            ],
+            "next_steps": ["Check Creality firmware settings for local Moonraker access."],
+        }):
+            result = runner.invoke(cli, ["doctor-creality", "--host", "192.168.1.55"])
+
+        assert result.exit_code != 0
+        assert "Likely cause: firmware_locked_or_wrong_port" in result.output
+        assert "same Wi-Fi/LAN" in result.output
+        assert "printer IP address" in result.output
+        assert "local Moonraker disabled" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -1314,8 +1378,6 @@ class TestFleetCLI:
 
     def test_fleet_requires_license(self, runner, tmp_path):
         """kiln fleet status requires Pro license."""
-        from kiln.licensing import LicenseTier
-
         with patch("kiln.licensing.check_tier", return_value=(False, (
             "This feature requires Kiln Pro. "
             "You're on the Free tier. "

@@ -40,7 +40,7 @@ class DiscoveredPrinter:
 
     host: str
     port: int
-    printer_type: str  # "octoprint", "moonraker", "bambu", "unknown"
+    printer_type: str  # "octoprint", "moonraker", "bambu", "elegoo", "prusaconnect", "unknown"
     name: str = ""
     version: str = ""
     api_available: bool = False

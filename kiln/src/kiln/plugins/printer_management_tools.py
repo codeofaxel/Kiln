@@ -49,7 +49,8 @@ class _PrinterManagementToolsPlugin:
             """Scan the local network for 3D printers.
 
             Uses mDNS/Bonjour and HTTP subnet probing to find OctoPrint,
-            Moonraker, Bambu Lab, and Elegoo printers on the local network.
+            Moonraker/Creality, Bambu Lab, Elegoo, and Prusa printers on
+            the local network.
 
             Args:
                 timeout: Maximum scan duration in seconds (default 5).

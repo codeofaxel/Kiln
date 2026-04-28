@@ -4,6 +4,7 @@ Regression coverage for incident #0 (2026-04-15, Bambu A1 nozzle crash
 into purge tool).  Tests the `kiln.printers.bed_fit` module + the
 downstream gates in slicer_tools and upload_file.
 """
+
 from __future__ import annotations
 
 import struct
@@ -15,14 +16,12 @@ from kiln.printers.bed_fit import (
     apply_translation_to_stl,
     check_bed_fit,
     check_gcode_has_homing,
-    compute_3mf_bbox,
     compute_gcode_bbox,
     compute_mesh_bbox,
     get_build_volume,
     validate_gcode_for_printer,
     validate_mesh_for_printer,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers to build test STL/gcode files
@@ -74,6 +73,18 @@ class TestBuildVolumeLookup:
     def test_bambu_a1(self):
         vol = get_build_volume("bambu_a1")
         assert vol == (256.0, 256.0, 256.0)
+
+    def test_creality_k1_max_alias(self):
+        assert get_build_volume("creality_k1_max") == (300.0, 300.0, 300.0)
+
+    def test_ender3_v3_ke(self):
+        assert get_build_volume("ender3_v3_ke") == (220.0, 220.0, 240.0)
+
+    def test_sparkx_i7(self):
+        assert get_build_volume("sparkx_i7") == (260.0, 260.0, 255.0)
+
+    def test_ender3_v4(self):
+        assert get_build_volume("ender3_v4") == (220.0, 220.0, 235.0)
 
     def test_unknown_returns_none(self):
         assert get_build_volume("this_printer_does_not_exist") is None

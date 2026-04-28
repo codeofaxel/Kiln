@@ -126,14 +126,19 @@ def get_slicer_profile(printer_id: str) -> SlicerProfile:
     """
     _load()
     normalised = printer_id.lower().replace("-", "_").strip()
-    profile = _cache.get(normalised)
-    if profile is not None:
-        return profile
+    candidates = [normalised]
+    if normalised.startswith("creality_"):
+        candidates.append(normalised.removeprefix("creality_"))
+    for candidate in candidates:
+        profile = _cache.get(candidate)
+        if profile is not None:
+            return profile
 
     # Fuzzy prefix match.
     for key in _cache:
-        if normalised.startswith(key) or key.startswith(normalised):
-            return _cache[key]
+        for candidate in candidates:
+            if candidate.startswith(key) or key.startswith(candidate):
+                return _cache[key]
 
     default = _cache.get("default")
     if default is not None:

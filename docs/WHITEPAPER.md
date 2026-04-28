@@ -10,13 +10,13 @@
 
 ## Abstract
 
-We present Kiln, a protocol and reference implementation that enables autonomous AI agents to transform ideas -- expressed as natural language, sketches, or parametric specifications -- into physical objects through 3D printing. Kiln bridges the gap between digital intelligence and physical fabrication by providing: (1) a Design Intelligence layer with 25 FDM materials with full engineering properties, 45 brand-specific filament profiles, and 20 proven design patterns; (2) text-to-3D and sketch-to-3D generation via Gemini Deep Think, Meshy, Tripo3D, Stability AI, and OpenSCAD; (3) 7-dimension printability analysis before parts reach a slicer; (4) direct control of local printers via OctoPrint, Moonraker, Bambu Lab, Elegoo, Prusa Link, and Direct USB/Serial adapters; (5) fulfillment routing through third-party providers such as Craftcloud; (6) multi-part assembly planning with clearance validation, tolerance stacking, and optional kiln-pro assembly manuals; (7) preview-confirmed print starts; and (8) real-time G-code interception for in-flight safety filtering. The system enforces safety invariants at the protocol level across 29 printer safety profiles, and preserves parametric Design DNA for iterative refinement. Kiln does not operate its own marketplace or manufacturing network -- it searches existing 3rd-party marketplaces and routes to existing fulfillment providers.
+We present Kiln, a protocol and reference implementation that enables autonomous AI agents to transform ideas -- expressed as natural language, sketches, or parametric specifications -- into physical objects through 3D printing. Kiln bridges the gap between digital intelligence and physical fabrication by providing: (1) a Design Intelligence layer with 25 FDM materials with full engineering properties, 45 brand-specific filament profiles, and 20 proven design patterns; (2) text-to-3D and sketch-to-3D generation via Gemini Deep Think, Meshy, Tripo3D, Stability AI, and OpenSCAD; (3) 7-dimension printability analysis before parts reach a slicer; (4) direct control of local printers via OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, and Direct USB/Serial adapters; (5) fulfillment routing through third-party providers such as Craftcloud; (6) multi-part assembly planning with clearance validation, tolerance stacking, and optional kiln-pro assembly manuals; (7) preview-confirmed print starts; and (8) real-time G-code interception for in-flight safety filtering. The system enforces safety invariants at the protocol level across 44 named printer safety profiles, and preserves parametric Design DNA for iterative refinement. Kiln does not operate its own marketplace or manufacturing network -- it searches existing 3rd-party marketplaces and routes to existing fulfillment providers.
 
 ## 1. Introduction
 
 ### 1.1 The Problem
 
-The distance between "I need a part" and holding that part is filled with fragmented tooling, specialized knowledge, and manual labor. Every printer ecosystem -- OctoPrint, Klipper/Moonraker, Bambu Lab, Elegoo, Prusa Link, and Serial/USB-connected Marlin printers -- exposes its own incompatible control surface. Designing printable parts requires CAD expertise. Validating printability requires tribal knowledge about overhangs, bridging distances, and material behavior. Managing a mixed fleet means maintaining separate integrations for each backend.
+The distance between "I need a part" and holding that part is filled with fragmented tooling, specialized knowledge, and manual labor. Every printer ecosystem -- OctoPrint, Klipper/Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, and Serial/USB-connected Marlin printers -- exposes its own incompatible control surface. Designing printable parts requires CAD expertise. Validating printability requires tribal knowledge about overhangs, bridging distances, and material behavior. Managing a mixed fleet means maintaining separate integrations for each backend.
 
 AI agents are now capable enough to plan and execute multi-step physical tasks. But no protocol exists to give these agents safe, structured access to the full pipeline from idea to physical object.
 
@@ -30,11 +30,11 @@ Kiln solves the entire pipeline:
 
 3. **Printability Engine.** 7-dimension analysis -- overhangs, thin walls, bridging, bed adhesion, supports, warping, and thermal stress -- catches problems before they waste filament. Thermal stress heuristics and adhesion force estimation provide quantitative risk assessment.
 
-4. **Unified Adapter Layer.** A single `PrinterAdapter` abstract interface normalizes OctoPrint, Moonraker, Bambu Lab, Elegoo, Prusa Link, and Direct USB/Serial printer control into consistent Python dataclasses. Adding a new backend requires implementing the adapter contract; all upstream consumers work automatically.
+4. **Unified Adapter Layer.** A single `PrinterAdapter` abstract interface normalizes OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, and Direct USB/Serial printer control into consistent Python dataclasses. Adding a new backend requires implementing the adapter contract; all upstream consumers work automatically.
 
 5. **Agent-Native Interface.** <!-- KILN_MCP_TOOL_COUNT:OLD --> 752 typed MCP tools and <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 759 total MCP capabilities make Kiln a first-class control layer for any MCP-compatible agent. <!-- KILN_CLI_COUNT:OLD --> 214 CLI commands with `--json` flags cover the same surface for scripting.
 
-6. **Safety-First Design.** Pre-flight checks, preview-confirmed print starts, G-code validation, temperature limits, and confirmation gates are enforced at the protocol layer. 29 safety profiles define hardware-specific limits. An agent cannot bypass safety checks even if instructed to.
+6. **Safety-First Design.** Pre-flight checks, preview-confirmed print starts, G-code validation, temperature limits, and confirmation gates are enforced at the protocol layer. 44 named safety profiles define hardware-specific limits. An agent cannot bypass safety checks even if instructed to.
 
 ## 2. Architecture
 
@@ -56,12 +56,12 @@ Kiln solves the entire pipeline:
         [Design    [Generation [Print-  [Your      [Fulfillment
         Intelligence] Backends] ability] Printers]  Providers]
          25 mats    Gemini DT   7-dim   OP/MR/BL   Craftcloud
-        45 filaments Meshy     analysis PL/EG/Serial
+        45 filaments Meshy     analysis CR/PL/EG/Serial
          20 patterns Tripo3D
                     Stability
                     OpenSCAD
 
-  OP = OctoPrint, MR = Moonraker, BL = Bambu Lab, PL = Prusa Link, EG = Elegoo
+  OP = OctoPrint, MR = Moonraker, CR = Creality, BL = Bambu Lab, PL = Prusa Link, EG = Elegoo
 ```
 
 The system is organized into five functional layers. Design Intelligence informs what to build and how. Generation backends convert descriptions into geometry. The Printability Engine validates geometry before slicing. Printer adapters handle hardware communication. Fulfillment providers handle outsourced manufacturing. All layers are accessible through the same MCP tools and CLI commands.
@@ -101,7 +101,7 @@ Physical machines can be damaged by integration errors. Kiln enforces safety at 
 
 **Level 2: Pre-flight Checks.** The `preflight_check()` gate runs before every print job. It validates: printer is online and idle, target file exists on the printer, temperatures are within safe ranges for the declared material, and no existing job is active.
 
-**Level 3: Temperature Limits and Safety Profiles.** 29 safety profiles define per-printer-model limits -- maximum hotend and bed temperatures, axis travel bounds, and maximum feedrates. Hard limits (300C hotend, 130C bed) are enforced regardless of what the caller requests. Material-specific ranges generate warnings when targets fall outside expected bounds. A background heater watchdog automatically cools idle heaters after a configurable timeout (default 30 minutes) to prevent fire hazards.
+**Level 3: Temperature Limits and Safety Profiles.** 44 named safety profiles define per-printer-model limits -- maximum hotend and bed temperatures, axis travel bounds, and maximum feedrates. Hard limits (300C hotend, 130C bed) are enforced regardless of what the caller requests. Material-specific ranges generate warnings when targets fall outside expected bounds. A background heater watchdog automatically cools idle heaters after a configurable timeout (default 30 minutes) to prevent fire hazards.
 
 **Level 4: Preview Confirmation.** `start_print` refuses new non-resume jobs unless the agent has rendered a recent preview, shown it to the user, and supplied a single-use confirmation token bound to the file and printer. Advanced users can bypass the gate through an explicit environment variable, and bypasses are logged.
 
@@ -218,7 +218,7 @@ For all fulfillment orders, the provider remains merchant of record. Kiln charge
 
 ### 10.1 Printer Registry
 
-The `PrinterRegistry` maintains a map of named printers with their adapter configurations. Printers can be added via CLI (`kiln auth`) or MCP tool (`register_printer`). The registry supports heterogeneous fleets -- a single Kiln instance can manage OctoPrint, Moonraker, and Bambu printers simultaneously.
+The `PrinterRegistry` maintains a map of named printers with their adapter configurations. Printers can be added via CLI (`kiln auth`) or MCP tool (`register_printer`). The registry supports heterogeneous fleets -- a single Kiln instance can manage OctoPrint, Moonraker, Creality, Bambu, Prusa Link, Elegoo, and Direct USB printers simultaneously.
 
 ### 10.2 Job Queue
 
@@ -264,7 +264,7 @@ Agents record structured print outcomes after each job: success/failure, quality
 
 ### 15.1 Physical Safety
 
-The safety system is described in Section 2.4. Additionally, 29 printer-specific safety profiles define model-specific limits loaded at startup and checked on every temperature and G-code command.
+The safety system is described in Section 2.4. Additionally, 44 named printer-specific safety profiles define model-specific limits loaded at startup and checked on every temperature and G-code command.
 
 ### 15.2 Authentication and Authorization
 

@@ -1,9 +1,4 @@
 {
-  "_meta": {
-    "version": "1.0.0",
-    "description": "Per-printer safety profiles for Kiln G-code validation. Each profile defines safe operating limits. The 'default' profile applies when no printer-specific profile matches.",
-    "updated": "2025-02-11"
-  },
   "default": {
     "display_name": "Generic / Unknown Printer",
     "max_hotend_temp": 300.0,
@@ -12,7 +7,11 @@
     "max_feedrate": 10000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": null,
-    "build_volume": [220, 220, 250],
+    "build_volume": [
+      220,
+      220,
+      250
+    ],
     "notes": "Conservative defaults suitable for most FDM printers."
   },
   "ender3": {
@@ -75,10 +74,40 @@
     ],
     "notes": "PTFE hotend. Large build volume."
   },
-  "k1": {
-    "display_name": "Creality K1 / K1 Max",
+  "ender3_v2": {
+    "display_name": "Creality Ender 3 V2",
+    "max_hotend_temp": 260.0,
+    "max_bed_temp": 110.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 7500.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 12.0,
+    "build_volume": [
+      220,
+      220,
+      250
+    ],
+    "notes": "Ender 3 V2 dimensions. Stock PTFE-lined hotend; all-metal upgrades should use a custom profile."
+  },
+  "sparkx_i7": {
+    "display_name": "Creality SPARKX i7",
     "max_hotend_temp": 300.0,
-    "max_bed_temp": 120.0,
+    "max_bed_temp": 100.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 28.0,
+    "build_volume": [
+      260,
+      260,
+      255
+    ],
+    "notes": "SPARKX i7 dimensions (260x260x255). CoreXY, direct drive, open-frame four-color desktop printer."
+  },
+  "k1": {
+    "display_name": "Creality K1",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 100.0,
     "max_chamber_temp": 60.0,
     "max_feedrate": 30000.0,
     "min_safe_z": 0.0,
@@ -88,7 +117,237 @@
       220,
       250
     ],
-    "notes": "Standard K1 dimensions (220x220x250). K1 Max users should create a custom profile with 300x300x300. High-speed CoreXY. Enclosed chamber. All-metal hotend."
+    "notes": "Standard K1 dimensions (220x220x250). High-speed CoreXY. Passive enclosed chamber. All-metal hotend."
+  },
+  "k1_max": {
+    "display_name": "Creality K1 Max",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 100.0,
+    "max_chamber_temp": 60.0,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 32.0,
+    "build_volume": [
+      300,
+      300,
+      300
+    ],
+    "notes": "K1 Max dimensions (300x300x300). High-speed CoreXY. Passive enclosed chamber. All-metal hotend."
+  },
+  "k1c": {
+    "display_name": "Creality K1C",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 100.0,
+    "max_chamber_temp": 60.0,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 32.0,
+    "build_volume": [
+      220,
+      220,
+      250
+    ],
+    "notes": "K1C dimensions (220x220x250). High-speed CoreXY. Enclosed frame. Hardened/steel-tipped nozzle path."
+  },
+  "k1_se": {
+    "display_name": "Creality K1 SE",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 100.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 28.0,
+    "build_volume": [
+      220,
+      220,
+      250
+    ],
+    "notes": "K1 SE dimensions (220x220x250). High-speed CoreXY with direct drive."
+  },
+  "k2": {
+    "display_name": "Creality K2",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 100.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 32.0,
+    "build_volume": [
+      260,
+      260,
+      260
+    ],
+    "notes": "K2 dimensions (260x260x260). CoreXY, direct drive, Creality Print 6 G-code/3MF workflow."
+  },
+  "k2_pro": {
+    "display_name": "Creality K2 Pro",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 110.0,
+    "max_chamber_temp": 60.0,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 32.0,
+    "build_volume": [
+      300,
+      300,
+      300
+    ],
+    "notes": "K2 Pro dimensions (300x300x300). CoreXY, direct drive, enclosed chamber."
+  },
+  "k2_plus": {
+    "display_name": "Creality K2 Plus",
+    "max_hotend_temp": 350.0,
+    "max_bed_temp": 120.0,
+    "max_chamber_temp": 60.0,
+    "max_feedrate": 36000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 40.0,
+    "build_volume": [
+      350,
+      350,
+      350
+    ],
+    "notes": "K2 Plus dimensions (350x350x350). CoreXY, direct drive, enclosed chamber, 350C hotend."
+  },
+  "k2_se": {
+    "display_name": "Creality K2 SE",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 100.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 28.0,
+    "build_volume": [
+      220,
+      215,
+      245
+    ],
+    "notes": "K2 SE dimensions (220x215x245). CoreXY, direct drive, open-frame multi-material-ready model."
+  },
+  "creality_hi": {
+    "display_name": "Creality Hi",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 100.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 28.0,
+    "build_volume": [
+      260,
+      260,
+      300
+    ],
+    "notes": "Creality Hi dimensions (260x260x300). CoreXY, direct drive, open frame."
+  },
+  "ender3_v4": {
+    "display_name": "Creality Ender-3 V4",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 100.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 24.0,
+    "build_volume": [
+      220,
+      220,
+      235
+    ],
+    "notes": "Ender-3 V4 dimensions (220x220x235). Direct-drive open-frame CFS-capable printer."
+  },
+  "ender3_v3": {
+    "display_name": "Creality Ender-3 V3",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 110.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 24.0,
+    "build_volume": [
+      220,
+      220,
+      250
+    ],
+    "notes": "Ender-3 V3 dimensions (220x220x250). CoreXZ, direct drive, open frame."
+  },
+  "ender3_v3_ke": {
+    "display_name": "Creality Ender-3 V3 KE",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 100.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 24.0,
+    "build_volume": [
+      220,
+      220,
+      240
+    ],
+    "notes": "Ender-3 V3 KE dimensions (220x220x240). Klipper-class direct-drive open-frame printer."
+  },
+  "ender3_v3_se": {
+    "display_name": "Creality Ender-3 V3 SE",
+    "max_hotend_temp": 260.0,
+    "max_bed_temp": 100.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 15000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 12.0,
+    "build_volume": [
+      220,
+      220,
+      250
+    ],
+    "notes": "Ender-3 V3 SE dimensions (220x220x250). Direct-drive open-frame Marlin-class printer."
+  },
+  "ender3_v3_plus": {
+    "display_name": "Creality Ender-3 V3 Plus",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 100.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 24.0,
+    "build_volume": [
+      300,
+      300,
+      330
+    ],
+    "notes": "Ender-3 V3 Plus dimensions (300x300x330). CoreXZ, direct drive, open frame."
+  },
+  "ender5_max": {
+    "display_name": "Creality Ender-5 Max",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 100.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 36000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 28.0,
+    "build_volume": [
+      400,
+      400,
+      400
+    ],
+    "notes": "Ender-5 Max dimensions (400x400x400). CoreXY, direct drive, open frame."
+  },
+  "cr10_se": {
+    "display_name": "Creality CR-10 SE",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 110.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 24.0,
+    "build_volume": [
+      220,
+      220,
+      265
+    ],
+    "notes": "CR-10 SE dimensions (220x220x265). Klipper-class direct-drive open-frame printer."
+  },
+  "_meta": {
+    "version": "1.0.0",
+    "description": "Per-printer safety profiles for Kiln G-code validation. Each profile defines safe operating limits. The 'default' profile applies when no printer-specific profile matches.",
+    "updated": "2025-02-11"
   },
   "prusa_mk3s": {
     "display_name": "Prusa i3 MK3S / MK3S+",
@@ -406,7 +665,7 @@
     "notes": "Enclosed. Klipper-based. Quick-swap nozzle."
   },
   "qidi_x_plus3": {
-    "display_name": "QIDI X-Plus 3 / X-Max 3",
+    "display_name": "QIDI X-Plus 3",
     "max_hotend_temp": 350.0,
     "max_bed_temp": 120.0,
     "max_chamber_temp": 65.0,

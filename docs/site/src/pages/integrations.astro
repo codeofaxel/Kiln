@@ -27,6 +27,14 @@ const printerIntegrations: Integration[] = [
     tag: 'REST API',
   },
   {
+    name: 'creality',
+    title: 'Creality',
+    description:
+      'Connect Creality K1, K2, Hi, Ender V3 KE, and similar CrealityOS printers through local Moonraker when reachable on the LAN. Older Marlin Creality machines still work through OctoPrint or Direct USB.',
+    icon: '🟩',
+    tag: 'Moonraker',
+  },
+  {
     name: 'bambu',
     title: 'Bambu Lab',
     description:
@@ -126,13 +134,14 @@ const integrationSchema = {
 ---
 
 <BaseLayout
-  title="Kiln Integrations — OctoPrint, Moonraker, Bambu, Prusa, Elegoo, MCP"
-  description="Kiln integrations for OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo, MCP clients, fulfillment, and model marketplaces."
+  title="Kiln Integrations — OctoPrint, Moonraker, Creality, Bambu, Prusa, Elegoo, MCP"
+  description="Kiln integrations for OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, MCP clients, fulfillment, and model marketplaces."
   current="integrations"
   keywords={[
     'kiln integrations',
     'octoprint ai tools',
     'moonraker mcp integration',
+    'creality k1 max ai tools',
     'bambu lab ai tools',
     'prusa link ai tools',
     'ai tools for 3d printer control',
@@ -148,7 +157,7 @@ const integrationSchema = {
       </p>
       <div class="stat-row">
         <div class="stat">
-          <span class="stat-num">6</span>
+          <span class="stat-num">7</span>
           <span class="stat-label">Printer backends</span>
         </div>
         <div class="stat">
@@ -318,8 +327,6 @@ const integrationSchema = {
     grid-template-columns: repeat(3, 1fr);
     gap: 16px;
   }
-
-  /* Legacy wide card styles removed — 6 backends = clean 3x2 */
 
   .card-wide p {
     grid-row: 2;

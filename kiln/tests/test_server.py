@@ -52,6 +52,7 @@ from kiln.server import (
     _tool_limiter,
     _validate_local_file,
     check_orientation,
+    cfs_status,
     get_bed_mesh,
     get_filament_status,
     get_speed_profile,
@@ -983,6 +984,39 @@ class TestGetAdapter:
         # Clean up the global singleton
         monkeypatch.setattr(mod, "_adapter", None)
 
+    def test_creality_type_creates_adapter(self, monkeypatch):
+        """Valid config with type='creality' creates a CrealityAdapter."""
+        import kiln.server as mod
+
+        created = {}
+
+        class FakeCrealityAdapter:
+            name = "creality"
+
+            def __init__(self, *, host, api_key=None, model=None):
+                created["host"] = host
+                created["api_key"] = api_key
+                created["model"] = model
+
+            def set_safety_profile(self, profile_id):
+                created["safety_profile"] = profile_id
+
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_PRINTER_HOST", "http://k1-max.local")
+        monkeypatch.setattr(mod, "_PRINTER_API_KEY", "")
+        monkeypatch.setattr(mod, "_PRINTER_TYPE", "creality")
+        monkeypatch.setattr(mod, "_PRINTER_MODEL", "creality_k1_max")
+        monkeypatch.setattr(mod, "CrealityAdapter", FakeCrealityAdapter)
+
+        adapter = mod._get_adapter()
+
+        assert isinstance(adapter, FakeCrealityAdapter)
+        assert created["host"] == "http://k1-max.local"
+        assert created["model"] == "creality_k1_max"
+        assert created["safety_profile"] == "creality_k1_max"
+
+        monkeypatch.setattr(mod, "_adapter", None)
+
     def test_bambu_type_creates_adapter(self, monkeypatch):
         """Valid config with type='bambu' creates a BambuAdapter."""
         import kiln.server as mod
@@ -1510,6 +1544,46 @@ class TestRegisterPrinter:
             api_key=None,
         )
         assert result["success"] is True
+
+    def test_creality_success(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+
+        created = {}
+
+        class FakeCrealityAdapter:
+            name = "creality"
+
+            def __init__(self, *, host, api_key=None, model=None, verify_ssl=True):
+                created["host"] = host
+                created["api_key"] = api_key
+                created["model"] = model
+                created["verify_ssl"] = verify_ssl
+
+            def set_safety_profile(self, profile_id):
+                created["safety_profile"] = profile_id
+
+        monkeypatch.setattr(mod, "CrealityAdapter", FakeCrealityAdapter)
+        monkeypatch.setattr(
+            mod,
+            "_validate_printer_url",
+            lambda host, printer_type: (f"http://{host}" if "://" not in host else host, []),
+        )
+
+        result = register_printer(
+            name="k1-max",
+            printer_type="creality",
+            host="192.168.1.55",
+            printer_model="creality_k1_max",
+        )
+
+        assert result["success"] is True
+        assert result["name"] == "k1-max"
+        assert created["host"] == "http://192.168.1.55"
+        assert created["model"] == "creality_k1_max"
+        assert created["safety_profile"] == "creality_k1_max"
 
     def test_bambu_success(self, monkeypatch):
         import kiln.server as mod
@@ -2466,6 +2540,47 @@ class TestGetFilamentStatus:
         result = get_filament_status()
         assert result["success"] is False
         assert "missing config" in result["error"]["message"]
+
+
+# ---------------------------------------------------------------------------
+# cfs_status()
+# ---------------------------------------------------------------------------
+
+
+class TestCfsStatus:
+    """Tests for the cfs_status MCP tool (Creality / Moonraker)."""
+
+    @patch("kiln.server._get_adapter")
+    def test_returns_cfs_status(self, mock_get_adapter):
+        adapter = MagicMock()
+        adapter.get_cfs_status.return_value = {
+            "detected": True,
+            "hardware_unverified": True,
+            "active_slot_control_supported": False,
+            "candidate_objects": ["cfs"],
+            "candidate_commands": ["CFS_LOAD"],
+            "slots": [{"slot": 0, "material": "PLA"}],
+            "slot_count": 1,
+            "warnings": ["read-only"],
+        }
+        mock_get_adapter.return_value = adapter
+
+        result = cfs_status()
+        assert result["success"] is True
+        assert result["detected"] is True
+        assert result["hardware_unverified"] is True
+        assert result["active_slot_control_supported"] is False
+        assert result["slots"][0]["material"] == "PLA"
+
+    @patch("kiln.server._get_adapter")
+    def test_unsupported_returns_error(self, mock_get_adapter):
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        mock_get_adapter.return_value = adapter
+
+        result = cfs_status()
+        assert result["success"] is False
+        assert result["error"]["code"] == "UNSUPPORTED"
+        assert "Creality" in result["error"]["message"]
 
 
 # ---------------------------------------------------------------------------

@@ -137,6 +137,41 @@ class TestGetProfile:
         assert profile.max_feedrate == 30000.0
         assert profile.display_name == "Bambu Lab X1 Carbon"
 
+    def test_creality_k1_max_limits(self) -> None:
+        profile = get_profile("k1_max")
+        assert profile.id == "k1_max"
+        assert profile.max_hotend_temp == 300.0
+        assert profile.max_bed_temp == 100.0
+        assert profile.build_volume == [300, 300, 300]
+
+    def test_creality_brand_prefixed_alias(self) -> None:
+        profile = get_profile("creality_k1_max")
+        assert profile.id == "k1_max"
+
+    def test_ender3_v3_se_temp_limit(self) -> None:
+        profile = get_profile("ender3_v3_se")
+        assert profile.max_hotend_temp == 260.0
+
+    def test_sparkx_i7_limits(self) -> None:
+        profile = get_profile("sparkx_i7")
+        assert profile.build_volume == [260, 260, 255]
+        assert profile.max_hotend_temp == 300.0
+
+    def test_ender3_v4_limits(self) -> None:
+        profile = get_profile("ender3_v4")
+        assert profile.build_volume == [220, 220, 235]
+        assert profile.max_bed_temp == 100.0
+        assert profile.max_bed_temp == 100.0
+
+    def test_qidi_x_plus3_limits(self) -> None:
+        profile = get_profile("qidi_x_plus3")
+        assert profile.id == "qidi_x_plus3"
+        assert profile.display_name == "QIDI X-Plus 3"
+        assert profile.max_hotend_temp == 350.0
+        assert profile.max_bed_temp == 120.0
+        assert profile.max_chamber_temp == 65.0
+        assert profile.build_volume == [280, 280, 270]
+
     def test_default_profile(self) -> None:
         profile = get_profile("default")
         assert profile.id == "default"

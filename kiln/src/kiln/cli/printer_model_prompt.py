@@ -47,7 +47,8 @@ _BAMBU_PREFIX_SUGGESTIONS: dict[str, str] = {
 # Top-N common models per backend type, shown as examples in the prompt.
 _EXAMPLES_BY_TYPE: dict[str, list[str]] = {
     "prusa":     ["prusa_mk4", "prusa_mini", "prusa_mk3s", "prusa_xl"],
-    "moonraker": ["klipper_generic", "voron_24", "voron_trident"],
+    "moonraker": ["klipper_generic", "voron_24", "voron_trident", "qidi_x_plus3", "k1_max"],
+    "creality":  ["sparkx_i7", "k1_max", "k1c", "ender3_v4", "ender3_v3_ke"],
     "octoprint": ["ender3", "ender3_v2", "ender5", "prusa_mk3s"],
     "serial":    ["ender3", "ender3_v2", "cr10", "prusa_mk3s"],
     "elegoo":    ["elegoo_centauri", "elegoo_centauri_carbon"],
@@ -92,7 +93,7 @@ def prompt_for_printer_model(
 
     Args:
         printer_type: Backend type — ``bambu``, ``prusa``, ``moonraker``,
-            ``octoprint``, ``serial``, ``elegoo``.
+            ``creality``, ``octoprint``, ``serial``, ``elegoo``.
         serial: Optional serial number; used to suggest a default for
             Bambu printers.
         allow_skip: When True, an empty answer returns None (caller

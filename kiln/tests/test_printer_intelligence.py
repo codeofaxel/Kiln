@@ -35,6 +35,55 @@ from kiln.printer_intelligence import (
     intel_to_dict,
     list_intel_profiles,
 )
+from kiln.slicer_profiles import _DATA_FILE as _SLICER_DATA_FILE
+
+CREALITY_PROFILE_IDS = {
+    "ender3",
+    "ender3_s1",
+    "ender5",
+    "cr10",
+    "ender3_v2",
+    "sparkx_i7",
+    "k1",
+    "k1_max",
+    "k1c",
+    "k1_se",
+    "k2",
+    "k2_pro",
+    "k2_plus",
+    "k2_se",
+    "creality_hi",
+    "ender3_v4",
+    "ender3_v3",
+    "ender3_v3_ke",
+    "ender3_v3_se",
+    "ender3_v3_plus",
+    "ender5_max",
+    "cr10_se",
+}
+
+CREALITY_CAPABILITY_KEYS = {
+    "has_camera",
+    "camera",
+    "camera_out_of_box",
+    "camera_optional",
+    "camera_options",
+    "multicolor_system",
+    "multicolor_out_of_box",
+    "multicolor_optional",
+    "multicolor_options",
+    "multicolor_max_colors",
+    "multicolor_max_colors_out_of_box",
+    "cfs_compatible",
+    "cfs_variant",
+    "cfs_max_units",
+    "hardened_nozzle_stock",
+    "input_shaping",
+    "filament_runout_sensor",
+    "power_loss_recovery",
+    "enclosure",
+    "source_notes",
+}
 
 # ===================================================================
 # Fixtures
@@ -87,6 +136,93 @@ class TestGetPrinterIntel:
         intel = get_printer_intel("bambu_x1c")
         assert intel.extruder_type == "direct_drive"
 
+    def test_creality_k1_max_intel(self) -> None:
+        intel = get_printer_intel("k1_max")
+        assert intel.id == "k1_max"
+        assert intel.firmware == "klipper"
+        assert intel.has_enclosure is True
+        assert intel.materials["PLA"].bed == 55
+        assert intel.capabilities["has_camera"] is True
+        assert intel.capabilities["camera_out_of_box"] is True
+        assert intel.capabilities["multicolor_system"] == "cfs_c"
+        assert intel.capabilities["multicolor_out_of_box"] is False
+        assert intel.capabilities["multicolor_optional"] is True
+        assert intel.capabilities["multicolor_max_colors"] == 4
+
+    def test_creality_brand_prefixed_alias(self) -> None:
+        intel = get_printer_intel("creality_k1_max")
+        assert intel.id == "k1_max"
+
+    def test_ender3_v3_ke_volume_and_firmware(self) -> None:
+        intel = get_printer_intel("ender3_v3_ke")
+        assert intel.firmware == "klipper"
+        assert intel.has_enclosure is False
+
+    def test_sparkx_i7_multicolor_capabilities(self) -> None:
+        intel = get_printer_intel("sparkx_i7")
+        assert intel.capabilities["multicolor_system"] == "cfs"
+        assert intel.capabilities["multicolor_out_of_box"] is True
+        assert intel.capabilities["multicolor_max_colors"] == 4
+        assert intel.capabilities["camera_out_of_box"] is True
+
+    def test_ender3_v4_cfs_capability(self) -> None:
+        intel = get_printer_intel("ender3_v4")
+        assert intel.capabilities["cfs_compatible"] is True
+        assert intel.capabilities["multicolor_out_of_box"] is False
+        assert intel.capabilities["multicolor_optional"] is True
+        assert intel.capabilities["camera_out_of_box"] is False
+
+    def test_k1_series_cfs_c_optional_capabilities(self) -> None:
+        for printer_id in ("k1", "k1_max", "k1c", "k1_se"):
+            intel = get_printer_intel(printer_id)
+            assert intel.capabilities["multicolor_system"] == "cfs_c"
+            assert intel.capabilities["cfs_variant"] == "CFS-C"
+            assert intel.capabilities["cfs_max_units"] == 1
+            assert intel.capabilities["multicolor_max_colors"] == 4
+            assert intel.capabilities["multicolor_out_of_box"] is False
+
+    def test_k2_se_camera_is_optional(self) -> None:
+        intel = get_printer_intel("k2_se")
+        assert intel.capabilities["has_camera"] is False
+        assert intel.capabilities["camera_out_of_box"] is False
+        assert intel.capabilities["camera_optional"] is True
+        assert intel.capabilities["multicolor_system"] == "cfs"
+        assert intel.capabilities["multicolor_max_colors"] == 16
+
+    def test_k2_family_hardened_nozzle_claims(self) -> None:
+        for printer_id in ("k2", "k2_pro", "k2_plus"):
+            intel = get_printer_intel(printer_id)
+            assert intel.capabilities["hardened_nozzle_stock"] is True
+
+    def test_ender5_max_optional_camera_no_cfs(self) -> None:
+        intel = get_printer_intel("ender5_max")
+        assert intel.capabilities["camera_optional"] is True
+        assert intel.capabilities["cfs_compatible"] is False
+        assert intel.capabilities["multicolor_system"] == "none"
+
+    def test_all_creality_profiles_have_capability_schema(self) -> None:
+        for printer_id in CREALITY_PROFILE_IDS:
+            intel = get_printer_intel(printer_id)
+            assert set(intel.capabilities) >= CREALITY_CAPABILITY_KEYS, printer_id
+            assert len(intel.quirks) >= 3, printer_id
+            assert len(intel.failure_modes) >= 3, printer_id
+
+    def test_creality_cfs_claims_align_with_slicer_tooling(self) -> None:
+        slicer = json.loads(_SLICER_DATA_FILE.read_text())
+        addon_compatible = set(
+            slicer["_multi_material_addons"]["creality_cfs"]["compatible_printers"],
+        )
+
+        for printer_id in CREALITY_PROFILE_IDS:
+            intel = get_printer_intel(printer_id)
+            if not intel.capabilities["cfs_compatible"]:
+                continue
+
+            tool_change = slicer[printer_id]["tool_change"]
+            covered_by_profile = tool_change["tool_changer"] == "cfs"
+            covered_by_addon = printer_id in addon_compatible
+            assert covered_by_profile or covered_by_addon, printer_id
+
     def test_nonexistent_falls_back_to_default(self) -> None:
         intel = get_printer_intel("nonexistent_printer_xyz")
         assert intel.id == "default"
@@ -126,6 +262,7 @@ class TestListIntelProfiles:
         assert "default" in profiles
         assert "ender3" in profiles
         assert "bambu_x1c" in profiles
+        assert "qidi_x_plus3" in profiles
 
     def test_returns_list_of_strings(self) -> None:
         profiles = list_intel_profiles()
@@ -174,6 +311,12 @@ class TestGetMaterialSettings:
         assert mat is not None
         assert mat.hotend == 270
 
+    def test_qidi_x_plus3_pc(self) -> None:
+        mat = get_material_settings("qidi_x_plus3", "PC")
+        assert mat is not None
+        assert mat.hotend == 280
+        assert mat.bed == 110
+
     def test_default_pla(self) -> None:
         mat = get_material_settings("default", "PLA")
         assert mat is not None
@@ -218,6 +361,11 @@ class TestDiagnoseIssue:
         matches = diagnose_issue("bambu_x1c", "AMS")
         assert len(matches) >= 1
 
+    def test_qidi_x_plus3_firmware_issue(self) -> None:
+        matches = diagnose_issue("qidi_x_plus3", "firmware")
+        assert len(matches) >= 1
+        assert any("Firmware update" in match["symptom"] for match in matches)
+
 
 # ===================================================================
 # intel_to_dict
@@ -232,7 +380,7 @@ class TestIntelToDict:
         expected_keys = [
             "id", "display_name", "firmware", "extruder_type",
             "hotend_type", "has_enclosure", "has_abl",
-            "materials", "quirks", "calibration", "failure_modes",
+            "capabilities", "materials", "quirks", "calibration", "failure_modes",
         ]
         for key in expected_keys:
             assert key in d, f"Missing key '{key}' in serialized dict"

@@ -74,6 +74,36 @@ class TestGetSlicerProfile:
         assert profile.slicer == "prusaslicer"
         assert profile.display_name == "Bambu Lab X1 Carbon"
 
+    def test_creality_k1_max_profile(self) -> None:
+        profile = get_slicer_profile("k1_max")
+        assert profile.id == "k1_max"
+        assert profile.slicer == "orcaslicer"
+        assert profile.settings["bed_shape"] == "0x0,300x0,300x300,0x300"
+        assert profile.settings["max_print_height"] == "300"
+
+    def test_creality_brand_prefixed_alias(self) -> None:
+        profile = get_slicer_profile("creality_k1_max")
+        assert profile.id == "k1_max"
+
+    def test_sparkx_i7_profile(self) -> None:
+        profile = get_slicer_profile("sparkx_i7")
+        assert profile.settings["bed_shape"] == "0x0,260x0,260x260,0x260"
+        assert "four-color" in profile.notes
+
+    def test_ender3_v4_profile(self) -> None:
+        profile = get_slicer_profile("ender3_v4")
+        assert profile.settings["max_print_height"] == "235"
+        assert "CFS" in profile.notes
+
+    def test_qidi_x_plus3_profile(self) -> None:
+        profile = get_slicer_profile("qidi_x_plus3")
+        assert profile.id == "qidi_x_plus3"
+        assert profile.display_name == "QIDI X-Plus 3"
+        assert profile.slicer == "orcaslicer"
+        assert profile.settings["gcode_flavor"] == "klipper"
+        assert profile.settings["bed_shape"] == "0x0,280x0,280x280,0x280"
+        assert profile.settings["max_print_height"] == "270"
+
     def test_nonexistent_falls_back_to_default(self) -> None:
         profile = get_slicer_profile("nonexistent_printer_9999")
         assert profile.id == "default"
@@ -256,6 +286,18 @@ class TestSlicerProfilesJSON:
             if key.startswith("_"):
                 continue
             assert "display_name" in data, f"Profile '{key}' missing 'display_name'"
+
+    def test_cfs_tool_changes_are_hardware_unverified(self) -> None:
+        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
+        for key, data in raw.items():
+            if key.startswith("_"):
+                continue
+            tool_change = data.get("tool_change", {})
+            if tool_change.get("tool_changer") == "cfs":
+                assert tool_change.get("hardware_unverified") is True, (
+                    f"Profile '{key}' must mark CFS slot control hardware-unverified"
+                )
+                assert tool_change.get("control_mode") == "firmware_gcode_or_creality_print"
 
 
 # ===================================================================

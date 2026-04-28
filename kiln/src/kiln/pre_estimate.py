@@ -208,6 +208,9 @@ def _get_printer_tool_change(
         addon (str | None): The add-on ID if one was applied.
         addon_display_name (str | None): Human-readable add-on name.
         max_colors (int | None): Maximum simultaneous colors supported.
+        hardware_unverified (bool): True when Kiln has no hardware-validated
+            active slot-control path for this changer.
+        warnings (list[str]): Runtime warnings callers should surface.
     """
     profiles = _load_slicer_profiles()
 
@@ -232,6 +235,9 @@ def _get_printer_tool_change(
                 "addon": None,
                 "addon_display_name": None,
                 "max_colors": None,
+                "hardware_unverified": bool(tc.get("hardware_unverified", False)),
+                "control_mode": tc.get("control_mode"),
+                "warnings": list(tc.get("warnings", [])),
             }
 
     return {
@@ -241,6 +247,9 @@ def _get_printer_tool_change(
         "addon": None,
         "addon_display_name": None,
         "max_colors": None,
+        "hardware_unverified": False,
+        "control_mode": None,
+        "warnings": [],
     }
 
 
@@ -298,6 +307,9 @@ def _resolve_addon(
         "addon": addon_id,
         "addon_display_name": addon.get("display_name", addon_id),
         "max_colors": addon.get("max_colors"),
+        "hardware_unverified": bool(addon.get("hardware_unverified", False)),
+        "control_mode": addon.get("control_mode"),
+        "warnings": list(addon.get("warnings", [])),
     }
 
 
@@ -307,14 +319,17 @@ def _get_klipper_printer_ids(profiles: dict[str, Any]) -> set[str]:
     for pid, profile in profiles.items():
         if pid.startswith("_"):
             continue
-        # Klipper printers: Voron, Neptune 4, K1, RatRig, Sovol SV07, generic
+        # Klipper printers: Voron, Neptune 4, Creality K/Hi/V3, RatRig, Sovol SV07, generic
         slicer = profile.get("slicer", "")
         notes = profile.get("notes", "").lower()
         if "klipper" in slicer.lower() or "klipper" in notes:
             klipper_ids.add(pid)
     # Hardcoded known Klipper printers not always tagged in profiles
     _KNOWN_KLIPPER = {
-        "voron_2", "voron_0", "k1", "elegoo_neptune4",
+        "voron_2", "voron_0", "sparkx_i7", "k1", "k1_max", "k1c", "k1_se",
+        "k2", "k2_pro", "k2_plus", "k2_se", "creality_hi",
+        "ender3_v4", "ender3_v3", "ender3_v3_ke", "ender3_v3_plus",
+        "ender5_max", "cr10_se", "elegoo_neptune4",
         "ratrig_vcore3", "sovol_sv07", "klipper_generic",
     }
     klipper_ids.update(_KNOWN_KLIPPER)
@@ -357,6 +372,9 @@ def list_addons(*, printer_id: str | None = None) -> list[dict[str, Any]]:
             "max_colors": addon.get("max_colors"),
             "compatible": "universal" if is_universal else ("klipper" if is_klipper else compatible),
             "requires_klipper": addon.get("requires_klipper", False),
+            "hardware_unverified": bool(addon.get("hardware_unverified", False)),
+            "control_mode": addon.get("control_mode"),
+            "warnings": list(addon.get("warnings", [])),
         })
 
     return results
@@ -747,9 +765,15 @@ def estimate_from_dimensions(
         addon_id = tc_info.get("addon")
         addon_display = tc_info.get("addon_display_name")
         max_colors = tc_info.get("max_colors")
+        warnings.extend(str(warning) for warning in tc_info.get("warnings", []))
 
         if tc_info["has_auto_tool_change"]:
             tool_change_time_s = tool_changes * tc_seconds
+            if tc_info.get("hardware_unverified"):
+                warnings.append(
+                    f"{addon_display or tool_change_type} slot control is hardware-unverified in Kiln. "
+                    "Verify CFS slot mapping and run a small multicolor test before unattended production printing."
+                )
             # Check color capacity warning
             if max_colors and num_materials > max_colors:
                 warnings.append(
@@ -764,6 +788,11 @@ def estimate_from_dimensions(
                 f"Printer '{printer_id}' has no automatic tool changer. "
                 f"Estimated {tool_changes} manual filament swaps at ~{_MANUAL_TOOL_CHANGE_SECONDS}s each."
             )
+            if printer_id in {"k1", "k1_max", "k1c", "k1_se"}:
+                warnings.append(
+                    f"Stock Creality '{printer_id}' is single-material. Select tool_changer_addon='creality_cfs' "
+                    "only after CFS-C hardware, firmware, and the compatible hotend path are installed."
+                )
             addon_id = None
             addon_display = None
             max_colors = None

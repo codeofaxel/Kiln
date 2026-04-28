@@ -11,7 +11,7 @@
 
 ---
 
-**Kiln is an open-source MCP server that lets AI agents (Claude, ChatGPT, Cursor, or any custom MCP client) drive real 3D printers end to end — Bambu Lab, Prusa, OctoPrint, Moonraker, and Elegoo.**
+**Kiln is an open-source MCP server that lets AI agents (Claude, ChatGPT, Cursor, or any custom MCP client) drive real 3D printers end to end — OctoPrint, Moonraker/Klipper, Creality, Bambu Lab, Prusa Link, Elegoo, and Direct USB.**
 
 In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result. No human in the middle.
 
@@ -38,7 +38,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing)) add Git-for-3D ver
 
 ### Why Kiln?
 
-- **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
+- **One control plane, any printer** — OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
 - **No printer? No problem** — Outsource any job to Craftcloud's 150+ manufacturing services. Kiln handles quoting, ordering, and tracking. No API key required.
 - **AI-native** — 759 MCP capabilities and 214 CLI commands built for AI agents. Not a web UI with an API bolted on.
 - **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print.
@@ -49,7 +49,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing)) add Git-for-3D ver
 - **Smart material routing** — 25 materials, 45 brand-specific filament profiles (Bambu, Prusament, Polymaker, and more) across 11 material families. Intent-based recommendations with printer capability awareness.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure recovery, closed-loop AI generation feedback (failed prints auto-improve future generations), preflight safety checks on every job.
 - **Search → Slice → Print** — Search and download 3D models from MyMiniFactory and Cults3D (search only), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
-- **Safety at scale** — 29 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
+- **Safety at scale** — 44 named per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
 
 ## Architecture
 
@@ -65,9 +65,10 @@ graph TD
 
     C --> E1["OctoPrint"]
     C --> E2["Moonraker"]
-    C --> E3["Bambu"]
-    C --> E4["Prusa Link"]
-    C --> E5["Elegoo"]
+    C --> E3["Creality"]
+    C --> E4["Bambu"]
+    C --> E5["Prusa Link"]
+    C --> E6["Elegoo"]
 
     F --> F1["Craftcloud"]
 
@@ -99,7 +100,7 @@ graph TD
     style V3 fill:#2d2d44,stroke:#f59e42,color:#fff
 ```
 
-Kiln connects AI agents to **OctoPrint**, **Moonraker** (Klipper), **Bambu Lab**, **Prusa Link**, and **Elegoo** printers. Agents can also outsource jobs through **Craftcloud** fulfillment, and search models on **MyMiniFactory**, **Cults3D** (search only), and **Thingiverse**. On Pro and up, the design store itself is versioned — branches, signed releases, and cross-machine cloud sync are first-class outputs of the system, not a side database.
+Kiln connects AI agents to **OctoPrint**, **Moonraker** (Klipper), **Creality** (Moonraker-backed), **Bambu Lab**, **Prusa Link**, and **Elegoo** printers. Agents can also outsource jobs through **Craftcloud** fulfillment, and search models on **MyMiniFactory**, **Cults3D** (search only), and **Thingiverse**. On Pro and up, the design store itself is versioned — branches, signed releases, and cross-machine cloud sync are first-class outputs of the system, not a side database.
 
 ## Git for 3D
 
@@ -156,7 +157,7 @@ This monorepo contains two packages:
 
 | Package | Description | Entry Point |
 |---------|-------------|-------------|
-| **kiln** | CLI + MCP server for multi-printer control (OctoPrint, Moonraker, Bambu, Elegoo, Prusa Link) | `kiln` or `python -m kiln` |
+| **kiln** | CLI + MCP server for multi-printer control (OctoPrint, Moonraker, Creality, Bambu, Prusa Link, Elegoo, Direct USB) | `kiln` or `python -m kiln` |
 | **octoprint-cli** | Lightweight standalone CLI for OctoPrint-only setups | `octoprint-cli` |
 
 ## Prerequisites
@@ -168,6 +169,7 @@ Before installing Kiln, you need your printer's LAN details (Ethernet or Wi-Fi):
 | **Prusa MK4/XL/Mini+** | `prusaconnect` | IP address + API key (both in Settings > Network > PrusaLink on the printer's LCD) |
 | **OctoPrint** (any printer) | `octoprint` | OctoPrint URL + API key (Settings > API in OctoPrint web UI) |
 | **Klipper/Moonraker** | `moonraker` | Moonraker URL (usually `http://<ip>:7125`) |
+| **Creality SPARKX/K1/K2/Hi/Ender V4/V3 KE** | `creality` | Printer IP + `printer_model` (e.g. `creality_k1_max`); Kiln probes local Moonraker ports |
 | **Bambu Lab** | `bambu` | IP address + LAN access code + serial number (all on the printer's LCD) |
 | **Elegoo** (SDCP printers) | `elegoo` | IP address only — no authentication required. For Neptune 4/OrangeStorm Giga, use `moonraker` instead. |
 | **Direct USB** (Marlin) | `serial` | USB cable only — no network, no OctoPrint, no Klipper. Works with Ender 3, Prusa MK3, CR-10, any Marlin/RepRapFirmware printer. |
@@ -232,6 +234,7 @@ Kiln works the same over Ethernet and Wi-Fi because it talks to printer APIs ove
 # 3. Verify the printer endpoint responds:
 curl http://<printer-ip>/api/version                    # OctoPrint
 curl http://<printer-ip>:7125/server/info               # Moonraker
+curl http://<printer-ip>:7125/server/info               # Creality K1/K2/Hi when local Moonraker is reachable
 curl -H "X-Api-Key: YOUR_KEY" http://<printer-ip>/api/v1/status   # Prusa Link
 
 # 4. Register directly by IP (no discovery required)
@@ -293,7 +296,7 @@ source ~/.kiln-venv/bin/activate
 
 git clone https://github.com/codeofaxel/Kiln.git
 cd Kiln
-pip install -e ./kiln            # includes all printer backends (OctoPrint, Moonraker, Bambu, Elegoo, Prusa Link)
+pip install -e ./kiln            # includes all printer backends (OctoPrint, Moonraker, Creality, Bambu, Prusa Link, Elegoo)
 
 kiln verify
 ```
@@ -309,6 +312,7 @@ connect directly by IP (same flow for Ethernet-only printers):
 # 1. Find your printer's IP (check your router or the printer's LCD/web UI)
 # 2. Verify connectivity from WSL
 curl http://192.168.1.100:7125/server/info                              # Moonraker (Klipper)
+curl http://192.168.1.100:7125/server/info                              # Creality K1/K2/Hi local Moonraker path
 curl http://192.168.1.100/api/version                                   # OctoPrint
 curl -H "X-Api-Key: YOUR_KEY" http://192.168.1.100/api/v1/status       # Prusa Link
 # Bambu printers use MQTT — just ensure port 8883 is reachable:
@@ -434,7 +438,8 @@ kiln serve
 
 # Or override with environment variables
 export KILN_PRINTER_HOST=http://192.168.1.100    # Your printer's IP or hostname
-export KILN_PRINTER_API_KEY=your_api_key          # API key (OctoPrint/Moonraker/Prusa Link)
+export KILN_PRINTER_API_KEY=your_api_key          # API key (OctoPrint/Moonraker/Creality/Prusa Link)
+export KILN_PRINTER_MODEL=creality_k1_max         # Optional safety/profile key
 export KILN_PRINTER_TYPE=prusaconnect             # octoprint | moonraker | bambu | prusaconnect | elegoo | serial
 kiln serve
 ```
@@ -620,7 +625,7 @@ The Kiln MCP server (`kiln serve`) exposes **752 tools** to agents, plus prompts
 | `save_agent_note` | Save a persistent note/preference that survives across sessions |
 | `get_agent_context` | Retrieve all stored agent memory for context |
 | `delete_agent_note` | Remove a stored note or preference |
-| `list_safety_profiles` | List all bundled printer safety profiles (29 models) |
+| `list_safety_profiles` | List all bundled printer safety profiles (44 named models plus default/generic profiles) |
 | `get_safety_profile` | Get temperature/feedrate/flow limits for a specific printer |
 | `validate_gcode_safe` | Validate G-code against printer-specific safety limits |
 | `list_slicer_profiles` | List all bundled slicer profiles with recommended settings |
@@ -874,6 +879,7 @@ The legacy `network_*` CLI commands and MCP tool aliases were deprecated in `v0.
 |---------|--------|----------|
 | **OctoPrint** | Stable | Any OctoPrint-connected printer (Prusa, Ender, custom) |
 | **Moonraker** | Stable | Klipper-based printers (Voron, Ratrig, etc.) |
+| **Creality** | Stable when Moonraker is reachable | SPARKX i7, K1/K1 Max/K1C/K1 SE, K2/K2 Pro/K2 Plus/K2 SE, Creality Hi, Ender-3 V4/V3 KE, Ender-5 Max, CR-10 SE via local Moonraker. Older Marlin Creality printers use `serial` or `octoprint`. |
 | **Bambu** | Stable | Bambu Lab X1C, P1S, A1 (via LAN MQTT) |
 | **Prusa Link** | Stable | Prusa MK4, XL, Mini+ (local REST API — type: `prusaconnect`) |
 | **Elegoo** | Stable | Centauri Carbon, Saturn, Mars series (via LAN WebSocket/SDCP). Neptune 4/OrangeStorm Giga use Moonraker. |
@@ -897,7 +903,7 @@ The server also exposes read-only resources that agents can use for context:
 | Module | Description |
 |---|---|
 | `server.py` | MCP server with tools, resources, and subsystem wiring |
-| `printers/` | Printer adapter abstraction (OctoPrint, Moonraker, Bambu, Elegoo, Prusa Link) |
+| `printers/` | Printer adapter abstraction (OctoPrint, Moonraker, Creality, Bambu, Prusa Link, Elegoo) |
 | `marketplaces/` | Model marketplace adapters (MyMiniFactory, Cults3D, Thingiverse, metadata-only sources) |
 | `slicer.py` | Slicer integration (PrusaSlicer, OrcaSlicer) with auto-detection |
 | `registry.py` | Fleet registry for multi-printer management |
@@ -922,7 +928,7 @@ The server also exposes read-only resources that agents can use for context:
 | `plugins/` | Focused MCP tool modules loaded by the plugin loader |
 | `gcode.py` | G-code safety validator with per-printer limits |
 | `gcode_interceptor.py` | Rule-based G-code interception and safety rewriting |
-| `safety_profiles.py` | Bundled safety database (29 printer models, temps/feedrates/flow) |
+| `safety_profiles.py` | Bundled safety database (44 named printer models, temps/feedrates/flow) |
 | `slicer_profiles.py` | Bundled slicer profiles (auto-generates .ini files per printer) |
 | `printer_intelligence.py` | Printer knowledge base (firmware quirks, materials, failure modes) |
 | `pipelines.py` | Pre-validated print pipelines (quick_print, calibrate, benchmark) |
@@ -982,7 +988,7 @@ Kiln can automatically find printers on your local network:
 kiln discover
 ```
 
-Discovery uses mDNS/Bonjour and HTTP subnet probing to find OctoPrint, Moonraker, Bambu, and Prusa Link printers.
+Discovery uses mDNS/Bonjour and HTTP subnet probing to find OctoPrint, Moonraker/Creality, Bambu, Elegoo, and Prusa Link printers.
 If discovery returns no results, register printers directly by IP with `kiln auth` (works for both Ethernet and Wi-Fi LAN setups).
 
 ## Third-Party Plugins
@@ -1084,7 +1090,7 @@ kiln snapshot --save photo.jpg
 kiln snapshot --json
 ```
 
-Supported on OctoPrint, Moonraker, Prusa Link, and Bambu (requires `ffmpeg` for RTSP capture — see install note above). Agents use the `printer_snapshot` MCP tool.
+Supported on OctoPrint, Moonraker, Creality when exposed by Moonraker, Bambu, Prusa Link, and Elegoo (requires `ffmpeg` for RTSP capture on RTSP backends — see install note above). Agents use the `printer_snapshot` MCP tool.
 
 ## Fulfillment Services
 

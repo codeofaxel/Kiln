@@ -394,6 +394,7 @@ def _make_adapter(cfg: dict[str, Any]):
     """Create a PrinterAdapter from a config dict."""
     from kiln.printers import (
         BambuAdapter,
+        CrealityAdapter,
         ElegooAdapter,
         MoonrakerAdapter,
         OctoPrintAdapter,
@@ -407,6 +408,12 @@ def _make_adapter(cfg: dict[str, Any]):
         return OctoPrintAdapter(host=host, api_key=cfg.get("api_key", ""))
     elif ptype == "moonraker":
         return MoonrakerAdapter(host=host, api_key=cfg.get("api_key") or None)
+    elif ptype == "creality":
+        return CrealityAdapter(
+            host=host,
+            api_key=cfg.get("api_key") or None,
+            model=cfg.get("printer_model") or None,
+        )
     elif ptype == "bambu":
         if BambuAdapter is None:
             raise click.ClickException("Bambu support requires paho-mqtt. Install it with: pip install paho-mqtt")
@@ -882,8 +889,42 @@ def _map_printer_hint_to_profile_id(raw: str | None) -> str | None:
         return "prusa_mk3s"
     if "prusa_xl" in hint or hint.endswith("_xl") or hint == "xl" or "prusa" in hint and "xl" in hint:
         return "prusa_xl"
+    if hint in {"sparkx_i7", "creality_sparkx_i7"} or "sparkxi7" in hint_compact:
+        return "sparkx_i7"
+    if "k1max" in hint_compact:
+        return "k1_max"
+    if hint_compact in {"k1c", "crealityk1c"}:
+        return "k1c"
+    if hint_compact in {"k1se", "crealityk1se"}:
+        return "k1_se"
+    if hint_compact in {"k1", "crealityk1"}:
+        return "k1"
+    if "k2plus" in hint_compact:
+        return "k2_plus"
+    if "k2pro" in hint_compact:
+        return "k2_pro"
+    if "k2se" in hint_compact:
+        return "k2_se"
+    if hint_compact in {"k2", "crealityk2"}:
+        return "k2"
+    if hint in {"creality_hi", "hi"} or hint_compact in {"crealityhi"}:
+        return "creality_hi"
+    if "ender3v4" in hint_compact:
+        return "ender3_v4"
+    if "ender3v3ke" in hint_compact:
+        return "ender3_v3_ke"
+    if "ender3v3se" in hint_compact:
+        return "ender3_v3_se"
+    if "ender3v3plus" in hint_compact:
+        return "ender3_v3_plus"
+    if "ender3v3" in hint_compact:
+        return "ender3_v3"
     if "ender3" in hint_compact:
         return "ender3"
+    if "ender5max" in hint_compact:
+        return "ender5_max"
+    if "cr10se" in hint_compact:
+        return "cr10_se"
     if hint in {"klipper", "moonraker"}:
         return "klipper_generic"
 
@@ -1103,6 +1144,97 @@ def _run_prusa_diagnostics(cfg: dict[str, Any]) -> dict[str, Any]:
     return summary
 
 
+def _run_creality_diagnostics(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Run non-destructive diagnostics for a Creality Moonraker config."""
+    checks: list[dict[str, Any]] = []
+    summary: dict[str, Any] = {
+        "host": cfg.get("host", ""),
+        "type": cfg.get("type", ""),
+        "checks": checks,
+        "ok": False,
+        "resolved_url": None,
+        "browser_test_url": None,
+        "klippy_state": None,
+        "likely_cause": None,
+        "user_message": None,
+        "firmware_lockdown_possible": False,
+        "connection_checklist": [],
+        "cfs_status": None,
+        "next_steps": [],
+    }
+
+    if str(cfg.get("type", "")).strip().lower() != "creality":
+        checks.append(
+            {
+                "name": "backend",
+                "ok": False,
+                "detail": "Active printer is not type 'creality'.",
+            }
+        )
+        return summary
+
+    from kiln.printers.creality import diagnose_creality_moonraker
+
+    diag = diagnose_creality_moonraker(
+        str(cfg.get("host", "") or ""),
+        api_key=cfg.get("api_key") or None,
+    )
+    diag_dict = diag.to_dict()
+    summary.update(
+        {
+            "ok": diag.ok,
+            "resolved_url": diag.resolved_url,
+            "browser_test_url": diag.browser_test_url,
+            "klippy_state": diag.klippy_state,
+            "likely_cause": diag.likely_cause,
+            "user_message": diag.user_message,
+            "firmware_lockdown_possible": diag.firmware_lockdown_possible,
+            "connection_checklist": diag.connection_checklist,
+            "next_steps": diag.next_steps,
+        }
+    )
+    for check in diag_dict.get("checks", []):
+        checks.append(
+            {
+                "name": "moonraker_probe",
+                "ok": bool(check.get("ok")),
+                "detail": f"{check.get('url')}: {check.get('detail')}",
+                "warn": bool(check.get("auth_required")),
+            }
+        )
+
+    if diag.ok:
+        try:
+            adapter = _make_adapter({**cfg, "host": diag.resolved_url or cfg.get("host", "")})
+            if hasattr(adapter, "get_cfs_status"):
+                cfs = adapter.get_cfs_status()
+                summary["cfs_status"] = cfs
+                checks.append(
+                    {
+                        "name": "cfs_discovery",
+                        "ok": True,
+                        "warn": bool(cfs.get("hardware_unverified", True)),
+                        "detail": (
+                            f"detected={bool(cfs.get('detected'))}; "
+                            f"slots={cfs.get('slot_count') or 'unknown'}; "
+                            "active slot control hardware-unverified"
+                        ),
+                    }
+                )
+        except Exception as exc:
+            logger.debug("Creality CFS discovery failed: %s", exc)
+            checks.append(
+                {
+                    "name": "cfs_discovery",
+                    "ok": True,
+                    "warn": True,
+                    "detail": f"CFS discovery skipped: {exc}",
+                }
+            )
+
+    return summary
+
+
 # ---------------------------------------------------------------------------
 # CLI group
 # ---------------------------------------------------------------------------
@@ -1299,12 +1431,13 @@ def discover(timeout: float, subnet: str | None, methods: tuple, json_mode: bool
     "--type",
     "printer_type",
     required=True,
-    type=click.Choice(["octoprint", "moonraker", "bambu", "elegoo", "prusaconnect"]),
+    type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusaconnect"]),
     help="Printer backend type.",
 )
-@click.option("--api-key", default=None, help="API key (OctoPrint/Moonraker/Prusa Link).")
+@click.option("--api-key", default=None, help="API key (OctoPrint/Moonraker/Creality/Prusa Link).")
 @click.option("--access-code", default=None, help="LAN access code (Bambu).")
 @click.option("--serial", default=None, help="Printer serial number (Bambu) or mainboard ID (Elegoo).")
+@click.option("--printer-model", default=None, help="Printer model profile (e.g. k1_max, sparkx_i7, ender3_v4).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def auth(
     name: str,
@@ -1313,6 +1446,7 @@ def auth(
     api_key: str | None,
     access_code: str | None,
     serial: str | None,
+    printer_model: str | None,
     json_mode: bool,
 ) -> None:
     """Save printer credentials to the config file."""
@@ -1324,8 +1458,11 @@ def auth(
             api_key=api_key,
             access_code=access_code,
             serial=serial,
+            printer_model=printer_model,
         )
         prusa_diagnostics: dict[str, Any] | None = None
+        creality_diagnostics: dict[str, Any] | None = None
+        saved_host = host
         if printer_type == "prusaconnect":
             try:
                 cfg = load_printer_config(name)
@@ -1344,15 +1481,37 @@ def auth(
                     )
             except Exception as exc:
                 logger.debug("Prusa diagnostics after auth failed: %s", exc)
+        elif printer_type == "creality":
+            try:
+                cfg = load_printer_config(name)
+                creality_diagnostics = _run_creality_diagnostics(cfg)
+                resolved_url = creality_diagnostics.get("resolved_url")
+                if isinstance(resolved_url, str) and resolved_url and resolved_url != host:
+                    saved_host = resolved_url
+                    save_printer(
+                        name,
+                        printer_type,
+                        saved_host,
+                        api_key=api_key,
+                        access_code=access_code,
+                        serial=serial,
+                        printer_model=printer_model,
+                    )
+            except Exception as exc:
+                logger.debug("Creality diagnostics after auth failed: %s", exc)
 
         data = {
             "name": name,
             "type": printer_type,
-            "host": host,
+            "host": saved_host,
             "config_path": str(path),
         }
+        if printer_model:
+            data["printer_model"] = printer_model
         if prusa_diagnostics is not None:
             data["diagnostics"] = prusa_diagnostics
+        if creality_diagnostics is not None:
+            data["diagnostics"] = creality_diagnostics
 
         if printer_type == "prusaconnect" and prusa_diagnostics is not None and not prusa_diagnostics.get("ok", False):
             checks = prusa_diagnostics.get("checks", [])
@@ -1379,6 +1538,31 @@ def auth(
                 click.echo(format_error(message, code="PRUSA_DIAGNOSTICS_FAILED", json_mode=False))
             sys.exit(1)
 
+        if printer_type == "creality" and creality_diagnostics is not None and not creality_diagnostics.get("ok", False):
+            checks = creality_diagnostics.get("checks", [])
+            failed_checks = [
+                c.get("name", "unknown")
+                for c in checks
+                if isinstance(c, dict) and not c.get("ok", False) and not c.get("warn", False)
+            ]
+            failed_summary = ", ".join(failed_checks) if failed_checks else "Moonraker probe"
+            message = (
+                "Saved printer credentials, but Creality Moonraker diagnostics failed "
+                f"({failed_summary}). Run 'kiln doctor-creality --json' for details."
+            )
+            if json_mode:
+                click.echo(
+                    format_response(
+                        "error",
+                        data=data,
+                        error={"code": "CREALITY_MOONRAKER_NOT_REACHABLE", "message": message},
+                        json_mode=True,
+                    )
+                )
+            else:
+                click.echo(format_error(message, code="CREALITY_MOONRAKER_NOT_REACHABLE", json_mode=False))
+            sys.exit(1)
+
         click.echo(format_response("success", data=data, json_mode=json_mode))
         if not json_mode and prusa_diagnostics is not None:
             profile_id = prusa_diagnostics.get("profile_id")
@@ -1397,6 +1581,20 @@ def auth(
                 click.echo("Storage roots not reachable yet. Verify API key and run: kiln doctor-prusa")
             else:
                 click.echo("Prusa connectivity check passed. Run: kiln doctor-prusa for full diagnostics.")
+        if not json_mode and creality_diagnostics is not None:
+            resolved_url = creality_diagnostics.get("resolved_url")
+            browser_url = creality_diagnostics.get("browser_test_url")
+            if resolved_url:
+                click.echo(f"Creality Moonraker resolved: {resolved_url}")
+            if browser_url:
+                click.echo(f"Browser test: {browser_url}")
+            cfs = creality_diagnostics.get("cfs_status")
+            if isinstance(cfs, dict):
+                detected = "detected" if cfs.get("detected") else "not detected"
+                click.echo(
+                    f"CFS discovery: {detected}; active slot control is hardware-unverified in Kiln."
+                )
+            click.echo("Creality connectivity check passed. Run: kiln doctor-creality for full diagnostics.")
     except OSError as exc:
         click.echo(
             format_error(
@@ -3280,7 +3478,7 @@ def snapshot(ctx: click.Context, output: str | None, source: str | None, json_mo
     """Capture a webcam snapshot from the printer.
 
     Saves the image to a file (--output) or prints base64-encoded data
-    in JSON mode.  Supports OctoPrint and Moonraker webcams.
+    in JSON mode.  Supports OctoPrint, Moonraker, and Creality webcams when exposed by the backend.
     """
     import base64
 
@@ -6565,6 +6763,7 @@ def donate(json_mode: bool) -> None:
 _PRINTER_TYPE_LABELS = {
     "octoprint": "OctoPrint",
     "moonraker": "Moonraker (Klipper)",
+    "creality": "Creality (Klipper/Moonraker)",
     "bambu": "Bambu Lab",
     "elegoo": "Elegoo (SDCP)",
     "prusaconnect": "Prusa Link",
@@ -6692,7 +6891,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         if printer_type == "unknown":
             printer_type = click.prompt(
                 "  Printer type could not be auto-detected. Select type",
-                type=click.Choice(["octoprint", "moonraker", "bambu", "elegoo", "prusaconnect"]),
+                type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusaconnect"]),
             )
         suggested_name = (selected.name or printer_type).lower().replace(" ", "-").replace(".", "-")
     else:
@@ -6715,7 +6914,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                 click.echo("  Could not auto-detect printer type.")
                 printer_type = click.prompt(
                     "  Select printer type",
-                    type=click.Choice(["octoprint", "moonraker", "bambu", "elegoo", "prusaconnect"]),
+                    type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusaconnect"]),
                 )
                 suggested_name = printer_type
         except Exception as exc:
@@ -6723,7 +6922,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
             click.echo("  Probe failed. Enter type manually.")
             printer_type = click.prompt(
                 "  Select printer type",
-                type=click.Choice(["octoprint", "moonraker", "bambu", "elegoo", "prusaconnect"]),
+                type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusaconnect"]),
             )
             suggested_name = printer_type
 
@@ -6737,7 +6936,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     access_code = None
     serial = None
 
-    if printer_type in ("octoprint", "moonraker", "prusaconnect"):
+    if printer_type in ("octoprint", "moonraker", "creality", "prusaconnect"):
         api_key = click.prompt(
             f"  API key for {_PRINTER_TYPE_LABELS.get(printer_type, printer_type)}",
             default="",
@@ -7880,7 +8079,7 @@ def firmware() -> None:
     """Check and apply firmware updates.
 
     Query available updates, apply upgrades, or roll back to a previous
-    version.  Supported for OctoPrint and Moonraker printers.
+    version.  Supported for OctoPrint, Moonraker, and Creality printers when exposed by the backend.
     """
 
 
@@ -8008,7 +8207,7 @@ def firmware_rollback_cmd(ctx: click.Context, component: str, json_mode: bool) -
     """Roll back a firmware component to its previous version.
 
     COMPONENT is the name of the component to roll back (e.g. klipper).
-    Only supported on Moonraker printers.
+    Only supported on Moonraker-backed printers.
     """
     import json as _json
 
@@ -8221,6 +8420,114 @@ def doctor_prusa(ctx: click.Context, json_mode: bool) -> None:
         sys.exit(1)
 
 
+@cli.command("doctor-creality")
+@click.option("--host", default=None, help="Printer IP/hostname/URL to probe without loading saved config.")
+@click.option("--api-key", default=None, help="Moonraker API key, if local auth is enabled.")
+@click.option("--model", default=None, help="Printer model hint (e.g. k1_max) for capability guidance.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def doctor_creality(
+    ctx: click.Context,
+    host: str | None,
+    api_key: str | None,
+    model: str | None,
+    json_mode: bool,
+) -> None:
+    """Run focused diagnostics for Creality Moonraker and CFS discovery."""
+    import json as _json
+
+    if host:
+        cfg: dict[str, Any] = {
+            "type": "creality",
+            "host": host,
+            "api_key": api_key,
+            "printer_model": model,
+        }
+    else:
+        try:
+            cfg = load_printer_config(ctx.obj.get("printer"))
+        except ValueError as exc:
+            click.echo(format_error(str(exc), code="CONFIG_ERROR", json_mode=json_mode))
+            sys.exit(1)
+        except Exception as exc:
+            click.echo(format_error(str(exc), code="CONFIG_ERROR", json_mode=json_mode))
+            sys.exit(1)
+
+        if api_key:
+            cfg["api_key"] = api_key
+        if model:
+            cfg["printer_model"] = model
+
+    if str(cfg.get("type", "")).strip().lower() != "creality":
+        click.echo(
+            format_error(
+                "Active printer is not Creality. Set one with --printer, run: kiln auth --type creality ..., or pass --host.",
+                code="WRONG_PRINTER_TYPE",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+    result = _run_creality_diagnostics(cfg)
+    if json_mode:
+        click.echo(_json.dumps({"status": "success" if result.get("ok") else "error", "data": result}, indent=2))
+    else:
+        click.echo("Creality Moonraker diagnostics:")
+        if result.get("user_message"):
+            click.echo(str(result["user_message"]))
+        for check in result.get("checks", []):
+            if not isinstance(check, dict):
+                continue
+            icon = "✓" if check.get("ok") else ("⚠" if check.get("warn") else "✗")
+            click.echo(f"  {icon} {check.get('name')}: {check.get('detail')}")
+        if result.get("resolved_url"):
+            click.echo(f"\nResolved Moonraker URL: {result['resolved_url']}")
+        if result.get("browser_test_url"):
+            click.echo(f"Browser test: {result['browser_test_url']}")
+        if result.get("likely_cause"):
+            click.echo(f"Likely cause: {result['likely_cause']}")
+
+        model_hint = model or cfg.get("printer_model")
+        mapped_model = _map_printer_hint_to_profile_id(str(model_hint or ""))
+        if mapped_model in {"k1", "k1_max", "k1c", "k1_se"}:
+            click.echo(
+                "\nK1-series CFS-C note: stock machines are single-material. "
+                "Use CFS-C only after the retrofit hardware, firmware update, "
+                "and compatible hotend path are installed."
+            )
+
+        cfs = result.get("cfs_status")
+        if isinstance(cfs, dict):
+            click.echo("\nCFS discovery:")
+            click.echo(f"  detected: {bool(cfs.get('detected'))}")
+            click.echo(f"  candidate objects: {', '.join(cfs.get('candidate_objects') or []) or 'none'}")
+            click.echo(f"  candidate commands: {', '.join(cfs.get('candidate_commands') or []) or 'none'}")
+            click.echo(f"  slots: {cfs.get('slot_count') or 'unknown'}")
+            click.echo("  active slot control: hardware-unverified/read-only")
+
+        checklist = result.get("connection_checklist") or []
+        if checklist and not result.get("ok"):
+            click.echo("\nConnection checklist:")
+            for item in checklist:
+                click.echo(f"  - {item}")
+
+        if result.get("firmware_lockdown_possible"):
+            click.echo(
+                "\nFirmware/local access note: the printer answered, but not with Moonraker. "
+                "Stock firmware on that version may have local Moonraker disabled, locked down, "
+                "or exposed on a different port."
+            )
+
+        next_steps = result.get("next_steps") or []
+        if next_steps:
+            click.echo("\nNext steps:")
+            for step in next_steps:
+                click.echo(f"  - {step}")
+
+    if not result.get("ok"):
+        sys.exit(1)
+
+
 # ---------------------------------------------------------------------------
 # Deep network diagnostics for kiln doctor --deep
 # ---------------------------------------------------------------------------
@@ -8324,6 +8631,11 @@ def _deep_network_diagnostics(host: str, printer_cfg: dict) -> list[dict]:
         "moonraker": [
             (7125, "Moonraker API"),
             (80, "HTTP"),
+        ],
+        "creality": [
+            (7125, "Moonraker API"),
+            (80, "HTTP"),
+            (4408, "Moonraker/Fluidd alternate"),
         ],
         "prusaconnect": [
             (80, "HTTP"),
@@ -8557,6 +8869,41 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
                 checks.append(
                     {
                         "name": "prusa_storage",
+                        "ok": False,
+                        "detail": str(exc),
+                    }
+                )
+        elif str(printer_cfg.get("type", "")).strip().lower() == "creality":
+            try:
+                creality_diag = _run_creality_diagnostics(printer_cfg)
+                detail = str(creality_diag.get("resolved_url") or printer_cfg.get("host", ""))
+                if creality_diag.get("klippy_state"):
+                    detail += f" (klippy_state={creality_diag.get('klippy_state')})"
+                checks.append(
+                    {
+                        "name": "creality_moonraker",
+                        "ok": bool(creality_diag.get("ok")),
+                        "detail": detail,
+                    }
+                )
+                cfs = creality_diag.get("cfs_status")
+                if isinstance(cfs, dict):
+                    checks.append(
+                        {
+                            "name": "creality_cfs",
+                            "ok": True,
+                            "warn": bool(cfs.get("hardware_unverified", True)),
+                            "detail": (
+                                f"detected={bool(cfs.get('detected'))}; "
+                                "active slot control hardware-unverified"
+                            ),
+                        }
+                    )
+            except Exception as exc:
+                logger.debug("Creality verify diagnostics failed: %s", exc)
+                checks.append(
+                    {
+                        "name": "creality_moonraker",
                         "ok": False,
                         "detail": str(exc),
                     }

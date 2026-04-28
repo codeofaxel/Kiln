@@ -200,23 +200,30 @@ def get_profile(printer_id: str) -> SafetyProfile:
     _load()
     _load_community()
     normalised = printer_id.lower().replace("-", "_").strip()
+    candidates = [normalised]
+    if normalised.startswith("creality_"):
+        candidates.append(normalised.removeprefix("creality_"))
 
     # Community profiles take precedence over bundled.
-    community = _community_cache.get(normalised)
-    if community is not None:
-        return community
+    for candidate in candidates:
+        community = _community_cache.get(candidate)
+        if community is not None:
+            return community
 
-    profile = _cache.get(normalised)
-    if profile is not None:
-        return profile
+    for candidate in candidates:
+        profile = _cache.get(candidate)
+        if profile is not None:
+            return profile
 
     # Try fuzzy prefix match (e.g. "ender-3-v2" → "ender3").
     for key in _community_cache:
-        if normalised.startswith(key) or key.startswith(normalised):
-            return _community_cache[key]
+        for candidate in candidates:
+            if candidate.startswith(key) or key.startswith(candidate):
+                return _community_cache[key]
     for key in _cache:
-        if normalised.startswith(key) or key.startswith(normalised):
-            return _cache[key]
+        for candidate in candidates:
+            if candidate.startswith(key) or key.startswith(candidate):
+                return _cache[key]
 
     default = _cache.get("default")
     if default is not None:

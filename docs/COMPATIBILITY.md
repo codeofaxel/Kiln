@@ -36,6 +36,58 @@ Notes: The adapter uses standard OctoPrint REST endpoints (`/api/printer`, `/api
 
 Notes: The adapter queries `/printer/info` for klippy state and `/printer/objects/query` for temperatures and print stats. It supports the full Moonraker update manager API including component-level updates and rollbacks. Webcam discovery uses the Moonraker webcam API (`/server/webcams/list`). Compatible with any Klipper installation fronted by Moonraker.
 
+For QIDI X-Plus 3 printers exposing Moonraker, configure Kiln with `type: moonraker` and `printer_model: qidi_x_plus3`. X-Max 3 is not claimed by this profile; use `klipper_generic` until a separate verified profile exists.
+
+### Creality (Moonraker-backed)
+
+| Item | Version |
+|---|---|
+| Tested path | Local Moonraker API when reachable on the printer LAN |
+| Authentication | Optional `X-Api-Key` header for Moonraker auth setups |
+| Protocol | HTTP/HTTPS via Moonraker |
+| Features | Full Moonraker-backed support (state, temps, upload, print control, G-code, webcam, firmware/update surfaces exposed by Moonraker) |
+
+**Supported path:** use `type: creality` for modern Creality FDM printers that expose Moonraker, including SPARKX i7, K1/K1 Max/K1C/K1 SE, K2/K2 Pro/K2 Plus/K2 SE, Creality Hi, Ender-3 V4, Ender-3 V3 KE, Ender-5 Max, CR-10 SE, and similar CrealityOS/Klipper models. Older Marlin-based Creality printers remain supported through `serial` or `octoprint`.
+
+Notes: Creality is a brand layer, not a single protocol. The `creality` adapter probes common Moonraker ports (`7125`, `80`, `4408`) and then delegates to the Moonraker adapter. If `/server/info` is not reachable, configure the printer through `serial`/`octoprint` or enable/verify the printer's local Moonraker service.
+
+`kiln doctor-creality` classifies common reachability misses as `network_or_port_unreachable`, `moonraker_auth_required`, `firmware_locked_or_wrong_port`, or `moonraker_backend_unavailable`. Its guidance is intentionally local-network-first: same Wi-Fi/LAN, correct printer IP, correct Moonraker port, API key if required, and a cautious stock-firmware note when the printer answers HTTP but does not expose Moonraker at `/server/info`.
+
+**Local connection test for K1 Max / K1 / K2 / Hi:**
+
+1. Put the computer and printer on the same LAN. Avoid guest Wi-Fi or networks with client/device isolation.
+2. Find the printer IP on the printer screen or router device list.
+3. In a browser on the computer, open `http://<printer-ip>:7125/server/info`.
+4. If that fails, try `http://<printer-ip>/server/info` and `http://<printer-ip>:4408/server/info`.
+5. A JSON response with Moonraker/Klipper fields means Kiln can use the local path. A browser timeout usually means wrong IP, different network, router isolation, or local Moonraker disabled. HTTP 401/403 means Moonraker answered but needs an API key.
+
+CLI setup:
+
+```bash
+kiln doctor-creality --host <printer-ip> --model k1_max
+kiln auth --name k1max --type creality --host <printer-ip> --printer-model k1_max
+```
+
+**Creality camera and multicolor capability notes:**
+
+| Model family | Camera | Multicolor |
+|---|---|---|
+| SPARKX i7 | Built-in AI monitoring camera | Built-in four-color CFS path |
+| K1 Max | Built-in AI camera/LiDAR | Optional CFS-C retrofit, four colors max |
+| K1C | Built-in AI monitoring camera | Optional CFS-C retrofit, four colors max |
+| K1 | Optional AI camera accessory | Optional CFS-C retrofit, four colors max |
+| K1 SE | No stock camera assumed | Optional CFS-C retrofit, four colors max |
+| K2 / K2 Pro / K2 Plus | K2 has AI monitoring; K2 Pro/Plus add nozzle AI camera | CFS-capable, bundle/accessory-dependent, up to four CFS units / sixteen colors |
+| K2 SE | Optional AI camera accessory | CFS-capable, bundle/accessory-dependent, up to four CFS units / sixteen colors |
+| Creality Hi | AI camera on the Hi Combo path | CFS-capable; confirm base-vs-combo hardware before multicolor jobs |
+| Ender-3 V4 | No stock camera assumed | CFS-compatible; CFS is sold separately / bundle-dependent, up to four CFS units / sixteen colors |
+| Ender-3 V3 KE / Ender-5 Max | Optional AI camera accessory | No stock CFS path assumed |
+| Older Ender/CR models | External host/webcam only | Manual M600 or third-party add-ons, no Creality CFS path assumed |
+
+For CFS jobs, Kiln records the hardware caveat instead of pretending all SKUs are identical: installed CFS unit count, firmware, slot mapping, and material path must be verified before unattended multicolor printing.
+
+`cfs_status()` is read-only discovery, not a Bambu AMS-equivalent control promise. It checks Moonraker object lists, candidate CFS/filament objects, and G-code help, then returns any visible slots/macros with `hardware_unverified: true` and `active_slot_control_supported: false`. Use Creality Print or the printer UI to verify CFS slot mapping until a real K1/K2/Hi/SparkX device validates active slot commands.
+
 ### Bambu Lab
 
 | Item | Details |
@@ -84,16 +136,33 @@ Notes: Both slicers are invoked via their `--export-gcode` CLI flag for headless
 
 ## Supported Printer Models (Safety Profiles)
 
-Kiln ships 28 curated safety profiles with per-printer temperature limits, feedrate limits, volumetric flow limits, and build volumes:
+Kiln ships curated safety profiles with per-printer temperature limits, feedrate limits, volumetric flow limits, and build volumes:
 
 | Profile ID | Display Name | Max Hotend | Max Bed | Build Volume |
 |---|---|---|---|---|
 | `default` | Generic / Unknown Printer | 300 C | 130 C | -- |
 | `ender3` | Creality Ender 3 / Ender 3 Pro / Ender 3 V2 | 260 C | 110 C | 220x220x250 |
+| `ender3_v2` | Creality Ender 3 V2 | 260 C | 110 C | 220x220x250 |
 | `ender3_s1` | Creality Ender 3 S1 / S1 Pro | 300 C | 110 C | 220x220x270 |
-| `ender5` | Creality Ender 5 / Ender 5 Plus | 260 C | 110 C | 350x350x400 |
+| `ender5` | Creality Ender 5 / Ender 5 Plus | 260 C | 110 C | 220x220x300 |
 | `cr10` | Creality CR-10 / CR-10S | 260 C | 110 C | 300x300x400 |
-| `k1` | Creality K1 / K1 Max | 300 C | 120 C | 300x300x300 |
+| `sparkx_i7` | Creality SPARKX i7 | 300 C | 100 C | 260x260x255 |
+| `k1` | Creality K1 | 300 C | 100 C | 220x220x250 |
+| `k1_max` / `creality_k1_max` | Creality K1 Max | 300 C | 100 C | 300x300x300 |
+| `k1c` / `creality_k1c` | Creality K1C | 300 C | 100 C | 220x220x250 |
+| `k1_se` / `creality_k1_se` | Creality K1 SE | 300 C | 100 C | 220x220x250 |
+| `k2` / `creality_k2` | Creality K2 | 300 C | 100 C | 260x260x260 |
+| `k2_pro` / `creality_k2_pro` | Creality K2 Pro | 300 C | 110 C | 300x300x300 |
+| `k2_plus` / `creality_k2_plus` | Creality K2 Plus | 350 C | 120 C | 350x350x350 |
+| `k2_se` / `creality_k2_se` | Creality K2 SE | 300 C | 100 C | 220x215x245 |
+| `creality_hi` | Creality Hi | 300 C | 100 C | 260x260x300 |
+| `ender3_v4` | Creality Ender-3 V4 | 300 C | 100 C | 220x220x235 |
+| `ender3_v3` | Creality Ender-3 V3 | 300 C | 110 C | 220x220x250 |
+| `ender3_v3_ke` | Creality Ender-3 V3 KE | 300 C | 100 C | 220x220x240 |
+| `ender3_v3_se` | Creality Ender-3 V3 SE | 260 C | 100 C | 220x220x250 |
+| `ender3_v3_plus` | Creality Ender-3 V3 Plus | 300 C | 100 C | 300x300x330 |
+| `ender5_max` | Creality Ender-5 Max | 300 C | 100 C | 400x400x400 |
+| `cr10_se` | Creality CR-10 SE | 300 C | 110 C | 220x220x265 |
 | `prusa_mk3s` | Prusa i3 MK3S / MK3S+ | 300 C | 120 C | 250x210x210 |
 | `prusa_mk4` | Prusa MK4 / MK4S | 300 C | 120 C | 250x210x220 |
 | `prusa_xl` | Prusa XL | 300 C | 120 C | 360x360x360 |
@@ -113,7 +182,7 @@ Kiln ships 28 curated safety profiles with per-printer temperature limits, feedr
 | `sovol_sv06` | Sovol SV06 / SV06 Plus | 300 C | 110 C | 220x220x250 |
 | `sovol_sv07` | Sovol SV07 / SV07 Plus | 300 C | 110 C | 220x220x250 |
 | `flashforge_adventurer5m` | FlashForge Adventurer 5M / 5M Pro | 280 C | 110 C | 220x220x220 |
-| `qidi_x_plus3` | QIDI X-Plus 3 / X-Max 3 | 350 C | 120 C | 280x280x270 |
+| `qidi_x_plus3` | QIDI X-Plus 3 | 350 C | 120 C | 280x280x270 |
 | `klipper_generic` | Generic Klipper Printer (Moonraker) | 300 C | 120 C | 235x235x250 |
 
 ## MCP Clients

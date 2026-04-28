@@ -48,7 +48,7 @@ def get_config_path() -> Path:
 def _normalize_host(host: str, printer_type: str = "octoprint") -> str:
     """Normalize *host* for the given printer type.
 
-    HTTP-based backends (OctoPrint, Moonraker, Prusa Link) get an
+    HTTP-based backends (OctoPrint, Moonraker, Creality, Prusa Link) get an
     ``http://`` scheme prefix if missing.  MQTT/FTPS backends (Bambu)
     need a raw hostname/IP — no scheme is prepended.
     """
@@ -81,7 +81,7 @@ def _validate_printer_url(url: str, *, printer_type: str = "octoprint") -> tuple
 
     :param url: Raw printer URL or hostname.
     :param printer_type: Backend type (``"octoprint"``, ``"moonraker"``,
-        ``"bambu"``, ``"prusaconnect"``).
+        ``"creality"``, ``"bambu"``, ``"prusaconnect"``).
     :returns: ``(cleaned_url, warnings)`` where *warnings* is a list of
         human-readable strings (empty if everything looks good).
     """
@@ -278,6 +278,7 @@ def load_printer_config(
             "api_key": os.environ.get("KILN_PRINTER_API_KEY", ""),
             "access_code": os.environ.get("KILN_PRINTER_ACCESS_CODE", ""),
             "serial": os.environ.get("KILN_PRINTER_SERIAL", ""),
+            "printer_model": os.environ.get("KILN_PRINTER_MODEL", ""),
         }
 
     # --- Config file path -------------------------------------------------
@@ -301,7 +302,7 @@ def load_printer_config(
                 "No printers configured. Run 'kiln setup' for guided network discovery and setup, "
                 "or add one manually with:\n"
                 "  kiln auth --name my-printer --host <IP_OR_HOSTNAME> --type <TYPE> --api-key <KEY>\n"
-                "Supported types: octoprint, moonraker, bambu, prusaconnect"
+                "Supported types: octoprint, moonraker, creality, bambu, elegoo, prusaconnect, serial"
             )
         else:
             raise ValueError(
@@ -356,7 +357,7 @@ def save_printer(
         "type": printer_type,
         "host": cleaned_host,
     }
-    if printer_type == "octoprint" or printer_type == "moonraker":
+    if printer_type in ("octoprint", "moonraker", "creality"):
         if api_key:
             entry["api_key"] = api_key
     elif printer_type == "bambu":
@@ -376,6 +377,9 @@ def save_printer(
     elif printer_type == "serial":
         # For serial printers, 'host' stores the serial port path.
         pass
+
+    if printer_model:
+        entry["printer_model"] = printer_model
 
     printers[name] = entry
 
@@ -472,7 +476,7 @@ def validate_printer_config(cfg: dict[str, Any]) -> tuple[bool, str | None]:
     Returns ``(True, None)`` or ``(False, error_message)``.
     """
     ptype = cfg.get("type", "")
-    if ptype not in ("octoprint", "moonraker", "bambu", "elegoo", "prusaconnect", "serial"):
+    if ptype not in ("octoprint", "moonraker", "creality", "bambu", "elegoo", "prusaconnect", "serial"):
         return False, f"Unknown printer type: {ptype!r}"
 
     host = cfg.get("host", "")

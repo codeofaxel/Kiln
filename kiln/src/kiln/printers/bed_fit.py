@@ -61,7 +61,15 @@ def get_build_volume(printer_id: str) -> tuple[float, float, float] | None:
     for an obscure printer model).
     """
     intel = _load_printer_intelligence()
-    entry = intel.get(printer_id)
+    normalised = printer_id.replace("-", "_").strip()
+    candidates = [normalised]
+    if normalised.startswith("creality_"):
+        candidates.append(normalised.removeprefix("creality_"))
+    entry = None
+    for candidate in candidates:
+        entry = intel.get(candidate)
+        if entry:
+            break
     if not entry:
         return None
     vol = entry.get("build_volume_mm")

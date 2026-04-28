@@ -785,20 +785,33 @@ class TestListAddons:
             assert "tool_change_seconds" in addon
             assert "tool_changer" in addon
             assert "max_colors" in addon
+            assert "hardware_unverified" in addon
             assert addon["tool_change_seconds"] > 0
+
+    def test_creality_cfs_reports_hardware_unverified(self):
+        addon = next(a for a in list_addons(printer_id="k1_max") if a["id"] == "creality_cfs")
+        assert addon["hardware_unverified"] is True
+        assert addon["control_mode"] == "firmware_gcode_or_creality_print"
+        assert any("hardware-unverified" in warning for warning in addon["warnings"])
 
     def test_filter_by_compatible_printer_k1(self):
         addons = list_addons(printer_id="k1")
         ids = {a["id"] for a in addons}
-        # CFS is K1-specific, palette + chameleon are universal
+        # CFS-C is K1-series specific, palette + chameleon are universal
         assert "creality_cfs" in ids
         assert "mosaic_palette3" in ids
         assert "chameleon_mk4" in ids
 
+    def test_filter_by_compatible_printer_k1_series(self):
+        for printer_id in ("k1", "k1_max", "k1c", "k1_se"):
+            addons = list_addons(printer_id=printer_id)
+            ids = {a["id"] for a in addons}
+            assert "creality_cfs" in ids
+
     def test_filter_excludes_incompatible(self):
         addons = list_addons(printer_id="ender3")
         ids = {a["id"] for a in addons}
-        # CFS is K1-only, CANVAS is Centauri-only
+        # CFS-C is K1-series only, CANVAS is Centauri-only
         assert "creality_cfs" not in ids
         assert "elegoo_canvas" not in ids
         # Universal add-ons should still be present
@@ -829,7 +842,7 @@ class TestGetPrinterToolChangeWithAddon:
         assert tc["tool_changer"] == "cfs"
         assert tc["has_auto_tool_change"] is True
         assert tc["addon"] == "creality_cfs"
-        assert tc["max_colors"] == 16
+        assert tc["max_colors"] == 4
 
     def test_palette_works_with_any_printer(self):
         tc = _get_printer_tool_change("ender3", tool_changer_addon="mosaic_palette3")
@@ -846,7 +859,7 @@ class TestGetPrinterToolChangeWithAddon:
         with pytest.raises(ValueError, match="Klipper"):
             _get_printer_tool_change("ender3", tool_changer_addon="coprint_kcm")
 
-    def test_cfs_rejects_non_k1_printer(self):
+    def test_cfs_rejects_non_k1_series_printer(self):
         with pytest.raises(ValueError, match="not compatible"):
             _get_printer_tool_change("ender3", tool_changer_addon="creality_cfs")
 
@@ -879,6 +892,11 @@ class TestGetPrinterToolChangeWithAddon:
         tc = _get_printer_tool_change("k1", tool_changer_addon="creality_cfs")
         assert "Creality CFS" in tc["addon_display_name"]
 
+    def test_cfs_addon_carries_hardware_unverified_warning(self):
+        tc = _get_printer_tool_change("k1_max", tool_changer_addon="creality_cfs")
+        assert tc["hardware_unverified"] is True
+        assert any("CFS-C slot control" in warning for warning in tc["warnings"])
+
 
 class TestEstimateWithAddon:
     """Tests for estimate_from_dimensions with tool_changer_addon."""
@@ -894,7 +912,7 @@ class TestEstimateWithAddon:
         assert est.tool_changer_addon == "creality_cfs"
         assert est.tool_changes > 0
         assert est.tool_change_time_seconds > 0
-        assert est.max_colors == 16
+        assert est.max_colors == 4
 
     def test_k1_without_addon_is_manual(self):
         """K1 with no add-on should fall back to manual M600."""
@@ -905,6 +923,17 @@ class TestEstimateWithAddon:
         )
         assert est.tool_change_type == "manual"
         assert est.tool_changer_addon is None
+        assert any("Stock Creality" in warning for warning in est.warnings)
+
+    def test_k1_max_with_cfs_warns_hardware_unverified(self):
+        est = estimate_from_dimensions(
+            100, 100, 15,
+            materials=["PLA", "PLA"],
+            printer_id="k1_max",
+            tool_changer_addon="creality_cfs",
+        )
+        assert est.tool_change_type == "cfs"
+        assert any("hardware-unverified" in warning for warning in est.warnings)
 
     def test_cfs_faster_than_manual(self):
         """CFS add-on should be faster than manual M600 swaps."""
@@ -1003,7 +1032,7 @@ class TestEstimateWithAddon:
         d = est.to_dict()
         assert d["tool_changer_addon"] == "creality_cfs"
         assert d["tool_changer_addon_name"] is not None
-        assert d["max_colors"] == 16
+        assert d["max_colors"] == 4
 
 
 class TestEstimateFromTemplateWithAddon:

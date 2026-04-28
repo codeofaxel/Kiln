@@ -34,6 +34,7 @@ try:
 except ImportError:
     ElegooAdapter = None  # type: ignore[assignment,misc]
 
+from kiln.printers.creality import CrealityAdapter
 from kiln.printers.moonraker import MoonrakerAdapter
 from kiln.printers.octoprint import OctoPrintAdapter
 from kiln.printers.prusaconnect import PrusaConnectAdapter
@@ -41,6 +42,7 @@ from kiln.printers.serial_adapter import SerialPrinterAdapter
 
 __all__ = [
     "BambuAdapter",
+    "CrealityAdapter",
     "DeviceAdapter",
     "DeviceType",
     "ElegooAdapter",

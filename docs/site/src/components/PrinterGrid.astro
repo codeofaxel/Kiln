@@ -2,6 +2,7 @@
 const printers = [
   { name: 'OctoPrint', desc: 'REST API \u00B7 Any printer with OctoPrint' },
   { name: 'Moonraker', desc: 'REST API \u00B7 Klipper-based printers' },
+  { name: 'Creality', desc: 'Moonraker-backed \u00B7 K1, K2, Hi, Ender V3 KE' },
   { name: 'Bambu Lab', desc: 'MQTT \u00B7 X1C, P1S, A1 Mini, A1' },
   { name: 'Elegoo', desc: 'WebSocket/SDCP \u00B7 Centauri Carbon, Saturn, Mars' },
   { name: 'Prusa Link', desc: 'REST API \u00B7 MK4, MK3.9, MINI+, XL' },
@@ -30,7 +31,7 @@ const printers = [
   }
   .printer-grid {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 16px;
   }
   @media (max-width: 900px) {

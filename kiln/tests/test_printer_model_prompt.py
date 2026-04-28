@@ -6,10 +6,6 @@ setup, quickstart, and status all share consistent behaviour.
 """
 from __future__ import annotations
 
-from unittest.mock import patch
-
-import pytest
-
 from kiln.cli.printer_model_prompt import (
     _find_close_matches,
     _validate_model_key,
@@ -41,6 +37,17 @@ class TestSuggestBambuModel:
 class TestValidateModelKey:
     def test_known_model_valid(self):
         assert _validate_model_key("bambu_a1") is True
+
+    def test_creality_alias_model_valid(self):
+        assert _validate_model_key("creality_k1_max") is True
+
+    def test_new_creality_models_valid(self):
+        assert _validate_model_key("sparkx_i7") is True
+        assert _validate_model_key("k1c") is True
+        assert _validate_model_key("ender3_v4") is True
+        assert _validate_model_key("ender3_v3_ke") is True
+        assert _validate_model_key("ender3_v3_se") is True
+        assert _validate_model_key("ender3_v2") is True
 
     def test_unknown_model_invalid(self):
         assert _validate_model_key("totally_fake_model_xyz_789") is False

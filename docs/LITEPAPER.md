@@ -16,7 +16,7 @@ Kiln is the intelligence layer between an idea and a physical object. It connect
 
 ## The Problem
 
-The gap between "I need a part" and holding that part in your hand is filled with fragmented, incompatible tooling. Every printer brand speaks a different language -- OctoPrint, Klipper, Bambu Lab, Elegoo, Prusa Link, and USB-connected Marlin printers each have their own interfaces. Designing parts requires specialized CAD skills. Validating printability requires tribal knowledge. Managing even a small fleet means juggling multiple dashboards. Meanwhile, AI agents are increasingly capable of planning and executing multi-step physical tasks, but there's no safe, standardized way to connect them to design tools and real hardware.
+The gap between "I need a part" and holding that part in your hand is filled with fragmented, incompatible tooling. Every printer brand speaks a different language -- OctoPrint, Klipper/Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, and USB-connected Marlin printers each have their own interfaces. Designing parts requires specialized CAD skills. Validating printability requires tribal knowledge. Managing even a small fleet means juggling multiple dashboards. Meanwhile, AI agents are increasingly capable of planning and executing multi-step physical tasks, but there's no safe, standardized way to connect them to design tools and real hardware.
 
 ## The Solution
 
@@ -36,7 +36,7 @@ Kiln acts as a universal intelligence layer between AI agents and physical fabri
 
 **Three ways to print.** Once a design is ready, Kiln routes it through three co-equal paths:
 
-1. **Your printers.** Control OctoPrint, Moonraker (Klipper), Bambu Lab, Elegoo, Prusa Link, or any Marlin/RepRap printer via Direct USB on your local network -- or remotely via Bambu Cloud. Kiln handles the protocol translation.
+1. **Your printers.** Control OctoPrint, Moonraker (Klipper), Creality printers with reachable local Moonraker, Bambu Lab, Prusa Link, Elegoo, or any Marlin/RepRap printer via Direct USB on your local network -- or remotely via Bambu Cloud. Kiln handles the protocol translation.
 
 2. **Search 3rd-party marketplaces.** Find existing models across Thingiverse, MyMiniFactory, and Cults3D. Download, slice, and print -- or use them as starting points for custom designs.
 
@@ -70,7 +70,7 @@ An agent can prototype on your desk printer, send the production version to Craf
 
 Agents are powerful, but they shouldn't be trusted blindly with physical hardware. Kiln enforces safety at the protocol level -- not as an afterthought, but as a core design constraint.
 
-Before any print starts, Kiln runs pre-flight checks: validating temperatures against per-printer limits, scanning G-code for dangerous commands, confirming the printer is in a safe state, and requiring a preview-confirmation token for new non-resume print starts. These checks cannot be bypassed by the agent. 29 safety profiles cover popular printer models with hardware-specific limits. A background watchdog auto-cools idle heaters after 30 minutes to prevent fire hazards. Real-time G-code interception lets agents monitor and modify printer commands on the fly -- blocking unsafe operations before they reach the hardware.
+Before any print starts, Kiln runs pre-flight checks: validating temperatures against per-printer limits, scanning G-code for dangerous commands, confirming the printer is in a safe state, and requiring a preview-confirmation token for new non-resume print starts. These checks cannot be bypassed by the agent. 44 named safety profiles cover popular printer models with hardware-specific limits. A background watchdog auto-cools idle heaters after 30 minutes to prevent fire hazards. Real-time G-code interception lets agents monitor and modify printer commands on the fly -- blocking unsafe operations before they reach the hardware.
 
 ## How It Works
 
@@ -78,7 +78,7 @@ Before any print starts, Kiln runs pre-flight checks: validating temperatures ag
 You (or your agent) --> Kiln --> Design Intelligence (materials, patterns, templates)
                                  Generation (Gemini, Meshy, Tripo3D, Stability, OpenSCAD)
                                  Printability Analysis (7-dimension validation)
-                                 Your Printers (OctoPrint, Moonraker, Bambu, Elegoo, Prusa, Direct USB)
+                                 Your Printers (OctoPrint, Moonraker, Creality, Bambu, Elegoo, Prusa, Direct USB)
                                  Fulfillment Providers (Craftcloud)
 ```
 

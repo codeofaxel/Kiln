@@ -854,6 +854,35 @@ class TestPrinterMaterialCompatibility:
         assert "bambu_x1c" in printers
         assert len(printers) >= 10
 
+    def test_creality_k1c_abrasive_material_compatible(self):
+        report = check_printer_material_compatibility("k1c", "cf_pla")
+        assert report is not None
+        assert report.materials["cf_pla"]["status"] == "compatible"
+
+    def test_creality_k1_max_abrasive_material_needs_nozzle(self):
+        report = check_printer_material_compatibility("k1_max", "cf_pla")
+        assert report is not None
+        assert report.materials["cf_pla"]["status"] == "needs_upgrade"
+        assert "hardened_nozzle" in report.materials["cf_pla"]["upgrades_needed"]
+
+    def test_creality_k2_pro_abrasive_material_compatible(self):
+        report = check_printer_material_compatibility("k2_pro", "cf_pla")
+        assert report is not None
+        assert report.materials["cf_pla"]["status"] == "compatible"
+        assert report.materials["cf_pla"]["upgrades_needed"] == []
+
+    def test_creality_open_frame_abs_needs_enclosure(self):
+        report = check_printer_material_compatibility("ender3_v4", "abs")
+        assert report is not None
+        assert report.materials["abs"]["status"] == "needs_upgrade"
+        assert "enclosure" in report.materials["abs"]["upgrades_needed"]
+
+    def test_creality_ender3_v2_tpu_needs_direct_drive(self):
+        report = check_printer_material_compatibility("ender3_v2", "tpu")
+        assert report is not None
+        assert report.materials["tpu"]["status"] == "needs_upgrade"
+        assert "direct_drive" in report.materials["tpu"]["upgrades_needed"]
+
     def test_case_insensitive(self):
         report = check_printer_material_compatibility("Ender3", "PLA")
         assert report is not None

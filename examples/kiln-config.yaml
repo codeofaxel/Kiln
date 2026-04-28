@@ -26,6 +26,14 @@ printers:
     host: http://192.168.1.60:7125
     # api_key: optional-if-you-enabled-auth
 
+  # Creality (K1/K2/Hi/Ender V3 KE via local Moonraker) ─────────
+  # Use the printer IP. Kiln will try the Creality/Moonraker ports.
+  k1_max:
+    type: creality
+    host: 192.168.1.55
+    printer_model: creality_k1_max
+    # api_key: optional-if-you-enabled-moonraker-auth
+
   # Bambu Lab ────────────────────────────────────────────────
   # Access code: printed on the screen or in Bambu Handy app.
   # Serial: found on the printer label or in Bambu Studio.
@@ -54,8 +62,9 @@ settings:
 # Environment variable overrides (not in this file):
 #
 #   KILN_PRINTER_HOST     — Printer URL
-#   KILN_PRINTER_TYPE     — octoprint / moonraker / bambu / prusaconnect
+#   KILN_PRINTER_TYPE     — octoprint / moonraker / creality / bambu / prusaconnect
 #   KILN_PRINTER_API_KEY  — API key or access code
+#   KILN_PRINTER_MODEL    — safety/profile key, e.g. creality_k1_max
 #
 # CLI flags (--host, --printer) take precedence over everything.
 # ──────────────────────────────────────────────────────────────

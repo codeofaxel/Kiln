@@ -233,7 +233,8 @@ class _UtilityToolsPlugin:
                         "prints can reach the printer. Ask the user which printer "
                         "they're using, then add `printer_model: <model>` under "
                         "`printers.<name>` in ~/.kiln/config.yaml (examples: "
-                        "bambu_a1, bambu_x1c, prusa_mk4, prusa_mini, ender3). "
+                        "bambu_a1, bambu_x1c, prusa_mk4, prusa_mini, ender3, "
+                        "creality_k1_max). "
                         "Valid keys are in kiln/data/printer_intelligence.json."
                     )
             except Exception as exc:

@@ -14,7 +14,8 @@ Environment variables
     API key used for authenticating with the printer server.
 ``KILN_PRINTER_TYPE``
     Printer backend type.  Supported values: ``"octoprint"``,
-    ``"moonraker"``, ``"bambu"``, ``"prusaconnect"``, and ``"serial"``.
+    ``"moonraker"``, ``"creality"``, ``"bambu"``, ``"elegoo"``,
+    ``"prusaconnect"``, and ``"serial"``.
     Defaults to ``"octoprint"``.
 ``KILN_PRINTER_PORT``
     Serial port path for USB printers (required when ``KILN_PRINTER_TYPE``
@@ -283,6 +284,7 @@ from kiln.printer_intelligence import (
 )
 from kiln.printers import (
     BambuAdapter,
+    CrealityAdapter,
     ElegooAdapter,
     MoonrakerAdapter,
     OctoPrintAdapter,
@@ -403,6 +405,18 @@ _PRINTER_SPEED_OVERRIDES: dict[str, dict[str, str]] = {
         "travel_speed": "250",
         "max_print_speed": "200",
         "default_acceleration": "3000",
+    },
+    "creality": {
+        # Creality K/Hi/Ender V3 KE class machines expose Klipper through Moonraker.
+        "perimeter_speed": "160",
+        "external_perimeter_speed": "100",
+        "infill_speed": "220",
+        "solid_infill_speed": "140",
+        "top_solid_infill_speed": "90",
+        "first_layer_speed": "45",
+        "travel_speed": "350",
+        "max_print_speed": "250",
+        "default_acceleration": "5000",
     },
 }
 
@@ -907,6 +921,12 @@ def _get_adapter() -> PrinterAdapter:
         # Moonraker typically does not require an API key, but one can
         # optionally be provided via KILN_PRINTER_API_KEY.
         _adapter = MoonrakerAdapter(host=host, api_key=api_key or None)
+    elif printer_type == "creality":
+        _adapter = CrealityAdapter(
+            host=host,
+            api_key=api_key or None,
+            model=_PRINTER_MODEL or None,
+        )
     elif printer_type == "bambu":
         if BambuAdapter is None:
             raise RuntimeError(
@@ -944,7 +964,7 @@ def _get_adapter() -> PrinterAdapter:
     else:
         raise RuntimeError(
             f"Unsupported printer type: {printer_type!r}.  "
-            f"Supported types are 'octoprint', 'moonraker', 'bambu', 'elegoo', 'prusaconnect', and 'serial'."
+            f"Supported types are 'octoprint', 'moonraker', 'creality', 'bambu', 'elegoo', 'prusaconnect', and 'serial'."
         )
 
     # Propagate safety profile to adapter for defense-in-depth temp limits.
@@ -1132,6 +1152,8 @@ def _build_adapter_from_config_entry(name: str, entry: dict[str, Any]) -> Printe
         adapter = OctoPrintAdapter(host=host, api_key=api_key)
     elif printer_type == "moonraker":
         adapter = MoonrakerAdapter(host=host, api_key=api_key or None)
+    elif printer_type == "creality":
+        adapter = CrealityAdapter(host=host, api_key=api_key or None, model=printer_model or None)
     elif printer_type == "bambu":
         if BambuAdapter is None:
             raise RuntimeError(
@@ -3246,7 +3268,7 @@ def upload_file(file_path: str) -> dict:
                     GCodeDialect.BAMBU
                     if _PRINTER_TYPE == "bambu"
                     else GCodeDialect.KLIPPER
-                    if _PRINTER_TYPE == "moonraker"
+                    if _PRINTER_TYPE in ("moonraker", "creality")
                     else GCodeDialect.GENERIC
                 )
                 scan = scan_gcode_file(
@@ -4151,8 +4173,8 @@ def cancel_print(
         # it AND the pre-cancel targets were non-zero (no point restoring
         # a printer that was already idle).  Uses the adapter's split
         # ``set_tool_temp`` / ``set_bed_temp`` methods — present on every
-        # adapter subclass (base, bambu, octoprint, moonraker, serial,
-        # elegoo, prusaconnect).  Chamber temp (rare) is sent as raw
+        # adapter subclass (base, bambu, octoprint, moonraker, creality,
+        # serial, elegoo, prusaconnect).  Chamber temp (rare) is sent as raw
         # M141 G-code since most adapters don't expose a chamber setter.
         restored: dict[str, float] | None = None
         chamber_restored: float | None = None
@@ -4787,6 +4809,41 @@ def ams_status() -> dict:
     except Exception as exc:
         logger.exception("Unexpected error in ams_status")
         return _error_dict(f"Unexpected error in ams_status: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def cfs_status() -> dict:
+    """Discover Creality CFS/CFS-C status through local Moonraker.
+
+    This is the Creality counterpart to ``ams_status()``, but the public
+    protocol is not equivalent to Bambu AMS. Creality documents CFS control
+    through Creality Print and printer UI; Kiln therefore performs read-only
+    Moonraker discovery (`/printer/objects/list`, candidate object queries,
+    and `/printer/gcode/help`) and reports any visible CFS slots/macros.
+
+    The response includes ``hardware_unverified=True`` and
+    ``active_slot_control_supported=False`` until slot load/unload/mapping
+    commands are validated against real Creality hardware or official API docs.
+    """
+    if err := _check_auth("read"):
+        return err
+    if err := _check_rate_limit("cfs_status"):
+        return err
+    try:
+        adapter = _get_adapter()
+        if not hasattr(adapter, "get_cfs_status"):
+            return _error_dict(
+                "CFS status is only available on Creality printers that expose CFS/CFS-C through local Moonraker.",
+                code="UNSUPPORTED",
+            )
+        result = adapter.get_cfs_status()
+        _audit("cfs_status", "queried")
+        return {"success": True, **result}
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Failed to query CFS status: {exc}")
+    except Exception as exc:
+        logger.exception("Unexpected error in cfs_status")
+        return _error_dict(f"Unexpected error in cfs_status: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -6058,6 +6115,7 @@ def register_printer(
     api_key: str | None = None,
     serial: str | None = None,
     verify_ssl: bool = True,
+    printer_model: str | None = None,
 ) -> dict:
     """Register a new printer in the fleet.
 
@@ -6067,17 +6125,18 @@ def register_printer(
     Args:
         name: Unique human-readable name (e.g. "voron-350", "bambu-x1c").
         printer_type: Backend type -- "octoprint", "moonraker", "bambu",
-            "elegoo", "prusaconnect", or "serial".
+            "creality", "elegoo", "prusaconnect", or "serial".
         host: Base URL or IP address of the printer.  For serial printers,
             this is the port path (e.g. "/dev/ttyUSB0", "COM3").
         api_key: API key (required for OctoPrint and Bambu, optional for
-            Moonraker, unused for serial).  For Bambu printers this is the
-            LAN Access Code.
+            Moonraker/Creality, unused for serial).  For Bambu printers
+            this is the LAN Access Code.
         serial: Printer serial number (required for Bambu printers).
         verify_ssl: Whether to verify SSL certificates (default True).
             Set to False for printers using self-signed certificates.
             For Bambu, True maps to TLS pin mode and False maps to
             insecure mode.
+        printer_model: Optional safety/profile key (e.g. "k1_max").
 
     Once registered the printer appears in ``fleet_status()`` and can be
     targeted by ``submit_job()``.
@@ -6137,6 +6196,13 @@ def register_printer(
             adapter = OctoPrintAdapter(host=host, api_key=api_key, verify_ssl=verify_ssl)
         elif printer_type == "moonraker":
             adapter = MoonrakerAdapter(host=host, api_key=api_key or None, verify_ssl=verify_ssl)
+        elif printer_type == "creality":
+            adapter = CrealityAdapter(
+                host=host,
+                api_key=api_key or None,
+                model=printer_model or None,
+                verify_ssl=verify_ssl,
+            )
         elif printer_type == "bambu":
             if BambuAdapter is None:
                 return _error_dict(
@@ -6179,9 +6245,12 @@ def register_printer(
         else:
             return _error_dict(
                 f"Unsupported printer_type: {printer_type!r}. "
-                "Supported: 'octoprint', 'moonraker', 'bambu', 'elegoo', 'prusaconnect', 'serial'.",
+                "Supported: 'octoprint', 'moonraker', 'creality', 'bambu', 'elegoo', 'prusaconnect', 'serial'.",
                 code="INVALID_ARGS",
             )
+
+        if printer_model:
+            adapter.set_safety_profile(printer_model)
 
         # Disconnect the boot-time default adapter if it's a separate
         # object not managed by the registry.  The registry's own
@@ -7080,8 +7149,42 @@ def _map_printer_hint_to_profile_id(raw: str | None) -> str | None:
         return "prusa_mk3s"
     if "prusa_xl" in hint or hint.endswith("_xl") or hint == "xl" or ("prusa" in hint and "xl" in hint):
         return "prusa_xl"
+    if "sparkxi7" in hint_compact or "sparkx" in hint_compact:
+        return "sparkx_i7"
     if "ender3" in hint_compact:
+        if "v4" in hint_compact:
+            return "ender3_v4"
+        if "v3ke" in hint_compact:
+            return "ender3_v3_ke"
+        if "v3se" in hint_compact:
+            return "ender3_v3_se"
+        if "v3" in hint_compact:
+            return "ender3_v3"
+        if "v2" in hint_compact:
+            return "ender3_v2"
         return "ender3"
+    if "k1max" in hint_compact:
+        return "k1_max"
+    if "k1c" in hint_compact:
+        return "k1c"
+    if "k1se" in hint_compact:
+        return "k1_se"
+    if hint_compact == "k1" or "crealityk1" in hint_compact:
+        return "k1"
+    if "k2plus" in hint_compact:
+        return "k2_plus"
+    if "k2pro" in hint_compact:
+        return "k2_pro"
+    if "k2se" in hint_compact:
+        return "k2_se"
+    if hint_compact == "k2" or "crealityk2" in hint_compact:
+        return "k2"
+    if hint_compact in {"hi", "crealityhi"}:
+        return "creality_hi"
+    if "ender5max" in hint_compact:
+        return "ender5_max"
+    if "cr10se" in hint_compact:
+        return "cr10_se"
     if hint in {"klipper", "moonraker"}:
         return "klipper_generic"
 
@@ -8351,7 +8454,7 @@ def fleet_workflow() -> str:
     return (
         "To manage a fleet of printers:\n\n"
         "1. Call `fleet_status` to see all registered printers and their states\n"
-        "2. Use `register_printer` to add new printers (octoprint, moonraker, bambu, elegoo, prusaconnect, or serial)\n"
+        "2. Use `register_printer` to add new printers (octoprint, moonraker, creality, bambu, elegoo, prusaconnect, or serial)\n"
         "3. Submit jobs with `submit_job` — the scheduler auto-dispatches to idle printers\n"
         "4. Monitor via `queue_summary` and `job_status`\n"
         "5. Check `recent_events` for lifecycle updates\n\n"

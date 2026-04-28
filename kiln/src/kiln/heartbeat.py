@@ -75,7 +75,9 @@ def _get_printer_info() -> tuple[str | None, str | None, int]:
                 model = os.environ.get("KILN_PRINTER_MODEL", None)
             # Derive adapter type from class name
             cls_name = type(adapter).__name__.lower()
-            if "bambu" in cls_name:
+            if "creality" in cls_name:
+                adapter_type = "creality"
+            elif "bambu" in cls_name:
                 adapter_type = "bambu"
             elif "octoprint" in cls_name:
                 adapter_type = "octoprint"
