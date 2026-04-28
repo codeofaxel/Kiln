@@ -26,6 +26,7 @@ import importlib.util
 import json
 import os
 import struct
+import sys
 import tempfile
 import zipfile
 from unittest.mock import MagicMock, PropertyMock, patch
@@ -44,6 +45,7 @@ from kiln.printers.base import (
 from kiln.printers.moonraker import MoonrakerAdapter
 from kiln.printers.octoprint import OctoPrintAdapter
 from kiln.server import (
+    _drain_restart_stdin,
     _error_dict,
     _format_duration,
     _generate_print_comment,
@@ -152,6 +154,36 @@ class TestErrorDict:
     def test_retryable_explicit_override(self):
         d = _error_dict("network flake", code="NOT_FOUND", retryable=True)
         assert d["error"]["retryable"] is True
+
+
+class TestRestartServerStdio:
+    """Coverage for restart_server stdio handoff helpers."""
+
+    def test_drain_restart_stdin_drains_available_pipe_bytes(self, monkeypatch):
+        read_fd, write_fd = os.pipe()
+        stdin_file = os.fdopen(read_fd, "rb", buffering=0)
+        try:
+            os.set_blocking(read_fd, True)
+            queued_frame = b'{"jsonrpc":"2.0","id":99}\n'
+            os.write(write_fd, queued_frame)
+            monkeypatch.setattr(sys, "stdin", stdin_file)
+
+            drained = _drain_restart_stdin()
+
+            assert drained == len(queued_frame)
+            assert os.get_blocking(read_fd) is True
+        finally:
+            stdin_file.close()
+            os.close(write_fd)
+
+    def test_drain_restart_stdin_handles_unreadable_stdin(self, monkeypatch):
+        class BrokenStdin:
+            def fileno(self):
+                raise ValueError("closed")
+
+        monkeypatch.setattr(sys, "stdin", BrokenStdin())
+
+        assert _drain_restart_stdin() == 0
 
 
 # ---------------------------------------------------------------------------

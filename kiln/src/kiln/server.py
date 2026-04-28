@@ -2269,6 +2269,54 @@ def _error_dict(
     }
 
 
+def _flush_restart_stdio() -> int:
+    """Flush outbound MCP framing and drain queued inbound frames before exec."""
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(OSError, AttributeError, ValueError):
+            stream.flush()
+
+    return _drain_restart_stdin()
+
+
+def _drain_restart_stdin(*, max_bytes: int = 1_048_576) -> int:
+    """Drain currently queued stdin bytes without blocking."""
+    try:
+        fd = sys.stdin.fileno()
+    except (OSError, AttributeError, ValueError):
+        return 0
+
+    try:
+        was_blocking = os.get_blocking(fd)
+    except (AttributeError, OSError):
+        was_blocking = None
+
+    try:
+        os.set_blocking(fd, False)
+    except (AttributeError, OSError):
+        return 0
+
+    drained = 0
+    try:
+        while drained < max_bytes:
+            try:
+                chunk = os.read(fd, min(65_536, max_bytes - drained))
+            except BlockingIOError:
+                break
+            except InterruptedError:
+                continue
+            except OSError:
+                break
+            if not chunk:
+                break
+            drained += len(chunk)
+    finally:
+        if was_blocking is not None:
+            with contextlib.suppress(OSError):
+                os.set_blocking(fd, was_blocking)
+
+    return drained
+
+
 def _extract_bearer_or_raw_token(value: Any) -> str:
     """Extract a token from either ``Bearer <token>`` or raw token input."""
     if value is None:
@@ -3728,7 +3776,7 @@ def start_print(
     if block := _emergency_latch_error("start_print", _resolve_effective_printer_name()):
         return block
 
-    # -- Preview confirmation gate (Jony Ive / Steve Jobs tier) -----------
+    # -- Preview confirmation gate -----------------------------------------
     # Refuse to start a print unless the agent has demonstrated a preview
     # was rendered and the user approved.  Bypass via
     # KILN_SKIP_PREVIEW_GATE=1 for CI / advanced users.  Skipped for
@@ -6571,18 +6619,15 @@ def restart_server(clean_env: bool = True) -> dict:
             )
         else:
             logger.info("Kiln MCP server restarting via restart_server tool...")
-        # Hard-flush stdio so the new process doesn't inherit half-written
-        # MCP framing.  Without this, MCP clients (notably Claude Code) can
-        # see garbled JSON-RPC framing after exec and every subsequent tool
-        # call returns -32602 "Invalid request parameters" — the user has to
-        # restart the client to recover.  Best-effort: never fail restart on
-        # a flush exception.
-        for stream in (sys.stdout, sys.stderr):
-            try:
-                stream.flush()
-                os.fsync(stream.fileno())
-            except (OSError, AttributeError, ValueError):
-                pass
+        # Hard-flush outbound framing and drain any queued inbound MCP
+        # frames so the fresh process does not inherit stale JSON-RPC bytes.
+        drained = _flush_restart_stdio()
+        if drained:
+            logger.info(
+                "Kiln MCP server restart drained %d queued stdin byte(s) before exec.",
+                drained,
+            )
+        _flush_restart_stdio()
         # ``serve`` is the only subcommand that runs the MCP server; without
         # it ``python -m kiln`` just prints help and exits, which makes the
         # MCP host think the child died and spawn a fresh one with its own

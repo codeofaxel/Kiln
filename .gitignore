@@ -33,6 +33,7 @@ tools/
 node_modules/
 .astro/
 CLAUDE.md
+AGENTS.md
 .claude/
 .mcp.json
 .pre-commit-config.yaml
