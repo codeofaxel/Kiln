@@ -3684,6 +3684,8 @@ def _render_smart_monitoring_panel(health_monitor, printer_name: str) -> None:
     try:
         from kiln_pro.recovery.auto_recover_engine import (
             AutoRecoverStatus as _AR_Status,
+        )
+        from kiln_pro.recovery.auto_recover_engine import (
             list_sessions as _ar_list_sessions,
         )
         ar_sessions = _ar_list_sessions(printer_name=printer_name)
@@ -3996,9 +3998,7 @@ def monitor(ctx: click.Context, interval: float,
 
             # Determine final exit code from session state.
             session = health_monitor.get_session(session_id)
-            if session.status.value in ("failed", "stalled", "aborted"):
-                exit_code = 1
-            elif any(
+            if session.status.value in ("failed", "stalled", "aborted") or any(
                 issue.get("auto_cancel_triggered")
                 for issue in session.issues
             ):
@@ -4006,10 +4006,8 @@ def monitor(ctx: click.Context, interval: float,
         finally:
             # Always tear down the background monitor so the daemon
             # thread stops.  KeyError if it already exited cleanly.
-            try:
+            with contextlib.suppress(KeyError):
                 health_monitor.stop_monitoring(printer_name)
-            except KeyError:
-                pass
 
         sys.exit(exit_code)
 

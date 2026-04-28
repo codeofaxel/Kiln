@@ -1398,6 +1398,8 @@ class PrintHealthMonitor:
         try:
             from kiln_pro.recovery.auto_recover_engine import (
                 AutoRecoverStatus as _AR_Status,
+            )
+            from kiln_pro.recovery.auto_recover_engine import (
                 list_sessions as _ar_list_sessions,
             )
         except ImportError:
