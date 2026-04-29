@@ -522,7 +522,7 @@ def auto_arrange_parts(
                 "supported printer model id."
             )
         _model_id, build_volume = resolved
-        plate_width, plate_depth = build_volume[0], build_volume[1]
+        plate_width = build_volume[0]
 
     # Assign default groups (each spec is its own group if not specified).
     # Track group per spec in a parallel list so the result-build pass never
