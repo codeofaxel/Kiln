@@ -137,6 +137,60 @@ def test_install_mcp_writes_codex_toml_config(tmp_path, monkeypatch) -> None:
     assert "Codex" in result.output
 
 
+def test_install_mcp_preserves_python_module_launch_for_codex(tmp_path, monkeypatch) -> None:
+    from click.testing import CliRunner
+    from kiln.cli import install_mcp
+
+    config_path = tmp_path / "codex" / "config.toml"
+    module_main = tmp_path / "site-packages" / "kiln" / "__main__.py"
+    module_main.parent.mkdir(parents=True)
+    module_main.write_text("")
+    python = tmp_path / "bin" / "python3"
+    python.parent.mkdir()
+    python.write_text("#!/bin/sh\n")
+
+    monkeypatch.setattr(install_mcp, "_codex_config_path", lambda: config_path)
+    monkeypatch.setattr(install_mcp.sys, "argv", [str(module_main)])
+    monkeypatch.setattr(install_mcp.sys, "executable", str(python))
+    monkeypatch.setattr(install_mcp.shutil, "which", lambda name: None)
+
+    result = CliRunner().invoke(
+        install_mcp.install_mcp,
+        ["--client", "codex"],
+    )
+
+    assert result.exit_code == 0, result.output
+    text = config_path.read_text()
+    assert f'command = "{python}"' in text
+    assert 'args = ["-m", "kiln", "serve"]' in text
+    assert f"MCP command: {python} -m kiln serve" in result.output
+
+
+def test_install_mcp_print_preserves_python_module_launch(tmp_path, monkeypatch) -> None:
+    from click.testing import CliRunner
+    from kiln.cli import install_mcp
+
+    module_main = tmp_path / "site-packages" / "kiln" / "__main__.py"
+    module_main.parent.mkdir(parents=True)
+    module_main.write_text("")
+    python = tmp_path / "bin" / "python3"
+    python.parent.mkdir()
+    python.write_text("#!/bin/sh\n")
+
+    monkeypatch.setattr(install_mcp.sys, "argv", [str(module_main)])
+    monkeypatch.setattr(install_mcp.sys, "executable", str(python))
+    monkeypatch.setattr(install_mcp.shutil, "which", lambda name: None)
+
+    result = CliRunner().invoke(
+        install_mcp.install_mcp,
+        ["--client", "codex", "--print"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert f'command = "{python}"' in result.output
+    assert 'args = ["-m", "kiln", "serve"]' in result.output
+
+
 def test_install_mcp_print_codex_snippet_is_toml(tmp_path) -> None:
     from click.testing import CliRunner
     from kiln.cli.install_mcp import install_mcp

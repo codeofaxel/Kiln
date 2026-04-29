@@ -14,18 +14,34 @@ import click
 _SERVER_ARGS = ["serve"]
 
 
-def _current_kiln_command() -> str:
+def _current_kiln_launch() -> tuple[str, list[str]]:
     executable = Path(sys.argv[0]).expanduser()
     if executable.name == "kiln":
         try:
-            return str(executable.resolve())
+            return str(executable.resolve()), []
         except OSError:
-            return str(executable)
-    return shutil.which("kiln") or "kiln"
+            return str(executable), []
+    if executable.name == "__main__.py" and executable.parent.name == "kiln":
+        return sys.executable, ["-m", "kiln"]
+    return shutil.which("kiln") or "kiln", []
 
 
-def _server_entry(command: str | None = None) -> dict[str, Any]:
-    return {"command": command or _current_kiln_command(), "args": list(_SERVER_ARGS)}
+def _current_kiln_command() -> str:
+    return _current_kiln_launch()[0]
+
+
+def _server_entry(
+    command: str | None = None,
+    *,
+    prefix_args: list[str] | None = None,
+) -> dict[str, Any]:
+    if command is None:
+        command, detected_prefix = _current_kiln_launch()
+        prefix_args = detected_prefix
+    return {
+        "command": command,
+        "args": list(prefix_args or []) + list(_SERVER_ARGS),
+    }
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -125,8 +141,12 @@ def _replace_toml_table(text: str, table: str, replacement: str) -> str:
     return prefix + replacement
 
 
-def _codex_server_block(command: str | None = None) -> str:
-    entry = _server_entry(command)
+def _codex_server_block(
+    command: str | None = None,
+    *,
+    prefix_args: list[str] | None = None,
+) -> str:
+    entry = _server_entry(command, prefix_args=prefix_args)
     return (
         "[mcp_servers.kiln]\n"
         f"command = {json.dumps(str(entry['command']))}\n"
@@ -142,7 +162,10 @@ def _install_into(client: str, path: Path, entry: dict[str, Any]) -> str:
         next_text = _replace_toml_table(
             text,
             "mcp_servers.kiln",
-            _codex_server_block(str(entry["command"])),
+            _codex_server_block(
+                str(entry["command"]),
+                prefix_args=list(entry.get("args") or [])[: -len(_SERVER_ARGS)],
+            ),
         )
         _write_text(path, next_text)
         return "updated" if before_exists else "created"
@@ -206,7 +229,8 @@ def install_mcp(
     print_snippet: bool,
 ) -> None:
     """Install the local Kiln MCP server into supported agent clients."""
-    command = command_override or _current_kiln_command()
+    entry = _server_entry(command_override)
+    command = str(entry["command"])
     selected = client.lower()
     if Path(command).is_absolute() and not Path(command).exists():
         raise click.ClickException(
@@ -214,13 +238,12 @@ def install_mcp(
             "Pass the executable that runs `kiln serve`, for example "
             "`kiln install-mcp --command /path/to/kiln`."
         )
-    entry = _server_entry(command)
 
     if print_snippet:
         if selected == "codex":
-            click.echo(_codex_server_block(command))
+            click.echo(_codex_server_block(command_override))
         else:
-            click.echo(_generic_snippet(command))
+            click.echo(json.dumps({"mcpServers": {"kiln": entry}}, indent=2))
         click.echo("")
         click.echo("Add this to your MCP client config. It points at the Kiln executable that serves the tool surface.")
         return
@@ -242,8 +265,13 @@ def install_mcp(
         click.echo("")
         click.echo(f"Note: {warning}")
     click.echo("")
-    click.echo(f"MCP command: {command} {' '.join(_SERVER_ARGS)}")
-    click.echo("Restart clients that do not hot-load MCP config changes, open a fresh Codex session if needed, then run `kiln whoami` to verify your tier.")
+    click.echo(f"MCP command: {command} {' '.join(entry.get('args') or [])}")
+    prefix_args = list(entry.get("args") or [])[: -len(_SERVER_ARGS)]
+    whoami_command = " ".join([command] + prefix_args + ["whoami"])
+    click.echo(
+        "Restart clients that do not hot-load MCP config changes, open a fresh "
+        f"Codex session if needed, then run `{whoami_command}` to verify your tier."
+    )
 
 
 def register_install_mcp_cli(cli_group: click.Group) -> None:
