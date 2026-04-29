@@ -10134,26 +10134,11 @@ def multi_copy_print(
             # Fallback: STL mesh duplication
             from kiln.auto_orient import duplicate_stl_on_plate
 
-            # Get bed dimensions from safety profiles if printer_id available
-            bed_w = 256.0
-            bed_d = 256.0
-            if printer_id:
-                try:
-                    from kiln.safety_profiles import get_profile
-
-                    profile = get_profile(printer_id)
-                    if profile and profile.build_volume:
-                        bed_w = float(profile.build_volume[0])
-                        bed_d = float(profile.build_volume[1])
-                except Exception:
-                    pass
-
             merged_path = duplicate_stl_on_plate(
                 model_path,
                 copies,
                 spacing_mm=spacing_mm,
-                bed_width_mm=bed_w,
-                bed_depth_mm=bed_d,
+                printer_id=printer_id or None,
             )
             result = _pipeline_reslice_and_print(
                 model_path=merged_path,

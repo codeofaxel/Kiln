@@ -2847,6 +2847,7 @@ def can_print_now(
     auto_fix: bool = False,
     output_path: str | None = None,
     printer_bed_mm: tuple[float, float, float] | None = None,
+    printer_id: str | None = None,
 ) -> dict[str, Any]:
     """Single-call print readiness check with optional auto-repair.
 
@@ -2868,11 +2869,33 @@ def can_print_now(
         auto_fix: Whether to attempt automatic repairs.
         output_path: Where to write the fixed file (only used with auto_fix).
         printer_bed_mm: Build volume as (x, y, z) in mm.
-            Defaults to (256, 256, 256) (typical Bambu A1).
+            Defaults to a legacy 256mm cube only when no printer_id or
+            explicit bed is provided.
+        printer_id: Optional supported printer model id.  When provided and
+            ``printer_bed_mm`` is omitted, printer intelligence supplies the
+            build volume.
 
     Returns:
         Dict with pass/fail verdict, issues found, and actions taken.
     """
+    if printer_bed_mm is None and printer_id:
+        from kiln.printers.bed_fit import get_build_volume
+
+        printer_bed_mm = get_build_volume(printer_id)
+        if printer_bed_mm is None:
+            return {
+                "can_print": False,
+                "verdict": "unknown_printer_bed",
+                "issues": [{
+                    "type": "unknown_printer_bed",
+                    "detail": (
+                        f"Unknown printer_id {printer_id!r}; pass "
+                        "printer_bed_mm explicitly or use a supported "
+                        "printer model id."
+                    ),
+                }],
+                "actions_taken": [],
+            }
     if printer_bed_mm is None:
         printer_bed_mm = (256.0, 256.0, 256.0)
 

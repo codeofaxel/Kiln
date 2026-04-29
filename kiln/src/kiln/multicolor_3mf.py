@@ -464,6 +464,7 @@ def auto_arrange_parts(
     plate_width: float = 256.0,
     plate_depth: float = 256.0,
     gap_mm: float = 5.0,
+    printer_id: str | None = None,
 ) -> list[ColorPart]:
     """Arrange multiple parts on a print plate without overlapping.
 
@@ -487,9 +488,14 @@ def auto_arrange_parts(
             * ``color`` (str, optional)
             * ``material`` (str, optional)
 
-        plate_width: Print plate X dimension in mm (default 256 for Bambu A1).
-        plate_depth: Print plate Y dimension in mm (default 256 for Bambu A1).
+        plate_width: Print plate X dimension in mm (default 256 for legacy
+          callers without a printer id).
+        plate_depth: Print plate Y dimension in mm (default 256 for legacy
+          callers without a printer id).
         gap_mm: Minimum gap between groups in mm.
+        printer_id: Optional supported printer model id.  When provided,
+          bundled printer-intelligence build volume overrides ``plate_width``
+          and ``plate_depth``.
 
     Returns:
         List of :class:`ColorPart` with ``x/y`` positions set, ready to pass
@@ -505,6 +511,19 @@ def auto_arrange_parts(
         ], plate_width=256, plate_depth=256, gap_mm=5)
         result = compose_multicolor_3mf(parts)
     """
+    if printer_id:
+        from kiln.printers.bed_fit import resolve_build_volume
+
+        resolved = resolve_build_volume(printer_id)
+        if resolved is None:
+            raise ValueError(
+                f"Unknown printer_id {printer_id!r}; omit printer_id and "
+                "pass plate_width/plate_depth explicitly, or use a "
+                "supported printer model id."
+            )
+        _model_id, build_volume = resolved
+        plate_width, plate_depth = build_volume[0], build_volume[1]
+
     # Assign default groups (each spec is its own group if not specified).
     # Track group per spec in a parallel list so the result-build pass never
     # calls list.index() — which would give wrong results for identical dicts.

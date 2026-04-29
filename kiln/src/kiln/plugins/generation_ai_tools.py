@@ -666,11 +666,14 @@ class _GenerationAIToolsPlugin:
 
                 # Step 4: Full validation pipeline (validate -> repair -> printability -> build volume)
                 pipeline_result = None
+                _build_vol = None
+                bed_size_source = None
+                bed_size_model_id = None
                 if result.format in ("stl", "obj", "glb"):
                     from kiln.mesh_validation_pipeline import run_validation_pipeline
+                    from kiln.printers.bed_fit import resolve_build_volume
 
                     # Resolve build volume from printer if available
-                    _build_vol = None
                     try:
                         if printer_name:
                             _adapter = _srv._get_registry().get(printer_name)
@@ -679,13 +682,26 @@ class _GenerationAIToolsPlugin:
                         _printer_info = _adapter.get_printer_info()
                         bv = getattr(_printer_info, "build_volume", None)
                         if isinstance(bv, dict) and bv:
-                            _build_vol = (
-                                float(bv.get("x", 256)),
-                                float(bv.get("y", 256)),
-                                float(bv.get("z", 256)),
-                            )
+                            x = bv.get("x")
+                            y = bv.get("y")
+                            z = bv.get("z")
+                            if x is not None and y is not None and z is not None:
+                                _build_vol = (float(x), float(y), float(z))
+                                bed_size_source = "adapter"
                     except Exception:
                         _logger.debug("Could not resolve build volume from printer", exc_info=True)
+                    if _build_vol is None and (printer_id or printer_name):
+                        resolved = resolve_build_volume(printer_id or printer_name)
+                        if resolved:
+                            bed_size_model_id, _build_vol = resolved
+                            bed_size_source = "printer_intelligence"
+                        elif printer_id:
+                            return _srv._error_dict(
+                                f"Unknown printer_id {printer_id!r}; use a supported "
+                                "printer model id or omit printer_id and pass an "
+                                "adapter with build-volume metadata.",
+                                code="UNKNOWN_PRINTER_MODEL",
+                            )
 
                     try:
                         pipeline_result = run_validation_pipeline(
@@ -793,6 +809,11 @@ class _GenerationAIToolsPlugin:
                     "experimental": True,
                     "auto_print_enabled": _srv._AUTO_PRINT_GENERATED,
                 }
+                if _build_vol is not None:
+                    resp["bed_dims_mm"] = list(_build_vol)
+                    resp["bed_size_source"] = bed_size_source
+                    if bed_size_model_id:
+                        resp["bed_size_model_id"] = bed_size_model_id
 
                 if auto_printed:
                     resp["print"] = print_data

@@ -748,6 +748,21 @@ class TestDuplicateStlOnPlate:
                 stl_path, 10, bed_width_mm=256, bed_depth_mm=256,
             )
 
+    def test_printer_id_resolves_build_plate(self, tmp_path):
+        stl_path = _make_flat_cube_stl(tmp_path, 140, 140, 10)
+        output = duplicate_stl_on_plate(
+            stl_path,
+            4,
+            printer_id="Creality K1 Max",
+            output_path=os.path.join(str(tmp_path), "k1max.stl"),
+        )
+        assert os.path.isfile(output)
+
+    def test_unknown_printer_id_raises(self, tmp_path):
+        stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 10)
+        with pytest.raises(ValueError, match="Unknown printer_id"):
+            duplicate_stl_on_plate(stl_path, 2, printer_id="mystery_bot")
+
     def test_model_too_large_for_bed(self, tmp_path):
         stl_path = _make_flat_cube_stl(tmp_path, 300, 300, 10)
         with pytest.raises(ValueError, match="too large"):

@@ -1539,6 +1539,17 @@ class TestPrintReadinessGate:
         assert result["can_print"] is False
         assert any(i["type"] == "too_large" for i in result["issues"])
 
+    def test_unknown_printer_id_fails_closed(self, tmp_path):
+        from kiln.generation.validation import can_print_now
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = can_print_now(f, printer_id="mystery_bot")
+
+        assert result["can_print"] is False
+        assert result["verdict"] == "unknown_printer_bed"
+        assert result["issues"][0]["type"] == "unknown_printer_bed"
+
     def test_auto_fix_returns_actions(self, tmp_path):
         from kiln.generation.validation import can_print_now
 
@@ -5094,6 +5105,28 @@ class TestArrangePartsOnPlateTool:
         result = arrange_parts_on_plate('["/tmp/a.stl"]')
         assert result["success"] is True
         assert result["fitted_parts"] == 1
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.design_reasoning.arrange_on_plate")
+    def test_printer_id_resolves_plate_size(self, mock_arrange, mock_auth):
+        from kiln.design_reasoning import PlateArrangement
+        arrange_parts_on_plate = _get_plugin_tool("design_reasoning_tools", "arrange_parts_on_plate")
+
+        mock_arrange.return_value = PlateArrangement(
+            arranged_parts=[{"path": "/tmp/a.stl", "x": 0, "y": 0, "width": 20, "depth": 20, "height": 10}],
+            plate_utilization=0.05,
+            total_parts=1,
+            fitted_parts=1,
+            summary="Arranged 1/1 parts.",
+        )
+
+        result = arrange_parts_on_plate('["/tmp/a.stl"]', printer_id="Creality K1 Max")
+
+        assert result["success"] is True
+        assert result["bed_size_model_id"] == "k1_max"
+        assert result["bed_dims_mm"] == [300.0, 300.0]
+        assert mock_arrange.call_args.kwargs["plate_width_mm"] == 300.0
+        assert mock_arrange.call_args.kwargs["plate_depth_mm"] == 300.0
 
 
 # ---- Loop 14: Template search by description ----

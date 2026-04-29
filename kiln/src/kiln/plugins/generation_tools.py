@@ -18,6 +18,23 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 
+def _resolve_tool_build_volume(
+    printer_id: str | None,
+) -> tuple[str, tuple[float, float, float]] | None:
+    if not printer_id:
+        return None
+    from kiln.printers.bed_fit import resolve_build_volume
+
+    resolved = resolve_build_volume(printer_id)
+    if resolved is None:
+        raise ValueError(
+            f"Unknown printer model {printer_id!r}; omit the printer id and "
+            "pass explicit build_volume_x/y/z, or use a supported printer "
+            "model id."
+        )
+    return resolved
+
+
 class _GenerationToolsPlugin:
     """Text-to-3D and image-to-3D model generation tools.
 
@@ -97,6 +114,7 @@ class _GenerationToolsPlugin:
                 return err
             try:
                 build_volume = None
+                resolved_model_id = None
                 if (
                     build_volume_x is not None
                     and build_volume_y is not None
@@ -107,6 +125,10 @@ class _GenerationToolsPlugin:
                         build_volume_y,
                         build_volume_z,
                     )
+                elif printer_model:
+                    resolved = _resolve_tool_build_volume(printer_model)
+                    if resolved:
+                        resolved_model_id, build_volume = resolved
 
                 session = _generate_original(
                     requirements,
@@ -125,6 +147,10 @@ class _GenerationToolsPlugin:
                 result = session.to_dict()
                 result["status"] = "success"
                 result["message"] = session.summary
+                if resolved_model_id:
+                    result["bed_size_source"] = "printer_intelligence"
+                    result["bed_size_model_id"] = resolved_model_id
+                    result["bed_dims_mm"] = list(build_volume)
                 return result
             except ValueError as exc:
                 return _srv._error_dict(str(exc), code="INVALID_INPUT")
@@ -270,6 +296,7 @@ class _GenerationToolsPlugin:
             build_volume_x: float | None = None,
             build_volume_y: float | None = None,
             build_volume_z: float | None = None,
+            printer_id: str = "",
             auto_repair: bool = True,
             auto_scale: bool = False,
             min_printability_score: int = 40,
@@ -300,6 +327,8 @@ class _GenerationToolsPlugin:
                 build_volume_x: Optional X build dimension (mm).
                 build_volume_y: Optional Y build dimension (mm).
                 build_volume_z: Optional Z build dimension (mm).
+                printer_id: Optional supported printer model id.  When
+                    provided, printer intelligence supplies the build volume.
                 auto_repair: Auto-repair non-manifold meshes (default True).
                 auto_scale: Auto-scale if mesh exceeds build volume (default False).
                 min_printability_score: Minimum score (0-100) to pass (default 40).
@@ -310,6 +339,7 @@ class _GenerationToolsPlugin:
                 from kiln.mesh_validation_pipeline import run_validation_pipeline
 
                 build_volume = None
+                resolved_model_id = None
                 if (
                     build_volume_x is not None
                     and build_volume_y is not None
@@ -320,6 +350,10 @@ class _GenerationToolsPlugin:
                         build_volume_y,
                         build_volume_z,
                     )
+                elif printer_id:
+                    resolved = _resolve_tool_build_volume(printer_id)
+                    if resolved:
+                        resolved_model_id, build_volume = resolved
 
                 result = run_validation_pipeline(
                     file_path,
@@ -336,6 +370,15 @@ class _GenerationToolsPlugin:
                     "passed": result.passed,
                     "result": result.to_dict(),
                     "message": result.summary,
+                    **(
+                        {
+                            "bed_size_source": "printer_intelligence",
+                            "bed_size_model_id": resolved_model_id,
+                            "bed_dims_mm": list(build_volume),
+                        }
+                        if resolved_model_id and build_volume
+                        else {}
+                    ),
                 }
             except Exception as exc:
                 _logger.exception("Unexpected error in validate_and_prepare_mesh")

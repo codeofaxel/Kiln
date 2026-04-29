@@ -245,12 +245,24 @@ def _inline_stl_binary_fallback(path: Path) -> dict[str, Any]:
 
 
 def _get_build_volume_for_printer(printer_id: str) -> tuple[float, float, float] | None:
-    """Resolve build volume from printer_id via safety profiles."""
+    """Resolve build volume from printer_id via intelligence, then profiles."""
+    try:
+        from kiln.printers.bed_fit import get_build_volume
+
+        volume = get_build_volume(printer_id)
+        if volume is not None:
+            return volume
+    except Exception:
+        _logger.debug(
+            "Could not resolve printer-intelligence build volume for %s",
+            printer_id,
+            exc_info=True,
+        )
     try:
         from kiln.safety_profiles import get_profile
 
         profile = get_profile(printer_id)
-        if profile.build_volume and len(profile.build_volume) >= 3:
+        if profile and profile.build_volume and len(profile.build_volume) >= 3:
             return (
                 float(profile.build_volume[0]),
                 float(profile.build_volume[1]),
@@ -1219,4 +1231,3 @@ def _step_estimate(report: _PipelineReport, working_path: str) -> None:
 # ---------------------------------------------------------------------------
 # Plugin class
 # ---------------------------------------------------------------------------
-

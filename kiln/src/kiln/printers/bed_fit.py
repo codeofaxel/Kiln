@@ -43,6 +43,18 @@ _PRINTER_INTELLIGENCE_PATH = (
 _printer_intelligence_cache: dict[str, Any] | None = None
 
 
+# Explicit variants and common shorthand names that are not one-to-one entries
+# in printer_intelligence.json.  Keep this narrow: the JSON catalog remains the
+# source of truth for first-class printer models.
+_BUILD_VOLUME_OVERRIDES: dict[str, tuple[float, float, float]] = {
+    "bambu_x1": (256.0, 256.0, 256.0),
+    "voron_2_4_350": (350.0, 350.0, 350.0),
+    "voron_350": (350.0, 350.0, 350.0),
+    "voron_2_4_300": (300.0, 300.0, 300.0),
+    "voron_2_4_250": (250.0, 250.0, 250.0),
+}
+
+
 def _load_printer_intelligence() -> dict[str, Any]:
     """Load printer_intelligence.json (cached)."""
     global _printer_intelligence_cache  # noqa: PLW0603
@@ -52,24 +64,75 @@ def _load_printer_intelligence() -> dict[str, Any]:
     return _printer_intelligence_cache
 
 
-def get_build_volume(printer_id: str) -> tuple[float, float, float] | None:
-    """Return (x, y, z) build volume in mm for a known printer_id.
+def _normalise_printer_id(printer_id: str) -> str:
+    value = printer_id.lower().strip()
+    value = re.sub(r"[^a-z0-9]+", "_", value)
+    value = re.sub(r"_+", "_", value).strip("_")
+    return value
 
-    Returns ``None`` when the printer_id is unknown or lacks volume data.
-    Callers should treat ``None`` as "unknown — don't block" rather than
-    as "no volume" (we'd rather allow a print than block on missing data
-    for an obscure printer model).
-    """
-    intel = _load_printer_intelligence()
-    normalised = printer_id.replace("-", "_").strip()
+
+def _printer_id_candidates(printer_id: str | None) -> list[str]:
+    if not printer_id:
+        return []
+    normalised = _normalise_printer_id(printer_id)
+    if not normalised:
+        return []
+
     candidates = [normalised]
     if normalised.startswith("creality_"):
-        candidates.append(normalised.removeprefix("creality_"))
-    entry = None
+        candidates.insert(0, normalised.removeprefix("creality_"))
+
+    vendor_stripped = normalised
+    for token in (
+        "bambu_lab_",
+        "original_prusa_",
+        "prusa_research_",
+        "creality_",
+    ):
+        if vendor_stripped.startswith(token):
+            vendor_stripped = vendor_stripped.removeprefix(token)
+            if token == "bambu_lab_":
+                vendor_stripped = "bambu_" + vendor_stripped
+            elif token in ("original_prusa_", "prusa_research_"):
+                vendor_stripped = "prusa_" + vendor_stripped
+            candidates.append(vendor_stripped)
+
+    for candidate in list(candidates):
+        candidates.append(re.sub(r"([a-z])_(\d)", r"\1\2", candidate))
+
+    aliases = {
+        "x1": "bambu_x1",
+        "x1c": "bambu_x1c",
+        "a1": "bambu_a1",
+        "a1_mini": "bambu_a1_mini",
+        "p1s": "bambu_p1s",
+        "p1p": "bambu_p1p",
+        "mk3s": "prusa_mk3s",
+        "mk4": "prusa_mk4",
+        "mini": "prusa_mini",
+        "xl": "prusa_xl",
+    }
+    for candidate in list(candidates):
+        if candidate in aliases:
+            candidates.append(aliases[candidate])
+
+    seen: set[str] = set()
+    ordered: list[str] = []
     for candidate in candidates:
-        entry = intel.get(candidate)
-        if entry:
-            break
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            ordered.append(candidate)
+    return ordered
+
+
+def _lookup_build_volume_exact(
+    candidate: str,
+) -> tuple[float, float, float] | None:
+    if candidate == "default":
+        return None
+    if candidate in _BUILD_VOLUME_OVERRIDES:
+        return _BUILD_VOLUME_OVERRIDES[candidate]
+    entry = _load_printer_intelligence().get(candidate)
     if not entry:
         return None
     vol = entry.get("build_volume_mm")
@@ -79,6 +142,43 @@ def get_build_volume(printer_id: str) -> tuple[float, float, float] | None:
         return (float(vol[0]), float(vol[1]), float(vol[2]))
     except (TypeError, ValueError):
         return None
+
+
+def get_build_volume(printer_id: str | None) -> tuple[float, float, float] | None:
+    """Return (x, y, z) build volume in mm for a known printer_id.
+
+    Returns ``None`` when the printer_id is unknown or lacks volume data.
+    Callers should treat ``None`` as "unknown — don't block" rather than
+    as "no volume" (we'd rather allow a print than block on missing data
+    for an obscure printer model).
+
+    ``printer_id`` may be a canonical id (``bambu_a1``), a vendor-prefixed
+    id (``creality_k1_max``), or a common human label (``Bambu Lab A1``).
+    """
+    for candidate in _printer_id_candidates(printer_id):
+        looked_up = _lookup_build_volume_exact(candidate)
+        if looked_up is not None:
+            return looked_up
+    return None
+
+
+def resolve_build_volume_printer_id(printer_id: str | None) -> str | None:
+    """Return the canonical id that provided a known build volume."""
+    for candidate in _printer_id_candidates(printer_id):
+        if _lookup_build_volume_exact(candidate) is not None:
+            return candidate
+    return None
+
+
+def resolve_build_volume(
+    printer_id: str | None,
+) -> tuple[str, tuple[float, float, float]] | None:
+    """Return ``(canonical_printer_id, build_volume_mm)`` if known."""
+    for candidate in _printer_id_candidates(printer_id):
+        looked_up = _lookup_build_volume_exact(candidate)
+        if looked_up is not None:
+            return candidate, looked_up
+    return None
 
 
 # ---------------------------------------------------------------------------

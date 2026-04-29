@@ -77,6 +77,7 @@ class TestGenerationToolsPlugin:
 
     def test_generate_original_design_wires_to_core_loop(self, registered_tools, monkeypatch) -> None:
         monkeypatch.setattr("kiln.server._check_auth", lambda scope: None)
+        captured_kwargs = {}
 
         session = SimpleNamespace(
             summary="Best attempt scored 94/100 (A) via gemini. The design is ready for print.",
@@ -88,10 +89,12 @@ class TestGenerationToolsPlugin:
                 "attempts_made": 1,
             },
         )
-        monkeypatch.setattr(
-            "kiln.original_design.generate_original_design",
-            lambda *args, **kwargs: session,
-        )
+
+        def fake_generate(*args, **kwargs):
+            captured_kwargs.update(kwargs)
+            return session
+
+        monkeypatch.setattr("kiln.original_design.generate_original_design", fake_generate)
 
         result = registered_tools["generate_original_design"](
             "phone stand with cable slot",
@@ -104,3 +107,6 @@ class TestGenerationToolsPlugin:
         assert result["message"] == session.summary
         assert result["provider_used"] == "gemini"
         assert result["best_readiness_score"] == 94
+        assert result["bed_size_model_id"] == "bambu_a1"
+        assert result["bed_dims_mm"] == [256.0, 256.0, 256.0]
+        assert captured_kwargs["build_volume"] == (256.0, 256.0, 256.0)

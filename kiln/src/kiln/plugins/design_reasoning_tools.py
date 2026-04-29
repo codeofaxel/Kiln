@@ -17,6 +17,22 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 
+def _resolve_tool_build_volume(
+    printer_id: str | None,
+) -> tuple[str, tuple[float, float, float]] | None:
+    if not printer_id:
+        return None
+    from kiln.printers.bed_fit import resolve_build_volume
+
+    resolved = resolve_build_volume(printer_id)
+    if resolved is None:
+        raise ValueError(
+            f"Unknown printer_id {printer_id!r}; omit printer_id and pass "
+            "explicit bed/plate dimensions, or use a supported printer model id."
+        )
+    return resolved
+
+
 class _DesignReasoningToolsPlugin:
     """Structural analysis, design reinforcement, plate arrangement, and
     template optimisation tools.
@@ -579,6 +595,7 @@ class _DesignReasoningToolsPlugin:
             plate_depth_mm: float = 256.0,
             spacing_mm: float = 5.0,
             copies: str = "",
+            printer_id: str = "",
         ) -> dict:
             """Pack multiple STL files onto a virtual build plate.
 
@@ -593,6 +610,8 @@ class _DesignReasoningToolsPlugin:
             :param plate_depth_mm: Build plate depth in mm (default 256).
             :param spacing_mm: Minimum gap between parts in mm (default 5).
             :param copies: Optional JSON dict of filename->count, e.g. ``{"part.stl": 3}``.
+            :param printer_id: Optional supported printer model id.  When
+                provided, printer intelligence supplies the plate size.
             :returns: Dict with arranged_parts, overflow_parts, plate_utilization, summary.
             """
             _srv._check_auth("design:arrange")
@@ -603,6 +622,11 @@ class _DesignReasoningToolsPlugin:
 
                 parsed_paths = _json.loads(file_paths)
                 parsed_copies = _json.loads(copies) if copies else None
+                resolved_model_id = None
+                resolved_volume = _resolve_tool_build_volume(printer_id)
+                if resolved_volume:
+                    resolved_model_id, build_volume = resolved_volume
+                    plate_width_mm, plate_depth_mm = build_volume[0], build_volume[1]
 
                 result = arrange_on_plate(
                     parsed_paths,
@@ -611,7 +635,12 @@ class _DesignReasoningToolsPlugin:
                     spacing_mm=spacing_mm,
                     copies=parsed_copies,
                 )
-                return {"success": True, **result.to_dict()}
+                response = {"success": True, **result.to_dict()}
+                if resolved_model_id:
+                    response["bed_size_source"] = "printer_intelligence"
+                    response["bed_size_model_id"] = resolved_model_id
+                    response["bed_dims_mm"] = [plate_width_mm, plate_depth_mm]
+                return response
             except ValueError as exc:
                 return _srv._error_dict(str(exc), code="INVALID_ARGS")
             except Exception as exc:
@@ -627,6 +656,7 @@ class _DesignReasoningToolsPlugin:
             plate_width: float = 256.0,
             plate_depth: float = 256.0,
             gap_mm: float = 5.0,
+            printer_id: str = "",
         ) -> dict:
             """Calculate non-overlapping XY positions for multiple parts on a print plate.
 
@@ -663,9 +693,13 @@ class _DesignReasoningToolsPlugin:
                     * ``material`` (str, optional) -- filament label (also triggers
                       compatibility checks when passed to compose_multicolor_3mf)
 
-                plate_width: Print plate X dimension in mm (default 256 for Bambu A1).
-                plate_depth: Print plate Y dimension in mm (default 256 for Bambu A1).
+                plate_width: Print plate X dimension in mm (default 256 for
+                    legacy callers without a printer id).
+                plate_depth: Print plate Y dimension in mm (default 256 for
+                    legacy callers without a printer id).
                 gap_mm: Minimum spacing between groups in mm.
+                printer_id: Optional supported printer model id.  When
+                    provided, printer intelligence supplies the plate size.
 
             Returns:
                 Dict with ``success``, ``parts`` list (each part has ``x``, ``y`` set),
@@ -678,12 +712,20 @@ class _DesignReasoningToolsPlugin:
             except ImportError as exc:
                 return {"success": False, "error": f"multicolor_3mf module unavailable: {exc}"}
 
-            arranged = _arrange(
-                part_specs,
-                plate_width=plate_width,
-                plate_depth=plate_depth,
-                gap_mm=gap_mm,
-            )
+            try:
+                resolved_model_id = None
+                resolved_volume = _resolve_tool_build_volume(printer_id)
+                if resolved_volume:
+                    resolved_model_id, build_volume = resolved_volume
+                    plate_width, plate_depth = build_volume[0], build_volume[1]
+                arranged = _arrange(
+                    part_specs,
+                    plate_width=plate_width,
+                    plate_depth=plate_depth,
+                    gap_mm=gap_mm,
+                )
+            except ValueError as exc:
+                return _srv._error_dict(str(exc), code="INVALID_ARGS")
 
             groups_seen: set = set()
             for spec in part_specs:
@@ -706,7 +748,7 @@ class _DesignReasoningToolsPlugin:
             ]
 
             group_count = len(groups_seen) if groups_seen else len(arranged)
-            return {
+            response = {
                 "success": True,
                 "parts": result_parts,
                 "group_count": group_count,
@@ -716,6 +758,11 @@ class _DesignReasoningToolsPlugin:
                     f"Pass 'parts' directly to compose_multicolor_3mf()."
                 ),
             }
+            if resolved_model_id:
+                response["bed_size_source"] = "printer_intelligence"
+                response["bed_size_model_id"] = resolved_model_id
+                response["bed_dims_mm"] = [plate_width, plate_depth]
+            return response
 
         # ------------------------------------------------------------------
         # optimize_template_params
@@ -1005,6 +1052,7 @@ class _DesignReasoningToolsPlugin:
             bed_x_mm: float = 256.0,
             bed_y_mm: float = 256.0,
             bed_z_mm: float = 256.0,
+            printer_id: str = "",
         ) -> dict:
             """Single-call print readiness check with optional auto-repair.
 
@@ -1021,6 +1069,8 @@ class _DesignReasoningToolsPlugin:
             :param bed_x_mm: Build plate X dimension (default 256).
             :param bed_y_mm: Build plate Y dimension (default 256).
             :param bed_z_mm: Build plate Z dimension (default 256).
+            :param printer_id: Optional supported printer model id.  When
+                provided, printer intelligence supplies the build volume.
             :returns: Dict with can_print verdict, issues, and actions taken.
             """
             if auto_fix and (err := _srv._check_auth("generate")):
@@ -1028,7 +1078,13 @@ class _DesignReasoningToolsPlugin:
             try:
                 from kiln.generation.validation import can_print_now
 
-                return {
+                resolved_model_id = None
+                resolved_volume = _resolve_tool_build_volume(printer_id)
+                if resolved_volume:
+                    resolved_model_id, build_volume = resolved_volume
+                    bed_x_mm, bed_y_mm, bed_z_mm = build_volume
+
+                response = {
                     "success": True,
                     **can_print_now(
                         file_path,
@@ -1037,6 +1093,13 @@ class _DesignReasoningToolsPlugin:
                         printer_bed_mm=(bed_x_mm, bed_y_mm, bed_z_mm),
                     ),
                 }
+                if resolved_model_id:
+                    response["bed_size_source"] = "printer_intelligence"
+                    response["bed_size_model_id"] = resolved_model_id
+                    response["bed_dims_mm"] = [bed_x_mm, bed_y_mm, bed_z_mm]
+                return response
+            except ValueError as exc:
+                return _srv._error_dict(str(exc), code="INVALID_ARGS")
             except Exception as exc:
                 return _srv._error_dict(f"Print readiness check failed: {exc}")
 

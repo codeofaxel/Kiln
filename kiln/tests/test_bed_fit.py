@@ -77,6 +77,14 @@ class TestBuildVolumeLookup:
     def test_creality_k1_max_alias(self):
         assert get_build_volume("creality_k1_max") == (300.0, 300.0, 300.0)
 
+    def test_human_model_labels(self):
+        assert get_build_volume("Creality K1 Max") == (300.0, 300.0, 300.0)
+        assert get_build_volume("Bambu Lab A1") == (256.0, 256.0, 256.0)
+        assert get_build_volume("Elegoo Neptune 4") == (225.0, 225.0, 265.0)
+
+    def test_explicit_size_variants(self):
+        assert get_build_volume("voron_2.4_350") == (350.0, 350.0, 350.0)
+
     def test_ender3_v3_ke(self):
         assert get_build_volume("ender3_v3_ke") == (220.0, 220.0, 240.0)
 

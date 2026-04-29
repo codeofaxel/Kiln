@@ -616,6 +616,27 @@ def _write_binary_stl(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_plate_xy(
+    *,
+    printer_id: str | None,
+    bed_width_mm: float,
+    bed_depth_mm: float,
+) -> tuple[float, float]:
+    if not printer_id:
+        return bed_width_mm, bed_depth_mm
+    from kiln.printers.bed_fit import resolve_build_volume
+
+    resolved = resolve_build_volume(printer_id)
+    if resolved is None:
+        raise ValueError(
+            f"Unknown printer_id {printer_id!r}; omit printer_id and pass "
+            "bed_width_mm/bed_depth_mm explicitly, or use a supported "
+            "printer model id."
+        )
+    _model_id, build_volume = resolved
+    return build_volume[0], build_volume[1]
+
+
 def duplicate_stl_on_plate(
     file_path: str,
     count: int,
@@ -623,6 +644,7 @@ def duplicate_stl_on_plate(
     spacing_mm: float = 10.0,
     bed_width_mm: float = 256.0,
     bed_depth_mm: float = 256.0,
+    printer_id: str | None = None,
     output_path: str | None = None,
 ) -> str:
     """Duplicate an STL model into *count* copies arranged in a grid on the build plate.
@@ -636,6 +658,9 @@ def duplicate_stl_on_plate(
     :param spacing_mm: Minimum gap between copies in mm.
     :param bed_width_mm: Build plate width (X) in mm.
     :param bed_depth_mm: Build plate depth (Y) in mm.
+    :param printer_id: Optional supported printer model id.  When provided,
+        the bundled printer-intelligence build volume overrides the generic
+        bed dimensions.
     :param output_path: Where to write the output STL.  If ``None``, a
         temp file is created.
     :returns: Path to the output STL with all copies.
@@ -643,6 +668,12 @@ def duplicate_stl_on_plate(
     """
     if count < 2:
         raise ValueError(f"count must be >= 2, got {count}")
+
+    bed_width_mm, bed_depth_mm = _resolve_plate_xy(
+        printer_id=printer_id,
+        bed_width_mm=bed_width_mm,
+        bed_depth_mm=bed_depth_mm,
+    )
 
     triangles, _vertices = _parse_mesh(file_path)
     triangles = _translate_to_bed(triangles)
@@ -743,6 +774,7 @@ def build_multicolor_plate_3mf(
     spacing_mm: float = 10.0,
     bed_width_mm: float = 256.0,
     bed_depth_mm: float = 256.0,
+    printer_id: str | None = None,
     output_path: str | None = None,
 ) -> str:
     """Build a multi-body 3MF from an STL with per-object extruder assignments.
@@ -757,6 +789,9 @@ def build_multicolor_plate_3mf(
     :param spacing_mm: Gap between copies in mm.
     :param bed_width_mm: Build plate width (X) in mm.
     :param bed_depth_mm: Build plate depth (Y) in mm.
+    :param printer_id: Optional supported printer model id.  When provided,
+        the bundled printer-intelligence build volume overrides the generic
+        bed dimensions.
     :param output_path: Output 3MF path.  If ``None``, a temp file is created.
     :returns: Path to the output 3MF file.
     :raises ValueError: If copies don't fit on the bed or file is invalid.
@@ -765,6 +800,12 @@ def build_multicolor_plate_3mf(
         raise ValueError(f"count must be >= 2, got {count}")
     if count > 20:
         raise ValueError(f"count must be <= 20, got {count}")
+
+    bed_width_mm, bed_depth_mm = _resolve_plate_xy(
+        printer_id=printer_id,
+        bed_width_mm=bed_width_mm,
+        bed_depth_mm=bed_depth_mm,
+    )
 
     # Parse mesh
     triangles, _vertices = _parse_mesh(file_path)

@@ -333,6 +333,21 @@ class TestCenterModelOnBed:
             "/tmp/m.stl", bed_x_mm=200.0, bed_y_mm=200.0, output_path=None,
         )
 
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.generation.validation.center_on_bed")
+    def test_printer_id_resolves_bed_size(self, mock_center, _auth, mesh_tools) -> None:
+        mock_center.return_value = {"translation_mm": {"x": 150, "y": 150, "z": 0}}
+        result = mesh_tools["center_model_on_bed"](
+            file_path="/tmp/m.stl", printer_id="Creality K1 Max",
+        )
+
+        assert result["success"] is True
+        assert result["bed_size_model_id"] == "k1_max"
+        assert result["bed_dims_mm"] == [300.0, 300.0]
+        mock_center.assert_called_once_with(
+            "/tmp/m.stl", bed_x_mm=300.0, bed_y_mm=300.0, output_path=None,
+        )
+
     def test_auth_failure(self, mesh_tools) -> None:
         with patch("kiln.server._check_auth", return_value=_auth_error()):
             result = mesh_tools["center_model_on_bed"](file_path="/tmp/m.stl")

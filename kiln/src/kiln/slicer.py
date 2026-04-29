@@ -444,6 +444,7 @@ def slice_multicolor_copies(
     spacing_mm: float = 10.0,
     bed_width_mm: float = 256.0,
     bed_depth_mm: float = 256.0,
+    printer_id: str | None = None,
     slicer_path: str | None = None,
     profile: str | None = None,
     extra_args: list[str] | None = None,
@@ -465,6 +466,9 @@ def slice_multicolor_copies(
     :param spacing_mm: Gap between copies in mm.
     :param bed_width_mm: Build plate width (X) in mm.
     :param bed_depth_mm: Build plate depth (Y) in mm.
+    :param printer_id: Optional supported printer model id.  When provided,
+        the bundled printer-intelligence build volume overrides the generic
+        bed dimensions.
     :param slicer_path: Explicit slicer binary path.
     :param profile: Path to a slicer profile/config file.
     :param extra_args: Additional CLI arguments for the slicer.
@@ -481,6 +485,18 @@ def slice_multicolor_copies(
 
     if count < 2:
         raise ValueError(f"count must be >= 2, got {count}")
+    if printer_id:
+        from kiln.printers.bed_fit import resolve_build_volume
+
+        resolved = resolve_build_volume(printer_id)
+        if resolved is None:
+            raise ValueError(
+                f"Unknown printer_id {printer_id!r}; omit printer_id and "
+                "pass bed_width_mm/bed_depth_mm explicitly, or use a "
+                "supported printer model id."
+            )
+        _model_id, build_volume = resolved
+        bed_width_mm, bed_depth_mm = build_volume[0], build_volume[1]
 
     # Parse mesh and compute bounding box
     triangles, _vertices = _parse_mesh(input_path)

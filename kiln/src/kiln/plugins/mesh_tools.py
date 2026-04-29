@@ -19,6 +19,23 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 
+def _resolve_tool_build_volume(
+    printer_id: str | None,
+) -> tuple[str, tuple[float, float, float]] | None:
+    if not printer_id:
+        return None
+    from kiln.printers.bed_fit import resolve_build_volume
+
+    resolved = resolve_build_volume(printer_id)
+    if resolved is None:
+        raise ValueError(
+            f"Unknown printer_id {printer_id!r}; omit printer_id and pass "
+            "explicit bed/build-volume dimensions, or use a supported "
+            "printer model id."
+        )
+    return resolved
+
+
 class _MeshToolsPlugin:
     """Mesh manipulation, analysis, and transformation tools.
 
@@ -606,6 +623,7 @@ class _MeshToolsPlugin:
             max_x_mm: float = 256.0,
             max_y_mm: float = 256.0,
             max_z_mm: float = 256.0,
+            printer_id: str = "",
             output_path: str = "",
         ) -> dict:
             """Auto-scale a mesh to fit within a build volume while maintaining aspect ratio.
@@ -617,6 +635,8 @@ class _MeshToolsPlugin:
             :param max_x_mm: Maximum X dimension of build volume.
             :param max_y_mm: Maximum Y dimension of build volume.
             :param max_z_mm: Maximum Z dimension of build volume.
+            :param printer_id: Optional supported printer model id.  When
+                provided, printer intelligence supplies the build volume.
             :param output_path: Output path. Defaults to overwriting input.
             :returns: Dict with original/new dimensions and scale factor.
             """
@@ -626,8 +646,13 @@ class _MeshToolsPlugin:
                 return err
             try:
                 from kiln.generation.validation import scale_to_fit
+                resolved_model_id = None
+                resolved_volume = _resolve_tool_build_volume(printer_id)
+                if resolved_volume:
+                    resolved_model_id, build_volume = resolved_volume
+                    max_x_mm, max_y_mm, max_z_mm = build_volume
 
-                return {
+                response = {
                     "success": True,
                     **scale_to_fit(
                         file_path,
@@ -637,6 +662,13 @@ class _MeshToolsPlugin:
                         output_path=output_path or None,
                     ),
                 }
+                if resolved_model_id:
+                    response["bed_size_source"] = "printer_intelligence"
+                    response["bed_size_model_id"] = resolved_model_id
+                    response["bed_dims_mm"] = [max_x_mm, max_y_mm, max_z_mm]
+                return response
+            except ValueError as exc:
+                return _error_dict(str(exc), code="INVALID_ARGS")
             except Exception as exc:
                 return _error_dict(f"Scale failed: {exc}")
 
@@ -645,6 +677,7 @@ class _MeshToolsPlugin:
             file_path: str,
             bed_x_mm: float = 256.0,
             bed_y_mm: float = 256.0,
+            printer_id: str = "",
             output_path: str = "",
         ) -> dict:
             """Center a mesh on the build plate and place at z=0.
@@ -655,6 +688,8 @@ class _MeshToolsPlugin:
             :param file_path: Path to the STL file.
             :param bed_x_mm: Build plate X dimension (default 256).
             :param bed_y_mm: Build plate Y dimension (default 256).
+            :param printer_id: Optional supported printer model id.  When
+                provided, printer intelligence supplies the bed size.
             :param output_path: Output path (defaults to overwriting input).
             :returns: Dict with translation applied.
             """
@@ -664,8 +699,13 @@ class _MeshToolsPlugin:
                 return err
             try:
                 from kiln.generation.validation import center_on_bed
+                resolved_model_id = None
+                resolved_volume = _resolve_tool_build_volume(printer_id)
+                if resolved_volume:
+                    resolved_model_id, build_volume = resolved_volume
+                    bed_x_mm, bed_y_mm = build_volume[0], build_volume[1]
 
-                return {
+                response = {
                     "success": True,
                     **center_on_bed(
                         file_path,
@@ -674,6 +714,13 @@ class _MeshToolsPlugin:
                         output_path=output_path or None,
                     ),
                 }
+                if resolved_model_id:
+                    response["bed_size_source"] = "printer_intelligence"
+                    response["bed_size_model_id"] = resolved_model_id
+                    response["bed_dims_mm"] = [bed_x_mm, bed_y_mm]
+                return response
+            except ValueError as exc:
+                return _error_dict(str(exc), code="INVALID_ARGS")
             except Exception as exc:
                 return _error_dict(f"Centering failed: {exc}")
 
@@ -788,6 +835,7 @@ class _MeshToolsPlugin:
             center_on_bed: bool = True,
             bed_x_mm: float = 256.0,
             bed_y_mm: float = 256.0,
+            printer_id: str = "",
         ) -> dict:
             """Build a functional part by composing geometric primitives with booleans.
 
@@ -836,6 +884,8 @@ class _MeshToolsPlugin:
             :param center_on_bed: Translate output to bed-center (default True).
             :param bed_x_mm: Build plate X dimension for centering (default 256).
             :param bed_y_mm: Build plate Y dimension for centering (default 256).
+            :param printer_id: Optional supported printer model id.  When
+                provided, printer intelligence supplies the bed size.
             :returns: Dict with result path, SCAD code, triangle count, and
                 (if centered) ``bed_centered=True`` + applied translation.
             """
@@ -845,6 +895,11 @@ class _MeshToolsPlugin:
                 return err
             try:
                 from kiln.generation.openscad import compose_from_primitives
+                resolved_model_id = None
+                resolved_volume = _resolve_tool_build_volume(printer_id)
+                if resolved_volume:
+                    resolved_model_id, build_volume = resolved_volume
+                    bed_x_mm, bed_y_mm = build_volume[0], build_volume[1]
 
                 result = compose_from_primitives(
                     operations,
@@ -865,6 +920,9 @@ class _MeshToolsPlugin:
                             )
                             response["bed_centered"] = True
                             response["bed_dims_mm"] = [bed_x_mm, bed_y_mm]
+                            if resolved_model_id:
+                                response["bed_size_source"] = "printer_intelligence"
+                                response["bed_size_model_id"] = resolved_model_id
                             response["translation_applied"] = centered.get(
                                 "translation"
                             ) or centered.get("translate")
