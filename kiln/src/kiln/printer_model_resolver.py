@@ -95,7 +95,7 @@ def _read_printer_model_from_config() -> str | None:
         # get_printer_intel which silently falls back to "default".
         try:
             from kiln.printers.bed_fit import get_build_volume
-            if get_build_volume(model_str) is None:
+            if model_str != model_str.lower() or get_build_volume(model_str) is None:
                 logger.warning(
                     "printer_model=%r in %s doesn't match any known printer "
                     "in printer_intelligence.json.  Safety gates will "
@@ -135,5 +135,4 @@ def _load_yaml_config() -> dict[str, Any]:
     except Exception as exc:
         logger.debug("Failed to parse %s: %s", _CONFIG_PATH, exc)
         return {}
-
 
