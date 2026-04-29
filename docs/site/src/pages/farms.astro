@@ -1,0 +1,988 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+interface ProofPoint {
+  value: string;
+  label: string;
+}
+
+interface Backend {
+  name: string;
+  protocol: string;
+  note: string;
+}
+
+interface Capability {
+  eyebrow: string;
+  title: string;
+  body: string;
+}
+
+interface BoundaryItem {
+  label: string;
+  body: string;
+}
+
+interface ShopType {
+  title: string;
+  body: string;
+}
+
+const proofPoints: ProofPoint[] = [
+  { value: '7', label: 'printer backends' },
+  { value: 'MCP', label: 'agent-native control' },
+  { value: 'LAN', label: 'local-first operation' },
+  { value: 'CI', label: 'fleet checks ready' },
+];
+
+const backends: Backend[] = [
+  {
+    name: 'Bambu Lab',
+    protocol: 'MQTT + local network',
+    note: 'A1, P1, and X1 families through the dedicated Bambu adapter.',
+  },
+  {
+    name: 'Creality',
+    protocol: 'Moonraker / Klipper',
+    note: 'K1, K2, Hi, Ender V3 KE, and CrealityOS machines when local Moonraker is reachable.',
+  },
+  {
+    name: 'Prusa Link',
+    protocol: 'REST',
+    note: 'Prusa printers through Prusa Link with adapter-level safety handling.',
+  },
+  {
+    name: 'Elegoo',
+    protocol: 'SDCP WebSocket',
+    note: 'Supported Elegoo SDCP/WebSocket printers such as Centauri Carbon; Neptune printers use Moonraker when exposed.',
+  },
+  {
+    name: 'OctoPrint',
+    protocol: 'REST',
+    note: 'A stable path for many older, modified, and farm-managed printers.',
+  },
+  {
+    name: 'Moonraker / Klipper',
+    protocol: 'HTTP / WebSocket',
+    note: 'Generic Klipper-class machines when their Moonraker API is reachable on the local network.',
+  },
+  {
+    name: 'Direct USB',
+    protocol: 'USB serial',
+    note: 'Marlin and RepRapFirmware printers when a direct cable is the right control path.',
+  },
+];
+
+const capabilities: Capability[] = [
+  {
+    eyebrow: '01',
+    title: 'One control contract for the room',
+    body: 'Agents using Kiln\'s MCP server, plus CLI and CI workflows, can inspect printer state, temperatures, files, jobs, materials, and snapshots instead of hopping between vendor tools.',
+  },
+  {
+    eyebrow: '02',
+    title: 'Safety before motion',
+    body: 'Starts route through preview confirmation, printer profiles, bed-fit checks, material guidance, and adapter-aware upload flows. Kiln gives agents a responsible path to physical hardware.',
+  },
+  {
+    eyebrow: '03',
+    title: 'Real mixed-fleet coverage',
+    body: 'Bambu Lab, Creality, Prusa Link, Elegoo, OctoPrint, Moonraker/Klipper, and direct USB can live behind the same local control layer.',
+  },
+  {
+    eyebrow: '04',
+    title: 'Automation without moving private code',
+    body: 'Public Kiln exposes the local MCP and CLI contract. Business and Enterprise workflows can stay in private infrastructure without shipping private code.',
+  },
+];
+
+const publicLayer: BoundaryItem[] = [
+  {
+    label: 'Local printer adapters',
+    body: 'Connect and normalize supported printer backends on the same LAN or USB host.',
+  },
+  {
+    label: 'MCP and CLI tools',
+    body: 'Expose printer operations, validation, slicing, monitoring, and model workflows to agents and scripts.',
+  },
+  {
+    label: 'Safety profiles',
+    body: 'Keep printer-specific dimensions, temperature limits, material guidance, camera support, and multicolor capabilities close to the adapter layer.',
+  },
+];
+
+const proLayer: BoundaryItem[] = [
+  {
+    label: 'Hosted account workflows',
+    body: 'Keep account-aware execution outside the public package when teams need Business or Enterprise controls.',
+  },
+  {
+    label: 'Fleet and recovery workflows',
+    body: 'Business and Enterprise routing, recovery, and team operations live privately in kiln-pro. Pro is for a single printer.',
+  },
+  {
+    label: 'Commercial controls',
+    body: 'The public package can discover and proxy eligible pro tools without moving proprietary implementations into the public repo.',
+  },
+];
+
+const shopTypes: ShopType[] = [
+  {
+    title: 'Custom merch and short-run production',
+    body: 'Repeated designs, mixed materials, and tight turnaround need printer status that an agent can trust before every job.',
+  },
+  {
+    title: 'Prototype and product teams',
+    body: 'Different printer types can share one validation and launch path while engineering keeps control over approved profiles.',
+  },
+  {
+    title: 'Education and research labs',
+    body: 'Shared fabrication rooms get a local MCP and CI command path that staff can document once and agents can respect every time.',
+  },
+  {
+    title: 'In-house manufacturing',
+    body: 'Jigs, fixtures, replacement parts, and low-volume production benefit from predictable setup across brands and teams.',
+  },
+];
+
+const farmsSchema = {
+  '@type': 'Product',
+  name: 'Kiln for Print Farms',
+  description:
+    '3D printing infrastructure for AI agents and CI workflows running mixed local printer fleets.',
+  brand: { '@type': 'Brand', name: 'Kiln' },
+};
+---
+
+<BaseLayout
+  title="Kiln for Print Farms - AI Printer Control for Mixed Fleets"
+  description="3D printing infrastructure for AI agents and CI workflows running mixed local printer fleets across Bambu Lab, Creality, Prusa Link, Elegoo, OctoPrint, Moonraker/Klipper, and direct USB."
+  current="farms"
+  keywords={[
+    'print farm infrastructure',
+    '3d print farm management',
+    'multi printer control',
+    'ai print farm',
+    'bambu fleet management',
+    'creality print farm',
+    'octoprint alternative',
+    'moonraker printer management',
+    'local 3d printer control',
+  ]}
+  schema={farmsSchema}
+>
+  <section class="farm-hero">
+    <div class="hero-scene" aria-hidden="true">
+      <div class="control-map">
+        <div class="map-clients">
+          <span>Claude</span>
+          <span>Codex</span>
+          <span>Custom MCP clients</span>
+        </div>
+        <div class="map-interfaces">
+          <span>Kiln MCP server</span>
+          <span>Kiln CLI</span>
+        </div>
+        <div class="map-core">
+          <p>local host</p>
+          <strong>Kiln</strong>
+          <span>validation + safety gates</span>
+        </div>
+        <div class="adapter-track">
+          <span>OctoPrint</span>
+          <span>Moonraker</span>
+          <span>Creality</span>
+          <span>Bambu</span>
+          <span>Prusa Link</span>
+          <span>Elegoo</span>
+          <span>Direct USB</span>
+        </div>
+        <div class="endpoint-track">
+          <span>K1 Max</span>
+          <span>Bambu A1</span>
+          <span>MK4</span>
+          <span>Centauri</span>
+          <span>Neptune 4</span>
+          <span>Ender 3 USB</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="container hero-copy">
+      <p class="eyebrow">Kiln for print farms</p>
+      <h1>The control layer for AI-ready printer rooms.</h1>
+      <p class="lead">
+        Kiln gives agents using MCP, plus CLI and CI workflows, one safe local
+        control path for
+        mixed printer fleets: discover, validate, slice, upload, start,
+        monitor, and stop jobs through adapter-aware guardrails.
+      </p>
+      <div class="cta-actions">
+        <a href="/install" class="btn">Install Kiln</a>
+        <a href="/pricing" class="btn btn-ghost">See Business options</a>
+      </div>
+      <div class="proof-strip" aria-label="Kiln print farm proof points">
+        {proofPoints.map((point) => (
+          <div class="proof-item">
+            <strong>{point.value}</strong>
+            <span>{point.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="farm-thesis bordered">
+    <div class="container">
+      <div class="thesis-grid">
+        <div>
+          <p class="eyebrow">The actual farm problem</p>
+          <h2>More printers usually means more control surfaces.</h2>
+        </div>
+        <p>
+          A serious print room rarely standardizes forever. One team adds a
+          Bambu Lab printer for speed, a Creality machine for large-format
+          throughput, a Prusa for reliability, a Klipper machine for tuning,
+          and an OctoPrint box for the older workhorse. Kiln turns that pile
+          of interfaces into one local printer-control layer an agent can
+          reason about.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="farm-capabilities bordered">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">Operating model</p>
+        <h2>Built around the room, not one brand.</h2>
+      </div>
+      <div class="capability-grid">
+        {capabilities.map((capability) => (
+          <article class="capability-card">
+            <span>{capability.eyebrow}</span>
+            <h3>{capability.title}</h3>
+            <p>{capability.body}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="backend-section bordered">
+    <div class="container">
+      <div class="section-head two-col">
+        <div>
+          <p class="eyebrow">Printer coverage</p>
+          <h2>Farm-ready because the adapters are real.</h2>
+        </div>
+        <p>
+          Kiln does not need every printer to speak the same protocol. It needs
+          each adapter to expose the same safe operations to the agent.
+        </p>
+      </div>
+      <div class="backend-list">
+        {backends.map((backend) => (
+          <article class="backend-row">
+            <div>
+              <h3>{backend.name}</h3>
+              <span>{backend.protocol}</span>
+            </div>
+            <p>{backend.note}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="boundary-section bordered">
+    <div class="container">
+      <div class="section-head">
+        <p class="eyebrow">Clean public/private boundary</p>
+        <h2>Open infrastructure below. Business and Enterprise fleets above.</h2>
+        <p class="section-sub">
+          This is the line that lets the public package stay useful while
+          Business and Enterprise workflows remain protected.
+        </p>
+      </div>
+      <p class="tier-note">
+        Pro is intentionally limited to one printer. Fleet features belong to
+        Business and Enterprise.
+      </p>
+      <div class="boundary-grid">
+        <article class="boundary-column">
+          <div class="column-kicker">Public Kiln</div>
+          {publicLayer.map((item) => (
+            <div class="boundary-item">
+              <h3>{item.label}</h3>
+              <p>{item.body}</p>
+            </div>
+          ))}
+        </article>
+        <article class="boundary-column pro">
+          <div class="column-kicker">Business and Enterprise layer</div>
+          {proLayer.map((item) => (
+            <div class="boundary-item">
+              <h3>{item.label}</h3>
+              <p>{item.body}</p>
+            </div>
+          ))}
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="shop-section bordered">
+    <div class="container">
+      <div class="section-head two-col">
+        <div>
+          <p class="eyebrow">Who this is for</p>
+          <h2>Rooms where print failure has a real cost.</h2>
+        </div>
+        <p>
+          Kiln is useful for a hobby bench. This page is for rooms where
+          printers are production equipment, and the team needs an MCP and CI
+          path that keeps up with the room.
+        </p>
+      </div>
+      <div class="shop-grid">
+        {shopTypes.map((shop) => (
+          <article class="shop-card">
+            <h3>{shop.title}</h3>
+            <p>{shop.body}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="farm-cta bordered">
+    <div class="container">
+      <p class="eyebrow">Start local, scale cleanly</p>
+      <h2>Give every agent the same printer surface.</h2>
+      <p class="lead">
+        Install Kiln, connect the printers already in the room, and make the
+        local control layer solid before layering on Business workflows.
+      </p>
+      <div class="cta-actions">
+        <a href="/install" class="btn">Install Kiln</a>
+        <a href="/integrations" class="btn btn-ghost">Check integrations</a>
+        <a href="/pricing" class="btn btn-ghost">Pricing</a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .bordered {
+    border-top: 1px solid var(--border);
+  }
+
+  .eyebrow {
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    margin: 0 0 12px;
+    text-transform: uppercase;
+  }
+
+  .farm-hero {
+    min-height: 760px;
+    overflow: hidden;
+    padding: 0;
+    position: relative;
+  }
+
+  .farm-hero::before {
+    background:
+      linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+    background-size: 54px 54px;
+    content: '';
+    inset: 0;
+    opacity: 0.36;
+    position: absolute;
+  }
+
+  .farm-hero::after {
+    background: linear-gradient(180deg, rgba(15, 15, 15, 0.08), var(--bg) 92%);
+    content: '';
+    inset: 0;
+    pointer-events: none;
+    position: absolute;
+  }
+
+  .hero-scene {
+    inset: 0;
+    opacity: 0.72;
+    position: absolute;
+  }
+
+  .control-map {
+    left: 50%;
+    max-width: 980px;
+    min-height: 340px;
+    position: absolute;
+    top: 34px;
+    transform: translateX(-50%);
+    width: min(86vw, 980px);
+  }
+
+  .control-map::before,
+  .control-map::after {
+    background: radial-gradient(circle, rgba(255, 107, 43, 0.18), transparent 68%);
+    content: '';
+    height: 230px;
+    left: 50%;
+    position: absolute;
+    transform: translateX(-50%);
+    width: 360px;
+  }
+
+  .control-map::before {
+    top: 16px;
+  }
+
+  .control-map::after {
+    opacity: 0.58;
+    top: 166px;
+  }
+
+  .map-clients,
+  .map-interfaces,
+  .adapter-track,
+  .endpoint-track {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    position: relative;
+    z-index: 1;
+  }
+
+  .map-clients,
+  .map-interfaces {
+    left: 0;
+    position: absolute;
+    right: 0;
+  }
+
+  .map-clients {
+    top: 0;
+  }
+
+  .map-interfaces {
+    top: 40px;
+  }
+
+  .map-clients span,
+  .map-interfaces span,
+  .adapter-track span,
+  .endpoint-track span {
+    background: rgba(15, 15, 15, 0.76);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    color: rgba(232, 232, 232, 0.78);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    padding: 6px 10px;
+    text-transform: uppercase;
+  }
+
+  .map-clients span,
+  .map-interfaces span {
+    border-color: rgba(255, 107, 43, 0.22);
+    color: rgba(255, 173, 128, 0.92);
+  }
+
+  .map-interfaces span {
+    background: rgba(255, 107, 43, 0.055);
+  }
+
+  .map-core {
+    align-items: center;
+    background:
+      radial-gradient(circle at 50% 0%, rgba(255, 107, 43, 0.16), transparent 54%),
+      rgba(16, 16, 16, 0.78);
+    border: 1px solid rgba(255, 107, 43, 0.24);
+    border-radius: 999px;
+    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.54);
+    display: grid;
+    height: 116px;
+    justify-items: center;
+    left: 50%;
+    padding: 18px;
+    position: absolute;
+    top: 86px;
+    transform: translateX(-50%);
+    width: 116px;
+    z-index: 2;
+  }
+
+  .map-core::before,
+  .map-core::after {
+    background: rgba(255, 107, 43, 0.32);
+    content: '';
+    height: 30px;
+    left: 50%;
+    position: absolute;
+    transform: translateX(-50%);
+    width: 1px;
+  }
+
+  .map-core::before {
+    bottom: 100%;
+  }
+
+  .map-core::after {
+    top: 100%;
+  }
+
+  .map-core p,
+  .map-core span {
+    color: var(--text-muted);
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 0.06em;
+    line-height: 1.3;
+    margin: 0;
+    text-align: center;
+    text-transform: uppercase;
+  }
+
+  .map-core strong {
+    color: var(--text);
+    font-size: 26px;
+    letter-spacing: 0.08em;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+
+  .adapter-track {
+    left: 50%;
+    margin: 0;
+    max-width: 720px;
+    position: absolute;
+    top: 238px;
+    transform: translateX(-50%);
+    width: 100%;
+  }
+
+  .adapter-track span {
+    border-color: rgba(122, 211, 162, 0.24);
+    color: rgba(153, 221, 183, 0.86);
+  }
+
+  .endpoint-track {
+    left: 50%;
+    margin: 0;
+    max-width: 820px;
+    position: absolute;
+    top: 296px;
+    transform: translateX(-50%);
+    width: 100%;
+  }
+
+  .endpoint-track span {
+    background: rgba(255, 255, 255, 0.035);
+  }
+
+  .hero-copy {
+    padding-bottom: 76px;
+    padding-top: 366px;
+    position: relative;
+    text-align: center;
+    z-index: 1;
+  }
+
+  .hero-copy h1 {
+    font-size: clamp(42px, 6.6vw, 70px);
+    letter-spacing: 0;
+    line-height: 0.98;
+    margin: 0 auto 22px;
+    max-width: 880px;
+  }
+
+  .hero-copy .lead {
+    color: rgba(232, 232, 232, 0.76);
+    font-size: 18px;
+    line-height: 1.55;
+    margin: 0 auto 24px;
+    max-width: 760px;
+  }
+
+  .cta-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: center;
+  }
+
+  .cta-actions .btn-ghost {
+    margin-left: 0;
+  }
+
+  .proof-strip {
+    border-top: 1px solid var(--border);
+    display: grid;
+    gap: 0;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin: 32px auto 0;
+    max-width: 820px;
+  }
+
+  .proof-item {
+    border-right: 1px solid var(--border);
+    padding: 18px 14px 0;
+  }
+
+  .proof-item:last-child {
+    border-right: none;
+  }
+
+  .proof-item strong {
+    color: var(--text);
+    display: block;
+    font-family: var(--mono);
+    font-size: 24px;
+    line-height: 1;
+    margin-bottom: 8px;
+  }
+
+  .proof-item span {
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .farm-thesis,
+  .farm-capabilities,
+  .backend-section,
+  .boundary-section,
+  .shop-section,
+  .farm-cta {
+    padding: 82px 0;
+  }
+
+  .thesis-grid,
+  .section-head.two-col {
+    display: grid;
+    gap: 54px;
+    grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.1fr);
+  }
+
+  .thesis-grid h2,
+  .section-head h2,
+  .farm-cta h2 {
+    font-size: clamp(28px, 4vw, 44px);
+    letter-spacing: 0;
+    line-height: 1.08;
+    margin: 0;
+  }
+
+  .thesis-grid > p,
+  .section-head.two-col > p,
+  .section-sub {
+    color: var(--text-muted);
+    font-size: 16px;
+    line-height: 1.75;
+    margin: 0;
+  }
+
+  .thesis-grid > p,
+  .section-head.two-col > p {
+    hyphens: auto;
+    text-align: justify;
+    text-align-last: left;
+    text-justify: inter-word;
+  }
+
+  .section-head {
+    margin-bottom: 36px;
+  }
+
+  .capability-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .capability-card,
+  .shop-card {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+  }
+
+  .capability-card span {
+    color: var(--accent);
+    display: block;
+    font-family: var(--mono);
+    font-size: 12px;
+    margin-bottom: 18px;
+  }
+
+  .capability-card h3,
+  .shop-card h3,
+  .backend-row h3,
+  .boundary-item h3 {
+    color: var(--text);
+    font-size: 18px;
+    letter-spacing: 0;
+    line-height: 1.3;
+    margin: 0 0 10px;
+  }
+
+  .capability-card p,
+  .shop-card p,
+  .backend-row p,
+  .boundary-item p {
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.65;
+    margin: 0;
+  }
+
+  .capability-card p,
+  .shop-card p,
+  .backend-row p,
+  .boundary-item p {
+    hyphens: auto;
+    text-align: justify;
+    text-align-last: left;
+    text-justify: inter-word;
+  }
+
+  .backend-list {
+    border-bottom: 1px solid var(--border);
+    border-top: 1px solid var(--border);
+  }
+
+  .backend-row {
+    display: grid;
+    gap: 28px;
+    grid-template-columns: 260px 1fr;
+    padding: 24px 0;
+  }
+
+  .backend-row + .backend-row {
+    border-top: 1px solid var(--border);
+  }
+
+  .backend-row span {
+    color: var(--accent);
+    display: block;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+
+  .boundary-grid {
+    display: grid;
+    gap: 18px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tier-note {
+    color: rgba(232, 232, 232, 0.78);
+    font-size: 14px;
+    line-height: 1.6;
+    margin: -12px 0 28px;
+  }
+
+  .boundary-column {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 26px;
+  }
+
+  .boundary-column.pro {
+    border-color: rgba(255, 107, 43, 0.28);
+  }
+
+  .column-kicker {
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    margin-bottom: 22px;
+    padding-bottom: 16px;
+    text-transform: uppercase;
+  }
+
+  .boundary-item + .boundary-item {
+    border-top: 1px solid var(--border);
+    margin-top: 20px;
+    padding-top: 20px;
+  }
+
+  .shop-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .farm-cta {
+    text-align: center;
+  }
+
+  .farm-cta h2 {
+    margin-bottom: 16px;
+  }
+
+  .farm-cta .lead {
+    color: var(--text-muted);
+    font-size: 17px;
+    line-height: 1.7;
+    margin: 0 auto 30px;
+    max-width: 680px;
+  }
+
+  @media (max-width: 900px) {
+    .farm-hero {
+      min-height: 760px;
+    }
+
+    .control-map {
+      min-height: 360px;
+      top: 34px;
+      width: calc(100vw - 32px);
+    }
+
+    .map-clients,
+    .map-interfaces {
+      margin-left: auto;
+      margin-right: auto;
+      max-width: 460px;
+    }
+
+    .map-core {
+      top: 92px;
+    }
+
+    .adapter-track {
+      top: 258px;
+    }
+
+    .endpoint-track {
+      top: 316px;
+    }
+
+    .hero-copy {
+      padding-top: 396px;
+    }
+
+    .thesis-grid,
+    .section-head.two-col,
+    .backend-row,
+    .boundary-grid,
+    .capability-grid,
+    .shop-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .proof-strip {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .proof-item:nth-child(2) {
+      border-right: none;
+    }
+
+    .proof-item:nth-child(n + 3) {
+      border-top: 1px solid var(--border);
+    }
+  }
+
+  @media (max-width: 640px) {
+    .farm-hero {
+      min-height: 780px;
+    }
+
+    .control-map {
+      min-height: 390px;
+      top: 32px;
+    }
+
+    .map-clients,
+    .map-interfaces,
+    .adapter-track,
+    .endpoint-track {
+      gap: 8px;
+    }
+
+    .map-clients span,
+    .map-interfaces span,
+    .adapter-track span,
+    .endpoint-track span {
+      font-size: 10px;
+      padding: 7px 9px;
+    }
+
+    .map-interfaces {
+      top: 46px;
+    }
+
+    .map-core {
+      height: 112px;
+      padding: 16px;
+      top: 104px;
+      width: 112px;
+    }
+
+    .map-core strong {
+      font-size: 24px;
+    }
+
+    .adapter-track {
+      top: 286px;
+    }
+
+    .adapter-track span:nth-child(n + 6),
+    .endpoint-track span:nth-child(n + 5) {
+      display: none;
+    }
+
+    .endpoint-track {
+      top: 344px;
+    }
+
+    .hero-copy {
+      padding-bottom: 54px;
+      padding-top: 440px;
+    }
+
+    .hero-copy h1 {
+      font-size: clamp(36px, 12vw, 48px);
+    }
+
+    .hero-copy .lead {
+      font-size: 16px;
+    }
+
+    .proof-strip {
+      grid-template-columns: 1fr;
+    }
+
+    .proof-item,
+    .proof-item:nth-child(2) {
+      border-right: none;
+    }
+
+    .proof-item + .proof-item {
+      border-top: 1px solid var(--border);
+    }
+
+    .farm-thesis,
+    .farm-capabilities,
+    .backend-section,
+    .boundary-section,
+    .shop-section,
+    .farm-cta {
+      padding: 56px 0;
+    }
+  }
+</style>
