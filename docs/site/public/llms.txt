@@ -68,7 +68,7 @@ Engineering knowledge base with 52 materials (mechanical, thermal, chemical prop
 `slice_and_print` auto-detects AMS material on Bambu printers, injects brim/raft based on geometry analysis, and handles the full upload → print → monitor cycle. `run_quick_print` for single-command printing.
 
 ### Failure Diagnosis & Recovery
-`diagnose_print_failure_live` combines printer state + model geometry + 29-printer intelligence database for ranked diagnosis. `retry_print_with_fix` chains diagnosis → slicer overrides → re-slice → reprint. `analyze_print_failure_smart` for post-mortem analysis with recovery planning.
+`diagnose_print_failure_live` combines printer state + model geometry + 44 named printer safety profiles for ranked diagnosis. `retry_print_with_fix` chains diagnosis → slicer overrides → re-slice → reprint. `analyze_print_failure_smart` for post-mortem analysis with recovery planning.
 
 ### Material Intelligence
 Full AMS (Automatic Material System) support for Bambu Lab. Material catalog with 52 materials, substitution rules, compliance data. `recommend_design_material` for intelligent material selection. `compare_material_properties` for side-by-side analysis. Fleet inventory tracking with restock alerts.
@@ -80,7 +80,7 @@ Full AMS (Automatic Material System) support for Bambu Lab. Material catalog wit
 Multi-printer registry with job queue, priority scheduling, cross-printer learning, automatic failure rerouting, site grouping, and event bus with webhook delivery.
 
 ### Safety
-29 per-printer safety profiles with temperature/speed/flow limits. G-code validation before every send. Preflight checks on every print. Emergency stop with interlock. Heater watchdog for thermal runaway detection.
+44 named per-printer safety profiles with temperature/speed/flow limits. G-code validation before every send. Preflight checks on every print. Emergency stop with interlock. Heater watchdog for thermal runaway detection.
 
 ### Mesh Diagnostics
 `diagnose_mesh` for non-manifold detection, floating region removal, wall thickness analysis. `repair_mesh` and `repair_mesh_advanced` for automatic fixes. `mesh_quality_scorecard` for comprehensive quality assessment.

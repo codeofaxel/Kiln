@@ -1435,6 +1435,6 @@ docs/
     site/                # Astro docs site; whitepaper/litepaper/project docs render from these markdown files
 ```
 
-The private kiln-pro companion repo extends the public surface through `kiln_pro.bridge`, `kiln_pro.generate_manifest`, and `kiln_pro.rest_api`. Its feature directories include paid-tier plugins, assembly manuals, design versioning, recovery intelligence, cloud sync, enterprise identity/compliance, billing/spend caps, fulfillment proxying, the web workshop, and the native desktop app. Public Kiln should depend only on the bridge, generated manifest, and documented response contracts.
+The private kiln-pro companion repo extends the public surface through `kiln_pro.bridge`, `kiln_pro.generate_manifest`, and `kiln_pro.rest_api`. Its feature directories include paid-tier plugins, assembly manuals, design versioning, recovery intelligence, cloud sync, enterprise identity/compliance, billing/spend caps, fulfillment proxying, and the web workshop. Public Kiln should depend only on the bridge, generated manifest, and documented response contracts.
 
 *Kiln is a project of Hadron Labs Inc.*
