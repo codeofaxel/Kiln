@@ -5,6 +5,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-04-29
+
+### Added
+- First stable public release for PyPI, the MCP Registry, ClawHub, and OpenClaw distribution.
+- 763 MCP capabilities and 215 CLI commands for agent-operated design, slicing, printing, monitoring, recovery, fulfillment, and safety workflows.
+- Hosted kiln-pro discovery stubs, paired-machine routing, and registry metadata that let public installs discover paid-tier capabilities without shipping private source.
+- Stable support posture for OctoPrint, Moonraker/Klipper, Creality when local Moonraker is reachable, Bambu Lab, Prusa Link, Elegoo, and Direct USB/Serial printers.
+
+### Changed
+- PyPI metadata, `server.json`, docs, and registry-facing copy now identify Kiln as `1.0.0`.
+- Release docs align public copy with the current Free, Pro, Business, and Enterprise tier boundaries.
+
 ## [0.4.2] - 2026-03-18
 
 ### Added

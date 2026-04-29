@@ -3,7 +3,7 @@
   "name": "io.github.codeofaxel/kiln",
   "title": "Kiln",
   "description": "Turn text descriptions into physical objects — 763 MCP capabilities for design intelligence, model generation, printability analysis, slicing, printing, monitoring, and failure recovery across OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, and Elegoo printers",
-  "version": "0.5.0",
+  "version": "1.0.0",
   "repository": {
     "url": "https://github.com/codeofaxel/Kiln",
     "source": "github"
@@ -12,7 +12,7 @@
     {
       "registryType": "pypi",
       "identifier": "kiln3d",
-      "version": "0.5.0",
+      "version": "1.0.0",
       "transport": {
         "type": "stdio"
       },

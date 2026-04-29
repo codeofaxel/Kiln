@@ -4,7 +4,7 @@
 
 # Kiln: The Intelligence Layer Between Ideas and Physical Objects
 
-**Version 0.5.0 — April 2026**
+**Version 1.0.0 — April 2026**
 
 > Describe it or draw it. Kiln makes it real.
 
@@ -294,10 +294,10 @@ On-premises deployment via Kubernetes manifests and Helm chart with namespace is
 
 Local printer control is free and unrestricted. Kiln uses a four-tier model:
 
-- **Free** -- All local printing, design intelligence, generation, and printability analysis. Up to 2 printers, 10-job queue.
-- **Pro ($49/mo, $39/mo annual)** -- Up to 5 printers, fleet orchestration, analytics, cloud sync, git-for-3D version control, product templates, procedural textures, surface decoration, assembly manuals, speed control, print learning, recovery intelligence, and cross-printer intelligence.
-- **Business ($99/mo, $79/mo annual)** -- Up to 50 printers, 5 team seats, team pull requests, approval gates, fulfillment brokering, shared hosted MCP server, priority support, custom safety profiles, QR product workflows, co-branded/multi-language assembly manuals, and per-part plate economics.
-- **Enterprise (from $499/mo, $399/mo annual)** -- Unlimited printers (20 included, $15/mo each additional), unlimited team seats, dedicated MCP server, on-premises deployment, SSO, SCIM, RBAC, audit trail, encrypted G-code, lockable safety profiles, 99.9% SLA.
+- **Free** -- Unlimited local printing, slicing, marketplace search, safety profiles, a 10-job queue, one printer, personal/non-commercial use, design intelligence, printability analysis, and local linear design history.
+- **Pro ($49/mo, $39/mo annual)** -- Everything in Free plus one-printer personal use, unlimited queue depth, unlimited assembly parts, auto-generated assembly manuals, Git-for-3D branch/merge/cherry-pick/signed releases, solo cloud sync, product templates, procedural textures, unlimited non-QR decorations, mid-print modification, failure recovery, print resume, design provenance, manual speed control, and print learning.
+- **Business ($199/mo, $159/mo annual)** -- Everything in Pro plus commercial use, 3 printers, 3 team seats, multi-printer fleet management, cross-printer learning, co-branded and multilingual assembly manuals, QR code generation, layer-scheduled speed adjustments, team pull requests, approval gates, federated design sharing, unlimited fulfillment orders, material compliance tracking, priority support, custom safety profiles, and webhooks.
+- **Enterprise (custom)** -- Everything in Business plus large fleets, unlimited team seats, SSO, SCIM, RBAC, full audit trail with long-term retention, lockable safety profiles, encrypted G-code at rest, white-label manuals, buyer-side authenticity verification, 99.9% SLA, dedicated CSM, on-prem/VPC deployment, custom integrations, and procurement terms.
 
 Fulfillment orders carry a 5% orchestration fee (first 3/month free, $0.25 min, $200 max). Providers remain merchant of record.
 

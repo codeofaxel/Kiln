@@ -90,10 +90,10 @@ Local printing with Kiln is free and always will be. The core infrastructure is 
 
 Revenue comes from optional services:
 
-- **Free tier** -- All local printing features, up to 2 printers and a 10-job queue. No cost, no account required.
-- **Pro ($49/month)** -- Up to 5 printers + fleet orchestration, analytics, cloud sync, git-for-3D version control, product templates for consumer goods (coasters, keychains, ornaments, pet tags, jewelry trays, and more), procedural textures (marble, tiger stripe, wood grain, ocean, lava, and more -- applied directly to mesh surfaces with 2D preview before printing), decoration system, assembly manuals, speed control, print learning, recovery intelligence, and cross-printer intelligence. Annual: $39/mo.
-- **Business ($99/month)** -- Up to 50 printers, 5 team seats, team pull requests, approval gates, fulfillment brokering, shared hosted MCP server, priority support, custom safety profiles, QR product workflows, co-branded/multi-language assembly manuals, and per-part plate economics for quoting kits and replacement parts. Annual: $79/mo.
-- **Enterprise (from $499/month)** -- Unlimited printers (20 included, $15/mo each additional) and unlimited team seats, dedicated single-tenant MCP server, on-premises deployment via Kubernetes and Helm (air-gapped support included), single sign-on via OIDC and SAML, SCIM provisioning endpoints, role-based access control, full audit trail with JSON/CSV export, lockable safety profiles, encrypted G-code at rest, 99.9% uptime SLA, and dedicated support channel with onboarding. Annual: $399/mo.
+- **Free tier** -- Unlimited local printing, slicing, marketplace search, safety profiles, a 10-job queue, one printer, personal/non-commercial use, design intelligence, printability analysis, and local linear design history.
+- **Pro ($49/month)** -- Everything in Free plus one-printer personal use, unlimited queue depth, unlimited assembly parts, auto-generated assembly manuals, Git-for-3D branch/merge/cherry-pick/signed releases, solo cloud sync, product templates, procedural textures, unlimited non-QR decorations, mid-print modification, failure recovery, print resume, design provenance, manual speed control, and print learning. Annual: $39/mo.
+- **Business ($199/month)** -- Everything in Pro plus commercial use, 3 printers, 3 team seats, multi-printer fleet management, cross-printer learning, co-branded and multilingual assembly manuals, QR code generation, layer-scheduled speed adjustments, team pull requests, approval gates, federated design sharing, unlimited fulfillment orders, material compliance tracking, priority support, custom safety profiles, and webhooks. Annual: $159/mo.
+- **Enterprise (custom)** -- Everything in Business plus large fleets, unlimited team seats, SSO via OIDC/SAML, SCIM, RBAC, full audit trail with long-term retention, lockable safety profiles, encrypted G-code at rest, white-label manuals, buyer-side authenticity verification, 99.9% uptime SLA, dedicated CSM, on-prem/VPC deployment, custom integrations, and procurement terms.
 
 Outsourced manufacturing orders carry a 5% orchestration fee (first 3 per month are free, with a $0.25 minimum and $200 maximum per order). Fulfillment providers remain merchant of record.
 
@@ -111,5 +111,5 @@ Full documentation, CLI reference, and the technical whitepaper are available in
 
 ---
 
-Kiln is open-source infrastructure released under the AGPL-3.0 License. Version 0.5.0, April 2026.
+Kiln is open-source infrastructure released under the AGPL-3.0 License. Version 1.0.0, April 2026.
 Kiln is a project of Hadron Labs Inc.
