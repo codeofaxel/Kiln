@@ -15,25 +15,29 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install kiln with dev deps
-        # Lock file: kiln/requirements-lock.txt (pinned versions for reproducible builds)
-        # To enforce pinned versions, use: pip install -r kiln/requirements-lock.txt && pip install -e "./kiln[dev,bambu]" --no-deps
-        run: pip install -e "./kiln[dev,bambu]"
+      - name: Install kiln with locked dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r kiln/requirements-lock.txt
+          pip install -e "./kiln[dev,bambu]" --no-deps
 
-      - name: Install octoprint-cli with dev deps
-        # Lock file: octoprint-cli/requirements-lock.txt (pinned versions for reproducible builds)
-        # To enforce pinned versions, use: pip install -r octoprint-cli/requirements-lock.txt && pip install -e "./octoprint-cli[dev]" --no-deps
-        run: pip install -e "./octoprint-cli[dev]"
+      - name: Install octoprint-cli with locked dev deps
+        run: |
+          pip install -r octoprint-cli/requirements-lock.txt
+          pip install -e "./octoprint-cli[dev]" --no-deps
 
       - name: Install linter
         run: pip install ruff
+
+      - name: Verify installed dependency graph
+        run: pip check
 
       - name: Lint kiln
         run: cd kiln && ruff check src/
@@ -46,38 +50,6 @@ jobs:
 
       - name: Run octoprint-cli tests
         run: cd octoprint-cli && python -m pytest tests/ -v --cov=octoprint_cli --cov-report=term-missing
-
-      - name: Check kiln dependency drift
-        run: |
-          pip freeze | grep -v "^-e" | sort > /tmp/current-deps.txt
-          if [ -f kiln/requirements-lock.txt ]; then
-            # Strip comments from lock file
-            grep -v "^#" kiln/requirements-lock.txt | sort > /tmp/lock-deps.txt
-            DIFF=$(diff /tmp/lock-deps.txt /tmp/current-deps.txt || true)
-            if [ -n "$DIFF" ]; then
-              echo "::warning::Dependency drift detected between installed packages and kiln/requirements-lock.txt"
-              echo "$DIFF"
-            else
-              echo "Dependencies match lock file"
-            fi
-          fi
-        continue-on-error: true
-
-      - name: Check octoprint-cli dependency drift
-        run: |
-          pip freeze | grep -v "^-e" | sort > /tmp/current-deps.txt
-          if [ -f octoprint-cli/requirements-lock.txt ]; then
-            # Strip comments from lock file
-            grep -v "^#" octoprint-cli/requirements-lock.txt | sort > /tmp/lock-deps.txt
-            DIFF=$(diff /tmp/lock-deps.txt /tmp/current-deps.txt || true)
-            if [ -n "$DIFF" ]; then
-              echo "::warning::Dependency drift detected between installed packages and octoprint-cli/requirements-lock.txt"
-              echo "$DIFF"
-            else
-              echo "Dependencies match lock file"
-            fi
-          fi
-        continue-on-error: true
 
       - name: Generate SBOM (CycloneDX)
         if: matrix.python-version == '3.12'
