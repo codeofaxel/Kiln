@@ -436,7 +436,7 @@ def auth_whoami(as_json: bool) -> None:
 # The mirror image of ``kiln signin``: instead of this machine bootstrapping
 # an OAuth session from cold, the user has already signed in on the web
 # (usually right after upgrading their tier at app.kiln3d.com/checkout/
-# success → /welcome).  The workshop minted a short-lived code tied to
+# success → /connect).  The workshop minted a short-lived code tied to
 # their session; ``kiln pair <code>`` hands the tokens to this machine
 # without any browser round-trip here.
 #
@@ -717,7 +717,7 @@ def auth_pair(code: str, client: str | None) -> None:
     required.
 
     The code is single-use and expires in 10 minutes.  Generate a new
-    one any time at app.kiln3d.com/welcome.
+    one any time at app.kiln3d.com/connect.
 
     Accepts either the full ``KLN-ABCD-EFGH`` shape or just
     ``ABCD-EFGH`` (the prefix is added for you).
@@ -765,7 +765,7 @@ def auth_pair(code: str, client: str | None) -> None:
         msg = resp.get("error") or "Pairing failed."
         if reason in ("not_found", "expired"):
             raise click.ClickException(
-                f"{msg}\n\n  Get a fresh code at app.kiln3d.com/welcome."
+                f"{msg}\n\n  Get a fresh code at app.kiln3d.com/connect."
             )
         if reason == "already_claimed":
             raise click.ClickException(
@@ -791,7 +791,7 @@ def auth_pair(code: str, client: str | None) -> None:
             "Pairing claim succeeded but the server response carried no "
             "access_token.  Nothing was written locally.  This is a "
             "server-side bug — please retry with a fresh code from "
-            "app.kiln3d.com/welcome, and if it persists: adam@kiln3d.com."
+            "app.kiln3d.com/connect, and if it persists: adam@kiln3d.com."
         )
 
     email = str(resp.get("email") or "")
