@@ -7000,6 +7000,31 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
             click.echo(f"  Hotend: {state.tool_temp_actual:.0f}C")
         if state.bed_temp_actual is not None:
             click.echo(f"  Bed:    {state.bed_temp_actual:.0f}C")
+        if printer_type == "bambu" and hasattr(adapter, "get_ams_status"):
+            try:
+                ams_data = adapter.get_ams_status()
+                loaded = []
+                for unit in ams_data.get("units", []):
+                    for tray in unit.get("trays", []):
+                        tray_type = str(tray.get("tray_type", "") or "").strip()
+                        if tray_type:
+                            loaded.append(tray)
+                if loaded:
+                    click.echo(
+                        click.style("  AMS visible!", fg="green")
+                        + f" {len(loaded)} loaded tray(s) detected."
+                    )
+                    tray_now = str(ams_data.get("tray_now", "255"))
+                    if tray_now == "255":
+                        selected = ams_data.get("tray_pre") or ams_data.get("tray_tar")
+                        if selected not in (None, "", "255"):
+                            click.echo(f"  Selected AMS tray: {selected}")
+                        else:
+                            click.echo("  Active AMS tray not reported yet; start_print auto-routing will use loaded trays.")
+                else:
+                    click.echo(click.style("  AMS reachable, but no loaded trays were reported.", fg="yellow"))
+            except Exception as exc:
+                click.echo(click.style(f"  AMS check failed: {exc}", fg="yellow"))
     except PrinterError as exc:
         click.echo(click.style(f"  Connection test failed: {exc}", fg="yellow"))
         click.echo(
@@ -10022,21 +10047,28 @@ def ams(ctx: click.Context, json_mode: bool) -> None:
         if json_mode:
             click.echo(format_response("success", data=result, json_mode=True))
         else:
-            ams_units = result.get("ams", [])
+            ams_units = result.get("units") or result.get("ams", [])
             if not ams_units:
                 click.echo("No AMS units detected.")
             else:
                 for unit in ams_units:
-                    click.echo(f"AMS #{unit.get('id', '?')}:")
-                    for tray in unit.get("trays", []):
-                        slot = tray.get("id", "?")
-                        color = tray.get("color", "unknown")
-                        material = tray.get("type", "unknown")
-                        remaining = tray.get("remaining", "?")
+                    click.echo(f"AMS #{unit.get('unit_id', unit.get('id', '?'))}:")
+                    for tray in unit.get("trays", unit.get("tray", [])):
+                        slot = tray.get("slot", tray.get("id", "?"))
+                        raw_color = tray.get("tray_color", tray.get("color", ""))
+                        color = f"#{raw_color[:6]}" if isinstance(raw_color, str) and len(raw_color) >= 6 else (raw_color or "unknown")
+                        material = tray.get("tray_type", tray.get("type", "unknown")) or "unknown"
+                        remaining = tray.get("remain", tray.get("remaining", "?"))
                         click.echo(f"  Slot {slot}: {material} ({color}) — {remaining}% remaining")
             tray_now = result.get("tray_now")
             if tray_now and tray_now != "255":
                 click.echo(f"Active tray: {tray_now}")
+            elif ams_units:
+                selected = result.get("tray_pre") or result.get("tray_tar")
+                if selected not in (None, "", "255"):
+                    click.echo(f"Selected AMS tray: {selected}")
+                else:
+                    click.echo("Active tray not reported; AMS trays are loaded.")
     except click.ClickException:
         raise
     except PrinterError as exc:

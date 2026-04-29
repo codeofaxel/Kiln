@@ -85,7 +85,7 @@ try:
     from kiln.billing_alerts import BillingAlertManager
 except ImportError:
     BillingAlertManager = None  # Available in kiln-pro
-from kiln.cli.config import _validate_printer_url
+from kiln.cli.config import _validate_printer_url, save_printer
 from kiln.cloud_sync import CloudSyncManager, SyncConfig
 from kiln.cost_estimator import CostEstimator
 from kiln.events import Event, EventBus, EventType
@@ -4783,10 +4783,12 @@ def ams_status() -> dict:
     Returns what's loaded in each AMS tray: filament type, color, remaining
     percentage, RFID tag, temperature ranges, and humidity.
 
-    The ``tray_now`` field shows which tray is currently active (``"255"``
-    means none / external spool).  The ``ams_exist_bits`` and
-    ``tray_exist_bits`` fields are bitmasks showing which AMS units and
-    trays are physically present.
+    The ``tray_now`` field usually shows which tray is currently active
+    (``"255"`` means none / external spool on X1/P1-style reports).  A1 /
+    AMS Lite reports may keep ``tray_now`` at ``"255"`` while exposing
+    loaded AMS trays and selected/target tray fields such as ``tray_pre``
+    or ``tray_tar``.  The ``ams_exist_bits`` and ``tray_exist_bits`` fields
+    are bitmasks showing which AMS units and trays are physically present.
 
     Use this to check filament levels before printing, verify the correct
     material is loaded, or select the right ``ams_mapping`` for
@@ -6118,6 +6120,8 @@ def register_printer(
     serial: str | None = None,
     verify_ssl: bool = True,
     printer_model: str | None = None,
+    persist: bool = True,
+    verify_connection: bool = True,
 ) -> dict:
     """Register a new printer in the fleet.
 
@@ -6139,6 +6143,10 @@ def register_printer(
             For Bambu, True maps to TLS pin mode and False maps to
             insecure mode.
         printer_model: Optional safety/profile key (e.g. "k1_max").
+        persist: Save the printer to ``~/.kiln/config.yaml`` so future MCP
+            sessions load the same printer. Default ``True``.
+        verify_connection: For Bambu printers, immediately query AMS status
+            after registration and return a proof summary. Default ``True``.
 
     Once registered the printer appears in ``fleet_status()`` and can be
     targeted by ``submit_job()``.
@@ -6254,6 +6262,24 @@ def register_printer(
         if printer_model:
             adapter.set_safety_profile(printer_model)
 
+        warnings_out: list[str] = list(url_warnings)
+        persisted_path: str | None = None
+        if persist:
+            try:
+                persisted = save_printer(
+                    name,
+                    printer_type,
+                    host,
+                    api_key=api_key if printer_type != "bambu" else None,
+                    access_code=api_key if printer_type == "bambu" else None,
+                    serial=serial,
+                    printer_model=printer_model,
+                    set_active=True,
+                )
+                persisted_path = str(persisted)
+            except Exception as exc:
+                warnings_out.append(f"Printer registered for this session but could not be saved: {exc}")
+
         # Disconnect the boot-time default adapter if it's a separate
         # object not managed by the registry.  The registry's own
         # register() handles disconnecting its old adapter.
@@ -6280,8 +6306,50 @@ def register_printer(
             "message": f"Registered printer {name!r} ({printer_type} @ {host}).",
             "name": name,
         }
-        if url_warnings:
-            result["warnings"] = url_warnings
+        if persisted_path:
+            result["persisted"] = True
+            result["config_path"] = persisted_path
+
+        if printer_type == "bambu" and verify_connection:
+            try:
+                ams_info = adapter.get_ams_status()
+                loaded_trays: list[dict[str, Any]] = []
+                for unit in ams_info.get("units", []):
+                    if not isinstance(unit, dict):
+                        continue
+                    for tray in unit.get("trays", []):
+                        if not isinstance(tray, dict):
+                            continue
+                        tray_type = str(tray.get("tray_type", "") or "").strip()
+                        if not tray_type:
+                            continue
+                        loaded_trays.append({
+                            "slot": tray.get("slot"),
+                            "tray_type": tray_type,
+                            "tray_color": tray.get("tray_color"),
+                        })
+                result["bambu_ready"] = True
+                result["ams_summary"] = {
+                    "units": len(ams_info.get("units", [])),
+                    "loaded_tray_count": len(loaded_trays),
+                    "loaded_trays": loaded_trays,
+                    "tray_now": ams_info.get("tray_now"),
+                    "tray_pre": ams_info.get("tray_pre"),
+                    "tray_tar": ams_info.get("tray_tar"),
+                }
+            except Exception as exc:
+                result["bambu_ready"] = False
+                result["ams_summary"] = {
+                    "error": str(exc),
+                    "retryable": True,
+                }
+                warnings_out.append(
+                    "Bambu printer was registered, but the live AMS verification failed. "
+                    "Check LAN mode, host, serial, and access code, then call ams_status()."
+                )
+
+        if warnings_out:
+            result["warnings"] = warnings_out
         return result
     except Exception as exc:
         logger.exception("Unexpected error in register_printer")

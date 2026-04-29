@@ -2712,6 +2712,22 @@ class BambuAdapter(PrinterAdapter):
             ),
             "units": [],
         }
+        # A1 / AMS Lite firmware may keep ``tray_now`` at 255 even when
+        # the AMS Lite is loaded.  Preserve the adjacent selection fields
+        # so higher-level tools can avoid falsely reporting external-spool
+        # feed when the wrapper names a selected or target tray.
+        for key in (
+            "tray_pre",
+            "tray_tar",
+            "tray_read_done_bits",
+            "tray_reading_bits",
+            "tray_is_bbl_bits",
+            "version",
+        ):
+            if key in ams_wrapper:
+                result[key] = ams_wrapper[key]
+            elif key in status:
+                result[key] = status[key]
 
         if not isinstance(ams_data, list):
             return result

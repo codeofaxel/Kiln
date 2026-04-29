@@ -1499,6 +1499,12 @@ class TestFleetStatus:
 class TestRegisterPrinter:
     """Tests for the register_printer MCP tool."""
 
+    @pytest.fixture(autouse=True)
+    def _no_config_write(self, monkeypatch, tmp_path):
+        import kiln.server as mod
+
+        monkeypatch.setattr(mod, "save_printer", lambda *a, **kw: tmp_path / "config.yaml")
+
     def test_octoprint_success(self, monkeypatch):
         import kiln.server as mod
 
@@ -1597,10 +1603,70 @@ class TestRegisterPrinter:
             host="192.168.1.100",
             api_key="12345678",
             serial="01P00A000000001",
+            verify_connection=False,
         )
         assert result["success"] is True
         assert result["name"] == "my-bambu"
         assert "my-bambu" in fresh_registry
+
+    def test_bambu_registration_returns_ams_proof(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+
+        class FakeBambuAdapter:
+            name = "bambu"
+
+            def __init__(self, *, host, access_code, serial, tls_mode):
+                self.host = host
+                self.access_code = access_code
+                self.serial = serial
+                self.tls_mode = tls_mode
+
+            def set_safety_profile(self, profile_id):
+                self.profile_id = profile_id
+
+            def get_ams_status(self):
+                return {
+                    "tray_now": "255",
+                    "tray_pre": "0",
+                    "tray_tar": "0",
+                    "units": [
+                        {
+                            "unit_id": "0",
+                            "trays": [
+                                {
+                                    "slot": 0,
+                                    "tray_type": "PLA",
+                                    "tray_color": "FFFFFFFF",
+                                },
+                                {
+                                    "slot": 1,
+                                    "tray_type": "PLA",
+                                    "tray_color": "161616FF",
+                                },
+                            ],
+                        }
+                    ],
+                }
+
+        monkeypatch.setattr(mod, "BambuAdapter", FakeBambuAdapter)
+
+        result = register_printer(
+            name="shop-a1",
+            printer_type="bambu",
+            host="192.168.1.100",
+            api_key="12345678",
+            serial="03900D5C2513213",
+            printer_model="bambu_a1",
+        )
+
+        assert result["success"] is True
+        assert result["persisted"] is True
+        assert result["bambu_ready"] is True
+        assert result["ams_summary"]["loaded_tray_count"] == 2
+        assert result["ams_summary"]["tray_pre"] == "0"
 
     def test_bambu_missing_api_key(self, monkeypatch):
         import kiln.server as mod

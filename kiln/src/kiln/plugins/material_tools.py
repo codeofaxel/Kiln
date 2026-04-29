@@ -15,6 +15,55 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 
+def _coerce_ams_slot(value: Any) -> int | None:
+    """Return an AMS slot index, or None for empty/external sentinels."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text == "255":
+        return None
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def _iter_ams_trays(ams: dict[str, Any]) -> list[dict[str, Any]]:
+    trays: list[dict[str, Any]] = []
+    units = ams.get("units", [])
+    if not isinstance(units, list):
+        return trays
+    for unit in units:
+        if not isinstance(unit, dict):
+            continue
+        raw_trays = unit.get("trays", [])
+        if not isinstance(raw_trays, list):
+            continue
+        for tray in raw_trays:
+            if isinstance(tray, dict):
+                trays.append(tray)
+    return trays
+
+
+def _loaded_ams_trays(ams: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        tray
+        for tray in _iter_ams_trays(ams)
+        if str(tray.get("tray_type", "") or "").strip()
+    ]
+
+
+def _find_tray(trays: list[dict[str, Any]], slot_index: int) -> dict[str, Any] | None:
+    for tray in trays:
+        try:
+            slot = int(tray.get("slot", -1))
+        except (TypeError, ValueError):
+            continue
+        if slot == slot_index:
+            return tray
+    return None
+
+
 class _MaterialToolsPlugin:
     """Material inspection and print-health tools.
 
@@ -49,8 +98,11 @@ class _MaterialToolsPlugin:
             range.  For non-Bambu printers (or printers without AMS), the
             material is reported as ``"unknown"``.
 
-            ``tray_now == "255"`` means an external spool is in use rather
-            than an AMS slot.
+            ``tray_now == "255"`` normally means external spool.  On some
+            A1/AMS Lite reports it can also mean the active slot was not
+            reported even though AMS trays are present; in that case Kiln
+            falls back to selected/target tray metadata or returns the
+            loaded AMS candidates instead of claiming external spool.
 
             Args:
                 printer_name: Named printer to query.  Omit to use the
@@ -98,9 +150,59 @@ class _MaterialToolsPlugin:
                     code="INTERNAL_ERROR",
                 )
 
-            tray_now: str = str(ams.get("tray_now", "255"))
+            tray_now: str = str(ams.get("tray_now", "255")).strip()
+            all_trays = _iter_ams_trays(ams)
+            loaded_trays = _loaded_ams_trays(ams)
 
-            if tray_now == "255":
+            slot_index = _coerce_ams_slot(tray_now)
+            active_source = "tray_now"
+            if slot_index is None:
+                for field in ("active_tray", "tray_pre", "tray_tar"):
+                    candidate = _coerce_ams_slot(ams.get(field))
+                    if candidate is None:
+                        continue
+                    if _find_tray(loaded_trays, candidate) is not None:
+                        slot_index = candidate
+                        active_source = field
+                        break
+
+            if slot_index is None and tray_now == "255" and loaded_trays:
+                materials = sorted({
+                    str(tray.get("tray_type", "") or "").strip()
+                    for tray in loaded_trays
+                    if str(tray.get("tray_type", "") or "").strip()
+                })
+                colors = [
+                    str(tray.get("tray_color", "") or "").strip()
+                    for tray in loaded_trays
+                    if str(tray.get("tray_color", "") or "").strip()
+                ]
+                loaded_slots: list[int] = []
+                for tray in loaded_trays:
+                    try:
+                        loaded_slots.append(int(tray.get("slot", 0)))
+                    except (TypeError, ValueError):
+                        continue
+                material = materials[0] if len(materials) == 1 else "unknown"
+                result: dict[str, Any] = {
+                    "success": True,
+                    "material": material,
+                    "source": "ams_loaded_unknown_slot",
+                    "tray_now": tray_now,
+                    "loaded_slots": loaded_slots,
+                    "candidate_materials": materials,
+                    "message": (
+                        "AMS trays are loaded, but the printer did not report "
+                        "a current slot. A1/AMS Lite firmware can report "
+                        "tray_now=255 in this state; pass an explicit "
+                        "ams_mapping to start_print when color matters."
+                    ),
+                }
+                if colors:
+                    result["candidate_colors"] = colors
+                return result
+
+            if slot_index is None and tray_now == "255":
                 return {
                     "success": True,
                     "material": "unknown",
@@ -108,10 +210,7 @@ class _MaterialToolsPlugin:
                     "message": "Active material unknown — external spool in use (no RFID/AMS data).",
                 }
 
-            # Locate the matching tray in the first AMS unit.
-            try:
-                slot_index = int(tray_now)
-            except (ValueError, TypeError):
+            if slot_index is None:
                 return {
                     "success": True,
                     "material": "unknown",
@@ -119,13 +218,7 @@ class _MaterialToolsPlugin:
                     "message": f"Could not parse AMS tray index: {tray_now!r}.",
                 }
 
-            units: list[dict[str, Any]] = ams.get("units", [])
-            tray_data: dict[str, Any] | None = None
-            if units:
-                for tray in units[0].get("trays", []):
-                    if tray.get("slot") == slot_index:
-                        tray_data = tray
-                        break
+            tray_data = _find_tray(all_trays, slot_index)
 
             if tray_data is None:
                 return {
@@ -154,6 +247,8 @@ class _MaterialToolsPlugin:
                 "success": True,
                 "material": material,
                 "source": f"ams_slot_{slot_index}",
+                "active_slot": slot_index,
+                "active_slot_source": active_source,
                 "message": message,
             }
             if color is not None:

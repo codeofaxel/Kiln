@@ -2000,11 +2000,15 @@ class TestBambuAdapterAMSStatus:
             ams_exist_bits="3",
             tray_exist_bits="ff",
             tray_now="2",
+            tray_pre="1",
+            tray_tar="3",
         )
         result = adapter.get_ams_status()
         assert result["ams_exist_bits"] == "3"
         assert result["tray_exist_bits"] == "ff"
         assert result["tray_now"] == "2"
+        assert result["tray_pre"] == "1"
+        assert result["tray_tar"] == "3"
 
     def test_ams_dict_wrapper_empty_units(self) -> None:
         """Dict wrapper with empty inner ams list returns no units."""

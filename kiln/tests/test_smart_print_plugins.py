@@ -132,7 +132,7 @@ class TestGetActiveMaterial:
         assert result["material"] == "unknown"
 
     def test_external_spool_tray_255(self, material_tools_fns):
-        """tray_now='255' means external spool → source='external_spool'."""
+        """tray_now='255' with no AMS tray data means external spool."""
         fn = material_tools_fns["get_active_material"]
         adapter = mock.MagicMock()
         adapter.get_ams_status.return_value = {"tray_now": "255", "units": []}
@@ -141,6 +141,61 @@ class TestGetActiveMaterial:
         assert result["success"] is True
         assert result["source"] == "external_spool"
         assert result["material"] == "unknown"
+
+    def test_a1_tray_now_255_uses_selected_ams_slot(self, material_tools_fns):
+        """A1/AMS Lite can report tray_now=255 while tray_pre names the AMS slot."""
+        fn = material_tools_fns["get_active_material"]
+        adapter = mock.MagicMock()
+        adapter.get_ams_status.return_value = {
+            "tray_now": "255",
+            "tray_pre": "1",
+            "tray_tar": "1",
+            "units": [
+                {
+                    "trays": [
+                        {"slot": 0, "tray_type": "PLA", "tray_color": "FFFFFFFF", "remain": 0},
+                        {"slot": 1, "tray_type": "PLA", "tray_color": "161616FF", "remain": 0},
+                    ]
+                }
+            ],
+        }
+        with mock.patch("kiln.server._get_adapter", return_value=adapter):
+            result = fn()
+        assert result["success"] is True
+        assert result["source"] == "ams_slot_1"
+        assert result["active_slot_source"] == "tray_pre"
+        assert result["material"] == "PLA"
+        assert result["color"] == "161616FF"
+
+    def test_a1_tray_now_255_loaded_ams_unknown_slot(self, material_tools_fns):
+        """Loaded AMS trays should not be mislabeled as external spool."""
+        fn = material_tools_fns["get_active_material"]
+        adapter = mock.MagicMock()
+        adapter.get_ams_status.return_value = {
+            "tray_now": "255",
+            "units": [
+                {
+                    "trays": [
+                        {"slot": 0, "tray_type": "PLA", "tray_color": "FFFFFFFF", "remain": 0},
+                        {"slot": 1, "tray_type": "PLA", "tray_color": "161616FF", "remain": 0},
+                        {"slot": 2, "tray_type": "PLA", "tray_color": "898989FF", "remain": 0},
+                        {"slot": 3, "tray_type": "PLA", "tray_color": "F72323FF", "remain": 0},
+                    ]
+                }
+            ],
+        }
+        with mock.patch("kiln.server._get_adapter", return_value=adapter):
+            result = fn()
+        assert result["success"] is True
+        assert result["source"] == "ams_loaded_unknown_slot"
+        assert result["material"] == "PLA"
+        assert result["loaded_slots"] == [0, 1, 2, 3]
+        assert result["candidate_colors"] == [
+            "FFFFFFFF",
+            "161616FF",
+            "898989FF",
+            "F72323FF",
+        ]
 
     def test_ams_slot_0_pla_loaded(self, material_tools_fns):
         """AMS slot 0 with PLA → correct material, color, remaining."""

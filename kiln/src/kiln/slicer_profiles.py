@@ -214,6 +214,12 @@ def slicer_profile_to_dict(profile: SlicerProfile) -> dict[str, Any]:
         "notes": profile.notes,
         "settings": dict(profile.settings),
         "tier": profile.tier,
+        "expanded_profile": {
+            "available_with": "kiln-pro",
+            "resolver": "get_printer_profile",
+            "requires_tier": "pro",
+            "url": "https://kiln3d.com/pricing",
+        },
     }
 
 
