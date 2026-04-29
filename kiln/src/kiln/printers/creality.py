@@ -24,6 +24,60 @@ from kiln.printers.moonraker import MoonrakerAdapter
 
 _MOONRAKER_PROBE_PATH = "/server/info"
 _DEFAULT_CREALITY_MOONRAKER_PORTS: tuple[int, ...] = (7125, 80, 4408)
+_MODEL_ALIASES: dict[str, str] = {
+    "creality_k1_max": "k1_max",
+    "k1 max": "k1_max",
+    "k1-max": "k1_max",
+    "creality_k1c": "k1c",
+    "k1 c": "k1c",
+    "creality_k1_se": "k1_se",
+    "k1 se": "k1_se",
+    "k1-se": "k1_se",
+    "creality_k2": "k2",
+    "creality_k2_pro": "k2_pro",
+    "k2 pro": "k2_pro",
+    "k2-pro": "k2_pro",
+    "creality_k2_plus": "k2_plus",
+    "k2 plus": "k2_plus",
+    "k2-plus": "k2_plus",
+    "creality_k2_se": "k2_se",
+    "k2 se": "k2_se",
+    "k2-se": "k2_se",
+    "creality hi": "creality_hi",
+    "creality-hi": "creality_hi",
+    "ender 3 v3": "ender3_v3",
+    "ender-3 v3": "ender3_v3",
+    "ender-3-v3": "ender3_v3",
+    "ender 3 v3 ke": "ender3_v3_ke",
+    "ender-3 v3 ke": "ender3_v3_ke",
+    "ender-3-v3-ke": "ender3_v3_ke",
+    "ender 3 v3 plus": "ender3_v3_plus",
+    "ender-3 v3 plus": "ender3_v3_plus",
+    "ender-3-v3-plus": "ender3_v3_plus",
+    "ender 3 v4": "ender3_v4",
+    "ender-3 v4": "ender3_v4",
+    "ender-3-v4": "ender3_v4",
+    "ender 5 max": "ender5_max",
+    "ender-5 max": "ender5_max",
+    "ender-5-max": "ender5_max",
+    "cr-10 se": "cr10_se",
+    "cr10 se": "cr10_se",
+    "sparkx i7": "sparkx_i7",
+    "sparkx-i7": "sparkx_i7",
+}
+_OFFICIAL_ROOT_SERVICE_MODELS: frozenset[str] = frozenset(
+    {"k1", "k1_max", "k1c", "ender3_v3_ke", "cr10_se"}
+)
+_OFFICIAL_STOCK_FLUIDD_MODELS: frozenset[str] = frozenset({"ender3_v3"})
+_COMMUNITY_FLUIDD_MODELS: frozenset[str] = frozenset(
+    {"k2", "k2_pro", "k2_plus", "creality_hi"}
+)
+_UNKNOWN_STOCK_MOONRAKER_MODELS: frozenset[str] = frozenset(
+    {"sparkx_i7", "k1_se", "k2_se", "ender3_v4", "ender3_v3_plus", "ender5_max"}
+)
+_LEGACY_SERIAL_MODELS: frozenset[str] = frozenset(
+    {"ender3", "ender3_v2", "ender3_s1", "ender5", "cr10", "ender3_v3_se"}
+)
 _CFS_OBJECT_KEYWORDS: tuple[str, ...] = (
     "cfs",
     "filament_box",
@@ -123,6 +177,47 @@ def _has_explicit_port(parsed_url: Any) -> bool:
         return True
 
 
+def _normalise_model_hint(model: str | None) -> str | None:
+    """Return Kiln's local profile key for a Creality model hint."""
+    if not model:
+        return None
+    cleaned = model.strip().lower().replace("/", " ").replace("-", "_")
+    cleaned = "_".join(cleaned.split())
+    if not cleaned:
+        return None
+    return _MODEL_ALIASES.get(model.strip().lower(), _MODEL_ALIASES.get(cleaned, cleaned))
+
+
+def _model_local_access_notes(model: str | None) -> list[str]:
+    """Return conservative model-specific local-control guidance."""
+    normalised = _normalise_model_hint(model)
+    if normalised in _OFFICIAL_STOCK_FLUIDD_MODELS:
+        return [
+            "Official Creality Wiki guidance for Ender-3 V3 documents local Fluidd at http://<printer-ip>:4408.",
+            "Fluidd reachability is not enough for Kiln by itself; Kiln still needs a Moonraker /server/info response on a probed port.",
+        ]
+    if normalised in _OFFICIAL_ROOT_SERVICE_MODELS:
+        return [
+            "Official Creality firmware/Annex notes for this family point to a root or service-enabled Fluidd/Mainsail/Moonraker path, not a stock Moonraker guarantee.",
+            "If Fluidd/Mainsail or Moonraker was installed, verify it after firmware updates because official notes say configuration files may be overwritten.",
+        ]
+    if normalised in _COMMUNITY_FLUIDD_MODELS:
+        return [
+            "Official Creality sources confirm Klipper/LAN-capable firmware for this family, but Fluidd/Moonraker port behavior is community or third-party confirmed.",
+            "Try http://<printer-ip>:4408 as a diagnostic hint, then save the printer only after /server/info returns Moonraker JSON.",
+        ]
+    if normalised in _UNKNOWN_STOCK_MOONRAKER_MODELS:
+        return [
+            "No official stock local Moonraker evidence is known for this Creality profile yet.",
+            "Use the Creality adapter only if /server/info is reachable; otherwise keep using Creality Print/cloud/local app paths or another local backend when applicable.",
+        ]
+    if normalised in _LEGACY_SERIAL_MODELS:
+        return [
+            "This is a Marlin-era or serial-first Creality profile; use type 'serial' or 'octoprint' unless a separate Moonraker host is installed.",
+        ]
+    return []
+
+
 def _candidate_moonraker_urls(host: str) -> list[str]:
     """Return Moonraker base URL candidates for a Creality host."""
     cleaned = host.strip().rstrip("/")
@@ -179,7 +274,7 @@ def _looks_like_moonraker_info(payload: dict[str, Any]) -> bool:
     )
 
 
-def _connection_checklist(host: str) -> list[str]:
+def _connection_checklist(host: str, model: str | None = None) -> list[str]:
     display_host = host.strip() or "<printer-ip>"
     return [
         "Keep the printer and this computer on the same Wi-Fi/LAN. Guest Wi-Fi, VPNs, VLANs, or client isolation can block local printer ports.",
@@ -187,7 +282,7 @@ def _connection_checklist(host: str) -> list[str]:
         "Check the Moonraker endpoint in a browser: http://<printer-ip>:7125/server/info. Kiln also probes http://<printer-ip>/server/info and http://<printer-ip>:4408/server/info.",
         "If Moonraker returns 401/403, pass --api-key or set KILN_PRINTER_API_KEY.",
         "If the printer answers HTTP but /server/info is not Moonraker, stock firmware on that version may not expose local Moonraker or may expose it on a different port.",
-    ]
+    ] + _model_local_access_notes(model)
 
 
 def _request_failure_kind(exc: requests.RequestException) -> str:
@@ -201,8 +296,10 @@ def _request_failure_kind(exc: requests.RequestException) -> str:
 def _classify_failed_probe(
     host: str,
     checks: list[CrealityMoonrakerProbe],
+    model: str | None = None,
 ) -> tuple[str, str, bool, list[str]]:
-    checklist = _connection_checklist(host)
+    checklist = _connection_checklist(host, model=model)
+    model_notes = _model_local_access_notes(model)
     if any(check.auth_required for check in checks):
         return (
             "moonraker_auth_required",
@@ -211,7 +308,8 @@ def _classify_failed_probe(
             [
                 "Pass --api-key or set KILN_PRINTER_API_KEY, then run doctor-creality again.",
                 "Paste http://<printer-ip>:7125/server/info into a browser on the same LAN to confirm the printer prompts or responds.",
-            ],
+            ]
+            + model_notes,
         )
 
     if any(check.failure_kind == "moonraker_not_exposed" for check in checks):
@@ -226,7 +324,8 @@ def _classify_failed_probe(
                 "Verify the Moonraker endpoint in a browser: http://<printer-ip>:7125/server/info.",
                 "If port 7125 fails, try http://<printer-ip>/server/info and http://<printer-ip>:4408/server/info.",
                 "If the printer's regular web page loads but /server/info does not, check Creality firmware settings/release notes for local Moonraker or LAN API access.",
-            ],
+            ]
+            + model_notes,
         )
 
     if any(check.status_code is not None and check.status_code >= 500 for check in checks):
@@ -237,7 +336,8 @@ def _classify_failed_probe(
             [
                 "Wait for the printer to finish booting or updating, then run doctor-creality again.",
                 "Open http://<printer-ip>:7125/server/info in a browser on the same LAN and check whether it returns JSON.",
-            ],
+            ]
+            + model_notes,
         )
 
     return (
@@ -252,20 +352,22 @@ def _classify_failed_probe(
             checklist[1],
             checklist[2],
             f"If all probes fail for {host!r} after LAN/IP/port checks, check whether that firmware exposes local Moonraker or configure the printer through serial/OctoPrint instead.",
-        ],
+        ]
+        + model_notes,
     )
 
 
 def _next_steps_for_failed_probe(
     host: str,
     checks: list[CrealityMoonrakerProbe],
+    model: str | None = None,
 ) -> list[str]:
-    _, _, _, next_steps = _classify_failed_probe(host, checks)
+    _, _, _, next_steps = _classify_failed_probe(host, checks, model=model)
     if any(check.auth_required for check in checks):
         return [
             "Moonraker answered but rejected the request. Pass --api-key or set KILN_PRINTER_API_KEY if auth is enabled.",
             "Paste http://<printer-ip>:7125/server/info into a browser on the same LAN to confirm the printer prompts or responds.",
-        ]
+        ] + _model_local_access_notes(model)
     return next_steps
 
 
@@ -273,6 +375,7 @@ def diagnose_creality_moonraker(
     host: str,
     api_key: str | None = None,
     *,
+    model: str | None = None,
     timeout: int = 5,
     verify_ssl: bool = True,
 ) -> CrealityMoonrakerDiagnostics:
@@ -293,7 +396,7 @@ def diagnose_creality_moonraker(
             ],
             likely_cause="host_missing",
             user_message="Kiln needs the printer IP address or local hostname before it can check Creality Moonraker access.",
-            connection_checklist=_connection_checklist("<printer-ip>"),
+            connection_checklist=_connection_checklist("<printer-ip>", model=model),
             next_steps=["Provide the printer IP address or local hostname."],
         )
 
@@ -317,7 +420,9 @@ def diagnose_creality_moonraker(
                 "This looks like a serial/USB printer path. The Creality adapter is for networked "
                 "Creality FDM printers with local Moonraker."
             ),
-            next_steps=["Use type 'serial' or 'octoprint' for USB/Marlin Creality printers."],
+            connection_checklist=_connection_checklist(host, model=model),
+            next_steps=["Use type 'serial' or 'octoprint' for USB/Marlin Creality printers."]
+            + _model_local_access_notes(model),
         )
 
     headers = {"X-Api-Key": api_key} if api_key else None
@@ -422,14 +527,16 @@ def diagnose_creality_moonraker(
             klippy_state=klippy_state,
             likely_cause="moonraker_reachable",
             user_message="Moonraker is reachable from Kiln on the local network.",
-            connection_checklist=_connection_checklist(host),
+            connection_checklist=_connection_checklist(host, model=model),
             next_steps=[
                 "Save this printer as type 'creality' with this resolved Moonraker URL.",
                 f"Browser test: {probe_url}",
             ],
         )
 
-    likely_cause, user_message, firmware_lockdown_possible, next_steps = _classify_failed_probe(host, checks)
+    likely_cause, user_message, firmware_lockdown_possible, next_steps = _classify_failed_probe(
+        host, checks, model=model
+    )
     return CrealityMoonrakerDiagnostics(
         host=host,
         candidates=candidates,
@@ -438,7 +545,7 @@ def diagnose_creality_moonraker(
         likely_cause=likely_cause,
         user_message=user_message,
         firmware_lockdown_possible=firmware_lockdown_possible,
-        connection_checklist=_connection_checklist(host),
+        connection_checklist=_connection_checklist(host, model=model),
         next_steps=next_steps,
     )
 
@@ -635,6 +742,7 @@ class CrealityAdapter(PrinterAdapter):
         diagnostics = diagnose_creality_moonraker(
             self._input_host,
             api_key=self._api_key,
+            model=self._model,
             timeout=self._timeout,
             verify_ssl=self._verify_ssl,
         )
@@ -658,8 +766,8 @@ class CrealityAdapter(PrinterAdapter):
             guidance = f"{guidance} Next steps: {steps}"
         raise PrinterError(
             "Could not find a Moonraker API on this Creality printer. "
-            "For K1 Max/K1/K2/Hi/Ender-3 V3 KE, verify the printer is on the LAN "
-            "and Moonraker is reachable, then try the printer IP or http://<ip>:7125. "
+            "For K1/K1 Max/K1C/Ender-3 V3/Ender-3 V3 KE/CR-10 SE/K2/Hi, verify the printer is on the LAN "
+            "and Moonraker is reachable, then try the printer IP, http://<ip>:7125, or model-specific Fluidd port hints. "
             f"Probe results: {detail or 'no candidates reached'}.{cause}{guidance}"
         )
 

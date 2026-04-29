@@ -47,19 +47,62 @@ For QIDI X-Plus 3 printers exposing Moonraker, configure Kiln with `type: moonra
 | Protocol | HTTP/HTTPS via Moonraker |
 | Features | Full Moonraker-backed support (state, temps, upload, print control, G-code, webcam, firmware/update surfaces exposed by Moonraker) |
 
-**Supported path:** use `type: creality` for modern Creality FDM printers that expose Moonraker, including SPARKX i7, K1/K1 Max/K1C/K1 SE, K2/K2 Pro/K2 Plus/K2 SE, Creality Hi, Ender-3 V4, Ender-3 V3 KE, Ender-5 Max, CR-10 SE, and similar CrealityOS/Klipper models. Older Marlin-based Creality printers remain supported through `serial` or `octoprint`.
+**Supported path:** use `type: creality` for modern Creality FDM printers only when local Moonraker is reachable on the printer LAN. Kiln's Creality adapter is a Creality-branded Moonraker endpoint adapter; a Creality profile in the data files is not a promise that stock firmware exposes Moonraker by default. Older Marlin-based Creality printers remain supported through `serial` or `octoprint`.
 
-Notes: Creality is a brand layer, not a single protocol. The `creality` adapter probes common Moonraker ports (`7125`, `80`, `4408`) and then delegates to the Moonraker adapter. If `/server/info` is not reachable, configure the printer through `serial`/`octoprint` or enable/verify the printer's local Moonraker service.
+Notes: Creality is a brand layer, not a single protocol. The `creality` adapter probes common Moonraker ports (`7125`, `80`, `4408`) and then delegates to the Moonraker adapter. If `/server/info` is not reachable, configure the printer through `serial`/`octoprint`, use Creality Print/Creality Cloud/local app paths outside Kiln, or enable/verify the printer's local Moonraker service where that model supports it.
 
-`kiln doctor-creality` classifies common reachability misses as `network_or_port_unreachable`, `moonraker_auth_required`, `firmware_locked_or_wrong_port`, or `moonraker_backend_unavailable`. Its guidance is intentionally local-network-first: same Wi-Fi/LAN, correct printer IP, correct Moonraker port, API key if required, and a cautious stock-firmware note when the printer answers HTTP but does not expose Moonraker at `/server/info`.
+`kiln doctor-creality` classifies common reachability misses as `network_or_port_unreachable`, `moonraker_auth_required`, `firmware_locked_or_wrong_port`, or `moonraker_backend_unavailable`. Its guidance is intentionally local-network-first: same Wi-Fi/LAN, correct printer IP, correct Moonraker port, API key if required, and a cautious stock-firmware note when the printer answers HTTP but does not expose Moonraker at `/server/info`. Pass `--model <profile_key>` for model-specific evidence hints.
 
-**Local connection test for K1 Max / K1 / K2 / Hi:**
+**Local-control evidence matrix:**
+
+| Model family | Profile key(s) | Stock firmware basis | Local Moonraker status | Port hints | Evidence level | Practical Kiln stance | Confidence | Gap / next action |
+|---|---|---|---|---|---|---|---|---|
+| Ender-3 / Pro / V2 | `ender3`, `ender3_v2` | Marlin | No stock Moonraker | None | Official/legacy Marlin class | Use `serial` or `octoprint` | 4 | Keep Creality examples away from these profiles |
+| Ender-3 S1 / S1 Pro | `ender3_s1` | Marlin | No stock Moonraker | None | Official/legacy Marlin class | Use `serial` or `octoprint` | 4 | Keep Creality examples away from these profiles |
+| Ender-5 / Ender-5 Plus | `ender5` | Marlin-era stock firmware | No stock Moonraker | None | Legacy Creality class | Use `serial` or `octoprint` | 4 | Use custom profile for externally hosted Klipper |
+| CR-10 / CR-10S | `cr10` | Marlin-era stock firmware | No stock Moonraker | None | Legacy Creality class | Use `serial` or `octoprint` | 4 | Use custom profile for externally hosted Klipper |
+| Ender-3 V3 SE | `ender3_v3_se` | Marlin-class stock firmware | No stock Moonraker found | None | Official support page; no local Moonraker evidence | Keep out of Creality/Moonraker examples | 3 | Hardware-check only if a user reports LAN API behavior |
+| Ender-3 V3 | `ender3_v3` | CrealityOS/Klipper-class firmware | Local Fluidd officially documented; Moonraker API still must be verified | `4408` Fluidd; probe `/server/info` on Kiln ports | Official Creality Wiki | Strongest stock-local UI claim; save in Kiln only after Moonraker JSON responds | 4 | Hardware-check whether `/server/info` is reachable stock at `:4408` or via proxy |
+| Ender-3 V3 Plus | `ender3_v3_plus` | CrealityOS/Klipper-class inferred | Unknown / likely related to V3 | Unknown, try `4408` only as a hint | Inferred from product family | Keep "Moonraker if reachable" | 1 | Do not inherit Ender-3 V3 claim until official docs or hardware confirm it |
+| Ender-3 V3 KE | `ender3_v3_ke` | Official Creality Klipper repo | Yes after root/service install | `4408` Fluidd, `4409` Mainsail, `7125` likely when Moonraker service is reachable | Official root/Annex implication | Add root/service-enabling hint | 4 | Hardware-check stock default vs rooted/service-enabled firmware versions |
+| CR-10 SE | `cr10_se` | Official Creality Klipper repo | Yes after root/service install | `4408` Fluidd, `4409` Mainsail, `7125` likely when Moonraker service is reachable | Official root/Annex implication | Add root/service-enabling hint | 4 | Hardware-check stock default vs rooted/service-enabled firmware versions |
+| K1 | `k1` | Official K1-series Klipper repo | Yes after root/service install | `4408` Fluidd, `4409` Mainsail, `7125` likely when Moonraker service is reachable | Official root/Annex implication | Add root/service-enabling hint; CFS-C is retrofit only | 4 | Hardware-check stock default vs rooted/service-enabled firmware versions |
+| K1 Max | `k1_max`, `creality_k1_max` | Official K1-series Klipper repo | Yes after root/service install | `4408` Fluidd, `4409` Mainsail, `7125` likely when Moonraker service is reachable | Official root/Annex implication | Stronger than generic "unknown", but not stock-default Moonraker | 4 | K1 Max can be stronger than "unknown", not stronger than service-enabled without hardware proof |
+| K1C | `k1c`, `creality_k1c` | Official K1-series Klipper repo | Yes after root/service install | `4408` Fluidd, `4409` Mainsail, `7125` likely when Moonraker service is reachable | Official root/Annex implication | Add root/service-enabling hint; CFS-C is retrofit only | 4 | Hardware-check stock default vs rooted/service-enabled firmware versions |
+| K1 SE | `k1_se`, `creality_k1_se` | CrealityOS/Klipper-class inferred | Unknown / likely after service enabling | Unknown | Product support plus CFS-C compatibility; no official Moonraker page found | Keep "Moonraker if reachable" | 1 | Find official K1 SE local-control docs or validate hardware |
+| K2 | `k2`, `creality_k2` | Official K2-series Klipper repo | Likely; not officially documented as Moonraker | `4408` community/third-party hint | Official Klipper source plus community Fluidd/Moonraker reports | Use `4408` as a diagnostic hint, not a stock guarantee | 3 | Get official Moonraker docs or hardware `/server/info` result |
+| K2 Pro | `k2_pro`, `creality_k2_pro` | Official K2-series Klipper repo | Likely; not officially documented as Moonraker | `4408` community/third-party hint | Official Klipper source plus community Fluidd/Moonraker reports | Keep "Moonraker if reachable" | 3 | Get official Moonraker docs or hardware `/server/info` result |
+| K2 Plus | `k2_plus`, `creality_k2_plus` | Official K2-series Klipper repo | Likely; official LAN HTTP/WebSocket support, community Moonraker/Fluidd detail | `4408` community/third-party hint | Official LAN protocol note plus community Fluidd/Moonraker reports | Use `4408` as a diagnostic hint, then require `/server/info` | 3 | Verify whether official LAN API exposes Moonraker JSON on stock firmware |
+| K2 SE | `k2_se`, `creality_k2_se` | CrealityOS/Klipper-class inferred | Unknown | Unknown | Official support page; no official Moonraker page found | Keep "Moonraker if reachable" | 1 | Find official K2 SE local-control docs or validate hardware |
+| Creality Hi | `creality_hi` | Official Hi Klipper repo | Likely; not officially documented as Moonraker | `4408` community/third-party hint | Official Klipper source plus community Fluidd/Moonraker reports | Use `4408` as a diagnostic hint, then require `/server/info` | 3 | Get official Moonraker docs or hardware `/server/info` result |
+| SPARKX i7 | `sparkx_i7` | CrealityOS/Klipper-class inferred | Unknown | Unknown | Official support confirms camera/CFS, not Moonraker | Keep "Moonraker if reachable" | 1 | Find official LAN/Moonraker docs or validate hardware |
+| Ender-3 V4 | `ender3_v4` | CrealityOS/Klipper-class inferred | Unknown | Unknown | Official store confirms CFS/Wi-Fi, not Moonraker | Keep "Moonraker if reachable" | 1 | Find official LAN/Moonraker docs or validate hardware |
+| Ender-5 Max | `ender5_max` | CrealityOS/Klipper-class inferred | Unknown | Unknown | Official support confirms CoreXY/Wi-Fi/optional camera, not Moonraker | Keep "Moonraker if reachable" | 1 | Find official LAN/Moonraker docs or validate hardware |
+
+Official sources that matter most: Creality publishes Klipper source/release notes for [K1 series](https://github.com/CrealityOfficial/K1_Series_Klipper), [K2 series](https://github.com/CrealityOfficial/K2_Series_Klipper), [Creality Hi](https://github.com/CrealityOfficial/Hi_Klipper), [Ender-3 V3 KE](https://github.com/CrealityOfficial/Ender-3_V3_KE_Klipper), and [CR-10 SE](https://github.com/CrealityOfficial/CR-10SE_Klipper). The [K1 Annex](https://github.com/CrealityOfficial/K1_Series_Annex), [Ender-3 V3 KE Annex](https://github.com/CrealityOfficial/Ender-3_V3_KE_Annex), and [CR-10 SE Annex](https://github.com/CrealityOfficial/CR-10SE_Annex) document Fluidd/Mainsail/Moonraker installation paths, which is an official implication of a service-enabled Moonraker path, not proof that stock firmware exposes Moonraker by default. Creality's own [Ender-3 V3 Wiki page](https://wiki.creality.com/en/ender-series/ender-3-v3/troubleshooting/after-modifying-the-mesh-bed-via-fluidd-the-screen-freezes-or-goes-black/how-to-control-the-ender-3-v3-using-fluidd-over-a-local-area-network) documents local Fluidd browser control at `http://<printer-ip>:4408`. [K2 Plus official support](https://www.creality.com/support/creality-k2-plus-cfs-combo) documents LAN HTTP/WebSocket control and WebRTC video, but does not name Moonraker.
+
+Community/third-party-only sources that are useful but not authoritative: [Creality Helper Script](https://guilouz.github.io/Creality-Helper-Script-Wiki/configurations/access-to-web-interface/) documents common Fluidd/Mainsail ports (`4408`/`4409`) and Moonraker/Nginx installation for K1 and Ender-3 V3 families. SimplyPrint's [K2 Plus](https://simplyprint.io/setup-guide/creality/k2-plus) and [Creality Hi](https://simplyprint.io/setup-guide/creality/hi) setup guides provide concrete `:4408`/Moonraker configuration behavior. Treat those as diagnostic hints until Creality documents the same behavior or Kiln verifies hardware directly.
+
+**Officially confirmed local-control evidence:**
+
+- Ender-3 V3: official Creality Wiki documents browser control through Fluidd at `http://<printer-ip>:4408`. This is a stock-local UI claim, not by itself proof that Kiln's required Moonraker `/server/info` API is exposed.
+- K1/K1 Max/K1C, Ender-3 V3 KE, and CR-10 SE: official Creality Klipper repositories plus official Annex repositories document root, Fluidd, Mainsail, and Moonraker installation paths. This is official evidence for a root/service-enabled path, not proof of stock-default Moonraker exposure.
+- K2/K2 Pro/K2 Plus and Creality Hi: official Creality Klipper repositories confirm the firmware basis. K2 Plus official support also documents LAN HTTP/WebSocket control and WebRTC video, but does not name Moonraker.
+
+**Not officially findable yet:**
+
+- No official Creality source found that says K1/K1 Max/K1C stock firmware exposes Moonraker locally by default.
+- No official Creality source found that names Moonraker/Fluidd ports for K2/K2 Pro/K2 Plus, K2 SE, Creality Hi, SPARKX i7, Ender-3 V4, Ender-3 V3 Plus, Ender-5 Max, or K1 SE.
+- K2/Hi `:4408` behavior is useful as a diagnostic hint, but it is community/third-party evidence until Creality documents it or Kiln validates hardware directly.
+
+**Local connection test for K1 Max / K1 / Ender-3 V3 / K2 / Hi:**
 
 1. Put the computer and printer on the same LAN. Avoid guest Wi-Fi or networks with client/device isolation.
 2. Find the printer IP on the printer screen or router device list.
 3. In a browser on the computer, open `http://<printer-ip>:7125/server/info`.
 4. If that fails, try `http://<printer-ip>/server/info` and `http://<printer-ip>:4408/server/info`.
 5. A JSON response with Moonraker/Klipper fields means Kiln can use the local path. A browser timeout usually means wrong IP, different network, router isolation, or local Moonraker disabled. HTTP 401/403 means Moonraker answered but needs an API key.
+6. For Ender-3 V3 specifically, Creality documents Fluidd at `http://<printer-ip>:4408`; if Fluidd loads but `/server/info` does not return Moonraker JSON, Kiln should still treat the Moonraker API as unverified.
 
 CLI setup:
 

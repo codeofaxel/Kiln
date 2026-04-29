@@ -158,7 +158,7 @@ class TestCrealityDiagnostics:
             "kiln.printers.creality.requests.get",
             side_effect=requests.ConnectionError("connection refused"),
         ):
-            diag = diagnose_creality_moonraker("k1-max.local")
+            diag = diagnose_creality_moonraker("k1-max.local", model="k1_max")
 
         assert diag.ok is False
         assert diag.likely_cause == "network_or_port_unreachable"
@@ -168,6 +168,8 @@ class TestCrealityDiagnostics:
         assert "ip address" in guidance
         assert ":7125/server/info" in guidance
         assert "stock firmware" in guidance
+        assert "root or service-enabled" in guidance
+        assert "configuration files may be overwritten" in guidance
 
     def test_diagnostic_non_moonraker_http_marks_firmware_lockdown_possible(self) -> None:
         response = MagicMock()
@@ -182,3 +184,27 @@ class TestCrealityDiagnostics:
         assert diag.checks[0].failure_kind == "moonraker_not_exposed"
         assert diag.user_message is not None
         assert "stock firmware" in diag.user_message.lower()
+
+    def test_diagnostic_ender3_v3_mentions_official_fluidd_port(self) -> None:
+        with patch(
+            "kiln.printers.creality.requests.get",
+            side_effect=requests.ConnectionError("connection refused"),
+        ):
+            diag = diagnose_creality_moonraker("ender-v3.local", model="Ender-3 V3")
+
+        guidance = " ".join(diag.connection_checklist + diag.next_steps).lower()
+        assert "official creality wiki" in guidance
+        assert ":4408" in guidance
+        assert "/server/info" in guidance
+
+    def test_diagnostic_legacy_model_points_to_serial_or_octoprint(self) -> None:
+        with patch(
+            "kiln.printers.creality.requests.get",
+            side_effect=requests.ConnectionError("connection refused"),
+        ):
+            diag = diagnose_creality_moonraker("ender3.local", model="ender3")
+
+        guidance = " ".join(diag.connection_checklist + diag.next_steps).lower()
+        assert "marlin-era" in guidance
+        assert "serial" in guidance
+        assert "octoprint" in guidance

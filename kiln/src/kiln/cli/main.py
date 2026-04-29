@@ -1179,6 +1179,7 @@ def _run_creality_diagnostics(cfg: dict[str, Any]) -> dict[str, Any]:
     diag = diagnose_creality_moonraker(
         str(cfg.get("host", "") or ""),
         api_key=cfg.get("api_key") or None,
+        model=str(cfg.get("printer_model") or ""),
     )
     diag_dict = diag.to_dict()
     summary.update(
