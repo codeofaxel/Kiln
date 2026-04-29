@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-29T01:43:56.206932+00:00",
-  "tool_count": 272,
+  "generated": "2026-04-29T15:56:40.969015+00:00",
+  "tool_count": 274,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -613,6 +613,22 @@
             ],
             "default": null,
             "title": "Design Name Translations"
+          },
+          "step_overrides": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Step Overrides"
           }
         },
         "required": [
@@ -1016,8 +1032,8 @@
     },
     {
       "name": "license_status_live",
-      "description": "Return live tier / status / expiry for a Kiln license key by hitting the server (revocation-aware).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Return live tier / status / expiry for the current Kiln caller by hitting the server (revocation-aware).",
+      "tier": "free",
       "category": "billing",
       "parameters": {
         "properties": {
@@ -7611,6 +7627,25 @@
       }
     },
     {
+      "name": "get_printer_profile",
+      "description": "Get the canonical tier-aware printer profile.",
+      "tier": "free",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id"
+        ],
+        "title": "get_printer_profileArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "get_recovery_recommendations",
       "description": "Return the historically best recovery strategy (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -7663,6 +7698,17 @@
           }
         },
         "title": "get_recovery_strategy_statsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_printer_profiles",
+      "description": "List canonical tier-aware printer profiles.",
+      "tier": "free",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {},
+        "title": "list_printer_profilesArguments",
         "type": "object"
       }
     },
