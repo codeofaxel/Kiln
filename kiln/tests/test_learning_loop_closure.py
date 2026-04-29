@@ -134,7 +134,7 @@ class TestWireA_LocalLoop:
     def test_prompt_gains_warping_mitigation_from_history(self, tmp_kiln_env):
         """End-to-end: an outcome-populated context flows all the way
         through enhance_prompt_with_design_intelligence into the
-        generated prompt text.  This is the Jobs-level demo — fail once,
+        generated prompt text.  This is the product-level demo -- fail once,
         get better next time, no button pressed."""
         from kiln.generation_feedback import (
             PrinterGenerationContext,

@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-28T08:10:28.535302+00:00",
-  "tool_count": 297,
+  "generated": "2026-04-29T01:43:56.206932+00:00",
+  "tool_count": 272,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -6397,6 +6397,31 @@
             ],
             "default": null,
             "title": "Ams Mapping"
+          },
+          "target_ams_slot": {
+            "default": -1,
+            "title": "Target Ams Slot",
+            "type": "integer"
+          },
+          "target_filament_type": {
+            "default": "",
+            "title": "Target Filament Type",
+            "type": "string"
+          },
+          "target_filament_color": {
+            "default": "",
+            "title": "Target Filament Color",
+            "type": "string"
+          },
+          "require_ams_match": {
+            "default": true,
+            "title": "Require Ams Match",
+            "type": "boolean"
+          },
+          "manual_material_change_confirmed": {
+            "default": false,
+            "title": "Manual Material Change Confirmed",
+            "type": "boolean"
           }
         },
         "title": "resume_interrupted_printArguments",
@@ -6634,6 +6659,31 @@
             "default": "",
             "title": "Parent Design Id",
             "type": "string"
+          },
+          "target_ams_slot": {
+            "default": -1,
+            "title": "Target Ams Slot",
+            "type": "integer"
+          },
+          "target_filament_type": {
+            "default": "",
+            "title": "Target Filament Type",
+            "type": "string"
+          },
+          "target_filament_color": {
+            "default": "",
+            "title": "Target Filament Color",
+            "type": "string"
+          },
+          "require_ams_match": {
+            "default": true,
+            "title": "Require Ams Match",
+            "type": "boolean"
+          },
+          "manual_material_change_confirmed": {
+            "default": false,
+            "title": "Manual Material Change Confirmed",
+            "type": "boolean"
           }
         },
         "required": [
@@ -6759,7 +6809,7 @@
     },
     {
       "name": "auto_recover",
-      "description": "One-call autonomous failure recovery (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Recover a failed print in one guided operation.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -6866,7 +6916,7 @@
     },
     {
       "name": "cancel_auto_recover",
-      "description": "Signal an in-flight auto_recover to stop at the next checkpoint (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Stop an active recovery run.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -6890,7 +6940,7 @@
     },
     {
       "name": "confirm_auto_recover",
-      "description": "Confirm an AWAITING_CONFIRMATION auto_recover can proceed (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Approve a recovery run that is waiting for operator confirmation.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -7145,6 +7195,31 @@
             "default": false,
             "title": "Accept Bridge Cascade Risk",
             "type": "boolean"
+          },
+          "target_ams_slot": {
+            "default": -1,
+            "title": "Target Ams Slot",
+            "type": "integer"
+          },
+          "target_filament_type": {
+            "default": "",
+            "title": "Target Filament Type",
+            "type": "string"
+          },
+          "target_filament_color": {
+            "default": "",
+            "title": "Target Filament Color",
+            "type": "string"
+          },
+          "require_ams_match": {
+            "default": true,
+            "title": "Require Ams Match",
+            "type": "boolean"
+          },
+          "manual_material_change_confirmed": {
+            "default": false,
+            "title": "Manual Material Change Confirmed",
+            "type": "boolean"
           }
         },
         "required": [
@@ -7330,7 +7405,7 @@
     },
     {
       "name": "get_auto_recover_status",
-      "description": "Read the current state of an async auto_recover (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Check the current state and outcome of a recovery run.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -7498,7 +7573,7 @@
     },
     {
       "name": "get_print_learning_summary",
-      "description": "Get what the print learning system has learned about a printer.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Get the current learning summary for a printer.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -7506,6 +7581,26 @@
           "printer_id": {
             "title": "Printer Id",
             "type": "string"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          },
+          "failure_type": {
+            "default": "",
+            "title": "Failure Type",
+            "type": "string"
+          },
+          "include_recovery": {
+            "default": true,
+            "title": "Include Recovery",
+            "type": "boolean"
+          },
+          "include_community": {
+            "default": true,
+            "title": "Include Community",
+            "type": "boolean"
           }
         },
         "required": [
@@ -7568,6 +7663,94 @@
           }
         },
         "title": "get_recovery_strategy_statsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "plan_fleet_material_change",
+      "description": "Plan future-object material/color changes across a fleet (Business).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Printers",
+            "type": "array"
+          },
+          "targets": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Targets",
+            "type": "array"
+          },
+          "trigger_object": {
+            "default": "",
+            "title": "Trigger Object",
+            "type": "string"
+          },
+          "plate_number": {
+            "default": 1,
+            "title": "Plate Number",
+            "type": "integer"
+          },
+          "source_filament_type": {
+            "default": "PLA",
+            "title": "Source Filament Type",
+            "type": "string"
+          },
+          "source_filament_color": {
+            "default": "",
+            "title": "Source Filament Color",
+            "type": "string"
+          },
+          "require_ams_match": {
+            "default": true,
+            "title": "Require Ams Match",
+            "type": "boolean"
+          },
+          "build_artifacts": {
+            "default": false,
+            "title": "Build Artifacts",
+            "type": "boolean"
+          },
+          "output_dir": {
+            "default": "",
+            "title": "Output Dir",
+            "type": "string"
+          },
+          "execute_ready": {
+            "default": false,
+            "title": "Execute Ready",
+            "type": "boolean"
+          },
+          "prepared_sessions": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Prepared Sessions"
+          }
+        },
+        "required": [
+          "printers",
+          "targets"
+        ],
+        "title": "plan_fleet_material_changeArguments",
         "type": "object"
       }
     },
@@ -7698,6 +7881,31 @@
           "strict": {
             "default": true,
             "title": "Strict",
+            "type": "boolean"
+          },
+          "target_ams_slot": {
+            "default": -1,
+            "title": "Target Ams Slot",
+            "type": "integer"
+          },
+          "target_filament_type": {
+            "default": "",
+            "title": "Target Filament Type",
+            "type": "string"
+          },
+          "target_filament_color": {
+            "default": "",
+            "title": "Target Filament Color",
+            "type": "string"
+          },
+          "require_ams_match": {
+            "default": true,
+            "title": "Require Ams Match",
+            "type": "boolean"
+          },
+          "manual_material_change_confirmed": {
+            "default": false,
+            "title": "Manual Material Change Confirmed",
             "type": "boolean"
           }
         },
@@ -9427,337 +9635,6 @@
       }
     },
     {
-      "name": "add_org_member",
-      "description": "Add *tenant_id* to *org_id*.  ``role`` is one of ``owner``, ``admin``, ``member``, ``viewer``.  Already- enrolled members get their role updated in place.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "org_id": {
-            "title": "Org Id",
-            "type": "string"
-          },
-          "tenant_id": {
-            "title": "Tenant Id",
-            "type": "string"
-          },
-          "role": {
-            "default": "member",
-            "title": "Role",
-            "type": "string"
-          },
-          "invited_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Invited By"
-          }
-        },
-        "required": [
-          "org_id",
-          "tenant_id"
-        ],
-        "title": "add_org_memberArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "add_team_member",
-      "description": "Add *tenant_id* to *team_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "team_id": {
-            "title": "Team Id",
-            "type": "string"
-          },
-          "tenant_id": {
-            "title": "Tenant Id",
-            "type": "string"
-          },
-          "role": {
-            "default": "member",
-            "title": "Role",
-            "type": "string"
-          },
-          "added_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Added By"
-          }
-        },
-        "required": [
-          "team_id",
-          "tenant_id"
-        ],
-        "title": "add_team_memberArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "apply_role_template",
-      "description": "Grant every scope in a role template to a tenant or team in a single call.  Composes repeated ``grant_scope`` under the hood \u2014 no new primitive, just ergonomic bundling.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "org_id": {
-            "title": "Org Id",
-            "type": "string"
-          },
-          "role": {
-            "title": "Role",
-            "type": "string"
-          },
-          "granted_by": {
-            "title": "Granted By",
-            "type": "string"
-          },
-          "tenant_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Tenant Id"
-          },
-          "team_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Team Id"
-          }
-        },
-        "required": [
-          "org_id",
-          "role",
-          "granted_by"
-        ],
-        "title": "apply_role_templateArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "assign_artifact_to_org",
-      "description": "Mark a local artifact as owned by *org_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "artifact_type": {
-            "title": "Artifact Type",
-            "type": "string"
-          },
-          "artifact_id": {
-            "title": "Artifact Id",
-            "type": "string"
-          },
-          "org_id": {
-            "title": "Org Id",
-            "type": "string"
-          },
-          "assigned_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Assigned By"
-          }
-        },
-        "required": [
-          "artifact_type",
-          "artifact_id",
-          "org_id"
-        ],
-        "title": "assign_artifact_to_orgArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "backfill_artifact_into_org",
-      "description": "Move an existing tenant-owned artifact into *org_id*, updating BOTH the cloud rows and the local ownership marker.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "artifact_type": {
-            "title": "Artifact Type",
-            "type": "string"
-          },
-          "artifact_id": {
-            "title": "Artifact Id",
-            "type": "string"
-          },
-          "org_id": {
-            "title": "Org Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "artifact_type",
-          "artifact_id",
-          "org_id"
-        ],
-        "title": "backfill_artifact_into_orgArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "check_capability",
-      "description": "Dry-run the permission check the cloud RLS will run.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "org_id": {
-            "title": "Org Id",
-            "type": "string"
-          },
-          "tenant_id": {
-            "title": "Tenant Id",
-            "type": "string"
-          },
-          "scope_key": {
-            "title": "Scope Key",
-            "type": "string"
-          },
-          "capability": {
-            "title": "Capability",
-            "type": "string"
-          }
-        },
-        "required": [
-          "org_id",
-          "tenant_id",
-          "scope_key",
-          "capability"
-        ],
-        "title": "check_capabilityArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "create_org",
-      "description": "Create a new org.  Owner is auto-enrolled as an owner-role member so permission checks never need a special case.  ``tier`` is one of ``pro``, ``business``, ``enterprise``.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "slug": {
-            "title": "Slug",
-            "type": "string"
-          },
-          "owner_tenant": {
-            "title": "Owner Tenant",
-            "type": "string"
-          },
-          "tier": {
-            "default": "pro",
-            "title": "Tier",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "slug",
-          "owner_tenant"
-        ],
-        "title": "create_orgArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "create_team",
-      "description": "Create a team (sub-group) inside an org.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "org_id": {
-            "title": "Org Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "slug": {
-            "title": "Slug",
-            "type": "string"
-          },
-          "description": {
-            "default": "",
-            "title": "Description",
-            "type": "string"
-          },
-          "parent_team_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Parent Team Id"
-          },
-          "created_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Created By"
-          }
-        },
-        "required": [
-          "org_id",
-          "name",
-          "slug"
-        ],
-        "title": "create_teamArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "delete_team",
       "description": "Delete a team, its memberships, and its scope grants.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -9777,50 +9654,9 @@
       }
     },
     {
-      "name": "evaluate_pr_approval",
-      "description": "Dry-run the approval gate on *pr_id* \u2014 returns ``allowed`` + a detailed reason (\"needs_1_more_approval\", \"blocked_by_change_requests\", \"gate_satisfied\", or \"no_gate_configured\").\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "pr_id": {
-            "title": "Pr Id",
-            "type": "string"
-          },
-          "target_branch_name": {
-            "title": "Target Branch Name",
-            "type": "string"
-          },
-          "artifact_type": {
-            "default": "design",
-            "title": "Artifact Type",
-            "type": "string"
-          },
-          "org_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Org Id"
-          }
-        },
-        "required": [
-          "pr_id",
-          "target_branch_name"
-        ],
-        "title": "evaluate_pr_approvalArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "export_audit_log",
-      "description": "Dump the local reflog to JSONL or CSV.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Dump the local reflog to JSONL or CSV.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "enterprise",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -9900,47 +9736,6 @@
       }
     },
     {
-      "name": "github_poll_login",
-      "description": "Complete the device-code flow.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "device_code": {
-            "title": "Device Code",
-            "type": "string"
-          },
-          "tenant_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Tenant Id"
-          },
-          "interval": {
-            "default": 5,
-            "title": "Interval",
-            "type": "integer"
-          },
-          "expires_in": {
-            "default": 900,
-            "title": "Expires In",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "device_code"
-        ],
-        "title": "github_poll_loginArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "github_start_device_login",
       "description": "Kick off the GitHub device-code flow.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -9948,148 +9743,6 @@
       "parameters": {
         "properties": {},
         "title": "github_start_device_loginArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "grant_scope",
-      "description": "Grant *capability* on *scope_key* to a tenant OR a team.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "org_id": {
-            "title": "Org Id",
-            "type": "string"
-          },
-          "scope_key": {
-            "title": "Scope Key",
-            "type": "string"
-          },
-          "capability": {
-            "title": "Capability",
-            "type": "string"
-          },
-          "granted_by": {
-            "title": "Granted By",
-            "type": "string"
-          },
-          "tenant_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Tenant Id"
-          },
-          "team_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Team Id"
-          },
-          "expires_at": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Expires At"
-          }
-        },
-        "required": [
-          "org_id",
-          "scope_key",
-          "capability",
-          "granted_by"
-        ],
-        "title": "grant_scopeArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "link_identity",
-      "description": "Manually bind ``(provider, provider_user_id)`` to a tenant.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "provider": {
-            "title": "Provider",
-            "type": "string"
-          },
-          "provider_user_id": {
-            "title": "Provider User Id",
-            "type": "string"
-          },
-          "handle": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Handle"
-          },
-          "email": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Email"
-          },
-          "display_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Display Name"
-          },
-          "tenant_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Tenant Id"
-          }
-        },
-        "required": [
-          "provider",
-          "provider_user_id"
-        ],
-        "title": "link_identityArguments",
         "type": "object"
       }
     },
@@ -10130,116 +9783,6 @@
       }
     },
     {
-      "name": "list_expiring_grants",
-      "description": "Return grants set to ``expires_at`` within the next *within_days*.  Lets admins renew or revoke before they lapse and break workflows.  Business+ tier.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "org_id": {
-            "title": "Org Id",
-            "type": "string"
-          },
-          "within_days": {
-            "default": 30,
-            "title": "Within Days",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "org_id"
-        ],
-        "title": "list_expiring_grantsArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "list_my_identities",
-      "description": "Every identity linked to a given tenant id.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "tenant_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Tenant Id"
-          }
-        },
-        "title": "list_my_identitiesArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "list_my_orgs",
-      "description": "Return every org *tenant_id* belongs to (owner or member).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "tenant_id": {
-            "title": "Tenant Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "tenant_id"
-        ],
-        "title": "list_my_orgsArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "list_my_teams",
-      "description": "List teams within *org_id* that *tenant_id* belongs to.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "org_id": {
-            "title": "Org Id",
-            "type": "string"
-          },
-          "tenant_id": {
-            "title": "Tenant Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "org_id",
-          "tenant_id"
-        ],
-        "title": "list_my_teamsArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "list_org_members",
-      "description": "List every member of *org_id* with their role.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "org_id": {
-            "title": "Org Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "org_id"
-        ],
-        "title": "list_org_membersArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "list_role_templates",
       "description": "Enumerate available role templates and their scope sets.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -10247,73 +9790,6 @@
       "parameters": {
         "properties": {},
         "title": "list_role_templatesArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "list_scopes",
-      "description": "List grants for an org, optionally filtered by tenant OR team.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "org_id": {
-            "title": "Org Id",
-            "type": "string"
-          },
-          "tenant_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Tenant Id"
-          },
-          "team_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Team Id"
-          }
-        },
-        "required": [
-          "org_id"
-        ],
-        "title": "list_scopesArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "list_stale_grants",
-      "description": "Return every grant in *org_id* whose ``granted_at`` is older than *older_than_days*.  The quarterly access-review starting point: \"these grants have been untouched for 3 months \u2014 still needed?\"  Business+ tier (team access review).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "org_id": {
-            "title": "Org Id",
-            "type": "string"
-          },
-          "older_than_days": {
-            "default": 90,
-            "title": "Older Than Days",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "org_id"
-        ],
-        "title": "list_stale_grantsArguments",
         "type": "object"
       }
     },
@@ -10333,25 +9809,6 @@
           "team_id"
         ],
         "title": "list_team_membersArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "list_teams",
-      "description": "List every team in *org_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "org_id": {
-            "title": "Org Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "org_id"
-        ],
-        "title": "list_teamsArguments",
         "type": "object"
       }
     },
@@ -10385,88 +9842,6 @@
       }
     },
     {
-      "name": "remove_org_member",
-      "description": "Remove a member and every permission scope they held inside *org_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "org_id": {
-            "title": "Org Id",
-            "type": "string"
-          },
-          "tenant_id": {
-            "title": "Tenant Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "org_id",
-          "tenant_id"
-        ],
-        "title": "remove_org_memberArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "remove_team_member",
-      "description": "Remove a tenant from a team.  Their personal org membership is unaffected; only team-targeted scope grants stop applying to them.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "team_id": {
-            "title": "Team Id",
-            "type": "string"
-          },
-          "tenant_id": {
-            "title": "Tenant Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "team_id",
-          "tenant_id"
-        ],
-        "title": "remove_team_memberArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "require_recent_auth",
-      "description": "Step-up auth gate for critical ops.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "max_age_minutes": {
-            "default": 15,
-            "title": "Max Age Minutes",
-            "type": "integer"
-          },
-          "provider": {
-            "default": "github",
-            "title": "Provider",
-            "type": "string"
-          },
-          "tenant_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Tenant Id"
-          }
-        },
-        "title": "require_recent_authArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "resolve_handle",
       "description": "Invite-by-handle resolver: ``(provider, handle)`` \u2192 Kiln tenant id.  Returns the linked identity row (or ``{found: False}`` when no binding exists).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -10487,78 +9862,6 @@
           "handle"
         ],
         "title": "resolve_handleArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "revoke_scope",
-      "description": "Revoke a scope grant.  Supply either ``tenant_id`` (to remove a personal grant) or ``team_id`` (to remove a team-targeted grant).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "org_id": {
-            "title": "Org Id",
-            "type": "string"
-          },
-          "scope_key": {
-            "title": "Scope Key",
-            "type": "string"
-          },
-          "capability": {
-            "title": "Capability",
-            "type": "string"
-          },
-          "tenant_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Tenant Id"
-          },
-          "team_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Team Id"
-          }
-        },
-        "required": [
-          "org_id",
-          "scope_key",
-          "capability"
-        ],
-        "title": "revoke_scopeArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "scope_review_summary",
-      "description": "Aggregate view of every grant in an org \u2014 by capability, by target (tenant / team), plus counts of stale and expiring.  Starting point for a quarterly audit.  Business+ tier (team-level org management).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "org_id": {
-            "title": "Org Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "org_id"
-        ],
-        "title": "scope_review_summaryArguments",
         "type": "object"
       }
     },
@@ -10682,61 +9985,6 @@
           "owner_tenant"
         ],
         "title": "setup_teamArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "sso_login",
-      "description": "Complete an enterprise SSO login in one call.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "code": {
-            "title": "Code",
-            "type": "string"
-          },
-          "state": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "State"
-          },
-          "tenant_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Tenant Id"
-          },
-          "org_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Org Id"
-          }
-        },
-        "required": [
-          "code"
-        ],
-        "title": "sso_loginArguments",
         "type": "object"
       }
     },

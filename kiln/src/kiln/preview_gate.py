@@ -1,8 +1,8 @@
 """Preview confirmation gate.
 
-Jony Ive / Steve Jobs tier safety: ``start_print`` refuses to execute
-unless the calling agent has demonstrated — via a fresh confirmation
-token — that a preview was rendered and the user approved it.
+Product safety gate: ``start_print`` refuses to execute unless the
+calling agent has demonstrated -- via a fresh confirmation token --
+that a preview was rendered and the user approved it.
 
 Without this gate the Kiln A1 crashed on 2026-04-15 (incident #0):
 the agent sliced, wrapped, uploaded, and started a print without
