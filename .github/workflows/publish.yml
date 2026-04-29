@@ -147,7 +147,7 @@ jobs:
 
       - name: Attest CycloneDX SBOM
         # actions/attest-sbom v1.4.3
-        uses: actions/attest-sbom@115c3be05ff3974bcbd596578934b3f9ce39bf68
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e
         with:
           subject-path: 'dist/*'
           sbom-path: sbom.cdx.json
