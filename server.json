@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.codeofaxel/kiln",
   "title": "Kiln",
-  "description": "Turn text descriptions into physical objects — 763 MCP capabilities for design intelligence, model generation, printability analysis, slicing, printing, monitoring, and failure recovery across OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, and Elegoo printers",
+  "description": "Kiln MCP server for agents: design, slice, print, monitor, and recover physical objects safely.",
   "version": "1.0.0",
   "repository": {
     "url": "https://github.com/codeofaxel/Kiln",
