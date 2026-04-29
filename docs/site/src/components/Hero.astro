@@ -130,6 +130,8 @@
   }
   .compat-strip-inline {
     text-align: center;
+    width: 100%;
+    min-width: 0;
     padding: 24px 32px;
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -155,6 +157,7 @@
   }
   .compat-list-inline {
     display: flex;
+    min-width: 0;
     align-items: center;
     justify-content: center;
     flex-wrap: wrap;
@@ -162,6 +165,7 @@
   }
   .compat-pill {
     display: inline-block;
+    max-width: 100%;
     padding: 7px 16px;
     font-size: 14px;
     font-weight: 500;
@@ -216,6 +220,8 @@
   @media (max-width: 640px) {
     .hero { padding: 60px 0 50px; }
     .tagline { margin-bottom: 20px; }
+    .tagline-line,
+    .tagline-emphasis { white-space: normal; }
     .compat-strip-inline { padding: 22px 18px; }
     .compat-heading { margin: 20px auto 18px; }
     .hero-cta { margin-top: 28px; padding: 12px 26px; }
