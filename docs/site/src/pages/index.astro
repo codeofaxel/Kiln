@@ -23,15 +23,6 @@ import CTA from '../components/CTA.astro';
 >
   <Hero />
 
-  <section class="bordered learning-curve">
-    <div class="container">
-      <h2 class="lc-heading">The 3D printing learning curve is over. Kiln ended it.</h2>
-      <p class="lc-lead">
-        Start with a sentence, an STL, a Blender scene, or a Fusion model. Kiln turns the idea into a finished physical object: checked, prepared, sliced, and sent to your printer.
-      </p>
-    </div>
-  </section>
-
   <!--
     Receipts — promoted to the second screen on 2026-04-25.  The
     two existing object photos already carry the page's two
@@ -204,14 +195,7 @@ import CTA from '../components/CTA.astro';
     border-top: 1px solid var(--border);
   }
 
-  /* Learning-curve kill — the second-beat angle, sized to read as
-     a hero echo, not a body section.  Pairs typographically with
-     Hero.astro's .tagline (weight 800, tight tracking) so the two
-     most important sentences on the page visibly rhyme. */
-  .learning-curve {
-    text-align: center;
-    padding: 112px 0 96px;
-  }
+  /* Shared centered section heading used by the product proof blocks. */
   .lc-heading {
     font-size: clamp(30px, 4.8vw, 54px);
     font-weight: 800;
@@ -230,15 +214,9 @@ import CTA from '../components/CTA.astro';
     margin: 0 auto;
     text-wrap: pretty;
   }
-  @media (max-width: 640px) {
-    .learning-curve { padding: 72px 0 60px; }
-  }
 
-  /* Kit-promise — sister section to .learning-curve, sells the
-     "from object to product" escalation after the receipts grid.
-     Reuses .lc-heading + .lc-lead typography so both second-screen
-     statements rhyme visually; layout duplicated here so the section
-     is self-contained and removable. */
+  /* Kit-promise — sells the "from object to product" escalation
+     after the receipts grid. */
   .kit-promise {
     text-align: center;
     padding: 112px 0 96px;
@@ -358,8 +336,7 @@ import CTA from '../components/CTA.astro';
      grid, no "Read the full story" link punt.  Two hero prints
      captioned with the sentence that produced them, sitting above
      the unedited 1:18 agent-run video.  Typography matches the
-     learning-curve + Git-for-3D sections above so the page reads
-     as one unified system. */
+     surrounding proof sections so the page reads as one system. */
   .receipts {
     padding: 120px 0;
     text-align: center;
