@@ -46,7 +46,7 @@ An agent can prototype on your desk printer, send the production version to Craf
 
 **Beyond printing:**
 
-- **Multi-part assembly.** Split large designs into printable sections with clearance validation, joint detection, tolerance stacking analysis, and split planning (10 parts free). With Kiln Pro (https://kiln3d.com/pricing), tolerance stacking gains engineering-grade chain analysis (worst-case + RSS + Bender + Monte Carlo with FDM-aware bias modeling), per-printer calibrated tolerances auto-imported from the user's slicer profile, and printable PDF assembly manuals with a bill of materials, step renders, verification gates, and optional 3MF embedding.
+- **Multi-part assembly.** Split large designs into printable sections with clearance validation, joint detection, tolerance stacking analysis, and split planning (10 parts free). With kiln-pro, multi-part prints can also generate printable PDF assembly manuals with a bill of materials, step renders, verification gates, and optional 3MF embedding.
 
 - **Cost estimation.** Material cost, electricity, and time estimates with smart recommendations -- before you commit to a print.
 
