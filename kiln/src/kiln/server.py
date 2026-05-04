@@ -2000,6 +2000,23 @@ def _get_fulfillment_monitor() -> Any | None:
     return _fulfillment_monitor
 
 
+def _validate_quote_for_order(
+    quote_id: str,
+    *,
+    provider_name: str | None = None,
+) -> Any:
+    """Validate a cached fulfillment quote before order placement."""
+    try:
+        from kiln.fulfillment.intelligence import validate_quote_for_order
+    except ImportError:
+        from kiln_pro.fulfillment.intelligence import validate_quote_for_order
+
+    return validate_quote_for_order(
+        quote_id,
+        provider_name=provider_name,
+    )
+
+
 _threedos_client: ThreeDOSClient | None = None
 
 
@@ -5932,7 +5949,7 @@ def issue_preview_token(
     Call this AFTER rendering a preview (``visualize_model`` /
     ``preview_generated_model``) and showing it to the user.  The user
     approves → you call this tool → you pass the returned token as
-    ``preview_token`` to ``start_print``.
+    ``preview_token`` to ``start_print`` or ``fulfillment_order``.
 
     Without a valid token, ``start_print`` refuses to execute (unless
     ``KILN_SKIP_PREVIEW_GATE=1``).  This is the deepest safety gate
@@ -5971,7 +5988,7 @@ def issue_preview_token(
             "expires_at": t.issued_at + t.ttl_seconds,
             "ttl_seconds": ttl_seconds,
             "usage_hint": (
-                "Pass this token as preview_token=<token> to start_print. "
+                "Pass this token as preview_token=<token> to start_print or fulfillment_order. "
                 "Single-use, expires in ~10 minutes."
             ),
         }
@@ -8191,7 +8208,7 @@ def compare_print_options(
             )
             fulfillment_quote_data = quote.to_dict()
             fulfillment_quote_data["kiln_fee"] = fee_calc.to_dict()
-            fulfillment_quote_data["total_with_fee"] = fee_calc.total_cost
+            fulfillment_quote_data["total_with_fee"] = float(fee_calc.total_cost)
         except (FulfillmentError, RuntimeError) as exc:
             fulfillment_error = str(exc)
         except Exception as exc:
@@ -10202,11 +10219,26 @@ def multi_copy_print(
             # Fallback: STL mesh duplication
             from kiln.auto_orient import duplicate_stl_on_plate
 
+            # Get bed dimensions from safety profiles if printer_id available
+            bed_w = 256.0
+            bed_d = 256.0
+            if printer_id:
+                try:
+                    from kiln.safety_profiles import get_profile
+
+                    profile = get_profile(printer_id)
+                    if profile and profile.build_volume:
+                        bed_w = float(profile.build_volume[0])
+                        bed_d = float(profile.build_volume[1])
+                except Exception:
+                    pass
+
             merged_path = duplicate_stl_on_plate(
                 model_path,
                 copies,
                 spacing_mm=spacing_mm,
-                printer_id=printer_id or None,
+                bed_width_mm=bed_w,
+                bed_depth_mm=bed_d,
             )
             result = _pipeline_reslice_and_print(
                 model_path=merged_path,
@@ -10339,48 +10371,28 @@ class _DedupingToolRegistrationProxy:
         return decorator
 
 
-_HOSTED_KILN_API_URL = "https://api.kiln3d.com"
-
-
-def _auth_tokens_path() -> Path:
-    auth_home = os.environ.get("KILN_AUTH_HOME") or str(Path.home())
-    return Path(auth_home) / ".kiln" / "auth_tokens.json"
-
-
-def _paired_access_token() -> str:
-    try:
-        import json
-
-        data = json.loads(_auth_tokens_path().read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            return str(data.get("access_token") or "").strip()
-    except Exception:
-        pass
-    return ""
-
-
 def _pro_api_call(tool_name: str, **kwargs) -> dict:
-    """Call a hosted kiln-pro tool through the public REST API."""
-    api_url = (os.environ.get("KILN_API_URL") or "").strip() or _HOSTED_KILN_API_URL
-    bearer = os.environ.get("KILN_LICENSE_KEY", "").strip() or _paired_access_token()
-    if not bearer:
+    """Call a pro tool via the Kiln REST API server."""
+    api_url = os.environ.get("KILN_API_URL", "").strip()
+    if not api_url:
         return {
             "status": "error",
             "error": (
-                f"'{tool_name}' needs a paired Kiln account. "
-                "Run `python3 -m kiln signin`, or generate a code at "
-                "https://app.kiln3d.com/connect and run `python3 -m kiln pair <code>`."
+                f"'{tool_name}' requires a Kiln server. "
+                "Set KILN_API_URL to your server address (e.g. http://localhost:8742) "
+                "or sign up at https://kiln3d.com to use the hosted API."
             ),
-            "code": "KILN_ACCOUNT_NOT_PAIRED",
+            "code": "PRO_TOOL_REQUIRES_SERVER",
             "tool": tool_name,
-            "setup_hint": "python3 -m kiln signin",
+            "setup_hint": "export KILN_API_URL=http://localhost:8742",
         }
     import json
-    import urllib.error
     import urllib.request
     try:
+        license_key = os.environ.get("KILN_LICENSE_KEY", "").strip()
         headers = {"Content-Type": "application/json"}
-        headers["Authorization"] = f"Bearer {bearer}"
+        if license_key:
+            headers["Authorization"] = f"Bearer {license_key}"
         req = urllib.request.Request(
             f"{api_url.rstrip('/')}/api/tools/{tool_name}",
             data=json.dumps(kwargs).encode() if kwargs else None,
@@ -10389,19 +10401,6 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
         )
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read())
-    except urllib.error.HTTPError as exc:
-        try:
-            body = json.loads(exc.read().decode("utf-8"))
-            if isinstance(body, dict):
-                return body
-        except Exception:
-            pass
-        return {
-            "status": "error",
-            "error": f"Kiln API rejected '{tool_name}' (HTTP {exc.code}).",
-            "code": "KILN_API_HTTP_ERROR",
-            "tool": tool_name,
-        }
     except Exception as exc:
         return {
             "status": "error",
@@ -10419,10 +10418,9 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
     intelligence, cloud sync, decoration, etc. — even when kiln-pro isn't
     installed.
 
-    Each stub proxies to the hosted API by default, or to ``KILN_API_URL``
-    when set for local development. The Authorization header comes from
-    ``KILN_LICENSE_KEY`` when present, otherwise from the OAuth token written
-    by ``kiln signin`` / ``kiln pair``.
+    Each stub either:
+    - Proxies to the REST API server (if ``KILN_API_URL`` is set)
+    - Returns a helpful setup message explaining how to access the feature
 
     Adding a new pro tool to kiln-pro's manifest automatically makes it
     discoverable here with zero additional code.
@@ -11016,12 +11014,52 @@ def find_material_substitute(
                 )
 
         subs = find_substitutes(material, "fdm", reason=reason_enum, min_score=min_score)
-        return {
+        sub_dicts = [s.to_dict() for s in subs]
+        # Food-safety preservation (kiln-pro feature; free-tier silently
+        # skips): if the source material is food_safe=yes, mark any
+        # substitute that ISN'T food_safe=yes as a safety regression so
+        # callers don't silently swap a pet bowl's PETG for ABS.
+        try:
+            from kiln_pro.material_safety import assess_food_safety  # noqa: WPS433
+        except ImportError:
+            assess_food_safety = None  # type: ignore[assignment]
+        food_safety_check: dict | None = None
+        if assess_food_safety is not None:
+            source_verdict = assess_food_safety(material)
+            if source_verdict["food_safe"] == "yes":
+                regressions: list[str] = []
+                for d in sub_dicts:
+                    sub_name = (
+                        d.get("substitute_material")
+                        or d.get("substitute")
+                        or d.get("material")
+                        or d.get("name")
+                    )
+                    if not sub_name:
+                        continue
+                    sub_verdict = assess_food_safety(str(sub_name))
+                    sub_food_safe = sub_verdict["food_safe"]
+                    d["food_safe"] = sub_food_safe
+                    if sub_food_safe != "yes":
+                        regressions.append(str(sub_name))
+                food_safety_check = {
+                    "source_food_safe": "yes",
+                    "regressions": regressions,
+                    "warning": (
+                        "Source material is food_safe=yes but some substitutes are "
+                        f"NOT: {regressions}. Do not silently swap for food-contact "
+                        "products (pet bowls, kitchen items). Filter or disclose."
+                    ) if regressions else None,
+                }
+        result = {
             "success": True,
             "material": material,
-            "substitutes": [s.to_dict() for s in subs],
-            "count": len(subs),
+            "substitutes": sub_dicts,
+            "count": len(sub_dicts),
         }
+        if food_safety_check is not None:
+            result["food_safety"] = food_safety_check
+        return result
     except Exception as exc:
         logger.exception("Error in find_material_substitute")
         return _error_dict(f"Failed to find material substitutes: {exc}", code="SUBSTITUTION_ERROR")

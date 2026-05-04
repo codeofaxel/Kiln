@@ -89,49 +89,6 @@
     },
     "scad_template": "// Parametric Wall Hook\nhook_radius = ${hook_radius};\nthickness = ${thickness};\nwidth = ${width};\nplate_height = ${plate_height};\nscrew_hole_dia = ${screw_hole_dia};\n\nmodule wall_hook() {\n    difference() {\n        union() {\n            // Mounting plate\n            cube([width, thickness, plate_height]);\n            // Hook arm\n            translate([0, 0, 0])\n                cube([width, hook_radius + thickness * 2, thickness]);\n            // Hook curve\n            translate([0, hook_radius + thickness, thickness])\n                rotate([0, 90, 0])\n                    difference() {\n                        cylinder(h=width, r=hook_radius + thickness, $fn=60);\n                        cylinder(h=width, r=hook_radius, $fn=60);\n                        translate([-hook_radius * 2, 0, 0])\n                            cube([hook_radius * 4, hook_radius * 2, width]);\n                    }\n        }\n        // Screw hole\n        translate([width/2, -1, plate_height * 0.7])\n            rotate([-90, 0, 0])\n                cylinder(h=thickness+2, d=screw_hole_dia, $fn=30);\n    }\n}\n\nwall_hook();"
   },
-  "box_with_lid": {
-    "display_name": "Box with Snap Lid",
-    "description": "Rectangular box with snap-fit lid. Two-piece print, no supports needed.",
-    "category": "containers",
-    "parameters": {
-      "inner_width": {
-        "default": 60,
-        "min": 20,
-        "max": 200,
-        "unit": "mm",
-        "description": "Inner width"
-      },
-      "inner_depth": {
-        "default": 40,
-        "min": 20,
-        "max": 200,
-        "unit": "mm",
-        "description": "Inner depth"
-      },
-      "inner_height": {
-        "default": 30,
-        "min": 10,
-        "max": 100,
-        "unit": "mm",
-        "description": "Inner height"
-      },
-      "wall": {
-        "default": 2.4,
-        "min": 1.6,
-        "max": 5,
-        "unit": "mm",
-        "description": "Wall thickness"
-      },
-      "corner_radius": {
-        "default": 3,
-        "min": 0,
-        "max": 10,
-        "unit": "mm",
-        "description": "Corner rounding radius"
-      }
-    },
-    "scad_template": "// Parametric Box with Snap Lid\niw = ${inner_width};\nid = ${inner_depth};\nih = ${inner_height};\nwall = ${wall};\ncr = ${corner_radius};\n\nmodule rounded_box(w, d, h, r) {\n    if (r > 0) {\n        hull() {\n            for (x = [r, w-r]) for (y = [r, d-r])\n                translate([x, y, 0]) cylinder(h=h, r=r, $fn=30);\n        }\n    } else {\n        cube([w, d, h]);\n    }\n}\n\nmodule box() {\n    ow = iw + wall*2;\n    od = id + wall*2;\n    oh = ih + wall;\n    difference() {\n        rounded_box(ow, od, oh, cr);\n        translate([wall, wall, wall])\n            rounded_box(iw, id, ih+1, max(0, cr-wall));\n    }\n    // Lip for lid\n    translate([wall-0.4, wall-0.4, oh])\n        difference() {\n            rounded_box(iw+0.8, id+0.8, 2, max(0, cr-wall));\n            translate([1, 1, -0.1])\n                rounded_box(iw-1.2, id-1.2, 2.2, max(0, cr-wall-1));\n        }\n}\n\nmodule lid() {\n    ow = iw + wall*2;\n    od = id + wall*2;\n    translate([ow + 10, 0, 0]) {\n        rounded_box(ow, od, wall, cr);\n        translate([wall+0.2, wall+0.2, wall])\n            difference() {\n                rounded_box(iw-0.4, id-0.4, 2.5, max(0, cr-wall));\n                translate([1.2, 1.2, -0.1])\n                    rounded_box(iw-2.8, id-2.8, 2.7, max(0, cr-wall-1));\n            }\n    }\n}\n\nbox();\nlid();"
-  },
   "cable_clip": {
     "display_name": "Cable Management Clip",
     "description": "Adhesive-back cable clip for desk cable management. Prints flat.",
@@ -203,126 +160,6 @@
       }
     },
     "scad_template": "// Parametric Shelf Bracket\narm = ${arm_length};\nwall_arm = ${wall_length};\nw = ${width};\nt = ${thickness};\nhole_d = ${hole_dia};\n\nmodule bracket() {\n    difference() {\n        union() {\n            // Wall plate\n            cube([w, t, wall_arm]);\n            // Shelf arm\n            cube([w, arm, t]);\n            // Gusset (triangle)\n            translate([0, 0, 0])\n                linear_extrude(height=w)\n                    polygon([[0,t],[0,wall_arm],[t,t]]);\n            // Mirrored gusset for width\n        }\n        // Mounting holes\n        for (z = [wall_arm*0.25, wall_arm*0.75]) {\n            translate([w/2, -1, z])\n                rotate([-90, 0, 0])\n                    cylinder(h=t+2, d=hole_d, $fn=30);\n        }\n    }\n}\n\nbracket();"
-  },
-  "nameplate": {
-    "display_name": "Desk Nameplate",
-    "description": "Raised text nameplate with angled face. Prints flat, no supports.",
-    "category": "desk_accessories",
-    "parameters": {
-      "text_string": {
-        "default": "KILN",
-        "type": "string",
-        "description": "Text to display"
-      },
-      "font_size": {
-        "default": 14,
-        "min": 8,
-        "max": 30,
-        "unit": "mm",
-        "description": "Font size"
-      },
-      "plate_width": {
-        "default": 120,
-        "min": 60,
-        "max": 200,
-        "unit": "mm",
-        "description": "Plate width"
-      },
-      "plate_height": {
-        "default": 35,
-        "min": 20,
-        "max": 60,
-        "unit": "mm",
-        "description": "Plate height"
-      },
-      "base_depth": {
-        "default": 30,
-        "min": 20,
-        "max": 50,
-        "unit": "mm",
-        "description": "Base depth"
-      }
-    },
-    "scad_template": "// Parametric Nameplate\ntxt = \"${text_string}\";\nfs = ${font_size};\npw = ${plate_width};\nph = ${plate_height};\nbd = ${base_depth};\nt = 3;\n\nmodule nameplate() {\n    // Base wedge\n    hull() {\n        cube([pw, bd, t]);\n        translate([0, 0, ph])\n            cube([pw, t, t]);\n    }\n    // Raised text\n    translate([pw/2, bd*0.3, ph*0.4])\n        rotate([atan2(ph, bd-t), 0, 0])\n            linear_extrude(height=1.2)\n                text(txt, size=fs, halign=\"center\", valign=\"center\", font=\"Liberation Sans:style=Bold\");\n}\n\nnameplate();"
-  },
-  "pencil_holder": {
-    "display_name": "Pencil/Pen Holder",
-    "description": "Cylindrical pen holder with honeycomb pattern cutouts. Prints without supports.",
-    "category": "desk_accessories",
-    "parameters": {
-      "diameter": {
-        "default": 70,
-        "min": 40,
-        "max": 120,
-        "unit": "mm",
-        "description": "Outer diameter"
-      },
-      "height": {
-        "default": 100,
-        "min": 60,
-        "max": 150,
-        "unit": "mm",
-        "description": "Height"
-      },
-      "wall": {
-        "default": 2.4,
-        "min": 1.6,
-        "max": 5,
-        "unit": "mm",
-        "description": "Wall thickness"
-      },
-      "hex_size": {
-        "default": 8,
-        "min": 4,
-        "max": 15,
-        "unit": "mm",
-        "description": "Honeycomb cell size"
-      }
-    },
-    "scad_template": "// Parametric Pencil Holder\nd = ${diameter};\nh = ${height};\nwall = ${wall};\nhex = ${hex_size};\n\nmodule pencil_holder() {\n    difference() {\n        cylinder(h=h, d=d, $fn=80);\n        translate([0, 0, 3])\n            cylinder(h=h, d=d - wall*2, $fn=80);\n        // Honeycomb cutouts\n        for (a = [0:30:359]) {\n            for (z = [15:hex*2.2:h-15]) {\n                rotate([0, 0, a])\n                    translate([d/2 - wall/2, 0, z])\n                        rotate([0, 90, 0])\n                            cylinder(h=wall+2, d=hex, $fn=6, center=true);\n            }\n        }\n    }\n}\n\npencil_holder();"
-  },
-  "headphone_stand": {
-    "display_name": "Headphone Stand",
-    "description": "Desktop headphone hanger with curved top rest. Prints in one piece.",
-    "category": "desk_accessories",
-    "parameters": {
-      "height": {
-        "default": 220,
-        "min": 150,
-        "max": 300,
-        "unit": "mm",
-        "description": "Total height"
-      },
-      "base_width": {
-        "default": 100,
-        "min": 70,
-        "max": 150,
-        "unit": "mm",
-        "description": "Base width"
-      },
-      "arm_width": {
-        "default": 30,
-        "min": 20,
-        "max": 50,
-        "unit": "mm",
-        "description": "Support arm width"
-      },
-      "thickness": {
-        "default": 5,
-        "min": 3,
-        "max": 10,
-        "unit": "mm",
-        "description": "Material thickness"
-      },
-      "hook_depth": {
-        "default": 60,
-        "min": 40,
-        "max": 100,
-        "unit": "mm",
-        "description": "Hook extension depth"
-      }
-    },
-    "scad_template": "// Parametric Headphone Stand\nh = ${height};\nbw = ${base_width};\naw = ${arm_width};\nt = ${thickness};\nhd = ${hook_depth};\n\nmodule stand() {\n    // Base plate\n    hull() {\n        cylinder(h=t, d=bw, $fn=60);\n    }\n    // Upright\n    translate([-aw/2, -t/2, 0])\n        cube([aw, t, h - hd/2]);\n    // Top hook\n    translate([0, 0, h - hd/2])\n        rotate([0, 0, 0]) {\n            // Curved top rest\n            translate([-aw/2, -t/2, 0])\n                cube([aw, t, hd/4]);\n            translate([0, hd/2, hd/4])\n                rotate([0, 90, 0])\n                    difference() {\n                        cylinder(h=aw, r=hd/2, $fn=60, center=true);\n                        cylinder(h=aw+2, r=hd/2-t, $fn=60, center=true);\n                        translate([0, -hd, 0])\n                            cube([hd*2, hd*2, aw+4], center=true);\n                    }\n        }\n}\n\nstand();"
   },
   "drawer_organizer": {
     "display_name": "Drawer Organizer Tray",
@@ -402,49 +239,6 @@
       }
     },
     "scad_template": "// Parametric SD Card Holder\nsd_n = ${sd_slots};\nmicro_n = ${micro_slots};\nwall = ${wall};\n\nsd_w = 24.5; sd_h = 32.5; sd_t = 2.5;\nmicro_w = 11.5; micro_h = 15.5; micro_t = 1.5;\nslot_gap = 1;\n\ntotal_w = max(sd_n * (sd_t + slot_gap + wall), micro_n * (micro_t + slot_gap + wall)) + wall;\ntotal_d = max(sd_w, micro_w) + wall * 2;\ntotal_h = sd_h + micro_h + wall * 3;\n\nmodule holder() {\n    difference() {\n        cube([total_w, total_d, total_h]);\n        // SD slots\n        for (i = [0:sd_n-1]) {\n            translate([wall + i * (sd_t + slot_gap + wall), wall, wall])\n                cube([sd_t + slot_gap, sd_w + 1, sd_h]);\n        }\n        // MicroSD slots\n        for (i = [0:micro_n-1]) {\n            translate([wall + i * (micro_t + slot_gap + wall), wall, sd_h + wall * 2])\n                cube([micro_t + slot_gap, micro_w + 1, micro_h]);\n        }\n    }\n}\n\nholder();"
-  },
-  "laptop_stand_riser": {
-    "display_name": "Laptop Stand Riser",
-    "description": "Angled laptop riser for ergonomic typing. Two identical halves, prints flat.",
-    "category": "desk_accessories",
-    "parameters": {
-      "width": {
-        "default": 60,
-        "min": 30,
-        "max": 100,
-        "unit": "mm",
-        "description": "Riser width"
-      },
-      "depth": {
-        "default": 80,
-        "min": 50,
-        "max": 120,
-        "unit": "mm",
-        "description": "Riser depth"
-      },
-      "front_height": {
-        "default": 10,
-        "min": 5,
-        "max": 20,
-        "unit": "mm",
-        "description": "Front edge height"
-      },
-      "back_height": {
-        "default": 40,
-        "min": 20,
-        "max": 80,
-        "unit": "mm",
-        "description": "Back edge height"
-      },
-      "thickness": {
-        "default": 4,
-        "min": 3,
-        "max": 8,
-        "unit": "mm",
-        "description": "Wall thickness"
-      }
-    },
-    "scad_template": "// Parametric Laptop Stand Riser\nw = ${width};\nd = ${depth};\nfh = ${front_height};\nbh = ${back_height};\nt = ${thickness};\n\nmodule riser() {\n    // Side profile (wedge shape)\n    linear_extrude(height=w)\n        polygon([[0,0], [d,0], [d,bh], [d-t,bh], [d-t,t], [t,t], [t,fh], [0,fh]]);\n    // Anti-slip ridges on top\n    for (y = [t*2:10:d-t*2]) {\n        translate([y, fh + (bh-fh)*(y/d) - 1, 0])\n            cube([2, 1, w]);\n    }\n}\n\nriser();"
   },
   "coat_hook_multi": {
     "display_name": "Multi-Peg Coat Hook",
@@ -647,7 +441,7 @@
   },
   "soap_dish": {
     "display_name": "Soap Dish",
-    "description": "Draining soap dish with raised ridges and drain holes.",
+    "description": "Draining soap dish with raised ridges in the basin and a protruding front-center drain spout that channels water off the front edge.",
     "category": "kitchen",
     "parameters": {
       "width": {
@@ -662,7 +456,7 @@
         "min": 40,
         "max": 100,
         "unit": "mm",
-        "description": "Dish depth"
+        "description": "Dish depth (front-to-back)"
       },
       "height": {
         "default": 15,
@@ -676,17 +470,31 @@
         "min": 3,
         "max": 10,
         "unit": "count",
-        "description": "Number of drain ridges"
+        "description": "Number of raised drain ridges in basin"
       },
       "corner_radius": {
         "default": 10,
         "min": 5,
         "max": 20,
         "unit": "mm",
-        "description": "Corner radius"
+        "description": "Outer corner radius"
+      },
+      "spout_width": {
+        "default": 25,
+        "min": 12,
+        "max": 40,
+        "unit": "mm",
+        "description": "Width of the protruding drain spout"
+      },
+      "spout_length": {
+        "default": 18,
+        "min": 0,
+        "max": 35,
+        "unit": "mm",
+        "description": "How far the drain spout extends beyond the front edge (set to 0 for no spout — closed basin)"
       }
     },
-    "scad_template": "// Parametric Soap Dish\nw = ${width};\nd = ${depth};\nh = ${height};\nridges = ${ridge_count};\ncr = ${corner_radius};\nwall = 3;\n\nmodule rounded_box(w, d, h, r) {\n    hull() {\n        for (x = [r, w-r]) for (y = [r, d-r])\n            translate([x, y, 0]) cylinder(h=h, r=r, $fn=20);\n    }\n}\n\nmodule dish() {\n    difference() {\n        rounded_box(w, d, h, cr);\n        translate([wall, wall, wall])\n            rounded_box(w-wall*2, d-wall*2, h, max(1, cr-wall));\n    }\n    // Drain ridges\n    ridge_sp = (w - wall*2 - 4) / (ridges - 1);\n    for (i = [0:ridges-1]) {\n        translate([wall + 2 + i * ridge_sp, wall + 2, wall])\n            cube([2, d - wall*2 - 4, 3]);\n    }\n    // Drain holes in base\n    // (slope the base slightly for drainage)\n}\n\ndish();"
+    "scad_template": "// Parametric Soap Dish — clean dish + separate tapered drain spout\n$fn = 80;\n\nw = ${width};\nd = ${depth};\nh = ${height};\nridges = ${ridge_count};\ncr = ${corner_radius};\nspout_w = ${spout_width};\nspout_l = ${spout_length};\nwall = 3;\nfloor = 3;\n\n// Spout taper: tip is 65% of base width, gives a clear teardrop tongue\ntip_w = spout_w * 0.65;\n\n// Hull-corner radii for the spout (smaller than dish corners — reads\n// as a refined tongue rather than a chunky box)\nspout_base_r = min(cr * 0.7, spout_w * 0.30);\nspout_tip_r  = min(cr * 0.5, tip_w * 0.45);\n\n// ---- Outer: dish (separate) + tapered tongue spout (separate) ----\nmodule dish_only() {\n    hull() {\n        for (x = [cr, w-cr]) for (y = [cr, d-cr])\n            translate([x, y, 0]) cylinder(h=h, r=cr);\n    }\n}\n\nmodule spout_only() {\n    if (spout_l > 0) {\n        hull() {\n            // Base cylinders — placed so they overlap into the dish\n            // front edge by ~spout_base_r (creates flared join, not a\n            // hard step, while the dish silhouette stays intact)\n            translate([w/2 - spout_w/2 + spout_base_r,\n                       spout_base_r, 0])\n                cylinder(h=h, r=spout_base_r);\n            translate([w/2 + spout_w/2 - spout_base_r,\n                       spout_base_r, 0])\n                cylinder(h=h, r=spout_base_r);\n            // Tip cylinders — forward of dish, narrower\n            translate([w/2 - tip_w/2 + spout_tip_r,\n                       -spout_l + spout_tip_r, 0])\n                cylinder(h=h, r=spout_tip_r);\n            translate([w/2 + tip_w/2 - spout_tip_r,\n                       -spout_l + spout_tip_r, 0])\n                cylinder(h=h, r=spout_tip_r);\n        }\n    }\n}\n\n// ---- Cavities: same construction, inset by `wall` ----\nmodule dish_cavity() {\n    cr_in = max(1, cr - wall);\n    hull() {\n        for (x = [cr, w-cr]) for (y = [cr, d-cr])\n            translate([x, y, floor]) cylinder(h=h+1, r=cr_in);\n    }\n}\n\nmodule spout_cavity() {\n    if (spout_l > 0) {\n        base_in_r = max(1, spout_base_r - wall);\n        tip_in_r  = max(1, spout_tip_r - wall);\n        hull() {\n            // Base — inset\n            translate([w/2 - spout_w/2 + wall + base_in_r,\n                       wall + base_in_r, floor])\n                cylinder(h=h+1, r=base_in_r);\n            translate([w/2 + spout_w/2 - wall - base_in_r,\n                       wall + base_in_r, floor])\n                cylinder(h=h+1, r=base_in_r);\n            // Tip — pushed PAST the outer's tip by 1mm so the front\n            // face of the spout is fully open (water exits)\n            translate([w/2 - tip_w/2 + wall + tip_in_r,\n                       -spout_l - 1, floor])\n                cylinder(h=h+1, r=tip_in_r);\n            translate([w/2 + tip_w/2 - wall - tip_in_r,\n                       -spout_l - 1, floor])\n                cylinder(h=h+1, r=tip_in_r);\n        }\n    }\n}\n\n// ---- Final dish ----\ndifference() {\n    union() {\n        dish_only();\n        spout_only();\n    }\n    union() {\n        dish_cavity();\n        spout_cavity();\n    }\n}\n\n// ---- Drain ridges — rounded-top capsules ----\nridge_sp = (w - wall*2 - 8) / (ridges - 1);\nridge_r  = 1.6;\nridge_y0 = wall + 4;\nridge_y1 = d - wall - 4;\nfor (i = [0:ridges-1]) {\n    rx = wall + 4 + i * ridge_sp;\n    hull() {\n        translate([rx, ridge_y0, floor + 0.2])\n            sphere(r=ridge_r);\n        translate([rx, ridge_y1, floor + 0.2])\n            sphere(r=ridge_r);\n    }\n}\n"
   },
   "spool_holder": {
     "display_name": "Filament Spool Holder",
@@ -1067,49 +875,6 @@
       }
     },
     "scad_template": "// Parametric Servo Bracket\nsw = ${servo_width};\nsd = ${servo_depth};\nsh = ${servo_height};\ntw = ${tab_width};\nwall = ${wall};\n\nclear = 0.5;\n\nmodule bracket() {\n    difference() {\n        union() {\n            // U-channel for servo\n            cube([sw + wall*2 + clear*2, sd + wall + clear, sh + wall]);\n            // Mounting base flange\n            translate([-(tw - sw - wall*2)/2, 0, 0])\n                cube([tw + clear*2, sd + wall + clear, wall]);\n        }\n        // Servo cavity\n        translate([wall, wall, wall])\n            cube([sw + clear*2, sd + clear + 1, sh + 1]);\n        // Mounting holes\n        for (x = [wall, tw + clear*2 - wall - (tw - sw - wall*2)/2 + (tw - sw - wall*2)/2]) {\n            translate([x, (sd + wall)/2, -0.1])\n                cylinder(h=wall+0.2, d=3, $fn=20);\n        }\n    }\n}\n\nbracket();"
-  },
-  "sliding_lid_box": {
-    "display_name": "Sliding Lid Box",
-    "description": "Box with dovetail-track sliding lid. Prints as two pieces.",
-    "category": "containers",
-    "parameters": {
-      "inner_width": {
-        "default": 60,
-        "min": 25,
-        "max": 150,
-        "unit": "mm",
-        "description": "Inner width"
-      },
-      "inner_depth": {
-        "default": 80,
-        "min": 30,
-        "max": 200,
-        "unit": "mm",
-        "description": "Inner depth"
-      },
-      "inner_height": {
-        "default": 25,
-        "min": 10,
-        "max": 80,
-        "unit": "mm",
-        "description": "Inner height"
-      },
-      "wall": {
-        "default": 2.4,
-        "min": 1.6,
-        "max": 5,
-        "unit": "mm",
-        "description": "Wall thickness"
-      },
-      "track_depth": {
-        "default": 1.5,
-        "min": 1,
-        "max": 3,
-        "unit": "mm",
-        "description": "Lid track groove depth"
-      }
-    },
-    "scad_template": "// Parametric Sliding Lid Box\niw = ${inner_width};\nid = ${inner_depth};\nih = ${inner_height};\nwall = ${wall};\ntd = ${track_depth};\n\now = iw + wall * 2;\nod = id + wall * 2;\ntw = 1.5;\n\nmodule box() {\n    difference() {\n        cube([ow, od, ih + wall]);\n        translate([wall, wall, wall])\n            cube([iw, id, ih + 1]);\n        // Lid tracks on inner sides\n        for (x = [wall - td, ow - wall]) {\n            translate([x, -0.1, ih + wall - tw - td])\n                cube([td, od + 0.2, tw]);\n        }\n        // Lid entry slot at front\n        translate([wall - td, -0.1, ih + wall - tw - td])\n            cube([iw + td * 2, wall + 0.2, tw + td + 1]);\n    }\n}\n\nmodule lid() {\n    translate([ow + 10, 0, 0]) {\n        cube([iw + td * 2 - 0.4, od + 5, tw - 0.3]);\n        // Pull tab\n        translate([(iw + td*2 - 0.4)/2 - 5, -8, 0])\n            cube([10, 8, tw + 2]);\n    }\n}\n\nbox();\nlid();"
   },
   "stackable_bin": {
     "display_name": "Stackable Storage Bin",
@@ -1928,7 +1693,7 @@
     "scad_template": "// Parametric Fuse Puller\nl = ${length};\nfw = ${fuse_width};\nt = ${thickness};\n\nhandle_w = 15;\ntip_gap = fw + 1;\n\nmodule puller() {\n    // Left arm\n    hull() {\n        cube([handle_w/2, t, l * 0.6]);\n        translate([-tip_gap/2 + handle_w/4, 0, l - 8])\n            cube([3, t, 8]);\n    }\n    // Right arm\n    hull() {\n        translate([handle_w/2, 0, 0])\n            cube([handle_w/2, t, l * 0.6]);\n        translate([tip_gap/2 + handle_w/4 - 3 + handle_w/2, 0, l - 8])\n            cube([3, t, 8]);\n    }\n    // Bridge at base\n    cube([handle_w, t, 5]);\n    // Grip ridges\n    for (z = [10:8:l*0.5]) {\n        translate([0, t, z])\n            cube([handle_w, 1, 2]);\n    }\n}\n\npuller();"
   },
   "corner_clamp_jig": {
-    "display_name": "90\u00b0 Corner Clamp Jig",
+    "display_name": "90° Corner Clamp Jig",
     "description": "Alignment jig for holding pieces at exact 90 degrees during gluing or welding.",
     "category": "workshop",
     "parameters": {
@@ -2164,92 +1929,6 @@
     },
     "scad_template": "// Parametric Switch Panel\nn = ${switches};\nsd = ${switch_dia};\nph = ${panel_height};\nsp = ${spacing};\nt = ${thickness};\nmhd = ${mount_holes};\n\npw = (n - 1) * sp + sd + 20;\nmargin = 8;\n\nmodule panel() {\n    difference() {\n        cube([pw, ph, t]);\n        // Switch holes\n        for (i = [0:n-1]) {\n            translate([10 + sd/2 + i * sp, ph/2, -0.1])\n                cylinder(h=t+0.2, d=sd, $fn=30);\n        }\n        // Corner mounting holes\n        for (x = [margin, pw - margin])\n            for (y = [margin, ph - margin])\n                translate([x, y, -0.1])\n                    cylinder(h=t+0.2, d=mhd, $fn=20);\n    }\n}\n\npanel();"
   },
-  "license_plate_frame": {
-    "display_name": "License Plate Frame",
-    "description": "Custom license plate frame with adjustable border width and text area. Standard US/EU sizes.",
-    "category": "automotive",
-    "parameters": {
-      "width": {
-        "default": 310,
-        "min": 280,
-        "max": 340,
-        "unit": "mm",
-        "description": "Frame outer width"
-      },
-      "height": {
-        "default": 160,
-        "min": 140,
-        "max": 180,
-        "unit": "mm",
-        "description": "Frame outer height"
-      },
-      "border": {
-        "default": 8,
-        "min": 4,
-        "max": 15,
-        "unit": "mm",
-        "description": "Border width"
-      },
-      "thickness": {
-        "default": 3,
-        "min": 2,
-        "max": 5,
-        "unit": "mm",
-        "description": "Frame thickness"
-      },
-      "screw_dia": {
-        "default": 5,
-        "min": 4,
-        "max": 6,
-        "unit": "mm",
-        "description": "Mounting screw hole diameter"
-      }
-    },
-    "scad_template": "// License Plate Frame\nw = ${width};\nh = ${height};\nb = ${border};\nt = ${thickness};\nsd = ${screw_dia};\n\nmodule frame() {\n    difference() {\n        cube([w, h, t]);\n        // Plate window\n        translate([b, b, -0.1])\n            cube([w - 2*b, h - 2*b, t + 0.2]);\n        // Screw holes\n        for (x = [w*0.25, w*0.75])\n            translate([x, h - b/2, -0.1])\n                cylinder(h=t+0.2, d=sd, $fn=20);\n    }\n}\n\nframe();"
-  },
-  "cup_holder_insert": {
-    "display_name": "Cup Holder Insert",
-    "description": "Adapter insert for oversized cup holders \u2014 reduces diameter to fit smaller cups or bottles.",
-    "category": "automotive",
-    "parameters": {
-      "outer_dia": {
-        "default": 85,
-        "min": 60,
-        "max": 110,
-        "unit": "mm",
-        "description": "Outer diameter (existing holder)"
-      },
-      "inner_dia": {
-        "default": 65,
-        "min": 40,
-        "max": 90,
-        "unit": "mm",
-        "description": "Inner diameter (target cup size)"
-      },
-      "depth": {
-        "default": 50,
-        "min": 20,
-        "max": 80,
-        "unit": "mm",
-        "description": "Insert depth"
-      },
-      "wall": {
-        "default": 2,
-        "min": 1.5,
-        "max": 4,
-        "unit": "mm",
-        "description": "Wall thickness"
-      },
-      "drain_holes": {
-        "default": 4,
-        "min": 0,
-        "max": 8,
-        "unit": "count",
-        "description": "Number of drain holes"
-      }
-    },
-    "scad_template": "// Cup Holder Insert\nod = ${outer_dia};\nid = ${inner_dia};\ndp = ${depth};\nwall = ${wall};\nnh = ${drain_holes};\n\nmodule insert() {\n    difference() {\n        cylinder(h=dp, d=od, $fn=60);\n        translate([0, 0, wall])\n            cylinder(h=dp, d=id, $fn=60);\n        // Drain holes\n        if (nh > 0)\n            for (i = [0:nh-1])\n                rotate([0, 0, i * 360/nh])\n                    translate([id/4, 0, -0.1])\n                        cylinder(h=wall+0.2, d=5, $fn=15);\n    }\n    // Lip ring at top\n    difference() {\n        cylinder(h=3, d=od, $fn=60);\n        translate([0, 0, -0.1])\n            cylinder(h=3.2, d=od - wall*2, $fn=60);\n    }\n}\n\ninsert();"
-  },
   "p_trap_cover": {
     "display_name": "P-Trap Access Cover",
     "description": "Snap-fit cover plate for exposed P-trap pipes under sinks. Conceals plumbing cleanly.",
@@ -2410,7 +2089,7 @@
   },
   "clamp_pad": {
     "display_name": "Soft Jaw Clamp Pad",
-    "description": "Protective jaw pad for bench vises \u2014 prevents marring delicate workpieces.",
+    "description": "Protective jaw pad for bench vises — prevents marring delicate workpieces.",
     "category": "workshop",
     "parameters": {
       "jaw_width": {
@@ -2729,13 +2408,13 @@
         "description": "Shape: rectangle, square, circle, or oval"
       }
     },
-    "scad_template": "// Fridge Magnet \u2014 rectangle, square, circle, or oval\nw = ${width};\nh = ${height};\nt = ${thickness};\nmd = ${magnet_diameter};\nmz = ${magnet_depth};\nshape = \"${shape}\";\n\n$fn = 80;\n\nmodule magnet_body() {\n    if (shape == \"circle\")\n        cylinder(d=w, h=t);\n    else if (shape == \"oval\")\n        scale([1, h/w, 1]) cylinder(d=w, h=t);\n    else if (shape == \"square\") {\n        r = 3;\n        hull() {\n            translate([r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,w-r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([r,w-r,0]) cylinder(r=r, h=t, $fn=20);\n        }\n    } else {\n        // rectangle (default)\n        r = 3;\n        hull() {\n            translate([r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,h-r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([r,h-r,0]) cylinder(r=r, h=t, $fn=20);\n        }\n    }\n}\n\ndifference() {\n    magnet_body();\n    // Magnet recess on back \u2014 centered\n    cx = (shape == \"circle\" || shape == \"oval\") ? 0 : (shape == \"square\" ? w/2 : w/2);\n    cy = (shape == \"circle\" || shape == \"oval\") ? 0 : (shape == \"square\" ? w/2 : h/2);\n    translate([cx, cy, -0.1])\n        cylinder(d=md+0.3, h=mz+0.1, $fn=40);\n}",
+    "scad_template": "// Fridge Magnet — rectangle, square, circle, or oval\nw = ${width};\nh = ${height};\nt = ${thickness};\nmd = ${magnet_diameter};\nmz = ${magnet_depth};\nshape = \"${shape}\";\n\n$fn = 80;\n\nmodule magnet_body() {\n    if (shape == \"circle\")\n        cylinder(d=w, h=t);\n    else if (shape == \"oval\")\n        scale([1, h/w, 1]) cylinder(d=w, h=t);\n    else if (shape == \"square\") {\n        r = 3;\n        hull() {\n            translate([r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,w-r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([r,w-r,0]) cylinder(r=r, h=t, $fn=20);\n        }\n    } else {\n        // rectangle (default)\n        r = 3;\n        hull() {\n            translate([r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,h-r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([r,h-r,0]) cylinder(r=r, h=t, $fn=20);\n        }\n    }\n}\n\ndifference() {\n    magnet_body();\n    // Magnet recess on back — centered\n    cx = (shape == \"circle\" || shape == \"oval\") ? 0 : (shape == \"square\" ? w/2 : w/2);\n    cy = (shape == \"circle\" || shape == \"oval\") ? 0 : (shape == \"square\" ? w/2 : h/2);\n    translate([cx, cy, -0.1])\n        cylinder(d=md+0.3, h=mz+0.1, $fn=40);\n}",
     "preview_angles": [
       "top",
       "bottom",
       "isometric"
     ],
-    "preview_notes": "Flat object \u2014 front/back faces are top and bottom. Show top (decoration face) and bottom (magnet recess) at priority."
+    "preview_notes": "Flat object — front/back faces are top and bottom. Show top (decoration face) and bottom (magnet recess) at priority."
   },
   "bookmark": {
     "display_name": "Bookmark",
@@ -2777,56 +2456,7 @@
       "bottom",
       "isometric"
     ],
-    "preview_notes": "Flat object \u2014 both large faces are decoratable. Show top and bottom faces, not thin edges."
-  },
-  "toothbrush_holder": {
-    "display_name": "Toothbrush Holder",
-    "description": "Countertop toothbrush holder with 2x2 grid layout for stability. Wide base, drainage holes, decoration-ready front and side faces.",
-    "category": "bathroom",
-    "parameters": {
-      "slots": {
-        "default": 4,
-        "min": 2,
-        "max": 6,
-        "unit": "",
-        "description": "Number of toothbrush slots (arranged in grid)"
-      },
-      "slot_diameter": {
-        "default": 18,
-        "min": 14,
-        "max": 24,
-        "unit": "mm",
-        "description": "Slot diameter (18mm fits electric brush heads)"
-      },
-      "height": {
-        "default": 90,
-        "min": 70,
-        "max": 120,
-        "unit": "mm",
-        "description": "Total height including base"
-      },
-      "wall_thickness": {
-        "default": 3,
-        "min": 2,
-        "max": 5,
-        "unit": "mm",
-        "description": "Wall thickness"
-      },
-      "base_extra": {
-        "default": 10,
-        "min": 5,
-        "max": 20,
-        "unit": "mm",
-        "description": "Extra base overhang on each side for stability"
-      }
-    },
-    "scad_template": "// Toothbrush Holder \u2014 2xN grid layout for stability\nns = ${slots};\nsd = ${slot_diameter};\nh = ${height};\nwt = ${wall_thickness};\nbx = ${base_extra};\n\n$fn = 40;\n\n// Grid layout: 2 rows, ceil(ns/2) columns\ncols = ceil(ns / 2);\nrows = min(ns, 2);\n\nbody_w = cols * (sd + wt) + wt;\nbody_d = rows * (sd + wt) + wt;\nbase_h = 8;\nbase_w = body_w + 2*bx;\nbase_d = body_d + 2*bx;\n\nmodule base_plate() {\n    r = 4;\n    hull() {\n        translate([r,r,0]) cylinder(r=r, h=base_h);\n        translate([base_w-r,r,0]) cylinder(r=r, h=base_h);\n        translate([base_w-r,base_d-r,0]) cylinder(r=r, h=base_h);\n        translate([r,base_d-r,0]) cylinder(r=r, h=base_h);\n    }\n}\n\nmodule body() {\n    translate([bx, bx, base_h]) {\n        r = 3;\n        hull() {\n            translate([r,r,0]) cylinder(r=r, h=h-base_h);\n            translate([body_w-r,r,0]) cylinder(r=r, h=h-base_h);\n            translate([body_w-r,body_d-r,0]) cylinder(r=r, h=h-base_h);\n            translate([r,body_d-r,0]) cylinder(r=r, h=h-base_h);\n        }\n    }\n}\n\nmodule slots() {\n    for (i = [0:ns-1]) {\n        col = floor(i / 2);\n        row = i % 2;\n        cx = bx + wt + sd/2 + col*(sd+wt);\n        cy = bx + wt + sd/2 + row*(sd+wt);\n        translate([cx, cy, base_h + 5])\n            cylinder(d=sd, h=h);\n        translate([cx, cy, -0.1])\n            cylinder(d=5, h=base_h + 6);\n    }\n}\n\ndifference() {\n    union() {\n        base_plate();\n        body();\n    }\n    slots();\n}\n",
-    "preview_angles": [
-      "isometric",
-      "top",
-      "front"
-    ],
-    "preview_notes": "3D object \u2014 isometric for shape, top for holes, front for decoration wall."
+    "preview_notes": "Flat object — both large faces are decoratable. Show top and bottom faces, not thin edges."
   },
   "pen_cup": {
     "display_name": "Pen Cup",
@@ -2897,13 +2527,13 @@
         "description": "QR pocket recess depth (matches coaster recipe)"
       }
     },
-    "scad_template": "// Pen Cup \u2014 cylinder or rectangle with QR pocket on bottom\nshape = \"${shape}\";\nd = ${diameter};\ndp = ${depth};\nh = ${height};\nwt = ${wall_thickness};\nbt = ${bottom_thickness};\ncr = ${corner_radius};\nqr_size = ${qr_pocket_size};\nqr_depth = ${qr_pocket_depth};\n\n$fn = 80;\n\nmodule outer_shell() {\n    if (shape == \"rectangle\") {\n        hull() {\n            translate([cr,cr,0]) cylinder(r=cr, h=h);\n            translate([d-cr,cr,0]) cylinder(r=cr, h=h);\n            translate([d-cr,dp-cr,0]) cylinder(r=cr, h=h);\n            translate([cr,dp-cr,0]) cylinder(r=cr, h=h);\n        }\n    } else {\n        cylinder(d=d, h=h);\n    }\n}\n\nmodule inner_cavity() {\n    if (shape == \"rectangle\") {\n        translate([wt, wt, bt])\n            hull() {\n                r = max(1, cr - wt);\n                translate([r,r,0]) cylinder(r=r, h=h);\n                translate([d-2*wt-r,r,0]) cylinder(r=r, h=h);\n                translate([d-2*wt-r,dp-2*wt-r,0]) cylinder(r=r, h=h);\n                translate([r,dp-2*wt-r,0]) cylinder(r=r, h=h);\n            }\n    } else {\n        translate([0, 0, bt])\n            cylinder(d=d - 2*wt, h=h);\n    }\n}\n\nmodule qr_pocket() {\n    if (qr_size > 0) {\n        cx = (shape == \"rectangle\") ? d/2 : 0;\n        cy = (shape == \"rectangle\") ? dp/2 : 0;\n        translate([cx - qr_size/2, cy - qr_size/2, -0.01])\n            cube([qr_size, qr_size, qr_depth + 0.01]);\n    }\n}\n\ndifference() {\n    outer_shell();\n    inner_cavity();\n    qr_pocket();\n}",
+    "scad_template": "// Pen Cup — cylinder or rectangle with QR pocket on bottom\nshape = \"${shape}\";\nd = ${diameter};\ndp = ${depth};\nh = ${height};\nwt = ${wall_thickness};\nbt = ${bottom_thickness};\ncr = ${corner_radius};\nqr_size = ${qr_pocket_size};\nqr_depth = ${qr_pocket_depth};\n\n$fn = 180;\n\nmodule outer_shell() {\n    if (shape == \"rectangle\") {\n        hull() {\n            translate([cr,cr,0]) cylinder(r=cr, h=h);\n            translate([d-cr,cr,0]) cylinder(r=cr, h=h);\n            translate([d-cr,dp-cr,0]) cylinder(r=cr, h=h);\n            translate([cr,dp-cr,0]) cylinder(r=cr, h=h);\n        }\n    } else {\n        cylinder(d=d, h=h);\n    }\n}\n\nmodule inner_cavity() {\n    if (shape == \"rectangle\") {\n        translate([wt, wt, bt])\n            hull() {\n                r = max(1, cr - wt);\n                translate([r,r,0]) cylinder(r=r, h=h);\n                translate([d-2*wt-r,r,0]) cylinder(r=r, h=h);\n                translate([d-2*wt-r,dp-2*wt-r,0]) cylinder(r=r, h=h);\n                translate([r,dp-2*wt-r,0]) cylinder(r=r, h=h);\n            }\n    } else {\n        translate([0, 0, bt])\n            cylinder(d=d - 2*wt, h=h);\n    }\n}\n\nmodule qr_pocket() {\n    if (qr_size > 0) {\n        cx = (shape == \"rectangle\") ? d/2 : 0;\n        cy = (shape == \"rectangle\") ? dp/2 : 0;\n        translate([cx - qr_size/2, cy - qr_size/2, -0.01])\n            cube([qr_size, qr_size, qr_depth + 0.01]);\n    }\n}\n\ndifference() {\n    outer_shell();\n    inner_cavity();\n    qr_pocket();\n}",
     "preview_angles": [
       "isometric",
       "front",
       "bottom",
       "top"
     ],
-    "preview_notes": "3D object \u2014 isometric for shape, front for decoration wall, bottom for QR pocket, top for opening."
+    "preview_notes": "3D object — isometric for shape, front for decoration wall, bottom for QR pocket, top for opening."
   }
 }

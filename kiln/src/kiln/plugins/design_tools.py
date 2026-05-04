@@ -350,6 +350,75 @@ class _DesignToolsPlugin:
                 )
                 result = rec.to_dict()
                 result["success"] = True
+                # Food-safety overlay (kiln-pro feature; free-tier silently skips):
+                # when the requirements imply food / pet / mouth contact,
+                # warn or override if the top pick isn't food_safe and limit
+                # the alternatives list to food-safe options.
+                try:
+                    from kiln_pro.material_safety import (  # noqa: WPS433
+                        assess_food_safety,
+                        filter_materials_by_food_safety,
+                        use_case_implies_food_contact,
+                    )
+                except ImportError:
+                    use_case_implies_food_contact = None  # type: ignore[assignment]
+                if (
+                    use_case_implies_food_contact is not None
+                    and use_case_implies_food_contact(requirements)
+                ):
+                    result["food_contact_use_case_detected"] = True
+
+                    def _slug(obj):
+                        """Extract a material slug from the recommendation
+                        result's varied shapes (dict with material_id /
+                        material / name keys, or a bare string)."""
+                        if isinstance(obj, dict):
+                            return (
+                                obj.get("material_id")
+                                or obj.get("material")
+                                or obj.get("name")
+                                or obj.get("display_name")
+                            )
+                        if isinstance(obj, str):
+                            return obj
+                        return None
+
+                    primary_obj = (
+                        result.get("material") or result.get("recommended_material")
+                    )
+                    primary_slug = _slug(primary_obj)
+                    if primary_slug:
+                        verdict = assess_food_safety(primary_slug)
+                        result["food_safety"] = {
+                            "primary_material": primary_slug,
+                            "primary_material_verdict": verdict["verdict"],
+                            "primary_material_warning": verdict["user_warning"],
+                            "approved_alternatives": verdict["approved_alternatives"],
+                        }
+                        if verdict["verdict"] == "refuse":
+                            warnings_list = result.setdefault("warnings", [])
+                            warnings_list.insert(
+                                0,
+                                "FOOD-SAFETY OVERRIDE: " + verdict["user_warning"],
+                            )
+                            alts = verdict["approved_alternatives"]
+                            if alts:
+                                result["recommended_override"] = {
+                                    "original_recommendation": primary_slug,
+                                    "override_to": alts[0],
+                                    "reason": "food_contact_safety",
+                                }
+                    raw_alts = result.get("alternatives") or []
+                    if raw_alts and isinstance(raw_alts, list):
+                        slugs = [_slug(a) for a in raw_alts]
+                        safe_set = set(
+                            filter_materials_by_food_safety(
+                                [s for s in slugs if s], require="yes_or_conditional"
+                            )
+                        )
+                        result["alternatives_food_safe_only"] = [
+                            a for a, s in zip(raw_alts, slugs) if s and s in safe_set
+                        ]
                 return result
             except Exception as exc:
                 _logger.error("Material recommendation failed: %s", exc, exc_info=True)
