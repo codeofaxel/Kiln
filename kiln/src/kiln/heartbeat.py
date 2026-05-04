@@ -1,9 +1,11 @@
 """Anonymous daily usage heartbeat.
 
-Sends one row per install per day to Supabase: installation UUID, Kiln
-version, printer model, and daily event counts.  No PII, no file paths,
-no user identity.  Runs in a daemon thread on server startup — never
-blocks, never errors visibly, never delays anything.
+Sends one row per install per day to Supabase: installation UUID,
+device fingerprint (anonymous salted hash of the OS-level machine ID
+— see ``kiln/device.py``), Kiln version, printer model, and daily
+event counts.  No PII, no file paths, no user identity.  Runs in a
+daemon thread on server startup — never blocks, never errors
+visibly, never delays anything.
 
 Disable with ``KILN_TELEMETRY=false`` in environment.
 """
@@ -130,8 +132,14 @@ def _send_heartbeat() -> None:
         import urllib.request
 
         from kiln.installation import get_installation_id
+        from kiln.device import get_device_fingerprint
 
         installation_id = get_installation_id()
+        # Anonymous, one-way salted hash of the OS-level machine ID
+        # (or "" if we can't read it).  Lets the dashboard count
+        # unique DEVICES separately from unique installs — see
+        # PRIVACY.md §3.1 for the full data-flow disclosure.
+        device_fingerprint = get_device_fingerprint() or None
 
         kiln_version: str | None = None
         try:
@@ -160,6 +168,7 @@ def _send_heartbeat() -> None:
             "p_print_hours_today": stats.get("print_hours", 0.0),
             "p_pro_installed": _is_pro_installed(),
             "p_os_platform": platform.system().lower(),
+            "p_device_fingerprint": device_fingerprint,
             "p_details": json.dumps({
                 "texture_names": stats.get("texture_names", {}),
                 "decoration_types": stats.get("decoration_types", {}),
