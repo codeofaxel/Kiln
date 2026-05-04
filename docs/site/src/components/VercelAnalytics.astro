@@ -1,0 +1,52 @@
+---
+/**
+ * Vercel Web Analytics — anonymous page-view + visitor tracking for
+ * the marketing site (`kiln3d.com`).
+ *
+ * Why we use it:
+ *   * Answers "is the marketing site getting traffic, where do
+ *     visitors land, what's the bounce rate" — the shape of data
+ *     we need before turning on paid acquisition.
+ *   * First-party-feeling — Vercel is already our hosting subprocessor,
+ *     and Web Analytics is operated by the same vendor with the same
+ *     SCC posture (see PRIVACY.md §5).
+ *   * No cookies, no PII, no cross-site tracking.  IP address is
+ *     hashed with a daily-rotating salt before storage, then
+ *     discarded — visitor counts are de-duplicated within a UTC day
+ *     but not across days, by design.
+ *   * No GDPR consent banner required (because no cookies and no
+ *     persistent identifiers).
+ *
+ * Why we use it ONLY on the marketing site:
+ *   * The web workshop (`app.kiln3d.com`) already has every
+ *     authenticated event covered via Supabase auth + reflog —
+ *     adding Vercel Analytics there would be redundant data
+ *     surface for zero new signal.
+ *   * The marketing site is anonymous-by-design and the only place
+ *     we genuinely don't know what's happening today.
+ *
+ * Implementation:
+ *   * Static <script defer> include of Vercel's hosted script.
+ *     Vercel auto-injects the project context server-side at the
+ *     platform level, so no env var or project ID is required.
+ *   * On non-Vercel deployments (local dev preview at :4321,
+ *     custom hosts) the request to `/_vercel/insights/script.js`
+ *     404s harmlessly — the page still renders, just without
+ *     analytics.
+ *   * No <noscript> fallback — analytics that requires JavaScript
+ *     is fine for our purposes; no-JS visitors don't show up in
+ *     the dashboard, which we accept as a small undercount.
+ *
+ * Disclosure:
+ *   * Documented in PRIVACY.md §3.2 (analytics) and §5 (subprocessor
+ *     table — Vercel's scope expanded to include Web Analytics).
+ *
+ * Disable for development:
+ *   * The script does nothing on `localhost` because Vercel's
+ *     edge layer doesn't serve `_vercel/insights/script.js` from
+ *     local Astro dev.  No flag needed.
+ */
+---
+
+<!-- Vercel Web Analytics — see /src/components/VercelAnalytics.astro -->
+<script defer src="/_vercel/insights/script.js"></script>

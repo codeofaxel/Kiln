@@ -60,14 +60,18 @@ when you **use** Kiln, not when you merely read its code.
 ## 3. What we collect — at a glance
 
 **First and most important: free users never sign up for an
-account, and we never collect anything from them.** Kiln's free
-tier runs entirely on your machine as local software (CLI + MCP
-server). It talks to your printers directly over your local
-network, slices your models in-process, and never needs to reach
-our servers. If you stick with the free tier there is no account,
-no OAuth, no email on file, no usage tracking, no telemetry,
-no cookies — effectively the only line of this policy that
-applies to you is "we don't have any data about you."
+account.** Kiln's free tier runs entirely on your machine as local
+software (CLI + MCP server). It talks to your printers directly
+over your local network, slices your models in-process, and the
+only thing it sends to our servers is a single anonymous "usage
+heartbeat" once per UTC day (described in §3.1). The heartbeat is
+keyed by a random UUID stored at `~/.kiln/installation_id` plus a
+salted one-way hash of your OS-level machine ID — never your name,
+email, IP, or any user identifier. It is on by default and
+opt-out with `KILN_TELEMETRY=false`. Beyond the heartbeat, free
+users have no account, no OAuth identity, no email on file, no
+per-person tracking, no cookies — we cannot identify you, contact
+you, or link your activity to a person.
 
 The table below applies **only to users who explicitly chose
 to create a paid-tier account** (Pro / Business / Enterprise) by
@@ -85,7 +89,7 @@ only if you write to us).
 | **Rendered previews** | Paid users who push to the cloud | Auto-generated thumbnails + preview images of your designs so you can browse your library visually | Supabase Storage (`kiln_cloud_meshes` blob storage) | Contract (§6(1)(b)) |
 | **Org + team data** | Paid users on Business / Enterprise who create or join orgs | Org names, membership rosters, team assignments, role grants, email addresses of people you invite to your org (before they accept) | Supabase DB (`kiln_cloud_orgs`, `kiln_cloud_org_memberships`, `kiln_cloud_memberships`, `kiln_cloud_team_memberships`, `kiln_cloud_org_teams`) | Contract (§6(1)(b)) |
 | **Workshop access logs** | Paid users who push to the cloud | Who pushed / pulled / viewed / cloned which design + when, for audit trail + collaboration accountability | Supabase DB (`kiln_cloud_reflog`) | Legitimate interest — collaborative-work audit (§6(1)(f)) |
-| **Usage heartbeats** | Paid users only | Per-tier rate-limit counters + paywall-enforcement counters. Scoped to auth_user_id but records only the tool category + timestamp, never the file content | Supabase DB (`usage_heartbeats`) | Legitimate interest — abuse prevention, paywall integrity (§6(1)(f)) |
+| **Usage heartbeats** | All Kiln installs (free + paid) | One row per install per UTC day. Anonymous installation UUID (random, generated locally at `~/.kiln/installation_id`, never derived from user identity) + a salted SHA-256 hash of the OS-level machine ID for unique-device counting. Records: Kiln version, printer model + adapter type + count, daily counts (prints / generations / decorations / textures / slices / downloads / print-hours), `pro_installed` flag, OS platform, paywall-denial counts. **No email, no IP, no hostname, no MAC, no file paths, no design content, no G-code.** Default ON; opt out with `KILN_TELEMETRY=false`. See §3.1 for full disclosure. | Supabase DB (`usage_heartbeats`) | Legitimate interest — product improvement, paywall integrity (§6(1)(f)) |
 | **Local product data** | **Every user — free and paid** | Print job history, printer configuration, billing records, event logs — everything you do with physical printers | **On your machine only**, in `~/.kiln/`. We cannot see it and cannot retrieve it. | Not applicable — we can't see it |
 | **Support interactions** | Anyone who emails us | Email you send to us, support ticket content | Our email provider + internal tooling | Legitimate interest (§6(1)(f)) |
 | **Security telemetry** | Paid users (free users never hit authed endpoints) | Coarse IP bucket hash, hashed device fingerprint, client version, timestamped security event type — all cryptographically hashed before storage | Supabase (`license_security_events` table) | Legitimate interest — fraud + abuse prevention (§6(1)(f)) |
@@ -94,11 +98,93 @@ only if you write to us).
 | **Opt-in community datasets** | Any user (free or paid) who explicitly opts in | If you explicitly opt in via `community_share`, we accept anonymized print outcome records (printer model, material, settings hash, success/fail outcome) and recovery strategies — never your email, auth_user_id, tenant_id, file names, or geometry | Supabase DB (`community_prints`, `community_recoveries`) | Consent (§6(1)(a)) |
 
 **What we deliberately do NOT collect:** advertising identifiers,
-analytics / telemetry of product usage, browsing history, your
-3D models (beyond fulfillment pass-through), your CAD prompts,
-your G-code, cross-site tracking data, biometric data, precise
+third-party cross-site tracking analytics (no Google Analytics,
+Facebook Pixel, Segment, Mixpanel, Amplitude — see §3.2 for the
+narrow first-party exceptions), browsing history, your 3D models
+(beyond fulfillment pass-through), your CAD prompts, your G-code,
+file paths or filenames, IP address or hostname (in heartbeats
+or analytics), cross-site tracking data, biometric data, precise
 location data, inferences about your personality / political
 views / religion / orientation, or data on minors.
+
+## 3.1 Usage heartbeats — what they are and aren't
+
+The Kiln client (free or paid) sends one anonymous heartbeat per
+install per UTC day to our Supabase backend. This is the only
+product telemetry that runs by default. We describe it explicitly
+because it's the kind of thing most products mention only in
+passing.
+
+**Identifiers we send:** a random UUID generated locally on first
+run (stored at `~/.kiln/installation_id` with mode 0o600, never
+derived from your name, email, IP, MAC, hostname, or any
+user-identifying data) plus an opaque "device fingerprint" — a
+one-way SHA-256 hash of your operating system's machine identifier
+(`IOPlatformUUID` on macOS, `/etc/machine-id` on Linux,
+`MachineGuid` on Windows), salted with a Kiln-specific string and
+truncated to 32 hex characters. We cannot recover the underlying
+machine ID from the fingerprint, and a third party using a
+different salt cannot link our fingerprints to theirs. The
+fingerprint identifies a *device* (an OS install on a piece of
+hardware), not a person — stable across Kiln reinstalls, resets
+when the OS itself is reinstalled. We use it to count unique
+devices separately from unique installs (so reinstalls and Docker
+runs don't inflate user-count estimates).
+
+**What we send each day:**
+
+- installation UUID + UTC date
+- device fingerprint (or empty string if machine-ID resolution failed)
+- Kiln version (e.g. `0.5.0`)
+- printer model + adapter type (Bambu / Creality / OctoPrint / Moonraker / Serial) + printer count
+- daily activity counts: prints, generations, decorations, textures, slices, downloads, print-hours
+- `pro_installed` boolean (is `kiln-pro` installed alongside?)
+- OS platform string (`darwin`, `linux`, `windows`)
+- aggregate counts of textures used, decoration types, slicer profiles, marketplace sources, paywall denials — always counts, never user-attributable details
+
+**What we never send:** email, IP address, MAC address, hostname,
+username, file paths, design content, G-code, model bytes, prompts,
+your CAD inputs, anything PII.
+
+**What we use it for:** understanding which printers and OS
+platforms our users actually run, prioritizing fixes for breaking
+changes, answering "is Kiln growing?" without building per-user
+analytics. We never use it for advertising, profiling, or sharing
+with third parties.
+
+**How to opt out:** set the environment variable
+`KILN_TELEMETRY=false` (or `0`, `no`, `off`) before starting
+Kiln. The heartbeat thread is a no-op when telemetry is disabled.
+
+## 3.2 Marketing-site analytics
+
+The marketing site (`kiln3d.com`) uses **Vercel Web Analytics** —
+Vercel's first-party privacy-preserving analytics service. We
+enabled it in May 2026 to answer "is the marketing site getting
+traffic, where do visitors land, what's the bounce rate" before
+turning on paid acquisition.
+
+**Vercel Web Analytics processes:** page URL, referrer, anonymous
+visitor count via a daily-rotating IP+user-agent hash (NEVER the
+raw IP), browser/OS family, and country (from IP geolocation
+performed at the edge before discarding the IP).
+
+**Vercel Web Analytics does NOT use:** cookies, persistent
+identifiers, cross-site tracking, fingerprinting beyond the
+hashed visitor count, or any data that survives the daily salt
+rotation. There is no consent banner because there's nothing to
+consent to.
+
+**Scope:** marketing site (`kiln3d.com`) only. The web workshop
+(`app.kiln3d.com`) is **not** instrumented with Vercel Web
+Analytics — its traffic is already captured by Supabase auth
+events for authenticated users, and we don't want to add a
+redundant data surface.
+
+**Subprocessor:** Vercel Inc. (already our hosting subprocessor —
+see §5). The same SCC posture for international transfers
+applies; Vercel Web Analytics is not a separate vendor
+relationship.
 
 ## 4. How we use it (processing purposes)
 
@@ -135,9 +221,14 @@ Every piece of data above maps to one of these narrow purposes:
 9. **Legal compliance** — retaining billing records for tax and
    accounting purposes (typically 7 years); responding to lawful
    legal requests (see §10).
-10. **Product improvement** — **only with your explicit opt-in** via
-    aggregated, de-identified statistics. Telemetry is OFF by
-    default and there is no per-user usage tracking.
+10. **Product improvement** — anonymous, aggregated, install-scoped
+    usage heartbeats (one row per install per UTC day, keyed by a
+    random UUID + a salted machine-ID hash; see §3.1). On by
+    default; opt-out via `KILN_TELEMETRY=false`. The marketing
+    site (`kiln3d.com`) additionally uses Vercel's first-party
+    privacy-preserving Web Analytics — no cookies, no PII, no
+    cross-site tracking; see §3.2. We never sell or share either
+    dataset.
 
 We do not use your data for advertising, profiling for commercial
 purposes, or cross-context behavioral advertising. We do not sell
@@ -156,7 +247,7 @@ perform.
 | **Stripe, Inc.** | Card payments, subscription billing, invoices | US | Standard Contractual Clauses (EU→US); PCI-DSS Level 1 |
 | **Circle Internet Financial, LLC** | USDC stablecoin payments (Solana / Base networks), if used | US | Standard Contractual Clauses (EU→US) |
 | **Fly.io (Fly Software Inc.)** | Hosting for `api.kiln3d.com` | US | Standard Contractual Clauses (EU→US) |
-| **Vercel Inc.** | Hosting for `kiln3d.com` and `app.kiln3d.com` | US | Standard Contractual Clauses (EU→US) |
+| **Vercel Inc.** | Hosting for `kiln3d.com` and `app.kiln3d.com`; first-party privacy-preserving Web Analytics on `kiln3d.com` only (no cookies, no PII, daily-rotating IP hash — see §3.2) | US | Standard Contractual Clauses (EU→US) |
 | **Google (OAuth), Apple (Sign in with Apple), GitHub (OAuth)** | OAuth authentication only | US | Standard Contractual Clauses + each provider's own data policies |
 | **Craftcloud (All3DP GmbH)** | Fulfillment order routing | Germany / EU | Not applicable — EU processor |
 | **MyMiniFactory / Cults3D** | Marketplace search queries you initiate | UK / France | Standard Contractual Clauses |
@@ -211,9 +302,11 @@ cancel any recurring subscriptions at the next billing cycle.
 
 ## 8. Cookies and local storage
 
-The **marketing site** (`kiln3d.com`) uses **no** cookies unless
-you explicitly opt in to something (there's no "accept cookies"
-banner because there's nothing to consent to by default).
+The **marketing site** (`kiln3d.com`) uses **no cookies**. Vercel
+Web Analytics (see §3.2) is enabled but it's cookieless by design
+— it counts visitors via a daily-rotating IP+user-agent hash, not
+a persistent identifier. No "accept cookies" banner is shown
+because there is nothing to consent to.
 
 The **web workshop** (`app.kiln3d.com`) uses:
 
@@ -225,7 +318,11 @@ The **web workshop** (`app.kiln3d.com`) uses:
   recently-opened designs) — not transmitted to us.
 
 We do **not** use Google Analytics, Facebook Pixel, Segment,
-Mixpanel, Amplitude, or any third-party analytics product.
+Mixpanel, Amplitude, or any third-party cross-site tracking
+analytics product. Vercel Web Analytics is first-party — operated
+by our hosting provider, with no cookies, no PII, no cross-site
+data flow — and is the only analytics enabled on `kiln3d.com`.
+See §3.2 for full disclosure.
 
 ## 9. Your rights
 
