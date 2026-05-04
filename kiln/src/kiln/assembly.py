@@ -806,19 +806,54 @@ def compose_assembly(
     }
 
 
+# Calibration narrowing — the half-width that the HIGH tier maps to
+# (matches the `confidence_to_band_mm` table in
+# kiln_pro.engineering.calibration_coach).  The ratio
+# `tier_accuracy_mm / _CALIBRATION_REFERENCE_HALF_WIDTH_MM` controls
+# how much we shrink each joint's clearance range.  The reference
+# ±0.20mm matches the LOW tier (no calibration) so a HIGH tier (±0.10)
+# halves the half-width, MEDIUM (±0.18) shaves ~10%, LOW leaves the
+# range unchanged.
+_CALIBRATION_REFERENCE_HALF_WIDTH_MM = 0.20
+
+
 def get_clearance_recommendation(
     joint_type: str,
     material_a: str = "PLA",
     material_b: str = "PLA",
+    *,
+    printer_id: str | None = None,
 ) -> dict[str, Any]:
     """Return recommended clearance, tolerance, and rationale.
 
     For flexible materials, clearance is increased by 50%.
     For brittle materials with snap_fit, a warning is included.
+
+    When ``printer_id`` is supplied AND kiln-pro is installed, the
+    function consults the user's calibration tier (via
+    ``calibration_coach.calibration_for``) and narrows the clearance
+    range proportionally to the tier's dimensional accuracy.  HIGH tier
+    (±0.10mm) halves the range, MEDIUM (±0.18mm) shaves ~10%, LOW /
+    UNKNOWN leave it unchanged.  The narrowing is centered on the
+    historic midpoint so press-fit interference stays negative and snap-
+    fit clearance stays positive.
+
+    The lookup uses ``material_a`` (the more-rigid material is normally
+    the body of a snap-fit cantilever or the receiver of a press-fit
+    insert; treating it as the calibration anchor keeps the chosen
+    range honest about the part where dimensional drift matters most).
+
+    Free users (kiln-pro not installed) and callers that omit
+    ``printer_id`` get the historic behaviour exactly — the function
+    is additive on the ``printer_id`` axis and the response always
+    carries a ``calibration_used`` field (empty when no calibration
+    was applied) so downstream consumers can rely on the field's
+    presence.
     """
     clearance_range = _DEFAULT_JOINT_CLEARANCES.get(joint_type, (0.1, 0.5))
     base_clearance = (clearance_range[0] + clearance_range[1]) / 2.0
     tolerance = abs(clearance_range[1] - clearance_range[0]) / 2.0
+    effective_range = (clearance_range[0], clearance_range[1])
 
     mat_a_upper = material_a.upper()
     mat_b_upper = material_b.upper()
@@ -830,6 +865,35 @@ def get_clearance_recommendation(
         f"(range {clearance_range[0]:.2f} to {clearance_range[1]:.2f} mm)."
     ]
     warnings: list[str] = []
+    calibration_used: dict[str, Any] = {}
+
+    # Calibration narrowing — only consulted when caller supplied a
+    # printer_id AND kiln-pro is importable.  Failures degrade silently
+    # to the historic flat-range path; the response shape stays the
+    # same so callers can rely on the calibration_used key.
+    if printer_id is not None:
+        cal_view = _calibration_view_for_clearance(
+            printer_id=printer_id,
+            material=material_a,
+        )
+        if cal_view is not None:
+            verdict_block, narrow_factor, tier_label = cal_view
+            calibration_used = verdict_block
+            if narrow_factor < 1.0:
+                midpoint = (clearance_range[0] + clearance_range[1]) / 2.0
+                half_width = (clearance_range[1] - clearance_range[0]) / 2.0
+                new_half = half_width * narrow_factor
+                effective_range = (
+                    midpoint - new_half,
+                    midpoint + new_half,
+                )
+                tolerance = new_half
+                rationale_parts.append(
+                    f"Calibration tier {tier_label.upper()} "
+                    f"(plus-or-minus {verdict_block.get('expected_accuracy_mm', 0):.2f} mm) "
+                    f"narrows the range to "
+                    f"{effective_range[0]:.2f}-{effective_range[1]:.2f} mm."
+                )
 
     if flexible:
         base_clearance *= 1.5
@@ -851,7 +915,67 @@ def get_clearance_recommendation(
         "material_b": material_b,
         "recommended_clearance_mm": round(base_clearance, 3),
         "tolerance_mm": round(tolerance, 3),
-        "clearance_range_mm": [clearance_range[0], clearance_range[1]],
+        "clearance_range_mm": [
+            round(effective_range[0], 3),
+            round(effective_range[1], 3),
+        ],
         "rationale": " ".join(rationale_parts),
         "warnings": warnings,
+        "calibration_used": calibration_used,
     }
+
+
+def _calibration_view_for_clearance(
+    *,
+    printer_id: str,
+    material: str,
+) -> tuple[dict[str, Any], float, str] | None:
+    """Resolve the calibration verdict for ``(printer_id, material)``.
+
+    Lazy-imports ``kiln_pro.engineering.calibration_coach`` so public
+    Kiln keeps working without the pro package installed.  Returns
+    ``None`` when the package is missing OR any error occurs during
+    lookup — the caller falls back to the historic flat-range path.
+
+    The narrow-factor maps the verdict's expected accuracy onto a
+    half-width multiplier:
+
+    - HIGH (±0.10mm) → 0.5  (halves the range)
+    - MEDIUM (±0.18mm) → 0.9 (~10% narrower)
+    - LOW (±0.20mm) → 1.0 (unchanged)
+    - UNKNOWN (±0.30mm) → 1.0 (unchanged — wider would mislead)
+
+    The ratio uses the LOW tier's ±0.20mm as the reference half-width
+    so a no-calibration call returns 1.0 (no change) by construction.
+    """
+    try:
+        from kiln_pro.engineering.calibration_coach import (  # type: ignore[import-not-found]
+            calibration_for,
+            calibration_used_block,
+        )
+    except ImportError:
+        return None
+
+    try:
+        verdict = calibration_for(printer_id, material)
+        verdict_block = calibration_used_block(verdict, printer_id=printer_id)
+    except Exception:
+        return None
+
+    tier = verdict_block.get("tier", "unknown")
+    accuracy_mm = verdict_block.get("expected_accuracy_mm")
+    if not isinstance(accuracy_mm, (int, float)) or accuracy_mm <= 0:
+        return verdict_block, 1.0, str(tier)
+
+    # Only HIGH and MEDIUM produce a narrowing — LOW / UNKNOWN keep
+    # the historic flat range so we never over-promise on a
+    # poorly-calibrated machine.
+    if tier in ("low", "unknown"):
+        narrow_factor = 1.0
+    else:
+        narrow_factor = min(
+            1.0,
+            float(accuracy_mm) / _CALIBRATION_REFERENCE_HALF_WIDTH_MM,
+        )
+
+    return verdict_block, narrow_factor, str(tier)

@@ -504,6 +504,19 @@ class _SlicerToolsPlugin:
                     printer_id
                 ) or _srv._map_printer_hint_to_profile_id(_srv._PRINTER_MODEL)
 
+                # -- Calibration overlay: when kiln-pro is installed and the
+                # user has a calibrated slicer profile for (printer, material),
+                # inject those values into parsed_overrides BEFORE resolve so
+                # the slicer's print-time / cost estimates use values the
+                # user has personally verified.  No-op for free users.
+                # User-supplied overrides ALWAYS win — the helper only fills
+                # gaps.
+                cal_used: dict[str, Any] | None = None
+                if effective_printer_id:
+                    parsed_overrides, cal_used = _maybe_overlay_calibration(
+                        parsed_overrides, effective_printer_id,
+                    )
+
                 effective_profile: str | None = None
                 if effective_printer_id:
                     try:
