@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-05-04T04:35:41.428178+00:00",
-  "tool_count": 279,
+  "generated": "2026-05-04T18:45:39.348087+00:00",
+  "tool_count": 282,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -8736,6 +8736,63 @@
       }
     },
     {
+      "name": "generate_frisbee",
+      "description": "Generate a flying-disc frisbee with optional top decoration.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "product_generators",
+      "parameters": {
+        "properties": {
+          "decoration": {
+            "default": "",
+            "title": "Decoration",
+            "type": "string"
+          },
+          "size_mm": {
+            "default": 230.0,
+            "title": "Size Mm",
+            "type": "number"
+          },
+          "thickness_mm": {
+            "default": 3.0,
+            "title": "Thickness Mm",
+            "type": "number"
+          },
+          "lip_height_mm": {
+            "default": 12.0,
+            "title": "Lip Height Mm",
+            "type": "number"
+          },
+          "lip_width_mm": {
+            "default": 8.0,
+            "title": "Lip Width Mm",
+            "type": "number"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "body_color": {
+            "default": "white",
+            "title": "Body Color",
+            "type": "string"
+          },
+          "color_overrides": {
+            "default": "",
+            "title": "Color Overrides",
+            "type": "string"
+          },
+          "photo_mask": {
+            "default": "circle",
+            "title": "Photo Mask",
+            "type": "string"
+          }
+        },
+        "title": "generate_frisbeeArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "generate_jewelry_tray",
       "description": "Generate a jewelry tray with optional decoration and QR code.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -9136,6 +9193,88 @@
       }
     },
     {
+      "name": "generate_pen_cup",
+      "description": "Generate a desktop pen / brush cup with optional QR + decoration.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "product_generators",
+      "parameters": {
+        "properties": {
+          "exterior": {
+            "default": "",
+            "title": "Exterior",
+            "type": "string"
+          },
+          "interior_bottom": {
+            "default": "plain",
+            "title": "Interior Bottom",
+            "type": "string"
+          },
+          "bottom": {
+            "default": "plain",
+            "title": "Bottom",
+            "type": "string"
+          },
+          "shape": {
+            "default": "cylinder",
+            "title": "Shape",
+            "type": "string"
+          },
+          "diameter_mm": {
+            "default": 75.0,
+            "title": "Diameter Mm",
+            "type": "number"
+          },
+          "depth_mm": {
+            "default": 75.0,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "height_mm": {
+            "default": 100.0,
+            "title": "Height Mm",
+            "type": "number"
+          },
+          "wall_thickness_mm": {
+            "default": 3.0,
+            "title": "Wall Thickness Mm",
+            "type": "number"
+          },
+          "bottom_thickness_mm": {
+            "default": 3.0,
+            "title": "Bottom Thickness Mm",
+            "type": "number"
+          },
+          "corner_radius_mm": {
+            "default": 8.0,
+            "title": "Corner Radius Mm",
+            "type": "number"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "body_color": {
+            "default": "navy",
+            "title": "Body Color",
+            "type": "string"
+          },
+          "color_overrides": {
+            "default": "",
+            "title": "Color Overrides",
+            "type": "string"
+          },
+          "photo_mask": {
+            "default": "auto",
+            "title": "Photo Mask",
+            "type": "string"
+          }
+        },
+        "title": "generate_pen_cupArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "generate_pet_bowl",
       "description": "Generate a tapered pet bowl optimized for FDM printing.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -9258,6 +9397,78 @@
           "front_text"
         ],
         "title": "generate_pet_tagArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_soap_dish",
+      "description": "Generate a draining soap dish with optional bottom branding.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "product_generators",
+      "parameters": {
+        "properties": {
+          "decoration": {
+            "default": "",
+            "title": "Decoration",
+            "type": "string"
+          },
+          "width_mm": {
+            "default": 90.0,
+            "title": "Width Mm",
+            "type": "number"
+          },
+          "depth_mm": {
+            "default": 65.0,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "height_mm": {
+            "default": 15.0,
+            "title": "Height Mm",
+            "type": "number"
+          },
+          "ridge_count": {
+            "default": 6,
+            "title": "Ridge Count",
+            "type": "integer"
+          },
+          "corner_radius_mm": {
+            "default": 10.0,
+            "title": "Corner Radius Mm",
+            "type": "number"
+          },
+          "spout_width_mm": {
+            "default": 25.0,
+            "title": "Spout Width Mm",
+            "type": "number"
+          },
+          "spout_length_mm": {
+            "default": 18.0,
+            "title": "Spout Length Mm",
+            "type": "number"
+          },
+          "material": {
+            "default": "PETG",
+            "title": "Material",
+            "type": "string"
+          },
+          "body_color": {
+            "default": "white",
+            "title": "Body Color",
+            "type": "string"
+          },
+          "color_overrides": {
+            "default": "",
+            "title": "Color Overrides",
+            "type": "string"
+          },
+          "photo_mask": {
+            "default": "rounded_rectangle",
+            "title": "Photo Mask",
+            "type": "string"
+          }
+        },
+        "title": "generate_soap_dishArguments",
         "type": "object"
       }
     },
