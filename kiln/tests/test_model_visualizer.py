@@ -146,12 +146,17 @@ def test_visualize_all_angles(tmp_stl: Path, tmp_path: Path):
         result = visualize_model(str(tmp_stl), output_dir=output_dir)
 
     assert result["success"] is True
-    assert result["rendered"] == 6
+    assert result["rendered"] == 7
     assert result["failed"] == 0
-    assert len(result["views"]) == 6
+    assert len(result["views"]) == 7
 
     angle_names = {v["angle"] for v in result["views"]}
-    assert angle_names == {"isometric", "front", "right", "top", "bottom", "back"}
+    # `wedge_iso` is the pitched-up 3/4 view added 2026-05-03 for tilted-
+    # canvas products (nameplates, awards, desk signs).  Default isometric
+    # (rz=25) flattens those; wedge_iso (rz=35) shows the slope.
+    assert angle_names == {
+        "isometric", "wedge_iso", "front", "right", "top", "bottom", "back",
+    }
 
     for view in result["views"]:
         assert view["path"] is not None
@@ -207,8 +212,10 @@ def test_visualize_partial_failure(tmp_stl: Path, tmp_path: Path):
         result = visualize_model(str(tmp_stl), output_dir=output_dir)
 
     assert result["success"] is True  # partial success
+    # First 3 mock-succeed, the remaining (now 4 with wedge_iso added)
+    # mock-fail.  Total angles = 7.
     assert result["rendered"] == 3
-    assert result["failed"] == 3
+    assert result["failed"] == 4
 
 
 # ---------------------------------------------------------------------------
@@ -216,8 +223,12 @@ def test_visualize_partial_failure(tmp_stl: Path, tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_camera_angles_have_six_entries():
-    assert len(_CAMERA_ANGLES) == 6
+def test_camera_angles_have_seven_entries():
+    """Six cardinal angles + wedge_iso (added 2026-05-03 for tilted-canvas
+    products like nameplates / awards / desk signs).  Bumping this count
+    is mandatory whenever a new preset rotation lands in
+    :data:`_ANGLE_ROTATIONS`."""
+    assert len(_CAMERA_ANGLES) == 7
 
 
 def test_camera_angles_have_required_fields():

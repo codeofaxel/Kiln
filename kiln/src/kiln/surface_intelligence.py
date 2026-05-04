@@ -277,9 +277,23 @@ def _subgroup_by_z_level(group: dict[str, Any]) -> list[dict[str, Any]]:
     Uses gap-based clustering: sort triangle centroids by Z, split wherever
     two consecutive centroids are >1.5mm apart.  Continuous curves (frisbee
     dome) have no gap and stay as one group.
+
+    Only applies to faces whose normal is mostly vertical (|nz| > 0.85).
+    A non-horizontal face (e.g. a wedge's angled hypotenuse, a tilted
+    nameplate canvas) by definition spans many Z levels — Z-splitting
+    would shred it into single-triangle sub-groups and pick the bed
+    instead. The 2026-05-03 nameplate "text on the bottom" bug came
+    from this: the angled face was Z-split into 2 triangles, the bottom
+    face stayed whole, and the engine picked the bottom as the "largest
+    flat face."
     """
     tris = group["triangles"]
     if not tris:
+        return [group]
+
+    # Only Z-split horizontal-ish faces. Tilted/vertical faces span Z by
+    # design and must stay merged.
+    if abs(group["normal"][2]) < 0.85:
         return [group]
 
     # Compute per-triangle Z centroid and area

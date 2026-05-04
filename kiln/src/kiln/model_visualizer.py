@@ -151,6 +151,7 @@ _CAMERA_ANGLES: list[tuple[str, str]] = [
     # Camera rotation: 7-param format rotX,rotY,rotZ
     # rotX,rotY,rotZ applied to default OpenSCAD view (looking down -Z)
     ("isometric", "3/4 overview showing overall shape"),
+    ("wedge_iso", "Pitched-up 3/4 view — optimised for nameplates and angled-canvas products"),
     ("front", "Front face — check symmetry and proportions"),
     ("right", "Right side — check profile and thickness"),
     ("top", "Top-down — check surface features and logo placement"),
@@ -161,8 +162,14 @@ _CAMERA_ANGLES: list[tuple[str, str]] = [
 # Rotation presets for each angle: (rotX, rotY, rotZ)
 # Top/bottom use 15° tilt to cast shadows on debossed/raised features.
 # Straight-down (0°) hides surface detail in mono-color rendering.
+# wedge_iso: pitched-up 3/4 view (rz=35) optimised for tilted-canvas
+# products (nameplates, awards, desk signs) — shows the angled face,
+# the slope, AND the triangular side so the user reads "this is 3D"
+# at a glance.  Default isometric (rz=25) flattens nameplates because
+# the camera is too straight-on relative to the wedge orientation.
 _ANGLE_ROTATIONS: dict[str, tuple[float, float, float]] = {
     "isometric": (55, 0, 25),
+    "wedge_iso": (55, 0, 35),
     "front": (90, 0, 0),
     "right": (90, 0, 90),
     "top": (15, 0, 10),

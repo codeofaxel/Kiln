@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from unittest.mock import patch
 
 import pytest
@@ -153,6 +154,89 @@ class TestGenerateEmbossScad:
         assert result["scad_path"].endswith(".scad")
         assert result["output_stl_path"].endswith(".stl")
         assert "openscad" in result["openscad_command"]
+
+
+class TestHeightmapDebossProportionalCut:
+    """Pin: heightmap-deboss must produce a flat-topped, varying-bottom prism
+    so the cut depth is proportional to the heightmap value at every pixel,
+    not a step function that only cuts where hmap > ~0.92.
+
+    Pre-fix, _heightmap_content_block emitted a positive Z scale and
+    generate_emboss_scad translated to cz - depth_mm. The result was a
+    flat-bottomed, varying-top prism whose top only reached the face surface
+    when hmap >= depth/(depth+0.1) ≈ 0.92, producing sparse 1.2mm pinpoint
+    pits and zero cut elsewhere. Visible on any product with a recessed face
+    (jewelry tray, ashtray, divided tray) and on flat plates too.
+
+    Fix: flip Z scale negative AND translate to cz so the flat top sits at
+    the face surface and the varying bottom extends INTO the material by
+    (depth+0.1)*hmap, giving a proportional cut at every column.
+    """
+
+    def _heightmap_content_info(self, tmp_path) -> dict:
+        dat_file = tmp_path / "hmap.dat"
+        dat_file.write_text("0.5 0.7\n0.3 1.0\n")
+        return {
+            "type": "heightmap",
+            "dat_path": str(dat_file),
+            "width_px": 2,
+            "height_px": 2,
+            "aspect_ratio": 1.0,
+        }
+
+    def test_deboss_emits_negative_z_scale_and_translates_to_cz(self, tmp_path):
+        from kiln.emboss_generator import generate_emboss_scad
+
+        result = generate_emboss_scad(
+            model_path=str(tmp_path / "model.stl"),
+            content_info=self._heightmap_content_info(tmp_path),
+            face=_make_face(),  # cz = 10.0
+            output_dir=str(tmp_path / "out"),
+            depth_mm=1.2,
+            mode="deboss",
+        )
+        with open(result["scad_path"]) as fh:
+            scad_code = fh.read()
+
+        # Negative Z scale — flat-topped, varying-bottomed prism.
+        assert ", -1.300000])" in scad_code, (
+            f"Expected negative Z scale on surface(); got:\n{scad_code}"
+        )
+        # Translate Z must equal cz, not cz - depth_mm. Pre-fix value 8.8
+        # would put the prism's flat side below the face surface, producing
+        # the step-function cut.
+        assert "10.000000])" in scad_code, (
+            f"Expected translate Z = cz = 10.0; got:\n{scad_code}"
+        )
+        assert "8.800000])" not in scad_code, (
+            f"Found stale pre-fix translate Z = cz - depth_mm; got:\n{scad_code}"
+        )
+        # Sanity: deboss is a difference() boolean.
+        assert "difference()" in scad_code
+
+    def test_emboss_keeps_positive_z_scale(self, tmp_path):
+        """Emboss path was always correct; pin so the deboss fix doesn't regress it."""
+        from kiln.emboss_generator import generate_emboss_scad
+
+        result = generate_emboss_scad(
+            model_path=str(tmp_path / "model.stl"),
+            content_info=self._heightmap_content_info(tmp_path),
+            face=_make_face(),  # cz = 10.0
+            output_dir=str(tmp_path / "out"),
+            depth_mm=1.2,
+            mode="emboss",
+        )
+        with open(result["scad_path"]) as fh:
+            scad_code = fh.read()
+
+        # Positive Z scale: prism extends upward from the face surface.
+        assert ", 1.300000])" in scad_code, (
+            f"Expected positive Z scale on surface(); got:\n{scad_code}"
+        )
+        assert ", -1.300000])" not in scad_code
+        # Emboss is a union() boolean; translate Z stays at cz.
+        assert "union()" in scad_code
+        assert "10.000000])" in scad_code
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +414,173 @@ class TestCgalBackendEnvVar:
             assert "--backend=manifold" not in captured_cmd
         finally:
             _mod._openscad_version_cache = original_cache
+
+
+# ---------------------------------------------------------------------------
+# Tests: _find_openscad probes executable compatibility before returning
+# ---------------------------------------------------------------------------
+
+class TestFindOpenscadProbe:
+    """_find_openscad skips binaries that exist but cannot execute."""
+
+    @staticmethod
+    def _reset_caches(_mod) -> tuple[str | None, bool, dict[str, tuple[bool, str | None]]]:
+        original_version = _mod._openscad_version_cache
+        original_warned = _mod._upgrade_warned
+        original_probe = dict(_mod._openscad_probe_cache)
+        _mod._openscad_version_cache = None
+        _mod._upgrade_warned = False
+        _mod._openscad_probe_cache.clear()
+        return original_version, original_warned, original_probe
+
+    @staticmethod
+    def _restore_caches(_mod, state) -> None:
+        version, warned, probe = state
+        _mod._openscad_version_cache = version
+        _mod._upgrade_warned = warned
+        _mod._openscad_probe_cache.clear()
+        _mod._openscad_probe_cache.update(probe)
+
+    def test_nonzero_probe_is_skipped(self, tmp_path):
+        import kiln.emboss_generator as _mod
+        from kiln.emboss_generator import _find_openscad
+
+        bad = str(tmp_path / "bad-openscad")
+        good = str(tmp_path / "good-openscad")
+        for path in (bad, good):
+            tmp_path.joinpath(os.path.basename(path)).write_text("#!/bin/sh\n")
+        executable = {bad, good}
+
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == bad:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    1,
+                    stdout="",
+                    stderr="Bad CPU type in executable",
+                )
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout="",
+                stderr="OpenSCAD version 2024.12.19",
+            )
+
+        state = self._reset_caches(_mod)
+        try:
+            with patch.dict(os.environ, {"KILN_OPENSCAD_PATH": bad}), \
+                 patch("kiln.emboss_generator.platform.system", return_value="Linux"), \
+                 patch("kiln.emboss_generator.shutil.which", return_value=good), \
+                 patch("kiln.emboss_generator.os.path.isfile", side_effect=lambda p: p in executable), \
+                 patch("kiln.emboss_generator.os.access", side_effect=lambda p, _m: p in executable), \
+                 patch("kiln.emboss_generator.subprocess.run", side_effect=fake_run):
+                assert _find_openscad() == good
+        finally:
+            self._restore_caches(_mod, state)
+
+    def test_oserror_probe_is_skipped(self, tmp_path):
+        import kiln.emboss_generator as _mod
+        from kiln.emboss_generator import _find_openscad
+
+        bad = str(tmp_path / "bad-openscad")
+        good = str(tmp_path / "good-openscad")
+        for path in (bad, good):
+            tmp_path.joinpath(os.path.basename(path)).write_text("#!/bin/sh\n")
+        executable = {bad, good}
+
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == bad:
+                raise OSError("exec format error: Bad CPU type in executable")
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout="OpenSCAD version 2024.12.19",
+                stderr="",
+            )
+
+        state = self._reset_caches(_mod)
+        try:
+            with patch.dict(os.environ, {"KILN_OPENSCAD_PATH": bad}), \
+                 patch("kiln.emboss_generator.platform.system", return_value="Linux"), \
+                 patch("kiln.emboss_generator.shutil.which", return_value=good), \
+                 patch("kiln.emboss_generator.os.path.isfile", side_effect=lambda p: p in executable), \
+                 patch("kiln.emboss_generator.os.access", side_effect=lambda p, _m: p in executable), \
+                 patch("kiln.emboss_generator.subprocess.run", side_effect=fake_run):
+                assert _find_openscad() == good
+        finally:
+            self._restore_caches(_mod, state)
+
+    def test_only_path_with_passing_probe_is_returned(self, tmp_path):
+        import kiln.emboss_generator as _mod
+        from kiln.emboss_generator import _find_openscad
+
+        good = str(tmp_path / "good-openscad")
+        tmp_path.joinpath("good-openscad").write_text("#!/bin/sh\n")
+
+        state = self._reset_caches(_mod)
+        try:
+            with patch.dict(os.environ, {"KILN_OPENSCAD_PATH": good}), \
+                 patch("kiln.emboss_generator.platform.system", return_value="Linux"), \
+                 patch("kiln.emboss_generator.shutil.which", return_value=None), \
+                 patch("kiln.emboss_generator.os.path.isfile", side_effect=lambda p: p == good), \
+                 patch("kiln.emboss_generator.os.access", side_effect=lambda p, _m: p == good), \
+                 patch(
+                     "kiln.emboss_generator.subprocess.run",
+                     return_value=subprocess.CompletedProcess(
+                         [good, "--version"],
+                         0,
+                         stdout="OpenSCAD version 2024.12.19",
+                         stderr="",
+                     ),
+                 ):
+                assert _find_openscad() == good
+        finally:
+            self._restore_caches(_mod, state)
+
+    def test_zero_passing_paths_reports_all_attempts(self, tmp_path):
+        import kiln.emboss_generator as _mod
+        from kiln.emboss_generator import _find_openscad
+
+        env_path = str(tmp_path / "env-openscad")
+        path_path = str(tmp_path / "path-openscad")
+        for path in (env_path, path_path):
+            tmp_path.joinpath(os.path.basename(path)).write_text("#!/bin/sh\n")
+        executable = {env_path, path_path}
+
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == env_path:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    1,
+                    stdout="",
+                    stderr="Incompatible processor. This Qt build requires neon",
+                )
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                stdout="",
+                stderr="Bad CPU type in executable",
+            )
+
+        state = self._reset_caches(_mod)
+        try:
+            with patch.dict(os.environ, {"KILN_OPENSCAD_PATH": env_path}), \
+                 patch("kiln.emboss_generator.platform.system", return_value="Linux"), \
+                 patch("kiln.emboss_generator.shutil.which", return_value=path_path), \
+                 patch("kiln.emboss_generator.os.path.isfile", side_effect=lambda p: p in executable), \
+                 patch("kiln.emboss_generator.os.access", side_effect=lambda p, _m: p in executable), \
+                 patch("kiln.emboss_generator.subprocess.run", side_effect=fake_run), \
+                 pytest.raises(FileNotFoundError) as exc_info:
+                _find_openscad()
+
+            message = str(exc_info.value)
+            assert env_path in message
+            assert path_path in message
+            assert "neon" in message
+            assert "Bad CPU type" in message
+            assert "approve running the Kiln generation command outside the sandbox" in message
+        finally:
+            self._restore_caches(_mod, state)
 
 
 # ---------------------------------------------------------------------------
