@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import pytest
 
+from .conftest import requires_engineering_overlay
+
 from kiln.design_intelligence import (
     DesignBrief,
     EnvironmentReport,
@@ -72,6 +74,7 @@ def _reset_kb():
 
 
 class TestMaterialProfiles:
+    @requires_engineering_overlay
     def test_get_pla(self):
         p = get_material_profile("pla")
         assert p is not None
@@ -84,11 +87,13 @@ class TestMaterialProfiles:
         assert p is not None
         assert p.thermal["max_service_temp_c"] == 65
 
+    @requires_engineering_overlay
     def test_get_nylon(self):
         p = get_material_profile("nylon")
         assert p is not None
         assert p.mechanical["fatigue_resistance"] == "excellent"
 
+    @requires_engineering_overlay
     def test_get_tpu_flexible(self):
         p = get_material_profile("tpu")
         assert p is not None
@@ -127,11 +132,18 @@ class TestMaterialProfiles:
         assert isinstance(d["mechanical"], dict)
         assert isinstance(d["agent_guidance"], list)
 
+    @requires_engineering_overlay
     def test_every_material_has_agent_guidance(self):
         for p in list_material_profiles():
             assert len(p.agent_guidance) > 0, f"{p.material_id} missing guidance"
 
     def test_every_material_has_design_limits(self):
+        # Safety-floor: every material has the process-floor design limits
+        # in public materials.json (min_wall_thickness_mm,
+        # max_unsupported_overhang_deg).  The engineering-grade limits
+        # (snap_fit_tolerance_mm, max_cantilever_length_mm,
+        # living_hinge_viable, etc.) live in the kiln-pro overlay and are
+        # asserted in kiln-pro's overlay sanity test.
         for p in list_material_profiles():
             assert "min_wall_thickness_mm" in p.design_limits, (
                 f"{p.material_id} missing min_wall_thickness_mm"

@@ -39,6 +39,78 @@ logger = logging.getLogger(__name__)
 
 _DATA_DIR = Path(__file__).parent / "data" / "design_knowledge"
 
+
+# ---------------------------------------------------------------------------
+# kiln-pro engineering-moat overlay (lazy, optional)
+# ---------------------------------------------------------------------------
+
+
+def _merge_pro_overlay_if_available(
+    public_data: dict[str, dict[str, Any]],
+    kind: str,
+) -> dict[str, dict[str, Any]]:
+    """Merge the kiln-pro engineering-moat overlay into ``public_data``.
+
+    Free tier (kiln-pro not installed): returns ``public_data`` as-is.
+    Pro+ tier (kiln-pro installed + license valid): deep-merges the
+    overlay into each material/pattern record, restoring the full
+    record (mechanical, design_limits, use_case_ratings, agent_guidance,
+    brand-tunings, curated guidance).
+
+    The overlay file ships in ``kiln_pro/data/<kind>_pro_overlay.json``
+    and is loaded lazily on first call.  We never import kiln-pro at
+    module load — only on first use — so the public package keeps
+    working when kiln-pro isn't installed.
+
+    :param public_data: Safety-floor data loaded from public Kiln's
+        ``data/design_knowledge/<kind>.json``.
+    :param kind: ``"materials"`` or ``"design_patterns"`` — selects
+        which overlay file to load.
+    :returns: Either the unmodified safety-floor dict (free tier) or
+        the deep-merged full record (Pro+).
+    """
+    try:
+        from kiln_pro.data_overlays import load_overlay  # type: ignore[import-not-found]
+    except ImportError:
+        return public_data
+
+    try:
+        overlay = load_overlay(kind)
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        logger.warning(
+            "kiln-pro %s overlay present but failed to load: %s. "
+            "Falling back to safety-floor data.",
+            kind, exc,
+        )
+        return public_data
+
+    return _deep_merge_dicts(public_data, overlay)
+
+
+def _deep_merge_dicts(
+    base: dict[str, Any],
+    overlay: dict[str, Any],
+) -> dict[str, Any]:
+    """Recursively merge ``overlay`` into ``base``, returning a new dict.
+
+    Overlay values win on conflict.  Lists are replaced wholesale (not
+    extended) — agent_guidance overlays cleanly without producing a
+    safety-then-curated frankenstein.  Special keys starting with ``_``
+    in either side are preserved (metadata).
+    """
+    result = dict(base)
+    for key, value in overlay.items():
+        if (
+            key in result
+            and isinstance(result[key], dict)
+            and isinstance(value, dict)
+        ):
+            result[key] = _deep_merge_dicts(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 # Rating scale for use-case compatibility
 _RATING_ORDER = {
     "outstanding": 6,
@@ -58,17 +130,33 @@ _RATING_ORDER = {
 
 @dataclass
 class MaterialProfile:
-    """Full material property sheet for design reasoning."""
+    """Full material property sheet for design reasoning.
+
+    Free tier: ``mechanical``, ``design_limits``, ``use_case_ratings``,
+    and ``agent_guidance`` may be empty (the engineering moat ships in
+    Kiln Pro's overlay).  Consumers MUST treat these as optional and
+    fall back to safety-floor inference when absent.  See
+    :func:`has_engineering_data` for the canonical check.
+    """
 
     material_id: str
     display_name: str
     category: str
-    mechanical: dict[str, Any]
     thermal: dict[str, Any]
     chemical: dict[str, Any]
-    design_limits: dict[str, Any]
-    use_case_ratings: dict[str, Any]
-    agent_guidance: list[str]
+    mechanical: dict[str, Any] = field(default_factory=dict)
+    design_limits: dict[str, Any] = field(default_factory=dict)
+    use_case_ratings: dict[str, Any] = field(default_factory=dict)
+    agent_guidance: list[str] = field(default_factory=list)
+
+    def has_engineering_data(self) -> bool:
+        """True when the kiln-pro engineering overlay is loaded.
+
+        Free tier returns False — consumers should fall back to
+        safety-floor inference (see :func:`_recommend_from_safety_floor`)
+        and emit the upgrade nudge in their response.
+        """
+        return bool(self.mechanical) and bool(self.use_case_ratings)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -343,6 +431,16 @@ class _DesignKnowledgeBase:
                 raw = json.loads(path.read_text(encoding="utf-8"))
                 setattr(self, attr, {k: v for k, v in raw.items() if not k.startswith("_")})
 
+        # Single choke point: merge the kiln-pro engineering moat overlay
+        # if present.  Free tier sees safety-floor only; Pro+ sees the
+        # full record (mechanical + design_limits + use_case_ratings +
+        # agent_guidance + brand-tuning + curated guidance) restored
+        # via deep merge.  Engineering moat is in kiln-pro; this loader
+        # never imports kiln-pro at module load — only at first use.
+        self._materials = _merge_pro_overlay_if_available(
+            self._materials, "materials"
+        )
+
         self._loaded = True
         logger.info(
             "Design knowledge loaded: %d materials, %d patterns, %d requirements, "
@@ -440,12 +538,12 @@ def get_material_profile(material_id: str) -> MaterialProfile | None:
         material_id=material_id.lower(),
         display_name=data["display_name"],
         category=data["category"],
-        mechanical=data["mechanical"],
-        thermal=data["thermal"],
-        chemical=data["chemical"],
-        design_limits=data["design_limits"],
-        use_case_ratings=data["use_case_ratings"],
-        agent_guidance=data["agent_guidance"],
+        thermal=data.get("thermal", {}),
+        chemical=data.get("chemical", {}),
+        mechanical=data.get("mechanical", {}),
+        design_limits=data.get("design_limits", {}),
+        use_case_ratings=data.get("use_case_ratings", {}),
+        agent_guidance=data.get("agent_guidance", []),
     )
 
 
@@ -459,12 +557,12 @@ def list_material_profiles() -> list[MaterialProfile]:
                 material_id=mid,
                 display_name=data["display_name"],
                 category=data["category"],
-                mechanical=data["mechanical"],
-                thermal=data["thermal"],
-                chemical=data["chemical"],
-                design_limits=data["design_limits"],
-                use_case_ratings=data["use_case_ratings"],
-                agent_guidance=data["agent_guidance"],
+                thermal=data.get("thermal", {}),
+                chemical=data.get("chemical", {}),
+                mechanical=data.get("mechanical", {}),
+                design_limits=data.get("design_limits", {}),
+                use_case_ratings=data.get("use_case_ratings", {}),
+                agent_guidance=data.get("agent_guidance", []),
             )
         )
     return profiles
@@ -716,7 +814,7 @@ def _build_brand_profile(
         hardened_nozzle_required=data.get("hardened_nozzle_required", False),
         ams_compatible=data.get("ams_compatible"),
         notes=data.get("notes"),
-        source=data["source"],
+        source=data.get("source", ""),
     )
 
 
