@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-05-04T06:43:49.875329+00:00",
-  "tool_count": 277,
+  "generated": "2026-05-04T07:39:58.733258+00:00",
+  "tool_count": 278,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -6148,6 +6148,64 @@
           "artifact_id"
         ],
         "title": "visualize_branch_treeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "assess_calibration_status",
+      "description": "Calibration confidence + auto-import for slicer profiles.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Id"
+          },
+          "intended_material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Intended Material"
+          },
+          "brief": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Brief"
+          },
+          "mode": {
+            "default": "auto",
+            "enum": [
+              "normie",
+              "engineer",
+              "auto"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "title": "assess_calibration_statusArguments",
         "type": "object"
       }
     },
