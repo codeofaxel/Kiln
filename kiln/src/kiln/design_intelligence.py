@@ -568,6 +568,482 @@ def list_material_profiles() -> list[MaterialProfile]:
     return profiles
 
 
+# ---------------------------------------------------------------------------
+# Free-tier safety-floor recommendation fallback
+# ---------------------------------------------------------------------------
+#
+# Public Kiln's materials.json carries only the safety floor: thermal
+# limits, chemical safety (UV/food/outgassing), process-floor design
+# limits (min wall thickness, overhangs), and brand identification +
+# safety-relevant tunings.  The engineering moat (mechanical
+# properties, design_limits beyond process floor, use_case_ratings,
+# agent_guidance paragraphs) ships in kiln-pro's overlay.
+#
+# When the overlay isn't loaded (free tier), the curated
+# ``recommend_material_for_design`` path is missing the
+# use_case_ratings + mechanical signals it relies on for fine-grained
+# scoring.  This fallback uses ONLY the safety-floor fields plus a
+# small set of public-domain DIY heuristics (UV, food, heat, load,
+# outgassing, flexibility) to produce a useful recommendation —
+# never as good as the engineering-overlay path, but honest about
+# what it can and can't see.
+#
+# Inputs are public-domain trigger keywords + material datasheet
+# common knowledge.  No moat data ships in this function.
+
+# Heat-exposure trigger words (parsed from requirements_text alongside
+# the matched ``heat_exposure`` requirement profile).  Public-domain.
+_HEAT_KEYWORDS: frozenset[str] = frozenset({
+    "heat", "hot", "oven", "dishwasher", "car", "summer",
+    "engine", "thermal", "warm", "near heat",
+})
+
+# Default target service temperature when the user implies "hot
+# environment" without a number.  60C = hot car interior in summer
+# shade / typical near-electronics ambient — the threshold at which
+# PLA starts visibly creeping.
+_DEFAULT_HOT_TARGET_C = 60
+
+# Outdoor / UV-exposure triggers.  Same vocabulary the
+# ``outdoor_use`` requirement profile uses; we re-parse here so the
+# fallback works even when the requirement profile didn't match.
+_OUTDOOR_KEYWORDS: frozenset[str] = frozenset({
+    "outdoor", "outside", "sun", "sunlight", "uv",
+    "weather", "garden", "patio", "yard", "balcony",
+})
+
+# Food / drink contact triggers.
+_FOOD_KEYWORDS: frozenset[str] = frozenset({
+    "food", "drink", "kitchen", "cookie", "cup", "bowl",
+    "utensil", "plate", "mug",
+})
+
+# Indoor-air / outgassing-sensitivity triggers.
+_INDOOR_KEYWORDS: frozenset[str] = frozenset({
+    "indoor", "office", "bedroom", "nursery", "classroom",
+    "living room",
+})
+
+# Flexibility / elastomer triggers.
+_FLEXIBLE_KEYWORDS: frozenset[str] = frozenset({
+    "flexible", "rubber", "soft", "bendy", "squishy",
+    "gasket", "seal", "grip",
+})
+
+# Sustained-load / hanging-weight triggers (creep concern, even when
+# the load-bearing detector itself doesn't fire).
+_SUSTAINED_LOAD_KEYWORDS: frozenset[str] = frozenset({
+    "shelf", "bracket", "hold", "weight", "hang",
+    "hanger", "mount", "support",
+})
+
+# Cosmetic / fine-detail triggers — bias toward PLA when neither
+# load-bearing nor environmental constraints fire.
+_COSMETIC_KEYWORDS: frozenset[str] = frozenset({
+    "decorative", "cosmetic", "figurine", "ornament", "display",
+    "art", "sculpture", "miniature", "gift", "show piece",
+    "showpiece", "pretty", "beautiful",
+})
+
+# Material families recognized by id-prefix when the safety-floor
+# ``category`` field is inconsistent (TPU 95A / TPU 85A are tagged
+# "thermoplastic" in materials.json; PLA family includes pla, pla_plus,
+# pla_matte, pla_tough, silk_pla, cf_pla).
+_TPU_FAMILY_PREFIXES: tuple[str, ...] = ("tpu",)
+_PLA_FAMILY_IDS: frozenset[str] = frozenset({
+    "pla", "pla_plus", "pla_matte", "pla_tough", "silk_pla",
+    "wood_pla", "cf_pla", "pvb",  # PVB behaves like PLA thermally
+})
+
+
+def _is_tpu_family(material_id: str) -> bool:
+    """True if the material id belongs to the TPU/elastomer family."""
+    return material_id.lower().startswith(_TPU_FAMILY_PREFIXES)
+
+
+def _is_pla_family(material_id: str) -> bool:
+    """True if the material id is a PLA variant (low-Tg, brittle, creeps)."""
+    return material_id.lower() in _PLA_FAMILY_IDS
+
+
+def _any_keyword(text: str, keywords: frozenset[str]) -> bool:
+    """True if any keyword from the set appears as a whole word in text."""
+    for kw in keywords:
+        if " " in kw:
+            if kw in text:
+                return True
+        elif re.search(rf"\b{re.escape(kw)}\b", text):
+            return True
+    return False
+
+
+def _recommend_from_safety_floor(
+    requirements_text: str,
+    materials: dict[str, dict[str, Any]],
+    *,
+    printer_has_enclosure: bool = False,
+    printer_has_direct_drive: bool = True,
+    max_hotend_temp_c: int = 300,
+    supported_materials: list[str] | None = None,
+) -> MaterialRecommendation:
+    """Recommend a material using ONLY safety-floor fields.
+
+    Free-tier fallback for ``recommend_material_for_design`` when the
+    kiln-pro engineering overlay isn't loaded.  Scores materials
+    against thermal limits, chemical safety (UV/food/outgassing), and
+    a small set of public-domain DIY heuristics (heat / outdoor /
+    food / flexibility / sustained-load / cosmetic).
+
+    Always runs the load-bearing detector and, when it trips,
+    attaches the upgrade-nudge dict to the result's ``warnings`` list
+    so free users see the path to the engineering-grade analysis.
+
+    :param requirements_text: Natural-language description.
+    :param materials: Safety-floor materials dict (from
+        ``_get_kb().materials`` — overlay assumed NOT loaded).
+    :param printer_has_enclosure: Whether the printer has an enclosed
+        build chamber (gates ABS / ASA / PC / Nylon).
+    :param printer_has_direct_drive: Direct-drive extruder presence
+        (required for TPU).
+    :param max_hotend_temp_c: Hotend ceiling (gates PC / Nylon / CF).
+    :param supported_materials: Optional allowlist from a printer
+        profile; materials outside this set are heavily penalized.
+    :returns: :class:`MaterialRecommendation`.  When the load-bearing
+        detector trips, ``warnings`` includes a single human-readable
+        upgrade-nudge string (the full structured nudge is in
+        ``upgrade_recommendation`` if callers want to surface it
+        programmatically).
+    """
+    # Lazy import — load_bearing_detector lives in the same package
+    # but we keep the import here to make the cross-module dependency
+    # obvious to readers.
+    from kiln.load_bearing_detector import detect_load_bearing
+
+    text = requirements_text.lower()
+    matched = match_requirements(requirements_text)
+    matched_ids = {cs.requirement_id for cs in matched}
+
+    # ---- Detect what kind of constraint set is in play -----------------
+    needs_heat = (
+        "heat_exposure" in matched_ids
+        or _any_keyword(text, _HEAT_KEYWORDS)
+    )
+    needs_outdoor = (
+        "outdoor_use" in matched_ids
+        or _any_keyword(text, _OUTDOOR_KEYWORDS)
+    )
+    needs_food = (
+        "food_contact" in matched_ids
+        or _any_keyword(text, _FOOD_KEYWORDS)
+    )
+    needs_low_outgassing = _any_keyword(text, _INDOOR_KEYWORDS)
+    needs_flexible = (
+        "flexibility_required" in matched_ids
+        or _any_keyword(text, _FLEXIBLE_KEYWORDS)
+    )
+    is_cosmetic = (
+        "aesthetic_decorative" in matched_ids
+        or _any_keyword(text, _COSMETIC_KEYWORDS)
+    )
+
+    # Load-bearing detector — the trip authoritatively tells us this is
+    # a sustained-load case.  We also OR in keyword sustained-load
+    # signals so "shelf for my books" still flags creep without
+    # tripping the heuristic.
+    verdict = detect_load_bearing(requirements_text)
+    needs_sustained_load = (
+        verdict.is_load_bearing
+        or _any_keyword(text, _SUSTAINED_LOAD_KEYWORDS)
+    )
+    needs_hot_load = needs_heat and needs_sustained_load
+
+    # Heat target temperature — if the user mentioned a number (e.g.
+    # "must survive 80C"), prefer that over the default 60C floor.
+    target_temp_c = _DEFAULT_HOT_TARGET_C
+    temp_match = re.search(r"(\d+)\s*°?\s*[cC]\b", requirements_text)
+    if temp_match:
+        try:
+            target_temp_c = max(target_temp_c, int(temp_match.group(1)))
+        except ValueError:
+            pass
+
+    supported = (
+        {m.lower() for m in supported_materials}
+        if supported_materials else None
+    )
+
+    # ---- Score each material against the constraints -------------------
+    scores: list[tuple[float, str, list[str], list[str]]] = []
+    fired_filters: list[str] = []  # rationale building blocks
+
+    for mid, mdata in materials.items():
+        score = 50.0  # neutral baseline
+        reasons: list[str] = []
+        warnings: list[str] = []
+
+        thermal = mdata.get("thermal", {})
+        chemical = mdata.get("chemical", {})
+        max_service_temp = thermal.get("max_service_temp_c", 0) or 0
+        warping = thermal.get("warping_tendency", "low")
+        uv_resistance = chemical.get("uv_resistance", "moderate")
+        food_safe = chemical.get("food_safe", "no")
+        outgassing = chemical.get("outgassing", "moderate")
+        min_print_temp = (thermal.get("print_temp_range_c", [0, 0]) or [0, 0])[0]
+
+        # --- Hard exclusions (skip the material entirely) -----------
+        # Flexibility: only TPU family qualifies.  Kill everything else
+        # so the recommendation can't accidentally hand back PETG for
+        # a phone case.
+        if needs_flexible and not _is_tpu_family(mid):
+            continue
+
+        # Outside flexibility, never propose TPU as the primary
+        # recommendation — it's a niche material.
+        if not needs_flexible and _is_tpu_family(mid):
+            continue
+
+        # Food contact: must be food_safe yes/conditional.
+        if needs_food and food_safe not in ("yes", "conditional"):
+            continue
+
+        # --- Soft scoring per fired filter --------------------------
+        if needs_heat:
+            if max_service_temp >= target_temp_c + 10:
+                score += 15
+                reasons.append(
+                    f"survives target temperature ({max_service_temp}C >= {target_temp_c}C + margin)."
+                )
+            elif max_service_temp >= target_temp_c:
+                score += 5
+                reasons.append(
+                    f"marginal at target temperature ({max_service_temp}C ≈ {target_temp_c}C)."
+                )
+            else:
+                score -= 30
+                warnings.append(
+                    f"deforms at target temperature "
+                    f"(max service {max_service_temp}C < {target_temp_c}C)."
+                )
+
+        if needs_outdoor:
+            if uv_resistance == "excellent":
+                score += 25
+                reasons.append("excellent UV resistance for sustained sun exposure.")
+            elif uv_resistance == "moderate":
+                score += 5
+                reasons.append("moderate UV resistance — survives 1-2 outdoor seasons.")
+            else:  # poor
+                score -= 30
+                warnings.append(
+                    "poor UV resistance — becomes brittle in direct sunlight within weeks."
+                )
+
+        if needs_food:
+            if food_safe == "yes":
+                score += 20
+                reasons.append("food-safe polymer family.")
+            elif food_safe == "conditional":
+                score += 5
+                reasons.append("conditionally food-safe (single-use only — FDM layer lines harbor bacteria).")
+
+        if needs_low_outgassing:
+            if outgassing == "minimal":
+                score += 8
+                reasons.append("minimal outgassing — safe for indoor / occupied spaces.")
+            elif outgassing == "low":
+                score += 4
+                reasons.append("low outgassing — acceptable for indoor spaces with ventilation.")
+            else:  # moderate / high
+                score -= 10
+                warnings.append("moderate outgassing — print and cure with ventilation.")
+
+        if needs_sustained_load:
+            # Creep + thermal floor — PLA family creeps badly under
+            # sustained load even at room temperature.  PETG / ASA /
+            # ABS / Nylon / PC are all engineered options.
+            if _is_pla_family(mid):
+                score -= 35
+                warnings.append(
+                    "PLA family creeps under sustained load — not safe long-term for shelves, hooks, or hangers."
+                )
+            elif max_service_temp >= 65 and warping in ("low", "moderate", "none"):
+                score += 12
+                reasons.append("dimensional stability suitable for sustained-load applications.")
+
+        if needs_hot_load:
+            # Hot environment + load — eliminate PLA AND PETG (PETG
+            # softens at 65C and creeps under load).
+            if _is_pla_family(mid) or mid.startswith("petg"):
+                score -= 25
+                warnings.append(
+                    "softens under combined heat and sustained load — choose ABS / ASA / PC / Nylon."
+                )
+
+        if needs_flexible:
+            # We've already filtered to TPU family — boost it strongly.
+            score += 30
+            reasons.append("TPU family — the only FDM material with genuine flexibility.")
+
+        if is_cosmetic and not (
+            needs_heat or needs_outdoor or needs_food
+            or needs_sustained_load or needs_flexible
+        ):
+            # Pure cosmetic case — PLA wins on surface finish + ease
+            # of print (no warping, low temp, smooth layer adhesion).
+            if _is_pla_family(mid):
+                score += 18
+                reasons.append("PLA family — best surface finish for cosmetic prints.")
+
+        # --- Printer capability filters -----------------------------
+        if supported is not None and mid not in supported:
+            warnings.append("not in the target printer's supported material set.")
+            score -= 60
+
+        if min_print_temp and min_print_temp > max_hotend_temp_c:
+            warnings.append(
+                f"requires {min_print_temp}C hotend — printer max is {max_hotend_temp_c}C."
+            )
+            score -= 50
+
+        needs_enclosure = warping in ("high", "very_high")
+        if needs_enclosure and not printer_has_enclosure:
+            warnings.append("requires enclosure for reliable printing — printer does not have one.")
+            score -= 30
+
+        if _is_tpu_family(mid) and not printer_has_direct_drive:
+            warnings.append("requires direct drive extruder — bowden setups cannot reliably print TPU.")
+            score -= 40
+
+        # Mild ease-of-print bias when nothing else is firing — PLA
+        # is the easiest to print, so it should win ties for vague
+        # prompts.
+        if (
+            not needs_heat and not needs_outdoor and not needs_food
+            and not needs_sustained_load and not needs_flexible
+            and warping == "low"
+        ):
+            score += 2
+
+        scores.append((score, mid, reasons, warnings))
+
+    scores.sort(key=lambda x: x[0], reverse=True)
+
+    # Track which filters fired for the top-level rationale string.
+    if needs_flexible:
+        fired_filters.append("flexibility")
+    if needs_food:
+        fired_filters.append("food contact")
+    if needs_outdoor:
+        fired_filters.append("outdoor / UV exposure")
+    if needs_heat:
+        fired_filters.append("heat exposure")
+    if needs_sustained_load:
+        fired_filters.append("sustained load")
+    if needs_low_outgassing:
+        fired_filters.append("indoor air quality")
+    if is_cosmetic and not fired_filters:
+        fired_filters.append("cosmetic / display")
+
+    if not scores:
+        # Absolute fallback — e.g. flexibility required but no TPU in
+        # the dict.  Never raise on free tier; return PLA with the
+        # full warning set so the user knows we couldn't satisfy it.
+        pla_data = materials.get("pla")
+        if pla_data is None:
+            raise RuntimeError("PLA material profile not found in safety-floor knowledge base")
+        pla_profile = MaterialProfile(
+            material_id="pla",
+            display_name=pla_data["display_name"],
+            category=pla_data["category"],
+            thermal=pla_data.get("thermal", {}),
+            chemical=pla_data.get("chemical", {}),
+        )
+        warnings = ["No material in the safety-floor catalogue satisfied your constraints — falling back to PLA."]
+        if verdict.is_load_bearing:
+            warnings.append(_format_upgrade_nudge(verdict))
+        return MaterialRecommendation(
+            material=pla_profile,
+            score=50.0,
+            reasons=[],
+            warnings=warnings,
+            design_limits_summary=pla_data.get("design_limits", {}),
+            alternatives=[],
+        )
+
+    top_score, top_mid, top_reasons, top_warnings = scores[0]
+    top_data = materials[top_mid]
+    top_profile = MaterialProfile(
+        material_id=top_mid,
+        display_name=top_data["display_name"],
+        category=top_data["category"],
+        thermal=top_data.get("thermal", {}),
+        chemical=top_data.get("chemical", {}),
+    )
+
+    # Compose the rationale prefix from the fired filters.
+    if fired_filters:
+        prefix = (
+            f"Recommended for: {', '.join(fired_filters)}. "
+            f"{top_profile.display_name} chosen — "
+            f"{top_reasons[0] if top_reasons else 'best matches the safety-floor constraints.'}"
+        )
+    else:
+        prefix = (
+            f"{top_profile.display_name} recommended — no specific functional "
+            f"constraints detected; defaulted to easiest-to-print material."
+        )
+    final_reasons = [prefix] + top_reasons[1:]
+
+    # Always attach the upgrade nudge when the load detector tripped,
+    # so free users see the path to engineering-grade analysis.
+    final_warnings = list(top_warnings)
+    if verdict.is_load_bearing:
+        final_warnings.append(_format_upgrade_nudge(verdict))
+
+    # Build alternatives from the next 2-3 ranked materials.
+    alternatives: list[dict[str, Any]] = []
+    for alt_score, alt_mid, alt_reasons, alt_warnings in scores[1:4]:
+        alt_data = materials[alt_mid]
+        alternatives.append(
+            {
+                "material_id": alt_mid,
+                "display_name": alt_data["display_name"],
+                "score": round(alt_score, 1),
+                "reasons": alt_reasons,
+                "warnings": alt_warnings,
+            }
+        )
+
+    return MaterialRecommendation(
+        material=top_profile,
+        score=round(top_score, 1),
+        reasons=final_reasons,
+        warnings=final_warnings,
+        design_limits_summary=top_profile.design_limits,
+        alternatives=alternatives,
+    )
+
+
+def _format_upgrade_nudge(verdict: Any) -> str:
+    """Render the load-bearing upgrade nudge as a single user-facing string.
+
+    The structured ``upgrade_recommendation`` dict from the verdict is
+    designed for programmatic consumers; this function flattens the
+    key copy into one line that fits naturally inside
+    ``MaterialRecommendation.warnings``.  Funnel-allowed per
+    CLAUDE.md "Trademark + cross-repo discipline" — naming kiln-pro
+    and linking kiln3d.com from public Kiln is a funnel, not a leak.
+    """
+    return (
+        "This appears to be a load-bearing application; the safety-floor "
+        "recommendation above doesn't account for cross-section shape, "
+        "buckling, fatigue, creep, or FDM anisotropy. For real-engineering "
+        "math (beam mechanics with FoS control, ISO 286 fits, fatigue + "
+        "creep derating, calibrated tolerances), see "
+        "https://kiln3d.com/pricing."
+    )
+
+
 def recommend_material_for_design(
     requirements_text: str,
     *,
@@ -594,6 +1070,28 @@ def recommend_material_for_design(
         profile. Materials outside this set are heavily penalized.
     """
     kb = _get_kb()
+
+    # Free-tier dispatch: when the kiln-pro engineering overlay isn't
+    # loaded, ``mechanical`` and ``use_case_ratings`` are empty across
+    # all materials.  The curated path below relies on those fields
+    # for fine-grained scoring; without them it produces degraded
+    # answers (e.g. recommends PLA for load-bearing because it can't
+    # see structural_load_bearing="poor").  Route those callers to
+    # the safety-floor fallback, which uses ONLY thermal / chemical /
+    # process-floor design_limits + a small set of public-domain DIY
+    # heuristics.  Probe a representative material (PLA — always
+    # present) for the overlay marker.
+    sample = kb.materials.get("pla") or next(iter(kb.materials.values()), None)
+    if sample is None or not sample.get("mechanical"):
+        return _recommend_from_safety_floor(
+            requirements_text,
+            kb.materials,
+            printer_has_enclosure=printer_has_enclosure,
+            printer_has_direct_drive=printer_has_direct_drive,
+            max_hotend_temp_c=max_hotend_temp_c,
+            supported_materials=supported_materials,
+        )
+
     matched = match_requirements(requirements_text)
     supported = {m.lower() for m in supported_materials} if supported_materials else None
 
