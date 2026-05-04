@@ -41,6 +41,9 @@ _manifold_benchmarked: bool = False
 #: per process lifetime.
 _upgrade_warned: bool = False
 
+#: Per-process OpenSCAD executable probe cache. Values are ``(ok, reason)``.
+_openscad_probe_cache: dict[str, tuple[bool, str | None]] = {}
+
 _OPENSCAD_MIN_VERSION_YEAR = 2024
 _OPENSCAD_UPGRADE_INSTRUCTIONS = (
     "  macOS: brew install --cask openscad@snapshot\n"
@@ -77,6 +80,72 @@ def _detect_openscad_version(binary: str) -> str:
     except Exception:  # noqa: BLE001
         pass
     return ""
+
+
+def _probe_openscad_runs(path: str) -> tuple[bool, str | None]:
+    """Return whether an OpenSCAD binary can execute on this host."""
+    cached = _openscad_probe_cache.get(path)
+    if cached is not None:
+        return cached
+
+    try:
+        result = subprocess.run(
+            [path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        probed = (False, "openscad --version timed out after 5s")
+        _openscad_probe_cache[path] = probed
+        return probed
+    except OSError as exc:
+        probed = (False, str(exc) or exc.__class__.__name__)
+        _openscad_probe_cache[path] = probed
+        return probed
+    except subprocess.SubprocessError as exc:
+        probed = (False, str(exc) or exc.__class__.__name__)
+        _openscad_probe_cache[path] = probed
+        return probed
+
+    output = (result.stderr or "").strip() or (result.stdout or "").strip()
+    if result.returncode != 0:
+        reason = output or f"openscad --version exited with status {result.returncode}"
+        probed = (False, reason)
+        _openscad_probe_cache[path] = probed
+        return probed
+    if not output:
+        probed = (False, "openscad --version produced no output")
+        _openscad_probe_cache[path] = probed
+        return probed
+    if not re.search(r"\bOpenSCAD\b", output, re.IGNORECASE):
+        probed = (False, f"unexpected openscad --version output: {output[:200]}")
+        _openscad_probe_cache[path] = probed
+        return probed
+
+    probed = (True, None)
+    _openscad_probe_cache[path] = probed
+    return probed
+
+
+def _openscad_sandbox_hint(reasons: list[str]) -> str:
+    """Return a Codex/sandbox hint for Qt CPU-feature probe failures."""
+    joined = "\n".join(reasons).lower()
+    cpu_probe_markers = [
+        "neon",
+        "bad cpu type",
+        "incompatible processor",
+        "qdetectcpufeatures",
+        "qt build requires",
+    ]
+    if not any(marker in joined for marker in cpu_probe_markers):
+        return ""
+    return (
+        "OpenSCAD is installed but Qt could not verify required CPU features "
+        "from this launch environment. In Codex, approve running the Kiln "
+        "generation command outside the sandbox, or run the generation step "
+        "from a normal terminal.\n"
+    )
 
 
 def get_openscad_version(binary: str | None = None) -> str:
@@ -289,22 +358,25 @@ def _heightmap_content_block(
     x_scale: float,
     y_scale: float,
     depth: float,
+    mode: str = "emboss",
 ) -> str:
     """Return the OpenSCAD fragment for a PGM heightmap surface.
 
-    OpenSCAD's ``surface()`` interprets pixel values 0-255 as heights.
-    We scale so that black pixels (0) produce zero height (no emboss)
-    and white pixels (255) produce full depth.  For debossing, the
-    caller inverts the image so dark areas = emboss.
-
-    The depth scale factor is ``(depth + 0.1) / 255`` so the surface
-    geometry fully penetrates the model (the +0.1 ensures overlap).
+    OpenSCAD's ``surface()`` builds a flat-bottomed, varying-top prism.
+    For *emboss*, we want that prism to sit ON the face and protrude
+    upward — positive Z scale, flat bottom flush with the face.  For
+    *deboss*, we want a flat-TOPPED, varying-BOTTOM prism so the flat
+    top sits flush with the face and the varying bottom extends INTO
+    the material by (depth + 0.1) * hmap — this gives a proportional
+    cut depth across all heightmap values, not a step function.  Flip
+    achieved with a negative Z scale.
     """
     dat_path = content_info.get("dat_path") or content_info.get("pgm_path", "")
     # DAT files use 0.0–1.0 range, so z_scale = full depth (+0.1 for overlap)
     z_scale = depth + 0.1
+    signed_z = -z_scale if mode == "deboss" else z_scale
     return (
-        f'scale([{x_scale:.6f}, {y_scale:.6f}, {z_scale:.6f}])\n'
+        f'scale([{x_scale:.6f}, {y_scale:.6f}, {signed_z:.6f}])\n'
         f'                surface(file="{_escape_scad_string(dat_path)}", center=true, convexity=5);'
     )
 
@@ -506,16 +578,48 @@ def generate_emboss_scad(
         placement, face, scale, offset_x_mm, offset_y_mm,
     )
 
+    # Detect non-cardinal (arbitrary) face normals.  For cardinal faces
+    # (top/bottom/front/back/left/right) the world-axis offsets and
+    # world-Z deboss shift work correctly because the local face frame
+    # aligns with world axes after rotation.  For arbitrary normals
+    # (tilted nameplate canvas, sloped trophy face, angled tag), the
+    # local face X/Y axes are NOT aligned with world X/Y, so:
+    #   - offset_x_mm / offset_y_mm must be applied in the LOCAL
+    #     face frame (before rotation), or they slide off the face.
+    #   - For deboss, the prism must shift along the FACE NORMAL
+    #     (into the body), not along world Z, or it lands inside the
+    #     body without crossing the face surface — silent no-op cut.
+    #
+    # The 2026-05-03 nameplate "no visible text" bug came from the
+    # second bullet: world-Z shift on a tilted face left the prism
+    # entirely inside the body, never crossing the face surface, so
+    # difference() removed an invisible slab while the face stayed
+    # intact.  Fix below uses an INNER translate (post-rotation,
+    # in face-local frame) so offsets and depth-shift compose
+    # correctly for any normal direction.
+    is_cardinal = (
+        abs(normal[2]) > 0.9
+        or abs(normal[1]) > 0.9
+        or abs(normal[0]) > 0.9
+    )
+
     if mode == "deboss":
-        tx = cx + final_offset_x
-        ty = cy + final_offset_y
-        tz = cz
         boolean_op = "difference"
     else:
+        boolean_op = "union"
+
+    if is_cardinal:
+        # Cardinal-face path: world-axis offsets, z_offset shift below.
         tx = cx + final_offset_x
         ty = cy + final_offset_y
         tz = cz
-        boolean_op = "union"
+    else:
+        # Non-cardinal: outer translate goes to bare face center; the
+        # offsets and deboss-shift are applied AFTER the rotation as an
+        # inner translate, so they compose in the face-local frame.
+        tx = cx
+        ty = cy
+        tz = cz
 
     rotation_clause = _rotation_for_normal(normal)
 
@@ -549,17 +653,28 @@ def generate_emboss_scad(
         # dark areas to be tall.  Invert the DAT so pattern=1, bg=0.
         heightmap_info = _invert_dat_heightmap(content_info, out)
         content_block = _heightmap_content_block(
-            heightmap_info, x_scale, y_scale, depth_mm,
+            heightmap_info, x_scale, y_scale, depth_mm, mode=mode,
         )
     else:
-        # openscad_text — scale font_size to fit the target width
-        text_str = content_info.get("text", "")
-        # Approximate: each character is ~0.6× font_size wide
-        char_count = max(1, len(text_str))
-        max_font_from_w = target_w / (char_count * 0.6)
-        max_font_from_h = target_h * 0.8  # leave vertical margin
-        auto_font_size = min(max_font_from_w, max_font_from_h)
-        content_info = {**content_info, "font_size": round(auto_font_size, 1)}
+        # openscad_text — caller can pre-set ``font_size`` in
+        # content_info to bypass auto-sizing.  Multi-line helpers use
+        # this to enforce typography hierarchy (primary > secondary >
+        # tertiary) when the auto-sizer's width/height coupling would
+        # otherwise produce inverted sizing — e.g. "Josh Beckham"
+        # width-limited at 11mm while "CEO" height-limited at 17mm
+        # on a 200×78 wedge face.
+        explicit_font_size = content_info.get("font_size", 0)
+        if explicit_font_size and explicit_font_size > 0:
+            # Caller knows what they want — trust it.
+            pass
+        else:
+            text_str = content_info.get("text", "")
+            # Approximate: each character is ~0.6× font_size wide
+            char_count = max(1, len(text_str))
+            max_font_from_w = target_w / (char_count * 0.6)
+            max_font_from_h = target_h * 0.8  # leave vertical margin
+            auto_font_size = min(max_font_from_w, max_font_from_h)
+            content_info = {**content_info, "font_size": round(auto_font_size, 1)}
         inner = _text_content_block(content_info)
         extrude_height = depth_mm + 0.1
         content_block = (
@@ -585,25 +700,103 @@ def generate_emboss_scad(
     # material at cz + depth_mm.  This mirrors the top-face behavior where
     # we shift -depth_mm so the prism penetrates inward.
     extrude_height = depth_mm + 0.1
-    if mode == "deboss":
-        if normal[2] < -0.9:
-            # Bottom-like face: prism was flipped by rotate([180,0,0]).
-            # Shift up by full extrude_height so it penetrates upward into
-            # the body sitting above the face.
-            z_offset = extrude_height
+    if is_cardinal:
+        # Cardinal-face path (top/bottom/front/back/left/right): use the
+        # original world-Z shift logic.  The face's local Z aligns with
+        # ±world-Z (after rotation) so this still works correctly.
+        if mode == "deboss":
+            if content_type == "heightmap":
+                # Heightmap deboss uses a negative Z scale (see
+                # _heightmap_content_block) so the prism is flat-TOPPED and
+                # varying-BOTTOMED.  Translating to cz puts the flat top
+                # exactly on the face surface; the varying bottom extends
+                # INTO the material by (depth + 0.1) * hmap.  Cut depth is
+                # proportional across all hmap values, not a step function.
+                z_offset = 0.0
+            elif normal[2] < -0.9:
+                # SVG/text deboss on a bottom-like face: prism was flipped by
+                # rotate([180,0,0]).  Shift up by full extrude_height so it
+                # penetrates upward into the body sitting above the face.
+                z_offset = extrude_height
+            else:
+                # SVG/text deboss on a top-like or side face: prism already
+                # points toward the body after rotation; shift by -depth_mm
+                # so far end penetrates depth.
+                z_offset = -depth_mm
         else:
-            # Top-like or side face: prism already points toward the body
-            # after rotation; shift by -depth_mm so far end penetrates depth.
-            z_offset = -depth_mm
-    else:
-        # Emboss — protrude outward from the surface.  Rotation already
-        # orients the prism outward; no additional Z shift needed for top
-        # faces.  For bottom faces the prism (post-flip) sits at Z=[-h, 0]
-        # in world frame, which is already OUTSIDE the material above —
-        # correct for a raised emboss on the tray underside.
-        z_offset = 0.0
+            # Emboss — protrude outward from the surface.  Rotation already
+            # orients the prism outward; no additional Z shift needed for top
+            # faces.  For bottom faces the prism (post-flip) sits at Z=[-h, 0]
+            # in world frame, which is already OUTSIDE the material above —
+            # correct for a raised emboss on the tray underside.
+            z_offset = 0.0
 
-    translate_line = f"translate([{tx:.6f}, {ty:.6f}, {tz + z_offset:.6f}])"
+        translate_line = f"translate([{tx:.6f}, {ty:.6f}, {tz + z_offset:.6f}])"
+        inner_translate_line = ""
+    else:
+        # Non-cardinal-face path: outer translate goes to bare face
+        # center; offsets and deboss-shift are applied AFTER rotation in
+        # face-local space so they compose along the face's u/v/normal
+        # axes regardless of world orientation.
+        if mode == "deboss":
+            if content_type == "heightmap":
+                local_z_shift = 0.0
+                local_extrude_override = None
+            else:
+                # Shift the prism INTO the body by depth_mm along the
+                # face normal (which is local +Z post-rotation), then
+                # extrude back out by (depth_mm + 1.0) so the prism
+                # robustly straddles the face surface — 1mm OUTSIDE
+                # the body, full depth_mm INSIDE.  The 1mm outward
+                # overlap (vs the cardinal-face 0.1mm) absorbs face-
+                # centroid jitter from chained deboss operations:
+                # each deboss carving subtly shifts the centroid off
+                # the actual face plane (deboss-floor pulls it
+                # inward), and a chained CEO-after-name deboss with
+                # only 0.1mm overlap silently no-ops because the
+                # prism never crosses the surface.  See the 2026-05-03
+                # nameplate "CEO disappears on second pass" bug.
+                local_z_shift = -depth_mm
+                local_extrude_override = depth_mm + 1.0
+        else:
+            local_z_shift = 0.0
+            local_extrude_override = None
+
+        translate_line = f"translate([{tx:.6f}, {ty:.6f}, {tz:.6f}])"
+        inner_translate_line = (
+            f"translate([{final_offset_x:.6f}, "
+            f"{final_offset_y:.6f}, {local_z_shift:.6f}])\n        "
+        )
+
+        # If the local-frame deboss path needs a different extrude
+        # height to straddle the surface robustly, rebuild the
+        # content_block with the override.
+        if local_extrude_override is not None and content_type == "openscad_text":
+            inner_text = _text_content_block(content_info)
+            content_block = (
+                f"linear_extrude(height={local_extrude_override:.4f})\n"
+                f"            {inner_text}"
+            )
+        elif local_extrude_override is not None and content_type == "svg":
+            # Same idea for SVG content — rebuild with override height.
+            # _svg_content_block was already called above; we need the
+            # raw inner.  Recompute it here for the override case.
+            svg_w_o = content_info.get("content_width") or content_info.get("width", 100)
+            svg_h_o = content_info.get("content_height") or content_info.get("height", 100)
+            content_cx_o = content_info.get("content_x_min", 0) + svg_w_o / 2
+            content_cy_o = content_info.get("content_y_min", 0) + svg_h_o / 2
+            scale_x_o = target_w / svg_w_o if svg_w_o else 1.0
+            scale_y_o = target_h / svg_h_o if svg_h_o else 1.0
+            uniform_scale_o = min(scale_x_o, scale_y_o)
+            inner_svg = _svg_content_block(
+                content_info, uniform_scale_o, uniform_scale_o,
+                content_cx_o, content_cy_o,
+                svg_id=svg_id, svg_layer=svg_layer,
+            )
+            content_block = (
+                f"linear_extrude(height={local_extrude_override:.4f})\n"
+                f"            {inner_svg}"
+            )
 
     scad_code = (
         f'// Generated by Kiln emboss_generator\n'
@@ -613,7 +806,7 @@ def generate_emboss_scad(
         f'{boolean_op}() {{\n'
         f'    import("{_escape_scad_string(str(model_path))}");\n'
         f'    {translate_line}\n'
-        f'        {rotation_clause}{content_block}\n'
+        f'        {rotation_clause}{inner_translate_line}{content_block}\n'
         f'}}\n'
     )
 
@@ -653,18 +846,37 @@ def _find_openscad(openscad_path: str | None = None) -> str:
         :func:`_find_openscad_for_svg` instead, which hard-fails on
         OpenSCAD < 2024.
     """
+    attempted: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def _try_candidate(candidate: str) -> str | None:
+        if not candidate or candidate in seen:
+            return None
+        seen.add(candidate)
+        if not os.path.isfile(candidate):
+            attempted.append((candidate, "not found"))
+            return None
+        if not os.access(candidate, os.X_OK):
+            attempted.append((candidate, "not executable"))
+            return None
+
+        ok, reason = _probe_openscad_runs(candidate)
+        if not ok:
+            attempted.append((candidate, reason or "openscad --version failed"))
+            return None
+
+        _detect_and_cache_version(candidate)
+        _warn_if_outdated()
+        return candidate
+
     # Check env var fast path first (CLAUDE.md rule: env vars > config > defaults)
     if not openscad_path:
         openscad_path = os.environ.get("KILN_OPENSCAD_PATH")
 
     if openscad_path:
-        if os.path.isfile(openscad_path) and os.access(openscad_path, os.X_OK):
-            _detect_and_cache_version(openscad_path)
-            _warn_if_outdated()
-            return openscad_path
-        raise FileNotFoundError(
-            f"Provided OpenSCAD path does not exist or is not executable: {openscad_path}"
-        )
+        found = _try_candidate(openscad_path)
+        if found:
+            return found
 
     # macOS bundle — handle versioned app names (e.g. OpenSCAD-2021.01.app)
     if platform.system() == "Darwin":
@@ -674,28 +886,37 @@ def _find_openscad(openscad_path: str | None = None) -> str:
             "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD",
             "/Applications/OpenSCAD-*.app/Contents/MacOS/OpenSCAD",
         ]:
-            for mac_path in _glob.glob(pattern):
-                if os.path.isfile(mac_path) and os.access(mac_path, os.X_OK):
-                    _detect_and_cache_version(mac_path)
-                    _warn_if_outdated()
-                    return mac_path
+            for mac_path in sorted(_glob.glob(pattern)):
+                found = _try_candidate(mac_path)
+                if found:
+                    return found
 
     # $PATH
     on_path = shutil.which("openscad")
     if on_path:
-        _detect_and_cache_version(on_path)
-        _warn_if_outdated()
-        return on_path
+        found = _try_candidate(on_path)
+        if found:
+            return found
 
     # Homebrew fallback (MCP servers may not inherit full $PATH)
     for brew_path in ["/opt/homebrew/bin/openscad", "/usr/local/bin/openscad"]:
-        if os.path.isfile(brew_path) and os.access(brew_path, os.X_OK):
-            _detect_and_cache_version(brew_path)
-            _warn_if_outdated()
-            return brew_path
+        found = _try_candidate(brew_path)
+        if found:
+            return found
+
+    attempted_msg = "\n".join(
+        f"  - {path} -> {reason}"
+        for path, reason in attempted
+    )
+    if attempted_msg:
+        attempted_msg = "Tried OpenSCAD candidates:\n" + attempted_msg + "\n"
+    hint = _openscad_sandbox_hint([reason for _path, reason in attempted])
 
     raise FileNotFoundError(
-        "OpenSCAD not found. Install it for 3D model generation:\n"
+        "OpenSCAD not found or not usable on this machine.\n"
+        + attempted_msg
+        + hint
+        + "Install it for 3D model generation:\n"
         + _OPENSCAD_UPGRADE_INSTRUCTIONS
     )
 

@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-04-29T15:56:40.969015+00:00",
-  "tool_count": 274,
+  "generated": "2026-05-04T04:35:41.428178+00:00",
+  "tool_count": 279,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -70,6 +70,10 @@
     "part_economics": {
       "label": "Part Economics",
       "pitch": "Break sliced plates into per-part time, filament, and cost estimates for quoting, kit pricing, and replacement parts."
+    },
+    "engineering_intelligence": {
+      "label": "Engineering Intelligence",
+      "pitch": "Curated industry-standard fastener, hole, and joint data \u2014 ANSI/ISO specs, FDM-aware clearance recommendations, heat-set insert sizing, joint-strategy decision tree.  Pro+ engineering reference for any design that drills a hole or threads a fastener."
     }
   },
   "tools": [
@@ -6148,6 +6152,114 @@
       }
     },
     {
+      "name": "lookup_fastener",
+      "description": "Get the full spec for a screw, bolt, or threaded fastener.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "lookup_fastenerArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "recommend_hole",
+      "description": "Tell me what size hole to drill for something to fit through.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "screw_name": {
+            "default": "",
+            "title": "Screw Name",
+            "type": "string"
+          },
+          "thing_diameter_mm": {
+            "default": 0.0,
+            "title": "Thing Diameter Mm",
+            "type": "number"
+          },
+          "fit": {
+            "default": "normal",
+            "title": "Fit",
+            "type": "string"
+          },
+          "thing_type": {
+            "default": "generic",
+            "title": "Thing Type",
+            "type": "string"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "print_axis": {
+            "default": "xy",
+            "title": "Print Axis",
+            "type": "string"
+          },
+          "hole_depth_mm": {
+            "default": 0.0,
+            "title": "Hole Depth Mm",
+            "type": "number"
+          },
+          "wall_thickness_mm": {
+            "default": 0.0,
+            "title": "Wall Thickness Mm",
+            "type": "number"
+          },
+          "edge_distance_mm": {
+            "default": 0.0,
+            "title": "Edge Distance Mm",
+            "type": "number"
+          },
+          "blind_or_through": {
+            "default": "through",
+            "title": "Blind Or Through",
+            "type": "string"
+          }
+        },
+        "title": "recommend_holeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "recommend_joint_strategy",
+      "description": "Tell me what kind of fastener / joint to use for a 3D-printed part.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "cycled_assembly": {
+            "default": false,
+            "title": "Cycled Assembly",
+            "type": "boolean"
+          },
+          "structural_load": {
+            "default": false,
+            "title": "Structural Load",
+            "type": "boolean"
+          },
+          "substrate": {
+            "default": "plastic_print",
+            "title": "Substrate",
+            "type": "string"
+          }
+        },
+        "title": "recommend_joint_strategyArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "emit_test_event",
       "description": "Fire a synthetic event to verify Telegram/Discord/log wiring.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -8779,6 +8891,180 @@
           }
         },
         "title": "generate_keychainArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_license_plate_frame",
+      "description": "Generate a US-spec license plate frame.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "product_generators",
+      "parameters": {
+        "properties": {
+          "top_text": {
+            "default": "",
+            "title": "Top Text",
+            "type": "string"
+          },
+          "bottom_text": {
+            "default": "",
+            "title": "Bottom Text",
+            "type": "string"
+          },
+          "width_mm": {
+            "default": 318.0,
+            "title": "Width Mm",
+            "type": "number"
+          },
+          "height_mm": {
+            "default": 200.0,
+            "title": "Height Mm",
+            "type": "number"
+          },
+          "plate_width_mm": {
+            "default": 305.0,
+            "title": "Plate Width Mm",
+            "type": "number"
+          },
+          "plate_height_mm": {
+            "default": 152.0,
+            "title": "Plate Height Mm",
+            "type": "number"
+          },
+          "thickness_mm": {
+            "default": 5.0,
+            "title": "Thickness Mm",
+            "type": "number"
+          },
+          "corner_radius_mm": {
+            "default": 6.0,
+            "title": "Corner Radius Mm",
+            "type": "number"
+          },
+          "mount_hole_diameter_mm": {
+            "default": 7.0,
+            "title": "Mount Hole Diameter Mm",
+            "type": "number"
+          },
+          "mount_hole_spacing_mm": {
+            "default": 178.0,
+            "title": "Mount Hole Spacing Mm",
+            "type": "number"
+          },
+          "mount_hole_inset_top_mm": {
+            "default": 9.0,
+            "title": "Mount Hole Inset Top Mm",
+            "type": "number"
+          },
+          "text_depth_mm": {
+            "default": 1.0,
+            "title": "Text Depth Mm",
+            "type": "number"
+          },
+          "text_size_mm": {
+            "default": 0.0,
+            "title": "Text Size Mm",
+            "type": "number"
+          },
+          "font": {
+            "default": "Liberation Sans:style=Bold",
+            "title": "Font",
+            "type": "string"
+          },
+          "material": {
+            "default": "ASA",
+            "title": "Material",
+            "type": "string"
+          },
+          "body_color": {
+            "default": "black",
+            "title": "Body Color",
+            "type": "string"
+          },
+          "color_overrides": {
+            "default": "",
+            "title": "Color Overrides",
+            "type": "string"
+          },
+          "size": {
+            "default": "",
+            "title": "Size",
+            "type": "string"
+          }
+        },
+        "title": "generate_license_plate_frameArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_nameplate",
+      "description": "Generate a desk nameplate with two-line raised text.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "product_generators",
+      "parameters": {
+        "properties": {
+          "text_line_1": {
+            "default": "",
+            "title": "Text Line 1",
+            "type": "string"
+          },
+          "text_line_2": {
+            "default": "",
+            "title": "Text Line 2",
+            "type": "string"
+          },
+          "font_size_mm": {
+            "default": 0.0,
+            "title": "Font Size Mm",
+            "type": "number"
+          },
+          "font": {
+            "default": "Liberation Sans:style=Bold",
+            "title": "Font",
+            "type": "string"
+          },
+          "border_frame": {
+            "default": true,
+            "title": "Border Frame",
+            "type": "boolean"
+          },
+          "width_mm": {
+            "default": 200.0,
+            "title": "Width Mm",
+            "type": "number"
+          },
+          "base_depth_mm": {
+            "default": 50.0,
+            "title": "Base Depth Mm",
+            "type": "number"
+          },
+          "height_mm": {
+            "default": 60.0,
+            "title": "Height Mm",
+            "type": "number"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "body_color": {
+            "default": "black",
+            "title": "Body Color",
+            "type": "string"
+          },
+          "color_overrides": {
+            "default": "",
+            "title": "Color Overrides",
+            "type": "string"
+          },
+          "size": {
+            "default": "",
+            "title": "Size",
+            "type": "string"
+          }
+        },
+        "title": "generate_nameplateArguments",
         "type": "object"
       }
     },
