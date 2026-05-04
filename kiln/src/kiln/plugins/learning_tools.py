@@ -427,6 +427,17 @@ def recommend_settings(
     aggregated recommendations (most common temps, speeds, slicer profiles)
     plus the raw successful settings for agent review.
 
+    When kiln-pro is installed AND the user has a calibrated slicer
+    profile for ``(printer_name, material_type)``, the calibration coach
+    overlays personally-tuned values (flow rate, max volumetric speed,
+    pressure advance, retraction distance) on top of the historical
+    medians.  The response gains a ``calibration_used`` block and an
+    extra ``rationale`` line per overridden value naming the slicer +
+    staleness — so the user sees "Using your calibrated flow rate of
+    0.95 from OrcaSlicer (updated 12 days ago)" instead of the generic
+    aggregate.  Behavior is unchanged when kiln-pro is not installed
+    or no calibration is available.
+
     **Note**: Recommendations are advisory.  They do NOT override safety
     limits or preflight checks.  Always validate settings against printer
     safety profiles before use.
@@ -456,8 +467,21 @@ def recommend_settings(
             limit=20,
         )
 
+        # Calibration overlay — when kiln-pro is installed AND the user
+        # has a calibrated profile for (printer_name, material_type),
+        # the coach attaches a calibration_used block and overrides
+        # specific slicer values (flow_rate, max_volumetric_speed,
+        # pressure_advance, retraction_distance) on top of the historical
+        # aggregates.  Lazy-imported so public Kiln keeps working without
+        # the pro package.  Returns (None, None, []) when calibration
+        # is not available — behavior is then identical to today.
+        cal_used, cal_overrides, cal_rationale = _recommend_calibration_overlay(
+            printer_name=printer_name,
+            material_type=material_type,
+        )
+
         if not outcomes:
-            return {
+            empty: dict[str, Any] = {
                 "success": True,
                 "has_data": False,
                 "message": "No successful outcomes found for the given criteria.",
@@ -468,6 +492,14 @@ def recommend_settings(
                 },
                 "safety_notice": _LEARNING_SAFETY_NOTICE,
             }
+            # Even with zero historical outcomes, surface calibrated
+            # overrides so the user's tuning shows up in the response.
+            if cal_overrides:
+                empty["recommended_settings"] = dict(cal_overrides)
+                empty["rationale"] = list(cal_rationale)
+            if cal_used is not None:
+                empty["calibration_used"] = cal_used
+            return empty
 
         # Aggregate settings across successful outcomes
         temp_tools: list[float] = []
@@ -523,7 +555,14 @@ def recommend_settings(
         n = len(outcomes)
         confidence = "low" if n < 3 else ("medium" if n < 10 else "high")
 
-        return {
+        # Calibration overrides win over historical medians — when the
+        # user has personally tuned the machine, that work supersedes
+        # the generic learning aggregate.  Only flow physics keys are
+        # touched; temps and speeds keep their historical values.
+        if cal_overrides:
+            recommended.update(cal_overrides)
+
+        result: dict[str, Any] = {
             "success": True,
             "has_data": True,
             "recommended_settings": recommended,
@@ -551,9 +590,126 @@ def recommend_settings(
             ],
             "safety_notice": _LEARNING_SAFETY_NOTICE,
         }
+        if cal_rationale:
+            result["rationale"] = list(cal_rationale)
+        if cal_used is not None:
+            result["calibration_used"] = cal_used
+        return result
     except Exception as exc:
         _logger.exception("Unexpected error in recommend_settings")
         return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# Tiers where the user's calibrated values win over historical medians.
+# HIGH: user verified values on this machine.
+# MEDIUM: imported profile diverges from defaults — treated as personally
+#   tuned (or vendor-baseline fallback, which is what we'd inject anyway).
+# LOW / UNKNOWN: skip — values look like defaults, no point overriding
+#   with the same numbers.
+_RECOMMEND_OVERRIDE_TIERS: frozenset[str] = frozenset({"high", "medium"})
+
+
+def _recommend_calibration_overlay(
+    *,
+    printer_name: str | None,
+    material_type: str | None,
+) -> tuple[dict | None, dict, list[str]]:
+    """Lazy-import calibration_coach and resolve overrides for a recommend.
+
+    Returns ``(calibration_used_block, overrides, rationale_lines)``.
+    The block is the standard payload from
+    :func:`kiln_pro.engineering.calibration_coach.calibration_used_block`
+    so the response shape matches the 6 other wire-up sites
+    (compute_iso_fit, design_for_load, tolerance_stack_analysis,
+    compute_hole, get_clearance_recommendation, slice_and_estimate's
+    slicer-args injection).
+
+    Returns ``(None, {}, [])`` when:
+
+    - kiln-pro is not installed (the public Kiln free-tier path)
+    - ``printer_name`` is None (calibration is meaningless without a printer)
+    - calibration tier is LOW or UNKNOWN (no override warranted)
+    - the coach raises (defensive — never break the recommend path)
+
+    Behavior in those cases is identical to the historic recommend
+    output, so the wire-up is a strict superset of today's surface.
+    """
+    if printer_name is None:
+        return None, {}, []
+    try:
+        from kiln_pro.engineering.calibration_coach import (  # type: ignore[import-not-found]
+            calibration_for,
+            calibration_used_block,
+        )
+    except ImportError:
+        return None, {}, []
+
+    try:
+        verdict = calibration_for(printer_name, material_type)
+        cal_used = calibration_used_block(verdict, printer_id=printer_name)
+    except Exception:
+        return None, {}, []
+
+    tier = getattr(verdict.tier, "value", None) or str(verdict.tier)
+    if tier not in _RECOMMEND_OVERRIDE_TIERS:
+        # LOW / UNKNOWN: still surface the calibration_used block so
+        # the user knows the coach looked, but no override.
+        return cal_used, {}, []
+
+    profile = verdict.profile
+    if profile is None:
+        return cal_used, {}, []
+
+    overrides: dict[str, Any] = {}
+    rationale: list[str] = []
+    candidates: tuple[tuple[str, Any], ...] = (
+        ("flow_rate", profile.flow_rate),
+        ("max_volumetric_speed", profile.max_volumetric_speed_mm3s),
+        ("pressure_advance", profile.pressure_advance),
+        ("retraction_distance", profile.retraction_distance_mm),
+    )
+
+    slicer_pretty = {
+        "orcaslicer": "OrcaSlicer",
+        "bambustudio": "Bambu Studio",
+        "prusaslicer": "PrusaSlicer",
+        "vendor_baseline": "the manufacturer baseline",
+    }.get(profile.slicer_name, profile.slicer_name)
+
+    age_days = profile.age_days() if hasattr(profile, "age_days") else None
+    if age_days is None or profile.slicer_name == "vendor_baseline":
+        age_phrase = ""
+    else:
+        days = int(round(age_days))
+        if days <= 0:
+            age_phrase = " (updated today)"
+        elif days == 1:
+            age_phrase = " (updated 1 day ago)"
+        else:
+            age_phrase = f" (updated {days} days ago)"
+
+    for key, value in candidates:
+        if value is None:
+            continue
+        overrides[key] = value
+        formatted = f"{value:g}"
+        rationale.append(
+            f"Using your calibrated {key} of {formatted} from "
+            f"{slicer_pretty}{age_phrase}"
+        )
+
+    staleness_days = getattr(verdict, "staleness_days", None)
+    if (
+        staleness_days is not None
+        and isinstance(staleness_days, (int, float))
+        and staleness_days > 180.0
+    ):
+        rationale.append(
+            f"Calibration is {int(round(staleness_days))} days old — "
+            "consider re-running the wizard for a fresher baseline."
+        )
+
+    return cal_used, overrides, rationale
 
 
 def save_agent_note(

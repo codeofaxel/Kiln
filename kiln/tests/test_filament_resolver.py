@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import pytest
 
+from .conftest import requires_engineering_overlay
+
 from kiln.design_intelligence import (
     recommend_material_for_design,
     resolve_filament,
@@ -28,6 +30,7 @@ from kiln.slicer_profiles import brand_overrides_for_slicer
 class TestResolveFilamentBrand:
     """Tests for resolving brand profile IDs."""
 
+    @requires_engineering_overlay
     def test_bambu_pla_basic_resolves(self):
         r = resolve_filament("bambu_pla_basic")
         assert r.is_brand_specific is True
@@ -35,6 +38,7 @@ class TestResolveFilamentBrand:
         assert r.density_g_per_cm3 == pytest.approx(1.26)
         assert "Bambu" in r.display_name
 
+    @requires_engineering_overlay
     def test_prusament_tpu_resolves(self):
         r = resolve_filament("prusament_tpu_95a")
         assert r.is_brand_specific is True
@@ -46,6 +50,7 @@ class TestResolveFilamentBrand:
         assert r.is_brand_specific is True
         assert r.nozzle_temp_optimal_c == 220
 
+    @requires_engineering_overlay
     def test_bambu_pa6_cf_resolves(self):
         r = resolve_filament("bambu_pa6_cf")
         assert r.is_brand_specific is True
@@ -126,6 +131,7 @@ class TestResolveFilamentCompat:
 class TestEstimatorBrandIntegration:
     """Tests for brand-specific density in the estimator."""
 
+    @requires_engineering_overlay
     def test_brand_density_used_in_estimator(self):
         """Bambu PLA Basic (1.26) should differ from generic PLA (1.24)."""
         brand = _get_material_profile("bambu_pla_basic")
@@ -146,6 +152,7 @@ class TestEstimatorBrandIntegration:
         assert result["name"] == "PLA"
         assert result["density_g_per_cm3"] > 0
 
+    @requires_engineering_overlay
     def test_brand_density_flows_to_estimate(self):
         """Brand density should flow through to estimate_from_dimensions."""
         from kiln.pre_estimate import estimate_from_dimensions

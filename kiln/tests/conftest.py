@@ -429,6 +429,54 @@ def mock_file_list():
 
 
 # ---------------------------------------------------------------------------
+# Engineering-overlay skip marker
+# ---------------------------------------------------------------------------
+# Public Kiln's materials.json carries only the safety floor (thermal
+# limits, food/UV/outgassing safety, process geometry floors).  The
+# engineering moat (mechanical properties, design_limits beyond
+# process floor, use_case_ratings, agent_guidance paragraphs, brand-
+# tunings beyond safety) ships in kiln-pro's overlay and is restored
+# at runtime by ``_merge_pro_overlay_if_available``.
+#
+# Tests that assert moat fields should be marked with
+# ``@requires_engineering_overlay`` so they SKIP in public-only CI
+# (where the overlay isn't installed) and RUN cleanly in kiln-pro CI
+# (where the overlay is present).
+
+
+def _engineering_overlay_loaded() -> bool:
+    """Probe whether the kiln-pro engineering overlay is loaded.
+
+    Calls into the public Kiln knowledge base and checks whether
+    PLA (the canonical material) has any mechanical fields.  Empty
+    mechanical means free-tier / no overlay.
+    """
+    try:
+        from kiln.design_intelligence import (
+            _reset_knowledge_base,
+            get_material_profile,
+        )
+        _reset_knowledge_base()
+        pla = get_material_profile("pla")
+    except Exception:
+        return False
+    return pla is not None and bool(pla.mechanical)
+
+
+_ENGINEERING_OVERLAY_PRESENT = _engineering_overlay_loaded()
+
+requires_engineering_overlay = pytest.mark.skipif(
+    not _ENGINEERING_OVERLAY_PRESENT,
+    reason=(
+        "kiln-pro engineering moat overlay not loaded; this assertion "
+        "requires mechanical / design_limits / use_case_ratings / "
+        "agent_guidance / brand-tuning fields that ship in kiln-pro. "
+        "Install kiln-pro to run this test."
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
 # License tier bypass for tests
 # ---------------------------------------------------------------------------
 

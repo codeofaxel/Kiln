@@ -254,17 +254,28 @@ class _AssemblyToolsPlugin:
             joint_type: str,
             material_a: str = "PLA",
             material_b: str = "PLA",
+            *,
+            printer_id: str | None = None,
         ) -> dict:
             """Get recommended clearance settings for a joint type and material pairing.
 
             Returns clearance recommendations based on the joint type
-            and the materials of the two mating parts.
+            and the materials of the two mating parts.  When
+            ``printer_id`` is supplied AND kiln-pro is installed, the
+            response narrows the clearance range by the user's
+            calibration tier (HIGH halves it, MEDIUM shaves ~10%, LOW
+            and UNKNOWN leave it unchanged) and attaches a
+            ``calibration_used`` block documenting the source.
 
             Args:
                 joint_type: Type of joint (e.g. ``"clearance_fit"``,
                     ``"press_fit"``, ``"snap_fit"``).
                 material_a: Material of the first part (default ``"PLA"``).
                 material_b: Material of the second part (default ``"PLA"``).
+                printer_id: Optional printer identifier (e.g.
+                    ``"bambu_a1"``).  Omit to keep the historic flat-range
+                    behaviour (free users + calls that don't care about
+                    calibration tightening).
             """
             try:
                 from kiln.assembly import get_clearance_recommendation
@@ -273,6 +284,7 @@ class _AssemblyToolsPlugin:
                     joint_type,
                     material_a,
                     material_b,
+                    printer_id=printer_id,
                 )
                 return {"success": True, "data": result}
             except Exception as exc:

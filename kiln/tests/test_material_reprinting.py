@@ -14,6 +14,8 @@ import os
 import tempfile
 from unittest.mock import patch
 
+from .conftest import requires_engineering_overlay
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -77,6 +79,7 @@ class TestGetMaterialProperties:
         assert "unobtainium" in result["error"]["message"]
         assert "Available" in result["error"]["message"]
 
+    @requires_engineering_overlay
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     def test_tpu_profile_has_flexibility_data(self, _auth):
         from kiln.server import get_material_properties
@@ -476,6 +479,7 @@ class TestNewMaterialProfiles:
         # PETG-HF prints hotter
         assert thermal["print_temp_range_c"][0] >= 230
 
+    @requires_engineering_overlay
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     def test_pla_tough_profile(self, _auth):
         from kiln.server import get_material_properties
@@ -485,6 +489,7 @@ class TestNewMaterialProfiles:
         mech = result["material"]["mechanical"]
         assert mech.get("tensile_strength_mpa", 0) >= 40
 
+    @requires_engineering_overlay
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     def test_tpu_95a_profile(self, _auth):
         from kiln.server import get_material_properties
@@ -495,6 +500,7 @@ class TestNewMaterialProfiles:
         # Should have high elongation like TPU
         assert mech.get("elongation_at_break_pct", 0) >= 300
 
+    @requires_engineering_overlay
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     def test_tpu_85a_profile(self, _auth):
         from kiln.server import get_material_properties

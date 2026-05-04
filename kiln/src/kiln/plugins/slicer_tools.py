@@ -218,6 +218,59 @@ def _maybe_auto_assembly_manual(metadata: dict) -> dict | None:
     }
 
 
+def _maybe_overlay_calibration(
+    parsed_overrides: dict[str, str],
+    printer_id: str,
+    *,
+    material: str | None = None,
+) -> tuple[dict[str, str], dict[str, Any] | None]:
+    """Inject a Pro+ user's calibrated slicer values into ``parsed_overrides``.
+
+    Lazy-imports ``kiln_pro.engineering.calibration_coach`` so this is
+    a no-op for free-tier installs that don't have kiln-pro present.
+    When kiln-pro is installed AND the user has a HIGH/MEDIUM-tier
+    calibrated slicer profile for ``printer_id`` (with material
+    matched when supplied; fallback to most-recent across all
+    materials when ``material`` is ``None``), the helper:
+
+    - Fills in keys the caller did NOT already set in ``parsed_overrides``
+      with the user's calibrated values (extrusion_multiplier,
+      filament_max_volumetric_speed, pressure_advance, xy_size_compensation,
+      filament_retraction_length).  User-supplied overrides ALWAYS win;
+      calibration only fills gaps.  Idempotent.
+    - Returns the standard ``calibration_used`` block (same shape as
+      every other wire-up site) so the slicer tool's response can
+      surface what was applied.
+
+    Returns ``(modified_overrides, calibration_used_block_or_None)``.
+    The calibration block is ``None`` when kiln-pro isn't installed
+    OR ``calibration_for`` raised; never raises out of this helper.
+    """
+    try:
+        from kiln_pro.engineering.calibration_coach import (
+            apply_calibration_to_slicer_args,
+            calibration_for,
+            calibration_used_block,
+        )
+    except ImportError:
+        return parsed_overrides, None
+
+    try:
+        merged = apply_calibration_to_slicer_args(
+            parsed_overrides, printer_id, material,
+        )
+        verdict = calibration_for(printer_id, material)
+        cal_used = calibration_used_block(verdict, printer_id=printer_id)
+    except Exception as exc:  # noqa: BLE001 — never block slicing
+        _logger.debug(
+            "calibration overlay skipped for printer %r: %s",
+            printer_id, exc,
+        )
+        return parsed_overrides, None
+
+    return merged, cal_used
+
+
 class _SlicerToolsPlugin:
     """Slicer tools: slice, reslice, find slicer, list/get profiles.
 
@@ -503,6 +556,19 @@ class _SlicerToolsPlugin:
                 effective_printer_id = _srv._map_printer_hint_to_profile_id(
                     printer_id
                 ) or _srv._map_printer_hint_to_profile_id(_srv._PRINTER_MODEL)
+
+                # -- Calibration overlay: when kiln-pro is installed and the
+                # user has a calibrated slicer profile for (printer, material),
+                # inject those values into parsed_overrides BEFORE resolve so
+                # the slicer's print-time / cost estimates use values the
+                # user has personally verified.  No-op for free users.
+                # User-supplied overrides ALWAYS win — the helper only fills
+                # gaps.
+                cal_used: dict[str, Any] | None = None
+                if effective_printer_id:
+                    parsed_overrides, cal_used = _maybe_overlay_calibration(
+                        parsed_overrides, effective_printer_id,
+                    )
 
                 effective_profile: str | None = None
                 if effective_printer_id:
