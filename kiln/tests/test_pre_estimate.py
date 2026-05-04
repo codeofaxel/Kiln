@@ -267,8 +267,11 @@ class TestResolveTemplateDimensions:
         assert d >= 60  # min base_depth
         assert h >= 8   # min lip_height
 
-    def test_box_with_lid_defaults(self):
-        w, d, h = _resolve_template_dimensions("box_with_lid")
+    def test_hinge_box_defaults(self):
+        # ``box_with_lid`` was retired in v1.0.1; ``hinge_box`` is the
+        # current canonical "rectangular container with lid" template
+        # and exercises the same container-shape resolver path.
+        w, d, h = _resolve_template_dimensions("hinge_box")
         assert w > 0
         assert d > 0
         assert h > 0
@@ -573,12 +576,10 @@ class TestEstimateFromTemplate:
         assert est.total_cost_usd > 0
         assert est.width_mm > 0
 
-    def test_box_with_lid(self):
-        est = estimate_from_template("box_with_lid")
-        assert est.estimated_time_seconds > 0
-
-    def test_nameplate(self):
-        est = estimate_from_template("nameplate")
+    def test_hinge_box(self):
+        # Replaces the retired ``box_with_lid`` template — see
+        # TestResolveTemplateDimensions.test_hinge_box_defaults.
+        est = estimate_from_template("hinge_box")
         assert est.estimated_time_seconds > 0
 
     def test_fridge_magnet(self):
