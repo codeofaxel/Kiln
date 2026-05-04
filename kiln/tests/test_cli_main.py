@@ -1112,6 +1112,20 @@ class TestErrorHandling:
 class TestLicenseCommands:
     """Tests for kiln upgrade and kiln license-info CLI commands."""
 
+    @pytest.fixture(autouse=True)
+    def _isolate_oauth_session(self, monkeypatch, tmp_path_factory):
+        """Redirect ``$KILN_AUTH_HOME`` at an empty tmp dir so the user's real
+        ``~/.kiln/auth_tokens.json`` doesn't bleed an OAuth-resolved tier into
+        tests that assert FREE / a specific legacy-key tier.
+
+        OAuth resolution runs *before* the legacy-key path in
+        ``LicenseManager.get_tier()``, so a developer running this suite on a
+        signed-in machine would otherwise see ``Tier: Enterprise`` /
+        ``Source: oauth`` instead of the expected ``Free`` / ``Pro``.
+        """
+        oauth_home = tmp_path_factory.mktemp("oauth_isolate")
+        monkeypatch.setenv("KILN_AUTH_HOME", str(oauth_home))
+
     def test_license_info_shows_free_tier(self, runner, tmp_path):
         """kiln license-info shows FREE tier when no license is set."""
         from kiln.licensing import LicenseManager
