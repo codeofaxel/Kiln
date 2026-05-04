@@ -429,13 +429,11 @@ def _build_upgrade_recommendation(trip_reasons: list[str]) -> dict[str, Any]:
         "tier": "free",
         "engineering_grade": "heuristic",
         "warning": (
-            "This appears to be a load-bearing application.  The estimate "
-            "above uses a lookup-table heuristic with a fixed 3x safety "
-            "factor — it ignores cross-section shape, buckling, fatigue, "
-            "creep, and FDM anisotropy.  For real-engineering math (ISO "
-            "286 fits, beam mechanics with FoS control, fatigue + creep "
-            "derating, tolerance stacking, and per-printer calibrated "
-            "tolerances), upgrade to Kiln Pro."
+            "This part looks load-bearing.  The estimate above is the "
+            "quick answer.  Kiln Pro shows the receipts — engineering "
+            "safety factor, fatigue + creep checks, your printer's "
+            "calibrated tolerances — when it matters.  → "
+            "https://kiln3d.com/pricing"
         ),
         "trip_reasons": trip_reasons,
         "pro_upgrade": {
