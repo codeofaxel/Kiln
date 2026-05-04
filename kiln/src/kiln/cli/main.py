@@ -4166,7 +4166,7 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
             ledger = BillingLedger()
             fee_calc = ledger.calculate_fee(quote.total_price, currency=quote.currency)
             quote_data["kiln_fee"] = fee_calc.to_dict()
-            quote_data["total_with_fee"] = fee_calc.total_cost
+            quote_data["total_with_fee"] = float(fee_calc.total_cost)
         click.echo(format_quote(quote_data, json_mode=json_mode))
     except click.ClickException:
         raise
@@ -4191,11 +4191,178 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
         sys.exit(1)
 
 
+def _build_fulfillment_shipping_address(
+    *,
+    first_name: str,
+    last_name: str,
+    email: str,
+    phone: str,
+    street: str,
+    street2: str,
+    city: str,
+    state: str,
+    postal_code: str,
+    country: str,
+    company: str,
+    vat_id: str,
+) -> dict[str, str]:
+    """Build a provider shipping address from CLI options."""
+    provided = {
+        "first_name": first_name.strip(),
+        "last_name": last_name.strip(),
+        "email": email.strip(),
+        "phone": phone.strip(),
+        "street": street.strip(),
+        "street2": street2.strip(),
+        "city": city.strip(),
+        "state": state.strip(),
+        "postal_code": postal_code.strip(),
+        "company": company.strip(),
+        "vat_id": vat_id.strip(),
+    }
+    if not any(provided.values()):
+        return {}
+
+    required = ("first_name", "last_name", "email", "phone", "street", "city", "postal_code")
+    missing = [name.replace("_", "-") for name in required if not provided[name]]
+    normalized_country = (country or "US").strip().upper()
+    if normalized_country == "US" and not provided["state"]:
+        missing.append("state")
+    if missing:
+        raise click.ClickException(
+            "Shipping address is incomplete. Missing: "
+            + ", ".join(missing)
+            + ". Provide the full shipping contact/address or omit all shipping fields."
+        )
+    if "@" not in provided["email"]:
+        raise click.ClickException("Shipping email must be a valid email address.")
+
+    address = {
+        "first_name": provided["first_name"],
+        "last_name": provided["last_name"],
+        "email": provided["email"],
+        "phone": provided["phone"],
+        "street": provided["street"],
+        "city": provided["city"],
+        "postal_code": provided["postal_code"],
+        "country": normalized_country,
+    }
+    for key in ("street2", "state", "company", "vat_id"):
+        if provided[key]:
+            address[key] = provided[key]
+    return address
+
+
+def _shipping_address_summary(address: dict[str, str]) -> str:
+    from kiln.fulfillment_profiles import summarize_shipping_address
+
+    return summarize_shipping_address(address, redact_sensitive=False)
+
+
+def _save_shipping_profile_from_cli(
+    shipping_address: dict[str, str],
+    profile_name: str,
+) -> None:
+    """Save a shipping profile from an explicit CLI decision."""
+    from kiln.fulfillment_profiles import save_shipping_profile
+
+    try:
+        save_shipping_profile(profile_name, shipping_address)
+    except ValueError as exc:
+        if "already exists" not in str(exc):
+            raise click.ClickException(str(exc)) from exc
+        if not click.confirm(
+            f"Shipping profile '{profile_name}' already exists. Replace it?",
+            default=False,
+        ):
+            click.echo("Shipping profile was not saved.")
+            return
+        save_shipping_profile(profile_name, shipping_address, overwrite=True)
+    click.echo("Shipping profile saved locally.")
+
+
+def _resolve_shipping_profile_save_step(
+    shipping_address: dict[str, str],
+    *,
+    used_shipping_profile: bool,
+    save_as: str,
+    do_not_save: bool,
+    json_mode: bool,
+) -> None:
+    """Ask or enforce the save-profile decision for one-shot addresses."""
+    if used_shipping_profile:
+        return
+    profile_name = save_as.strip()
+    if profile_name and do_not_save:
+        raise click.ClickException(
+            "Choose either --save-shipping-profile-as or --do-not-save-shipping-profile, not both."
+        )
+    if profile_name:
+        _save_shipping_profile_from_cli(shipping_address, profile_name)
+        return
+    if do_not_save:
+        return
+    if json_mode:
+        raise click.ClickException(
+            "Before placing a fulfillment order, ask the user whether Kiln should "
+            "save this shipping contact/address as a local profile. Then pass "
+            "--save-shipping-profile-as NAME if they say yes, or "
+            "--do-not-save-shipping-profile if they say no."
+        )
+    if not click.confirm(
+        "Save this shipping contact/address as a local profile for future orders?",
+        default=False,
+    ):
+        return
+    profile_name = click.prompt("Shipping profile name", default="home").strip()
+    _save_shipping_profile_from_cli(shipping_address, profile_name)
+
+
 @order.command("place")
 @click.argument("quote_id")
 @click.option("--shipping", "-s", "shipping_id", default="", help="Shipping option ID (from quote).")
+@click.option("--shipping-profile", default="", help="Saved shipping profile name.")
+@click.option("--first-name", default="", help="Shipping contact first name.")
+@click.option("--last-name", default="", help="Shipping contact last name.")
+@click.option("--email", default="", help="Shipping contact email.")
+@click.option("--phone", default="", help="Shipping contact phone number.")
+@click.option("--street", default="", help="Shipping street address.")
+@click.option("--street2", default="", help="Shipping street address line 2.")
+@click.option("--city", default="", help="Shipping city.")
+@click.option("--state", default="", help="Shipping state/province.")
+@click.option("--postal-code", default="", help="Shipping postal/ZIP code.")
+@click.option("--country", default="US", help="Shipping country code.")
+@click.option("--company", default="", help="Shipping company name.")
+@click.option("--vat-id", default="", help="Business tax/VAT ID for billing address.")
+@click.option("--preview-file", type=click.Path(exists=True), default=None, help="Model file whose rendered preview was reviewed.")
+@click.option("--confirm-preview", is_flag=True, help="Confirm the rendered model preview was reviewed and approved.")
+@click.option("--confirm-shipping", is_flag=True, help="Confirm the contact/shipping details were reviewed and approved.")
+@click.option("--save-shipping-profile-as", default="", help="Save explicit shipping fields as a local profile after user approval.")
+@click.option("--do-not-save-shipping-profile", is_flag=True, help="Confirm the user chose not to save explicit shipping fields.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def order_place(quote_id: str, shipping_id: str, json_mode: bool) -> None:
+def order_place(
+    quote_id: str,
+    shipping_id: str,
+    shipping_profile: str,
+    first_name: str,
+    last_name: str,
+    email: str,
+    phone: str,
+    street: str,
+    street2: str,
+    city: str,
+    state: str,
+    postal_code: str,
+    country: str,
+    company: str,
+    vat_id: str,
+    preview_file: str | None,
+    confirm_preview: bool,
+    confirm_shipping: bool,
+    save_shipping_profile_as: str,
+    do_not_save_shipping_profile: bool,
+    json_mode: bool,
+) -> None:
     """Place a manufacturing order from a quote.
 
     Requires a quote ID from 'kiln order quote'.
@@ -4216,11 +4383,82 @@ def order_place(quote_id: str, shipping_id: str, json_mode: bool) -> None:
     from kiln.persistence import get_db
 
     try:
+        manual_shipping_fields = any(
+            value.strip()
+            for value in (
+                first_name,
+                last_name,
+                email,
+                phone,
+                street,
+                street2,
+                city,
+                state,
+                postal_code,
+                company,
+                vat_id,
+            )
+        )
+        if shipping_profile and manual_shipping_fields:
+            raise click.ClickException(
+                "Provide either --shipping-profile or explicit shipping fields, not both."
+            )
+        if shipping_profile:
+            from kiln.fulfillment_profiles import get_shipping_profile
+
+            shipping_address = get_shipping_profile(shipping_profile).shipping_address
+        else:
+            shipping_address = _build_fulfillment_shipping_address(
+                first_name=first_name,
+                last_name=last_name,
+                email=email,
+                phone=phone,
+                street=street,
+                street2=street2,
+                city=city,
+                state=state,
+                postal_code=postal_code,
+                country=country,
+                company=company,
+                vat_id=vat_id,
+            )
+        if not shipping_address:
+            raise click.ClickException(
+                "Shipping contact/address is required before placing a fulfillment order. "
+                "Pass explicit shipping fields or --shipping-profile."
+            )
+        if not preview_file:
+            raise click.ClickException(
+                "Fulfillment order requires a reviewed model preview. "
+                "Run `kiln preview MODEL_FILE`, show the rendered preview to the user, "
+                "then rerun order place with --preview-file MODEL_FILE and --confirm-preview."
+            )
+        if not confirm_preview:
+            raise click.ClickException(
+                "Preview approval is required before placing a fulfillment order. "
+                f"Review the rendered preview for {preview_file!r}, then rerun with --confirm-preview."
+            )
+        if not confirm_shipping:
+            raise click.ClickException(
+                "Shipping/contact approval is required before placing a fulfillment order. "
+                f"Review: {_shipping_address_summary(shipping_address)}. "
+                "Then rerun with --confirm-shipping."
+            )
+        _resolve_shipping_profile_save_step(
+            shipping_address,
+            used_shipping_profile=bool(shipping_profile),
+            save_as=save_shipping_profile_as,
+            do_not_save=do_not_save_shipping_profile,
+            json_mode=json_mode,
+        )
         provider = _get_fulfillment_provider()
         result = provider.place_order(
             OrderRequest(
                 quote_id=quote_id,
                 shipping_option_id=shipping_id,
+                shipping_address=shipping_address,
+                preview_confirmed=True,
+                shipping_confirmed=True,
             )
         )
         order_data = result.to_dict()
@@ -4246,7 +4484,7 @@ def order_place(quote_id: str, shipping_id: str, json_mode: bool) -> None:
                 )
                 order_data["payment"] = {"status": "failed"}
             order_data["kiln_fee"] = fee_calc.to_dict()
-            order_data["total_with_fee"] = fee_calc.total_cost
+            order_data["total_with_fee"] = float(fee_calc.total_cost)
         click.echo(format_order(order_data, json_mode=json_mode))
     except click.ClickException:
         raise

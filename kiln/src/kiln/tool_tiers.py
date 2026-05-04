@@ -174,6 +174,10 @@ TIER_FULL: list[str] = [
     # --- Fulfillment ---
     "fulfillment_materials",
     "fulfillment_quote",
+    "save_shipping_profile",
+    "list_shipping_profiles",
+    "delete_shipping_profile",
+    "issue_shipping_confirmation_token",
     "fulfillment_order",
     "fulfillment_order_status",
     "fulfillment_cancel",

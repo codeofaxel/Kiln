@@ -337,6 +337,7 @@ class QuoteCache:
         lead_time_days: int,
         *,
         metadata: dict[str, Any] | None = None,
+        quote_id: str | None = None,
     ) -> CachedQuote:
         """Cache a fulfillment provider quote.
 
@@ -348,6 +349,8 @@ class QuoteCache:
         :param currency: ISO 4217 currency code.
         :param lead_time_days: Manufacturing lead time in days.
         :param metadata: Optional extra data from the provider.
+        :param quote_id: Optional provider-assigned quote ID.  When omitted,
+            Kiln generates a local cache identifier.
         :returns: The newly cached :class:`CachedQuote`.
         """
         cache_key = self._make_cache_key(provider, service_type, material, quantity)
@@ -355,7 +358,7 @@ class QuoteCache:
         now = time.time()
 
         quote = CachedQuote(
-            quote_id=str(uuid.uuid4()),
+            quote_id=quote_id or str(uuid.uuid4()),
             provider_name=provider,
             service_type=service_type,
             material=material,
@@ -573,6 +576,7 @@ def cache_quote(
     lead_time_days: int,
     *,
     metadata: dict[str, Any] | None = None,
+    quote_id: str | None = None,
 ) -> CachedQuote:
     """Convenience wrapper to cache a quote via the singleton.
 
@@ -584,6 +588,7 @@ def cache_quote(
     :param currency: ISO 4217 currency code.
     :param lead_time_days: Manufacturing lead time in days.
     :param metadata: Optional extra data.
+    :param quote_id: Optional provider-assigned quote ID.
     :returns: The newly cached :class:`CachedQuote`.
     """
     return get_quote_cache().put(
@@ -595,6 +600,7 @@ def cache_quote(
         currency,
         lead_time_days,
         metadata=metadata,
+        quote_id=quote_id,
     )
 
 

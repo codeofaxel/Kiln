@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sqlite3
 import threading
 import time
 from unittest import mock
@@ -619,6 +620,55 @@ class TestGetDB:
 
 
 # ---------------------------------------------------------------------------
+# Billing charge item counts
+# ---------------------------------------------------------------------------
+
+class TestBillingChargeItemCounts:
+    """Fulfillment quota counters sum manufactured item quantity."""
+
+    @staticmethod
+    def _charge(
+        charge_id: str,
+        *,
+        user_email: str = "user@example.com",
+        item_count: int | None = None,
+    ) -> dict:
+        charge = {
+            "id": charge_id,
+            "job_id": f"job-{charge_id}",
+            "fee_amount": 0.0,
+            "fee_percent": 0.0,
+            "job_cost": 10.0,
+            "total_cost": 10.0,
+            "currency": "USD",
+            "waived": True,
+            "payment_status": "waived",
+            "user_email": user_email,
+            "created_at": time.time(),
+        }
+        if item_count is not None:
+            charge["item_count"] = item_count
+        return charge
+
+    def test_item_count_defaults_to_one(self, db):
+        db.save_billing_charge(self._charge("default"))
+
+        assert db.billing_charges_this_month_for_user("user@example.com") == 1
+        assert db.billing_charge_items_this_month_for_user("user@example.com") == 1
+
+    def test_item_counter_sums_quantity_per_user(self, db):
+        db.save_billing_charge(self._charge("a", item_count=2))
+        db.save_billing_charge(self._charge("b", item_count=3))
+        db.save_billing_charge(
+            self._charge("other", user_email="other@example.com", item_count=5)
+        )
+
+        assert db.billing_charges_this_month_for_user("user@example.com") == 2
+        assert db.billing_charge_items_this_month_for_user("user@example.com") == 5
+        assert db.billing_charge_items_this_month() == 10
+
+
+# ---------------------------------------------------------------------------
 # Close
 # ---------------------------------------------------------------------------
 
@@ -631,7 +681,7 @@ class TestClose:
         instance.set_setting("test", "value")
         instance.close()
 
-        with pytest.raises(Exception):
+        with pytest.raises(sqlite3.ProgrammingError):
             instance.get_setting("test")
 
     def test_data_persists_after_close(self, tmp_path):

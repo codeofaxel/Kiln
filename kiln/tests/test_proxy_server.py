@@ -14,6 +14,7 @@ Covers:
 
 from __future__ import annotations
 
+import contextlib
 import time
 from unittest.mock import MagicMock, patch
 
@@ -35,10 +36,8 @@ from kiln.fulfillment.base import (
 from kiln.fulfillment.proxy_server import ProxyOrchestrator, get_orchestrator
 from kiln.licensing import LicenseInfo, LicenseTier
 
-try:
+with contextlib.suppress(ImportError):
     from kiln.payments.base import PaymentError
-except ImportError:
-    pass  # skipped above
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -99,6 +98,7 @@ def _seed_quote_cache(
     currency: str = "USD",
     provider: str = "craftcloud",
     user_email: str = "user@test.com",
+    item_count: int = 1,
     ttl: float = 3600,
 ) -> str:
     """Insert a fake quote into the orchestrator's server-side cache.
@@ -111,6 +111,7 @@ def _seed_quote_cache(
         "provider": provider,
         "user_email": user_email,
         "quote_id": "q-123",
+        "item_count": item_count,
         "expires_at": time.time() + ttl,
     }
     return token
@@ -420,15 +421,15 @@ class TestHandleOrder:
 
     def test_free_tier_limit_enforcement(self, orch: ProxyOrchestrator):
         token = _seed_quote_cache(orch, "token-free")
-        with patch.object(orch._ledger, "network_jobs_this_month_for_user", return_value=3):
-            with pytest.raises(FulfillmentError, match="Free tier limit reached"):
-                orch.handle_order(
-                    "craftcloud",
-                    OrderRequest(quote_id="q-123"),
-                    user_email="user@test.com",
-                    user_tier=LicenseTier.FREE,
-                    quote_token=token,
-                )
+        with patch.object(orch._ledger, "network_items_this_month_for_user", return_value=3), \
+             pytest.raises(FulfillmentError, match="Free tier limit reached"):
+            orch.handle_order(
+                "craftcloud",
+                OrderRequest(quote_id="q-123"),
+                user_email="user@test.com",
+                user_tier=LicenseTier.FREE,
+                quote_token=token,
+            )
 
     def test_free_tier_allows_under_limit(
         self,
@@ -439,27 +440,40 @@ class TestHandleOrder:
         mock_provider.place_order.return_value = _order_result()
         fee = _fee_calc()
 
-        with patch.object(orch._ledger, "network_jobs_this_month_for_user", return_value=2):
-            with patch.object(orch._ledger, "calculate_fee", return_value=fee):
-                with patch.object(
-                    orch._ledger,
-                    "calculate_and_record_fee",
-                    return_value=(fee, "charge-1"),
-                ):
-                    with patch.object(orch, "_tag_charge_with_user"):
-                        with patch(
-                            "kiln.fulfillment.proxy_server.get_fulfillment_provider",
-                            return_value=mock_provider,
-                        ):
-                            result = orch.handle_order(
-                                "craftcloud",
-                                OrderRequest(quote_id="q-123"),
-                                user_email="user@test.com",
-                                user_tier=LicenseTier.FREE,
-                                quote_token=token,
-                            )
+        with patch.object(orch._ledger, "network_items_this_month_for_user", return_value=2), \
+             patch.object(orch._ledger, "calculate_fee", return_value=fee), \
+             patch.object(
+                 orch._ledger,
+                 "calculate_and_record_fee",
+                 return_value=(fee, "charge-1"),
+             ), \
+             patch.object(orch, "_tag_charge_with_user"), \
+             patch(
+                 "kiln.fulfillment.proxy_server.get_fulfillment_provider",
+                 return_value=mock_provider,
+             ):
+            result = orch.handle_order(
+                "craftcloud",
+                OrderRequest(quote_id="q-123"),
+                user_email="user@test.com",
+                user_tier=LicenseTier.FREE,
+                quote_token=token,
+            )
 
         assert result["order"]["order_id"] == "o-456"
+
+    def test_free_tier_blocks_order_quantity_over_remaining_items(self, orch: ProxyOrchestrator):
+        token = _seed_quote_cache(orch, "token-over-items", item_count=2)
+        with patch.object(orch._ledger, "network_items_this_month_for_user", return_value=2):
+            with pytest.raises(FulfillmentError, match="fulfillment items") as exc_info:
+                orch.handle_order(
+                    "craftcloud",
+                    OrderRequest(quote_id="q-123"),
+                    user_email="user@test.com",
+                    user_tier=LicenseTier.FREE,
+                    quote_token=token,
+                )
+            assert exc_info.value.code == "FREE_TIER_LIMIT"
 
     def test_business_tier_bypasses_limit(
         self,
@@ -529,15 +543,15 @@ class TestHandleOrder:
         fee = _fee_calc()
         mock_payment_mgr.charge_fee.side_effect = PaymentError("card declined")
 
-        with patch.object(orch._ledger, "calculate_fee", return_value=fee):
-            with pytest.raises(PaymentError, match="card declined"):
-                orch.handle_order(
-                    "craftcloud",
-                    OrderRequest(quote_id="q-123"),
-                    user_email="user@test.com",
-                    user_tier=LicenseTier.BUSINESS,
-                    quote_token=token,
-                )
+        with patch.object(orch._ledger, "calculate_fee", return_value=fee), \
+             pytest.raises(PaymentError, match="card declined"):
+            orch.handle_order(
+                "craftcloud",
+                OrderRequest(quote_id="q-123"),
+                user_email="user@test.com",
+                user_tier=LicenseTier.BUSINESS,
+                quote_token=token,
+            )
 
     def test_auto_refund_on_order_failure(
         self,
@@ -623,8 +637,14 @@ class TestHandleOrder:
                 quote_token=token,
             )
 
-        mock_record.assert_called_once_with("q-123", 100.0, currency="USD")
-        mock_tag.assert_called_once_with("charge-abc", "user@test.com")
+        mock_record.assert_called_once_with(
+            "q-123",
+            100.0,
+            currency="USD",
+            user_email="user@test.com",
+            item_count=1,
+        )
+        mock_tag.assert_not_called()
         assert result["order"]["order_id"] == "o-456"
 
     def test_no_refund_when_no_payment_id(
@@ -654,7 +674,7 @@ class TestHandleOrder:
 
     def test_pro_tier_subject_to_limit(self, orch: ProxyOrchestrator):
         token = _seed_quote_cache(orch, "token-pro")
-        with patch.object(orch._ledger, "network_jobs_this_month_for_user", return_value=3):
+        with patch.object(orch._ledger, "network_items_this_month_for_user", return_value=3):
             with pytest.raises(FulfillmentError, match="Free tier limit reached") as exc_info:
                 orch.handle_order(
                     "craftcloud",
@@ -692,7 +712,13 @@ class TestHandleOrder:
             )
 
         # Fee must be calculated from the cached 200.0, not any client value
-        mock_calc.assert_called_once_with(200.0, currency="EUR")
+        mock_calc.assert_called_once_with(
+            200.0,
+            currency="EUR",
+            jurisdiction=None,
+            business_tax_id=None,
+            user_email="user@test.com",
+        )
 
 
 # ---------------------------------------------------------------------------

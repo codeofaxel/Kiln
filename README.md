@@ -39,7 +39,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing)) add Git-for-3D ver
 ### Why Kiln?
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
-- **No printer? No problem** — Outsource any job to Craftcloud's 150+ manufacturing services. Kiln handles quoting, ordering, and tracking. No API key required.
+- **No printer? No problem** — Outsource jobs to Craftcloud's 150+ manufacturing services through the hosted proxy, or use direct mode with your own provider credentials.
 - **AI-native** — 763 MCP capabilities and 215 CLI commands built for AI agents. Not a web UI with an API bolted on.
 - **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print.
 - **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command.
@@ -578,7 +578,11 @@ The Kiln MCP server (`kiln serve`) exposes **756 tools** to agents, plus prompts
 | `printer_snapshot` | Capture a webcam snapshot from the printer |
 | `fulfillment_materials` | List materials from external print services (Craftcloud) |
 | `fulfillment_quote` | Get a manufacturing quote for a 3D model |
-| `fulfillment_order` | Place an order based on a quote |
+| `save_shipping_profile` | Save a local shipping/contact profile after explicit consent |
+| `list_shipping_profiles` | List saved local shipping profiles |
+| `delete_shipping_profile` | Delete a saved local shipping profile |
+| `issue_shipping_confirmation_token` | Confirm reviewed shipping/contact details before ordering |
+| `fulfillment_order` | Place an order after preview and shipping confirmation |
 | `fulfillment_order_status` | Track a fulfillment order |
 | `fulfillment_cancel` | Cancel a fulfillment order |
 | `estimate_cost` | Estimate print cost from G-code file |
@@ -1118,8 +1122,11 @@ kiln order validate-address --street "123 Main St" --city Austin --state TX --po
 # View shipping insurance options
 kiln order insurance 45.00
 
-# Place the order
-kiln order place q-abc123 --shipping std
+# Preview and confirm before placing the order
+kiln preview model.stl
+kiln order place q-abc123 --shipping std --preview-file model.stl --confirm-preview --confirm-shipping \
+  --first-name Ada --last-name Lovelace --email ada@example.com --phone 555-0100 \
+  --street "123 Main St" --city Austin --state TX --postal-code 78701 --country US
 
 # Track order status
 kiln order status o-def456
@@ -1134,10 +1141,11 @@ kiln order countries
 Configure your fulfillment provider:
 
 ```bash
-# Craftcloud — works out of the box (no API key required for public endpoints)
-export KILN_FULFILLMENT_PROVIDER=craftcloud
+# Normal users: leave provider unset and use the hosted Kiln proxy.
+# Craftcloud credentials stay server-side; quota and spend limits are enforced there.
 
-# Optional: API key to associate orders with a Craftcloud account
+# Operators/developers only: direct Craftcloud mode with your own Craftcloud key.
+export KILN_FULFILLMENT_PROVIDER=craftcloud
 export KILN_CRAFTCLOUD_API_KEY=your_key
 
 # Optional: WebSocket price polling (recommended by Craftcloud, requires pip install websockets msgpack)

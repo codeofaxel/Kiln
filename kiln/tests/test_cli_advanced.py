@@ -30,6 +30,12 @@ try:
 except ImportError:
     _has_payments = False
 
+try:
+    import kiln.fulfillment  # noqa: F401
+    _has_fulfillment = True
+except ImportError:
+    _has_fulfillment = False
+
 from kiln.printers.base import (
     JobProgress,
     PrinterFile,
@@ -717,6 +723,150 @@ class TestOrder:
         with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
             result = runner.invoke(cli, ["order", "status", "ord-1", "--json"])
         assert result.exit_code == 0
+
+    @pytest.mark.skipif(not _has_fulfillment, reason="kiln-pro fulfillment module not available")
+    def test_order_place_passes_shipping_address_and_returns_checkout(self, runner, tmp_path):
+        preview_file = tmp_path / "model.stl"
+        preview_file.write_bytes(b"solid test\nendsolid test\n")
+        provider = MagicMock()
+        mock_result = MagicMock()
+        mock_result.total_price = None
+        mock_result.to_dict.return_value = {
+            "order_id": "ord-1",
+            "status": "submitted",
+            "provider": "craftcloud",
+            "checkout_url": "https://craftcloud3d.com/checkout/ord-1",
+        }
+        provider.place_order.return_value = mock_result
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, [
+                "order", "place", "quote-1",
+                "--shipping", "ship-1",
+                "--first-name", "Ada",
+                "--last-name", "Lovelace",
+                "--email", "ada@example.com",
+                "--phone", "555-0100",
+                "--street", "123 Main St",
+                "--city", "Austin",
+                "--state", "TX",
+                "--postal-code", "78701",
+                "--country", "US",
+                "--preview-file", str(preview_file),
+                "--confirm-preview",
+                "--confirm-shipping",
+                "--do-not-save-shipping-profile",
+                "--json",
+            ])
+        assert result.exit_code == 0
+        request = provider.place_order.call_args.args[0]
+        assert request.shipping_option_id == "ship-1"
+        assert request.shipping_address["email"] == "ada@example.com"
+        assert request.shipping_address["state"] == "TX"
+        assert request.preview_confirmed is True
+        assert request.shipping_confirmed is True
+        data = json.loads(result.output)
+        assert data["data"]["order"]["checkout_url"] == "https://craftcloud3d.com/checkout/ord-1"
+
+    @pytest.mark.skipif(not _has_fulfillment, reason="kiln-pro fulfillment module not available")
+    def test_order_place_json_requires_shipping_profile_save_decision(self, runner, tmp_path):
+        preview_file = tmp_path / "model.stl"
+        preview_file.write_bytes(b"solid test\nendsolid test\n")
+        provider = MagicMock()
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, [
+                "order", "place", "quote-1",
+                "--shipping", "ship-1",
+                "--first-name", "Ada",
+                "--last-name", "Lovelace",
+                "--email", "ada@example.com",
+                "--phone", "555-0100",
+                "--street", "123 Main St",
+                "--city", "Austin",
+                "--state", "TX",
+                "--postal-code", "78701",
+                "--country", "US",
+                "--preview-file", str(preview_file),
+                "--confirm-preview",
+                "--confirm-shipping",
+                "--json",
+            ])
+
+        assert result.exit_code != 0
+        provider.place_order.assert_not_called()
+        assert "ask the user whether Kiln should save" in result.output
+
+    @pytest.mark.skipif(not _has_fulfillment, reason="kiln-pro fulfillment module not available")
+    def test_order_place_interactive_asks_to_save_shipping_profile(self, runner, tmp_path, monkeypatch):
+        monkeypatch.setenv("KILN_SHIPPING_PROFILES_PATH", str(tmp_path / "profiles.json"))
+        preview_file = tmp_path / "model.stl"
+        preview_file.write_bytes(b"solid test\nendsolid test\n")
+        provider = MagicMock()
+        mock_result = MagicMock()
+        mock_result.total_price = None
+        mock_result.to_dict.return_value = {
+            "order_id": "ord-1",
+            "status": "submitted",
+            "provider": "craftcloud",
+        }
+        provider.place_order.return_value = mock_result
+
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, [
+                "order", "place", "quote-1",
+                "--shipping", "ship-1",
+                "--first-name", "Ada",
+                "--last-name", "Lovelace",
+                "--email", "ada@example.com",
+                "--phone", "555-0100",
+                "--street", "123 Main St",
+                "--city", "Austin",
+                "--state", "TX",
+                "--postal-code", "78701",
+                "--country", "US",
+                "--preview-file", str(preview_file),
+                "--confirm-preview",
+                "--confirm-shipping",
+            ], input="\n")
+
+        assert result.exit_code == 0
+        assert "Save this shipping contact/address" in result.output
+        assert not (tmp_path / "profiles.json").exists()
+
+    @pytest.mark.skipif(not _has_fulfillment, reason="kiln-pro fulfillment module not available")
+    def test_order_place_rejects_partial_shipping_address(self, runner):
+        provider = MagicMock()
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, [
+                "order", "place", "quote-1",
+                "--first-name", "Ada",
+                "--json",
+            ])
+        assert result.exit_code != 0
+        provider.place_order.assert_not_called()
+        assert "Shipping address is incomplete" in result.output
+
+    @pytest.mark.skipif(not _has_fulfillment, reason="kiln-pro fulfillment module not available")
+    def test_order_place_rejects_missing_preview_confirmation(self, runner):
+        provider = MagicMock()
+        with patch("kiln.cli.main._get_fulfillment_provider", return_value=provider):
+            result = runner.invoke(cli, [
+                "order", "place", "quote-1",
+                "--shipping", "ship-1",
+                "--first-name", "Ada",
+                "--last-name", "Lovelace",
+                "--email", "ada@example.com",
+                "--phone", "555-0100",
+                "--street", "123 Main St",
+                "--city", "Austin",
+                "--state", "TX",
+                "--postal-code", "78701",
+                "--country", "US",
+                "--confirm-shipping",
+                "--json",
+            ])
+        assert result.exit_code != 0
+        provider.place_order.assert_not_called()
+        assert "reviewed model preview" in result.output
 
     def test_order_cancel_json(self, runner):
         provider = MagicMock()

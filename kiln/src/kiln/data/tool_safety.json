@@ -220,6 +220,18 @@
     "fulfillment_quote": {
       "level": "confirm"
     },
+    "save_shipping_profile": {
+      "level": "confirm"
+    },
+    "list_shipping_profiles": {
+      "level": "guarded"
+    },
+    "delete_shipping_profile": {
+      "level": "confirm"
+    },
+    "issue_shipping_confirmation_token": {
+      "level": "confirm"
+    },
     "fulfillment_order": {
       "level": "confirm"
     },

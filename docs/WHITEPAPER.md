@@ -207,7 +207,7 @@ The `slice_and_print` operation combines slicing, upload, and print start into a
 
 Kiln routes manufacturing jobs to existing third-party fulfillment providers. It does not operate its own manufacturing network.
 
-**Craftcloud.** Aggregates quotes from 150+ print services worldwide across FDM, SLA, SLS, MJF, and metal (DMLS). Works out of the box with no API key required. No printer needed.
+**Craftcloud.** Aggregates quotes from 150+ print services worldwide across FDM, SLA, SLS, MJF, and metal (DMLS). Normal users route through Kiln's hosted fulfillment path; operators can use direct mode with their own provider credentials. No printer needed.
 
 
 Kiln provides a fulfillment intelligence layer above individual providers: health monitoring with automatic skip on consecutive failures, cross-provider quote comparison (cheapest, fastest, recommended), batch quoting for multi-part assemblies, retry with provider fallback, and persistent order history.

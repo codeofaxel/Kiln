@@ -602,7 +602,11 @@ Routes manufacturing to third-party fulfillment providers (Craftcloud). Kiln act
 |---|---|---|
 | `fulfillment_materials` | `provider` | Available materials from third-party print services |
 | `fulfillment_quote` | `file_path`, `material_id`, `quantity`, `provider` | Manufacturing quote + provider ownership metadata (`provider_name`, `provider_terms_url`, `support_owner=provider`, `merchant_of_record=provider`) |
-| `fulfillment_order` | `quote_id`, `shipping_option_id`, `payment_hold_id` | Order confirmation with billing + provider metadata (`provider_order_id`) |
+| `save_shipping_profile` | `name`, `shipping_address`, `consent_to_store` | Locally saved shipping/contact profile after explicit user consent |
+| `list_shipping_profiles` | `include_addresses` | Saved profile summaries; full addresses only when requested for review |
+| `delete_shipping_profile` | `name` | Local shipping profile deletion |
+| `issue_shipping_confirmation_token` | `quote_id`, `shipping_option_id`, `shipping_address` or `shipping_profile_name` | Single-use proof that the user reviewed contact/shipping details |
+| `fulfillment_order` | `quote_id`, `shipping_option_id`, `preview_token`, `preview_file_path`, `shipping_confirmation_token`, `payment_hold_id` | Order confirmation with billing + provider metadata (`provider_order_id`) after preview and shipping confirmation |
 | `fulfillment_order_status` | `order_id` | Order tracking details + provider ownership metadata |
 | `fulfillment_cancel` | `order_id` | Cancellation confirmation |
 | `compare_print_options` | `file_path`, `material` | Local vs. fulfillment cost comparison |

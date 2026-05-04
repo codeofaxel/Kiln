@@ -694,6 +694,11 @@ def format_order(
                 table.add_row("Total", f"[bold]{cur} {order['total_price']:.2f}[/bold]")
         if order.get("tracking_url"):
             table.add_row("Tracking", order["tracking_url"])
+        if order.get("checkout_url"):
+            table.add_row("Checkout", order["checkout_url"])
+        payment_url = order.get("payment_url")
+        if payment_url and payment_url != order.get("checkout_url"):
+            table.add_row("Payment", payment_url)
         if order.get("estimated_delivery"):
             table.add_row("Delivery", order["estimated_delivery"])
 
@@ -719,6 +724,11 @@ def format_order(
             lines.append(f"Total:    {cur} {order['total_price']:.2f}")
     if order.get("tracking_url"):
         lines.append(f"Tracking: {order['tracking_url']}")
+    if order.get("checkout_url"):
+        lines.append(f"Checkout: {order['checkout_url']}")
+    payment_url = order.get("payment_url")
+    if payment_url and payment_url != order.get("checkout_url"):
+        lines.append(f"Payment:  {payment_url}")
     return "\n".join(lines)
 
 
@@ -1053,9 +1063,12 @@ def format_billing_status(
             f"max ${policy.get('max_fee_usd', 50):.2f})"
         )
 
-        jobs_this_month = data.get("outsourced_jobs_this_month", data.get("network_jobs_this_month", 0))
-        free_left = max(0, policy.get("free_tier_jobs", 3) - jobs_this_month)
-        parts.append(f"[bold]Free tier:[/bold] {free_left} free orders remaining this month")
+        items_this_month = data.get(
+            "network_items_this_month",
+            data.get("outsourced_jobs_this_month", data.get("network_jobs_this_month", 0)),
+        )
+        free_left = max(0, policy.get("free_tier_items", policy.get("free_tier_jobs", 3)) - items_this_month)
+        parts.append(f"[bold]Free tier:[/bold] {free_left} fulfillment items remaining this month")
 
         # Available rails
         rails = data.get("available_rails", [])

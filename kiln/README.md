@@ -111,7 +111,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 - **Cross-printer learning** — fleet-wide outcome learning, predictive settings, closed-loop AI generation feedback where failed prints auto-improve future generations (patent pending)
 - **AMS auto-routing** — automatic Bambu AMS tray detection, color/type identification, and slot routing when starting prints
 - **Community print registry** — opt-in crowd-sourced settings and success rates
-- **Fulfillment services** — outsource to Craftcloud (150+ print services, no API key required)
+- **Fulfillment services** — outsource to Craftcloud through the hosted proxy, or use direct mode with your own provider credentials
 - **Safety first** — pre-flight checks, G-code validation, temperature limits, optional auth
 - **Webhooks** — HMAC-signed event notifications for job lifecycle
 - **OTA firmware updates** — check, update, and rollback printer firmware

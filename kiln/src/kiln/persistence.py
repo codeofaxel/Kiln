@@ -625,6 +625,7 @@ class KilnDB:
                     payment_rail    TEXT,
                     payment_status  TEXT NOT NULL DEFAULT 'pending',
                     user_email      TEXT,
+                    item_count      INTEGER NOT NULL DEFAULT 1,
                     created_at      REAL NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_billing_charges_job
@@ -982,6 +983,13 @@ class KilnDB:
             with contextlib.suppress(sqlite3.OperationalError, Exception):
                 self._conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_billing_charges_user ON billing_charges(user_email)"
+                )
+            # Count manufactured items, not just checkout rows, for
+            # fulfillment free-tier enforcement.  Existing rows represent
+            # one item unless a newer caller records a larger quantity.
+            with contextlib.suppress(sqlite3.OperationalError, Exception):
+                self._conn.execute(
+                    "ALTER TABLE billing_charges ADD COLUMN item_count INTEGER NOT NULL DEFAULT 1"
                 )
 
             self._conn.commit()
@@ -1415,11 +1423,11 @@ class KilnDB:
                     (id, job_id, order_id, fee_amount, fee_percent,
                      job_cost, total_cost, currency, waived, waiver_reason,
                      payment_id, payment_rail, payment_status, user_email,
-                     created_at)
+                     item_count, created_at)
                 VALUES (:id, :job_id, :order_id, :fee_amount, :fee_percent,
                         :job_cost, :total_cost, :currency, :waived,
                         :waiver_reason, :payment_id, :payment_rail,
-                        :payment_status, :user_email, :created_at)
+                        :payment_status, :user_email, :item_count, :created_at)
                 """,
                 {
                     "id": charge["id"],
@@ -1436,6 +1444,7 @@ class KilnDB:
                     "payment_rail": charge.get("payment_rail"),
                     "payment_status": charge.get("payment_status", "pending"),
                     "user_email": charge.get("user_email"),
+                    "item_count": max(1, int(charge.get("item_count", 1) or 1)),
                     "created_at": charge.get("created_at", time.time()),
                 },
             )
@@ -1546,6 +1555,38 @@ class KilnDB:
             (start, user_email),
         ).fetchone()
         return row["cnt"] if row else 0
+
+    def billing_charge_items_this_month(self) -> int:
+        """Count fulfillment items recorded in billing charges this month."""
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        start = datetime(now.year, now.month, 1, tzinfo=timezone.utc).timestamp()
+        row = self._conn.execute(
+            """
+            SELECT COALESCE(SUM(CASE WHEN item_count < 1 THEN 1 ELSE item_count END), 0) AS cnt
+            FROM billing_charges
+            WHERE created_at >= ?
+            """,
+            (start,),
+        ).fetchone()
+        return int(row["cnt"]) if row else 0
+
+    def billing_charge_items_this_month_for_user(self, user_email: str) -> int:
+        """Count fulfillment items for a specific user in the current month."""
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        start = datetime(now.year, now.month, 1, tzinfo=timezone.utc).timestamp()
+        row = self._conn.execute(
+            """
+            SELECT COALESCE(SUM(CASE WHEN item_count < 1 THEN 1 ELSE item_count END), 0) AS cnt
+            FROM billing_charges
+            WHERE created_at >= ? AND user_email = ?
+            """,
+            (start, user_email),
+        ).fetchone()
+        return int(row["cnt"]) if row else 0
 
     def monthly_fee_total(self) -> float:
         """Sum of fee_amount for billing charges in the current month."""
