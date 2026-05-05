@@ -24,6 +24,7 @@ Public API:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -762,10 +763,8 @@ def _recommend_from_safety_floor(
     target_temp_c = _DEFAULT_HOT_TARGET_C
     temp_match = re.search(r"(\d+)\s*°?\s*[cC]\b", requirements_text)
     if temp_match:
-        try:
+        with contextlib.suppress(ValueError):
             target_temp_c = max(target_temp_c, int(temp_match.group(1)))
-        except ValueError:
-            pass
 
     supported = (
         {m.lower() for m in supported_materials}
@@ -870,29 +869,34 @@ def _recommend_from_safety_floor(
                 score += 12
                 reasons.append("dimensional stability suitable for sustained-load applications.")
 
-        if needs_hot_load:
+        if needs_hot_load and (_is_pla_family(mid) or mid.startswith("petg")):
             # Hot environment + load — eliminate PLA AND PETG (PETG
             # softens at 65C and creeps under load).
-            if _is_pla_family(mid) or mid.startswith("petg"):
-                score -= 25
-                warnings.append(
-                    "softens under combined heat and sustained load — choose ABS / ASA / PC / Nylon."
-                )
+            score -= 25
+            warnings.append(
+                "softens under combined heat and sustained load — choose ABS / ASA / PC / Nylon."
+            )
 
         if needs_flexible:
             # We've already filtered to TPU family — boost it strongly.
             score += 30
             reasons.append("TPU family — the only FDM material with genuine flexibility.")
 
-        if is_cosmetic and not (
-            needs_heat or needs_outdoor or needs_food
-            or needs_sustained_load or needs_flexible
+        if (
+            is_cosmetic
+            and not (
+                needs_heat
+                or needs_outdoor
+                or needs_food
+                or needs_sustained_load
+                or needs_flexible
+            )
+            and _is_pla_family(mid)
         ):
             # Pure cosmetic case — PLA wins on surface finish + ease
             # of print (no warping, low temp, smooth layer adhesion).
-            if _is_pla_family(mid):
-                score += 18
-                reasons.append("PLA family — best surface finish for cosmetic prints.")
+            score += 18
+            reasons.append("PLA family — best surface finish for cosmetic prints.")
 
         # --- Printer capability filters -----------------------------
         if supported is not None and mid not in supported:
@@ -2516,4 +2520,3 @@ def _reset_knowledge_base() -> None:
     """Reset the singleton — for testing only."""
     global _kb
     _kb = None
-

@@ -392,7 +392,7 @@ def emboss_text_lines_on_face(
     # TextDoesNotFitError and surfaces ``verdict.suggestions`` to the
     # user (shorten to N chars, widen to W mm, split lines).
     fit_warnings: list[str] = []
-    for i, (line, size) in enumerate(zip(lines, per_line_sizes)):
+    for i, (line, size) in enumerate(zip(lines, per_line_sizes, strict=False)):
         if not line:
             continue
         text_w = len(line) * size * 0.6
@@ -461,7 +461,7 @@ def emboss_text_lines_on_face(
         offsets = [top - i * line_spacing_mm for i in range(n)]
 
     current = body_stl
-    for i, (line, offset) in enumerate(zip(lines, offsets)):
+    for i, (line, offset) in enumerate(zip(lines, offsets, strict=False)):
         if not line:
             continue
         current = emboss_text_on_face(

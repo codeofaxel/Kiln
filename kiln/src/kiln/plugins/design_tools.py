@@ -417,7 +417,7 @@ class _DesignToolsPlugin:
                             )
                         )
                         result["alternatives_food_safe_only"] = [
-                            a for a, s in zip(raw_alts, slugs) if s and s in safe_set
+                            a for a, s in zip(raw_alts, slugs, strict=False) if s and s in safe_set
                         ]
                 return result
             except Exception as exc:

@@ -62,10 +62,7 @@ _CI_ENV_VARS: tuple[str, ...] = (
 
 def _is_ci_environment() -> bool:
     """True if any well-known CI / build / test env var is set."""
-    for name in _CI_ENV_VARS:
-        if os.environ.get(name):
-            return True
-    return False
+    return any(os.environ.get(name) for name in _CI_ENV_VARS)
 
 
 def _already_sent_today() -> bool:
@@ -168,8 +165,8 @@ def _send_heartbeat() -> None:
         import platform
         import urllib.request
 
-        from kiln.installation import get_installation_id
         from kiln.device import get_device_fingerprint
+        from kiln.installation import get_installation_id
 
         installation_id = get_installation_id()
         # Anonymous, one-way salted hash of the OS-level machine ID

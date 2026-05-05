@@ -1400,7 +1400,8 @@ class TestFleetCLI:
         ))):
             result = runner.invoke(cli, ["fleet", "status"])
         assert result.exit_code != 0
-        assert "Free tier" in result.output or "upgrade" in result.output.lower()
+        assert "LICENSE_REQUIRED" in result.output
+        assert "kiln3d.com/pricing" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -1836,8 +1837,8 @@ class TestMonitor:
         """JSON-Lines envelope must carry the Tier-1 signals block."""
         from kiln.print_health_monitor import (
             HealthSeverity,
-            PrintHealthMonitor,
             PrinterHealthReport,
+            PrintHealthMonitor,
         )
 
         # Build an in-process monitor (so _build_jsonl_envelope runs)
@@ -1933,10 +1934,11 @@ class TestMonitor:
     def test_monitor_json_omits_auto_recover_when_kiln_pro_unavailable(self):
         """Free tier (no kiln_pro) -> auto_recover/reroute fields are None."""
         import sys
+
         from kiln.print_health_monitor import (
             HealthSeverity,
-            PrintHealthMonitor,
             PrinterHealthReport,
+            PrintHealthMonitor,
         )
 
         # Force the import to fail by stubbing the kiln_pro module out

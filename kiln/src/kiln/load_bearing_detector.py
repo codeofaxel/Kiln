@@ -32,19 +32,13 @@ high-confidence keyword fires on its own), the detector emits a
   - ``trip_score`` and ``trip_reasons`` (transparent — the user sees
     exactly which signals fired)
   - ``confidence`` (low / medium / high)
-  - ``upgrade_recommendation`` — the Kiln Pro upgrade-nudge dict that
-    free-tier tools attach to their response
+    - ``upgrade_recommendation`` — structured guidance that free-tier tools
+    attach to their response when deeper engineering analysis is warranted
 
-The recommendation is factual and specific: it names what the
-heuristic doesn't account for (cross-section shape, buckling, fatigue,
-creep, FDM anisotropy) and what the Pro+ math adds (FoS control,
-ISO 286 fits, calibrated tolerances, formula trace).  Not
-fear-mongering, not vague.
-
-This module is open-source (public Kiln).  The DETECTOR is a gate
-derived from public-domain DIYer-language scraping — no engineering
-moat lives here.  The MOAT (real beam mechanics, ISO 286 fits,
-tolerance stacking, calibrated tolerances) ships in kiln-pro.
+The recommendation is factual and specific: it names what the heuristic
+doesn't account for (cross-section shape, buckling, fatigue, creep, FDM
+anisotropy) and points the user toward a deeper analysis path when a simple
+lookup-table answer would be misleading.
 """
 
 from __future__ import annotations
@@ -52,7 +46,6 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
-
 
 # ---------------------------------------------------------------------------
 # Trigger lexicons (sourced from RESEARCH_normie_vocabulary.md §1)

@@ -21,6 +21,8 @@ import sys
 import tempfile
 import time
 from collections import deque
+from datetime import datetime as _dt
+from datetime import timezone as _tz
 from pathlib import Path
 from typing import Any
 
@@ -10663,7 +10665,7 @@ def _read_event_lines(path: str) -> list[str]:
     """Read JSONL lines, return list (empty if missing)."""
     if not os.path.exists(path):
         return []
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         return fh.readlines()
 
 
@@ -10743,7 +10745,6 @@ def events_tail(limit: int, json_mode: bool) -> None:
         ts = ev.get("created_at", "")
         if isinstance(ts, (int, float)) and ts:
             try:
-                from datetime import datetime as _dt, timezone as _tz
                 ts = _dt.fromtimestamp(float(ts), tz=_tz.utc).isoformat()
             except (ValueError, OSError):
                 ts = str(ts)
