@@ -10629,6 +10629,251 @@ def repair(file_path: str, output: str | None, json_mode: bool) -> None:
         sys.exit(1)
 
 
+# ---------------------------------------------------------------------------
+# `kiln events` — local event log inspection.
+#
+# Free-tier friendly: the event log file is JSONL at
+# ``~/.kiln/events.log`` (override with ``KILN_EVENT_LOG``).  Whether
+# the writer is the kiln-pro VCS event bus, a CI hook script, or a
+# user's own ``echo >> ~/.kiln/events.log`` cron job, the reader is
+# pure stdlib JSON parsing — no kiln-pro dependency.  If the file
+# doesn't exist, both commands print a friendly empty result instead
+# of erroring; that's the expected state on a fresh install.
+#
+# Mirrors the MCP tools ``tail_event_log`` and ``summarize_events``
+# (kiln-pro plugins/notification_tools.py); the MCP surface stays the
+# canonical agent interface and these CLI commands are the
+# operator-at-terminal version for ``tail -f``-style monitoring and
+# quick "what happened in the last hour" diagnostics in scripts.
+# ---------------------------------------------------------------------------
+
+_EVENT_LOG_DEFAULT = os.path.expanduser("~/.kiln/events.log")
+
+
+def _events_log_path() -> str:
+    """Resolve the path to the JSONL event log.
+
+    Honors ``KILN_EVENT_LOG`` (matches kiln-pro's writer + MCP
+    reader).  Falls back to ``~/.kiln/events.log``.
+    """
+    return os.environ.get("KILN_EVENT_LOG") or _EVENT_LOG_DEFAULT
+
+
+def _read_event_lines(path: str) -> list[str]:
+    """Read JSONL lines, return list (empty if missing)."""
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", encoding="utf-8") as fh:
+        return fh.readlines()
+
+
+def _parse_event_lines(lines: list[str]) -> list[dict[str, object]]:
+    """Parse JSONL → dict; preserve raw text for unparseable lines.
+
+    Lines that fail to parse are returned as ``{"raw": <line>}`` so
+    the operator sees them rather than silently losing entries — the
+    common cause is a truncated write at the tail.
+    """
+    out: list[dict[str, object]] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            out.append({"raw": line})
+    return out
+
+
+@cli.group("events")
+def events_group() -> None:
+    """Inspect the local event log (``~/.kiln/events.log``).
+
+    Subcommands:
+      tail     — show the most recent N events (operator's ``tail``)
+      summary  — aggregate counts over a time window
+    """
+
+
+@events_group.command("tail")
+@click.option(
+    "-n", "--limit", type=int, default=50, show_default=True,
+    help="Number of trailing events to display.",
+)
+@click.option(
+    "--json", "json_mode", is_flag=True,
+    help="Emit raw JSONL (one event per line) instead of a table.",
+)
+def events_tail(limit: int, json_mode: bool) -> None:
+    """Show the last N events from the local event log.
+
+    Operator analogue of the ``tail_event_log`` MCP tool — useful for
+    grep pipelines, quick last-state checks, and shell automation
+    that doesn't have an agent in the loop.
+    """
+    if limit < 1:
+        raise click.ClickException("--limit must be >= 1")
+
+    path = _events_log_path()
+    lines = _read_event_lines(path)
+    tail = lines[-limit:]
+    events = _parse_event_lines(tail)
+
+    if json_mode:
+        for ev in events:
+            click.echo(json.dumps(ev))
+        return
+
+    if not events:
+        click.echo(f"No events at {path} (file empty or missing).")
+        return
+
+    # Plain-text table; column widths kept terminal-friendly.  We
+    # deliberately don't use Rich here because operators commonly pipe
+    # this into `grep`, `awk`, or `less` — Rich's box-drawing breaks
+    # those pipelines.  Operators who want a fancier view get
+    # ``--json | jq`` instead.
+    click.echo(f"# {path}  (showing last {len(events)} of {len(lines)})")
+    click.echo("# created_at\tevent_type\tartifact_type\toperator")
+    for ev in events:
+        if "raw" in ev:
+            click.echo(f"# unparseable: {ev['raw']}")
+            continue
+        ts = ev.get("created_at", "")
+        if isinstance(ts, (int, float)) and ts:
+            try:
+                from datetime import datetime as _dt, timezone as _tz
+                ts = _dt.fromtimestamp(float(ts), tz=_tz.utc).isoformat()
+            except (ValueError, OSError):
+                ts = str(ts)
+        click.echo(
+            f"{ts}\t{ev.get('event_type', '?')}\t"
+            f"{ev.get('artifact_type', '?')}\t{ev.get('operator', '?')}"
+        )
+
+
+_DURATION_UNITS = {
+    "s": 1.0 / 3600,
+    "m": 1.0 / 60,
+    "h": 1.0,
+    "d": 24.0,
+    "w": 24.0 * 7,
+}
+
+
+def _parse_window(spec: str) -> float:
+    """Parse a duration like ``"1h"``, ``"30m"``, ``"7d"`` into hours.
+
+    Bare numbers are treated as hours (matches the MCP tool's
+    ``window_hours`` parameter).  Raises ``ClickException`` on invalid
+    input rather than silently defaulting — a typo'd ``--since 2hr``
+    should produce a visible error, not 24h of data.
+    """
+    spec = spec.strip().lower()
+    if not spec:
+        raise click.ClickException("--since cannot be empty")
+    if spec[-1].isdigit():
+        try:
+            return float(spec)
+        except ValueError as exc:
+            raise click.ClickException(f"invalid --since value: {spec!r}") from exc
+    unit = spec[-1]
+    if unit not in _DURATION_UNITS:
+        raise click.ClickException(
+            f"unknown --since unit {unit!r}; use s/m/h/d/w (e.g. 30m, 2h, 7d)"
+        )
+    try:
+        n = float(spec[:-1])
+    except ValueError as exc:
+        raise click.ClickException(f"invalid --since value: {spec!r}") from exc
+    return n * _DURATION_UNITS[unit]
+
+
+@events_group.command("summary")
+@click.option(
+    "--since", "since_spec", default="24h", show_default=True,
+    help="Time window (e.g. 30m, 2h, 7d).  Bare numbers = hours.",
+)
+@click.option(
+    "--json", "json_mode", is_flag=True,
+    help="Emit aggregate as a single JSON object.",
+)
+def events_summary(since_spec: str, json_mode: bool) -> None:
+    """Aggregate event counts over a time window.
+
+    Counts events by type and artifact, plus the top 10 operators.
+    Reads the same JSONL file as ``kiln events tail``.  Operator
+    analogue of the ``summarize_events`` MCP tool — drop into a
+    daily cron and pipe to a notifier for cheap fleet dashboards.
+    """
+    window_hours = _parse_window(since_spec)
+    path = _events_log_path()
+    lines = _read_event_lines(path)
+
+    import time as _time
+    cutoff = _time.time() - (window_hours * 3600)
+
+    by_event: dict[str, int] = {}
+    by_artifact: dict[str, int] = {}
+    by_operator: dict[str, int] = {}
+    total = 0
+    unparseable = 0
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            unparseable += 1
+            continue
+        try:
+            if float(ev.get("created_at") or 0) < cutoff:
+                continue
+        except (TypeError, ValueError):
+            continue
+        total += 1
+        et = str(ev.get("event_type", "?"))
+        at = str(ev.get("artifact_type", "?"))
+        op = str(ev.get("operator", "?"))
+        by_event[et] = by_event.get(et, 0) + 1
+        by_artifact[at] = by_artifact.get(at, 0) + 1
+        by_operator[op] = by_operator.get(op, 0) + 1
+
+    top_ops = dict(sorted(by_operator.items(), key=lambda kv: -kv[1])[:10])
+
+    if json_mode:
+        click.echo(json.dumps({
+            "window_hours": window_hours,
+            "path": path,
+            "total": total,
+            "by_event_type": by_event,
+            "by_artifact_type": by_artifact,
+            "top_operators": top_ops,
+            "unparseable_lines": unparseable,
+        }))
+        return
+
+    click.echo(f"# {path}  (window: {since_spec} = {window_hours}h)")
+    click.echo(f"Total events: {total}")
+    if unparseable:
+        click.echo(f"Unparseable lines: {unparseable}")
+    if not total:
+        return
+    click.echo("\nBy event type:")
+    for et, n in sorted(by_event.items(), key=lambda kv: -kv[1]):
+        click.echo(f"  {n:>5}  {et}")
+    click.echo("\nBy artifact type:")
+    for at, n in sorted(by_artifact.items(), key=lambda kv: -kv[1]):
+        click.echo(f"  {n:>5}  {at}")
+    if top_ops:
+        click.echo("\nTop operators:")
+        for op, n in top_ops.items():
+            click.echo(f"  {n:>5}  {op}")
+
+
 # Pro-CLI registration — MUST run after every @cli.group decorator above so
 # kiln-pro can extend public groups (e.g. graft `versions alerts`, `versions
 # record-outcome`, `versions best` onto the public `versions` group).
