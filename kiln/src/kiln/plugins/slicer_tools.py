@@ -223,6 +223,7 @@ def _maybe_overlay_calibration(
     printer_id: str,
     *,
     material: str | None = None,
+    input_path: str | None = None,
 ) -> tuple[dict[str, str], dict[str, Any] | None]:
     """Inject a Pro+ user's calibrated slicer values into ``parsed_overrides``.
 
@@ -241,6 +242,13 @@ def _maybe_overlay_calibration(
     - Returns the standard ``calibration_used`` block (same shape as
       every other wire-up site) so the slicer tool's response can
       surface what was applied.
+    - If ``input_path`` is supplied AND the calibration overlay produced
+      a non-None block, ALSO records a slice event into kiln-pro's
+      per-design slice-history artifact via the bridge (best-effort,
+      never raises).  Centralising the recording hook here means any
+      slice-flow caller of this helper automatically participates;
+      future tools that apply calibration overlay don't need to know
+      about slice history at all.
 
     Returns ``(modified_overrides, calibration_used_block_or_None)``.
     The calibration block is ``None`` when kiln-pro isn't installed
@@ -267,6 +275,21 @@ def _maybe_overlay_calibration(
             printer_id, exc,
         )
         return parsed_overrides, None
+
+    # Record the slice event for design-anchored explanation if we have
+    # an input path AND the overlay actually produced a calibration
+    # block.  Wrapped in try/except so any kiln-pro hiccup never blocks
+    # a successful slice.
+    if input_path and cal_used is not None:
+        try:
+            from kiln_pro.bridge import pro_features
+            pro_features.record_slice_for_input(
+                input_path=input_path,
+                printer_id=printer_id,
+                material=cal_used.get("material") or material or "",
+            )
+        except Exception:
+            pass  # never block slicing on telemetry
 
     return merged, cal_used
 
@@ -566,26 +589,14 @@ class _SlicerToolsPlugin:
                 # gaps.
                 cal_used: dict[str, Any] | None = None
                 if effective_printer_id:
+                    # Passing input_path here triggers Pro+ slice-history
+                    # recording inside the helper itself — any future
+                    # caller of _maybe_overlay_calibration automatically
+                    # participates without a separate hook.
                     parsed_overrides, cal_used = _maybe_overlay_calibration(
                         parsed_overrides, effective_printer_id,
+                        input_path=input_path,
                     )
-
-                # Pro+ slice-history recording (best-effort, never blocks slicing).
-                # When kiln-pro is installed AND the input has a recipe
-                # sidecar, this records the per-machine offsets that
-                # were applied at this slice into a per-design append-only
-                # artifact, enabling design-scoped calibration explanation.
-                # Free users (no kiln-pro): try/except fires ImportError, no-op.
-                if cal_used is not None:
-                    try:
-                        from kiln_pro.bridge import pro_features
-                        pro_features.record_slice_for_input(
-                            input_path=input_path,
-                            printer_id=effective_printer_id or "",
-                            material=cal_used.get("material") or "",
-                        )
-                    except Exception:
-                        pass  # never block slicing on telemetry
 
                 effective_profile: str | None = None
                 if effective_printer_id:
