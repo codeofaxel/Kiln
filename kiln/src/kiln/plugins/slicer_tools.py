@@ -570,6 +570,23 @@ class _SlicerToolsPlugin:
                         parsed_overrides, effective_printer_id,
                     )
 
+                # Pro+ slice-history recording (best-effort, never blocks slicing).
+                # When kiln-pro is installed AND the input has a recipe
+                # sidecar, this records the per-machine offsets that
+                # were applied at this slice into a per-design append-only
+                # artifact, enabling design-scoped calibration explanation.
+                # Free users (no kiln-pro): try/except fires ImportError, no-op.
+                if cal_used is not None:
+                    try:
+                        from kiln_pro.bridge import pro_features
+                        pro_features.record_slice_for_input(
+                            input_path=input_path,
+                            printer_id=effective_printer_id or "",
+                            material=cal_used.get("material") or "",
+                        )
+                    except Exception:
+                        pass  # never block slicing on telemetry
+
                 effective_profile: str | None = None
                 if effective_printer_id:
                     try:
