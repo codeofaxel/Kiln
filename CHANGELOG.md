@@ -7,15 +7,83 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [1.0.0] - 2026-04-29
 
-### Added
-- First stable public release for PyPI, the MCP Registry, ClawHub, and OpenClaw distribution.
-- 763 MCP capabilities and 215 CLI commands for agent-operated design, slicing, printing, monitoring, recovery, fulfillment, and safety workflows.
-- Hosted kiln-pro discovery stubs, paired-machine routing, and registry metadata that let public installs discover paid-tier capabilities without shipping private source.
-- Stable support posture for OctoPrint, Moonraker/Klipper, Creality when local Moonraker is reachable, Bambu Lab, Prusa Link, Elegoo, and Direct USB/Serial printers.
+All changes vs v0.5.0:
 
-### Changed
-- PyPI metadata, `server.json`, docs, and registry-facing copy now identify Kiln as `1.0.0`.
-- Release docs align public copy with the current Free, Pro, Business, and Enterprise tier boundaries.
+### Added
+
+- **Stable Public Package** — Kiln now ships as `kiln3d 1.0.0` on PyPI with production/stable package metadata.
+- **MCP Registry Release** — Kiln now publishes 1.0.0 metadata for MCP-compatible clients.
+- **Expanded MCP Surface** — Kiln now exposes 763 total MCP capabilities for local agent-operated manufacturing workflows.
+- **Expanded CLI Surface** — The `kiln` CLI now exposes 215 commands across setup, design, slicing, printing, monitoring, recovery, and release workflows.
+- **MCP Installer Command** — Added `kiln install-mcp` for easier setup in MCP clients.
+- **Account Pairing Flow** — Added local sign-in, pairing, and account-status commands for connecting a machine to a Kiln account.
+- **Tool Discovery Metadata** — Updated capability metadata so agents can find the right tool faster.
+- **Git for 3D Foundations** — Added design versioning, ancestry, aliases, rollback, mesh-only imports, and release-signing foundations.
+- **STEP Import** — Added STEP file import support with multi-backend handling.
+- **Design Recipe System** — Added recipe/provenance tracking so generated and modified objects can be edited later.
+- **Surface Decoration Tools** — Added workflows for text, image, SVG, photo, and reusable surface decorations.
+- **Photo Emboss Pipeline** — Added image-to-surface and emboss/deboss tooling for relief-style printed surfaces.
+- **Surface Intelligence** — Added face detection and placement helpers for decorating printable models.
+- **Multicolor 3MF Composer** — Added 3MF composition for multicolor and multi-material print outputs.
+- **Colored 3MF Preview** — Added per-face color rendering so multicolor files can be previewed before printing.
+- **Universal Model Visualizer** — Added adaptive model preview rendering for flat, tall, colored, and Bambu-wrapped 3MF files.
+- **Mesh Tooling Expansion** — Added repair, split, merge, mirror, hollow, simplify, compare, orient, and printability tools.
+- **Pre-Generation Estimator** — Added time, filament, and cost estimates before a model is generated.
+- **Post-Generation Validation** — Added validation gates for AI-generated meshes before print.
+- **OpenSCAD Verification** — Added static checks for common parametric model mistakes before printing.
+- **Generation Feedback Loop** — Failed print outcomes can feed back into future generation constraints.
+- **Material Intelligence Expansion** — Expanded material data, brand filament profiles, compatibility rules, troubleshooting, and post-processing guidance.
+- **Filament Resolver** — Added smarter brand/material matching across slicing, recommendations, and print planning.
+- **Multi-Material System Support** — Added support metadata for multi-material printer workflows.
+- **Creality Moonraker Support** — Added Creality local Moonraker adapter support where local Moonraker is reachable.
+- **Bambu AMS Auto-Routing** — Added AMS-aware material routing and safer tray handling.
+- **Multi-Color Copies** — Added workflows for printing multiple copies in different AMS colors.
+- **MakerWorld Adapter** — Added MakerWorld marketplace support alongside existing marketplace integrations.
+- **Assembly Manual Metadata** — Added public-side metadata for assembly manual workflows.
+- **Print Health Monitor** — Reworked monitoring around a canonical health monitor with predictive risk and failure signals.
+- **Print Watchdog** — Added watchdog support for safer monitoring and recovery decisions.
+- **Incident Recorder** — Added structured incident recording for safety-critical printer events.
+- **Failure Vocabulary** — Added unified failure type and severity normalization.
+- **Printer Model Resolver** — Added explicit printer model resolution instead of unsafe guessing.
+- **Safety Gap Warnings** — Added warnings when Kiln cannot fully verify printer-specific safety limits.
+- **G-Code Interception Rules** — Added default interception rules for safer printer command handling.
+- **Preview Confirmation Gate** — Added confirmation tokens so print starts can be tied to a verified preview.
+
+### Printer & Slicing Improvements
+
+- **Bambu 3MF Reliability** — Improved Bambu 3MF wrapping, thumbnails, object printing, and startup handling.
+- **Bambu MQTT Compatibility** — Fixed Bambu connection behavior with newer MQTT client versions.
+- **Bambu A-Series Handling** — Improved A-series state parsing, file transfer behavior, and print-start polling.
+- **AMS Ambiguity Handling** — Kiln now fails safer when AMS tray state is ambiguous.
+- **Build Volume Resolution** — Printer build volumes now resolve consistently across tool paths.
+- **Slicer Profiles Expansion** — Expanded bundled slicer profile metadata and printer compatibility data.
+- **3MF Extraction** — Added extraction support for models embedded inside `.3mf` and `.gcode.3mf` files.
+- **Prusa/Bambu Time Estimates** — Improved print time estimation from slicer output.
+- **SCAD Color Preview Fixes** — OpenSCAD previews now preserve expected colors.
+- **Adaptive Preview Angles** — Model previews choose better angles for different part shapes.
+
+### Fixed
+
+- **Config Validation** — `printer_model` validation now preserves case-sensitive model IDs.
+- **Registry Recovery** — Printer registry access is more reliable across CLI, MCP, and plugin paths.
+- **Monitor Import Fixes** — Fixed missing health-check imports and retired stale monitor paths.
+- **Tool Name Cleanup** — Removed stale suffixes and repaired naming collisions.
+- **Auth Command Cleanup** — Clarified sign-in, pairing, linking, and identity behavior.
+- **Preview Token Binding** — Preview confirmation now binds more reliably to the intended file.
+- **Path Traversal Fixes** — Hardened marketplace downloads, snapshots, and file destinations.
+- **Shell Injection Fix** — Hardened preview notification command handling.
+- **Bambu Credential Masking** — Bambu access codes are masked in sensitive output paths.
+- **Public Install Cleanup** — Removed install paths that could fail for normal public package users.
+
+### Security & Safety
+
+- **License Change** — Kiln moved to AGPL-3.0-or-later with commercial licensing available.
+- **Release Signing Workflow** — Added signed-release workflow foundations.
+- **SBOM Workflow** — Added software bill of materials generation.
+- **SLSA Attestation Workflow** — Added provenance/attestation workflow for release artifacts.
+- **PyPI Publishing Hardening** — Fixed release workflow issues for trusted publishing.
+- **Printer Crash Prevention** — Added stronger safety checks around upload, startup, and command execution.
+- **Tier Boundary Clarity** — Free, Pro, Business, and Enterprise capabilities are clearer across CLI, MCP metadata, and account-aware workflows.
 
 ## [0.4.2] - 2026-03-18
 
