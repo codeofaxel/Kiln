@@ -34,7 +34,7 @@ def _has_pro_license() -> bool:
     except ImportError:
         return False
 
-# Joint type clearance ranges (mm) — used when design_patterns.json
+# Joint type clearance ranges (mm) — used when design_templates.json
 # doesn't have specific values
 _DEFAULT_JOINT_CLEARANCES: dict[str, tuple[float, float]] = {
     "snap_fit": (0.1, 0.3),
@@ -50,8 +50,8 @@ _FLEXIBLE_MATERIALS: frozenset[str] = frozenset({"TPU", "TPE", "SILICONE"})
 # Materials too brittle for snap-fit
 _BRITTLE_MATERIALS: frozenset[str] = frozenset({"PLA", "PLA+", "SILK-PLA"})
 
-# Mapping from joint_type shorthand to design_patterns.json keys
-_JOINT_PATTERN_MAP: dict[str, str] = {
+# Mapping from joint_type shorthand to design_templates.json keys
+_JOINT_TEMPLATE_MAP: dict[str, str] = {
     "snap_fit": "snap_fit_cantilever",
     "press_fit": "press_fit",
     "threaded": "threaded_connection",
@@ -424,9 +424,9 @@ _DATA_DIR = Path(__file__).resolve().parent / "data" / "design_knowledge"
 
 
 @lru_cache(maxsize=1)
-def _load_design_patterns() -> dict[str, Any]:
-    """Load design_patterns.json with ``@lru_cache``."""
-    path = Path(__file__).resolve().parent / "data" / "design_knowledge" / "design_patterns.json"
+def _load_design_templates() -> dict[str, Any]:
+    """Load design_templates.json with ``@lru_cache``."""
+    path = Path(__file__).resolve().parent / "data" / "design_knowledge" / "design_templates.json"
     try:
         with open(path) as fh:
             data: dict[str, Any] = json.load(fh)
@@ -587,10 +587,10 @@ def validate_joint(
     mat_a = parts_by_id[interface.part_a_id].material.upper() if interface.part_a_id in parts_by_id else "PLA"
     mat_b = parts_by_id[interface.part_b_id].material.upper() if interface.part_b_id in parts_by_id else "PLA"
 
-    # Load design pattern data (if available for this joint type)
-    patterns = _load_design_patterns()
-    pattern_key = _JOINT_PATTERN_MAP.get(jtype)
-    pattern = patterns.get(pattern_key, {}) if pattern_key else {}
+    # Load design template data (if available for this joint type)
+    templates = _load_design_templates()
+    template_key = _JOINT_TEMPLATE_MAP.get(jtype)
+    template = templates.get(template_key, {}) if template_key else {}
 
     clearance_range = _DEFAULT_JOINT_CLEARANCES.get(jtype, (0.0, 1.0))
 
@@ -695,9 +695,9 @@ def validate_joint(
     else:
         issues.append(f"Unknown joint type '{jtype}' — no design rules available for validation.")
 
-    # -- Material compatibility from design_patterns.json -----------------
-    if pattern and "material_compatibility" in pattern:
-        compat = pattern["material_compatibility"]
+    # -- Material compatibility from design_templates.json ----------------
+    if template and "material_compatibility" in template:
+        compat = template["material_compatibility"]
         rules_checked.append("material_compatibility")
         for mat_label, mat_val in [("Part A", mat_a), ("Part B", mat_b)]:
             mat_lower = mat_val.lower()

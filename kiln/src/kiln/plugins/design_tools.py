@@ -31,9 +31,9 @@ class _DesignToolsPlugin:
         - check_material_environment
         - get_printer_design_capabilities
         - list_printer_design_profiles
-        - get_design_pattern_info
-        - list_design_patterns_catalog
-        - find_design_patterns
+        - get_design_template_info  (alias: get_design_pattern_info)
+        - list_design_templates_catalog  (alias: list_design_patterns_catalog)
+        - find_design_templates  (alias: find_design_patterns)
         - match_design_requirements
         - validate_design_for_requirements
         - troubleshoot_print_issue
@@ -544,96 +544,146 @@ class _DesignToolsPlugin:
                 return {"success": False, "error": str(exc)}
 
         @mcp.tool()
-        def get_design_pattern_info(pattern: str) -> dict:
-            """Get detailed design rules for a functional pattern.
+        def get_design_template_info(template: str) -> dict:
+            """Get detailed design rules for a functional design template.
 
             Returns dimensional constraints, material compatibility,
-            print orientation rules, and expert tips for patterns like
+            print orientation rules, and expert tips for templates like
             snap fits, press fits, living hinges, gears, brackets, threads,
             watertight containers, and electronics enclosures.
 
             Args:
-                pattern: Pattern ID — one of: snap_fit_cantilever, press_fit,
+                template: Template ID — one of: snap_fit_cantilever, press_fit,
                     living_hinge, threaded_connection, cantilever_bracket,
                     watertight_container, enclosure_box, gear.
             """
-            from kiln.design_intelligence import get_design_pattern
+            from kiln.design_intelligence import get_design_template
 
             try:
-                p = get_design_pattern(pattern)
-                if p is None:
-                    from kiln.design_intelligence import list_design_patterns
+                t = get_design_template(template)
+                if t is None:
+                    from kiln.design_intelligence import list_design_templates
 
-                    available = [dp.pattern_id for dp in list_design_patterns()]
+                    available = [dt.template_id for dt in list_design_templates()]
                     return {
                         "success": False,
-                        "error": f"Unknown pattern: {pattern}. Available: {', '.join(available)}.",
+                        "error": f"Unknown template: {template}. Available: {', '.join(available)}.",
                     }
-                result = p.to_dict()
+                result = t.to_dict()
                 result["success"] = True
                 return result
             except Exception as exc:
-                _logger.error("Design pattern failed: %s", exc, exc_info=True)
+                _logger.error("Design template failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
+        # Backwards-compat alias for the pre-2026-05-05 MCP tool name.
+        # Translates the response shape so any agent wired to the old
+        # name keeps seeing the old keys (pattern_id rather than
+        # template_id).  Removable once we're confident no callers rely
+        # on the old name.
         @mcp.tool()
-        def list_design_patterns_catalog() -> dict:
-            """List all available design patterns with descriptions.
+        def get_design_pattern_info(pattern: str) -> dict:
+            """[DEPRECATED — use ``get_design_template_info``] Get design template details."""
+            result = get_design_template_info(pattern)
+            if isinstance(result, dict) and "template_id" in result:
+                result = dict(result)
+                result["pattern_id"] = result["template_id"]
+            return result
 
-            Returns every functional design pattern in the knowledge base
+        @mcp.tool()
+        def list_design_templates_catalog() -> dict:
+            """List all available design templates with descriptions.
+
+            Returns every functional design template in the knowledge base
             with a brief description and applicable use cases.  Use this
-            to discover which patterns are relevant before getting detailed
-            rules with get_design_pattern_info.
+            to discover which templates are relevant before getting detailed
+            rules with get_design_template_info.
             """
-            from kiln.design_intelligence import list_design_patterns
+            from kiln.design_intelligence import list_design_templates
 
             try:
-                patterns = list_design_patterns()
+                templates = list_design_templates()
                 summaries = []
-                for p in patterns:
+                for t in templates:
                     summaries.append(
                         {
-                            "pattern_id": p.pattern_id,
-                            "display_name": p.display_name,
-                            "description": p.description,
-                            "use_cases": p.use_cases,
-                            "best_materials": p.material_compatibility.get(
+                            "template_id": t.template_id,
+                            "display_name": t.display_name,
+                            "description": t.description,
+                            "use_cases": t.use_cases,
+                            "best_materials": t.material_compatibility.get(
                                 "excellent", []
                             ),
                         }
                     )
                 return {
                     "success": True,
-                    "patterns": summaries,
+                    "templates": summaries,
                     "count": len(summaries),
                 }
             except Exception as exc:
-                _logger.error("List patterns failed: %s", exc, exc_info=True)
+                _logger.error("List templates failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
+        # Backwards-compat alias for the pre-2026-05-05 MCP tool name.
+        # Translates the response shape: {"templates": [...]} →
+        # {"patterns": [...]} and template_id → pattern_id per item.
         @mcp.tool()
-        def find_design_patterns(use_case: str) -> dict:
-            """Find design patterns that apply to a specific use case.
+        def list_design_patterns_catalog() -> dict:
+            """[DEPRECATED — use ``list_design_templates_catalog``] List design templates."""
+            result = list_design_templates_catalog()
+            if isinstance(result, dict) and "templates" in result:
+                result = dict(result)
+                items = []
+                for t in result["templates"]:
+                    item = dict(t) if isinstance(t, dict) else t
+                    if isinstance(item, dict) and "template_id" in item:
+                        item["pattern_id"] = item["template_id"]
+                    items.append(item)
+                result["patterns"] = items
+            return result
 
-            Searches the pattern library for patterns whose use-case tags
-            match the query.  Returns matching patterns with full rules.
+        @mcp.tool()
+        def find_design_templates(use_case: str) -> dict:
+            """Find design templates that apply to a specific use case.
+
+            Searches the template library for templates whose use-case tags
+            match the query.  Returns matching templates with full rules.
 
             Args:
                 use_case: What you're designing (e.g. "enclosure",
                     "gear train", "battery cover", "vase").
             """
-            from kiln.design_intelligence import find_patterns_for_use_case
+            from kiln.design_intelligence import find_templates_for_use_case
 
             try:
-                patterns = find_patterns_for_use_case(use_case)
+                templates = find_templates_for_use_case(use_case)
                 return {
                     "success": True,
-                    "patterns": [p.to_dict() for p in patterns],
-                    "count": len(patterns),
+                    "templates": [t.to_dict() for t in templates],
+                    "count": len(templates),
                 }
             except Exception as exc:
-                _logger.error("Find patterns failed: %s", exc, exc_info=True)
+                _logger.error("Find templates failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
+
+        # Backwards-compat alias for the pre-2026-05-05 MCP tool name.
+        # Translates the response shape: {"templates": [...]} →
+        # {"patterns": [...]} and template_id → pattern_id per item.
+        @mcp.tool()
+        def find_design_patterns(use_case: str) -> dict:
+            """[DEPRECATED — use ``find_design_templates``] Find design templates."""
+            result = find_design_templates(use_case)
+            if isinstance(result, dict) and "templates" in result:
+                result = dict(result)
+                items = []
+                for t in result["templates"]:
+                    item = dict(t) if isinstance(t, dict) else t
+                    if isinstance(item, dict) and "template_id" in item:
+                        item["pattern_id"] = item["template_id"]
+                    items.append(item)
+                result["patterns"] = items
+            return result
 
         @mcp.tool()
         def match_design_requirements(description: str) -> dict:

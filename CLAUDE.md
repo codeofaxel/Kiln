@@ -438,7 +438,7 @@ When pushing new Kiln version releases:
 - **KilnToolRegistry.swift / KilnAPIClient.swift** may need updating to reflect new or changed MCP tools
 - **NativeMonitor.swift** polls Kiln tools (`monitor_print`, `check_print_health`, `printer_trend_analysis`, etc.) — verify these still match after tool signature changes
 - **AlertInjector.swift** maps Kiln's safety/monitoring responses to native macOS notifications — update when new alert types or safety features are added
-- New materials, design patterns, or safety profiles should be reflected in the **DesignVisualizer**'s material system and the Models tab's Design Library
+- New materials, design templates, or safety profiles should be reflected in the **DesignVisualizer**'s material system and the Models tab's Design Library
 - Build and test: `cd /Users/adamarreola/Kiln-pro/kiln-desktop && swift build -c release`
 
 The `Kiln-pro/CLAUDE.md` § "Desktop App" has the full architecture reference (API client wiring, tier system, install commands).

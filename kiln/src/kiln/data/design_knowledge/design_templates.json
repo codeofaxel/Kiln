@@ -1,0 +1,542 @@
+{
+  "_meta": {
+    "version": "2.0.0",
+    "domain": "fdm",
+    "description": "Discovery catalog of functional design templates for FDM printing. Each entry is identifiable by display_name, use_cases, and material compatibility — enough for an agent to surface the right template to the user. Engineering-grade depth (design_rules, agent_guidance, failure modes, structured variants, sources) lives in the Kiln Pro overlay.",
+    "_data_quality": {
+      "last_audit_date": "2026-05-05",
+      "primary_sources": [
+        "Bayer 'Snap-Fit Joint Design' Engineering Polymers Design Guide (1995)",
+        "Shigley & Mischke 'Mechanical Engineering Design' 10th ed.",
+        "ISO 261 / ISO 286 / ISO 60529 / ISO 60715 / ISO 62133 — relevant standards",
+        "AGMA 933 — Basic Gear Geometry",
+        "Manufacturer technical datasheets (McMaster-Carr, Keystone, filament vendors)",
+        "Empirical FDM consensus (CNC Kitchen, MakersMuse, Hackaday, /r/3Dprinting)"
+      ],
+      "methodology": "Conservative safety-floor values appropriate for AI-controlled FDM printing without expert supervision. Curated reasoning, decision trees, structured variants, holding torques, cycle estimates, and source-cited engineering values are the engineering moat — they ship in Kiln Pro."
+    },
+    "_split_note": "Discovery + safety-floor profiles for AI-controlled FDM printing. Curated engineering depth (recommended dimensions, structured failure modes, decision trees, holding torques, cycle estimates, helical-gear formulas, IP-rating decision trees, captured-ball variants, anti-walkout lock options, per-material insert tables, DIN-rail variants, and source-cited reasoning) is available in Kiln Pro. See https://kiln3d.com/pricing."
+  },
+  "snap_fit_cantilever": {
+    "display_name": "Cantilever Snap Fit",
+    "description": "A flexible arm with a hook that deflects during assembly and snaps into a mating feature. The most common snap fit type.",
+    "use_cases": [
+      "enclosures",
+      "battery_covers",
+      "cable_management",
+      "removable_panels",
+      "phone_cases",
+      "electronics_housings"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "petg",
+        "nylon",
+        "tpu"
+      ],
+      "good": [
+        "abs",
+        "asa",
+        "polycarbonate"
+      ],
+      "poor": [
+        "pla"
+      ],
+      "avoid": []
+    },
+    "print_orientation": "arm_in_xy_plane"
+  },
+  "press_fit": {
+    "display_name": "Press Fit / Interference Fit",
+    "description": "A joint where one part is slightly larger than the hole it fits into, creating a friction-based connection. No fasteners needed.",
+    "use_cases": [
+      "axle_bearings",
+      "dowel_joints",
+      "insert_holders",
+      "magnet_pockets",
+      "bearing_seats",
+      "pin_connections"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "petg",
+        "abs",
+        "asa",
+        "nylon"
+      ],
+      "good": [
+        "pla",
+        "polycarbonate"
+      ],
+      "poor": [
+        "tpu"
+      ],
+      "avoid": []
+    },
+    "print_orientation": "hole_axis_vertical"
+  },
+  "living_hinge": {
+    "display_name": "Living Hinge",
+    "description": "A thin flexible section connecting two rigid sections, allowing repeated bending at a defined axis. Like the hinge on a shampoo bottle cap.",
+    "use_cases": [
+      "flip_lids",
+      "foldable_parts",
+      "one_piece_enclosures",
+      "articulated_joints",
+      "deployable_structures"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "tpu",
+        "nylon"
+      ],
+      "good": [
+        "polycarbonate"
+      ],
+      "poor": [],
+      "avoid": [
+        "pla",
+        "petg",
+        "abs",
+        "asa"
+      ]
+    },
+    "print_orientation": "hinge_line_perpendicular_to_layers"
+  },
+  "threaded_connection": {
+    "display_name": "Printed Threads",
+    "description": "Screw threads printed directly into the part. Can be external (bolt) or internal (nut). Works for both mating printed parts and accepting standard fasteners.",
+    "use_cases": [
+      "adjustment_screws",
+      "containers_with_lids",
+      "camera_mounts",
+      "tripod_adapters",
+      "connector_housings",
+      "leveling_feet"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "petg",
+        "abs",
+        "asa",
+        "nylon"
+      ],
+      "good": [
+        "pla",
+        "polycarbonate"
+      ],
+      "poor": [
+        "tpu"
+      ],
+      "avoid": []
+    },
+    "print_orientation": "thread_axis_vertical"
+  },
+  "cantilever_bracket": {
+    "display_name": "Cantilever / Wall Mount Bracket",
+    "description": "A rigid bracket that supports weight while mounted to a wall or surface. Must resist bending and shear loads. Covers both cantilever shelf-arm and flat/L-shape wall-mount geometries.",
+    "use_cases": [
+      "shelf_brackets",
+      "shelf_mounting",
+      "monitor_arms",
+      "phone_mounts",
+      "tool_holders",
+      "display_stands",
+      "equipment_mounts",
+      "light_fixtures",
+      "speaker_mounts",
+      "curtain_rod_brackets",
+      "picture_hangers"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "petg",
+        "abs",
+        "asa",
+        "nylon",
+        "polycarbonate"
+      ],
+      "good": [
+        "cf_pla",
+        "cf_petg",
+        "pla_plus"
+      ],
+      "poor": [
+        "pla"
+      ],
+      "avoid": [
+        "tpu"
+      ]
+    },
+    "print_orientation": "bracket_flat_on_bed"
+  },
+  "watertight_container": {
+    "display_name": "Watertight Container / Vessel",
+    "description": "A container designed to hold liquid without leaking through the print walls or seams.",
+    "use_cases": [
+      "vases",
+      "planters",
+      "cups",
+      "funnels",
+      "reservoirs",
+      "drainage_channels",
+      "water_tanks"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "petg",
+        "tpu"
+      ],
+      "good": [
+        "pla",
+        "abs",
+        "asa"
+      ],
+      "poor": [
+        "nylon"
+      ],
+      "avoid": []
+    },
+    "print_orientation": "opening_up"
+  },
+  "enclosure_box": {
+    "display_name": "Electronics Enclosure / Project Box",
+    "description": "A multi-part box designed to house electronics, with provisions for cable routing, mounting, ventilation, and assembly.",
+    "use_cases": [
+      "raspberry_pi_cases",
+      "sensor_housings",
+      "control_boxes",
+      "led_controller_housings",
+      "battery_enclosures",
+      "iot_devices"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "petg",
+        "abs",
+        "asa"
+      ],
+      "good": [
+        "pla",
+        "nylon",
+        "polycarbonate"
+      ],
+      "poor": [
+        "tpu"
+      ],
+      "avoid": []
+    },
+    "print_orientation": "opening_up"
+  },
+  "gear": {
+    "display_name": "Spur Gear / Mechanical Gear",
+    "description": "A toothed wheel designed to mesh with another gear to transmit rotational motion and torque.",
+    "use_cases": [
+      "gear_trains",
+      "actuators",
+      "toys",
+      "mechanical_art",
+      "clock_mechanisms",
+      "robot_joints",
+      "adjustable_mechanisms"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "nylon"
+      ],
+      "good": [
+        "petg",
+        "abs",
+        "asa",
+        "polycarbonate"
+      ],
+      "poor": [
+        "pla"
+      ],
+      "avoid": [
+        "tpu"
+      ]
+    },
+    "print_orientation": "gear_face_on_bed"
+  },
+  "heat_set_insert_boss": {
+    "display_name": "Heat-Set Insert Boss",
+    "description": "A cylindrical boss designed to accept M2-M5 brass heat-set threaded inserts, providing strong metal threads in a printed part for repeated screw assembly.",
+    "use_cases": [
+      "electronics_enclosures",
+      "panel_mounting",
+      "structural_assemblies",
+      "jigs_and_fixtures",
+      "robot_chassis",
+      "camera_housings",
+      "modular_furniture"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "abs",
+        "asa",
+        "nylon"
+      ],
+      "good": [
+        "petg",
+        "polycarbonate",
+        "pc_abs"
+      ],
+      "poor": [
+        "pla",
+        "pla_plus"
+      ],
+      "avoid": [
+        "tpu"
+      ]
+    },
+    "print_orientation": "boss_axis_vertical"
+  },
+  "phone_stand": {
+    "display_name": "Phone / Tablet Stand",
+    "description": "An angled stand that holds a phone or tablet at a comfortable viewing angle, with a front lip for retention and a stable base to prevent tipping.",
+    "use_cases": [
+      "desk_phone_holder",
+      "kitchen_recipe_stand",
+      "video_call_stand",
+      "bedside_charging_dock",
+      "tablet_drawing_stand",
+      "point_of_sale_display"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "pla",
+        "petg",
+        "pla_plus"
+      ],
+      "good": [
+        "abs",
+        "asa",
+        "cf_pla",
+        "silk_pla"
+      ],
+      "poor": [],
+      "avoid": [
+        "tpu"
+      ]
+    },
+    "print_orientation": "back_panel_flat_on_bed"
+  },
+  "ball_joint_socket": {
+    "display_name": "Ball and Socket Joint",
+    "description": "A spherical joint allowing multi-axis rotation, consisting of a ball on one part and a receiving socket on another. Can be print-in-place or assembled.",
+    "use_cases": [
+      "articulated_figures",
+      "camera_mounts",
+      "adjustable_lamp_arms",
+      "robot_limbs",
+      "poseable_models",
+      "gimbal_mechanisms"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "nylon",
+        "petg"
+      ],
+      "good": [
+        "tpu",
+        "abs",
+        "asa"
+      ],
+      "poor": [
+        "pla"
+      ],
+      "avoid": [
+        "cf_pla",
+        "cf_nylon"
+      ]
+    },
+    "print_orientation": "socket_opening_up"
+  },
+  "dovetail_joint": {
+    "display_name": "Sliding Dovetail Joint",
+    "description": "A trapezoidal tongue-and-groove joint that slides together for tool-free mechanical assembly. Resists pull-apart forces perpendicular to the slide direction.",
+    "use_cases": [
+      "modular_assemblies",
+      "drawer_slides",
+      "rail_systems",
+      "tool_free_mounting",
+      "stackable_modules",
+      "adjustable_fixtures"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "pla",
+        "petg",
+        "cf_pla"
+      ],
+      "good": [
+        "abs",
+        "asa",
+        "pla_plus",
+        "cf_petg"
+      ],
+      "poor": [
+        "nylon"
+      ],
+      "avoid": [
+        "tpu"
+      ]
+    },
+    "print_orientation": "slide_axis_horizontal"
+  },
+  "battery_compartment": {
+    "display_name": "Battery Compartment",
+    "description": "A holder designed to securely house standard battery cells with contact terminals, polarity guides, and a retaining lid for easy replacement.",
+    "use_cases": [
+      "remote_controls",
+      "portable_devices",
+      "sensor_nodes",
+      "led_projects",
+      "toy_electronics",
+      "emergency_lights",
+      "iot_devices"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "petg",
+        "abs",
+        "pla_plus"
+      ],
+      "good": [
+        "pla",
+        "asa",
+        "nylon"
+      ],
+      "poor": [],
+      "avoid": [
+        "tpu"
+      ]
+    },
+    "print_orientation": "opening_up"
+  },
+  "pcb_enclosure_standoff": {
+    "display_name": "PCB Mounting Standoff",
+    "description": "Cylindrical posts that elevate a PCB above the enclosure floor, providing clearance for bottom-side components and secure mounting via screws or snap-fit nubs.",
+    "use_cases": [
+      "electronics_enclosures",
+      "raspberry_pi_mounts",
+      "arduino_shields",
+      "custom_pcb_housings",
+      "sensor_boards",
+      "led_driver_mounts"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "petg",
+        "abs",
+        "asa"
+      ],
+      "good": [
+        "pla_plus",
+        "nylon",
+        "polycarbonate"
+      ],
+      "poor": [
+        "pla"
+      ],
+      "avoid": [
+        "tpu"
+      ]
+    },
+    "print_orientation": "standoffs_vertical"
+  },
+  "pegboard_hook": {
+    "display_name": "Pegboard Hook / Accessory",
+    "description": "Hooks and holders designed to insert into standard 25.4mm (1-inch) spaced pegboard holes for tool and accessory organization.",
+    "use_cases": [
+      "tool_organization",
+      "workshop_storage",
+      "craft_room_hooks",
+      "retail_displays",
+      "garage_organizers",
+      "kitchen_utensil_holders"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "petg",
+        "abs",
+        "cf_pla",
+        "pla_plus"
+      ],
+      "good": [
+        "asa",
+        "nylon",
+        "pla"
+      ],
+      "poor": [],
+      "avoid": [
+        "tpu"
+      ]
+    },
+    "print_orientation": "peg_axis_vertical"
+  },
+  "hinge_pin": {
+    "display_name": "Pin Hinge",
+    "description": "A rotation joint using alternating knuckles held together by a cylindrical pin, allowing controlled rotation for doors, lids, and flip mechanisms.",
+    "use_cases": [
+      "enclosure_lids",
+      "flip_covers",
+      "door_hinges",
+      "fold_out_supports",
+      "adjustable_panels",
+      "access_hatches"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "petg",
+        "nylon",
+        "abs"
+      ],
+      "good": [
+        "asa",
+        "polycarbonate",
+        "pla_plus"
+      ],
+      "poor": [
+        "pla"
+      ],
+      "avoid": [
+        "tpu"
+      ]
+    },
+    "print_orientation": "hinge_axis_horizontal"
+  },
+  "latch_clasp": {
+    "display_name": "Mechanical Latch / Clasp",
+    "description": "A lever-actuated latch mechanism for securing lids, doors, and panels on enclosures. Uses a hook-and-catch system with a spring arm to maintain engagement.",
+    "use_cases": [
+      "tool_boxes",
+      "equipment_cases",
+      "waterproof_enclosures",
+      "storage_containers",
+      "access_panels",
+      "instrument_housings"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "petg",
+        "nylon",
+        "abs",
+        "asa"
+      ],
+      "good": [
+        "polycarbonate",
+        "pla_plus",
+        "pc_abs"
+      ],
+      "poor": [
+        "pla"
+      ],
+      "avoid": [
+        "tpu"
+      ]
+    },
+    "print_orientation": "lever_flat_on_bed"
+  }
+}

@@ -219,6 +219,10 @@ TIER_FULL: list[str] = [
     "check_material_environment",
     "get_printer_design_capabilities",
     "list_printer_design_profiles",
+    "get_design_template_info",
+    "list_design_templates_catalog",
+    "find_design_templates",
+    # Backwards-compat aliases (renamed 2026-05-05)
     "get_design_pattern_info",
     "list_design_patterns_catalog",
     "find_design_patterns",
