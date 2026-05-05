@@ -34,6 +34,40 @@ def _telemetry_enabled() -> bool:
     return val not in ("false", "0", "no", "off")
 
 
+# Environment variables that indicate a CI / build / sandbox runner.
+# Heartbeats are for installed-user reachability, not for ephemeral
+# CI jobs that get a fresh ``$HOME`` per invocation — those generate
+# a brand-new ``installation_id`` per run and inflate active-install
+# counts by two orders of magnitude (the founder dashboard saw 462
+# "active installs" in 30d when the real number was ~4).  Suppressing
+# the heartbeat at the source is the only honest fix.
+_CI_ENV_VARS: tuple[str, ...] = (
+    "CI",                  # generic flag set by GitHub Actions, GitLab, CircleCI, Travis, Buildkite, Vercel, Netlify, Cloudflare Pages, Render
+    "GITHUB_ACTIONS",      # GitHub Actions
+    "GITLAB_CI",           # GitLab CI
+    "CIRCLECI",            # CircleCI
+    "TRAVIS",              # Travis
+    "BUILDKITE",           # Buildkite
+    "JENKINS_URL",         # Jenkins
+    "TEAMCITY_VERSION",    # TeamCity
+    "TF_BUILD",            # Azure DevOps
+    "BITBUCKET_BUILD_NUMBER",  # Bitbucket Pipelines
+    "DRONE",               # Drone CI
+    "APPVEYOR",            # AppVeyor
+    "CODEBUILD_BUILD_ID",  # AWS CodeBuild
+    "RUNNER_OS",           # GitHub Actions runner shim — present even in some self-hosted setups where ``CI`` got unset
+    "PYTEST_CURRENT_TEST", # pytest sets this during test execution; a unit test importing kiln must not phone home
+)
+
+
+def _is_ci_environment() -> bool:
+    """True if any well-known CI / build / test env var is set."""
+    for name in _CI_ENV_VARS:
+        if os.environ.get(name):
+            return True
+    return False
+
+
 def _already_sent_today() -> bool:
     """File-based guard — avoid duplicate pings on restarts."""
     try:
@@ -120,6 +154,9 @@ def _is_pro_installed() -> bool:
 def _send_heartbeat() -> None:
     """Send a single heartbeat to Supabase."""
     global _sent_today  # noqa: PLW0603
+
+    if _is_ci_environment():
+        return
 
     with _lock:
         if _sent_today or _already_sent_today():
@@ -210,6 +247,8 @@ def _send_heartbeat() -> None:
 def send_heartbeat_async() -> None:
     """Fire the heartbeat in a daemon thread — never blocks startup."""
     if not _telemetry_enabled():
+        return
+    if _is_ci_environment():
         return
     if _sent_today or _already_sent_today():
         return
