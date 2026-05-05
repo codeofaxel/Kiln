@@ -2,15 +2,25 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 
 // Pricing structure locked 2026-04-25:
-//   Free       $0/mo            1 printer  · 1 seat   · non-commercial
-//   Pro        $49/mo           1 printer  · 1 seat   · non-commercial (hobbyists)
-//   Business   $199/mo          3 printers · 3 seats · commercial
+//   Free       $0/mo            1 printer  · 1 seat   · personal use
+//   Pro        $49/mo           1 printer  · 1 seat   · hobbyists & personal projects
+//   Business   $199/mo          3 printers · 3 seats · for prints you sell
 //                                +$15/printer over 3 (cap 50)
 //                                +$50/seat over 3 (cap 10)
 //   Enterprise hidden            50 printers · flexible · custom
 //                                Contact us — quoted per deal.
 //
 // Annual ~20% off for Pro and Business.  Enterprise is custom.
+//
+// Copy convention: tier descriptions in this file deliberately avoid
+// the words "commercial use" and "non-commercial license" because
+// Kiln itself ships under AGPL-3.0, and the FAQ at the bottom of
+// this page references a *separate* "AGPL commercial license" for
+// proprietary code use.  Two unrelated meanings of "commercial" on
+// the same page would confuse OSS-aware buyers.  Use concrete
+// behaviour ("selling what you print" / "personal projects") for
+// the subscription-tier UI; reserve "commercial license" for the
+// AGPL-alternative FAQ where it's the standard term of art.
 
 const pricingSchema = {
   '@type': 'OfferCatalog',
@@ -130,7 +140,7 @@ const pricingFaqSchema = {
           <ul class="features">
             <li><span class="check">&#10003;</span> Unlimited local printing</li>
             <li><span class="check">&#10003;</span> 1 printer</li>
-            <li><span class="check">&#10003;</span> Personal / non-commercial use</li>
+            <li><span class="check">&#10003;</span> For personal projects</li>
             <li><span class="check">&#10003;</span> 10-job queue</li>
             <li><span class="check">&#10003;</span> Design intelligence (25 FDM materials, 45 brand-specific filament profiles, 20 patterns)</li>
             <li><span class="check">&#10003;</span> Natural-language to physical fabrication &mdash; text/image to validated 3D print</li>
@@ -141,7 +151,7 @@ const pricingFaqSchema = {
             <li><span class="check">&#10003;</span> Cost estimation &amp; recommendations</li>
             <li><span class="check">&#10003;</span> 14-component parametric catalog</li>
             <li><span class="check">&#10003;</span> Local design history (linear) &mdash; branching, merge, and signed releases require Pro</li>
-            <li><span class="check">&#10003;</span> 763 MCP capabilities &amp; 215 CLI commands</li>
+            <li><span class="check">&#10003;</span> 791 MCP capabilities &amp; 216 CLI commands</li>
             <li><span class="check">&#10003;</span> Community support</li>
             <li><span class="check">&#10003;</span> 3 fulfillment orders/month free</li>
             <li><span class="check">&#10003;</span> 5% orchestration fee on fulfillment</li>
@@ -165,7 +175,7 @@ const pricingFaqSchema = {
           <ul class="features">
             <li><span class="check">&#10003;</span> Everything in Free</li>
             <li><span class="check">&#10003;</span> 1 printer (single-printer use)</li>
-            <li><span class="check">&#10003;</span> Personal / non-commercial license</li>
+            <li><span class="check">&#10003;</span> Hobbyist &amp; personal projects only</li>
             <li><span class="check">&#10003;</span> Unlimited job queue</li>
             <li><span class="check">&#10003;</span> Unlimited assembly parts</li>
             <li><span class="check">&#10003;</span> Auto-generated assembly manuals &mdash; multi-part prints ship with a printable single-language PDF, "Made with Kiln" cover</li>
@@ -196,7 +206,7 @@ const pricingFaqSchema = {
           <div class="badge">Recommended</div>
           <div class="card-header">
             <h3>Business</h3>
-            <p class="tier-tagline">For anyone selling &mdash; Etsy, Shopify, custom orders, commercial work.</p>
+            <p class="tier-tagline">For anyone selling what they print &mdash; Etsy, Shopify, custom orders, client work.</p>
             <div class="price">
               <span class="amount monthly-price">$199</span>
               <span class="amount annual-price" style="display:none">$159</span>
@@ -206,7 +216,7 @@ const pricingFaqSchema = {
           </div>
           <ul class="features">
             <li><span class="check">&#10003;</span> Everything in Pro</li>
-            <li><span class="check">&#10003;</span> Commercial license &mdash; sell what you make</li>
+            <li><span class="check">&#10003;</span> Sell what you print &mdash; Etsy, Shopify, custom orders, client work</li>
             <li><span class="check">&#10003;</span> 3 printers included <span class="feature-note">($15/mo each above, up to 50)</span></li>
             <li><span class="check">&#10003;</span> 3 team seats included <span class="feature-note">($50/mo each above, up to 10)</span></li>
             <li><span class="check">&#10003;</span> Multi-printer fleet management &amp; cross-printer learning</li>
@@ -282,7 +292,7 @@ const pricingFaqSchema = {
         </details>
         <details>
           <summary>What's the difference between Pro and Business?</summary>
-          <p>Pro is licensed for personal and hobbyist use only — single user, single printer, no commercial selling. Business is for anyone running a real operation: Etsy shops, Shopify stores, custom-order businesses, agencies, schools, manufacturers. Business adds multi-printer fleet management, team seats, QR codes, commercial license, and the workflow features small shops actually need.</p>
+          <p>Pro is for hobbyists and personal projects — single user, single printer, not for prints sold for revenue. Business is for anyone running a real operation: Etsy shops, Shopify stores, custom-order businesses, agencies, schools, manufacturers. Business adds multi-printer fleet management, team seats, QR codes, and the workflow features small shops actually need. (Both tiers are subscription plans for the hosted product — separate from the AGPL-alternative licensing covered below.)</p>
         </details>
         <details>
           <summary>What does annual billing save?</summary>
@@ -297,31 +307,45 @@ const pricingFaqSchema = {
           <p>Yes. Email <a href="mailto:adam@kiln3d.com?subject=Kiln%20Enterprise%20evaluation">adam@kiln3d.com</a> and we'll set you up with full Enterprise access to evaluate.</p>
         </details>
         <details>
-          <summary>What about commercial licensing?</summary>
-          <p>Kiln is open source under AGPL-3.0, which requires that derivative works and networked services built on Kiln also be open-sourced. If your company needs to use Kiln in proprietary products without AGPL obligations, we offer a commercial license. Contact <a href="mailto:adam@kiln3d.com?subject=Commercial%20License">adam@kiln3d.com</a> to discuss.</p>
+          <summary>Need a non-AGPL license to use Kiln in proprietary code?</summary>
+          <p>Different from the subscription tiers above. Kiln is open source under AGPL-3.0, which requires that derivative works and networked services built on Kiln also be open-sourced. If your company needs to use Kiln in proprietary products without AGPL obligations, we offer an <strong>AGPL commercial license</strong> (a dual-licensing alternative — not a subscription tier). Contact <a href="mailto:adam@kiln3d.com?subject=AGPL%20Commercial%20License">adam@kiln3d.com</a> to discuss.</p>
         </details>
       </div>
     </div>
   </section>
 
-  <!-- Commercial-use modal — fired before Pro checkout to gate
-       commercial sellers into Business.  Defense-in-depth: the
-       /api/billing/create-checkout-session endpoint also rejects
-       Pro signups that declare commercial_use=true. -->
+  <!-- "Are you selling what you print?" modal — fired before Pro
+       checkout to route sellers into Business.  Defense-in-depth:
+       the /api/billing/create-checkout-session endpoint also
+       rejects Pro signups that declare commercial_use=true.
+
+       Copy avoids the words "commercial" and "license" because
+       this page also has a "Need a non-AGPL license to use Kiln
+       in proprietary code?" FAQ entry that's a separate
+       (legitimate) AGPL-alternative offering — see the file-header
+       comment.  Concrete behaviour ("selling what you print")
+       side-steps the conflation. -->
   <dialog id="commercial-use-modal" class="commercial-use-modal">
     <form method="dialog" class="commercial-use-content">
-      <h3>Quick question before checkout</h3>
-      <p>Will you be using Kiln for products you sell or commercial work?</p>
+      <h3>Are you selling what you print?</h3>
+      <p>
+        Pro is for personal projects. Business is for prints you
+        sell &mdash; Etsy, Shopify, custom orders, client work
+        &mdash; and includes the team and fleet features
+        you&rsquo;ll want once revenue is on the line.
+      </p>
       <div class="commercial-use-buttons">
         <button type="submit" value="yes" class="btn commercial-use-yes">
-          Yes — I sell or do commercial work
+          Yes &mdash; I sell prints
         </button>
         <button type="submit" value="no" class="btn commercial-use-no">
-          No — just personal projects
+          No &mdash; personal projects
         </button>
       </div>
       <p class="commercial-use-note">
-        Pro is licensed for personal &amp; hobbyist use only. Commercial sellers (Etsy, Shopify, custom orders, agencies) need Business.
+        About your subscription plan &mdash; not Kiln&rsquo;s
+        open-source (AGPL-3.0) license. You can change plans
+        anytime in billing settings.
       </p>
     </form>
   </dialog>
@@ -376,8 +400,9 @@ const pricingFaqSchema = {
         // message rather than a generic error.
         if (data.upgrade_to) {
           alert(
-            `Pro is licensed for personal use only.\n\n` +
-            `Click "Get Business" instead — that's the right plan for commercial work.`,
+            `Pro is for personal projects only.\n\n` +
+            `Click "Get Business" instead — that's the right plan ` +
+            `when you're selling what you print.`,
           );
           btn.disabled = false;
           btn.textContent = originalLabel;
@@ -643,7 +668,7 @@ const pricingFaqSchema = {
     text-align: center;
   }
 
-  /* Featured card (Business — recommended for commercial use) */
+  /* Featured card (Business — recommended for sellers) */
   .pricing-card.featured {
     border-color: var(--accent);
     box-shadow: 0 0 40px var(--accent-glow), 0 0 80px rgba(255, 107, 43, 0.05);
