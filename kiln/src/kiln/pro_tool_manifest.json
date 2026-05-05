@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-05-05T05:14:57.738800+00:00",
-  "tool_count": 299,
+  "generated": "2026-05-05T05:31:16.831978+00:00",
+  "tool_count": 301,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -6156,6 +6156,68 @@
       }
     },
     {
+      "name": "apply_calibration_recommendations",
+      "description": "Persist calibration tuning overrides as soft defaults.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {
+          "noise_floor_mm": {
+            "default": -1.0,
+            "title": "Noise Floor Mm",
+            "type": "number"
+          },
+          "heuristic_confidence_levels": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Heuristic Confidence Levels"
+          },
+          "clarification_threshold": {
+            "default": -1.0,
+            "title": "Clarification Threshold",
+            "type": "number"
+          },
+          "auto_refresh_when_stable": {
+            "default": false,
+            "title": "Auto Refresh When Stable",
+            "type": "boolean"
+          },
+          "auto_refresh_stability_window": {
+            "default": 3,
+            "title": "Auto Refresh Stability Window",
+            "type": "integer"
+          },
+          "source": {
+            "default": "user_explicit",
+            "title": "Source",
+            "type": "string"
+          },
+          "based_on_sample_count": {
+            "default": 0,
+            "title": "Based On Sample Count",
+            "type": "integer"
+          },
+          "annotation": {
+            "default": "",
+            "title": "Annotation",
+            "type": "string"
+          }
+        },
+        "title": "apply_calibration_recommendationsArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "assess_calibration_status",
       "description": "Calibration confidence + auto-import for slicer profiles.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -6733,6 +6795,17 @@
           "material"
         ],
         "title": "request_calibration_test_printArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "revert_calibration_recommendations",
+      "description": "Delete applied_settings.json \u2014 revert all resolvers to defaults.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {},
+        "title": "revert_calibration_recommendationsArguments",
         "type": "object"
       }
     },
