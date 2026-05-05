@@ -30,7 +30,7 @@ Kiln acts as a universal intelligence layer between AI agents and physical fabri
 
 - **Design Intelligence.** A knowledge base of 25 FDM materials with full engineering properties, 45 brand-specific filament profiles, and 20 proven design patterns informs every design decision -- from material selection to structural reinforcement to joint design.
 
-- **Printability Engine.** Before anything reaches a slicer, Kiln runs 7-dimension printability analysis: overhangs, thin walls, bridging, bed adhesion, supports, warping, and thermal stress. Problems are caught and fixed in the design phase, not after a failed print.
+- **Printability Engine.** Before anything reaches a slicer, Kiln runs 7-dimension printability analysis: overhangs, thin walls, bridging, bed adhesion, supports, warping, and thermal stress. The gate fires on every print path -- direct slice-and-print, AI-generated meshes, smart-retry-after-failure, and benchmarks -- and auto-repairs non-manifold geometry before slicing. Problems are caught and fixed in the design phase, not after a failed print.
 
 - **Design DNA.** Every generated model preserves its parametric source code alongside the cached mesh. Need to tweak a dimension? The agent modifies the source and regenerates -- no starting from scratch.
 
