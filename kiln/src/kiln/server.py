@@ -10308,8 +10308,9 @@ def run_benchmark(
     printer_name: str | None = None,
     printer_id: str | None = None,
     profile_path: str | None = None,
+    skip_validation: bool = False,
 ) -> dict:
-    """Prepare a benchmark print: slice → upload → report stats.
+    """Prepare a benchmark print: validate → slice → upload → report stats.
 
     Slices a model with the printer's profile and uploads it, then
     reports printer stats from history. The print is NOT started
@@ -10320,6 +10321,10 @@ def run_benchmark(
         printer_name: Registered printer name.
         printer_id: Printer model ID for profile selection.
         profile_path: Explicit slicer profile path.
+        skip_validation: Bypass the pre-print mesh validation step.
+            Defaults to False — user-supplied benchmark meshes are
+            pre-tested for printability.  Set to True for known-good
+            fixed reference benchmark models.
     """
     if err := _check_auth("print"):
         return err
@@ -10329,6 +10334,7 @@ def run_benchmark(
             printer_name=printer_name,
             printer_id=printer_id,
             profile_path=profile_path,
+            skip_validation=skip_validation,
         )
         return {"success": result.success, **result.to_dict()}
     except Exception as exc:

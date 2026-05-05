@@ -355,7 +355,7 @@ class TestGenerateAndPrint:
     @patch("kiln.server._get_adapter")
     @patch("kiln.slicer.slice_file")
     @patch("kiln.generation.validate_mesh")
-    @patch("kiln.mesh_validation_pipeline.run_validation_pipeline")
+    @patch("kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline")
     @patch("os.path.getsize", return_value=42000)
     @patch("kiln.server._get_generation_provider")
     def test_full_pipeline(self, mock_get_provider, _mock_getsize, mock_pipeline, mock_validate, mock_slice, mock_adapter, _auth):
@@ -366,13 +366,20 @@ class TestGenerateAndPrint:
         provider.download_result.return_value = _make_result()
         mock_get_provider.return_value = provider
 
-        # Mock the validation pipeline to pass
-        pipeline_result = MagicMock()
-        pipeline_result.passed = True
-        pipeline_result.file_path = "/tmp/kiln_generated/model.stl"
-        pipeline_result.dimensions_mm = {"x": 10.0, "y": 10.0, "z": 10.0}
-        pipeline_result.to_dict.return_value = {"passed": True}
-        mock_pipeline.return_value = pipeline_result
+        # Mock the comprehensive validation pipeline to pass.
+        # generate_and_print now uses run_full_validation_pipeline (the
+        # 14-step gate, same one slice_and_print calls).
+        mock_pipeline.return_value = {
+            "ready_to_print": True,
+            "printability_score": 92,
+            "validated_path": "/tmp/kiln_generated/model.stl",
+            "summary": "Print-ready (92/100).",
+            "next_action": None,
+            "repaired": False,
+            "model_info": {"dimensions_mm": {"x": 10.0, "y": 10.0, "z": 10.0}},
+            "checks": [],
+            "status": "pass",
+        }
 
         mock_validate.return_value = _make_validation(valid=True)
 
@@ -423,7 +430,7 @@ class TestGenerateAndPrint:
         assert result["error"]["code"] == "GENERATION_FAILED"
 
     @_AUTH_PATCH
-    @patch("kiln.mesh_validation_pipeline.run_validation_pipeline")
+    @patch("kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline")
     @patch("kiln.server._get_generation_provider")
     def test_validation_fails(self, mock_get_provider, mock_pipeline, _auth):
         """Generated mesh fails validation — should not proceed to slice."""
@@ -433,20 +440,29 @@ class TestGenerateAndPrint:
         provider.download_result.return_value = _make_result()
         mock_get_provider.return_value = provider
 
-        # Mock the validation pipeline to fail
-        pipeline_result = MagicMock()
-        pipeline_result.passed = False
-        pipeline_result.summary = "Non-manifold edges detected"
-        mock_pipeline.return_value = pipeline_result
+        # Mock the comprehensive validation pipeline to fail.
+        mock_pipeline.return_value = {
+            "ready_to_print": False,
+            "printability_score": 25,
+            "validated_path": "/tmp/kiln_generated/model.stl",
+            "summary": "Not ready (25/100). Non-manifold edges detected.",
+            "next_action": {"tool": "repair_mesh_advanced"},
+            "repaired": False,
+            "model_info": {"dimensions_mm": {"x": 10.0, "y": 10.0, "z": 10.0}},
+            "checks": [],
+            "status": "fail",
+        }
 
         result = generate_and_print("a cube")
         assert result["success"] is False
         assert result["error"]["code"] == "VALIDATION_FAILED"
         assert "Non-manifold" in result["error"]["message"]
+        # The full report comes back attached to the error envelope.
+        assert result["validation"]["printability_score"] == 25
 
     @_AUTH_PATCH
     @patch("kiln.server._registry")
-    @patch("kiln.mesh_validation_pipeline.run_validation_pipeline")
+    @patch("kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline")
     @patch("os.path.getsize", return_value=42000)
     @patch("kiln.server._get_generation_provider")
     def test_printer_not_found(self, mock_get_provider, _mock_getsize, mock_pipeline, mock_registry, _auth):
@@ -460,13 +476,18 @@ class TestGenerateAndPrint:
 
         mock_registry.get.side_effect = PrinterNotFoundError("no-printer")
 
-        # Pipeline passes — the NOT_FOUND should come from the upload step
-        pipeline_result = MagicMock()
-        pipeline_result.passed = True
-        pipeline_result.file_path = "/tmp/kiln_generated/model.stl"
-        pipeline_result.dimensions_mm = None
-        pipeline_result.to_dict.return_value = {"passed": True}
-        mock_pipeline.return_value = pipeline_result
+        # Pipeline passes — the NOT_FOUND should come from the upload step.
+        mock_pipeline.return_value = {
+            "ready_to_print": True,
+            "printability_score": 88,
+            "validated_path": "/tmp/kiln_generated/model.stl",
+            "summary": "Print-ready (88/100).",
+            "next_action": None,
+            "repaired": False,
+            "model_info": {"dimensions_mm": {}},
+            "checks": [],
+            "status": "pass",
+        }
 
         with patch("kiln.generation.validate_mesh", return_value=_make_validation(valid=True)), \
              patch("kiln.slicer.slice_file") as mock_slice:

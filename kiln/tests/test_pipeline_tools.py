@@ -263,6 +263,7 @@ class TestRunBenchmark:
             printer_name=None,
             printer_id=None,
             profile_path=None,
+            skip_validation=False,
         )
 
     @patch("kiln.server._pipeline_benchmark")
@@ -282,6 +283,22 @@ class TestRunBenchmark:
             printer_name="prusa",
             printer_id="prusa_mk4",
             profile_path="/tmp/profile.ini",
+            skip_validation=False,
+        )
+
+    @patch("kiln.server._pipeline_benchmark")
+    def test_skip_validation_passed_through(self, mock_pipeline):
+        from kiln.server import run_benchmark
+
+        mock_pipeline.return_value = _ok_result("benchmark")
+        run_benchmark(model_path="/tmp/bench.stl", skip_validation=True)
+
+        mock_pipeline.assert_called_once_with(
+            model_path="/tmp/bench.stl",
+            printer_name=None,
+            printer_id=None,
+            profile_path=None,
+            skip_validation=True,
         )
 
     @patch("kiln.server._pipeline_benchmark", side_effect=ValueError("no model"))

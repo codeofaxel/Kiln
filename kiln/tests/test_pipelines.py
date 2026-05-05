@@ -455,7 +455,12 @@ class TestQuickPrintValidationStep:
 # ===================================================================
 
 class TestBenchmarkPipeline:
-    """Tests for benchmark() pipeline with mocked dependencies."""
+    """Tests for benchmark() pipeline with mocked dependencies.
+
+    These tests pass ``skip_validation=True`` to isolate slice / upload
+    semantics from the pre-print validation gate.  Validation gating
+    coverage lives in :class:`TestBenchmarkValidationStep`.
+    """
 
     def test_no_model_path_returns_error(self) -> None:
         """benchmark() without model_path should fail immediately."""
@@ -476,7 +481,7 @@ class TestBenchmarkPipeline:
 
     @patch("kiln.slicer.slice_file", side_effect=Exception("slicer error"))
     def test_fails_at_slice(self, mock_slice: MagicMock) -> None:
-        result = benchmark(model_path="/tmp/bench.stl")
+        result = benchmark(model_path="/tmp/bench.stl", skip_validation=True)
         assert result.success is False
         assert result.pipeline == "benchmark"
         slice_steps = [s for s in result.steps if s.name == "slice"]
@@ -490,10 +495,91 @@ class TestBenchmarkPipeline:
         mock_resolve: MagicMock,
         mock_slice: MagicMock,
     ) -> None:
-        result = benchmark(model_path="/tmp/bench.stl", printer_id="ender3")
+        result = benchmark(
+            model_path="/tmp/bench.stl",
+            printer_id="ender3",
+            skip_validation=True,
+        )
         profile_steps = [s for s in result.steps if s.name == "resolve_profile"]
         assert len(profile_steps) == 1
         assert profile_steps[0].success is True
+
+
+# ===================================================================
+# benchmark pre-print validation gate
+# ===================================================================
+
+
+class TestBenchmarkValidationStep:
+    """Tests for the pre-print validation step in benchmark()."""
+
+    @patch("kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline")
+    @patch("kiln.slicer.slice_file")
+    def test_validation_failure_blocks_benchmark(
+        self,
+        mock_slice: MagicMock,
+        mock_validate: MagicMock,
+    ) -> None:
+        """A non-printable benchmark mesh aborts before slicing."""
+        mock_validate.return_value = {
+            "ready_to_print": False,
+            "printability_score": 30,
+            "validated_path": "/tmp/bench.stl",
+            "summary": "Not ready (30/100). 1 issue: paper-thin walls",
+            "next_action": None,
+            "repaired": False,
+        }
+        result = benchmark(model_path="/tmp/bench.stl")
+
+        assert result.success is False
+        validate_steps = [s for s in result.steps if s.name == "validate_mesh"]
+        assert len(validate_steps) == 1
+        assert validate_steps[0].success is False
+        assert "30/100" in validate_steps[0].message
+        # Slicer never invoked
+        assert mock_slice.call_count == 0
+
+    @patch("kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline")
+    @patch("kiln.slicer.slice_file", side_effect=Exception("slicer mock"))
+    def test_validation_pass_proceeds_to_slice(
+        self,
+        mock_slice: MagicMock,
+        mock_validate: MagicMock,
+    ) -> None:
+        """A passing benchmark mesh records success and continues to slice."""
+        mock_validate.return_value = {
+            "ready_to_print": True,
+            "printability_score": 90,
+            "validated_path": "/tmp/bench.stl",
+            "summary": "Print-ready (90/100).",
+            "next_action": None,
+            "repaired": False,
+        }
+        result = benchmark(model_path="/tmp/bench.stl")
+
+        validate_steps = [s for s in result.steps if s.name == "validate_mesh"]
+        assert len(validate_steps) == 1
+        assert validate_steps[0].success is True
+        assert validate_steps[0].data["printability_score"] == 90
+        # Reached slice
+        slice_steps = [s for s in result.steps if s.name == "slice"]
+        assert len(slice_steps) == 1
+
+    @patch("kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline")
+    @patch("kiln.slicer.slice_file", side_effect=Exception("slicer mock"))
+    def test_skip_validation_bypasses_gate(
+        self,
+        mock_slice: MagicMock,
+        mock_validate: MagicMock,
+    ) -> None:
+        """skip_validation=True records a clean skip and never calls the validator."""
+        result = benchmark(model_path="/tmp/bench.stl", skip_validation=True)
+
+        assert mock_validate.call_count == 0
+        validate_steps = [s for s in result.steps if s.name == "validate_mesh"]
+        assert len(validate_steps) == 1
+        assert validate_steps[0].success is True
+        assert "skip" in validate_steps[0].message.lower()
 
 
 # ===================================================================

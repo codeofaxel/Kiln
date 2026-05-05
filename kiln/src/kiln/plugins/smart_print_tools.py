@@ -43,6 +43,7 @@ class _SmartPrintToolsPlugin:
             printer_id: str | None = None,
             custom_overrides: str | None = None,
             skip_diagnosis: bool = False,
+            skip_validation: bool = False,
         ) -> dict:
             """Diagnose the last print failure and re-slice + print with fixes.
 
@@ -56,8 +57,14 @@ class _SmartPrintToolsPlugin:
             3. Merges diagnosis-recommended slicer overrides with any
                ``custom_overrides`` you supply (your overrides win on
                conflict).
-            4. Re-slices the model with the merged overrides, uploads the
-               result, and starts the print.
+            4. Re-validates the mesh's printability before re-slicing.  A
+               retry path that re-sends a broken mesh is the highest-
+               value place to validate — the previous attempt already
+               failed, and slicer overrides can't fix mesh-level issues.
+               Bypass with ``skip_validation=True`` if the caller already
+               validated.
+            5. Re-slices the (possibly auto-repaired) mesh with the merged
+               overrides, uploads the result, and starts the print.
 
             Args:
                 model_path: Path to the STL/OBJ/3MF that failed.
@@ -73,6 +80,10 @@ class _SmartPrintToolsPlugin:
                     conflict.
                 skip_diagnosis: If True, skip the failure diagnosis step and
                     re-slice using only ``custom_overrides``.
+                skip_validation: If True, bypass the pre-print mesh
+                    validation gate.  Defaults to False — designs are
+                    pre-tested for printability before the retry reaches
+                    the printer.
             """
             import kiln.server as _srv
             from kiln.printability import (
@@ -266,6 +277,83 @@ class _SmartPrintToolsPlugin:
             # letting the slicer use its built-in defaults.
 
             # ------------------------------------------------------------------
+            # 5b. Pre-print validation gate.
+            #
+            # A retry is the most consequential place to validate: the
+            # previous attempt failed, and slicer-override fixes can only
+            # paper over mesh-level issues (non-manifold, paper-thin
+            # walls, intersecting volumes).  Re-sending the same broken
+            # mesh through a re-slice will fail the same way.  Auto-
+            # repair the mesh before slicing; block the retry on a
+            # ready_to_print=False verdict.  Bypass with skip_validation=True.
+            # ------------------------------------------------------------------
+            validation_summary: dict | None = None
+            if not skip_validation:
+                try:
+                    from kiln.plugins._validation_pipeline_internals import (
+                        _SUPPORTED_FORMATS,
+                    )
+                    from kiln.plugins.validation_pipeline_tools import (
+                        run_full_validation_pipeline,
+                    )
+
+                    _ext = os.path.splitext(model_path)[1].lower()
+                    if _ext in _SUPPORTED_FORMATS:
+                        val_report = run_full_validation_pipeline(
+                            model_path,
+                            printer_id=effective_pid or "",
+                            material=effective_material or "",
+                        )
+                        if not val_report.get("ready_to_print", True):
+                            score = val_report.get("printability_score", 0)
+                            summary = val_report.get(
+                                "summary", "Validation failed",
+                            )
+                            err_resp = _srv._error_dict(
+                                f"Retry blocked — mesh failed pre-print "
+                                f"validation (score {score}/100): {summary} "
+                                f"Slicer-override fixes won't repair the "
+                                f"underlying mesh.  Pass skip_validation=True "
+                                f"to bypass.",
+                                code="VALIDATION_FAILED",
+                            )
+                            err_resp["validation"] = val_report
+                            return err_resp
+
+                        validated_path = (
+                            val_report.get("validated_path") or model_path
+                        )
+                        if validated_path and validated_path != model_path:
+                            _logger.info(
+                                "retry_print_with_fix: using validated path "
+                                "%s (repaired=%s)",
+                                validated_path,
+                                val_report.get("repaired", False),
+                            )
+                            model_path = validated_path
+
+                        validation_summary = {
+                            "printability_score": val_report.get(
+                                "printability_score",
+                            ),
+                            "ready_to_print": val_report.get("ready_to_print"),
+                            "repaired": val_report.get("repaired"),
+                            "summary": val_report.get("summary"),
+                        }
+                except ImportError:
+                    _logger.debug(
+                        "Validation pipeline unavailable, proceeding without",
+                        exc_info=True,
+                    )
+                except Exception:
+                    # Validator infrastructure failure must not block a
+                    # legitimate retry — log and proceed.
+                    _logger.warning(
+                        "Validation pipeline raised — proceeding without gate",
+                        exc_info=True,
+                    )
+
+            # ------------------------------------------------------------------
             # 6. Slice, upload, print — mirroring slice_and_print's flow.
             # ------------------------------------------------------------------
             try:
@@ -361,6 +449,8 @@ class _SmartPrintToolsPlugin:
                 "print": print_result.to_dict(),
                 "message": message,
             }
+            if validation_summary is not None:
+                result["validation"] = validation_summary
             if effective_pid:
                 result["printer_id"] = effective_pid
             if effective_profile:

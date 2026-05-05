@@ -1266,6 +1266,7 @@ def benchmark(
     printer_id: str | None = None,
     model_path: str | None = None,
     profile_path: str | None = None,
+    skip_validation: bool = False,
 ) -> PipelineResult:
     """Slice a benchmark model, upload, and report estimated stats.
 
@@ -1273,16 +1274,24 @@ def benchmark(
     automatically (benchmarks should be manually observed).
 
     Steps:
-    1. Resolve slicer profile for printer
-    2. Slice benchmark model (or user-provided model)
-    3. Upload to printer
-    4. Report printer stats from history
+    1. Verify model is supplied
+    2. Validate the mesh (manifold, walls, overhangs, bridges, bed-fit).
+       Skipped when skip_validation=True (e.g. for fixed reference
+       benchmark models that are pre-validated).
+    3. Resolve slicer profile for printer
+    4. Slice benchmark model (or user-provided model)
+    5. Upload to printer
+    6. Report printer stats from history
 
     Args:
         printer_name: Registered printer name.
         printer_id: Printer model for profile selection.
         model_path: Path to benchmark model. Uses a simple cube if omitted.
         profile_path: Explicit slicer profile path.
+        skip_validation: Bypass the pre-print mesh validation step.
+            Defaults to False — user-supplied benchmark meshes are
+            pre-tested for printability before slicing.  Set to True
+            for known-good fixed reference models.
     """
     start = time.time()
     steps: list[PipelineStep] = []
@@ -1302,6 +1311,126 @@ def benchmark(
             message="Benchmark requires a model_path. Provide an STL file.",
             steps=steps,
             total_duration_seconds=time.time() - start,
+        )
+
+    # Step 1b: Pre-print validation gate.
+    # Same gate as quick_print / reslice_and_print so user-supplied
+    # benchmark meshes get the same engineering review.  Skipped for
+    # known-good reference models via skip_validation=True.
+    if not skip_validation:
+        step_start = time.time()
+        try:
+            from kiln.plugins._validation_pipeline_internals import (
+                _SUPPORTED_FORMATS,
+            )
+            from kiln.plugins.validation_pipeline_tools import (
+                run_full_validation_pipeline,
+            )
+        except ImportError as exc:
+            logger.debug(
+                "Validation pipeline import failed: %s", exc, exc_info=True,
+            )
+            steps.append(
+                PipelineStep(
+                    name="validate_mesh",
+                    success=True,
+                    message="Validation skipped (pipeline unavailable)",
+                    duration_seconds=time.time() - step_start,
+                )
+            )
+        else:
+            ext = os.path.splitext(model_path)[1].lower()
+            if ext not in _SUPPORTED_FORMATS:
+                steps.append(
+                    PipelineStep(
+                        name="validate_mesh",
+                        success=True,
+                        message=f"Validation skipped (unsupported format {ext})",
+                        duration_seconds=time.time() - step_start,
+                    )
+                )
+            else:
+                try:
+                    report = run_full_validation_pipeline(
+                        model_path,
+                        printer_id=printer_id or "",
+                        material="",
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Validation pipeline raised — proceeding without gate: %s",
+                        exc, exc_info=True,
+                    )
+                    steps.append(
+                        PipelineStep(
+                            name="validate_mesh",
+                            success=True,
+                            message=f"Validation skipped ({exc.__class__.__name__})",
+                            duration_seconds=time.time() - step_start,
+                        )
+                    )
+                else:
+                    ready = report.get("ready_to_print", True)
+                    score = report.get("printability_score", 0)
+                    summary = report.get("summary", "")
+                    if not ready:
+                        steps.append(
+                            PipelineStep(
+                                name="validate_mesh",
+                                success=False,
+                                message=(
+                                    f"Mesh failed pre-print validation "
+                                    f"(score {score}/100): {summary} "
+                                    f"Pass skip_validation=True to bypass."
+                                ),
+                                data={
+                                    "printability_score": score,
+                                    "ready_to_print": False,
+                                    "next_action": report.get("next_action"),
+                                    "summary": summary,
+                                },
+                                duration_seconds=time.time() - step_start,
+                            )
+                        )
+                        return PipelineResult(
+                            pipeline="benchmark",
+                            success=False,
+                            message=(
+                                f"Benchmark blocked at validation: {summary}"
+                            ),
+                            steps=steps,
+                            total_duration_seconds=time.time() - start,
+                        )
+                    # Slice the (possibly auto-repaired) mesh.
+                    validated_path = report.get("validated_path") or model_path
+                    if validated_path and validated_path != model_path:
+                        logger.info(
+                            "benchmark: using validated path %s (repaired=%s)",
+                            validated_path,
+                            report.get("repaired", False),
+                        )
+                        model_path = validated_path
+                    steps.append(
+                        PipelineStep(
+                            name="validate_mesh",
+                            success=True,
+                            message=f"Print-ready (score {score}/100)",
+                            data={
+                                "printability_score": score,
+                                "ready_to_print": True,
+                                "repaired": report.get("repaired", False),
+                                "summary": summary,
+                            },
+                            duration_seconds=time.time() - step_start,
+                        )
+                    )
+    else:
+        steps.append(
+            PipelineStep(
+                name="validate_mesh",
+                success=True,
+                message="Validation skipped (skip_validation=True)",
+            )
         )
 
     # Step 2: Resolve profile

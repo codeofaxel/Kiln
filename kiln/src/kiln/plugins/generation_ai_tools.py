@@ -664,16 +664,30 @@ class _GenerationAIToolsPlugin:
                     except Exception as exc:
                         _logger.warning("%s->STL conversion failed: %s", result.format.upper(), exc)
 
-                # Step 4: Full validation pipeline (validate -> repair -> printability -> build volume)
+                # Step 4: Comprehensive validation pipeline.
+                #
+                # AI-generated meshes go through Kiln's full pre-print
+                # validation gate -- format check, mesh analysis, auto-
+                # scale (catches the AI-models-in-meters bug), watertight
+                # check, auto-repair, printability scoring, support
+                # assessment, structural check, bed-fit, and material
+                # check.  Same gate the direct slice_and_print path uses,
+                # so AI users get the same engineering review as user-
+                # supplied STLs -- not a weaker subset.
                 pipeline_result = None
                 _build_vol = None
                 bed_size_source = None
                 bed_size_model_id = None
                 if result.format in ("stl", "obj", "glb"):
-                    from kiln.mesh_validation_pipeline import run_validation_pipeline
+                    from kiln.plugins.validation_pipeline_tools import (
+                        run_full_validation_pipeline,
+                    )
                     from kiln.printers.bed_fit import resolve_build_volume
 
                     # Resolve build volume from printer if available
+                    # (used for the bed_dims_mm field in the response;
+                    # the validation pipeline itself does its own bed-fit
+                    # check via printer_id).
                     try:
                         if printer_name:
                             _adapter = _srv._get_registry().get(printer_name)
@@ -704,12 +718,10 @@ class _GenerationAIToolsPlugin:
                             )
 
                     try:
-                        pipeline_result = run_validation_pipeline(
+                        pipeline_result = run_full_validation_pipeline(
                             result.local_path,
+                            printer_id=printer_id or "",
                             material="PLA",
-                            build_volume=_build_vol,
-                            auto_repair=True,
-                            auto_scale=False,  # Don't silently resize user's model
                         )
                     except Exception as exc:
                         _logger.error("Validation pipeline crashed: %s", exc, exc_info=True)
@@ -718,19 +730,31 @@ class _GenerationAIToolsPlugin:
                             code="VALIDATION_ERROR",
                         )
 
-                    if not pipeline_result.passed:
-                        return _srv._error_dict(
-                            f"Generated mesh failed validation pipeline: {pipeline_result.summary}",
+                    if not pipeline_result.get("ready_to_print", False):
+                        score = pipeline_result.get("printability_score", 0)
+                        summary = pipeline_result.get(
+                            "summary", "Generated mesh failed validation",
+                        )
+                        err_resp = _srv._error_dict(
+                            f"Generated mesh failed pre-print validation "
+                            f"(score {score}/100): {summary}",
                             code="VALIDATION_FAILED",
                         )
+                        err_resp["validation"] = pipeline_result
+                        return err_resp
 
-                    # Use the (possibly repaired) file path going forward
+                    # Use the (possibly repaired/scaled) validated path
+                    # going forward.
+                    validated_path = (
+                        pipeline_result.get("validated_path")
+                        or result.local_path
+                    )
                     result = GenerationResult(
                         job_id=result.job_id,
                         provider=result.provider,
-                        local_path=pipeline_result.file_path,
+                        local_path=validated_path,
                         format="stl",
-                        file_size_bytes=os.path.getsize(pipeline_result.file_path),
+                        file_size_bytes=os.path.getsize(validated_path),
                         prompt=result.prompt,
                     )
 
@@ -756,18 +780,25 @@ class _GenerationAIToolsPlugin:
                 file_name = upload.file_name or os.path.basename(slice_result.output_path)
 
                 # Use pipeline results for response (already computed above)
-                gen_validation = pipeline_result.to_dict() if pipeline_result else None
-                gen_dimensions = pipeline_result.dimensions_mm if pipeline_result else None
-                if gen_dimensions:
-                    w = gen_dimensions.get("width", 0)
-                    d = gen_dimensions.get("depth", 0)
-                    h = gen_dimensions.get("height", 0)
-                    gen_dimensions = {
-                        "width_mm": round(w, 2),
-                        "depth_mm": round(d, 2),
-                        "height_mm": round(h, 2),
-                        "summary": f"{w:.1f} x {d:.1f} x {h:.1f} mm",
-                    }
+                gen_validation = pipeline_result if pipeline_result else None
+                gen_dimensions = None
+                if pipeline_result:
+                    _dims = (
+                        pipeline_result.get("model_info", {}).get("dimensions_mm")
+                        or {}
+                    )
+                    # The new pipeline reports dims as x/y/z (or
+                    # width_mm/depth_mm/height_mm — handle both shapes).
+                    w = float(_dims.get("x", _dims.get("width_mm", 0)) or 0)
+                    d = float(_dims.get("y", _dims.get("depth_mm", 0)) or 0)
+                    h = float(_dims.get("z", _dims.get("height_mm", 0)) or 0)
+                    if w or d or h:
+                        gen_dimensions = {
+                            "width_mm": round(w, 2),
+                            "depth_mm": round(d, 2),
+                            "height_mm": round(h, 2),
+                            "summary": f"{w:.1f} x {d:.1f} x {h:.1f} mm",
+                        }
 
                 # Auto-print only if the user has opted in via KILN_AUTO_PRINT_GENERATED.
                 print_data = None

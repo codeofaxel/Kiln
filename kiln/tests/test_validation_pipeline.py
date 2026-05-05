@@ -2193,3 +2193,111 @@ class TestRunFullValidationPipeline:
         gcode.write_text("G28\n")
         report = run_full_validation_pipeline(str(gcode))
         assert report["ready_to_print"] is False
+
+
+# ===================================================================
+# Marketing-claim coverage — "Designs are pre-tested for printability
+# before they reach your bed."
+# ===================================================================
+#
+# These tests pin the claim across every mesh-bearing entry point in
+# the codebase.  If a new print tool is added that bypasses the gate,
+# its absence from this list is the regression signal.
+
+
+class TestMarketingClaimCoverage:
+    """E2E pin: every mesh-bearing print entry point blocks a non-
+    printable mesh, regardless of which surface the user calls.
+
+    A failing mesh report (ready_to_print=False, score=10/100) is
+    fed to the validator at module-import time, then each entry
+    point is exercised — none should reach the slicer.
+    """
+
+    _BAD_REPORT = {
+        "ready_to_print": False,
+        "printability_score": 10,
+        "validated_path": "/tmp/bad.stl",
+        "summary": "Not ready (10/100). 1 issue: critically thin walls",
+        "next_action": {"tool": "thicken_mesh_walls", "reason": "thin walls"},
+        "repaired": False,
+        "checks": [],
+        "status": "fail",
+    }
+
+    def test_quick_print_blocks_bad_mesh(self) -> None:
+        from kiln.pipelines import quick_print
+
+        with patch(
+            "kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline",
+            return_value=self._BAD_REPORT,
+        ), patch("kiln.slicer.slice_file") as mock_slice:
+            result = quick_print(model_path="/tmp/bad.stl")
+
+        assert result.success is False
+        assert mock_slice.call_count == 0
+        validate_steps = [s for s in result.steps if s.name == "validate_mesh"]
+        assert validate_steps and not validate_steps[0].success
+
+    def test_reslice_and_print_blocks_bad_mesh(self) -> None:
+        from kiln.pipelines import reslice_and_print
+
+        with patch(
+            "kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline",
+            return_value=self._BAD_REPORT,
+        ), patch("kiln.slicer.slice_file") as mock_slice:
+            result = reslice_and_print(model_path="/tmp/bad.stl")
+
+        assert result.success is False
+        assert mock_slice.call_count == 0
+
+    def test_benchmark_blocks_bad_mesh(self) -> None:
+        from kiln.pipelines import benchmark
+
+        with patch(
+            "kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline",
+            return_value=self._BAD_REPORT,
+        ), patch("kiln.slicer.slice_file") as mock_slice:
+            result = benchmark(model_path="/tmp/bad.stl")
+
+        assert result.success is False
+        assert mock_slice.call_count == 0
+        validate_steps = [s for s in result.steps if s.name == "validate_mesh"]
+        assert validate_steps and not validate_steps[0].success
+
+    def test_every_print_pipeline_step_list_includes_validate_mesh_first(
+        self,
+    ) -> None:
+        """The validate_mesh step must be position 0 (or 1, after the
+        no-model-path pre-check in benchmark) in every print pipeline.
+
+        This is structural — if a refactor moves validate_mesh later in
+        the step list, a slice could happen before validation runs.
+        """
+        from kiln.pipelines import benchmark, quick_print, reslice_and_print
+
+        with patch(
+            "kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline",
+            return_value={
+                "ready_to_print": True,
+                "printability_score": 100,
+                "validated_path": "/tmp/x.stl",
+                "summary": "ok",
+                "next_action": None,
+                "repaired": False,
+                "checks": [],
+                "status": "pass",
+            },
+        ), patch("kiln.slicer.slice_file", side_effect=Exception("stop")):
+            qp = quick_print(model_path="/tmp/x.stl")
+            rp = reslice_and_print(model_path="/tmp/x.stl")
+            bm = benchmark(model_path="/tmp/x.stl")
+
+        # quick_print + reslice_and_print: validate_mesh is the first
+        # step recorded.
+        assert qp.steps[0].name == "validate_mesh"
+        assert rp.steps[0].name == "validate_mesh"
+        # benchmark: validate_mesh is step 0 because the no-model-path
+        # branch returns early without recording any steps when a model
+        # IS supplied.
+        assert bm.steps[0].name == "validate_mesh"

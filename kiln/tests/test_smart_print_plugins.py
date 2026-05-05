@@ -517,7 +517,10 @@ class TestRetryPrintWithFix:
             mock.patch("kiln.printability.analyze_printability", side_effect=Exception("skip")),
             mock.patch("kiln.slicer_profiles.resolve_slicer_profile", return_value=None),
         ):
-            result = fn(model_path="/tmp/cube.stl")
+            # skip_validation=True so the test isolates slice/upload/print
+            # semantics from the new pre-print validation gate (covered
+            # separately in TestRetryPrintValidationGate below).
+            result = fn(model_path="/tmp/cube.stl", skip_validation=True)
 
         assert result["success"] is True
         assert result["diagnosis"] is not None
@@ -550,6 +553,7 @@ class TestRetryPrintWithFix:
             result = fn(
                 model_path="/tmp/cube.stl",
                 skip_diagnosis=True,
+                skip_validation=True,
                 custom_overrides='{"brim_width": "5"}',
             )
 
@@ -603,7 +607,7 @@ class TestRetryPrintWithFix:
             mock.patch("kiln.printability.analyze_printability", side_effect=Exception("skip")),
             mock.patch("kiln.slicer_profiles.resolve_slicer_profile", return_value=None),
         ):
-            result = fn(model_path="/tmp/cube.stl")
+            result = fn(model_path="/tmp/cube.stl", skip_validation=True)
 
         assert result["success"] is True
         assert result["material_detected"] == "PETG"
@@ -625,7 +629,11 @@ class TestRetryPrintWithFix:
             mock.patch("kiln.printability.analyze_printability", side_effect=Exception("skip")),
             mock.patch("kiln.slicer_profiles.resolve_slicer_profile", return_value=None),
         ):
-            result = fn(model_path="/tmp/cube.stl", skip_diagnosis=True)
+            result = fn(
+                model_path="/tmp/cube.stl",
+                skip_diagnosis=True,
+                skip_validation=True,
+            )
 
         assert result["success"] is False
         assert result["error"]["code"] == "SLICER_NOT_FOUND"
@@ -671,6 +679,7 @@ class TestRetryPrintWithFix:
             result = fn(
                 model_path="/tmp/cube.stl",
                 custom_overrides='{"brim_width": "10"}',
+                skip_validation=True,
             )
 
         assert result["success"] is True
@@ -703,10 +712,191 @@ class TestRetryPrintWithFix:
             mock.patch("kiln.printability.analyze_printability", side_effect=Exception("skip")),
             mock.patch("kiln.slicer_profiles.resolve_slicer_profile", return_value=None),
         ):
-            result = fn(model_path="/tmp/cube.stl")
+            result = fn(model_path="/tmp/cube.stl", skip_validation=True)
 
         assert result["success"] is True
         assert result["material_detected"] is None
+
+
+# ===========================================================================
+# retry_print_with_fix — pre-print validation gate
+# ===========================================================================
+#
+# A retry path that re-sends a broken mesh is the most consequential
+# place to validate: the previous attempt failed, and slicer-override
+# fixes can't repair mesh-level issues.  These tests cover the gate.
+
+
+class TestRetryPrintValidationGate:
+    """Tests for the pre-print validation step in retry_print_with_fix."""
+
+    def _make_slice_result(self, output_path: str = "/tmp/out.gcode"):
+        sr = mock.MagicMock()
+        sr.output_path = output_path
+        sr.slicer = "PrusaSlicer"
+        sr.to_dict.return_value = {"output_path": output_path, "slicer": "PrusaSlicer"}
+        return sr
+
+    def _make_upload_result(self, file_name: str = "out.gcode"):
+        ur = mock.MagicMock()
+        ur.file_name = file_name
+        ur.to_dict.return_value = {"file_name": file_name}
+        return ur
+
+    def _make_print_result(self):
+        pr = mock.MagicMock()
+        pr.to_dict.return_value = {"started": True}
+        return pr
+
+    def test_validation_failure_blocks_retry(self, smart_print_fns):
+        """A non-printable mesh aborts the retry — slice never runs."""
+        fn = smart_print_fns["retry_print_with_fix"]
+        adapter = mock.MagicMock(spec=["get_state", "upload_file", "start_print"])
+        adapter.get_state.return_value = _make_state()
+        slice_mock = mock.MagicMock()
+
+        with (
+            mock.patch("kiln.server._get_adapter", return_value=adapter),
+            mock.patch("kiln.server._map_printer_hint_to_profile_id", return_value=None),
+            mock.patch("kiln.server._PRINTER_MODEL", None),
+            mock.patch("kiln.slicer.slice_file", slice_mock),
+            mock.patch(
+                "kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline",
+                return_value={
+                    "ready_to_print": False,
+                    "printability_score": 25,
+                    "validated_path": "/tmp/cube.stl",
+                    "summary": "Not ready (25/100). 1 issue: non-manifold",
+                    "next_action": {"tool": "repair_mesh_advanced", "reason": "non-manifold"},
+                    "repaired": False,
+                },
+            ),
+        ):
+            result = fn(model_path="/tmp/cube.stl", skip_diagnosis=True)
+
+        assert result["success"] is False
+        assert result["error"]["code"] == "VALIDATION_FAILED"
+        assert "25/100" in result["error"]["message"]
+        # Mesh-level fixes can't be papered over by slicer overrides —
+        # the error message must say so to guide the user.
+        assert "Slicer-override fixes" in result["error"]["message"]
+        # The full report comes back attached to the error envelope
+        # so callers can inspect next_action / printability checks.
+        assert result["validation"]["printability_score"] == 25
+        assert result["validation"]["next_action"]["tool"] == "repair_mesh_advanced"
+        # Slicer was never invoked
+        assert slice_mock.call_count == 0
+
+    def test_validation_pass_lets_retry_proceed(self, smart_print_fns):
+        """A passing mesh attaches a validation summary and proceeds to slice."""
+        fn = smart_print_fns["retry_print_with_fix"]
+        adapter = mock.MagicMock(spec=["get_state", "upload_file", "start_print"])
+        adapter.get_state.return_value = _make_state()
+        slice_result = self._make_slice_result()
+        adapter.upload_file.return_value = self._make_upload_result()
+        adapter.start_print.return_value = self._make_print_result()
+        watchdog = mock.MagicMock()
+
+        with (
+            mock.patch("kiln.server._get_adapter", return_value=adapter),
+            mock.patch("kiln.server._map_printer_hint_to_profile_id", return_value=None),
+            mock.patch("kiln.server._PRINTER_MODEL", None),
+            mock.patch("kiln.server._resolve_effective_printer_name", return_value="default"),
+            mock.patch("kiln.server._emergency_latch_error", return_value=None),
+            mock.patch("kiln.server.preflight_check", return_value={"ready": True}),
+            mock.patch("kiln.server._heater_watchdog", watchdog),
+            mock.patch("kiln.slicer.slice_file", return_value=slice_result),
+            mock.patch("kiln.slicer_profiles.resolve_slicer_profile", return_value=None),
+            mock.patch(
+                "kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline",
+                return_value={
+                    "ready_to_print": True,
+                    "printability_score": 92,
+                    "validated_path": "/tmp/cube.stl",
+                    "summary": "Print-ready (92/100).",
+                    "next_action": None,
+                    "repaired": False,
+                },
+            ),
+        ):
+            result = fn(model_path="/tmp/cube.stl", skip_diagnosis=True)
+
+        assert result["success"] is True
+        assert result["validation"]["printability_score"] == 92
+        assert result["validation"]["ready_to_print"] is True
+        adapter.start_print.assert_called_once()
+
+    def test_auto_repair_swaps_slice_path(self, smart_print_fns):
+        """When the validator auto-repairs, slice runs on the repaired path."""
+        fn = smart_print_fns["retry_print_with_fix"]
+        adapter = mock.MagicMock(spec=["get_state", "upload_file", "start_print"])
+        adapter.get_state.return_value = _make_state()
+        slice_result = self._make_slice_result()
+        adapter.upload_file.return_value = self._make_upload_result()
+        adapter.start_print.return_value = self._make_print_result()
+        slice_mock = mock.MagicMock(return_value=slice_result)
+
+        with (
+            mock.patch("kiln.server._get_adapter", return_value=adapter),
+            mock.patch("kiln.server._map_printer_hint_to_profile_id", return_value=None),
+            mock.patch("kiln.server._PRINTER_MODEL", None),
+            mock.patch("kiln.server._resolve_effective_printer_name", return_value="default"),
+            mock.patch("kiln.server._emergency_latch_error", return_value=None),
+            mock.patch("kiln.server.preflight_check", return_value={"ready": True}),
+            mock.patch("kiln.server._heater_watchdog", mock.MagicMock()),
+            mock.patch("kiln.slicer.slice_file", slice_mock),
+            mock.patch("kiln.slicer_profiles.resolve_slicer_profile", return_value=None),
+            mock.patch(
+                "kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline",
+                return_value={
+                    "ready_to_print": True,
+                    "printability_score": 75,
+                    "validated_path": "/tmp/repaired_cube.stl",
+                    "summary": "Print-ready (75/100). Auto-repaired non-manifold.",
+                    "next_action": None,
+                    "repaired": True,
+                },
+            ),
+        ):
+            fn(model_path="/tmp/original_cube.stl", skip_diagnosis=True)
+
+        assert slice_mock.call_count == 1
+        call_args = slice_mock.call_args
+        # First positional arg is the path passed to slice_file —
+        # must be the repaired path, not the original.
+        assert call_args.args[0] == "/tmp/repaired_cube.stl"
+
+    def test_validation_pipeline_crash_does_not_block_retry(self, smart_print_fns):
+        """Validator infrastructure failure must not block a legitimate retry."""
+        fn = smart_print_fns["retry_print_with_fix"]
+        adapter = mock.MagicMock(spec=["get_state", "upload_file", "start_print"])
+        adapter.get_state.return_value = _make_state()
+        slice_result = self._make_slice_result()
+        adapter.upload_file.return_value = self._make_upload_result()
+        adapter.start_print.return_value = self._make_print_result()
+
+        with (
+            mock.patch("kiln.server._get_adapter", return_value=adapter),
+            mock.patch("kiln.server._map_printer_hint_to_profile_id", return_value=None),
+            mock.patch("kiln.server._PRINTER_MODEL", None),
+            mock.patch("kiln.server._resolve_effective_printer_name", return_value="default"),
+            mock.patch("kiln.server._emergency_latch_error", return_value=None),
+            mock.patch("kiln.server.preflight_check", return_value={"ready": True}),
+            mock.patch("kiln.server._heater_watchdog", mock.MagicMock()),
+            mock.patch("kiln.slicer.slice_file", return_value=slice_result),
+            mock.patch("kiln.slicer_profiles.resolve_slicer_profile", return_value=None),
+            mock.patch(
+                "kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline",
+                side_effect=ValueError("validator infrastructure failure"),
+            ),
+        ):
+            result = fn(model_path="/tmp/cube.stl", skip_diagnosis=True)
+
+        # Retry succeeded — validator crash logged, gate skipped.
+        assert result["success"] is True
+        # No validation summary attached because the pipeline raised.
+        assert result.get("validation") is None
+        adapter.start_print.assert_called_once()
 
 
 # ===========================================================================
