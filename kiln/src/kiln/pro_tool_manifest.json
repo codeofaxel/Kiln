@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-05-05T04:30:09.166973+00:00",
-  "tool_count": 298,
+  "generated": "2026-05-05T05:14:57.738800+00:00",
+  "tool_count": 299,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -6492,6 +6492,23 @@
           "printer_id"
         ],
         "title": "get_calibration_freshnessArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_calibration_health_recommendations",
+      "description": "Recommend tunable noise floor + heuristic confidence levels.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {
+          "min_samples_per_category": {
+            "default": 5,
+            "title": "Min Samples Per Category",
+            "type": "integer"
+          }
+        },
+        "title": "get_calibration_health_recommendationsArguments",
         "type": "object"
       }
     },
