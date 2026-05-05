@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-05-04T22:04:42.341136+00:00",
-  "tool_count": 287,
+  "generated": "2026-05-05T02:32:49.906323+00:00",
+  "tool_count": 288,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -2466,6 +2466,40 @@
           "feature_id"
         ],
         "title": "archive_featureArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "batch_verify_manuals",
+      "description": "Batch buyer-facing verification across many PDFs / 3MFs (Pro+).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Paths",
+            "type": "array"
+          },
+          "release_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Release Id"
+          }
+        },
+        "required": [
+          "paths"
+        ],
+        "title": "batch_verify_manualsArguments",
         "type": "object"
       }
     },
