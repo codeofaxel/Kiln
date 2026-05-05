@@ -834,6 +834,34 @@ class _SlicerToolsPlugin:
                     printer_id=printer_id,
                 )
 
+                # --- Pro+ calibration overlay ---
+                # Mirror slice_model: when kiln-pro is installed AND the user
+                # has a HIGH/MEDIUM-tier calibrated profile for this printer,
+                # overlay calibrated values (extrusion_multiplier,
+                # filament_max_volumetric_speed, pressure_advance,
+                # xy_size_compensation, filament_retraction_length) onto the
+                # slicer args.  Free tier no-op.  Re-resolves the profile so
+                # the slicer call actually uses the calibrated values.
+                parsed_overrides: dict[str, str] = {}
+                cal_used = None
+                if effective_printer_id:
+                    parsed_overrides, cal_used = _maybe_overlay_calibration(
+                        parsed_overrides, effective_printer_id,
+                        material=material,
+                        input_path=input_path,
+                    )
+                    if parsed_overrides:
+                        try:
+                            effective_profile = resolve_slicer_profile(
+                                effective_printer_id,
+                                overrides=parsed_overrides,
+                            )
+                        except Exception as _exc:
+                            _logger.debug(
+                                "Calibration profile re-resolution failed for %s: %s",
+                                effective_printer_id, _exc,
+                            )
+
                 # --- Auto-material from AMS if not specified ---
                 if material is None:
                     try:
