@@ -742,6 +742,7 @@ class _SlicerToolsPlugin:
             material: str | None = None,
             auto_center: bool = True,
             metadata: dict | None = None,
+            skip_validation: bool = False,
         ) -> dict:
             """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
 
@@ -751,6 +752,14 @@ class _SlicerToolsPlugin:
             based on model geometry, material warp tendency, and printer type.
             This adhesion intelligence only activates when no custom profile is
             supplied.
+
+            Pre-print validation gate: mesh inputs (.stl/.obj/.3mf/.step/.glb)
+            run through Kiln's full validation pipeline before slicing —
+            format check, watertight check, auto-repair, printability scoring
+            (0-100), bed-fit, and material checks.  Designs that fail the gate
+            are blocked before reaching the printer; auto-repaired meshes are
+            sliced from the repaired path.  Pass ``skip_validation=True`` to
+            bypass (e.g. for already-validated meshes or pre-sliced 3MFs).
 
             Args:
                 input_path: Path to the 3D model file (STL, 3MF, STEP, etc.).
@@ -773,6 +782,13 @@ class _SlicerToolsPlugin:
                     ``manual_cover_language``.  Multi-language and
                     co-brand are kiln-pro Business+ features
                     (https://kiln3d.com/pricing).
+                skip_validation: Bypass the pre-print validation gate.
+                    Defaults to False — designs are pre-tested for
+                    printability before they reach the printer.  Set to
+                    True only when the caller has already validated the
+                    mesh (e.g. ``validate_and_prepare`` was just called)
+                    or when the input is a pre-sliced 3MF the validator
+                    can't introspect.
 
             Combines ``slice_model``, ``upload_file``, and ``start_print`` into
             a single action.
@@ -812,6 +828,70 @@ class _SlicerToolsPlugin:
                                         break
                     except Exception:
                         _logger.debug("AMS material auto-detection failed", exc_info=True)
+
+                # --- Pre-print validation gate ---
+                # Mesh inputs are pre-tested for printability (manifold,
+                # walls, overhangs, bridges, bed-fit, material) before they
+                # reach the printer.  Auto-repair on non-manifold; blocks
+                # designs that fail with a clear next_action.  Bypass with
+                # skip_validation=True (e.g. pre-sliced 3MFs).
+                validation_summary: dict | None = None
+                if not skip_validation:
+                    try:
+                        from kiln.plugins._validation_pipeline_internals import (
+                            _SUPPORTED_FORMATS,
+                        )
+                        from kiln.plugins.validation_pipeline_tools import (
+                            run_full_validation_pipeline,
+                        )
+
+                        _ext = os.path.splitext(input_path)[1].lower()
+                        if _ext in _SUPPORTED_FORMATS:
+                            val_report = run_full_validation_pipeline(
+                                input_path,
+                                printer_id=effective_printer_id or "",
+                                material=material or "",
+                            )
+                            if not val_report.get("ready_to_print", True):
+                                score = val_report.get("printability_score", 0)
+                                summary = val_report.get("summary", "Validation failed")
+                                err_resp = _srv._error_dict(
+                                    f"Mesh failed pre-print validation "
+                                    f"(score {score}/100): {summary} "
+                                    f"Pass skip_validation=True to bypass.",
+                                    code="VALIDATION_FAILED",
+                                )
+                                err_resp["validation"] = val_report
+                                return err_resp
+
+                            # Slice the (possibly repaired/scaled) validated mesh.
+                            validated_path = val_report.get("validated_path") or input_path
+                            if validated_path and validated_path != input_path:
+                                _logger.info(
+                                    "slice_and_print: using validated path %s (repaired=%s)",
+                                    validated_path,
+                                    val_report.get("repaired", False),
+                                )
+                                input_path = validated_path
+
+                            validation_summary = {
+                                "printability_score": val_report.get("printability_score"),
+                                "ready_to_print": val_report.get("ready_to_print"),
+                                "repaired": val_report.get("repaired"),
+                                "summary": val_report.get("summary"),
+                            }
+                    except ImportError:
+                        _logger.debug(
+                            "Validation pipeline unavailable, proceeding without",
+                            exc_info=True,
+                        )
+                    except Exception:
+                        # An infrastructure-side bug in validation must not
+                        # block users from printing.  Log and proceed.
+                        _logger.warning(
+                            "Validation pipeline raised — proceeding without gate",
+                            exc_info=True,
+                        )
 
                 # --- Auto-adhesion: analyse model and inject brim/raft if needed ---
                 adhesion_rec = None
@@ -1044,6 +1124,8 @@ class _SlicerToolsPlugin:
                     "profile_path": effective_profile,
                     "message": f"Sliced, uploaded, and started printing {os.path.basename(input_path)}.",
                 }
+                if validation_summary is not None:
+                    resp["validation"] = validation_summary
                 if adhesion_rec:
                     resp["adhesion"] = adhesion_rec
                 if ams_routing is not None:

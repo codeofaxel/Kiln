@@ -375,8 +375,15 @@ def quick_print(
     profile_path: str | None = None,
     slicer_path: str | None = None,
     pause_after_step: int | None = None,
+    skip_validation: bool = False,
 ) -> PipelineResult:
-    """Slice → preflight → upload → start print in one call.
+    """Validate → slice → preflight → upload → start print in one call.
+
+    The pipeline pre-tests the mesh for printability before slicing
+    (manifold, walls, overhangs, bridges, bed-fit, material).  Auto-repairs
+    non-manifold meshes; the slicer runs against the repaired path.  Designs
+    that fail the gate are blocked at the validation step with a clear
+    next_action — they never reach the printer.
 
     Args:
         model_path: Path to input model (STL, 3MF, etc.).
@@ -389,17 +396,124 @@ def quick_print(
         slicer_path: Explicit slicer binary path.
         pause_after_step: Auto-pause after completing step N (0-indexed).
             When ``None``, the pipeline runs to completion synchronously.
+        skip_validation: Bypass the pre-print validation step.  Defaults
+            to False — designs are pre-tested for printability before
+            they reach the printer.  Use True only for already-validated
+            inputs or pre-sliced 3MFs the validator can't introspect.
 
     Returns:
         :class:`PipelineResult` with step-by-step outcomes.
     """
-    # Shared mutable state between step closures
+    # Shared mutable state between step closures.
+    # ctx["model_path"] is the EFFECTIVE path used by downstream steps —
+    # the validation step may update it to point at an auto-repaired or
+    # auto-scaled mesh.
     ctx: dict[str, Any] = {
         "effective_profile": profile_path,
         "gcode_path": None,
         "adapter": None,
         "remote_name": None,
+        "model_path": model_path,
+        "validation_report": None,
     }
+
+    def _validate_mesh() -> PipelineStep:
+        step_start = time.time()
+        if skip_validation:
+            return PipelineStep(
+                name="validate_mesh",
+                success=True,
+                message="Validation skipped (skip_validation=True)",
+                duration_seconds=time.time() - step_start,
+            )
+
+        try:
+            from kiln.plugins._validation_pipeline_internals import (
+                _SUPPORTED_FORMATS,
+            )
+            from kiln.plugins.validation_pipeline_tools import (
+                run_full_validation_pipeline,
+            )
+        except ImportError as exc:
+            logger.debug("Validation pipeline import failed: %s", exc, exc_info=True)
+            return PipelineStep(
+                name="validate_mesh",
+                success=True,
+                message="Validation skipped (pipeline unavailable)",
+                duration_seconds=time.time() - step_start,
+            )
+
+        ext = os.path.splitext(model_path)[1].lower()
+        if ext not in _SUPPORTED_FORMATS:
+            return PipelineStep(
+                name="validate_mesh",
+                success=True,
+                message=f"Validation skipped (unsupported format {ext})",
+                duration_seconds=time.time() - step_start,
+            )
+
+        try:
+            report = run_full_validation_pipeline(
+                model_path,
+                printer_id=printer_id or "",
+                material="",
+            )
+        except Exception as exc:
+            logger.warning(
+                "Validation pipeline raised — proceeding without gate: %s",
+                exc, exc_info=True,
+            )
+            return PipelineStep(
+                name="validate_mesh",
+                success=True,
+                message=f"Validation skipped ({exc.__class__.__name__})",
+                duration_seconds=time.time() - step_start,
+            )
+
+        ctx["validation_report"] = report
+        ready = report.get("ready_to_print", True)
+        score = report.get("printability_score", 0)
+        summary = report.get("summary", "")
+
+        if not ready:
+            return PipelineStep(
+                name="validate_mesh",
+                success=False,
+                message=(
+                    f"Mesh failed pre-print validation (score {score}/100): "
+                    f"{summary} Pass skip_validation=True to bypass."
+                ),
+                data={
+                    "printability_score": score,
+                    "ready_to_print": False,
+                    "next_action": report.get("next_action"),
+                    "summary": summary,
+                },
+                duration_seconds=time.time() - step_start,
+            )
+
+        # Slice the (possibly repaired/scaled) validated mesh.
+        validated_path = report.get("validated_path") or model_path
+        if validated_path and validated_path != model_path:
+            ctx["model_path"] = validated_path
+            logger.info(
+                "quick_print: using validated path %s (repaired=%s)",
+                validated_path,
+                report.get("repaired", False),
+            )
+
+        return PipelineStep(
+            name="validate_mesh",
+            success=True,
+            message=f"Print-ready (score {score}/100)",
+            data={
+                "printability_score": score,
+                "ready_to_print": True,
+                "repaired": report.get("repaired", False),
+                "summary": summary,
+            },
+            duration_seconds=time.time() - step_start,
+        )
 
     def _resolve_profile() -> PipelineStep:
         if ctx["effective_profile"] or not printer_id:
@@ -434,7 +548,7 @@ def quick_print(
             from kiln.slicer import slice_file
 
             result = slice_file(
-                model_path,
+                ctx["model_path"],
                 profile=ctx["effective_profile"],
                 slicer_path=slicer_path,
             )
@@ -570,9 +684,10 @@ def quick_print(
             )
 
     def _check_stability() -> PipelineStep:
-        return _run_stability_check(model_path, ctx)
+        return _run_stability_check(ctx["model_path"], ctx)
 
     step_defs = [
+        _StepDef(name="validate_mesh", fn=_validate_mesh, fatal=True),
         _StepDef(name="resolve_profile", fn=_resolve_profile, fatal=False),
         _StepDef(name="stability_check", fn=_check_stability, fatal=False),
         _StepDef(name="slice", fn=_slice, fatal=True),
@@ -607,16 +722,20 @@ def reslice_and_print(
     pause_after_step: int | None = None,
     use_ams: bool | None = None,
     ams_mapping: list[int] | None = None,
+    skip_validation: bool = False,
 ) -> PipelineResult:
     """Reslice a model with parameter overrides, then upload and print.
 
     Steps:
-        1. resolve_profile — Merge base profile with overrides
-        2. slice — Call slicer with merged profile
-        3. safety_check — Validate gcode against printer limits
-        4. upload — Upload gcode to printer
-        5. preflight — Verify printer is ready
-        6. start_print — Begin printing
+        1. validate_mesh — Pre-print printability gate (manifold, walls,
+            overhangs, bridges, bed-fit, material).  Auto-repairs on
+            non-manifold; blocks failed designs.  Skip with skip_validation=True.
+        2. resolve_profile — Merge base profile with overrides
+        3. slice — Call slicer with merged profile
+        4. safety_check — Validate gcode against printer limits
+        5. upload — Upload gcode to printer
+        6. preflight — Verify printer is ready
+        7. start_print — Begin printing
 
     Args:
         model_path: Path to STL/3MF file.
@@ -628,19 +747,124 @@ def reslice_and_print(
         slicer_path: Explicit path to slicer binary.
         extra_args: Additional CLI arguments to pass to the slicer.
         pause_after_step: Auto-pause after completing step N (0-indexed).
+        skip_validation: Bypass the pre-print validation step.  Defaults
+            to False — designs are pre-tested for printability before
+            they reach the printer.
 
     Returns:
         :class:`PipelineResult` with step-by-step outcomes.
     """
     effective_overrides = overrides or {}
 
-    # Shared mutable state between step closures
+    # Shared mutable state between step closures.
+    # ctx["model_path"] is the EFFECTIVE path used by downstream steps —
+    # the validation step may update it to point at an auto-repaired or
+    # auto-scaled mesh.
     ctx: dict[str, Any] = {
         "effective_profile": profile_path,
         "gcode_path": None,
         "adapter": None,
         "remote_name": None,
+        "model_path": model_path,
+        "validation_report": None,
     }
+
+    def _validate_mesh() -> PipelineStep:
+        step_start = time.time()
+        if skip_validation:
+            return PipelineStep(
+                name="validate_mesh",
+                success=True,
+                message="Validation skipped (skip_validation=True)",
+                duration_seconds=time.time() - step_start,
+            )
+
+        try:
+            from kiln.plugins._validation_pipeline_internals import (
+                _SUPPORTED_FORMATS,
+            )
+            from kiln.plugins.validation_pipeline_tools import (
+                run_full_validation_pipeline,
+            )
+        except ImportError as exc:
+            logger.debug("Validation pipeline import failed: %s", exc, exc_info=True)
+            return PipelineStep(
+                name="validate_mesh",
+                success=True,
+                message="Validation skipped (pipeline unavailable)",
+                duration_seconds=time.time() - step_start,
+            )
+
+        ext = os.path.splitext(model_path)[1].lower()
+        if ext not in _SUPPORTED_FORMATS:
+            return PipelineStep(
+                name="validate_mesh",
+                success=True,
+                message=f"Validation skipped (unsupported format {ext})",
+                duration_seconds=time.time() - step_start,
+            )
+
+        try:
+            report = run_full_validation_pipeline(
+                model_path,
+                printer_id=printer_id or "",
+                material="",
+            )
+        except Exception as exc:
+            logger.warning(
+                "Validation pipeline raised — proceeding without gate: %s",
+                exc, exc_info=True,
+            )
+            return PipelineStep(
+                name="validate_mesh",
+                success=True,
+                message=f"Validation skipped ({exc.__class__.__name__})",
+                duration_seconds=time.time() - step_start,
+            )
+
+        ctx["validation_report"] = report
+        ready = report.get("ready_to_print", True)
+        score = report.get("printability_score", 0)
+        summary = report.get("summary", "")
+
+        if not ready:
+            return PipelineStep(
+                name="validate_mesh",
+                success=False,
+                message=(
+                    f"Mesh failed pre-print validation (score {score}/100): "
+                    f"{summary} Pass skip_validation=True to bypass."
+                ),
+                data={
+                    "printability_score": score,
+                    "ready_to_print": False,
+                    "next_action": report.get("next_action"),
+                    "summary": summary,
+                },
+                duration_seconds=time.time() - step_start,
+            )
+
+        validated_path = report.get("validated_path") or model_path
+        if validated_path and validated_path != model_path:
+            ctx["model_path"] = validated_path
+            logger.info(
+                "reslice_and_print: using validated path %s (repaired=%s)",
+                validated_path,
+                report.get("repaired", False),
+            )
+
+        return PipelineStep(
+            name="validate_mesh",
+            success=True,
+            message=f"Print-ready (score {score}/100)",
+            data={
+                "printability_score": score,
+                "ready_to_print": True,
+                "repaired": report.get("repaired", False),
+                "summary": summary,
+            },
+            duration_seconds=time.time() - step_start,
+        )
 
     def _resolve_profile() -> PipelineStep:
         if ctx["effective_profile"]:
@@ -688,7 +912,7 @@ def reslice_and_print(
             from kiln.slicer import slice_file
 
             result = slice_file(
-                model_path,
+                ctx["model_path"],
                 profile=ctx["effective_profile"],
                 slicer_path=slicer_path,
                 extra_args=extra_args,
@@ -867,9 +1091,10 @@ def reslice_and_print(
             )
 
     def _check_stability() -> PipelineStep:
-        return _run_stability_check(model_path, ctx)
+        return _run_stability_check(ctx["model_path"], ctx)
 
     step_defs = [
+        _StepDef(name="validate_mesh", fn=_validate_mesh, fatal=True),
         _StepDef(name="resolve_profile", fn=_resolve_profile, fatal=False),
         _StepDef(name="stability_check", fn=_check_stability, fatal=False),
         _StepDef(name="slice", fn=_slice, fatal=True),

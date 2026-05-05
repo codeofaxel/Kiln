@@ -9964,18 +9964,21 @@ def run_quick_print(
     printer_name: str | None = None,
     printer_id: str | None = None,
     profile_path: str | None = None,
+    skip_validation: bool = False,
 ) -> dict:
-    """Full print pipeline: slice + validate + upload + print (recommended one-shot tool).
+    """Full print pipeline: validate + slice + safety-check + upload + print (recommended one-shot tool).
 
-    Preferred over ``slice_and_print`` — adds G-code validation and auto-detects
-    bundled slicer profiles. For custom slicer parameter overrides, use
-    ``run_reslice_and_print`` instead. The full quick-print pipeline:
-    1. Resolve slicer profile (bundled, by printer_id)
-    2. Slice the model to G-code
-    3. Safety-validate the G-code against printer limits
-    4. Upload G-code to the printer
-    5. Run preflight checks (always — cannot be skipped)
-    6. Start printing
+    Preferred over ``slice_and_print`` — adds mesh-level pre-print
+    validation, G-code safety validation, and auto-detected bundled
+    slicer profiles.  For custom slicer parameter overrides, use
+    ``run_reslice_and_print`` instead.  The full quick-print pipeline:
+    1. Validate mesh (printability, manifold, walls, bridges, bed-fit)
+    2. Resolve slicer profile (bundled, by printer_id)
+    3. Slice the (possibly auto-repaired) mesh to G-code
+    4. Safety-validate the G-code against printer limits
+    5. Upload G-code to the printer
+    6. Run preflight checks (always — cannot be skipped)
+    7. Start printing
 
     Args:
         model_path: Path to input model (STL, 3MF, STEP, OBJ).
@@ -9983,6 +9986,10 @@ def run_quick_print(
         printer_id: Printer model ID for auto-profile selection
             (e.g. ``"ender3"``, ``"bambu_x1c"``, ``"klipper_generic"``).
         profile_path: Explicit slicer profile. Overrides printer_id auto-selection.
+        skip_validation: Bypass the mesh-level pre-print validation step.
+            Defaults to False — designs are pre-tested for printability
+            before they reach the printer.  Use True for already-validated
+            inputs or pre-sliced 3MFs the validator can't introspect.
     """
     if err := _check_auth("print"):
         return err
@@ -9992,6 +9999,7 @@ def run_quick_print(
             printer_name=printer_name,
             printer_id=printer_id,
             profile_path=profile_path,
+            skip_validation=skip_validation,
         )
         return {"success": result.success, **result.to_dict()}
     except Exception as exc:
@@ -10009,13 +10017,14 @@ def run_reslice_and_print(
     slicer_path: str | None = None,
     use_ams: bool | None = None,
     ams_mapping: str | None = None,
+    skip_validation: bool = False,
 ) -> dict:
     """Reslice with custom slicer overrides + print (use for retries with adjusted settings).
 
     Use this when you need to tweak slicer parameters (speed, brim, infill, temps).
     For standard prints without overrides, use ``run_quick_print`` instead.
-    One-shot pipeline: resolve profile with overrides → slice → safety check →
-    upload to printer → start print.
+    One-shot pipeline: validate mesh → resolve profile with overrides →
+    slice → safety check → upload to printer → start print.
 
     The overrides parameter is a JSON string of PrusaSlicer INI key-value pairs:
       {"brim_width": "8", "perimeter_speed": "30", "fill_density": "25%"}
@@ -10042,6 +10051,9 @@ def run_reslice_and_print(
             auto-detected from 3MF metadata.
         ams_mapping: JSON string of AMS slot indices (e.g. ``"[0, 2]"``).
             Maps each extruder/filament to an AMS tray position.
+        skip_validation: Bypass the mesh-level pre-print validation step.
+            Defaults to False — designs are pre-tested for printability
+            before they reach the printer.
     """
     if err := _check_auth("print"):
         return err
@@ -10113,6 +10125,7 @@ def run_reslice_and_print(
             slicer_path=slicer_path,
             use_ams=use_ams,
             ams_mapping=parsed_ams_mapping,
+            skip_validation=skip_validation,
         )
         return {"success": result.success, **result.to_dict()}
     except Exception as exc:

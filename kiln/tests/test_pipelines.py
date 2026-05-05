@@ -221,12 +221,17 @@ class TestQuickPrintPipeline:
     ``from kiln.slicer import slice_file``, so we mock at
     ``kiln.slicer.slice_file``. Same for resolve_slicer_profile
     (``kiln.slicer_profiles.resolve_slicer_profile``).
+
+    These tests pass ``skip_validation=True`` to isolate the slice /
+    safety / upload steps from the pre-print validation gate.  The
+    validation step has its own coverage in
+    :class:`TestQuickPrintValidationStep`.
     """
 
     @patch("kiln.slicer.slice_file", side_effect=FileNotFoundError("model.stl not found"))
     def test_fails_at_slice_with_missing_model(self, mock_slice: MagicMock) -> None:
         """quick_print should fail at the slice step if the model file is missing."""
-        result = quick_print(model_path="/nonexistent/model.stl")
+        result = quick_print(model_path="/nonexistent/model.stl", skip_validation=True)
         assert result.success is False
         assert result.pipeline == "quick_print"
         assert "slicing" in result.message.lower() or "slice" in result.message.lower()
@@ -237,19 +242,19 @@ class TestQuickPrintPipeline:
 
     @patch("kiln.slicer.slice_file", side_effect=RuntimeError("slicer not found"))
     def test_fails_at_slice_with_slicer_error(self, mock_slice: MagicMock) -> None:
-        result = quick_print(model_path="/tmp/model.stl")
+        result = quick_print(model_path="/tmp/model.stl", skip_validation=True)
         assert result.success is False
         assert any(s.name == "slice" and not s.success for s in result.steps)
 
     def test_result_has_pipeline_name(self) -> None:
         """Even on failure, pipeline name should be 'quick_print'."""
         with patch("kiln.slicer.slice_file", side_effect=Exception("fail")):
-            result = quick_print(model_path="/tmp/model.stl")
+            result = quick_print(model_path="/tmp/model.stl", skip_validation=True)
         assert result.pipeline == "quick_print"
 
     def test_result_has_total_duration(self) -> None:
         with patch("kiln.slicer.slice_file", side_effect=Exception("fail")):
-            result = quick_print(model_path="/tmp/model.stl")
+            result = quick_print(model_path="/tmp/model.stl", skip_validation=True)
         assert result.total_duration_seconds >= 0
 
     @patch("kiln.slicer.slice_file", side_effect=Exception("slice error"))
@@ -260,7 +265,11 @@ class TestQuickPrintPipeline:
         mock_slice: MagicMock,
     ) -> None:
         """When printer_id is given, profile resolution step should be recorded."""
-        result = quick_print(model_path="/tmp/model.stl", printer_id="ender3")
+        result = quick_print(
+            model_path="/tmp/model.stl",
+            printer_id="ender3",
+            skip_validation=True,
+        )
         profile_steps = [s for s in result.steps if s.name == "resolve_profile"]
         assert len(profile_steps) == 1
         assert profile_steps[0].success is True
@@ -273,13 +282,172 @@ class TestQuickPrintPipeline:
         mock_slice: MagicMock,
     ) -> None:
         """Profile resolution failure should be recorded but not abort the pipeline."""
-        result = quick_print(model_path="/tmp/model.stl", printer_id="unknown_printer")
+        result = quick_print(
+            model_path="/tmp/model.stl",
+            printer_id="unknown_printer",
+            skip_validation=True,
+        )
         profile_steps = [s for s in result.steps if s.name == "resolve_profile"]
         assert len(profile_steps) == 1
         assert profile_steps[0].success is False
         # Pipeline continues to slice step
         slice_steps = [s for s in result.steps if s.name == "slice"]
         assert len(slice_steps) == 1
+
+
+# ===================================================================
+# quick_print pre-print validation gate (validate_mesh step)
+# ===================================================================
+
+
+class TestQuickPrintValidationStep:
+    """Tests for the pre-print validation gate that runs as the first
+    step of ``quick_print`` (and ``reslice_and_print``).
+
+    Wires through ``run_full_validation_pipeline`` to gate the print on
+    mesh-level printability — manifold, walls, overhangs, bridges,
+    bed-fit, material.  Auto-repaired meshes update the working path so
+    downstream slicing operates on the repaired geometry.
+    """
+
+    @patch("kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline")
+    @patch("kiln.slicer.slice_file")
+    def test_validation_failure_blocks_pipeline(
+        self,
+        mock_slice: MagicMock,
+        mock_validate: MagicMock,
+    ) -> None:
+        """A non-printable mesh aborts the pipeline at validate_mesh — slice never runs."""
+        mock_validate.return_value = {
+            "ready_to_print": False,
+            "printability_score": 25,
+            "validated_path": "/tmp/model.stl",
+            "summary": "Not ready (25/100). 1 issue: non-manifold",
+            "next_action": {"tool": "repair_mesh_advanced", "reason": "non-manifold"},
+            "repaired": False,
+        }
+
+        result = quick_print(model_path="/tmp/model.stl")
+
+        assert result.success is False
+        assert result.pipeline == "quick_print"
+        # validate_mesh step ran, was the failure
+        validate_steps = [s for s in result.steps if s.name == "validate_mesh"]
+        assert len(validate_steps) == 1
+        assert validate_steps[0].success is False
+        assert "25/100" in validate_steps[0].message
+        # slice never ran
+        assert mock_slice.call_count == 0
+        slice_steps = [s for s in result.steps if s.name == "slice"]
+        assert len(slice_steps) == 0
+
+    @patch("kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline")
+    @patch("kiln.slicer.slice_file", side_effect=RuntimeError("slicer mock"))
+    def test_validation_pass_lets_pipeline_continue(
+        self,
+        mock_slice: MagicMock,
+        mock_validate: MagicMock,
+    ) -> None:
+        """A passing mesh records validate_mesh success and proceeds to slice."""
+        mock_validate.return_value = {
+            "ready_to_print": True,
+            "printability_score": 92,
+            "validated_path": "/tmp/model.stl",
+            "summary": "Print-ready (92/100).",
+            "next_action": None,
+            "repaired": False,
+        }
+
+        result = quick_print(model_path="/tmp/model.stl")
+
+        validate_steps = [s for s in result.steps if s.name == "validate_mesh"]
+        assert len(validate_steps) == 1
+        assert validate_steps[0].success is True
+        assert validate_steps[0].data["printability_score"] == 92
+        # Pipeline reached slice step (which is mocked to fail — that's fine)
+        slice_steps = [s for s in result.steps if s.name == "slice"]
+        assert len(slice_steps) == 1
+
+    @patch("kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline")
+    @patch("kiln.slicer.slice_file", side_effect=RuntimeError("slicer mock"))
+    def test_auto_repair_updates_slice_path(
+        self,
+        mock_slice: MagicMock,
+        mock_validate: MagicMock,
+    ) -> None:
+        """When validation auto-repairs the mesh, slice runs on the repaired path."""
+        mock_validate.return_value = {
+            "ready_to_print": True,
+            "printability_score": 75,
+            "validated_path": "/tmp/repaired_model.stl",
+            "summary": "Print-ready (75/100). Auto-repaired non-manifold.",
+            "next_action": None,
+            "repaired": True,
+        }
+
+        quick_print(model_path="/tmp/original_model.stl")
+
+        # slice was called with the repaired path, not the original
+        assert mock_slice.call_count == 1
+        call_args = mock_slice.call_args
+        assert call_args.args[0] == "/tmp/repaired_model.stl"
+
+    @patch("kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline")
+    @patch("kiln.slicer.slice_file", side_effect=RuntimeError("slicer mock"))
+    def test_skip_validation_bypasses_gate(
+        self,
+        mock_slice: MagicMock,
+        mock_validate: MagicMock,
+    ) -> None:
+        """skip_validation=True records a skipped validate_mesh and never calls the validator."""
+        result = quick_print(
+            model_path="/tmp/model.stl",
+            skip_validation=True,
+        )
+
+        # Validator never invoked
+        assert mock_validate.call_count == 0
+        # validate_mesh step still recorded as a clean skip
+        validate_steps = [s for s in result.steps if s.name == "validate_mesh"]
+        assert len(validate_steps) == 1
+        assert validate_steps[0].success is True
+        assert "skip" in validate_steps[0].message.lower()
+        # Pipeline reached slice (which is mocked to fail — fine)
+        slice_steps = [s for s in result.steps if s.name == "slice"]
+        assert len(slice_steps) == 1
+
+    @patch(
+        "kiln.plugins.validation_pipeline_tools.run_full_validation_pipeline",
+        side_effect=ValueError("validator infrastructure failure"),
+    )
+    @patch("kiln.slicer.slice_file", side_effect=RuntimeError("slicer mock"))
+    def test_validation_pipeline_crash_does_not_block_print(
+        self,
+        mock_slice: MagicMock,
+        mock_validate: MagicMock,
+    ) -> None:
+        """If the validator itself raises, the pipeline still proceeds —
+        an infrastructure-side bug must not block users from printing."""
+        result = quick_print(model_path="/tmp/model.stl")
+
+        # validate_mesh step recorded as a soft skip, not a fatal
+        validate_steps = [s for s in result.steps if s.name == "validate_mesh"]
+        assert len(validate_steps) == 1
+        assert validate_steps[0].success is True
+        # Pipeline reached slice
+        slice_steps = [s for s in result.steps if s.name == "slice"]
+        assert len(slice_steps) == 1
+
+    def test_unsupported_format_skips_validation_cleanly(self) -> None:
+        """An input format the validator doesn't understand (e.g. .gcode)
+        records a skip — it doesn't fail the pipeline."""
+        with patch("kiln.slicer.slice_file", side_effect=RuntimeError("slicer mock")):
+            result = quick_print(model_path="/tmp/model.gcode")
+
+        validate_steps = [s for s in result.steps if s.name == "validate_mesh"]
+        assert len(validate_steps) == 1
+        assert validate_steps[0].success is True
+        assert "skip" in validate_steps[0].message.lower()
 
 
 # ===================================================================
@@ -387,11 +555,15 @@ class TestResliceAndPrintPipeline:
         - Printer offline at preflight
         - Upload failure stops pipeline
         - Pipeline name and serialization
+
+    These tests pass ``skip_validation=True`` to isolate slicer / adapter /
+    upload semantics from the pre-print validation gate.  Validation has
+    its own coverage in :class:`TestQuickPrintValidationStep`.
     """
 
     @patch("kiln.slicer.slice_file", side_effect=FileNotFoundError("model.stl not found"))
     def test_fails_at_slice_with_missing_model(self, mock_slice: MagicMock) -> None:
-        result = reslice_and_print(model_path="/nonexistent/model.stl")
+        result = reslice_and_print(model_path="/nonexistent/model.stl", skip_validation=True)
         assert result.success is False
         assert result.pipeline == "reslice_and_print"
         slice_steps = [s for s in result.steps if s.name == "slice"]
@@ -400,7 +572,7 @@ class TestResliceAndPrintPipeline:
 
     @patch("kiln.slicer.slice_file", side_effect=RuntimeError("slicer not found"))
     def test_fails_at_slice_with_slicer_error(self, mock_slice: MagicMock) -> None:
-        result = reslice_and_print(model_path="/tmp/model.stl")
+        result = reslice_and_print(model_path="/tmp/model.stl", skip_validation=True)
         assert result.success is False
         assert any(s.name == "slice" and not s.success for s in result.steps)
 
@@ -416,6 +588,7 @@ class TestResliceAndPrintPipeline:
             model_path="/tmp/model.stl",
             printer_id="ender3",
             overrides=overrides,
+            skip_validation=True,
         )
         mock_resolve.assert_called_once_with("ender3", overrides=overrides)
 
@@ -430,6 +603,7 @@ class TestResliceAndPrintPipeline:
             model_path="/tmp/model.stl",
             printer_id="ender3",
             overrides={"brim_width": "8"},
+            skip_validation=True,
         )
         profile_steps = [s for s in result.steps if s.name == "resolve_profile"]
         assert len(profile_steps) == 1
@@ -447,6 +621,7 @@ class TestResliceAndPrintPipeline:
             model_path="/tmp/model.stl",
             printer_id="unknown_printer",
             overrides={"brim_width": "8"},
+            skip_validation=True,
         )
         profile_steps = [s for s in result.steps if s.name == "resolve_profile"]
         assert len(profile_steps) == 1
@@ -460,6 +635,7 @@ class TestResliceAndPrintPipeline:
             result = reslice_and_print(
                 model_path="/tmp/model.stl",
                 profile_path="/tmp/custom.ini",
+                skip_validation=True,
             )
         profile_steps = [s for s in result.steps if s.name == "resolve_profile"]
         assert len(profile_steps) == 1
@@ -508,11 +684,14 @@ class TestResliceAndPrintPipeline:
             printer_name="myprinter",
             printer_id="ender3",
             overrides={"brim_width": "8"},
+            skip_validation=True,
         )
 
         assert result.success is True
         assert result.pipeline == "reslice_and_print"
-        assert len(result.steps) == 7  # includes stability_check step
+        # 8 steps: validate_mesh (skipped) + resolve_profile + stability_check
+        # + slice + safety_check + upload + preflight + start_print.
+        assert len(result.steps) == 8
         assert all(s.success for s in result.steps)
         mock_adapter.start_print.assert_called_once_with("out.gcode")
 
@@ -557,6 +736,7 @@ class TestResliceAndPrintPipeline:
             printer_name="bambu",
             printer_id="bambu_a1",
             overrides={"temperature": "220", "bed_temperature": "65"},
+            skip_validation=True,
         )
 
         assert result.success is True
@@ -596,6 +776,7 @@ class TestResliceAndPrintPipeline:
         result = reslice_and_print(
             model_path="/tmp/model.stl",
             printer_name="myprinter",
+            skip_validation=True,
         )
 
         assert result.success is False
@@ -631,6 +812,7 @@ class TestResliceAndPrintPipeline:
         result = reslice_and_print(
             model_path="/tmp/model.stl",
             printer_name="myprinter",
+            skip_validation=True,
         )
 
         assert result.success is False
@@ -641,17 +823,17 @@ class TestResliceAndPrintPipeline:
 
     def test_result_has_pipeline_name(self) -> None:
         with patch("kiln.slicer.slice_file", side_effect=Exception("fail")):
-            result = reslice_and_print(model_path="/tmp/model.stl")
+            result = reslice_and_print(model_path="/tmp/model.stl", skip_validation=True)
         assert result.pipeline == "reslice_and_print"
 
     def test_result_has_total_duration(self) -> None:
         with patch("kiln.slicer.slice_file", side_effect=Exception("fail")):
-            result = reslice_and_print(model_path="/tmp/model.stl")
+            result = reslice_and_print(model_path="/tmp/model.stl", skip_validation=True)
         assert result.total_duration_seconds >= 0
 
     def test_result_is_json_serializable(self) -> None:
         with patch("kiln.slicer.slice_file", side_effect=Exception("fail")):
-            result = reslice_and_print(model_path="/tmp/model.stl")
+            result = reslice_and_print(model_path="/tmp/model.stl", skip_validation=True)
         d = result.to_dict()
         serialized = json.dumps(d)
         assert isinstance(serialized, str)
@@ -667,6 +849,7 @@ class TestResliceAndPrintPipeline:
                 model_path="/tmp/model.stl",
                 printer_id="ender3",
                 overrides={},
+                skip_validation=True,
             )
             mock_resolve.assert_called_once_with("ender3", overrides={})
 
@@ -703,7 +886,7 @@ class TestStabilityCheckPipeline:
         mock_result.recommendation = "Orientation looks stable."
         mock_stability.return_value = mock_result
 
-        result = quick_print(model_path="/tmp/model.stl")
+        result = quick_print(model_path="/tmp/model.stl", skip_validation=True)
         stability_steps = [s for s in result.steps if s.name == "stability_check"]
         assert len(stability_steps) == 1
         assert stability_steps[0].success is True
@@ -720,7 +903,7 @@ class TestStabilityCheckPipeline:
         mock_result.recommendation = "Looks stable."
         mock_stability.return_value = mock_result
 
-        result = reslice_and_print(model_path="/tmp/model.stl")
+        result = reslice_and_print(model_path="/tmp/model.stl", skip_validation=True)
         stability_steps = [s for s in result.steps if s.name == "stability_check"]
         assert len(stability_steps) == 1
         assert stability_steps[0].success is True
@@ -737,7 +920,7 @@ class TestStabilityCheckPipeline:
         mock_result.recommendation = "High wobble risk. Reorienting recommended."
         mock_stability.return_value = mock_result
 
-        result = quick_print(model_path="/tmp/tall_tower.stl")
+        result = quick_print(model_path="/tmp/tall_tower.stl", skip_validation=True)
         stability_steps = [s for s in result.steps if s.name == "stability_check"]
         assert len(stability_steps) == 1
         step = stability_steps[0]
@@ -754,7 +937,7 @@ class TestStabilityCheckPipeline:
     def test_stability_failure_does_not_block_pipeline(
         self, mock_slice: MagicMock, mock_stability: MagicMock
     ) -> None:
-        result = quick_print(model_path="/tmp/model.stl")
+        result = quick_print(model_path="/tmp/model.stl", skip_validation=True)
         stability_steps = [s for s in result.steps if s.name == "stability_check"]
         assert len(stability_steps) == 1
         # Stability check should succeed even on internal error (it's non-fatal)
@@ -769,7 +952,7 @@ class TestStabilityCheckPipeline:
     def test_non_stl_file_skips_stability_check(
         self, mock_slice: MagicMock, mock_stability: MagicMock
     ) -> None:
-        result = quick_print(model_path="/tmp/model.gcode")
+        result = quick_print(model_path="/tmp/model.gcode", skip_validation=True)
         stability_steps = [s for s in result.steps if s.name == "stability_check"]
         assert len(stability_steps) == 1
         assert stability_steps[0].success is True
@@ -782,7 +965,7 @@ class TestStabilityCheckPipeline:
     def test_3mf_file_skips_stability_check(
         self, mock_slice: MagicMock, mock_stability: MagicMock
     ) -> None:
-        result = quick_print(model_path="/tmp/model.3mf")
+        result = quick_print(model_path="/tmp/model.3mf", skip_validation=True)
         stability_steps = [s for s in result.steps if s.name == "stability_check"]
         assert len(stability_steps) == 1
         assert "skip" in stability_steps[0].message.lower()
@@ -800,7 +983,7 @@ class TestStabilityCheckPipeline:
         mock_result.recommendation = "Model is stable."
         mock_stability.return_value = mock_result
 
-        result = quick_print(model_path="/tmp/flat_part.stl")
+        result = quick_print(model_path="/tmp/flat_part.stl", skip_validation=True)
         stability_steps = [s for s in result.steps if s.name == "stability_check"]
         assert len(stability_steps) == 1
         step = stability_steps[0]

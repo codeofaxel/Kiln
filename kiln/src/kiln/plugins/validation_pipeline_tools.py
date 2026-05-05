@@ -148,6 +148,197 @@ from kiln.plugins._validation_pipeline_internals import (
 _logger = logging.getLogger(__name__)
 
 
+def run_full_validation_pipeline(
+    input_path: str,
+    printer_id: str = "",
+    material: str = "",
+) -> dict[str, Any]:
+    """Module-level entry point for the full pre-print validation pipeline.
+
+    Same orchestration as the ``validate_and_prepare`` MCP tool, lifted out
+    of the closure so other call sites (``slice_and_print``,
+    ``run_quick_print``, recovery retries) can run the gate programmatically
+    without going through MCP.
+
+    Runs format check, mesh analysis, optional auto-scale, watertight check,
+    auto-repair, printability analysis, support assessment, structural check,
+    bed-fit, material check, and estimation.  Returns the same dict shape as
+    ``validate_and_prepare`` — including ``ready_to_print``, ``validated_path``,
+    ``printability_score``, ``next_action``, and ``summary``.
+
+    :param input_path: Path to a 3D model file (.stl, .3mf, .obj, .step, .glb).
+    :param printer_id: Optional printer model ID for bed-fit checking.
+    :param material: Optional material name for material-specific checks.
+    :returns: Dict matching ``validate_and_prepare``'s return shape.
+    """
+    report = _PipelineReport(input_path=input_path)
+
+    # Step 1: Format check
+    ext = _step_format_check(report, input_path)
+    if ext is None:
+        return report.to_dict()
+
+    # Step 2: Mesh analysis
+    _step_mesh_analysis(report, input_path, ext)
+
+    # Step 2b: Auto-scale
+    input_path, _auto_scaled = _step_auto_scale(report, input_path, ext)
+
+    # Step 3: Watertight check
+    is_manifold = _step_watertight_check(report, input_path)
+
+    # Step 4: Auto-repair
+    working_path = _step_repair(
+        report, input_path, Path(input_path), is_manifold,
+    )
+
+    # Step 5: Printability
+    _step_printability(report, working_path)
+
+    # Step 5b: Support assessment
+    _step_support_assessment(
+        report, working_path, material,
+    )
+
+    # Step 6: Structural
+    _step_structural(report)
+
+    # Step 7: Bed fit + scale check
+    _step_bed_fit(report, printer_id, _auto_scaled)
+
+    # Step 8: Material check
+    _step_material_check(report, material)
+
+    # Step 9: Estimate
+    _step_estimate(report, working_path)
+
+    # ----------------------------------------------------------
+    # Step 10: Aggregate verdict
+    # ----------------------------------------------------------
+    has_failure = any(
+        not c.passed and c.severity == "error" for c in report.checks
+    )
+    has_warning = any(
+        (not c.passed and c.severity == "warning")
+        or (c.passed and c.severity == "warning")
+        for c in report.checks
+    )
+
+    if has_failure:
+        report.status = "fail"
+        report.ready_to_print = False
+    elif has_warning:
+        report.status = "pass_with_warnings"
+        report.ready_to_print = True
+    else:
+        report.status = "pass"
+        report.ready_to_print = True
+
+    # ----------------------------------------------------------
+    # Step 11: Printability score
+    # ----------------------------------------------------------
+    report.printability_score, report.score_breakdown = _compute_printability_score(
+        report.checks,
+        repaired=report.repaired,
+    )
+
+    # ----------------------------------------------------------
+    # Step 12: validated_path
+    # ----------------------------------------------------------
+    report.validated_path = report.repaired_path or input_path
+
+    # ----------------------------------------------------------
+    # Step 13: summary
+    # ----------------------------------------------------------
+    issues: list[str] = []
+    warnings: list[str] = []
+    for c in report.checks:
+        if not c.passed and c.severity == "error":
+            issues.append(_sanitize_summary_detail(c.details))
+        elif not c.passed and c.severity == "warning":
+            warnings.append(_sanitize_summary_detail(c.details))
+
+    score_str = f"{report.printability_score}/100"
+
+    # Build cost/time snippet for summary from model_info
+    _est_snippet = ""
+    _t = report.model_info.get("estimated_print_time_min")
+    _c = report.model_info.get("estimated_cost_usd")
+    if _t:
+        _est_snippet = f" ~{_t} min, ~${_c:.2f}." if _c else f" ~{_t} min."
+
+    if report.ready_to_print and not issues and not warnings:
+        report.summary = f"Print-ready ({score_str}).{_est_snippet}"
+    elif report.ready_to_print:
+        count = len(warnings)
+        label = "warning" if count == 1 else "warnings"
+        first = warnings[0] if warnings else ""
+        base = f"Print-ready ({score_str}).{_est_snippet} {count} {label}: {first}"
+        report.summary = base[:200]
+    else:
+        count = len(issues)
+        label = "issue" if count == 1 else "issues"
+        brief = "; ".join(issues[:2])
+        base = f"Not ready ({score_str}). {count} {label}: {brief}"
+        report.summary = base[:200]
+
+    # ----------------------------------------------------------
+    # Step 14: next_action
+    # ----------------------------------------------------------
+    if report.ready_to_print:
+        slice_args: dict[str, Any] = {"input_path": report.validated_path}
+        if printer_id:
+            slice_args["printer_id"] = printer_id
+        report.next_action = {
+            "tool": "slice_model",
+            "args": slice_args,
+        }
+    else:
+        # Determine most actionable next step
+        bed_fail = any(
+            not c.passed and c.name == "bed_fit" for c in report.checks
+        )
+        mesh_fail = any(
+            not c.passed and c.name in ("watertight", "repair")
+            for c in report.checks
+        )
+        printability_fail = any(
+            not c.passed and c.name == "printability"
+            for c in report.checks
+        )
+        scale_fail = any(
+            not c.passed and c.name == "scale_check"
+            for c in report.checks
+        )
+        if bed_fail:
+            action: dict[str, Any] = {
+                "tool": "scale_mesh_to_fit",
+                "reason": "Model exceeds printer build volume",
+            }
+            if printer_id:
+                action["printer_id"] = printer_id
+            report.next_action = action
+        elif scale_fail:
+            report.next_action = {
+                "tool": "rescale_model",
+                "reason": "Model is suspiciously small — likely exported in wrong units",
+            }
+        elif mesh_fail:
+            report.next_action = {
+                "tool": "repair_mesh_advanced",
+                "reason": "Mesh is non-manifold and auto-repair failed",
+            }
+        elif printability_fail:
+            report.next_action = {
+                "tool": "auto_orient_model",
+                "reason": "Low printability score — reorienting may improve it",
+            }
+        else:
+            report.next_action = None
+
+    return report.to_dict()
+
+
 class _ValidationPipelinePlugin:
     """Post-generation validation pipeline — comprehensive pass/fail report.
 
@@ -197,172 +388,9 @@ class _ValidationPipelinePlugin:
             :returns: Dict with pass/fail status, per-check details, recommendations,
                 ``printability_score`` (0-100), and ``score_breakdown``.
             """
-            report = _PipelineReport(input_path=input_path)
-
-            # Step 1: Format check
-            ext = _step_format_check(report, input_path)
-            if ext is None:
-                return report.to_dict()
-
-            # Step 2: Mesh analysis
-            _step_mesh_analysis(report, input_path, ext)
-
-            # Step 2b: Auto-scale
-            input_path, _auto_scaled = _step_auto_scale(report, input_path, ext)
-
-            # Step 3: Watertight check
-            is_manifold = _step_watertight_check(report, input_path)
-
-            # Step 4: Auto-repair
-            working_path = _step_repair(
-                report, input_path, Path(input_path), is_manifold,
+            return run_full_validation_pipeline(
+                input_path, printer_id=printer_id, material=material,
             )
-
-            # Step 5: Printability
-            _step_printability(report, working_path)
-
-            # Step 5b: Support assessment
-            _step_support_assessment(
-                report, working_path, material,
-            )
-
-            # Step 6: Structural
-            _step_structural(report)
-
-            # Step 7: Bed fit + scale check
-            _step_bed_fit(report, printer_id, _auto_scaled)
-
-            # Step 8: Material check
-            _step_material_check(report, material)
-
-            # Step 9: Estimate
-            _step_estimate(report, working_path)
-
-            # ----------------------------------------------------------
-            # Step 10: Aggregate verdict
-            # ----------------------------------------------------------
-            has_failure = any(
-                not c.passed and c.severity == "error" for c in report.checks
-            )
-            has_warning = any(
-                (not c.passed and c.severity == "warning")
-                or (c.passed and c.severity == "warning")
-                for c in report.checks
-            )
-
-            if has_failure:
-                report.status = "fail"
-                report.ready_to_print = False
-            elif has_warning:
-                report.status = "pass_with_warnings"
-                report.ready_to_print = True
-            else:
-                report.status = "pass"
-                report.ready_to_print = True
-
-            # ----------------------------------------------------------
-            # Step 11: Printability score
-            # ----------------------------------------------------------
-            report.printability_score, report.score_breakdown = _compute_printability_score(
-                report.checks,
-                repaired=report.repaired,
-            )
-
-            # ----------------------------------------------------------
-            # Step 12: validated_path
-            # ----------------------------------------------------------
-            report.validated_path = report.repaired_path or input_path
-
-            # ----------------------------------------------------------
-            # Step 13: summary
-            # ----------------------------------------------------------
-            issues: list[str] = []
-            warnings: list[str] = []
-            for c in report.checks:
-                if not c.passed and c.severity == "error":
-                    issues.append(_sanitize_summary_detail(c.details))
-                elif not c.passed and c.severity == "warning":
-                    warnings.append(_sanitize_summary_detail(c.details))
-
-            score_str = f"{report.printability_score}/100"
-
-            # Build cost/time snippet for summary from model_info
-            _est_snippet = ""
-            _t = report.model_info.get("estimated_print_time_min")
-            _c = report.model_info.get("estimated_cost_usd")
-            if _t:
-                _est_snippet = f" ~{_t} min, ~${_c:.2f}." if _c else f" ~{_t} min."
-
-            if report.ready_to_print and not issues and not warnings:
-                report.summary = f"Print-ready ({score_str}).{_est_snippet}"
-            elif report.ready_to_print:
-                count = len(warnings)
-                label = "warning" if count == 1 else "warnings"
-                first = warnings[0] if warnings else ""
-                base = f"Print-ready ({score_str}).{_est_snippet} {count} {label}: {first}"
-                report.summary = base[:200]
-            else:
-                count = len(issues)
-                label = "issue" if count == 1 else "issues"
-                brief = "; ".join(issues[:2])
-                base = f"Not ready ({score_str}). {count} {label}: {brief}"
-                report.summary = base[:200]
-
-            # ----------------------------------------------------------
-            # Step 14: next_action
-            # ----------------------------------------------------------
-            if report.ready_to_print:
-                slice_args: dict[str, Any] = {"input_path": report.validated_path}
-                if printer_id:
-                    slice_args["printer_id"] = printer_id
-                report.next_action = {
-                    "tool": "slice_model",
-                    "args": slice_args,
-                }
-            else:
-                # Determine most actionable next step
-                bed_fail = any(
-                    not c.passed and c.name == "bed_fit" for c in report.checks
-                )
-                mesh_fail = any(
-                    not c.passed and c.name in ("watertight", "repair")
-                    for c in report.checks
-                )
-                printability_fail = any(
-                    not c.passed and c.name == "printability"
-                    for c in report.checks
-                )
-                scale_fail = any(
-                    not c.passed and c.name == "scale_check"
-                    for c in report.checks
-                )
-                if bed_fail:
-                    action: dict[str, Any] = {
-                        "tool": "scale_mesh_to_fit",
-                        "reason": "Model exceeds printer build volume",
-                    }
-                    if printer_id:
-                        action["printer_id"] = printer_id
-                    report.next_action = action
-                elif scale_fail:
-                    report.next_action = {
-                        "tool": "rescale_model",
-                        "reason": "Model is suspiciously small — likely exported in wrong units",
-                    }
-                elif mesh_fail:
-                    report.next_action = {
-                        "tool": "repair_mesh_advanced",
-                        "reason": "Mesh is non-manifold and auto-repair failed",
-                    }
-                elif printability_fail:
-                    report.next_action = {
-                        "tool": "auto_orient_model",
-                        "reason": "Low printability score — reorienting may improve it",
-                    }
-                else:
-                    report.next_action = None
-
-            return report.to_dict()
 
         @mcp.tool()
         def prepare_ai_model_for_print(

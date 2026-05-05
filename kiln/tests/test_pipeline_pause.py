@@ -353,16 +353,17 @@ class TestQuickPrintPauseAfterStep:
         """quick_print pauses after resolve_profile when pause_after_step=0."""
         from kiln.pipelines import quick_print
 
-        # The first step (resolve_profile) needs no external deps when
-        # no printer_id is given and profile_path is explicit.
+        # The first step is validate_mesh — pass skip_validation=True so
+        # it records a clean skip and the pipeline can pause cleanly.
         result = quick_print(
             model_path="/fake/model.stl",
             profile_path="/fake/profile.ini",
             pause_after_step=0,
+            skip_validation=True,
         )
-        # Should pause after step 0 (resolve_profile)
+        # Should pause after step 0 (validate_mesh, skipped)
         assert len(result.steps) == 1
-        assert result.steps[0].name == "resolve_profile"
+        assert result.steps[0].name == "validate_mesh"
         assert "Paused" in result.message
 
     @patch("kiln.pipelines.time.time", return_value=1000.0)
@@ -374,6 +375,7 @@ class TestQuickPrintPauseAfterStep:
             model_path="/fake/model.stl",
             profile_path="/fake/profile.ini",
             pause_after_step=0,
+            skip_validation=True,
         )
         execs = list_executions()
         assert len(execs) == 1

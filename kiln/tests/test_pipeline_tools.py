@@ -119,6 +119,7 @@ class TestRunQuickPrint:
             printer_name=None,
             printer_id=None,
             profile_path=None,
+            skip_validation=False,
         )
 
     @patch("kiln.server._pipeline_quick_print")
@@ -138,6 +139,22 @@ class TestRunQuickPrint:
             printer_name="my_printer",
             printer_id="ender3",
             profile_path="/tmp/profile.ini",
+            skip_validation=False,
+        )
+
+    @patch("kiln.server._pipeline_quick_print")
+    def test_skip_validation_passed_through(self, mock_pipeline):
+        from kiln.server import run_quick_print
+
+        mock_pipeline.return_value = _ok_result("quick_print")
+        run_quick_print(model_path="/tmp/test.stl", skip_validation=True)
+
+        mock_pipeline.assert_called_once_with(
+            model_path="/tmp/test.stl",
+            printer_name=None,
+            printer_id=None,
+            profile_path=None,
+            skip_validation=True,
         )
 
     @patch("kiln.server._pipeline_quick_print")

@@ -2111,3 +2111,85 @@ class TestSeverityAlwaysPresent:
 
         for check in result["checks"]:
             assert "severity" in check, f"Check {check['name']} missing severity key"
+
+
+# ===================================================================
+# Module-level run_full_validation_pipeline entry point
+# ===================================================================
+#
+# `slice_and_print`, `run_quick_print`, and `run_reslice_and_print`
+# import `run_full_validation_pipeline` directly to gate the print on
+# mesh-level printability before slicing.  These tests pin the import
+# path and the contract — same return shape as the validate_and_prepare
+# MCP tool, since both delegate to the same orchestration body.
+
+
+class TestRunFullValidationPipeline:
+    """Tests for the module-level ``run_full_validation_pipeline``."""
+
+    def test_module_level_function_is_importable(self) -> None:
+        """The function must be importable from validation_pipeline_tools —
+        slice_and_print and the print pipelines depend on this exact path."""
+        from kiln.plugins.validation_pipeline_tools import (
+            run_full_validation_pipeline,
+        )
+        assert callable(run_full_validation_pipeline)
+
+    def test_supported_formats_set_is_importable(self) -> None:
+        """The print tools also import _SUPPORTED_FORMATS to short-circuit
+        validation for unsupported inputs (e.g. raw .gcode)."""
+        from kiln.plugins._validation_pipeline_internals import _SUPPORTED_FORMATS
+        # Mesh formats the validator can introspect.
+        assert ".stl" in _SUPPORTED_FORMATS
+        assert ".obj" in _SUPPORTED_FORMATS
+        assert ".3mf" in _SUPPORTED_FORMATS
+        # Raw G-code is intentionally NOT in the set — validator can't
+        # introspect it; print tools should skip the gate cleanly.
+        assert ".gcode" not in _SUPPORTED_FORMATS
+
+    def test_returns_same_shape_as_mcp_tool(self, tmp_path: Path) -> None:
+        """Module-level call returns the same dict shape as validate_and_prepare —
+        same keys, same semantics — so callers can rely on either entry point."""
+        from kiln.plugins.validation_pipeline_tools import (
+            run_full_validation_pipeline,
+        )
+
+        stl = _make_binary_stl(tmp_path, triangles=10)
+        report = run_full_validation_pipeline(stl)
+
+        # Contract: every key the gate logic in slice_and_print /
+        # quick_print reads must be present.
+        for key in (
+            "ready_to_print",
+            "printability_score",
+            "validated_path",
+            "summary",
+            "next_action",
+            "checks",
+            "status",
+        ):
+            assert key in report, f"missing key {key!r} from validation report"
+
+    def test_missing_file_returns_not_ready(self, tmp_path: Path) -> None:
+        """A non-existent input fails the gate — print pipelines treat
+        ready_to_print=False as the block signal."""
+        from kiln.plugins.validation_pipeline_tools import (
+            run_full_validation_pipeline,
+        )
+
+        report = run_full_validation_pipeline(str(tmp_path / "missing.stl"))
+        assert report["ready_to_print"] is False
+        assert report["printability_score"] == 0
+
+    def test_unsupported_format_returns_not_ready(self, tmp_path: Path) -> None:
+        """An unsupported format also fails — but slice_and_print /
+        quick_print short-circuit BEFORE calling the validator using
+        _SUPPORTED_FORMATS, so this is a defensive gate."""
+        from kiln.plugins.validation_pipeline_tools import (
+            run_full_validation_pipeline,
+        )
+
+        gcode = tmp_path / "fake.gcode"
+        gcode.write_text("G28\n")
+        report = run_full_validation_pipeline(str(gcode))
+        assert report["ready_to_print"] is False
