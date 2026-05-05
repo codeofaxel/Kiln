@@ -181,7 +181,7 @@ Parts too large for a single print bed are automatically split into printable se
 
 ### 6.2 Assembly Validation
 
-Multi-part assemblies undergo clearance validation (minimum gap between mating surfaces), joint detection (identifying snap-fit, press-fit, and threaded connections), and tolerance stacking analysis (cumulative dimensional error across assembled parts). The system flags assemblies where accumulated tolerances may prevent proper fit.
+Multi-part assemblies undergo clearance validation (minimum gap between mating surfaces), joint detection (identifying snap-fit, press-fit, and threaded connections), and tolerance stacking analysis (cumulative dimensional error across assembled parts). The system flags assemblies where accumulated tolerances may prevent proper fit. With Kiln Pro (https://kiln3d.com/pricing), tolerance stacking gets engineering-grade chain analysis — worst-case, RSS (naive and Bender-inflated), Scholz mean-shift, and Monte Carlo with FDM-aware bias — with method-specific confidence bands (90% Bender, 97% Scholz, 99.73% MC) and out-of-spec probability, plus per-printer offsets auto-imported from your slicer profile (OrcaSlicer, Bambu Studio, PrusaSlicer).
 
 ### 6.3 Assembly Manuals
 
