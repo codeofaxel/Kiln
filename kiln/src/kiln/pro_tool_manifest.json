@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-05-05T02:32:49.906323+00:00",
-  "tool_count": 288,
+  "generated": "2026-05-05T04:30:09.166973+00:00",
+  "tool_count": 298,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -2466,40 +2466,6 @@
           "feature_id"
         ],
         "title": "archive_featureArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "batch_verify_manuals",
-      "description": "Batch buyer-facing verification across many PDFs / 3MFs (Pro+).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "design_versioning",
-      "parameters": {
-        "properties": {
-          "paths": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Paths",
-            "type": "array"
-          },
-          "release_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Release Id"
-          }
-        },
-        "required": [
-          "paths"
-        ],
-        "title": "batch_verify_manualsArguments",
         "type": "object"
       }
     },
@@ -6248,6 +6214,38 @@
       }
     },
     {
+      "name": "classify_calibration_confidence",
+      "description": "Deterministically classify per-field + overall calibration confidence.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {
+          "tool_name": {
+            "title": "Tool Name",
+            "type": "string"
+          },
+          "parsed_fields": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parsed Fields"
+          }
+        },
+        "required": [
+          "tool_name"
+        ],
+        "title": "classify_calibration_confidenceArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "compute_iso_fit",
       "description": "ISO 286 limits and fits with FDM achievability gate.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -6432,6 +6430,296 @@
       }
     },
     {
+      "name": "explain_calibration_for_design",
+      "description": "Plain-English explanation of which calibration offsets were applied.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "recipe_version": {
+            "default": "",
+            "title": "Recipe Version",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          },
+          "feature_class": {
+            "default": "",
+            "title": "Feature Class",
+            "type": "string"
+          },
+          "nominal_size_mm": {
+            "default": 0.0,
+            "title": "Nominal Size Mm",
+            "type": "number"
+          }
+        },
+        "title": "explain_calibration_for_designArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_calibration_freshness",
+      "description": "Report freshness for every calibration combination of a printer.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id"
+        ],
+        "title": "get_calibration_freshnessArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_parser_health_summary",
+      "description": "Aggregate correction rates per signal type and per mapping rule.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {},
+        "title": "get_parser_health_summaryArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_provenance_history",
+      "description": "Return provenance-log entries for explainability (Claim 35).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {
+          "feature_class": {
+            "default": "",
+            "title": "Feature Class",
+            "type": "string"
+          },
+          "originating_signal": {
+            "default": "",
+            "title": "Originating Signal",
+            "type": "string"
+          },
+          "since_iso": {
+            "default": "",
+            "title": "Since Iso",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          },
+          "mapping_rule_id": {
+            "default": "",
+            "title": "Mapping Rule Id",
+            "type": "string"
+          },
+          "limit": {
+            "default": 100,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "get_provenance_historyArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "import_third_party_calibration",
+      "description": "Auto-import + classify + coach in a single call.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {
+          "tool_name": {
+            "title": "Tool Name",
+            "type": "string"
+          },
+          "config_path": {
+            "default": "",
+            "title": "Config Path",
+            "type": "string"
+          },
+          "printer_model": {
+            "default": "",
+            "title": "Printer Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_name"
+        ],
+        "title": "import_third_party_calibrationArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "ingest_measurement",
+      "description": "Ingest a calibration measurement and update the per-machine profile.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {
+          "measurement_kind": {
+            "title": "Measurement Kind",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          }
+        },
+        "required": [
+          "measurement_kind",
+          "payload",
+          "printer_id",
+          "material"
+        ],
+        "title": "ingest_measurementArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "query_per_machine_offset",
+      "description": "Return the calibration offset for a specific feature.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "feature_class": {
+            "title": "Feature Class",
+            "type": "string"
+          },
+          "nominal_size_mm": {
+            "title": "Nominal Size Mm",
+            "type": "number"
+          }
+        },
+        "required": [
+          "printer_id",
+          "material",
+          "feature_class",
+          "nominal_size_mm"
+        ],
+        "title": "query_per_machine_offsetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_calibration_correction",
+      "description": "Record an explicit correction event linking two observations.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {
+          "original_observation_id": {
+            "title": "Original Observation Id",
+            "type": "string"
+          },
+          "corrected_by_observation_id": {
+            "default": "",
+            "title": "Corrected By Observation Id",
+            "type": "string"
+          },
+          "reason": {
+            "default": "user_explicit",
+            "title": "Reason",
+            "type": "string"
+          },
+          "confidence_adjustment": {
+            "default": 0.0,
+            "title": "Confidence Adjustment",
+            "type": "number"
+          },
+          "annotation": {
+            "default": "",
+            "title": "Annotation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "original_observation_id"
+        ],
+        "title": "record_calibration_correctionArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "request_calibration_test_print",
+      "description": "Return a pointer to the user's slicer's native calibration wizard.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "test_piece_kind": {
+            "default": "slicer_native",
+            "title": "Test Piece Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id",
+          "material"
+        ],
+        "title": "request_calibration_test_printArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "tolerance_stack_analysis",
       "description": "Chain-walking tolerance stack analysis on a multi-part assembly.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -6524,6 +6812,17 @@
           "chain"
         ],
         "title": "tolerance_stack_analysisArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "verify_provenance_integrity",
+      "description": "Re-walk the provenance log's hash chain; report any breaks.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {},
+        "title": "verify_provenance_integrityArguments",
         "type": "object"
       }
     },
