@@ -345,7 +345,7 @@ class TestHandleOrder:
         with pytest.raises(FulfillmentError, match="Quote not found"):
             orch.handle_order(
                 "craftcloud",
-                OrderRequest(quote_id="q-123"),
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="user@test.com",
                 user_tier=LicenseTier.FREE,
                 quote_token="nonexistent-token",
@@ -356,7 +356,7 @@ class TestHandleOrder:
         with pytest.raises(FulfillmentError, match="expired"):
             orch.handle_order(
                 "craftcloud",
-                OrderRequest(quote_id="q-123"),
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="user@test.com",
                 user_tier=LicenseTier.FREE,
                 quote_token="expired-token",
@@ -367,7 +367,7 @@ class TestHandleOrder:
         with pytest.raises(FulfillmentError, match="Provider mismatch"):
             orch.handle_order(
                 "sculpteo",
-                OrderRequest(quote_id="q-123"),
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="user@test.com",
                 user_tier=LicenseTier.FREE,
                 quote_token="token-1",
@@ -378,7 +378,7 @@ class TestHandleOrder:
         with pytest.raises(FulfillmentError, match="different user"):
             orch.handle_order(
                 "craftcloud",
-                OrderRequest(quote_id="q-123"),
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="bob@test.com",
                 user_tier=LicenseTier.FREE,
                 quote_token="token-1",
@@ -403,7 +403,7 @@ class TestHandleOrder:
         ):
             orch.handle_order(
                 "craftcloud",
-                OrderRequest(quote_id="q-123"),
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="user@test.com",
                 user_tier=LicenseTier.BUSINESS,
                 quote_token=token,
@@ -413,7 +413,7 @@ class TestHandleOrder:
         with pytest.raises(FulfillmentError, match="Quote not found"):
             orch.handle_order(
                 "craftcloud",
-                OrderRequest(quote_id="q-123"),
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="user@test.com",
                 user_tier=LicenseTier.BUSINESS,
                 quote_token=token,
@@ -425,7 +425,7 @@ class TestHandleOrder:
              pytest.raises(FulfillmentError, match="Free tier limit reached"):
             orch.handle_order(
                 "craftcloud",
-                OrderRequest(quote_id="q-123"),
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="user@test.com",
                 user_tier=LicenseTier.FREE,
                 quote_token=token,
@@ -454,7 +454,7 @@ class TestHandleOrder:
              ):
             result = orch.handle_order(
                 "craftcloud",
-                OrderRequest(quote_id="q-123"),
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="user@test.com",
                 user_tier=LicenseTier.FREE,
                 quote_token=token,
@@ -468,7 +468,7 @@ class TestHandleOrder:
             with pytest.raises(FulfillmentError, match="fulfillment items") as exc_info:
                 orch.handle_order(
                     "craftcloud",
-                    OrderRequest(quote_id="q-123"),
+                    OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                     user_email="user@test.com",
                     user_tier=LicenseTier.FREE,
                     quote_token=token,
@@ -494,7 +494,7 @@ class TestHandleOrder:
         ):
             result = orch.handle_order(
                 "craftcloud",
-                OrderRequest(quote_id="q-123"),
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="user@test.com",
                 user_tier=LicenseTier.BUSINESS,
                 quote_token=token,
@@ -523,7 +523,7 @@ class TestHandleOrder:
         ):
             result = orch.handle_order(
                 "craftcloud",
-                OrderRequest(quote_id="q-123"),
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="user@test.com",
                 user_tier=LicenseTier.BUSINESS,
                 quote_token=token,
@@ -547,7 +547,7 @@ class TestHandleOrder:
              pytest.raises(PaymentError, match="card declined"):
             orch.handle_order(
                 "craftcloud",
-                OrderRequest(quote_id="q-123"),
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="user@test.com",
                 user_tier=LicenseTier.BUSINESS,
                 quote_token=token,
@@ -575,7 +575,7 @@ class TestHandleOrder:
         ), pytest.raises(FulfillmentError, match="vendor unavailable"):
             orch.handle_order(
                 "craftcloud",
-                OrderRequest(quote_id="q-123"),
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="user@test.com",
                 user_tier=LicenseTier.BUSINESS,
                 quote_token=token,
@@ -606,7 +606,7 @@ class TestHandleOrder:
         ), pytest.raises(FulfillmentError, match="vendor unavailable"):
             orch.handle_order(
                 "craftcloud",
-                OrderRequest(quote_id="q-123"),
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="user@test.com",
                 user_tier=LicenseTier.BUSINESS,
                 quote_token=token,
@@ -631,7 +631,7 @@ class TestHandleOrder:
         ):
             result = orch.handle_order(
                 "craftcloud",
-                OrderRequest(quote_id="q-123"),
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="user@test.com",
                 user_tier=LicenseTier.BUSINESS,
                 quote_token=token,
@@ -666,7 +666,7 @@ class TestHandleOrder:
         ), pytest.raises(FulfillmentError, match="order failed"):
             orch.handle_order(
                 "craftcloud",
-                OrderRequest(quote_id="q-123"),
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="user@test.com",
                 user_tier=LicenseTier.BUSINESS,
                 quote_token=token,
@@ -678,7 +678,7 @@ class TestHandleOrder:
             with pytest.raises(FulfillmentError, match="Free tier limit reached") as exc_info:
                 orch.handle_order(
                     "craftcloud",
-                    OrderRequest(quote_id="q-123"),
+                    OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                     user_email="user@test.com",
                     user_tier=LicenseTier.PRO,
                     quote_token=token,
@@ -705,7 +705,7 @@ class TestHandleOrder:
         ):
             orch.handle_order(
                 "craftcloud",
-                OrderRequest(quote_id="q-123"),
+                OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="user@test.com",
                 user_tier=LicenseTier.BUSINESS,
                 quote_token=token,
