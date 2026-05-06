@@ -283,7 +283,11 @@ class TestDesignTemplates:
         assert "material_compatibility" in d
         assert "agent_guidance" in d
 
+    @requires_engineering_overlay
     def test_every_pattern_has_guidance(self):
+        # ``agent_guidance`` is moat-tier data — populated only when the
+        # kiln-pro engineering overlay is loaded.  Public-only CI runs
+        # see empty agent_guidance per the design-knowledge moat split.
         for p in list_design_templates():
             assert len(p.agent_guidance) > 0, f"{p.template_id} missing guidance"
 
@@ -365,7 +369,10 @@ class TestRequirementMatching:
 
 
 class TestDesignBrief:
+    @requires_engineering_overlay
     def test_basic_brief(self):
+        # ``combined_guidance`` rolls up template + material agent_guidance
+        # which is moat-tier data; empty in public-only CI runs.
         brief = get_design_constraints("phone stand for my desk")
         assert isinstance(brief, DesignBrief)
         assert brief.recommended_material is not None
