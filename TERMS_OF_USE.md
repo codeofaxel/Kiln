@@ -925,7 +925,7 @@ changes, we will:
 1. Update the "Last updated" date and increment the version
    number at the top;
 2. Preserve prior versions in public Git history at
-   [github.com/codeofaxel/Kiln/blob/main/TERMS.md](https://github.com/codeofaxel/Kiln/blob/main/TERMS.md);
+   [github.com/codeofaxel/Kiln/blob/main/TERMS_OF_USE.md](https://github.com/codeofaxel/Kiln/blob/main/TERMS_OF_USE.md);
 3. For **material changes** (changes to fees, cancellation
    terms, liability, arbitration, acceptable-use restrictions,
    or other terms that meaningfully affect your rights), email
