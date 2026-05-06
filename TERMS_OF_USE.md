@@ -362,7 +362,7 @@ risk profile of Kiln's most distinctive feature.
 
 Kiln exposes tools over the Model Context Protocol (MCP) that
 third-party AI agents — such as Claude, Claude Code, Cursor,
-ChatGPT, and other MCP clients — can invoke to perform physical
+and other MCP clients — can invoke to perform physical
 operations on your printer, including homing, motion, heating,
 extrusion, bed levelling, file uploads, and unattended print
 execution. Kiln agents may initiate printer motion, heating, and

@@ -11,7 +11,7 @@
 
 ---
 
-**Kiln is an open-source MCP server that lets AI agents (Claude, ChatGPT, Cursor, or any custom MCP client) drive real 3D printers end to end — OctoPrint, Moonraker/Klipper, Creality, Bambu Lab, Prusa Link, Elegoo, and Direct USB.**
+**Kiln is an open-source MCP server that lets AI agents (Claude, Cursor, or any custom MCP client) drive real 3D printers end to end — OctoPrint, Moonraker/Klipper, Creality, Bambu Lab, Prusa Link, Elegoo, and Direct USB.**
 
 In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result. No human in the middle.
 
