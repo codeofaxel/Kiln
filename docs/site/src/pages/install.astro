@@ -43,7 +43,7 @@ const installHowToSchema = {
     {
       '@type': 'HowToStep',
       name: 'Install Kiln',
-      text: 'Install Kiln with pip install kiln3d, then run kiln setup once to pair your printer.',
+      text: 'Install Kiln by pasting pip install kiln3d into your AI agent or terminal.',
       url: 'https://kiln3d.com/install',
     },
     {
@@ -94,12 +94,11 @@ const installHowToSchema = {
           <div class="step-number">1</div>
           <div class="step-content">
             <h3>Install Kiln</h3>
-            <p>Run it in your terminal &mdash; or paste it to your AI agent.</p>
+            <p>Paste this to your AI agent, or run it in your terminal.</p>
             <div class="code-block">
               <button class="copy-btn" data-code="pip install kiln3d">Copy</button>
               <code><span class="cmd">pip install kiln3d</span></code>
             </div>
-            <p class="step-note">Then run <code>kiln setup</code> once to pair your printer.</p>
             <p class="step-aside"><a href="#advanced-install">More install options &rarr;</a></p>
           </div>
         </li>
@@ -119,7 +118,7 @@ const installHowToSchema = {
           <div class="step-content">
             <h3>Ask</h3>
             <p>Paste any sentence like this into your agent.  Kiln does the rest.</p>
-            <blockquote class="example-prompt">make me a coaster with my dog&rsquo;s photo on it</blockquote>
+            <blockquote class="example-prompt">I have a Bambu A1, make me a coaster with my dog&rsquo;s photo on it</blockquote>
           </div>
         </li>
       </ol>
@@ -276,23 +275,6 @@ const installHowToSchema = {
   .step-aside a:hover {
     color: var(--accent);
     border-bottom-color: var(--accent);
-  }
-
-  /* Step note — small muted line below a code block, used for the
-     "Then run kiln setup..." follow-up under Step 1's pip install. */
-  .step-note {
-    font-size: 13px !important;
-    color: var(--text-muted);
-    margin-top: 12px !important;
-    line-height: 1.7;
-  }
-  .step-note code {
-    background: var(--bg-code);
-    border: 1px solid var(--border);
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 0.85em;
-    color: var(--accent);
   }
 
   /* Example prompt (Step 3) — chat-bubble shape, accent left
