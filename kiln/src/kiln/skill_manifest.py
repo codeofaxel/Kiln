@@ -173,7 +173,7 @@ class SkillManifest:
             "printer_status": "printer_status() — current state, temps, progress",
             "monitoring": "monitor_print() — full report with snapshot and cost",
             "design_brief": "get_design_brief(requirements) — start here for any new design",
-            "design_templates": "find_design_templates(use_case) — proven templates (17 in library)",
+            "design_templates": "find_design_templates(use_case) — proven templates (18 in library)",
             "material_selection": "recommend_design_material(use_case) — intelligent material pick",
             "material_rules": "get_material_design_profile(material) — constraints and rules",
             "load_analysis": "estimate_structural_load(geometry, material) — strength validation",

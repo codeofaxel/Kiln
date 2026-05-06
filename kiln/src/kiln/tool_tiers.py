@@ -39,6 +39,7 @@ TIER_ESSENTIAL: list[str] = [
     "job_status",
     "queue_summary",
     "kiln_health",
+    "check_my_tier",
 ]
 
 TIER_STANDARD: list[str] = TIER_ESSENTIAL + [

@@ -5,6 +5,67 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-06
+
+Design templates rebuild + automatic Pro+ calibration on every slice
+tool + safer pre-print validation gate + a self-service tier diagnostic.
+
+### Added
+
+- **`check_my_tier` MCP tool** — answers "what plan am I on, and why" for
+  agents handling user questions about tier / subscription / paywall
+  confusion. Walks the live tier-resolution chain (env var → license
+  file → OAuth session → cached entitlement → free fallback) and
+  returns a plain-English summary the agent can paste straight to the
+  user. Free-tier safe — no license needed to call.
+- **`tablet_stand` template** — dedicated for tablets / iPads, with
+  wider base depth, taller back panel, and slot sized for keyboard
+  cases. Phone stands stay focused on phones.
+- **Pre-print validation gate runs by default** — `slice_and_print`,
+  `run_quick_print`, and `run_reslice_and_print` now validate the
+  mesh against printer + material constraints before slicing.
+- **Per-machine calibration overlay applied uniformly** — Pro+
+  calibration now applies to `slice_and_print` (previously only
+  `slice_model` and `reslice_with_overrides`).
+- **`kiln events tail` / `kiln events summary`** — read-only CLI
+  access to the local event log.
+
+### Changed
+
+- **3 design-template MCP tools renamed** — `find_design_templates`,
+  `list_design_templates_catalog`, `get_design_template_info`. Old
+  names continue to work; agents wired to the previous names see
+  the same response shape.
+- **Design template count: 17 → 18** — dropped 3 (cable management
+  clip schema break, GoPro mount single-vendor, wall mount bracket
+  folded into cantilever bracket), then split phone stand into
+  `phone_stand` + `tablet_stand`.
+- **`design_patterns.json` → `design_templates.json`** — file name
+  matches the user-facing concept. Imports of the old class /
+  function / field names (`DesignPattern`, `pattern_id`,
+  `get_design_pattern`, etc.) continue to work.
+- **WHITEPAPER + LITEPAPER** — refreshed to match current capability
+  + count.
+- **Site nav** — Install hoisted to the top of the Product menu;
+  install copy refreshed.
+
+### Fixed
+
+- **Free-tier safety-floor fallback** — when the engineering overlay
+  isn't loaded, design intelligence returns conservative safety-floor
+  recommendations instead of an error.
+- **Documentation counts** refreshed across README, white paper,
+  litepaper, FAQ, and the marketing site.
+
+### Deprecated
+
+- MCP tools `find_design_patterns`, `list_design_patterns_catalog`,
+  `get_design_pattern_info` — use the `_design_templates_` variants.
+  Old names stay available; will be removed no earlier than v2.0.0.
+- Python imports `DesignPattern`, `pattern_id`, `kb.patterns`,
+  `get_design_pattern`, `list_design_patterns`,
+  `find_patterns_for_use_case` — all aliased to the new names.
+
 ## [1.0.0] - 2026-04-29
 
 All changes vs v0.5.0:
