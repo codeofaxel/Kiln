@@ -44,6 +44,7 @@ const contentHtml = `
 
 <ul>
   <li><strong>Pre-print validation runs by default.</strong> The slice-and-print path now validates the mesh against printer + material constraints before slicing, not after.</li>
+  <li><strong>Food-safety verdicts</strong> on every material recommendation. PETG / PETG-HF read as food-safe, PLA gets a conditional verdict (water-only, hand-wash, replace 6-12 months), and unsafe materials (ABS, TPU, ASA, CF blends) are hard-refused with a clear reason. No more &quot;is this safe?&quot; guesswork on mugs, bowls, or pet bowls.</li>
   <li><strong>Per-printer calibration applied uniformly</strong> across the slice tools — Pro+ calibration now reaches the most-used path too.</li>
   <li><strong>Free-tier fallback is more useful</strong> — when the engineering overlay isn't loaded, design intelligence returns conservative safety-floor recommendations instead of an error.</li>
   <li><code>kiln events tail</code> / <code>kiln events summary</code> — read-only event log access for debugging.</li>

@@ -41,6 +41,35 @@ tool + safer pre-print validation gate + a self-service tier diagnostic.
   `slice_model` and `reslice_with_overrides`).
 - **`kiln events tail` / `kiln events summary`** — read-only CLI
   access to the local event log.
+- **Craftcloud order safety gates** — fulfillment orders now require
+  an explicit preview-confirmation token AND a shipping-address
+  confirmation token before placing.  Two new endpoints
+  (`POST /api/fulfillment/preview-confirm`,
+  `POST /api/fulfillment/shipping-confirm`) issue the tokens after
+  the user has actually seen the rendered preview and reviewed the
+  shipping address.  Prevents "agent placed an order I didn't
+  expect," surprise shipping mismatches, and stale-quote charges.
+- **Local shipping profiles store** — named shipping addresses now
+  persist locally at `~/.kiln/shipping_profiles.json` (override via
+  `KILN_SHIPPING_PROFILES_PATH`) and can be referenced by name when
+  issuing a shipping-confirm token.  No more re-entering the same
+  address every time you order a part for the same workshop or
+  customer.
+- **Food-safety material overlays** — material-recommendation,
+  slice, and food-contact tool paths now consult a structured
+  food-safety catalog.  PETG / PETG-HF surface as food-safe; PLA
+  returns a `conditional` verdict with constraints (water-only,
+  hand-wash, replace 6-12 months); ABS, TPU, ASA, and CF blends
+  hard-refuse with `MATERIAL_NOT_FOOD_SAFE`.  Affects
+  `generate_pet_bowl`, material recommendations, and slice metadata.
+- **Anonymous unique-device counting** — heartbeat telemetry
+  (already on in v1.0) now includes a one-way-hashed device
+  fingerprint so we can count unique installs without identifying
+  anyone.  No reversal possible; no PII collected.
+- **Free-tier `recommend_settings` calibration overlay** — free
+  users now get per-printer calibration data folded into setting
+  recommendations when a calibrated profile is present (Pro+ writes,
+  free reads).  Smaller-than-Pro continuous-learning, but real.
 
 ### Changed
 
@@ -73,6 +102,10 @@ tool + safer pre-print validation gate + a self-service tier diagnostic.
   raw 260°C ceiling instead of the PTFE-safe 240°C.  Now clamps
   correctly; set `KILN_OVERRIDE_PTFE_LIMIT=1` to disable for
   user-installed all-metal conversions.
+- **Decoration engine fixes** — face detection, deboss math,
+  decoration hierarchy, and fit calculations all hardened in
+  this release.  Affects users who hit edge-case decoration
+  bugs in v1.0.
 - **Documentation counts** refreshed across README, white paper,
   litepaper, FAQ, and the marketing site.
 
