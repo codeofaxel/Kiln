@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-05-05T05:31:16.831978+00:00",
-  "tool_count": 301,
+  "generated": "2026-05-06T00:41:27.212335+00:00",
+  "tool_count": 300,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -6014,61 +6014,6 @@
           }
         },
         "title": "verify_feature_releaseArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "verify_manual_authenticity",
-      "description": "Buyer-facing verification \u2014 is THIS PDF the official manual? (Pro+).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "design_versioning",
-      "parameters": {
-        "properties": {
-          "pdf_path": {
-            "title": "Pdf Path",
-            "type": "string"
-          },
-          "release_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Release Id"
-          },
-          "design_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Design Id"
-          },
-          "release_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Release Name"
-          }
-        },
-        "required": [
-          "pdf_path"
-        ],
-        "title": "verify_manual_authenticityArguments",
         "type": "object"
       }
     },
