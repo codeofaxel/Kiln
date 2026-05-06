@@ -172,6 +172,7 @@ class SkillManifest:
         default_factory=lambda: {
             "printer_status": "printer_status() — current state, temps, progress",
             "monitoring": "monitor_print() — full report with snapshot and cost",
+            "tier_diagnostic": "check_my_tier() — answer plan/subscription/paywall questions ('what tier am I on', 'why does it say I need Pro', 'do I have to pay')",
             "design_brief": "get_design_brief(requirements) — start here for any new design",
             "design_templates": "find_design_templates(use_case) — proven templates (18 in library)",
             "material_selection": "recommend_design_material(use_case) — intelligent material pick",
