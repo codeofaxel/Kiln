@@ -1,0 +1,69 @@
+---
+import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
+
+const contentHtml = `
+<p>Generic 3D-printing defaults assume a generic printer. Yours has its own dimensional bias — the kind of difference that makes a snap fit either snap or split. Until now, Kiln assumed defaults. <strong>Kiln 1.1 calibrates to your printer.</strong></p>
+
+<p>Today's release also rebuilds the design template library, adds a dedicated tablet stand, and ships a self-service tier diagnostic that just answers the question when a user asks their AI agent <em>&quot;why does it say I need Pro?&quot;</em></p>
+
+<h2>1. Per-printer calibration grounding</h2>
+
+<p>Kiln Pro reads your existing OrcaSlicer / Bambu Studio / PrusaSlicer filament settings and uses them on every slice. Nothing leaves your machine. The slice response shows you exactly which values came from where.</p>
+
+<p>The first time Kiln applies your calibration, your agent surfaces a one-time notice — what profile it picked up, what values it overlaid, and that this is happening now on every slice. After that, silent overlay with the audit trail in every slice response. Most active users of those slicers will see the overlay on their next slice — the more you've tuned, the more Kiln picks up.</p>
+
+<p>Every offset that ends up in your model is traceable back to where it came from, so when your agent says &quot;this hole is sized at 5.2 mm,&quot; you can ask it <em>why</em> and get a real answer instead of a shrug.</p>
+
+<p>Tolerance stacking — predicting whether a multi-part assembly will actually go together — gets <strong>several methods to pick from, each with its own confidence band</strong>, so you can choose how conservative to be based on what's at stake. The output is a real probability the parts won't fit, not a single number wrapped in a &quot;trust us.&quot; <em>Patent pending.</em></p>
+
+<h2>2. Design templates: deeper, sharper, and a tablet stand</h2>
+
+<p>The design template library was rebuilt this release. <strong>17 templates → 18</strong>, with three under-loved entries dropped and the long-overdue split that surfaces as a new <code>tablet_stand</code> template.</p>
+
+<p>Until now, &quot;phone stand&quot; quietly tried to also serve tablets. That's wrong. An iPad Pro 13&quot; in a Magic Keyboard case weighs over a kilo and changes the whole tipping geometry — a base depth sized for a phone tips it backward. The new <code>tablet_stand</code> template handles three viewing-angle modes (drawing, desk, video call) and devices through 1.5 kg, with Magic Keyboard support and an Apple Pencil clip variant. <code>phone_stand</code> stays focused on phones, with Qi/MagSafe support and the magnet-orientation gotcha called out.</p>
+
+<p>Every template now carries structured failure modes (cause + prevention), recommended dimensions, and cross-references to related templates. Free users see the discovery surface and material safety floor. Kiln Pro layers the engineering depth on top.</p>
+
+<h2>3. A tier diagnostic that just answers the question</h2>
+
+<p>When someone asks their AI agent &quot;what plan am I on?&quot; or &quot;why does it say I need Pro?&quot; or &quot;did my subscription not activate?&quot; — the agent now has a tool that just answers, in plain English, what tier they're on and why.</p>
+
+<p>Free-tier safe (no license needed to call). Designed for the everyday case where someone's confused and an agent needs to give them a real answer instead of a runaround.</p>
+
+<h2>Other 1.1 highlights</h2>
+
+<ul>
+  <li><strong>Pre-print validation runs by default.</strong> The slice-and-print path now validates the mesh against printer + material constraints before slicing, not after.</li>
+  <li><strong>Per-printer calibration applied uniformly</strong> across the slice tools — Pro+ calibration now reaches the most-used path too.</li>
+  <li><strong>Free-tier fallback is more useful</strong> — when the engineering overlay isn't loaded, design intelligence returns conservative safety-floor recommendations instead of an error.</li>
+  <li><code>kiln events tail</code> / <code>kiln events summary</code> — read-only event log access for debugging.</li>
+  <li><strong>Pro signup commercial-use gate</strong> — a concrete-language dialog (&quot;Are you selling what you print?&quot;) routes selling users to Business at signup. No more surprise paywall rejections at checkout.</li>
+</ul>
+
+<h2>Install</h2>
+
+<pre><code class="language-bash">python3 -m pip install -U kiln3d
+kiln install-mcp
+kiln signin
+</code></pre>
+
+<p>Existing Kiln Pro subscribers: the calibration pipeline and engineering toolkit are unlocked the moment you upgrade. Free tier: same install, the safety-floor fallback is now active by default.</p>
+
+<p>Full release notes: <a href="https://github.com/codeofaxel/Kiln/blob/main/CHANGELOG.md">CHANGELOG.md</a></p>
+
+<h2>What's next</h2>
+
+<p>1.1 closes the gap between &quot;Kiln knows what a generic 3D printer can do&quot; and &quot;Kiln knows what <em>your</em> 3D printer can do.&quot; The next steps build on that.</p>
+
+<p>Kiln 1.1 is live.</p>
+`;
+---
+
+<BlogPostLayout
+  title="Kiln 1.1: Your printer is no longer generic"
+  description="Per-printer calibration grounding, a rebuilt design template library with a dedicated tablet stand, and a tier diagnostic that just answers the question when an AI agent's user asks 'what plan am I on?'"
+  date="May 6, 2026"
+  tags={["release", "v1.1", "calibration", "design-templates", "tier-diagnostic"]}
+>
+  <Fragment set:html={contentHtml} />
+</BlogPostLayout>

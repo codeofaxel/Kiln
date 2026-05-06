@@ -291,7 +291,94 @@ def _maybe_overlay_calibration(
         except Exception:
             pass  # never block slicing on telemetry
 
+    # First-time-use surface: the FIRST time Kiln applies a calibration
+    # overlay on this machine, attach a `first_time_notice` field to the
+    # cal_used block so the slice response can highlight what happened.
+    # Subsequent slices stay silent (audit trail in cal_used itself is
+    # the standing transparency mechanism).
+    #
+    # Marker file lives at ~/.kiln/calibration_overlay_first_use.seen
+    # — presence = first-use surface already shown.  Removing the file
+    # re-enables the surface (useful for re-onboarding or when handing
+    # the machine to a different user).
+    if cal_used is not None:
+        try:
+            cal_used = _attach_first_time_notice_if_unseen(cal_used)
+        except Exception:
+            pass  # never block slicing on the surface mechanism
+
     return merged, cal_used
+
+
+def _attach_first_time_notice_if_unseen(
+    cal_used: dict[str, Any],
+) -> dict[str, Any]:
+    """Check the first-use marker; if unseen, add a `first_time_notice`
+    to ``cal_used`` and create the marker.  Idempotent — once the marker
+    exists, this function is a no-op.
+
+    Returns the (possibly augmented) ``cal_used`` dict.  Never raises.
+    """
+    from pathlib import Path
+
+    marker = Path.home() / ".kiln" / "calibration_overlay_first_use.seen"
+    if marker.exists():
+        return cal_used
+
+    # Build the first-time notice.  Tells the agent + user what just
+    # happened, in language an agent can paraphrase verbatim.
+    profile_name = cal_used.get("profile_name") or cal_used.get("source_profile") or "your slicer profile"
+    source_slicer = cal_used.get("source") or cal_used.get("slicer") or "your slicer"
+    material = cal_used.get("material") or "your material"
+    applied_values = cal_used.get("applied") or cal_used.get("values") or {}
+
+    # Compose the values summary in a stable, agent-paraphrasable shape
+    if isinstance(applied_values, dict) and applied_values:
+        kv_pairs = [f"{k}={v}" for k, v in list(applied_values.items())[:4]]
+        values_str = ", ".join(kv_pairs)
+    else:
+        values_str = "calibrated values"
+
+    notice = {
+        "headline": (
+            f"Kiln Pro just used your {source_slicer} profile "
+            f"({profile_name}) on this slice."
+        ),
+        "what_happened": (
+            f"Read your existing {source_slicer} filament profile for "
+            f"{material} and overlaid your tuned values ({values_str}) "
+            f"onto the slice. Read-only — your slicer files weren't modified. "
+            f"Local-only — nothing left this machine."
+        ),
+        "ongoing_behavior": (
+            "From now on Kiln Pro applies your slicer calibration "
+            "automatically on every slice. The 'calibration_used' field "
+            "in each slice response shows you exactly which profile + "
+            "values were applied."
+        ),
+        "opt_out": (
+            "Want to stop this? Remove the slicer profile from your "
+            "slicer app, OR set the slice override explicitly — "
+            "user-supplied overrides always win over calibration."
+        ),
+        "remind_me": (
+            "Want to see this notice again? Delete "
+            "~/.kiln/calibration_overlay_first_use.seen and the next "
+            "calibrated slice will surface it."
+        ),
+    }
+
+    # Mark seen so we don't surface again.  Best-effort — if the dir
+    # write fails, surface again next time (no big deal).
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+    except Exception:
+        pass  # if we can't write the marker, surface again — harmless
+
+    augmented = dict(cal_used)
+    augmented["first_time_notice"] = notice
+    return augmented
 
 
 class _SlicerToolsPlugin:
