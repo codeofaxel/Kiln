@@ -1,7 +1,7 @@
 """Terms of use acceptance tracking.
 
 Stores acceptance state in the SQLite settings table.  The current terms
-version is bumped whenever TERMS.md changes materially; a version mismatch
+version is bumped whenever TERMS_OF_USE.md changes materially; a version mismatch
 triggers re-acceptance during ``kiln setup``.
 """
 
@@ -30,7 +30,7 @@ _TERMS_SUMMARY = """\
      fee-free. Local printing is always free.
   6. Kiln is provided "as is" without warranty of any kind.
 
-  Full terms: https://github.com/codeofaxel/Kiln/blob/main/TERMS.md
+  Full terms: https://github.com/codeofaxel/Kiln/blob/main/TERMS_OF_USE.md
   Privacy policy: https://github.com/codeofaxel/Kiln/blob/main/PRIVACY.md"""
 
 
