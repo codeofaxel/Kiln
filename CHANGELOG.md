@@ -25,6 +25,11 @@ tool + safer pre-print validation gate + a self-service tier diagnostic.
   silent overlay with the audit trail in every slice response.
   Removable marker at `~/.kiln/calibration_overlay_first_use.seen` if
   you want to re-trigger the notice.
+- **Pro+ continuous calibration learning** — when Kiln Pro is
+  installed, per-printer offsets refine from every observation (not
+  just one-time profile imports).  Freshness tracking surfaces when
+  your printer drifts; full provenance answers "why is this dimension
+  what it is?".
 - **`tablet_stand` template** — dedicated for tablets / iPads, with
   wider base depth, taller back panel, and slot sized for keyboard
   cases. Phone stands stay focused on phones.
