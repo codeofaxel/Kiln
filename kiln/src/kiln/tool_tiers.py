@@ -8,7 +8,7 @@ the full set.
 Tiers
 -----
 ``essential``
-    15 core tools for weak models (Llama, Mistral, Phi, Qwen).
+    16 core tools for weak models (Llama, Mistral, Phi, Qwen).
 ``standard``
     ~50 tools for capable models (GPT-4o-mini, Gemini Flash, Command R+).
 ``full``
@@ -129,6 +129,8 @@ TIER_FULL: list[str] = [
     "job_history",
     # --- Events ---
     "recent_events",
+    # --- Tier diagnostic ---
+    "check_my_tier",
     # --- Billing ---
     "billing_summary",
     "billing_setup_url",
@@ -223,10 +225,6 @@ TIER_FULL: list[str] = [
     "get_design_template_info",
     "list_design_templates_catalog",
     "find_design_templates",
-    # Backwards-compat aliases (renamed 2026-05-05)
-    "get_design_pattern_info",
-    "list_design_patterns_catalog",
-    "find_design_patterns",
     "match_design_requirements",
     "validate_design_for_requirements",
     # --- Firmware ---

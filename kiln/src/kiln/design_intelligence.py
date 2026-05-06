@@ -189,9 +189,6 @@ class DesignTemplate:
     Kiln Pro's overlay). Consumers MUST treat these as optional and
     fall back to discovery-only behavior when absent. See
     :func:`has_engineering_data` for the canonical check.
-
-    Renamed from ``DesignPattern`` on 2026-05-05.  An alias preserves
-    the old name for any caller that still imports it.
     """
 
     template_id: str
@@ -203,11 +200,6 @@ class DesignTemplate:
     design_rules: dict[str, Any] = field(default_factory=dict)
     print_orientation_reason: str = ""
     agent_guidance: list[str] = field(default_factory=list)
-
-    @property
-    def pattern_id(self) -> str:
-        """Backwards-compat alias for ``template_id`` (renamed 2026-05-05)."""
-        return self.template_id
 
     def has_engineering_data(self) -> bool:
         """True when the kiln-pro engineering overlay is loaded.
@@ -221,11 +213,6 @@ class DesignTemplate:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-
-
-# Backwards-compat alias for the pre-2026-05-05 name.  Any external
-# import of ``DesignPattern`` resolves to ``DesignTemplate``.
-DesignPattern = DesignTemplate
 
 
 @dataclass
@@ -321,7 +308,7 @@ class DesignBrief:
 
     functional_constraints: list[DesignConstraintSet]
     recommended_material: MaterialRecommendation | None
-    applicable_patterns: list[DesignPattern]
+    applicable_patterns: list[DesignTemplate]
     combined_guidance: list[str]
     combined_rules: dict[str, Any]
 
@@ -519,11 +506,6 @@ class _DesignKnowledgeBase:
     def templates(self) -> dict[str, dict[str, Any]]:
         self._load()
         return self._templates
-
-    @property
-    def patterns(self) -> dict[str, dict[str, Any]]:
-        """Backwards-compat alias for ``templates`` (renamed 2026-05-05)."""
-        return self.templates
 
     @property
     def requirements(self) -> dict[str, dict[str, Any]]:
@@ -1940,13 +1922,6 @@ def find_templates_for_use_case(use_case: str) -> list[DesignTemplate]:
     return results
 
 
-# Backwards-compat aliases (renamed 2026-05-05).  Old names continue
-# to work for any caller that imports them directly.
-get_design_pattern = get_design_template
-list_design_patterns = list_design_templates
-find_patterns_for_use_case = find_templates_for_use_case
-
-
 # ---------------------------------------------------------------------------
 # Public API — Functional Requirements
 # ---------------------------------------------------------------------------
@@ -2064,7 +2039,7 @@ def get_design_constraints(
             recommendation = recommend_material_for_design(requirements_text)
 
     # 3. Find applicable patterns
-    patterns = _find_patterns_from_text(requirements_text)
+    patterns = _find_templates_from_text(requirements_text)
 
     # 4. Combine all guidance
     combined_guidance: list[str] = []
@@ -2535,8 +2510,8 @@ def _accumulate_rating_outcome(
     return has_fail, has_warning
 
 
-def _find_patterns_from_text(text: str) -> list[DesignPattern]:
-    """Find design patterns relevant to the given text."""
+def _find_templates_from_text(text: str) -> list[DesignTemplate]:
+    """Find design templates relevant to the given text."""
     kb = _get_kb()
     lower = text.lower()
     results = []

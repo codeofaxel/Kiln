@@ -31,9 +31,9 @@ class _DesignToolsPlugin:
         - check_material_environment
         - get_printer_design_capabilities
         - list_printer_design_profiles
-        - get_design_template_info  (alias: get_design_pattern_info)
-        - list_design_templates_catalog  (alias: list_design_patterns_catalog)
-        - find_design_templates  (alias: find_design_patterns)
+        - get_design_template_info
+        - list_design_templates_catalog
+        - find_design_templates
         - match_design_requirements
         - validate_design_for_requirements
         - troubleshoot_print_issue
@@ -576,20 +576,6 @@ class _DesignToolsPlugin:
                 _logger.error("Design template failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        # Backwards-compat alias for the pre-2026-05-05 MCP tool name.
-        # Translates the response shape so any agent wired to the old
-        # name keeps seeing the old keys (pattern_id rather than
-        # template_id).  Removable once we're confident no callers rely
-        # on the old name.
-        @mcp.tool()
-        def get_design_pattern_info(pattern: str) -> dict:
-            """[DEPRECATED — use ``get_design_template_info``] Get design template details."""
-            result = get_design_template_info(pattern)
-            if isinstance(result, dict) and "template_id" in result:
-                result = dict(result)
-                result["pattern_id"] = result["template_id"]
-            return result
-
         @mcp.tool()
         def list_design_templates_catalog() -> dict:
             """List all available design templates with descriptions.
@@ -625,24 +611,6 @@ class _DesignToolsPlugin:
                 _logger.error("List templates failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
-        # Backwards-compat alias for the pre-2026-05-05 MCP tool name.
-        # Translates the response shape: {"templates": [...]} →
-        # {"patterns": [...]} and template_id → pattern_id per item.
-        @mcp.tool()
-        def list_design_patterns_catalog() -> dict:
-            """[DEPRECATED — use ``list_design_templates_catalog``] List design templates."""
-            result = list_design_templates_catalog()
-            if isinstance(result, dict) and "templates" in result:
-                result = dict(result)
-                items = []
-                for t in result["templates"]:
-                    item = dict(t) if isinstance(t, dict) else t
-                    if isinstance(item, dict) and "template_id" in item:
-                        item["pattern_id"] = item["template_id"]
-                    items.append(item)
-                result["patterns"] = items
-            return result
-
         @mcp.tool()
         def find_design_templates(use_case: str) -> dict:
             """Find design templates that apply to a specific use case.
@@ -666,24 +634,6 @@ class _DesignToolsPlugin:
             except Exception as exc:
                 _logger.error("Find templates failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
-
-        # Backwards-compat alias for the pre-2026-05-05 MCP tool name.
-        # Translates the response shape: {"templates": [...]} →
-        # {"patterns": [...]} and template_id → pattern_id per item.
-        @mcp.tool()
-        def find_design_patterns(use_case: str) -> dict:
-            """[DEPRECATED — use ``find_design_templates``] Find design templates."""
-            result = find_design_templates(use_case)
-            if isinstance(result, dict) and "templates" in result:
-                result = dict(result)
-                items = []
-                for t in result["templates"]:
-                    item = dict(t) if isinstance(t, dict) else t
-                    if isinstance(item, dict) and "template_id" in item:
-                        item["pattern_id"] = item["template_id"]
-                    items.append(item)
-                result["patterns"] = items
-            return result
 
         @mcp.tool()
         def match_design_requirements(description: str) -> dict:

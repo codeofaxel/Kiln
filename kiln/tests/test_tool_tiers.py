@@ -21,18 +21,22 @@ from kiln.tool_tiers import (
 class TestTierSizes:
     """Verify tier sizes and the subset/superset relationships."""
 
-    def test_essential_has_15_items(self):
-        assert len(TIER_ESSENTIAL) == 15
+    def test_essential_has_16_items(self):
+        # 15 core + check_my_tier (the tier-diagnostic tool) — agent-facing
+        # answer to "what plan am I on?" earns its place in the smallest
+        # tier because confused users on weak models still need it.
+        assert len(TIER_ESSENTIAL) == 16
 
     def test_standard_includes_all_essential(self):
         for tool in TIER_ESSENTIAL:
             assert tool in TIER_STANDARD, f"{tool!r} missing from STANDARD"
 
     def test_standard_has_approximately_50_items(self):
-        # Standard now includes the original-design toolchain, so it is
-        # intentionally broader than the older ~43-tool shape.
+        # Standard now includes the original-design toolchain + the
+        # check_my_tier diagnostic, so it is intentionally broader than
+        # the older ~43-tool shape.
         assert len(TIER_STANDARD) >= 40
-        assert len(TIER_STANDARD) <= 60
+        assert len(TIER_STANDARD) <= 65
 
     def test_full_has_at_least_105_items(self):
         assert len(TIER_FULL) >= 105
