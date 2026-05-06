@@ -40,17 +40,17 @@ tool + safer pre-print validation gate + a self-service tier diagnostic.
 ### Changed
 
 - **3 design-template MCP tools renamed** — `find_design_templates`,
-  `list_design_templates_catalog`, `get_design_template_info`. Old
-  names continue to work; agents wired to the previous names see
-  the same response shape.
+  `list_design_templates_catalog`, `get_design_template_info`. The
+  prior `_design_patterns_` names are removed in this release (see
+  Removed below).
 - **Design template count: 17 → 18** — dropped 3 (cable management
   clip schema break, GoPro mount single-vendor, wall mount bracket
   folded into cantilever bracket), then split phone stand into
   `phone_stand` + `tablet_stand`.
 - **`design_patterns.json` → `design_templates.json`** — file name
-  matches the user-facing concept. Imports of the old class /
-  function / field names (`DesignPattern`, `pattern_id`,
-  `get_design_pattern`, etc.) continue to work.
+  matches the user-facing concept.  Old Python imports
+  (`DesignPattern`, `pattern_id`, `get_design_pattern`, etc.) are
+  removed in this release (see Removed below).
 - **WHITEPAPER + LITEPAPER** — refreshed to match current capability
   + count.
 - **Site nav** — Install hoisted to the top of the Product menu;
@@ -61,17 +61,26 @@ tool + safer pre-print validation gate + a self-service tier diagnostic.
 - **Free-tier safety-floor fallback** — when the engineering overlay
   isn't loaded, design intelligence returns conservative safety-floor
   recommendations instead of an error.
+- **PTFE temperature clamp now actually fires** — the safety guard
+  capping PTFE-lined hotends at 240°C had a silent failure path
+  (`PrinterIntel` dataclass treated as a dict) that meant Ender 3,
+  Ender 5, and any other PTFE-lined hotend was getting the profile's
+  raw 260°C ceiling instead of the PTFE-safe 240°C.  Now clamps
+  correctly; set `KILN_OVERRIDE_PTFE_LIMIT=1` to disable for
+  user-installed all-metal conversions.
 - **Documentation counts** refreshed across README, white paper,
   litepaper, FAQ, and the marketing site.
 
-### Deprecated
+### Removed
 
 - MCP tools `find_design_patterns`, `list_design_patterns_catalog`,
-  `get_design_pattern_info` — use the `_design_templates_` variants.
-  Old names stay available; will be removed no earlier than v2.0.0.
+  `get_design_pattern_info` — replaced by the `_design_templates_`
+  variants in this release.  No back-compat aliases.
 - Python imports `DesignPattern`, `pattern_id`, `kb.patterns`,
   `get_design_pattern`, `list_design_patterns`,
-  `find_patterns_for_use_case` — all aliased to the new names.
+  `find_patterns_for_use_case` — all renamed to `DesignTemplate`,
+  `template_id`, `kb.templates`, `get_design_template`,
+  `list_design_templates`, `find_templates_for_use_case`.
 
 ## [1.0.0] - 2026-04-29
 
