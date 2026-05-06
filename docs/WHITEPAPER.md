@@ -10,7 +10,7 @@
 
 ## Abstract
 
-We present Kiln, a protocol and reference implementation that enables autonomous AI agents to transform ideas -- expressed as natural language, sketches, or parametric specifications -- into physical objects through 3D printing. Kiln bridges the gap between digital intelligence and physical fabrication by providing: (1) a Design Intelligence layer with 25 FDM materials with full engineering properties, 45 brand-specific filament profiles, and 17 proven design templates; (2) text-to-3D and sketch-to-3D generation via Gemini Deep Think, Meshy, Tripo3D, Stability AI, and OpenSCAD; (3) 7-dimension printability analysis before parts reach a slicer; (4) direct control of local printers via OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, and Direct USB/Serial adapters; (5) fulfillment routing through third-party providers such as Craftcloud; (6) multi-part assembly planning with clearance validation, tolerance stacking, and optional kiln-pro assembly manuals; (7) preview-confirmed print starts; and (8) real-time G-code interception for in-flight safety filtering. The system enforces safety invariants at the protocol level across 44 named printer safety profiles, and preserves parametric Design DNA for iterative refinement. Kiln does not operate its own marketplace or manufacturing network -- it searches existing 3rd-party marketplaces and routes to existing fulfillment providers.
+We present Kiln, a protocol and reference implementation that enables autonomous AI agents to transform ideas -- expressed as natural language, sketches, or parametric specifications -- into physical objects through 3D printing. Kiln bridges the gap between digital intelligence and physical fabrication by providing: (1) a Design Intelligence layer with 25 FDM materials with full engineering properties, 45 brand-specific filament profiles, and 18 proven design templates; (2) text-to-3D and sketch-to-3D generation via Gemini Deep Think, Meshy, Tripo3D, Stability AI, and OpenSCAD; (3) 7-dimension printability analysis before parts reach a slicer; (4) direct control of local printers via OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, and Direct USB/Serial adapters; (5) fulfillment routing through third-party providers such as Craftcloud; (6) multi-part assembly planning with clearance validation, tolerance stacking, and optional kiln-pro assembly manuals; (7) preview-confirmed print starts; and (8) real-time G-code interception for in-flight safety filtering. The system enforces safety invariants at the protocol level across 44 named printer safety profiles, and preserves parametric Design DNA for iterative refinement. Kiln does not operate its own marketplace or manufacturing network -- it searches existing 3rd-party marketplaces and routes to existing fulfillment providers.
 
 ## 1. Introduction
 
@@ -24,7 +24,7 @@ AI agents are now capable enough to plan and execute multi-step physical tasks. 
 
 Kiln solves the entire pipeline:
 
-1. **Design Intelligence.** A structured knowledge base of 25 FDM materials with full engineering properties, 45 brand-specific filament profiles, and 17 proven design templates informs material selection, structural design, joint types, and reinforcement strategies. The system provides material-aware design recommendations and structural load estimation.
+1. **Design Intelligence.** A structured knowledge base of 25 FDM materials with full engineering properties, 45 brand-specific filament profiles, and 18 proven design templates informs material selection, structural design, joint types, and reinforcement strategies. The system provides material-aware design recommendations and structural load estimation.
 
 2. **Text & Sketch to 3D.** Five generation backends convert ideas into printable geometry. Gemini Deep Think uses AI reasoning to produce precise OpenSCAD code from text or sketch descriptions. Meshy, Tripo3D, and Stability AI handle organic shapes via cloud APIs. A local OpenSCAD provider compiles parametric code with zero API cost. A 14-component parametric catalog provides proven primitives (gears, threads, hinges, bearings, etc.) for assembly composition.
 
@@ -117,7 +117,7 @@ Agents query this knowledge base when selecting materials for a design. The syst
 
 ### 3.2 Design Patterns and Templates
 
-17 design templates codify reusable structural solutions: snap fits, living hinges, press-fit joints, threaded inserts, cantilever beams, and others. Each pattern includes recommended dimensions, material compatibility, and printability notes.
+18 design templates codify reusable structural solutions: snap fits, living hinges, press-fit joints, threaded inserts, cantilever beams, and others. Each pattern includes recommended dimensions, material compatibility, and printability notes.
 
 Templates provide parametric starting points for common objects. Templates preserve their parametric source, enabling agents to customize dimensions while maintaining structural integrity.
 

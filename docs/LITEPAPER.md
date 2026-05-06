@@ -28,7 +28,7 @@ Kiln acts as a universal intelligence layer between AI agents and physical fabri
 
 - **Sketch-to-3D generation.** Draw it on a napkin. Gemini Deep Think interprets rough sketches and converts them into precise, printable geometry.
 
-- **Design Intelligence.** A knowledge base of 25 FDM materials with full engineering properties, 45 brand-specific filament profiles, and 17 proven design templates informs every design decision -- from material selection to structural reinforcement to joint design.
+- **Design Intelligence.** A knowledge base of 25 FDM materials with full engineering properties, 45 brand-specific filament profiles, and 18 proven design templates informs every design decision -- from material selection to structural reinforcement to joint design.
 
 - **Printability Engine.** Before anything reaches a slicer, Kiln runs 7-dimension printability analysis: overhangs, thin walls, bridging, bed adhesion, supports, warping, and thermal stress. The gate fires on every print path -- direct slice-and-print, AI-generated meshes, smart-retry-after-failure, and benchmarks -- and auto-repairs non-manifold geometry before slicing. Problems are caught and fixed in the design phase, not after a failed print.
 

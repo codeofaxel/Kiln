@@ -293,15 +293,15 @@
     "print_orientation": "boss_axis_vertical"
   },
   "phone_stand": {
-    "display_name": "Phone / Tablet Stand",
-    "description": "An angled stand that holds a phone or tablet at a comfortable viewing angle, with a front lip for retention and a stable base to prevent tipping.",
+    "display_name": "Phone Stand",
+    "description": "An angled stand that holds a smartphone at a comfortable viewing angle, with a front lip for retention and a stable base.  Supports basic + Qi + MagSafe charging variants and devices up to ~280g (covers all current iPhones, Samsung Galaxy S/Z, Pixel, OnePlus).  For tablets / iPads use the dedicated `tablet_stand` template — different lever-arm baseline, Magic Keyboard support, Apple Pencil clip variant.",
     "use_cases": [
       "desk_phone_holder",
-      "kitchen_recipe_stand",
       "video_call_stand",
       "bedside_charging_dock",
-      "tablet_drawing_stand",
-      "point_of_sale_display"
+      "qi_charging_dock",
+      "magsafe_charging_dock",
+      "treadmill_phone_holder"
     ],
     "material_compatibility": {
       "excellent": [
@@ -538,5 +538,36 @@
       ]
     },
     "print_orientation": "lever_flat_on_bed"
+  },
+  "tablet_stand": {
+    "display_name": "Tablet / iPad Stand",
+    "description": "An angled stand designed for tablets — wider base depth (100-130mm) to accommodate the longer lever arm, taller back panel and lip, slot wide enough to clear keyboard cases (Apple Magic Keyboard, Smart Folio, +6.5mm thickness).  Three viewing-angle modes: video call (75°), desk use (60°), drawing with stylus (20-30°).  Supports iPad mini through iPad Pro 13\", Samsung Galaxy Tab, and other large-format tablets up to 1.5kg (single device, with or without keyboard case).  For phones use the dedicated `phone_stand` template.",
+    "use_cases": [
+      "video_call_stand",
+      "drawing_stylus_stand",
+      "kitchen_recipe_stand",
+      "ipad_charging_stand",
+      "magic_keyboard_stand",
+      "point_of_sale_display",
+      "kiosk_display"
+    ],
+    "material_compatibility": {
+      "excellent": [
+        "petg",
+        "abs",
+        "asa"
+      ],
+      "good": [
+        "pla_plus",
+        "cf_pla"
+      ],
+      "poor": [
+        "pla"
+      ],
+      "avoid": [
+        "tpu"
+      ]
+    },
+    "print_orientation": "back_panel_flat_on_bed"
   }
 }

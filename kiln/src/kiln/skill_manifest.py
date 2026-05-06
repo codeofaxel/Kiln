@@ -154,7 +154,7 @@ class SkillManifest:
             "design_intelligence": [
                 "get_design_brief(requirements) — functional requirements analysis",
                 "get_material_design_profile(material) — material-specific design rules",
-                "find_design_templates(use_case) — proven design templates (17 templates)",
+                "find_design_templates(use_case) — proven design templates (18 templates)",
                 "estimate_structural_load(geometry, material) — load capacity analysis",
                 "validate_design_for_requirements(design, reqs) — verification",
                 "get_post_processing_guide(material) — finishing guidance",
