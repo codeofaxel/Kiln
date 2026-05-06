@@ -886,7 +886,7 @@ G-code and 3MF cost analysis. Parses extrusion totals, calculates filament weigh
 
 #### Design Intelligence
 
-Constraint-aware design reasoning — agents query material properties, design patterns, and functional constraints before generating geometry.
+Constraint-aware design reasoning — agents query material properties, design templates, and functional constraints before generating geometry.
 
 | Tool | Input | Output |
 |---|---|---|
@@ -898,9 +898,9 @@ Constraint-aware design reasoning — agents query material properties, design p
 | `check_material_environment` | `material`, `environment` | Material-environment compatibility check |
 | `get_printer_design_capabilities` | `printer_id` | Design capability profile for a printer |
 | `list_printer_design_profiles` | — | All known printer design capability profiles |
-| `get_design_pattern_info` | `pattern` | Detailed design rules for a functional pattern |
-| `list_design_patterns_catalog` | — | All available design patterns with descriptions |
-| `find_design_patterns` | `use_case` | Design patterns that apply to a use case |
+| `get_design_template_info` | `pattern` | Detailed design rules for a functional pattern |
+| `list_design_templates_catalog` | — | All available design templates with descriptions |
+| `find_design_templates` | `use_case` | Design patterns that apply to a use case |
 | `match_design_requirements` | `description` | Functional requirements that apply to a design task |
 | `validate_design_for_requirements` | `design`, requirements | Validation against functional design requirements |
 | `troubleshoot_print_issue` | `material`, `symptom` | Print problem diagnosis by material and symptom |

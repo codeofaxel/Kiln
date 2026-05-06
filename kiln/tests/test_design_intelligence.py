@@ -41,16 +41,16 @@ from kiln.design_intelligence import (
     check_multi_material_compatibility,
     check_printer_material_compatibility,
     estimate_load_capacity,
-    find_patterns_for_use_case,
+    find_templates_for_use_case,
     get_design_constraints,
-    get_design_pattern,
+    get_design_template,
     get_material_profile,
     get_post_processing,
     get_print_diagnostic,
     get_printer_design_profile,
     get_support_material_options,
     list_compatibility_printers,
-    list_design_patterns,
+    list_design_templates,
     list_material_profiles,
     list_printer_profiles,
     list_troubleshooting_materials,
@@ -233,50 +233,50 @@ class TestMaterialRecommendation:
 # ---------------------------------------------------------------------------
 
 
-class TestDesignPatterns:
+class TestDesignTemplates:
     def test_get_snap_fit(self):
-        p = get_design_pattern("snap_fit_cantilever")
+        p = get_design_template("snap_fit_cantilever")
         assert p is not None
         assert "snap" in p.display_name.lower()
         assert "pla" in p.material_compatibility["poor"]
 
     def test_get_gear(self):
-        p = get_design_pattern("gear")
+        p = get_design_template("gear")
         assert p is not None
         assert "nylon" in p.material_compatibility["excellent"]
 
     def test_get_living_hinge(self):
-        p = get_design_pattern("living_hinge")
+        p = get_design_template("living_hinge")
         assert p is not None
         assert "tpu" in p.material_compatibility["excellent"]
         assert "pla" in p.material_compatibility["avoid"]
 
     def test_unknown_pattern_returns_none(self):
-        assert get_design_pattern("quantum_teleporter") is None
+        assert get_design_template("quantum_teleporter") is None
 
     def test_list_patterns_returns_all(self):
-        patterns = list_design_patterns()
+        patterns = list_design_templates()
         assert len(patterns) >= 8
-        ids = {p.pattern_id for p in patterns}
+        ids = {p.template_id for p in patterns}
         assert "snap_fit_cantilever" in ids
         assert "gear" in ids
         assert "watertight_container" in ids
 
     def test_find_patterns_for_enclosure(self):
-        results = find_patterns_for_use_case("enclosures")
-        ids = {p.pattern_id for p in results}
+        results = find_templates_for_use_case("enclosures")
+        ids = {p.template_id for p in results}
         assert "snap_fit_cantilever" in ids or "enclosure_box" in ids
 
     def test_find_patterns_for_gears(self):
-        results = find_patterns_for_use_case("gear")
+        results = find_templates_for_use_case("gear")
         assert len(results) > 0
 
     def test_find_patterns_empty_returns_empty(self):
-        results = find_patterns_for_use_case("quantum_computing")
+        results = find_templates_for_use_case("quantum_computing")
         assert len(results) == 0
 
     def test_pattern_to_dict(self):
-        p = get_design_pattern("press_fit")
+        p = get_design_template("press_fit")
         assert p is not None
         d = p.to_dict()
         assert "design_rules" in d
@@ -284,8 +284,8 @@ class TestDesignPatterns:
         assert "agent_guidance" in d
 
     def test_every_pattern_has_guidance(self):
-        for p in list_design_patterns():
-            assert len(p.agent_guidance) > 0, f"{p.pattern_id} missing guidance"
+        for p in list_design_templates():
+            assert len(p.agent_guidance) > 0, f"{p.template_id} missing guidance"
 
 
 # ---------------------------------------------------------------------------
@@ -389,8 +389,8 @@ class TestDesignBrief:
 
     def test_brief_finds_patterns(self):
         brief = get_design_constraints("snap fit enclosure for electronics")
-        pattern_ids = {p.pattern_id for p in brief.applicable_patterns}
-        assert "enclosure_box" in pattern_ids or "snap_fit_cantilever" in pattern_ids
+        template_ids = {p.template_id for p in brief.applicable_patterns}
+        assert "enclosure_box" in template_ids or "snap_fit_cantilever" in template_ids
 
     def test_min_constraint_merging(self):
         # Multiple requirements with different min_wall_thickness

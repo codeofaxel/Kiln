@@ -5,13 +5,13 @@ Covers:
 - check_multi_material_pairing — happy path, exception
 - estimate_print_cost_from_mesh — happy path, file not found, bad input, exception
 - estimate_structural_load — happy path, unknown material, exception
-- find_design_patterns — happy path, empty results, exception
-- get_design_pattern_info — happy path, unknown pattern, exception
+- find_design_templates — happy path, empty results, exception
+- get_design_template_info — happy path, unknown pattern, exception
 - get_material_design_profile — happy path, unknown material, exception
 - get_post_processing_guide — happy path, unknown material, exception
 - get_printer_design_capabilities — happy path, unknown printer, exception
 - list_design_materials — happy path, exception
-- list_design_patterns_catalog — happy path, exception
+- list_design_templates_catalog — happy path, exception
 - list_printer_design_profiles — happy path, exception
 - match_design_requirements — happy path, empty match, exception
 - recommend_design_material — happy path, exception
@@ -73,15 +73,15 @@ def _fake_material_profile(material_id: str = "pla") -> SimpleNamespace:
     )
 
 
-def _fake_design_pattern(pattern_id: str = "snap_fit_cantilever") -> SimpleNamespace:
+def _fake_design_template(template_id: str = "snap_fit_cantilever") -> SimpleNamespace:
     return SimpleNamespace(
-        pattern_id=pattern_id,
+        template_id=template_id,
         display_name="Snap-Fit Cantilever",
         description="Flexible arm that snaps into a recess.",
         use_cases=["enclosures", "battery covers"],
         material_compatibility={"excellent": ["petg", "nylon"]},
         to_dict=lambda: {
-            "pattern_id": pattern_id,
+            "template_id": template_id,
             "display_name": "Snap-Fit Cantilever",
             "description": "Flexible arm that snaps into a recess.",
         },
@@ -286,75 +286,75 @@ class TestEstimateStructuralLoad:
 
 
 # ---------------------------------------------------------------------------
-# TestFindDesignPatterns
+# TestFindDesignTemplates
 # ---------------------------------------------------------------------------
 
 
-class TestFindDesignPatterns:
-    """Tests for find_design_patterns MCP tool."""
+class TestFindDesignTemplates:
+    """Tests for find_design_templates MCP tool."""
 
-    @patch("kiln.design_intelligence.find_patterns_for_use_case")
+    @patch("kiln.design_intelligence.find_templates_for_use_case")
     def test_happy_path(self, mock_fn, registered_tools):
-        mock_fn.return_value = [_fake_design_pattern("snap_fit_cantilever")]
+        mock_fn.return_value = [_fake_design_template("snap_fit_cantilever")]
 
-        result = registered_tools["find_design_patterns"]("battery cover")
+        result = registered_tools["find_design_templates"]("battery cover")
 
         assert result["success"] is True
         assert result["count"] == 1
-        assert len(result["patterns"]) == 1
+        assert len(result["templates"]) == 1
         mock_fn.assert_called_once_with("battery cover")
 
-    @patch("kiln.design_intelligence.find_patterns_for_use_case")
+    @patch("kiln.design_intelligence.find_templates_for_use_case")
     def test_empty_results(self, mock_fn, registered_tools):
         mock_fn.return_value = []
 
-        result = registered_tools["find_design_patterns"]("alien spaceship")
+        result = registered_tools["find_design_templates"]("alien spaceship")
 
         assert result["success"] is True
         assert result["count"] == 0
-        assert result["patterns"] == []
+        assert result["templates"] == []
 
-    @patch("kiln.design_intelligence.find_patterns_for_use_case", side_effect=RuntimeError("boom"))
+    @patch("kiln.design_intelligence.find_templates_for_use_case", side_effect=RuntimeError("boom"))
     def test_exception(self, mock_fn, registered_tools):
-        result = registered_tools["find_design_patterns"]("enclosure")
+        result = registered_tools["find_design_templates"]("enclosure")
 
         assert result["success"] is False
         assert "boom" in result["error"]
 
 
 # ---------------------------------------------------------------------------
-# TestGetDesignPatternInfo
+# TestGetDesignTemplateInfo
 # ---------------------------------------------------------------------------
 
 
-class TestGetDesignPatternInfo:
-    """Tests for get_design_pattern_info MCP tool."""
+class TestGetDesignTemplateInfo:
+    """Tests for get_design_template_info MCP tool."""
 
-    @patch("kiln.design_intelligence.get_design_pattern")
+    @patch("kiln.design_intelligence.get_design_template")
     def test_happy_path(self, mock_fn, registered_tools):
-        mock_fn.return_value = _fake_design_pattern()
+        mock_fn.return_value = _fake_design_template()
 
-        result = registered_tools["get_design_pattern_info"]("snap_fit_cantilever")
+        result = registered_tools["get_design_template_info"]("snap_fit_cantilever")
 
         assert result["success"] is True
-        assert result["pattern_id"] == "snap_fit_cantilever"
+        assert result["template_id"] == "snap_fit_cantilever"
         mock_fn.assert_called_once_with("snap_fit_cantilever")
 
-    @patch("kiln.design_intelligence.list_design_patterns")
-    @patch("kiln.design_intelligence.get_design_pattern")
+    @patch("kiln.design_intelligence.list_design_templates")
+    @patch("kiln.design_intelligence.get_design_template")
     def test_unknown_pattern(self, mock_get, mock_list, registered_tools):
         mock_get.return_value = None
-        mock_list.return_value = [_fake_design_pattern("snap_fit_cantilever")]
+        mock_list.return_value = [_fake_design_template("snap_fit_cantilever")]
 
-        result = registered_tools["get_design_pattern_info"]("nonexistent")
+        result = registered_tools["get_design_template_info"]("nonexistent")
 
         assert result["success"] is False
         assert "nonexistent" in result["error"]
         assert "snap_fit_cantilever" in result["error"]
 
-    @patch("kiln.design_intelligence.get_design_pattern", side_effect=RuntimeError("boom"))
+    @patch("kiln.design_intelligence.get_design_template", side_effect=RuntimeError("boom"))
     def test_exception(self, mock_fn, registered_tools):
-        result = registered_tools["get_design_pattern_info"]("snap_fit_cantilever")
+        result = registered_tools["get_design_template_info"]("snap_fit_cantilever")
 
         assert result["success"] is False
         assert "boom" in result["error"]
@@ -510,42 +510,42 @@ class TestListDesignMaterials:
 
 
 # ---------------------------------------------------------------------------
-# TestListDesignPatternsCatalog
+# TestListDesignTemplatesCatalog
 # ---------------------------------------------------------------------------
 
 
-class TestListDesignPatternsCatalog:
-    """Tests for list_design_patterns_catalog MCP tool."""
+class TestListDesignTemplatesCatalog:
+    """Tests for list_design_templates_catalog MCP tool."""
 
-    @patch("kiln.design_intelligence.list_design_patterns")
+    @patch("kiln.design_intelligence.list_design_templates")
     def test_happy_path(self, mock_fn, registered_tools):
         mock_fn.return_value = [
-            _fake_design_pattern("snap_fit_cantilever"),
-            _fake_design_pattern("press_fit"),
+            _fake_design_template("snap_fit_cantilever"),
+            _fake_design_template("press_fit"),
         ]
 
-        result = registered_tools["list_design_patterns_catalog"]()
+        result = registered_tools["list_design_templates_catalog"]()
 
         assert result["success"] is True
         assert result["count"] == 2
-        assert result["patterns"][0]["pattern_id"] == "snap_fit_cantilever"
+        assert result["templates"][0]["template_id"] == "snap_fit_cantilever"
 
-    @patch("kiln.design_intelligence.list_design_patterns")
+    @patch("kiln.design_intelligence.list_design_templates")
     def test_summary_fields_present(self, mock_fn, registered_tools):
-        mock_fn.return_value = [_fake_design_pattern()]
+        mock_fn.return_value = [_fake_design_template()]
 
-        result = registered_tools["list_design_patterns_catalog"]()
-        pat = result["patterns"][0]
+        result = registered_tools["list_design_templates_catalog"]()
+        pat = result["templates"][0]
 
-        assert "pattern_id" in pat
+        assert "template_id" in pat
         assert "display_name" in pat
         assert "description" in pat
         assert "use_cases" in pat
         assert "best_materials" in pat
 
-    @patch("kiln.design_intelligence.list_design_patterns", side_effect=RuntimeError("boom"))
+    @patch("kiln.design_intelligence.list_design_templates", side_effect=RuntimeError("boom"))
     def test_exception(self, mock_fn, registered_tools):
-        result = registered_tools["list_design_patterns_catalog"]()
+        result = registered_tools["list_design_templates_catalog"]()
 
         assert result["success"] is False
         assert "boom" in result["error"]

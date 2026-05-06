@@ -721,9 +721,9 @@ The Kiln MCP server (`kiln serve`) exposes **756 tools** to agents, plus prompts
 | `check_material_environment` | Check whether a material is compatible with an environment |
 | `get_printer_design_capabilities` | Get the design capability profile for a printer |
 | `list_printer_design_profiles` | List all known printer design capability profiles |
-| `get_design_pattern_info` | Get detailed design rules for a functional pattern (snap-fit, living hinge, etc.) |
-| `list_design_patterns_catalog` | List all available design patterns with descriptions |
-| `find_design_patterns` | Find design patterns that apply to a specific use case |
+| `get_design_template_info` | Get detailed design rules for a functional template (snap-fit, living hinge, etc.) |
+| `list_design_templates_catalog` | List all available design templates with descriptions |
+| `find_design_templates` | Find design templates that apply to a specific use case |
 | `match_design_requirements` | Identify which functional requirements apply to a design task |
 | `validate_design_for_requirements` | Validate a 3D model against functional design requirements |
 | `troubleshoot_print_issue` | Diagnose a 3D printing problem by material and symptom |

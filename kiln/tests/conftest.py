@@ -445,22 +445,42 @@ def mock_file_list():
 
 
 def _engineering_overlay_loaded() -> bool:
-    """Probe whether the kiln-pro engineering overlay is loaded.
+    """Probe whether BOTH the kiln-pro materials AND design_templates
+    overlays are loaded.
 
-    Calls into the public Kiln knowledge base and checks whether
-    PLA (the canonical material) has any mechanical fields.  Empty
-    mechanical means free-tier / no overlay.
+    Materials probe: PLA must have mechanical fields (post-2026-04-09
+    materials split — those fields ship in the kiln-pro overlay).
+
+    Templates probe: snap_fit_cantilever must have design_rules
+    (post-2026-05-05 design_templates split — those fields ship in
+    the kiln-pro overlay).
+
+    Both must be present.  Returning False here makes the
+    ``@requires_engineering_overlay`` mark skip every assertion in
+    test_material_data_sanity.py — the right behavior when either
+    overlay is missing OR when an older kiln-pro install lacks the
+    design_templates overlay kind entirely (load_overlay raises
+    KeyError, the merger silently falls back to public-only data,
+    and tests would then see only the discovery surface — false
+    negatives if the gate let them run).
     """
     try:
         from kiln.design_intelligence import (
+            _get_kb,
             _reset_knowledge_base,
             get_material_profile,
         )
         _reset_knowledge_base()
         pla = get_material_profile("pla")
+        if pla is None or not pla.mechanical:
+            return False
+        templates = _get_kb().templates
+        snap = templates.get("snap_fit_cantilever") or {}
+        if not snap.get("design_rules"):
+            return False
     except Exception:
         return False
-    return pla is not None and bool(pla.mechanical)
+    return True
 
 
 _ENGINEERING_OVERLAY_PRESENT = _engineering_overlay_loaded()

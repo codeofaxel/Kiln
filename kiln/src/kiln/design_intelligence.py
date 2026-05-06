@@ -16,8 +16,8 @@ Public API:
     check_environment_compatibility — survivability check by environment
     get_printer_design_profile — capability profile for a printer
     list_printer_profiles     — all known printer capability profiles
-    get_design_pattern        — constraints for a design pattern
-    list_design_patterns      — all patterns in a domain
+    get_design_template       — constraints for a design template
+    list_design_templates     — all templates in a domain
     get_design_constraints    — decompose functional requirements into rules
     match_requirements        — find which requirement profiles match text
 """
@@ -53,15 +53,20 @@ def _merge_pro_overlay_if_available(
     """Merge the kiln-pro engineering-moat overlay into ``public_data``.
 
     Free tier (kiln-pro not installed): returns ``public_data`` as-is.
-    Pro+ tier (kiln-pro installed + license valid): deep-merges the
-    overlay into each material/pattern record, restoring the full
-    record (mechanical, design_limits, use_case_ratings, agent_guidance,
-    brand-tunings, curated guidance).
+    Pro+ tier (kiln-pro installed + valid license): kiln-pro fetches
+    the overlay from ``api.kiln3d.com/api/internal/overlay/<kind>`` at
+    runtime, deep-merges it into each material/pattern record, and
+    restores the full record (mechanical, design_limits,
+    use_case_ratings, agent_guidance, brand-tunings, curated guidance).
 
-    The overlay file ships in ``kiln_pro/data/<kind>_pro_overlay.json``
-    and is loaded lazily on first call.  We never import kiln-pro at
-    module load — only on first use — so the public package keeps
-    working when kiln-pro isn't installed.
+    The overlay is NOT bundled in the kiln-pro wheel (closes the
+    on-disk-grep leak vector for pip-install Pro+ users); it lives
+    server-side and is fetched per process with an encrypted local
+    cache.  See ``kiln_pro.data_overlays`` for the full caching
+    behavior (24h TTL, 7d offline grace, license-key-derived cache
+    encryption).  We never import kiln-pro at module load — only on
+    first use — so the public package keeps working when kiln-pro
+    isn't installed.
 
     :param public_data: Safety-floor data loaded from public Kiln's
         ``data/design_knowledge/<kind>.json``.
@@ -77,10 +82,22 @@ def _merge_pro_overlay_if_available(
 
     try:
         overlay = load_overlay(kind)
-    except (FileNotFoundError, KeyError, ValueError) as exc:
+    except KeyError as exc:
+        # Unknown overlay kind — programming error, not a runtime
+        # failure.  Log loudly so we catch it early.
+        logger.error(
+            "kiln-pro overlay loader rejected kind=%r: %s. "
+            "Update _OVERLAY_FILES in kiln_pro/data_overlays.py?",
+            kind, exc,
+        )
+        return public_data
+    except Exception as exc:
+        # Catches OverlayUnavailableError (network / license / cache),
+        # FileNotFoundError, ValueError, anything else.  Free tier
+        # behavior: silently fall back to safety-floor data, log at
+        # warning level so the operator can see something happened.
         logger.warning(
-            "kiln-pro %s overlay present but failed to load: %s. "
-            "Falling back to safety-floor data.",
+            "kiln-pro %s overlay unavailable, falling back to safety-floor: %s",
             kind, exc,
         )
         return public_data
@@ -164,21 +181,51 @@ class MaterialProfile:
 
 
 @dataclass
-class DesignPattern:
-    """A functional design pattern with constraints and guidance."""
+class DesignTemplate:
+    """A functional design template with constraints and guidance.
 
-    pattern_id: str
+    Free tier: ``design_rules``, ``print_orientation_reason``, and
+    ``agent_guidance`` may be empty (the engineering moat ships in
+    Kiln Pro's overlay). Consumers MUST treat these as optional and
+    fall back to discovery-only behavior when absent. See
+    :func:`has_engineering_data` for the canonical check.
+
+    Renamed from ``DesignPattern`` on 2026-05-05.  An alias preserves
+    the old name for any caller that still imports it.
+    """
+
+    template_id: str
     display_name: str
     description: str
     use_cases: list[str]
-    design_rules: dict[str, Any]
     material_compatibility: dict[str, list[str]]
     print_orientation: str
-    print_orientation_reason: str
-    agent_guidance: list[str]
+    design_rules: dict[str, Any] = field(default_factory=dict)
+    print_orientation_reason: str = ""
+    agent_guidance: list[str] = field(default_factory=list)
+
+    @property
+    def pattern_id(self) -> str:
+        """Backwards-compat alias for ``template_id`` (renamed 2026-05-05)."""
+        return self.template_id
+
+    def has_engineering_data(self) -> bool:
+        """True when the kiln-pro engineering overlay is loaded.
+
+        Free tier returns False — consumers should fall back to
+        discovery-only output (display_name, use_cases, material
+        compatibility, print orientation label) and emit the upgrade
+        nudge in their response.
+        """
+        return bool(self.design_rules) and bool(self.agent_guidance)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+# Backwards-compat alias for the pre-2026-05-05 name.  Any external
+# import of ``DesignPattern`` resolves to ``DesignTemplate``.
+DesignPattern = DesignTemplate
 
 
 @dataclass
@@ -398,7 +445,7 @@ class _DesignKnowledgeBase:
     def __init__(self, domain: str = "fdm") -> None:
         self.domain = domain
         self._materials: dict[str, dict[str, Any]] = {}
-        self._patterns: dict[str, dict[str, Any]] = {}
+        self._templates: dict[str, dict[str, Any]] = {}
         self._requirements: dict[str, dict[str, Any]] = {}
         self._load_tables: dict[str, dict[str, Any]] = {}
         self._environment: dict[str, dict[str, Any]] = {}
@@ -415,7 +462,7 @@ class _DesignKnowledgeBase:
 
         _tables: list[tuple[str, str]] = [
             ("materials.json", "_materials"),
-            ("design_patterns.json", "_patterns"),
+            ("design_templates.json", "_templates"),
             ("functional_requirements.json", "_requirements"),
             ("load_tables.json", "_load_tables"),
             ("environment_compatibility.json", "_environment"),
@@ -432,23 +479,28 @@ class _DesignKnowledgeBase:
                 raw = json.loads(path.read_text(encoding="utf-8"))
                 setattr(self, attr, {k: v for k, v in raw.items() if not k.startswith("_")})
 
-        # Single choke point: merge the kiln-pro engineering moat overlay
-        # if present.  Free tier sees safety-floor only; Pro+ sees the
-        # full record (mechanical + design_limits + use_case_ratings +
-        # agent_guidance + brand-tuning + curated guidance) restored
-        # via deep merge.  Engineering moat is in kiln-pro; this loader
-        # never imports kiln-pro at module load — only at first use.
+        # Single choke point: merge the kiln-pro engineering moat overlays
+        # if present.  Free tier sees safety-floor + discovery only; Pro+
+        # sees the full record (mechanical + design_limits + use_case_ratings
+        # + agent_guidance + brand-tuning + curated guidance for materials;
+        # design_rules + agent_guidance + failure_modes + sources + variant
+        # tables + Phase 4 depth for design_patterns) restored via deep
+        # merge.  Engineering moat is in kiln-pro; this loader never
+        # imports kiln-pro at module load — only at first use.
         self._materials = _merge_pro_overlay_if_available(
             self._materials, "materials"
+        )
+        self._templates = _merge_pro_overlay_if_available(
+            self._templates, "design_templates"
         )
 
         self._loaded = True
         logger.info(
-            "Design knowledge loaded: %d materials, %d patterns, %d requirements, "
+            "Design knowledge loaded: %d materials, %d templates, %d requirements, "
             "%d load tables, %d environments, %d printers, %d troubleshooting, "
             "%d printer-compat, %d post-processing",
             len(self._materials),
-            len(self._patterns),
+            len(self._templates),
             len(self._requirements),
             len(self._load_tables),
             len(self._environment),
@@ -464,9 +516,14 @@ class _DesignKnowledgeBase:
         return self._materials
 
     @property
-    def patterns(self) -> dict[str, dict[str, Any]]:
+    def templates(self) -> dict[str, dict[str, Any]]:
         self._load()
-        return self._patterns
+        return self._templates
+
+    @property
+    def patterns(self) -> dict[str, dict[str, Any]]:
+        """Backwards-compat alias for ``templates`` (renamed 2026-05-05)."""
+        return self.templates
 
     @property
     def requirements(self) -> dict[str, dict[str, Any]]:
@@ -1816,56 +1873,56 @@ def list_printer_profiles() -> list[PrinterDesignProfile]:
 
 
 # ---------------------------------------------------------------------------
-# Public API — Design Patterns
+# Public API — Design Templates
 # ---------------------------------------------------------------------------
 
 
-def get_design_pattern(pattern_id: str) -> DesignPattern | None:
-    """Get a design pattern by ID.
+def get_design_template(template_id: str) -> DesignTemplate | None:
+    """Get a design template by ID.
 
-    :param pattern_id: Pattern key (e.g. ``"snap_fit_cantilever"``).
+    :param template_id: Template key (e.g. ``"snap_fit_cantilever"``).
     """
     kb = _get_kb()
-    data = kb.patterns.get(pattern_id)
+    data = kb.templates.get(template_id)
     if data is None:
         return None
 
-    return DesignPattern(
-        pattern_id=pattern_id,
+    return DesignTemplate(
+        template_id=template_id,
         display_name=data["display_name"],
         description=data["description"],
         use_cases=data["use_cases"],
-        design_rules=data["design_rules"],
         material_compatibility=data["material_compatibility"],
         print_orientation=data["print_orientation"],
-        print_orientation_reason=data["print_orientation_reason"],
-        agent_guidance=data["agent_guidance"],
+        design_rules=data.get("design_rules", {}),
+        print_orientation_reason=data.get("print_orientation_reason", ""),
+        agent_guidance=data.get("agent_guidance", []),
     )
 
 
-def list_design_patterns() -> list[DesignPattern]:
-    """Return all design patterns sorted by name."""
+def list_design_templates() -> list[DesignTemplate]:
+    """Return all design templates sorted by name."""
     kb = _get_kb()
-    patterns = []
-    for pid, data in sorted(kb.patterns.items()):
-        patterns.append(
-            DesignPattern(
-                pattern_id=pid,
+    templates = []
+    for tid, data in sorted(kb.templates.items()):
+        templates.append(
+            DesignTemplate(
+                template_id=tid,
                 display_name=data["display_name"],
                 description=data["description"],
                 use_cases=data["use_cases"],
-                design_rules=data["design_rules"],
                 material_compatibility=data["material_compatibility"],
                 print_orientation=data["print_orientation"],
-                print_orientation_reason=data["print_orientation_reason"],
-                agent_guidance=data["agent_guidance"],
+                design_rules=data.get("design_rules", {}),
+                print_orientation_reason=data.get("print_orientation_reason", ""),
+                agent_guidance=data.get("agent_guidance", []),
             )
         )
-    return patterns
+    return templates
 
 
-def find_patterns_for_use_case(use_case: str) -> list[DesignPattern]:
-    """Find design patterns that match a use case.
+def find_templates_for_use_case(use_case: str) -> list[DesignTemplate]:
+    """Find design templates that match a use case.
 
     :param use_case: Use case keyword (e.g. ``"enclosures"``, ``"gears"``).
     """
@@ -1873,14 +1930,21 @@ def find_patterns_for_use_case(use_case: str) -> list[DesignPattern]:
     lower = use_case.lower()
     results = []
 
-    for pid, data in kb.patterns.items():
+    for tid, data in kb.templates.items():
         cases = [c.lower() for c in data.get("use_cases", [])]
         if any(lower in c or c in lower for c in cases):
-            pattern = get_design_pattern(pid)
-            if pattern:
-                results.append(pattern)
+            template = get_design_template(tid)
+            if template:
+                results.append(template)
 
     return results
+
+
+# Backwards-compat aliases (renamed 2026-05-05).  Old names continue
+# to work for any caller that imports them directly.
+get_design_pattern = get_design_template
+list_design_patterns = list_design_templates
+find_patterns_for_use_case = find_templates_for_use_case
 
 
 # ---------------------------------------------------------------------------
@@ -2479,18 +2543,18 @@ def _find_patterns_from_text(text: str) -> list[DesignPattern]:
     seen: set[str] = set()
 
     # Check use_case matches
-    for pid, data in kb.patterns.items():
+    for tid, data in kb.templates.items():
         cases = [c.lower().replace("_", " ") for c in data.get("use_cases", [])]
         name_words = data.get("display_name", "").lower().split()
 
         matched = any(c in lower for c in cases) or any(
             w in lower for w in name_words if len(w) > 3
         )
-        if matched and pid not in seen:
-            pattern = get_design_pattern(pid)
-            if pattern:
-                results.append(pattern)
-                seen.add(pid)
+        if matched and tid not in seen:
+            template = get_design_template(tid)
+            if template:
+                results.append(template)
+                seen.add(tid)
 
     return results
 
