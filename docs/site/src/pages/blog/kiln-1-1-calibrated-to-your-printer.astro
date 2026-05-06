@@ -2,7 +2,7 @@
 import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
 
 const contentHtml = `
-<p>Generic 3D-printing defaults assume a generic printer. Yours has its own dimensional bias — the kind of difference that makes a snap fit either snap or split. Until now, Kiln assumed defaults. <strong>Kiln 1.1 calibrates to your printer.</strong></p>
+<p>Your printer has its own dimensional bias — the kind of difference that makes a snap fit either snap or split, even between two of the same model off the same assembly line. <strong>Kiln 1.1 captures it.</strong> Reading your slicer's tuned values, learning from every print, applying both on every slice.</p>
 
 <p>Today's release also rebuilds the design template library, adds a dedicated tablet stand, and ships a self-service tier diagnostic that just answers the question when a user asks their AI agent <em>&quot;why does it say I need Pro?&quot;</em></p>
 
@@ -12,17 +12,27 @@ const contentHtml = `
 
 <p>The first time Kiln applies your calibration, your agent surfaces a one-time notice — what profile it picked up, what values it overlaid, and that this is happening now on every slice. After that, silent overlay with the audit trail in every slice response. Most active users of those slicers will see the overlay on their next slice — the more you've tuned, the more Kiln picks up.</p>
 
-<p>Every offset that ends up in your model is traceable back to where it came from, so when your agent says &quot;this hole is sized at 5.2 mm,&quot; you can ask it <em>why</em> and get a real answer instead of a shrug.</p>
+<p><strong>That's just the cold start.</strong> From there, Kiln keeps learning. Tell your agent the hole you measured came out at 4.85 mm instead of the 5.0 mm the model called for, and Kiln records that observation against the printer it came from. Every measurement refines a per-printer offset profile. The next slice for that printer + material combination uses the refined values automatically — no re-running test prints, no re-importing slicer profiles.</p>
 
-<p>Tolerance stacking — predicting whether a multi-part assembly will actually go together — gets <strong>several methods to pick from, each with its own confidence band</strong>, so you can choose how conservative to be based on what's at stake. The output is a real probability the parts won't fit, not a single number wrapped in a &quot;trust us.&quot; <em>Patent pending.</em></p>
+<p>You can describe measurements the way you'd say them out loud — &quot;the bracket holes are about half a mil tight&quot; — and Kiln parses, asks for clarification on anything ambiguous, and stores the observation with confidence.</p>
+
+<p>Kiln also tracks how fresh each printer's calibration is. Hardware drifts — belts loosen, nozzles wear, bed surfaces change. When the offsets are likely stale, Kiln surfaces it to your agent before the next critical print, so you can decide whether to re-test or proceed with a wider tolerance band.</p>
+
+<p>Every offset that ends up in your model is traceable back to where it came from. When your agent says &quot;this hole is sized at 5.2 mm,&quot; you can ask it <em>why</em> and get a real answer — which slicer profile, which test print, which user-supplied measurement, on which date — instead of a shrug.</p>
+
+<p>Every Pro+ slice freezes the exact calibration offsets it applied to that design at that moment. Re-print months later and you can see what calibration state shipped the first run — useful when version 1 fits and version 4 doesn't, and you're trying to figure out what changed.</p>
+
+<p>Tolerance stacking — predicting whether a multi-part assembly will actually go together — gets <strong>several methods to pick from, each with its own confidence band</strong>, so you can choose how conservative to be based on what's at stake. The output is a real probability the parts won't fit, not a single number wrapped in a &quot;trust us.&quot;</p>
+
+<p><em>Patent pending — both the per-printer calibration grounding pipeline above (slicer-profile import, continuous learning, freshness gating, agent-mediated MCP tools) and the tolerance-stacking approach with confidence bands.</em></p>
 
 <h2>2. Design templates: deeper, sharper, and a tablet stand</h2>
 
 <p>The design template library was rebuilt this release. <strong>17 templates → 18</strong>, with three under-loved entries dropped and the long-overdue split that surfaces as a new <code>tablet_stand</code> template.</p>
 
-<p>Until now, &quot;phone stand&quot; quietly tried to also serve tablets. That's wrong. An iPad Pro 13&quot; in a Magic Keyboard case weighs over a kilo and changes the whole tipping geometry — a base depth sized for a phone tips it backward. The new <code>tablet_stand</code> template handles three viewing-angle modes (drawing, desk, video call) and devices through 1.5 kg, with Magic Keyboard support and an Apple Pencil clip variant. <code>phone_stand</code> stays focused on phones, with Qi/MagSafe support and the magnet-orientation gotcha called out.</p>
+<p>Kiln's <code>phone_stand</code> template had been doing double duty for tablets too. v1.1 splits them properly because tablets and phones aren't the same problem — an iPad Pro 13&quot; in a Magic Keyboard case weighs over a kilo and changes the whole tipping geometry, and a base depth sized for a phone tips it backward. The new <code>tablet_stand</code> template handles three viewing-angle modes (drawing, desk, video call) and devices through 1.5 kg, with Magic Keyboard support and an Apple Pencil clip variant. <code>phone_stand</code> stays focused on phones, with Qi/MagSafe support and the magnet-orientation gotcha called out.</p>
 
-<p>Every template now carries structured failure modes (cause + prevention), recommended dimensions, and cross-references to related templates. Free users see the discovery surface and material safety floor. On Pro, Kiln layers the engineering depth on top.</p>
+<p>Every template now carries structured failure modes (cause + prevention), recommended dimensions, cross-references to related templates, AND the formulas (tipping math, bending equations) so agents can size correctly for ANY device — not just the baseline. The new <code>tablet_stand</code> isn't hardcoded for an iPad Pro 13&quot;; give it the dimensions and weight of any tablet and it sizes the base correctly so it doesn't tip backward. Free users see the discovery surface and material safety floor. On Pro, Kiln layers the engineering depth on top.</p>
 
 <h2>3. A tier diagnostic that just answers the question</h2>
 
@@ -60,7 +70,7 @@ kiln signin
 ---
 
 <BlogPostLayout
-  title="Kiln 1.1: Your printer is no longer generic"
+  title="Kiln 1.1: Calibrated to your printer"
   description="Per-printer calibration grounding, a rebuilt design template library with a dedicated tablet stand, and a tier diagnostic that just answers the question when an AI agent's user asks 'what plan am I on?'"
   date="May 6, 2026"
   tags={["release", "v1.1", "calibration", "design-templates", "tier-diagnostic"]}
