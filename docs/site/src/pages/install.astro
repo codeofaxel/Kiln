@@ -19,12 +19,7 @@ const mcpConfig = JSON.stringify({
   mcpServers: {
     kiln: {
       command: "python3",
-      args: ["-m", "kiln", "serve"],
-      env: {
-        KILN_PRINTER_HOST: "http://your-printer:port",
-        KILN_PRINTER_API_KEY: "your_key",
-        KILN_PRINTER_TYPE: "octoprint"
-      }
+      args: ["-m", "kiln", "serve"]
     }
   }
 }, null, 2);
@@ -33,12 +28,7 @@ const mcpConfigCompact = JSON.stringify({
   mcpServers: {
     kiln: {
       command: "python3",
-      args: ["-m", "kiln", "serve"],
-      env: {
-        KILN_PRINTER_HOST: "http://your-printer:port",
-        KILN_PRINTER_API_KEY: "your_key",
-        KILN_PRINTER_TYPE: "octoprint"
-      }
+      args: ["-m", "kiln", "serve"]
     }
   }
 });
@@ -53,7 +43,7 @@ const installHowToSchema = {
     {
       '@type': 'HowToStep',
       name: 'Install Kiln',
-      text: 'Install Kiln with pip install kiln3d on macOS, Linux, or WSL 2.',
+      text: 'Install Kiln with pip install kiln3d, then run kiln setup once to pair your printer.',
       url: 'https://kiln3d.com/install',
     },
     {
@@ -104,11 +94,12 @@ const installHowToSchema = {
           <div class="step-number">1</div>
           <div class="step-content">
             <h3>Install Kiln</h3>
-            <p>One line.  macOS, Linux, or Windows via WSL&nbsp;2.</p>
+            <p>Run it in your terminal &mdash; or paste it to your AI agent.</p>
             <div class="code-block">
               <button class="copy-btn" data-code="pip install kiln3d">Copy</button>
               <code><span class="cmd">pip install kiln3d</span></code>
             </div>
+            <p class="step-note">Then run <code>kiln setup</code> once to pair your printer.</p>
             <p class="step-aside"><a href="#advanced-install">More install options &rarr;</a></p>
           </div>
         </li>
@@ -121,9 +112,6 @@ const installHowToSchema = {
               <button class="copy-btn" data-code={mcpConfigCompact}>Copy</button>
               <pre><code set:text={mcpConfig} /></pre>
             </div>
-            <p class="config-note">
-              Replace <code>your-printer:port</code>, <code>your_key</code>, and <code>octoprint</code> with your printer host, API key, and backend type (<code>octoprint</code>, <code>moonraker</code>, <code>creality</code>, <code>bambu</code>, <code>prusaconnect</code>, or <code>elegoo</code>).
-            </p>
           </div>
         </li>
         <li>
@@ -290,15 +278,15 @@ const installHowToSchema = {
     border-bottom-color: var(--accent);
   }
 
-  /* Config note (Step 2) — guides the visitor through the JSON
-     placeholders without competing with the copyable block above. */
-  .config-note {
+  /* Step note — small muted line below a code block, used for the
+     "Then run kiln setup..." follow-up under Step 1's pip install. */
+  .step-note {
     font-size: 13px !important;
     color: var(--text-muted);
     margin-top: 12px !important;
     line-height: 1.7;
   }
-  .config-note code {
+  .step-note code {
     background: var(--bg-code);
     border: 1px solid var(--border);
     padding: 2px 6px;
