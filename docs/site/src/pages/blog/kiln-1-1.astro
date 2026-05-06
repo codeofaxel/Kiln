@@ -6,9 +6,9 @@ const contentHtml = `
 
 <p>Today's release also rebuilds the design template library, adds a dedicated tablet stand, and ships a self-service tier diagnostic that just answers the question when a user asks their AI agent <em>&quot;why does it say I need Pro?&quot;</em></p>
 
-<h2>1. Per-printer calibration grounding</h2>
+<h2>1. Per-printer calibration grounding (Pro)</h2>
 
-<p>Kiln Pro reads your existing OrcaSlicer / Bambu Studio / PrusaSlicer filament settings and uses them on every slice. Nothing leaves your machine. The slice response shows you exactly which values came from where.</p>
+<p>Kiln reads your existing OrcaSlicer / Bambu Studio / PrusaSlicer filament settings and uses them on every slice. Nothing leaves your machine. The slice response shows you exactly which values came from where.</p>
 
 <p>The first time Kiln applies your calibration, your agent surfaces a one-time notice — what profile it picked up, what values it overlaid, and that this is happening now on every slice. After that, silent overlay with the audit trail in every slice response. Most active users of those slicers will see the overlay on their next slice — the more you've tuned, the more Kiln picks up.</p>
 
@@ -22,7 +22,7 @@ const contentHtml = `
 
 <p>Until now, &quot;phone stand&quot; quietly tried to also serve tablets. That's wrong. An iPad Pro 13&quot; in a Magic Keyboard case weighs over a kilo and changes the whole tipping geometry — a base depth sized for a phone tips it backward. The new <code>tablet_stand</code> template handles three viewing-angle modes (drawing, desk, video call) and devices through 1.5 kg, with Magic Keyboard support and an Apple Pencil clip variant. <code>phone_stand</code> stays focused on phones, with Qi/MagSafe support and the magnet-orientation gotcha called out.</p>
 
-<p>Every template now carries structured failure modes (cause + prevention), recommended dimensions, and cross-references to related templates. Free users see the discovery surface and material safety floor. Kiln Pro layers the engineering depth on top.</p>
+<p>Every template now carries structured failure modes (cause + prevention), recommended dimensions, and cross-references to related templates. Free users see the discovery surface and material safety floor. On Pro, Kiln layers the engineering depth on top.</p>
 
 <h2>3. A tier diagnostic that just answers the question</h2>
 
@@ -47,7 +47,7 @@ kiln install-mcp
 kiln signin
 </code></pre>
 
-<p>Existing Kiln Pro subscribers: the calibration pipeline and engineering toolkit are unlocked the moment you upgrade. Free tier: same install, the safety-floor fallback is now active by default.</p>
+<p>Existing Pro subscribers: the calibration pipeline and engineering toolkit are unlocked the moment you upgrade. Free tier: same install, the safety-floor fallback is now active by default.</p>
 
 <p>Full release notes: <a href="https://github.com/codeofaxel/Kiln/blob/main/CHANGELOG.md">CHANGELOG.md</a></p>
 

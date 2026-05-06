@@ -18,13 +18,13 @@ tool + safer pre-print validation gate + a self-service tier diagnostic.
   file → OAuth session → cached entitlement → free fallback) and
   returns a plain-English summary the agent can paste straight to the
   user. Free-tier safe — no license needed to call.
-- **First-time calibration overlay notice** — the first time Kiln Pro
-  applies your slicer calibration to a slice, the response carries a
-  `first_time_notice` block that the agent can surface to the user
-  ("Kiln Pro just used your OrcaSlicer profile…"). After that, silent
-  overlay with the audit trail in every slice response. Removable
-  marker at `~/.kiln/calibration_overlay_first_use.seen` if you want
-  to re-trigger the notice.
+- **First-time calibration overlay notice** — the first time Kiln
+  applies your slicer calibration to a slice (Pro tier), the response
+  carries a `first_time_notice` block that the agent can surface to
+  the user ("Kiln just used your OrcaSlicer profile…"). After that,
+  silent overlay with the audit trail in every slice response.
+  Removable marker at `~/.kiln/calibration_overlay_first_use.seen` if
+  you want to re-trigger the notice.
 - **`tablet_stand` template** — dedicated for tablets / iPads, with
   wider base depth, taller back panel, and slot sized for keyboard
   cases. Phone stands stay focused on phones.
