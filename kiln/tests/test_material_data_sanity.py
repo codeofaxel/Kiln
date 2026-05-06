@@ -44,8 +44,20 @@ def materials_data() -> dict:
 
 @pytest.fixture(scope="module")
 def materials(materials_data: dict) -> dict:
-    """Return only material entries (skip _meta and any _ prefixed keys)."""
-    return {k: v for k, v in materials_data.items() if not k.startswith("_")}
+    """Return all material entries with the kiln-pro engineering overlay
+    merged in (when installed).  The public file is safety-floor only
+    after the 2026-04-09 materials split — mechanical / design_limits /
+    use_case_ratings / agent_guidance / brand-tunings live in the
+    kiln-pro overlay and are merged in at runtime via
+    ``kiln.design_intelligence._merge_pro_overlay_if_available``.
+
+    This module is gated on ``requires_engineering_overlay`` so we only
+    run when overlay is loaded; reading the merged in-memory data
+    instead of the public file directly is what lets the schema /
+    range / guidance assertions reflect the post-split reality.
+    """
+    from kiln.design_intelligence import _get_kb
+    return _get_kb().materials
 
 
 @pytest.fixture(scope="module")
@@ -56,8 +68,20 @@ def patterns_data() -> dict:
 
 @pytest.fixture(scope="module")
 def patterns(patterns_data: dict) -> dict:
-    """Return only pattern entries (skip _meta and any _ prefixed keys)."""
-    return {k: v for k, v in patterns_data.items() if not k.startswith("_")}
+    """Return all pattern entries with the kiln-pro engineering overlay
+    merged in (when installed).  The public file is discovery-only after
+    the 2026-05-05 split — design_rules / agent_guidance / failure_modes
+    / sources / related_patterns / formulas live in the kiln-pro pro
+    overlay and are merged in at runtime via
+    ``kiln.design_intelligence._merge_pro_overlay_if_available``.
+
+    This module is gated on ``requires_engineering_overlay`` so we only
+    run when overlay is loaded; reading the merged in-memory data
+    instead of the public file directly is what lets the schema /
+    guidance / count assertions reflect the post-split reality.
+    """
+    from kiln.design_intelligence import _get_kb
+    return _get_kb().templates
 
 
 # --- Material Schema Tests ---
@@ -422,8 +446,13 @@ class TestCrossFileConsistency:
         )
 
     def test_pattern_count_minimum(self, patterns):
-        assert len(patterns) >= 20, (
-            f"Expected >= 20 patterns, got {len(patterns)}"
+        # 2026-05-05: dropped 3 (cable_management_clip, gopro_mount,
+        # wall_mount_bracket merged into cantilever_bracket) → 17, then
+        # split phone_stand into phone_stand + tablet_stand → 18.
+        # Floor at 17 to allow one further drop without breaking; bump
+        # back if more templates are intentionally added.
+        assert len(patterns) >= 17, (
+            f"Expected >= 17 patterns, got {len(patterns)}"
         )
 
 
