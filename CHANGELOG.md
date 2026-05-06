@@ -5,6 +5,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+Nothing pending — see [1.1.0] below for the latest release.
+
 ## [1.1.0] - 2026-05-06
 
 Design templates rebuild + automatic Pro+ calibration on every slice
