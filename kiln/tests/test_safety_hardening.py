@@ -70,24 +70,47 @@ class TestGetTempLimits:
     """Tests for _get_temp_limits() with KILN_PRINTER_MODEL."""
 
     def test_default_limits_without_model(self, monkeypatch) -> None:
-        """Without KILN_PRINTER_MODEL, should return generic 300/130."""
+        """Without ANY resolvable printer model, fall back to the
+        documented conservative generic limits (300°C tool / 130°C bed).
+
+        Both ``_PRINTER_MODEL`` AND ``_resolve_printer_model_live`` must
+        be neutralised — the live resolver will otherwise auto-detect a
+        Bambu over the network / serial-prefix and return that printer's
+        bed limit (e.g. A1's 100°C), masking the true fallback path.
+        """
         monkeypatch.setattr("kiln.server._PRINTER_MODEL", "")
+        monkeypatch.setattr(
+            "kiln.server._resolve_printer_model_live", lambda: "",
+        )
         from kiln.server import _get_temp_limits
         max_tool, max_bed = _get_temp_limits()
         assert max_tool == 300.0
         assert max_bed == 130.0
 
     def test_ender3_limits(self, monkeypatch) -> None:
-        """Ender 3 has PTFE hotend — max should be 260, not 300."""
+        """Ender 3 has PTFE hotend — max hotend should be clamped to 240
+        (the PTFE-safe ceiling), not 300.  Bed honors the Ender 3 profile."""
         monkeypatch.setattr("kiln.server._PRINTER_MODEL", "ender3")
+        monkeypatch.setattr(
+            "kiln.server._resolve_printer_model_live", lambda: "ender3",
+        )
         from kiln.server import _get_temp_limits
         max_tool, max_bed = _get_temp_limits()
-        assert max_tool == 260.0
+        # PTFE-clamp ceiling kicks in for the Ender 3's PTFE-lined hotend.
+        assert max_tool == 240.0
+        # Ender 3 stock bed: 110°C max
         assert max_bed == 110.0
 
     def test_unknown_model_falls_back(self, monkeypatch) -> None:
-        """Unknown model should fall back to generic 300/130."""
-        monkeypatch.setattr("kiln.server._PRINTER_MODEL", "nonexistent_printer_xyz")
+        """Unknown model should fall back to the generic conservative
+        limits (300°C tool / 130°C bed) — same as the no-model path."""
+        monkeypatch.setattr(
+            "kiln.server._PRINTER_MODEL", "nonexistent_printer_xyz",
+        )
+        monkeypatch.setattr(
+            "kiln.server._resolve_printer_model_live",
+            lambda: "nonexistent_printer_xyz",
+        )
         from kiln.server import _get_temp_limits
         max_tool, max_bed = _get_temp_limits()
         assert max_tool == 300.0

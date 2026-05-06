@@ -1032,11 +1032,20 @@ def _get_temp_limits() -> tuple:
             max_tool = profile.max_hotend_temp
             max_bed = profile.max_bed_temp
             # PTFE clamp — look up hotend_type from printer_intelligence.
+            # ``get_printer_intel`` returns a ``PrinterIntel`` DATACLASS, not
+            # a dict — the original ``(intel or {}).get(...)`` raised
+            # AttributeError silently inside the bare ``except Exception``
+            # below, so the clamp never fired for any PTFE-lined hotend
+            # (Ender 3, Ender 5, etc.) and users were getting the profile's
+            # raw 260°C ceiling instead of the PTFE-safe 240°C.  Fix:
+            # use ``getattr`` against the dataclass attribute.
             if os.environ.get("KILN_OVERRIDE_PTFE_LIMIT", "").strip() not in ("1", "true", "yes"):
                 try:
                     from kiln.printer_intelligence import get_printer_intel
                     intel = get_printer_intel(_resolved)
-                    hotend_type = (intel or {}).get("hotend_type", "").lower()
+                    hotend_type = (
+                        getattr(intel, "hotend_type", "") or ""
+                    ).lower()
                     if hotend_type and hotend_type != "all_metal":
                         # Common values: "ptfe", "ptfe_lined", "hybrid", ""
                         _PTFE_SAFE_MAX = 240.0
@@ -10390,28 +10399,60 @@ class _DedupingToolRegistrationProxy:
         return decorator
 
 
+_HOSTED_KILN_API_URL = "https://api.kiln3d.com"
+
+
+def _auth_tokens_path() -> Path:
+    auth_home = os.environ.get("KILN_AUTH_HOME") or str(Path.home())
+    return Path(auth_home) / ".kiln" / "auth_tokens.json"
+
+
+def _paired_access_token() -> str:
+    try:
+        import json
+
+        data = json.loads(_auth_tokens_path().read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return str(data.get("access_token") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
 def _pro_api_call(tool_name: str, **kwargs) -> dict:
-    """Call a pro tool via the Kiln REST API server."""
-    api_url = os.environ.get("KILN_API_URL", "").strip()
-    if not api_url:
+    """Call a hosted kiln-pro tool through the public REST API.
+
+    Bearer-token resolution order:
+      1. ``KILN_LICENSE_KEY`` env var (operator-supplied license)
+      2. OAuth access token from ``$KILN_AUTH_HOME/.kiln/auth_tokens.json``,
+         set by ``kiln signin`` / ``kiln pair <code>``
+      3. None — return ``KILN_ACCOUNT_NOT_PAIRED`` with the pairing
+         instructions so the agent can guide the user
+
+    URL resolution: ``KILN_API_URL`` env var (operator override, e.g.
+    pointing at a self-hosted instance) OR ``https://api.kiln3d.com``
+    (the hosted default — paired users hit this without any env config).
+    """
+    api_url = (os.environ.get("KILN_API_URL") or "").strip() or _HOSTED_KILN_API_URL
+    bearer = os.environ.get("KILN_LICENSE_KEY", "").strip() or _paired_access_token()
+    if not bearer:
         return {
             "status": "error",
             "error": (
-                f"'{tool_name}' requires a Kiln server. "
-                "Set KILN_API_URL to your server address (e.g. http://localhost:8742) "
-                "or sign up at https://kiln3d.com to use the hosted API."
+                f"'{tool_name}' needs a paired Kiln account. "
+                "Run `python3 -m kiln signin`, or generate a code at "
+                "https://app.kiln3d.com/connect and run `python3 -m kiln pair <code>`."
             ),
-            "code": "PRO_TOOL_REQUIRES_SERVER",
+            "code": "KILN_ACCOUNT_NOT_PAIRED",
             "tool": tool_name,
-            "setup_hint": "export KILN_API_URL=http://localhost:8742",
+            "setup_hint": "python3 -m kiln signin",
         }
     import json
+    import urllib.error
     import urllib.request
     try:
-        license_key = os.environ.get("KILN_LICENSE_KEY", "").strip()
         headers = {"Content-Type": "application/json"}
-        if license_key:
-            headers["Authorization"] = f"Bearer {license_key}"
+        headers["Authorization"] = f"Bearer {bearer}"
         req = urllib.request.Request(
             f"{api_url.rstrip('/')}/api/tools/{tool_name}",
             data=json.dumps(kwargs).encode() if kwargs else None,
@@ -10420,6 +10461,22 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
         )
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        # Preserve the server's own error body when present — it usually
+        # carries a structured ``code`` + ``error`` the agent can act on
+        # (e.g. tier-gate denials, quota-exhaustion messages).
+        try:
+            body = json.loads(exc.read().decode("utf-8"))
+            if isinstance(body, dict):
+                return body
+        except Exception:
+            pass
+        return {
+            "status": "error",
+            "error": f"Kiln API rejected '{tool_name}' (HTTP {exc.code}).",
+            "code": "KILN_API_HTTP_ERROR",
+            "tool": tool_name,
+        }
     except Exception as exc:
         return {
             "status": "error",
