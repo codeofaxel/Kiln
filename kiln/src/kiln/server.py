@@ -10981,6 +10981,17 @@ def main() -> None:
     # results panel.
     _print_startup_banner()
 
+    # Orphan watchdog: if the MCP host (Claude Code, Claude Desktop,
+    # ...) dies without closing stdin, this process gets adopted by
+    # init/launchd and ``mcp.run()`` blocks forever waiting for
+    # JSON-RPC traffic that will never arrive.  The watchdog polls
+    # PPID every 30s and exits cleanly when the original parent is
+    # gone.  No-op when the process was started under a supervisor
+    # (PPID=1 from the start).  See ``parent_watchdog.py`` for the
+    # rationale + the ``KILN_DISABLE_ORPHAN_WATCHDOG`` escape hatch.
+    from kiln.parent_watchdog import start_parent_watchdog
+    start_parent_watchdog()
+
     mcp.run()
 
 
