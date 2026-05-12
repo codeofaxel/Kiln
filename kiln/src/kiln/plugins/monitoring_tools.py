@@ -502,6 +502,32 @@ class _PrintWatcher:
                                 self._snapshots.append(snap)
                             if self._event_bus is not None:
                                 try:
+                                    # VISION_CHECK SUBSCRIBER CONTRACT
+                                    # --------------------------------
+                                    # This event fires on EVERY snapshot
+                                    # capture (default cadence: one every
+                                    # 60 seconds while a print runs).  The
+                                    # ``snapshot_b64`` field carries the
+                                    # full JPEG bytes — typically ~50-150
+                                    # KB per frame.
+                                    #
+                                    # Subscribers MUST NOT persist
+                                    # ``snapshot_b64`` to disk or transmit
+                                    # it over the network on every event.
+                                    # A naive 6-hour-print subscriber that
+                                    # writes every frame yields ~36 MB of
+                                    # snaps per print; multi-print fleets
+                                    # fill disks fast and bandwidth bills
+                                    # grow linearly.
+                                    #
+                                    # The correct pattern: subscribe,
+                                    # analyse / hash / compare in memory,
+                                    # and only persist on a DERIVED
+                                    # signal (e.g. publish a VISION_ALERT
+                                    # and have a downstream recorder
+                                    # subscribe to the alert instead).
+                                    # See ``kiln_pro.vision.corpus`` for
+                                    # the reference implementation.
                                     self._event_bus.publish(
                                         EventType.VISION_CHECK,
                                         {
