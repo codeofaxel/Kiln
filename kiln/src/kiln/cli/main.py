@@ -10445,6 +10445,35 @@ def health(ctx: click.Context, json_mode: bool) -> None:
         except Exception:
             checks["kiln_version"] = "unknown"
 
+        # MCP client config drift.  ``kiln install-mcp`` writes the
+        # client configs but nothing watches them afterwards — a
+        # renamed venv or a hand-edit silently leaves a client
+        # pointed at a binary that no longer exists, and the user's
+        # first signal is the MCP host's "Server disconnected"
+        # banner with no actionable detail.  Audit reports drift
+        # here so ``kiln health`` is the one place users go when
+        # something's wrong.
+        try:
+            from kiln.cli.mcp_config_audit import (
+                audit_all_mcp_clients,
+                to_json_payload,
+            )
+
+            _mcp_results = audit_all_mcp_clients()
+            checks["mcp_clients"] = to_json_payload(_mcp_results)
+            checks["mcp_clients_ok"] = not any(
+                r.has_drift or r.parse_error for r in _mcp_results
+            )
+        except Exception as exc:
+            # Auditor must never break ``kiln health`` itself.  If it
+            # raises (impossible by design, but defensive against
+            # future regressions), surface the failure as a soft
+            # warning rather than crashing the whole command.
+            _mcp_results = []
+            checks["mcp_clients"] = []
+            checks["mcp_clients_ok"] = None
+            checks["mcp_clients_error"] = str(exc)
+
         healthy = checks.get("printer_online", False)
         checks["healthy"] = healthy
 
@@ -10468,6 +10497,42 @@ def health(ctx: click.Context, json_mode: bool) -> None:
                 click.echo(f"  [{mark_fail}] Slicer: not found")
             # Kiln version
             click.echo(f"  [*] Kiln: v{checks.get('kiln_version', 'unknown')}")
+            # MCP client configs — one line per installed client.
+            # Skip clients whose config doesn't exist (the user didn't
+            # install Kiln there, no need to nag).  Show entry-level
+            # drift with a copy-paste recovery command so the user
+            # goes from "yellow banner with no clue what's wrong" to
+            # "one line tells me exactly what to do" in one step.
+            for _r in _mcp_results:
+                if not _r.config_exists:
+                    continue
+                if _r.parse_error:
+                    click.echo(
+                        f"  [{mark_fail}] {_r.client}: config unparseable "
+                        f"({_r.parse_error}). Run `kiln install-mcp` to regenerate.",
+                    )
+                    continue
+                if not _r.entries:
+                    # File exists but has no Kiln/MCP entry — nothing
+                    # to verify; the user installed Kiln elsewhere or
+                    # never ran ``kiln install-mcp`` on this client.
+                    continue
+                for _entry in _r.entries:
+                    if _entry.is_ok:
+                        click.echo(
+                            f"  [{mark_ok}] {_r.client} → {_entry.name}: "
+                            f"{_entry.command}",
+                        )
+                    else:
+                        click.echo(
+                            f"  [{mark_fail}] {_r.client} → {_entry.name}: "
+                            f"{_entry.detail}. Run `kiln install-mcp` to regenerate.",
+                        )
+            if checks.get("mcp_clients_error"):
+                click.echo(
+                    f"  [{mark_fail}] MCP config audit failed: "
+                    f"{checks['mcp_clients_error']}",
+                )
     except Exception as exc:
         click.echo(
             format_error(
