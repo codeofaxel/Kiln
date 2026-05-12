@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-05-06T00:41:27.212335+00:00",
-  "tool_count": 300,
+  "generated": "2026-05-12T04:49:50.212677+00:00",
+  "tool_count": 301,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -3617,6 +3617,25 @@
           "recipe_path"
         ],
         "title": "get_design_ancestryArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_design_pull_request",
+      "description": "Fetch one pull request's full detail by id.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "pr_id": {
+            "title": "Pr Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pr_id"
+        ],
+        "title": "get_design_pull_requestArguments",
         "type": "object"
       }
     },
