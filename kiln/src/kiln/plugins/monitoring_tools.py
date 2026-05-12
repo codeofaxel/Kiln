@@ -114,6 +114,11 @@ class _PrintWatcher:
         self._start_time: float = 0.0
         self._thread: threading.Thread | None = None
         self._prev_snapshot_hash: str | None = None
+        # Raw observability counter: how many consecutive snapshot
+        # captures have produced an identical hash to the previous
+        # frame.  Counter is a measurement only — downstream
+        # subscribers decide what threshold means "camera frozen".
+        self._consecutive_static_frames: int = 0
         self._save_dir: str | None = None
         if self._save_to_disk:
             self._save_dir = os.path.join(str(Path.home()), ".kiln", "timelapses", watch_id)
@@ -415,9 +420,24 @@ class _PrintWatcher:
                             # emit a warning so agents don't trust a
                             # broken telemetry script.
                             img_hash = hashlib.md5(image_data).hexdigest()  # noqa: S324
+                            had_prior_frame = self._prev_snapshot_hash is not None
                             camera_changed = (
-                                self._prev_snapshot_hash is not None and img_hash != self._prev_snapshot_hash
+                                had_prior_frame and img_hash != self._prev_snapshot_hash
                             )
+
+                            # Update consecutive-static-frames counter.
+                            # Only count after we've seen a prior frame —
+                            # the very first capture has nothing to
+                            # compare to.  Counter is a measurement
+                            # exposed on the VISION_CHECK event; the
+                            # "what counts as stale" decision belongs to
+                            # whatever subscriber consumes the event.
+                            if had_prior_frame:
+                                if camera_changed:
+                                    self._consecutive_static_frames = 0
+                                else:
+                                    self._consecutive_static_frames += 1
+
                             self._prev_snapshot_hash = img_hash
 
                             telemetry_mismatch = False
@@ -486,9 +506,30 @@ class _PrintWatcher:
                                         EventType.VISION_CHECK,
                                         {
                                             "printer_name": self._printer_name,
+                                            "watch_id": self._watch_id,
                                             "completion": job.completion,
                                             "phase": phase,
                                             "snapshot_index": len(self._snapshots),
+                                            # Raw observability data on the
+                                            # captured frame.  Downstream
+                                            # subscribers may consume the
+                                            # snapshot bytes, hash, change
+                                            # bit, consecutive-static count,
+                                            # and time-since-progress to
+                                            # run their own detectors —
+                                            # the watcher itself makes no
+                                            # decisions from these values.
+                                            "snapshot_b64": base64.b64encode(
+                                                image_data
+                                            ).decode("ascii"),
+                                            "frame_hash": img_hash,
+                                            "camera_changed": camera_changed,
+                                            "consecutive_static_frames": (
+                                                self._consecutive_static_frames
+                                            ),
+                                            "time_since_last_progress_seconds": round(
+                                                time.time() - _last_progress_time, 1
+                                            ),
                                         },
                                         source="vision",
                                     )
