@@ -237,7 +237,30 @@ def _audit_codex_toml(client: str, path: Path) -> ClientAuditResult:
             continue
         cmd_match = _CODEX_COMMAND_RE.match(line)
         if cmd_match:
-            current_command = cmd_match.group(1).encode("utf-8").decode("unicode_escape")
+            raw_value = cmd_match.group(1)
+            # TOML basic strings interpret backslash as the escape
+            # character; decode them so paths like ``é`` resolve.
+            #
+            # Three failure modes the decode can hit:
+            #   * UnicodeDecodeError — outright malformed sequence
+            #     (rare today; treat as raw fallback so the binary
+            #     check still has something to look at).
+            #   * DeprecationWarning — Python 3.12+ flags invalid
+            #     escapes (``\z``, ``\d``, ...).  Promote to an
+            #     error during this single call so we treat the
+            #     same case as the future hard-error consistently.
+            #   * The currently-permitted "pass-through" behavior
+            #     (a ``\z`` decodes to literal ``\z``).  Falls into
+            #     the try block's success path; we keep that result.
+            import warnings as _warnings
+            try:
+                with _warnings.catch_warnings():
+                    _warnings.simplefilter("error", DeprecationWarning)
+                    current_command = (
+                        raw_value.encode("utf-8").decode("unicode_escape")
+                    )
+            except (UnicodeDecodeError, DeprecationWarning):
+                current_command = raw_value
     if current_name is not None:
         entries.append(_check_server_entry(
             current_name, {"command": current_command},

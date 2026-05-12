@@ -423,3 +423,57 @@ class TestHealthCliIntegration:
             assert "Claude Code" not in line
             assert "Codex" not in line
             assert "install-mcp" not in line
+
+    def test_auditor_failure_renders_soft_warning_not_crash(
+        self, tmp_path, monkeypatch,
+    ):
+        """Auditor failures (import error, unexpected raise, future
+        regression) must NEVER crash ``kiln health``.  Force
+        ``audit_all_mcp_clients`` to raise and verify the command
+        still exits 0, the legacy rows still render, and the soft
+        warning surfaces the underlying error message."""
+        from click.testing import CliRunner
+        from kiln.cli import main as main_mod
+        from kiln.cli import mcp_config_audit as audit_mod
+
+        def _boom() -> None:
+            raise RuntimeError("simulated auditor regression")
+
+        # ``main.health`` does ``from kiln.cli.mcp_config_audit import
+        # audit_all_mcp_clients`` at call time, so patching the module
+        # attribute is enough to redirect the function lookup.
+        monkeypatch.setattr(audit_mod, "audit_all_mcp_clients", _boom)
+
+        result = CliRunner().invoke(main_mod.cli, ["health"])
+        assert result.exit_code == 0, result.output
+        assert "MCP config audit failed" in result.output
+        assert "simulated auditor regression" in result.output
+
+    def test_line_level_toml_fallback_tolerates_bad_escape(
+        self, tmp_path, monkeypatch,
+    ):
+        """A malformed escape sequence in a Codex command string must
+        not crash the audit — fall back to the raw value so the
+        binary check still runs.  Real-world trigger: a Windows-style
+        backslash path in a TOML string (or any unsupported escape)."""
+        import kiln.cli.mcp_config_audit as audit_mod
+
+        codex = tmp_path / "codex.toml"
+        # ``\z`` is not a valid TOML escape; decode("unicode_escape")
+        # would raise UnicodeDecodeError on the literal value.  The
+        # auditor must fall back gracefully and still produce a result.
+        codex.write_text(
+            '[mcp_servers.kiln]\ncommand = "/path/that\\z-bad-escape"\n',
+        )
+        _redirect_client_paths(
+            monkeypatch, desktop=tmp_path / "x", code=tmp_path / "y", codex=codex,
+        )
+        monkeypatch.setattr(audit_mod, "_toml_parser", lambda: None)
+
+        # The path won't exist (expected), but ``audit_all_mcp_clients``
+        # must return without raising.
+        results = audit_mod.audit_all_mcp_clients()
+        codex_result = next(r for r in results if r.client == "Codex")
+        assert codex_result.config_exists
+        assert codex_result.parse_error is None  # bad escape, not bad TOML
+        assert len(codex_result.entries) == 1
