@@ -894,14 +894,46 @@ class _MonitoringToolsPlugin:
                 )
 
         @mcp.tool()
-        def watch_print_status(watch_id: str) -> dict:
+        def watch_print_status(
+            watch_id: str,
+            block_until_event: bool = False,
+            timeout: int = 60,
+            event_types: list[str] | None = None,
+        ) -> dict:
             """Check the current status of a background print watcher.
 
             Returns progress, collected snapshots, and whether the watcher
             has finished.
 
+            By default returns immediately with the current state.  Set
+            ``block_until_event=True`` to wait server-side until a new
+            event fires on the bus matching this watcher's printer (or
+            ``timeout`` seconds elapse).  Loop a single blocking call
+            instead of polling every N seconds — roughly 50× fewer tool
+            invocations on a multi-hour print.
+
             Args:
                 watch_id: The watcher ID returned by ``watch_print``.
+                block_until_event: If True, block until a matching event
+                    arrives on the event bus or ``timeout`` is reached.
+                    Default False (return immediately, current behaviour).
+                timeout: Maximum seconds to block when
+                    ``block_until_event=True``.  Default 60.  MCP clients
+                    should set their tool-call timeout comfortably above
+                    this (e.g. 120s) so the call returns cleanly instead
+                    of being killed mid-wait.
+                event_types: Optional list of event-type strings to wait
+                    on.  Defaults to ``["vision.alert", "print.terminal"]``
+                    — failure alerts and print completion.  Pass a custom
+                    list to wait on different events (e.g.
+                    ``["vision.check"]`` to wake on every snapshot).
+
+            When ``block_until_event=True`` and an event arrives, the
+            return payload includes ``events_received`` (list of events)
+            alongside the watcher's current status.  On timeout the
+            payload includes ``timed_out: True``.  If the watcher has
+            already finished before subscription, the call returns
+            immediately with ``watcher_already_finished: True``.
             """
             if err := _srv._check_auth("monitoring"):
                 return err
@@ -911,7 +943,86 @@ class _MonitoringToolsPlugin:
                     f"No active watcher with id {watch_id!r}. It may have already been stopped or never existed.",
                     code="NOT_FOUND",
                 )
-            return {"success": True, **watcher.status()}
+
+            if not block_until_event:
+                return {"success": True, **watcher.status()}
+
+            # --- Blocking path -------------------------------------------------
+            from kiln.events import Event, EventType
+
+            requested_types = (
+                event_types if event_types is not None else ["vision.alert", "print.terminal"]
+            )
+            try:
+                type_enums = {EventType(t) for t in requested_types}
+            except ValueError as exc:
+                valid = sorted(t.value for t in EventType)
+                return _srv._error_dict(
+                    f"Unknown event type: {exc}. Valid types: {valid}",
+                    code="VALIDATION_ERROR",
+                )
+
+            watch_printer_name = watcher._printer_name
+            received_box: list[dict] = []
+            event_arrived = threading.Event()
+
+            def _handler(event: Event) -> None:
+                data = event.data or {}
+                ev_watch_id = data.get("watch_id")
+                ev_printer = data.get("printer_name")
+                # Prefer watch_id match when the event carries one; fall
+                # back to printer_name match for events that don't.
+                if ev_watch_id is not None:
+                    if ev_watch_id != watch_id:
+                        return
+                elif ev_printer is not None and ev_printer != watch_printer_name:
+                    return
+                received_box.append(
+                    {
+                        "type": event.type.value,
+                        "data": data,
+                        "source": event.source,
+                        "timestamp": event.timestamp,
+                    }
+                )
+                event_arrived.set()
+
+            bus = _srv._get_event_bus()
+            # Subscribe BEFORE checking finished-state to avoid a race
+            # where PRINT_TERMINAL fires between status() and subscribe().
+            for t in type_enums:
+                bus.subscribe(t, _handler)
+            try:
+                initial_status = watcher.status()
+                if initial_status.get("finished"):
+                    return {
+                        "success": True,
+                        "events_received": [],
+                        "watcher_already_finished": True,
+                        **initial_status,
+                    }
+
+                got_event = event_arrived.wait(timeout=timeout)
+                final_status = watcher.status()
+                if got_event and received_box:
+                    return {
+                        "success": True,
+                        "events_received": list(received_box),
+                        **final_status,
+                    }
+                return {
+                    "success": True,
+                    "events_received": [],
+                    "timed_out": True,
+                    "timeout_seconds": timeout,
+                    **final_status,
+                }
+            finally:
+                for t in type_enums:
+                    try:
+                        bus.unsubscribe(t, _handler)
+                    except Exception:
+                        pass
 
         @mcp.tool()
         def stop_watch_print(watch_id: str) -> dict:
