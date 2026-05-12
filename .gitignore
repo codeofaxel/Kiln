@@ -43,6 +43,11 @@ fly.toml
 deploy.sh
 Dockerfile.api
 scripts/
+# …with a surgical exception for the marketing site's CI-relevant
+# build helpers, which need to be tracked so .github/workflows can
+# run them and contributors can read what they do.
+!docs/site/scripts/
+!docs/site/scripts/**
 
 # Internal working docs (backed up via iCloud)
 .dev

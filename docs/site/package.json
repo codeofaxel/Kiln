@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "check-build-secrets": "bash scripts/check-build-no-secrets.sh",
+    "verify-build": "npm run build && npm run check-build-secrets"
   },
   "dependencies": {
     "astro": "^5.3.0",
