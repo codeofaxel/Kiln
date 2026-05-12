@@ -1,0 +1,58 @@
+---
+/**
+ * Google Analytics 4 — page-view + engagement tracking for the
+ * marketing site.  Sister of MetaPixel.astro: same dormancy
+ * pattern, gated on `analytics` consent (not `advertising`).
+ *
+ * Two gates — both must be ON:
+ *   1. PUBLIC_GA4_MEASUREMENT_ID is set (build-time)
+ *   2. User has granted analytics consent (read-time)
+ *
+ * IP anonymization is enforced via `anonymize_ip: true` in the
+ * gtag config — a redundant belt-and-suspenders since GA4 anon-
+ * imizes IPs by default, but explicit because PRIVACY.md §3.2
+ * commits to it.
+ *
+ * Dormant by default until PUBLIC_GA4_MEASUREMENT_ID is set on
+ * Vercel.
+ *
+ * @see ./CookieBanner.astro — consent writer
+ * @see ../../../PRIVACY.md §3.2 — public disclosure
+ */
+const GA4_ID = import.meta.env.PUBLIC_GA4_MEASUREMENT_ID;
+---
+
+{GA4_ID && (
+  <script is:inline define:vars={{ GA4_ID }}>
+    (() => {
+      const COOKIE = "kiln_consent";
+      const raw = document.cookie
+        .split("; ")
+        .find((c) => c.startsWith(COOKIE + "="))
+        ?.split("=")[1];
+      let analytics = false;
+      try {
+        if (raw) {
+          analytics = JSON.parse(decodeURIComponent(raw))?.analytics === true;
+        }
+      } catch {
+        /* malformed cookie → default OFF */
+      }
+      if (!analytics) return;
+
+      // Inject the GA4 loader.
+      const s = document.createElement("script");
+      s.async = true;
+      s.src = "https://www.googletagmanager.com/gtag/js?id=" + GA4_ID;
+      document.head.appendChild(s);
+
+      window.dataLayer = window.dataLayer || [];
+      window.gtag = function () { window.dataLayer.push(arguments); };
+      window.gtag("js", new Date());
+      window.gtag("config", GA4_ID, {
+        anonymize_ip: true,
+        send_page_view: true,
+      });
+    })();
+  </script>
+)}

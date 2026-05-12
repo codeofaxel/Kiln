@@ -1,0 +1,75 @@
+---
+/**
+ * Google Ads conversion tracking — exposes
+ * `window.kilnTrackGoogleAdsConversion()` for the workshop app
+ * or any post-conversion page to fire when a paid signup happens.
+ *
+ * The PageView-equivalent for Google Ads is just loading the gtag
+ * script with the AW conversion ID; the actual conversion event
+ * fires from a dedicated post-signup page (or via the workshop
+ * app's checkout-success route once that surface ships).
+ *
+ * Two gates — both must be ON:
+ *   1. PUBLIC_GOOGLE_ADS_CONVERSION_ID is set (build-time)
+ *   2. User has granted advertising consent (read-time)
+ *
+ * The conversion label (PUBLIC_GOOGLE_ADS_SIGNUP_LABEL) is the
+ * second half of the conversion id; it identifies WHICH conversion
+ * action (paid signup vs page-view vs lead).  Both must be set
+ * for the helper to fire conversions.
+ *
+ * Dormant by default until env vars are set on Vercel.
+ *
+ * @see ./CookieBanner.astro — consent writer
+ * @see ../../../PRIVACY.md §3.2 — public disclosure
+ */
+const ADS_ID = import.meta.env.PUBLIC_GOOGLE_ADS_CONVERSION_ID;
+const SIGNUP_LABEL = import.meta.env.PUBLIC_GOOGLE_ADS_SIGNUP_LABEL;
+---
+
+{ADS_ID && (
+  <script is:inline define:vars={{ ADS_ID, SIGNUP_LABEL }}>
+    (() => {
+      const COOKIE = "kiln_consent";
+      const raw = document.cookie
+        .split("; ")
+        .find((c) => c.startsWith(COOKIE + "="))
+        ?.split("=")[1];
+      let advertising = false;
+      try {
+        if (raw) {
+          advertising = JSON.parse(decodeURIComponent(raw))?.advertising === true;
+        }
+      } catch {
+        /* malformed cookie → default OFF */
+      }
+      if (!advertising) return;
+
+      // Reuse window.gtag if GoogleAnalytics already loaded it.
+      // Otherwise inject a dedicated loader for the AW account.
+      // Either way, gtag config for the AW id is required for
+      // conversion firing to work.
+      if (typeof window.gtag !== "function") {
+        const s = document.createElement("script");
+        s.async = true;
+        s.src = "https://www.googletagmanager.com/gtag/js?id=" + ADS_ID;
+        document.head.appendChild(s);
+        window.dataLayer = window.dataLayer || [];
+        window.gtag = function () { window.dataLayer.push(arguments); };
+        window.gtag("js", new Date());
+      }
+      window.gtag("config", ADS_ID);
+
+      // Public helper: fire the paid-signup conversion.  Call from
+      // /signup/success (or wherever the post-conversion redirect
+      // lands).  No-op until both env vars are set + advertising
+      // consent granted.
+      window.kilnTrackGoogleAdsConversion = function (transactionId) {
+        if (!SIGNUP_LABEL || typeof window.gtag !== "function") return;
+        const payload = { send_to: ADS_ID + "/" + SIGNUP_LABEL };
+        if (transactionId) payload.transaction_id = transactionId;
+        window.gtag("event", "conversion", payload);
+      };
+    })();
+  </script>
+)}
