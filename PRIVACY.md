@@ -93,19 +93,19 @@ only if you write to us).
 | **Local product data** | **Every user — free and paid** | Print job history, printer configuration, billing records, event logs — everything you do with physical printers | **On your machine only**, in `~/.kiln/`. We cannot see it and cannot retrieve it. | Not applicable — we can't see it |
 | **Support interactions** | Anyone who emails us | Email you send to us, support ticket content | Our email provider + internal tooling | Legitimate interest (§6(1)(f)) |
 | **Security telemetry** | Paid users (free users never hit authed endpoints) | Coarse IP bucket hash, hashed device fingerprint, client version, timestamped security event type — all cryptographically hashed before storage | Supabase (`license_security_events` table) | Legitimate interest — fraud + abuse prevention (§6(1)(f)) |
-| **Cookies (site)** | Visitors to `app.kiln3d.com` (paid-tier web workshop) | Supabase auth session cookie, CSRF token | Your browser | Consent for non-essential (§6(1)(a)); contract for session cookies |
+| **Cookies (workshop)** | Visitors to `app.kiln3d.com` (paid-tier web workshop) | Supabase auth session cookie, CSRF token | Your browser | Consent for non-essential (§6(1)(a)); contract for session cookies |
+| **Cookies (marketing site)** | Visitors to `kiln3d.com` who explicitly grant consent via the cookie banner — only present if we're running paid acquisition campaigns and you've opted in | Consent record (`kiln_consent`); when granted, optional analytics + advertising cookies (see §3.2) | Your browser | Consent (§6(1)(a)) — opt-in; no strictly-necessary cookies on the marketing site |
 | **Fulfillment orders** | Paid users who route through Craftcloud | Ship-to address, model file, material + finish choice | Passed through to Craftcloud; not retained by us beyond the order record | Contract (§6(1)(b)) |
 | **Opt-in community datasets** | Any user (free or paid) who explicitly opts in | If you explicitly opt in via `community_share`, we accept anonymized print outcome records (printer model, material, settings hash, success/fail outcome) and recovery strategies — never your email, auth_user_id, tenant_id, file names, or geometry | Supabase DB (`community_prints`, `community_recoveries`) | Consent (§6(1)(a)) |
 
-**What we deliberately do NOT collect:** advertising identifiers,
-third-party cross-site tracking analytics (no Google Analytics,
-Facebook Pixel, Segment, Mixpanel, Amplitude — see §3.2 for the
-narrow first-party exceptions), browsing history, your 3D models
-(beyond fulfillment pass-through), your CAD prompts, your G-code,
-file paths or filenames, IP address or hostname (in heartbeats
-or analytics), cross-site tracking data, biometric data, precise
-location data, inferences about your personality / political
-views / religion / orientation, or data on minors.
+**What we deliberately do NOT collect:** browsing history outside
+`kiln3d.com`, your 3D models (beyond fulfillment pass-through),
+your CAD prompts, your G-code, file paths or filenames, IP
+address or hostname (in heartbeats — see §3.2 for marketing-site
+analytics, which is consent-gated), audience-resale-style
+cross-site tracking data, biometric data, precise location data,
+inferences about your personality / political views / religion /
+orientation, or data on minors.
 
 ## 3.1 Usage heartbeats — what they are and aren't
 
@@ -186,6 +186,49 @@ see §5). The same SCC posture for international transfers
 applies; Vercel Web Analytics is not a separate vendor
 relationship.
 
+### Optional: third-party advertising + analytics (consent required)
+
+If we're running paid acquisition campaigns, the marketing site
+may additionally load **Meta Pixel** (Facebook + Instagram ad
+attribution), **Google Analytics 4** (aggregate behavior), and
+**Google Ads conversion tracking** (signup attribution). These
+load **only** when both gates are open: (1) the corresponding
+integration ID is configured for the deployment, and (2) you
+have granted explicit consent via the cookie preferences banner
+— `analytics` for GA4, `advertising` for Meta Pixel and Google
+Ads. With either gate closed, no third-party script loads, no
+event fires, no cookie is written. The cookie banner is not
+shown when there is nothing to consent to.
+
+**What gets shared (when active):**
+
+- **Meta Pixel:** page views and standard events (e.g.
+  `Lead`, `CompleteRegistration`, `Subscribe`, `Purchase`). For
+  measurement quality, we send SHA-256-hashed versions of any
+  identifiers you've already provided to us — typically your
+  email if you signed up. Meta receives the hash, not the raw
+  value, and cannot reverse it. Our server-side Conversions API
+  forwarder (`api.kiln3d.com`) pairs each browser fire with a
+  server fire sharing the same `event_id`, so Meta dedupes the
+  pair and we don't double-count.
+- **Google Analytics 4:** page views with anonymized IP, browser
+  / OS family, country, referrer, in-session events.
+- **Google Ads conversion tracking:** binary "signup conversion
+  occurred" plus the click identifier (`gclid`) if you arrived
+  via a Google ad.
+
+**Withdrawing consent** stops new tracking events. Click "Cookie
+preferences" in the site footer to re-open the banner and toggle
+off advertising or analytics. This does not delete data already
+collected — for that, use the rights process in §9.
+
+**Subprocessors:** Meta Platforms, Inc. and Google LLC — see §5.
+
+**California residents:** you may opt out of cross-context
+behavioral advertising at the cookie banner. We honor this by
+sending Limited Data Use (LDU) signals to Meta and equivalent
+flags to Google.
+
 ## 4. How we use it (processing purposes)
 
 Every piece of data above maps to one of these narrow purposes:
@@ -248,6 +291,8 @@ perform.
 | **Circle Internet Financial, LLC** | USDC stablecoin payments (Solana / Base networks), if used | US | Standard Contractual Clauses (EU→US) |
 | **Fly.io (Fly Software Inc.)** | Hosting for `api.kiln3d.com` | US | Standard Contractual Clauses (EU→US) |
 | **Vercel Inc.** | Hosting for `kiln3d.com` and `app.kiln3d.com`; first-party privacy-preserving Web Analytics on `kiln3d.com` only (no cookies, no PII, daily-rotating IP hash — see §3.2) | US | Standard Contractual Clauses (EU→US) |
+| **Meta Platforms, Inc.** | Ad measurement + retargeting on `kiln3d.com`, only when paid acquisition is active AND you've granted advertising consent (see §3.2) | US | Standard Contractual Clauses (EU→US); Meta's data-processing addendum |
+| **Google LLC** (Analytics + Ads) | GA4 site analytics + Google Ads conversion tracking on `kiln3d.com`, only when active AND you've granted the corresponding consent (see §3.2) | US | Standard Contractual Clauses (EU→US); Google's data-processing terms |
 | **Google (OAuth), Apple (Sign in with Apple), GitHub (OAuth)** | OAuth authentication only | US | Standard Contractual Clauses + each provider's own data policies |
 | **Craftcloud (All3DP GmbH)** | Fulfillment order routing | Germany / EU | Not applicable — EU processor |
 | **MyMiniFactory / Cults3D** | Marketplace search queries you initiate | UK / France | Standard Contractual Clauses |
@@ -256,10 +301,14 @@ perform.
 We will publish any changes to this list with at least 30 days'
 notice before a new subprocessor begins processing your data.
 
-We do **not** share data with advertising networks, analytics
-services, data brokers, cookie-consent platforms that resell
-signals, marketing automation platforms, or any third party whose
+We do **not** sell data, share data with data brokers, or use
+cookie-consent platforms or marketing automation tools whose
 business model depends on reselling user data.
+
+The advertising and analytics services listed above (Meta,
+Google) are bound subprocessors under data-processing
+agreements; they receive only what's described in §3.2 and only
+with your explicit consent.
 
 ## 6. International data transfers
 
@@ -302,11 +351,15 @@ cancel any recurring subscriptions at the next billing cycle.
 
 ## 8. Cookies and local storage
 
-The **marketing site** (`kiln3d.com`) uses **no cookies**. Vercel
-Web Analytics (see §3.2) is enabled but it's cookieless by design
-— it counts visitors via a daily-rotating IP+user-agent hash, not
-a persistent identifier. No "accept cookies" banner is shown
-because there is nothing to consent to.
+The **marketing site** (`kiln3d.com`) uses Vercel Web Analytics
+(see §3.2) — cookieless by design, no consent required. If we're
+running paid acquisition campaigns, the site additionally shows
+a cookie preferences banner offering optional analytics + advertising
+cookies (Google Analytics 4, Meta Pixel, Google Ads — see §3.2 for
+the full list). Strictly necessary cookies are not used on the
+marketing site; the only cookie ever written is your consent record
+(`kiln_consent`) when you save a preference. If no banner appears
+on your visit, no third-party tracking is active for that visit.
 
 The **web workshop** (`app.kiln3d.com`) uses:
 
@@ -317,12 +370,13 @@ The **web workshop** (`app.kiln3d.com`) uses:
 - **`localStorage`** for UI preferences (collapsed sidebars,
   recently-opened designs) — not transmitted to us.
 
-We do **not** use Google Analytics, Facebook Pixel, Segment,
-Mixpanel, Amplitude, or any third-party cross-site tracking
-analytics product. Vercel Web Analytics is first-party — operated
-by our hosting provider, with no cookies, no PII, no cross-site
-data flow — and is the only analytics enabled on `kiln3d.com`.
-See §3.2 for full disclosure.
+We do **not** use Segment, Mixpanel, Amplitude, or any cross-site
+tracking platform whose business model is audience resale. The
+only third-party analytics that may run on `kiln3d.com` are
+Google Analytics 4 and Meta Pixel — and only with your explicit
+consent (see §3.2). Neither is loaded on the web workshop
+(`app.kiln3d.com`) at all. Vercel Web Analytics is first-party,
+cookieless, and the only analytics that runs without consent.
 
 ## 9. Your rights
 

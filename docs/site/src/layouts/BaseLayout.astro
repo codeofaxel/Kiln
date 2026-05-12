@@ -3,6 +3,10 @@ import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
 import SeoHead from '../components/SeoHead.astro';
 import VercelAnalytics from '../components/VercelAnalytics.astro';
+import MetaPixel from '../components/MetaPixel.astro';
+import GoogleAnalytics from '../components/GoogleAnalytics.astro';
+import GoogleAdsConversion from '../components/GoogleAdsConversion.astro';
+import CookieBanner from '../components/CookieBanner.astro';
 import '../styles/global.css';
 
 interface Props {
@@ -59,5 +63,16 @@ const {
     <slot />
   </main>
   <Footer />
+
+  <!-- Marketing tracking — env-gated dormant; nothing renders
+       until PUBLIC_META_PIXEL_ID / PUBLIC_GA4_MEASUREMENT_ID /
+       PUBLIC_GOOGLE_ADS_CONVERSION_ID are set on Vercel.  Each
+       script also gates on `kiln_consent` cookie at script-init
+       time (advertising for Meta/Google-Ads, analytics for GA4).
+       See PRIVACY.md §3.2 for disclosure. -->
+  <MetaPixel />
+  <GoogleAnalytics />
+  <GoogleAdsConversion />
+  <CookieBanner />
 </body>
 </html>
