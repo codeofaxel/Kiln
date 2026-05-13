@@ -13,6 +13,8 @@ import logging
 import threading
 import time
 
+from kiln.events import EventType
+
 logger = logging.getLogger(__name__)
 
 # Default idle timeout: 30 minutes.
@@ -192,8 +194,6 @@ class HeaterWatchdog:
         # Emit event if event bus is available.
         if self._event_bus is not None:
             try:
-                from kiln.events import EventType
-
                 self._event_bus.publish(
                     EventType.TEMPERATURE_WARNING,
                     {

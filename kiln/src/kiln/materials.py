@@ -14,6 +14,8 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from kiln.events import EventType
+
 logger = logging.getLogger(__name__)
 
 
@@ -122,8 +124,6 @@ class MaterialTracker:
                     remaining_grams=remaining_grams,
                 )
             if self._bus is not None:
-                from kiln.events import EventType
-
                 self._bus.publish(
                     EventType.MATERIAL_LOADED,
                     data=mat.to_dict(),
@@ -186,8 +186,6 @@ class MaterialTracker:
             ),
         )
         if self._bus is not None:
-            from kiln.events import EventType
-
             self._bus.publish(
                 EventType.MATERIAL_MISMATCH,
                 data=warning.to_dict(),
@@ -261,8 +259,6 @@ class MaterialTracker:
         """Emit spool low/empty events if thresholds are crossed."""
         if self._bus is None:
             return
-        from kiln.events import EventType
-
         if remaining <= 0:
             self._bus.publish(
                 EventType.SPOOL_EMPTY,

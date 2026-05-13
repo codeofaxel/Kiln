@@ -13,6 +13,8 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from kiln.events import EventType
+
 logger = logging.getLogger(__name__)
 
 
@@ -96,8 +98,6 @@ class BedLevelManager:
         """Subscribe to job completion events on the event bus."""
         if self._bus is None:
             return
-        from kiln.events import EventType
-
         self._bus.subscribe(EventType.JOB_COMPLETED, self._on_job_completed)
 
     def _on_job_completed(self, event: Any) -> None:
@@ -110,8 +110,6 @@ class BedLevelManager:
         # Check if leveling is now needed
         status = self.check_needed(printer_name)
         if status.needs_leveling and self._bus is not None:
-            from kiln.events import EventType
-
             self._bus.publish(
                 EventType.LEVELING_NEEDED,
                 data=status.to_dict(),
@@ -261,8 +259,6 @@ class BedLevelManager:
         started_at = time.time()
 
         if self._bus is not None:
-            from kiln.events import EventType
-
             self._bus.publish(
                 EventType.LEVELING_TRIGGERED,
                 data={
@@ -301,8 +297,6 @@ class BedLevelManager:
                 self._prints_since[printer_name] = 0
 
             if self._bus is not None:
-                from kiln.events import EventType
-
                 self._bus.publish(
                     EventType.LEVELING_COMPLETED,
                     data={
@@ -335,8 +329,6 @@ class BedLevelManager:
                 )
 
             if self._bus is not None:
-                from kiln.events import EventType
-
                 self._bus.publish(
                     EventType.LEVELING_FAILED,
                     data={

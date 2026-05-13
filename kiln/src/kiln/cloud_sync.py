@@ -18,6 +18,8 @@ from typing import Any
 
 import requests
 
+from kiln.events import EventType
+
 logger = logging.getLogger(__name__)
 
 
@@ -227,8 +229,6 @@ class CloudSyncManager:
                 self._last_status = "success"
 
             if self._bus is not None:
-                from kiln.events import EventType
-
                 self._bus.publish(
                     EventType.SYNC_COMPLETED,
                     data=result,
@@ -251,8 +251,6 @@ class CloudSyncManager:
                     self._errors = self._errors[-50:]
 
             if self._bus is not None:
-                from kiln.events import EventType
-
                 self._bus.publish(
                     EventType.SYNC_FAILED,
                     data={"error": safe_msg},

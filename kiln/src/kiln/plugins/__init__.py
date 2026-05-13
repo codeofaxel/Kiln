@@ -18,6 +18,8 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from kiln.events import EventType
+
 logger = logging.getLogger(__name__)
 _PLUGIN_POLICY_STRICT = "strict"
 _PLUGIN_POLICY_PERMISSIVE = "permissive"
@@ -360,8 +362,6 @@ class PluginManager:
                 info.error = None
 
             if ctx.event_bus is not None:
-                from kiln.events import EventType
-
                 ctx.event_bus.publish(
                     EventType.PLUGIN_LOADED,
                     data={"name": name, "version": plugin.version},
@@ -377,8 +377,6 @@ class PluginManager:
             logger.error("Failed to activate plugin %s: %s", name, exc)
 
             if ctx.event_bus is not None:
-                from kiln.events import EventType
-
                 ctx.event_bus.publish(
                     EventType.PLUGIN_ERROR,
                     data={"name": name, "error": str(exc)},
