@@ -660,6 +660,31 @@ class TestStallDetection:
         result2 = monitor._check_stall("test", 50.0)
         assert result2 is None
 
+    def test_publish_stall_event_reaches_event_bus(self, monkeypatch):
+        # Regression: the publish path previously imported a nonexistent
+        # `get_event_bus` from kiln.events, so the surrounding try/except
+        # swallowed an ImportError on every call and the bus never saw
+        # the event.
+        from kiln.events import Event, EventType
+
+        mock_bus = MagicMock()
+        monkeypatch.setattr("kiln.server._get_event_bus", lambda: mock_bus)
+
+        monitor = PrintHealthMonitor()
+        alert_data = {
+            "alert_type": "stall",
+            "printer_name": "voron-350",
+            "completion_pct": 50.0,
+        }
+        monitor._publish_stall_event(alert_data)
+
+        mock_bus.publish.assert_called_once()
+        (published_event,) = mock_bus.publish.call_args[0]
+        assert isinstance(published_event, Event)
+        assert published_event.type == EventType.PRINTER_ERROR
+        assert published_event.data == alert_data
+        assert published_event.source == "print_health_monitor"
+
 
 # ---------------------------------------------------------------------------
 # Health history

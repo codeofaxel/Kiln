@@ -1792,15 +1792,15 @@ class PrintHealthMonitor:
     def _publish_stall_event(self, alert_data: dict[str, Any]) -> None:
         """Best-effort publish of a stall detection event."""
         try:
-            from kiln.events import Event, EventType, get_event_bus
+            import kiln.server as _srv
+            from kiln.events import Event, EventType
 
-            bus = get_event_bus()
             event = Event(
                 type=EventType.PRINTER_ERROR,
                 data=alert_data,
                 source="print_health_monitor",
             )
-            bus.publish(event)
+            _srv._get_event_bus().publish(event)
             logger.info("Stall event published for printer=%s", alert_data.get("printer_name"))
         except Exception as exc:
             logger.debug("Failed to publish stall event: %s", exc)  # event delivery is best-effort
