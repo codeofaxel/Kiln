@@ -475,8 +475,14 @@ class TestFirstLayerMonitor:
         ]
         assert len(alert_calls) > 0
 
-    def test_monitor_publishes_vision_check_events(self) -> None:
-        """Event bus receives VISION_CHECK per successful snapshot."""
+    def test_monitor_publishes_vision_frame_captured_events(self) -> None:
+        """Event bus receives VISION_FRAME_CAPTURED per successful snapshot.
+
+        The first-layer monitor is a system actor capturing frames, so its
+        events share the same type as the background watcher's.  Payload
+        includes the JPEG bytes forwarded from the snap dict so downstream
+        detectors / corpus recorders can analyse without re-fetching.
+        """
 
         jpeg_data = _make_jpeg(bytes(range(256)) * 2)
         adapter = _make_mock_adapter(snapshot_data=jpeg_data)
@@ -493,12 +499,18 @@ class TestFirstLayerMonitor:
             result = monitor.monitor()
         assert result.success is True
         assert len(result.snapshots) == 2
-        # Should have published VISION_CHECK for each snapshot
+        # Should have published VISION_FRAME_CAPTURED for each snapshot
         check_calls = [
             c for c in event_bus.publish.call_args_list
-            if c[0][0] == EventType.VISION_CHECK
+            if c[0][0] == EventType.VISION_FRAME_CAPTURED
         ]
         assert len(check_calls) == 2
+        # And the payload should include the snapshot bytes — first-layer
+        # monitor must forward what the background watcher forwards.
+        assert all(
+            isinstance(c[0][1].get("snapshot_b64"), str) and len(c[0][1]["snapshot_b64"]) > 0
+            for c in check_calls
+        )
 
     def test_monitor_custom_policy(self) -> None:
         """Custom delay/interval/count are all respected."""

@@ -133,7 +133,26 @@ class EventType(enum.Enum):
     FULFILLMENT_STALLED = "fulfillment.stalled"
 
     # Vision monitoring
-    VISION_CHECK = "vision.check"
+    #
+    # VISION_FRAME_CAPTURED — a system actor (background watcher,
+    # first-layer monitor) just captured a camera frame.  Payload
+    # includes the snapshot bytes plus raw observability signals
+    # (hash, camera_changed, consecutive_static_frames,
+    # time_since_last_progress).  Fires often (every snapshot_interval
+    # during a watched print).
+    #
+    # VISION_AGENT_INSPECTION — an agent invoked the
+    # monitor_print_vision tool to look at the printer right now.
+    # Payload is thin metadata (printer state + whether a snapshot
+    # was captured + whether auto-pause fired).  Fires once per
+    # explicit tool call.
+    #
+    # VISION_ALERT — a derived signal (failure detected, alert
+    # threshold crossed, recovery needed).  Published by downstream
+    # detectors that consume VISION_FRAME_CAPTURED / agent inspections
+    # and apply policy.
+    VISION_FRAME_CAPTURED = "vision.frame_captured"
+    VISION_AGENT_INSPECTION = "vision.agent_inspection"
     VISION_ALERT = "vision.alert"
 
     # Safety monitor (kiln monitor)

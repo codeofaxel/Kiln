@@ -429,9 +429,9 @@ class _PrintWatcher:
                             # Only count after we've seen a prior frame —
                             # the very first capture has nothing to
                             # compare to.  Counter is a measurement
-                            # exposed on the VISION_CHECK event; the
-                            # "what counts as stale" decision belongs to
-                            # whatever subscriber consumes the event.
+                            # exposed on the VISION_FRAME_CAPTURED event;
+                            # the "what counts as stale" decision belongs
+                            # to whatever subscriber consumes the event.
                             if had_prior_frame:
                                 if camera_changed:
                                     self._consecutive_static_frames = 0
@@ -502,8 +502,8 @@ class _PrintWatcher:
                                 self._snapshots.append(snap)
                             if self._event_bus is not None:
                                 try:
-                                    # VISION_CHECK SUBSCRIBER CONTRACT
-                                    # --------------------------------
+                                    # VISION_FRAME_CAPTURED SUBSCRIBER CONTRACT
+                                    # ---------------------------------------
                                     # This event fires on EVERY snapshot
                                     # capture (default cadence: one every
                                     # 60 seconds while a print runs).  The
@@ -529,7 +529,7 @@ class _PrintWatcher:
                                     # See ``kiln_pro.vision.corpus`` for
                                     # the reference implementation.
                                     self._event_bus.publish(
-                                        EventType.VISION_CHECK,
+                                        EventType.VISION_FRAME_CAPTURED,
                                         {
                                             "printer_name": self._printer_name,
                                             "watch_id": self._watch_id,
@@ -790,9 +790,14 @@ class _MonitoringToolsPlugin:
                 if cost_info is not None:
                     result["cost_estimate"] = cost_info
 
-                # Publish vision check event
+                # Publish agent-inspection event — fires once per
+                # explicit monitor_print_vision call.  Distinct from
+                # the system-actor VISION_FRAME_CAPTURED events
+                # published by background monitors; payload is thin
+                # (no snapshot bytes) because agents already have the
+                # bytes returned to them via the tool's response.
                 _srv._get_event_bus().publish(
-                    EventType.VISION_CHECK,
+                    EventType.VISION_AGENT_INSPECTION,
                     {
                         "printer_name": printer_name or "default",
                         "completion": job.completion,
@@ -993,7 +998,7 @@ class _MonitoringToolsPlugin:
                     on.  Defaults to ``["vision.alert", "print.terminal"]``
                     — failure alerts and print completion.  Pass a custom
                     list to wait on different events (e.g.
-                    ``["vision.check"]`` to wake on every snapshot).
+                    ``["vision.frame_captured"]`` to wake on every snapshot).
 
             When ``block_until_event=True`` and an event arrives, the
             return payload includes ``events_received`` (list of events)

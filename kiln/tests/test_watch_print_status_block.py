@@ -319,7 +319,7 @@ class TestEventTypeValidation:
 class TestCustomEventTypes:
     """Custom event_types filter wakes on the requested type and only that."""
 
-    def test_custom_event_types_filter_to_vision_check(
+    def test_custom_event_types_filter_to_vision_frame_captured(
         self, monitoring_tools, watcher_in_registry,
     ) -> None:
         import kiln.server as _srv
@@ -337,9 +337,9 @@ class TestCustomEventTypes:
                 source="test",
             )
             time.sleep(0.05)
-            # vision.check IS in event_types — should wake us.
+            # vision.frame_captured IS in event_types — should wake us.
             bus.publish(
-                EventType.VISION_CHECK,
+                EventType.VISION_FRAME_CAPTURED,
                 {"printer_name": "printer-H", "phase": "mid_print"},
                 source="test",
             )
@@ -352,16 +352,16 @@ class TestCustomEventTypes:
                     watch_id="w-custom",
                     block_until_event=True,
                     timeout=3,
-                    event_types=["vision.check"],
+                    event_types=["vision.frame_captured"],
                 )
         finally:
             t.join(timeout=2)
 
         assert result["success"] is True
         assert len(result["events_received"]) >= 1
-        # The wake-up event should be vision.check, not vision.alert.
+        # The wake-up event should be vision.frame_captured, not vision.alert.
         types_received = {e["type"] for e in result["events_received"]}
-        assert "vision.check" in types_received
+        assert "vision.frame_captured" in types_received
         assert "vision.alert" not in types_received
 
 

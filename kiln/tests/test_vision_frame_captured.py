@@ -1,7 +1,7 @@
-"""Tests for the enriched VISION_CHECK event payload from _PrintWatcher.
+"""Tests for the enriched VISION_FRAME_CAPTURED event payload from _PrintWatcher.
 
 The watcher captures camera frames during every snapshot cycle.  This
-test file pins the contract: every published VISION_CHECK event carries
+test file pins the contract: every published VISION_FRAME_CAPTURED event carries
 raw observability data — snapshot bytes, MD5 hash, the camera-changed
 bit, the consecutive-static-frame count, and the seconds since
 telemetry last advanced — so downstream subscribers (e.g. an out-of-
@@ -124,11 +124,11 @@ def _start_watcher_briefly(
     return watcher
 
 
-def _collect_vision_checks(bus) -> list[dict]:
-    """Return all VISION_CHECK events the bus has received."""
+def _collect_vision_frames(bus) -> list[dict]:
+    """Return all VISION_FRAME_CAPTURED events the bus has received."""
     from kiln.events import EventType
 
-    return [e for e in bus._history if e.type == EventType.VISION_CHECK]
+    return [e for e in bus._history if e.type == EventType.VISION_FRAME_CAPTURED]
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +137,7 @@ def _collect_vision_checks(bus) -> list[dict]:
 
 
 class TestVisionCheckPayloadShape:
-    """Pin the contract: every VISION_CHECK carries the raw signals
+    """Pin the contract: every VISION_FRAME_CAPTURED carries the raw signals
     downstream subscribers need to run their own detectors."""
 
     REQUIRED_FIELDS = [
@@ -164,13 +164,13 @@ class TestVisionCheckPayloadShape:
 
         _start_watcher_briefly(adapter, bus, run_seconds=0.6)
 
-        events = _collect_vision_checks(bus)
-        assert len(events) >= 2, "Expected multiple VISION_CHECK events"
+        events = _collect_vision_frames(bus)
+        assert len(events) >= 2, "Expected multiple VISION_FRAME_CAPTURED events"
         for ev in events:
             data = ev.data
             for field in self.REQUIRED_FIELDS:
                 assert field in data, (
-                    f"VISION_CHECK payload missing required field {field!r}"
+                    f"VISION_FRAME_CAPTURED payload missing required field {field!r}"
                 )
 
     def test_snapshot_b64_is_decodable_and_matches_hash(self) -> None:
@@ -188,8 +188,8 @@ class TestVisionCheckPayloadShape:
 
         _start_watcher_briefly(adapter, bus, run_seconds=0.4)
 
-        events = _collect_vision_checks(bus)
-        assert events, "Expected at least one VISION_CHECK"
+        events = _collect_vision_frames(bus)
+        assert events, "Expected at least one VISION_FRAME_CAPTURED"
         ev = events[0]
         decoded = base64.b64decode(ev.data["snapshot_b64"])
         assert decoded == distinct_blob, (
@@ -212,7 +212,7 @@ class TestVisionCheckPayloadShape:
 
         _start_watcher_briefly(adapter, bus, run_seconds=0.4)
 
-        events = _collect_vision_checks(bus)
+        events = _collect_vision_frames(bus)
         assert events
         assert all(ev.data["watch_id"] == "enrich-test" for ev in events)
 
@@ -237,10 +237,10 @@ class TestCameraChangedBit:
 
         _start_watcher_briefly(adapter, bus, run_seconds=0.3)
 
-        events = _collect_vision_checks(bus)
+        events = _collect_vision_frames(bus)
         assert events
         assert events[0].data["camera_changed"] is False, (
-            "First VISION_CHECK should report camera_changed=False (no prior frame)"
+            "First VISION_FRAME_CAPTURED should report camera_changed=False (no prior frame)"
         )
 
     def test_subsequent_event_camera_changed_when_bytes_differ(self) -> None:
@@ -254,7 +254,7 @@ class TestCameraChangedBit:
 
         _start_watcher_briefly(adapter, bus, run_seconds=0.5)
 
-        events = _collect_vision_checks(bus)
+        events = _collect_vision_frames(bus)
         assert len(events) >= 2
         # Frame 2+: bytes differ, hash differs, camera_changed=True
         assert events[1].data["camera_changed"] is True
@@ -271,7 +271,7 @@ class TestCameraChangedBit:
 
         _start_watcher_briefly(adapter, bus, run_seconds=0.5)
 
-        events = _collect_vision_checks(bus)
+        events = _collect_vision_frames(bus)
         assert len(events) >= 3
         # First event: no prior frame, camera_changed=False
         # Subsequent events: hash matches prior, camera_changed=False
@@ -299,7 +299,7 @@ class TestConsecutiveStaticFrames:
 
         _start_watcher_briefly(adapter, bus, run_seconds=0.3)
 
-        events = _collect_vision_checks(bus)
+        events = _collect_vision_frames(bus)
         assert events
         assert events[0].data["consecutive_static_frames"] == 0
 
@@ -315,7 +315,7 @@ class TestConsecutiveStaticFrames:
 
         _start_watcher_briefly(adapter, bus, run_seconds=0.6)
 
-        events = _collect_vision_checks(bus)
+        events = _collect_vision_frames(bus)
         # Build a list of consecutive_static_frames values across events.
         counter_values = [e.data["consecutive_static_frames"] for e in events]
         # Frame 0: 0 (first frame, no comparison)
@@ -343,7 +343,7 @@ class TestConsecutiveStaticFrames:
 
         _start_watcher_briefly(adapter, bus, run_seconds=0.6)
 
-        events = _collect_vision_checks(bus)
+        events = _collect_vision_frames(bus)
         counter_values = [e.data["consecutive_static_frames"] for e in events]
         # We expect the counter to climb through the static run, then
         # drop back to 0 once a different frame arrives.
@@ -376,7 +376,7 @@ class TestTimeSinceLastProgress:
 
         _start_watcher_briefly(adapter, bus, run_seconds=0.4)
 
-        events = _collect_vision_checks(bus)
+        events = _collect_vision_frames(bus)
         assert events
         for ev in events:
             value = ev.data["time_since_last_progress_seconds"]
@@ -396,7 +396,7 @@ class TestTimeSinceLastProgress:
 
         _start_watcher_briefly(adapter, bus, run_seconds=0.6)
 
-        events = _collect_vision_checks(bus)
+        events = _collect_vision_frames(bus)
         assert len(events) >= 3
         values = [e.data["time_since_last_progress_seconds"] for e in events]
         # Strictly monotonic increase (allow small float noise).
@@ -413,7 +413,7 @@ class TestTimeSinceLastProgress:
 class TestNoDecisionsInPublicWatcher:
     """The watcher publishes raw signals only.  Alert-bearing fields
     (alert_type, recommended_action, is_heartbeat, mismatch_duration_seconds)
-    must NOT appear in VISION_CHECK events from the watcher — those are
+    must NOT appear in VISION_FRAME_CAPTURED events from the watcher — those are
     downstream-detector responsibilities, not raw-stream responsibilities.
     """
 
@@ -436,11 +436,11 @@ class TestNoDecisionsInPublicWatcher:
 
         _start_watcher_briefly(adapter, bus, run_seconds=0.4)
 
-        events = _collect_vision_checks(bus)
+        events = _collect_vision_frames(bus)
         assert events
         for ev in events:
             for forbidden in self.FORBIDDEN_FIELDS:
                 assert forbidden not in ev.data, (
-                    f"VISION_CHECK payload should NOT carry decision field "
+                    f"VISION_FRAME_CAPTURED payload should NOT carry decision field "
                     f"{forbidden!r} — that belongs to downstream detectors"
                 )

@@ -24,20 +24,23 @@ from kiln.server import _PHASE_HINTS, _detect_phase
 class TestVisionEventTypes:
     """Verify new vision-related event types exist."""
 
-    def test_vision_check_exists(self) -> None:
-        assert EventType.VISION_CHECK.value == "vision.check"
+    def test_vision_frame_captured_exists(self) -> None:
+        assert EventType.VISION_FRAME_CAPTURED.value == "vision.frame_captured"
+
+    def test_vision_agent_inspection_exists(self) -> None:
+        assert EventType.VISION_AGENT_INSPECTION.value == "vision.agent_inspection"
 
     def test_vision_alert_exists(self) -> None:
         assert EventType.VISION_ALERT.value == "vision.alert"
 
-    def test_vision_check_creates_event(self) -> None:
+    def test_vision_frame_captured_creates_event(self) -> None:
         event = Event(
-            type=EventType.VISION_CHECK,
+            type=EventType.VISION_FRAME_CAPTURED,
             data={"printer_name": "voron", "completion": 45.0},
             source="vision",
         )
         d = event.to_dict()
-        assert d["type"] == "vision.check"
+        assert d["type"] == "vision.frame_captured"
         assert d["data"]["printer_name"] == "voron"
 
     def test_vision_alert_creates_event(self) -> None:

@@ -298,7 +298,7 @@ class FirstLayerMonitor:
                 if snap is not None:
                     snapshots.append(snap)
                     consecutive_failures = 0
-                    self._publish_vision_check(snap)
+                    self._publish_vision_frame_captured(snap)
                 else:
                     consecutive_failures += 1
                     logger.warning(
@@ -600,23 +600,41 @@ class FirstLayerMonitor:
 
         return None
 
-    def _publish_vision_check(self, snap: dict[str, Any]) -> None:
-        """Publish a ``VISION_CHECK`` event for the captured snapshot."""
+    def _publish_vision_frame_captured(self, snap: dict[str, Any]) -> None:
+        """Publish a ``VISION_FRAME_CAPTURED`` event for the snapshot.
+
+        First-layer monitor captures count as system-actor frame
+        captures, same shape as the background watcher's events.  We
+        forward the JPEG bytes from the snap dict so downstream
+        subscribers (vision detectors, training-corpus recorders)
+        have the raw frame available — without this they'd see the
+        event fire but have no image to analyse.
+
+        See the VISION_FRAME_CAPTURED subscriber contract in
+        ``kiln/plugins/monitoring_tools.py`` for the size warning
+        and the persist-only-on-derived-signal pattern.
+        """
         if self._event_bus is None:
             return
         try:
             self._event_bus.publish(
-                EventType.VISION_CHECK,
+                EventType.VISION_FRAME_CAPTURED,
                 {
                     "printer_name": self._printer_name,
                     "completion": snap.get("completion_percent"),
                     "phase": snap.get("print_phase"),
                     "snapshot_index": snap.get("snapshot_index"),
+                    # Forward the raw bytes that were already in the
+                    # snap dict, so downstream detectors don't have to
+                    # re-fetch from the adapter.
+                    "snapshot_b64": snap.get("image_base64"),
                 },
                 source="print_monitor",
             )
         except Exception:
-            logger.debug("Failed to publish VISION_CHECK event", exc_info=True)
+            logger.debug(
+                "Failed to publish VISION_FRAME_CAPTURED event", exc_info=True
+            )
 
     def _publish_vision_alert(self, alert_type: str, detail: str) -> None:
         """Publish a ``VISION_ALERT`` event."""
