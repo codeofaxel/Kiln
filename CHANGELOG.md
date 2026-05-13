@@ -15,7 +15,7 @@ Vision event-name split, MCP-client config self-heal, an event-aware
 - `watch_print_status` `block_until_event` subscribe mode — agents can
   await a specific event instead of polling.
 - `kiln health`: detects MCP-client config drift and self-heals stale
-  `kiln` command paths in Cursor / Claude Desktop / Windsurf configs.
+  `kiln` command paths in Claude Desktop / Claude Code / Codex configs.
 - `kiln install-mcp`: richer installer promoted from kiln-pro.
 - `kiln serve`: orphan-host watchdog exits cleanly when the MCP host
   goes away.
