@@ -11,7 +11,7 @@
 
 ---
 
-**Kiln is an open-source MCP server that lets AI agents (Claude, Cursor, or any custom MCP client) drive real 3D printers end to end — OctoPrint, Moonraker/Klipper, Creality, Bambu Lab, Prusa Link, Elegoo, and Direct USB.**
+**Kiln is an open-source MCP server that lets AI agents (Claude Desktop, Claude Code, Codex, or any custom MCP client) drive real 3D printers end to end — OctoPrint, Moonraker/Klipper, Creality, Bambu Lab, Prusa Link, Elegoo, and Direct USB.**
 
 In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result. No human in the middle.
 
@@ -347,7 +347,7 @@ export KILN_BAMBU_TLS_MODE=insecure
 export KILN_BAMBU_TLS_FINGERPRINT=0123abcd...
 ```
 
-**Bambu webcam snapshots** require `ffmpeg` for RTSP frame capture. Install it if you want vision monitoring on Bambu printers:
+**Bambu webcam streams** use `ffmpeg` to relay the RTSP feed as MJPEG. Install it if you want the continuous video stream on Bambu printers:
 ```bash
 # macOS
 brew install ffmpeg
@@ -355,7 +355,7 @@ brew install ffmpeg
 # Ubuntu/Debian
 sudo apt install ffmpeg
 ```
-Without `ffmpeg`, Bambu printers will work normally but `can_snapshot` will be `False` and vision monitoring tools won't capture frames.
+Without `ffmpeg`, Bambu printers still report `can_snapshot=True` and single-frame vision tools (e.g. `printer_snapshot`, `monitor_print_vision`) work normally — only the continuous MJPEG stream needs `ffmpeg`.
 
 ### CLI Commands
 
