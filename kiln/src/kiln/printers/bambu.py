@@ -645,7 +645,16 @@ class BambuAdapter(PrinterAdapter):
             can_set_temp=True,
             can_send_gcode=True,
             can_pause=True,
-            can_snapshot=_find_ffmpeg() is not None,
+            # Port 6000 TLS+JPEG works on A1 / A1 Mini / P1P / P1S
+            # without ffmpeg.  get_snapshot() tries port 6000 first
+            # and falls back to RTSPS (X1 series, port 322) only if
+            # the port-6000 path fails — RTSPS does need ffmpeg, but
+            # by that point we're already in a Bambu X1-specific
+            # error case that surfaces as a clear PrinterError.
+            # Reporting True here lets every Bambu user opt into
+            # snapshot-based workflows; runtime failures bubble up
+            # from get_snapshot() with model-specific guidance.
+            can_snapshot=True,
             can_stream=True,
             supported_extensions=(".3mf", ".gcode", ".gco"),
         )

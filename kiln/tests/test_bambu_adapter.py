@@ -1374,9 +1374,15 @@ class TestBambuAdapterSnapshot:
 
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value=None)
     def test_capabilities_without_ffmpeg(self, mock_ffmpeg) -> None:
+        """A1 / A1 Mini / P1P / P1S use port 6000 TLS+JPEG and don't need
+        ffmpeg.  Reporting can_snapshot=False when ffmpeg is missing
+        would silently disable the watcher's snapshot capture for the
+        majority of Bambu printers in the wild.  get_snapshot() handles
+        the X1-series RTSPS fallback and raises a clear PrinterError
+        if that path also fails."""
         adapter = _adapter()
         caps = adapter.capabilities
-        assert caps.can_snapshot is False
+        assert caps.can_snapshot is True
         assert caps.can_stream is True
 
 
