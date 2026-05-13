@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from kiln.events import Event, EventBus, EventType
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -1034,8 +1036,6 @@ class GcodeInterceptor:
     ) -> None:
         """Best-effort event emission for interception actions."""
         try:
-            from kiln.events import Event, EventBus, EventType
-
             event = Event(
                 type=EventType.SAFETY_BLOCKED,
                 data={

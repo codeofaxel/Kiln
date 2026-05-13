@@ -37,6 +37,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from kiln import parse_int_env
+from kiln.events import Event, EventType
 
 logger = logging.getLogger(__name__)
 
@@ -509,8 +510,6 @@ class PrintQueue:
         if self._event_bus is None:
             return
         try:
-            from kiln.events import Event, EventType
-
             self._event_bus.publish(
                 Event(
                     type=EventType.JOB_STUCK_TIMEOUT,

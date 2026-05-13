@@ -44,6 +44,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from kiln.events import Event, EventBus, EventType
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -1865,8 +1867,6 @@ class PrintRecovery:
     def _emit_event(self, failure: FailureReport) -> None:
         """Best-effort event emission for failure detection.  Never raises."""
         try:
-            from kiln.events import Event, EventBus, EventType
-
             event = Event(
                 type=EventType.PRINT_FAILED,
                 data={

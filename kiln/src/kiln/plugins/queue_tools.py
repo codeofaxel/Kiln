@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.events import Event, EventType
+
 _logger = logging.getLogger(__name__)
 
 
@@ -44,7 +46,6 @@ def submit_job(
     Use ``job_status`` to check progress and ``queue_summary`` for an overview.
     """
     import kiln.server as _srv
-    from kiln.events import Event, EventType
     try:
         from kiln.licensing import FREE_TIER_MAX_QUEUED_JOBS, LicenseTier, get_tier
     except ImportError:
@@ -204,7 +205,6 @@ def cancel_job(job_id: str) -> dict:
     Only jobs in QUEUED or PRINTING state can be cancelled.
     """
     import kiln.server as _srv
-    from kiln.events import Event, EventType
     from kiln.queue import JobNotFoundError
 
     if err := _srv._check_auth("queue"):

@@ -40,6 +40,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from kiln.events import Event, EventBus, EventType
+
 logger = logging.getLogger(__name__)
 
 _PERSIST_SETTING_KEY = "emergency_latch_state_v1"
@@ -803,8 +805,6 @@ class EmergencyCoordinator:
     ) -> None:
         """Best-effort event emission.  Never raises."""
         try:
-            from kiln.events import Event, EventBus, EventType
-
             event = Event(
                 type=EventType.SAFETY_ESCALATED,
                 data={
