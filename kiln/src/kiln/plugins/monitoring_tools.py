@@ -22,6 +22,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kiln.events import EventType
+
 _logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -190,8 +192,6 @@ class _PrintWatcher:
             self._outcome = result.get("outcome", "unknown")
         if self._event_bus is not None:
             try:
-                from kiln.events import EventType
-
                 self._event_bus.publish(
                     EventType.PRINT_TERMINAL,
                     {
@@ -207,7 +207,6 @@ class _PrintWatcher:
 
     def _run(self) -> None:
         """Main monitoring loop — runs in a background thread."""
-        from kiln.events import EventType
         from kiln.printers import PrinterStatus
 
         adapter = self._adapter
@@ -604,7 +603,6 @@ class _MonitoringToolsPlugin:
                     detected with confidence >= 0.8.  Defaults to the value of the
                     ``KILN_VISION_AUTO_PAUSE`` environment variable (default False).
             """
-            from kiln.events import EventType
             from kiln.printers import PrinterError, PrinterStatus
             from kiln.registry import PrinterNotFoundError
 
