@@ -385,3 +385,32 @@ jobs:
             --version "$VERSION" \
             --changelog "v${VERSION} — see https://github.com/codeofaxel/Kiln/releases/tag/${GITHUB_REF#refs/tags/}" \
             --tags "latest,3d-printing,mcp,ai-agent,bambu,moonraker,octoprint,prusa,klipper,elegoo"
+
+  # After every PyPI publish job completes, override the
+  # `pypa/gh-action-pypi-publish` action's automatic "inactive" status
+  # so the repo's Deployments widget shows green ✓ on the `pypi` row
+  # instead of greyed-out "inactive".  The action fires its own
+  # success → inactive sequence within ~7 seconds as a one-shot-deploy
+  # convention; we post a fresh success last so the widget reflects
+  # what actually happened (the publish succeeded).
+  finalize-pypi-status:
+    needs: [publish-kiln, publish-octoprint-cli, publish-kiln-print, publish-kiln-printer]
+    runs-on: ubuntu-latest
+    permissions:
+      deployments: write
+    steps:
+      - name: Override pypi deployment status to success
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          DEP_ID=$(gh api "repos/$REPO/deployments?environment=pypi&per_page=1" --jq '.[0].id')
+          if [ -z "$DEP_ID" ]; then
+            echo "No pypi deployment found; skipping status override."
+            exit 0
+          fi
+          gh api "repos/$REPO/deployments/$DEP_ID/statuses" -X POST \
+            -f state=success \
+            -f environment=pypi \
+            -f description="kiln3d ${TAG} published to PyPI"
