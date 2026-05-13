@@ -142,6 +142,9 @@ const installHowToSchema = {
         </p>
         <a href="/pricing" class="btn pro-cta-btn">Get Pro &rarr;</a>
         <p class="pro-cta-price">$49 / month</p>
+        <p class="pro-cta-signin">
+          Or <a href="https://app.kiln3d.com/connect">sign in free &rarr;</a>
+        </p>
       </div>
     </div>
   </section>
@@ -338,6 +341,30 @@ const installHowToSchema = {
     color: var(--text-muted);
     margin: 12px 0 0 !important;
     letter-spacing: 0.01em;
+  }
+
+  /* Free-tier escape hatch — sits below the Pro price line as a
+     tertiary aside in the same eye-position as the Pro CTA button.
+     Muted styling matches the .faq-link footnote pattern (dashed
+     underline, text-muted, accent-on-hover) so it reads as "not
+     ready yet, here's the free path" rather than as a second CTA
+     competing with Get Pro. */
+  .pro-cta-signin {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 10px 0 0;
+    letter-spacing: 0.01em;
+  }
+  .pro-cta-signin a {
+    color: var(--text-muted);
+    text-decoration: none;
+    border-bottom: 1px dashed var(--border);
+    padding-bottom: 1px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .pro-cta-signin a:hover {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
   }
 
   /* Advanced install disclosure — preserves the legacy macOS /
