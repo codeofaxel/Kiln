@@ -5,7 +5,40 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-Nothing pending — see [1.1.0] below for the latest release.
+## [1.1.1] - 2026-05-13
+
+Vision event-name split, MCP-client config self-heal, an event-aware
+`watch_print_status` subscribe mode, and a few quality fixes.
+
+### Added
+
+- `watch_print_status` `block_until_event` subscribe mode — agents can
+  await a specific event instead of polling.
+- `kiln health`: detects MCP-client config drift and self-heals stale
+  `kiln` command paths in Cursor / Claude Desktop / Windsurf configs.
+- `kiln install-mcp`: richer installer promoted from kiln-pro.
+- `kiln serve`: orphan-host watchdog exits cleanly when the MCP host
+  goes away.
+
+### Changed
+
+- Vision events: `VISION_CHECK` split into `VISION_FRAME_CAPTURED` and
+  `VISION_AGENT_INSPECTION`.  Subscribers should migrate; the original
+  name is removed.
+- `VISION_FRAME_CAPTURED` payloads carry raw signals alongside the
+  snapshot, with a warning so `snapshot_b64` consumers can opt out via
+  the inspection-only event.
+- Pro-tool manifest registers `get_design_pull_request` so agents
+  discover it without a kiln-pro install.
+
+### Fixed
+
+- `print_health_monitor`: silent stall-event publish — stall warnings
+  were observable internally but never reached subscribers.
+- Bambu adapter: `can_snapshot=True` when the printer has a working
+  camera URL, regardless of ffmpeg availability.
+- `kiln health`: tolerates invalid TOML escapes in third-party MCP
+  client configs.
 
 ## [1.1.0] - 2026-05-06
 
