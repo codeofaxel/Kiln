@@ -1,7 +1,40 @@
-"""Tests for ``kiln install-mcp`` first-run MCP setup."""
+"""Tests for ``kiln install-mcp`` / ``kiln uninstall-mcp``.
+
+The installer is the command every Kiln user runs to wire their agent
+(Claude Desktop, Claude Code, Codex) into Kiln.  Coverage here:
+
+- registration: both commands attach to a CLI group.
+- happy path: writes JSON / TOML configs with the selected executable.
+- prefix args: ``python -m kiln`` launches preserve the ``-m kiln``
+  prefix so MCP clients can reproduce the module launch.
+- PATH warning: when the installer chooses a different binary than
+  PATH would resolve, the user sees both paths.
+- auth gate: ``--force`` skips the signed-in check; without it, an
+  empty ``~/.kiln/auth_tokens.json`` blocks the install with a clear
+  error.
+- uninstall: removes only the ``kiln`` entry, leaving siblings + other
+  top-level keys intact.
+"""
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+from click.testing import CliRunner
+
+
+def _write_session(home: Path) -> None:
+    """Seed the ``~/.kiln/auth_tokens.json`` file the installer's
+    ``_require_signed_in`` gate looks for.  Tests that don't pass
+    ``--force`` need this; tests that do pass ``--force`` skip it."""
+    tokens = home / ".kiln" / "auth_tokens.json"
+    tokens.parent.mkdir(parents=True)
+    tokens.write_text(json.dumps({"access_token": "token"}), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Registration
+# ---------------------------------------------------------------------------
 
 
 def test_registers_install_mcp_command() -> None:
@@ -12,83 +45,114 @@ def test_registers_install_mcp_command() -> None:
     register_install_mcp_cli(group)
 
     assert "install-mcp" in group.commands
+    assert "uninstall-mcp" in group.commands
 
 
-def test_install_mcp_writes_selected_executable(tmp_path, monkeypatch) -> None:
-    from click.testing import CliRunner
-    from kiln.cli import install_mcp
+# ---------------------------------------------------------------------------
+# install-mcp — JSON path (Claude Desktop / Claude Code)
+# ---------------------------------------------------------------------------
 
-    config_path = tmp_path / "claude_desktop_config.json"
-    executable = tmp_path / "bin" / "kiln"
-    executable.parent.mkdir()
-    executable.write_text("#!/bin/sh\n")
 
+def test_install_mcp_writes_current_executable_path(tmp_path: Path, monkeypatch) -> None:
+    """The installer must not blindly write ``command: kiln``.
+
+    A stale public Kiln binary on PATH can expose only public tools or
+    pro stubs.  The config should preserve the executable selected by
+    the user or by the current installer process.
+    """
+    from kiln.cli import install_mcp as mod
+
+    home = tmp_path / "home"
+    _write_session(home)
+    config_path = tmp_path / "claude.json"
+    kiln_bin = tmp_path / "venv" / "bin" / "kiln"
+    kiln_bin.parent.mkdir(parents=True)
+    kiln_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setenv("KILN_AUTH_HOME", str(home))
     monkeypatch.setattr(
-        install_mcp,
-        "_claude_desktop_config_path",
-        lambda: config_path,
+        mod,
+        "_DEFAULT_CLIENTS",
+        [mod.MCPClient("claude_code", "Claude Code", config_path)],
     )
 
     result = CliRunner().invoke(
-        install_mcp.install_mcp,
-        [
-            "--client",
-            "claude-desktop",
-            "--command",
-            str(executable),
-        ],
+        mod.install_mcp,
+        ["--command", str(kiln_bin)],
     )
 
     assert result.exit_code == 0, result.output
-    data = json.loads(config_path.read_text())
-    assert data["mcpServers"]["kiln"] == {
-        "command": str(executable),
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config["mcpServers"]["kiln"] == {
+        "command": str(kiln_bin),
         "args": ["serve"],
     }
+    assert f"MCP command: {kiln_bin}" in result.output
 
 
-def test_install_mcp_print_uses_selected_executable(tmp_path) -> None:
-    from click.testing import CliRunner
+def test_install_mcp_print_snippet_uses_selected_command(tmp_path: Path) -> None:
     from kiln.cli.install_mcp import install_mcp
 
-    executable = tmp_path / "kiln"
-    executable.write_text("#!/bin/sh\n")
+    kiln_bin = tmp_path / "bin" / "kiln"
+    kiln_bin.parent.mkdir(parents=True)
+    kiln_bin.write_text("#!/bin/sh\n", encoding="utf-8")
 
     result = CliRunner().invoke(
         install_mcp,
-        ["--print", "--command", str(executable)],
+        ["--print", "--command", str(kiln_bin)],
     )
 
     assert result.exit_code == 0, result.output
-    assert f'"command": "{executable}"' in result.output
-    assert '"args": [' in result.output
-    assert '"serve"' in result.output
+    assert f'"command": "{kiln_bin}"' in result.output
+    assert "It points at the Kiln executable" in result.output
 
 
-def test_path_warning_names_selected_and_path_binaries(tmp_path, monkeypatch) -> None:
+# ---------------------------------------------------------------------------
+# PATH warning
+# ---------------------------------------------------------------------------
+
+
+def test_path_warning_names_both_binaries(tmp_path: Path, monkeypatch) -> None:
+    """When PATH would resolve ``kiln`` to a different binary than the
+    one the installer is using, the warning must include both paths so
+    the user can see why their tool surface might differ from expectations."""
     from kiln.cli import install_mcp
 
-    selected = tmp_path / "venv" / "kiln"
-    path_kiln = tmp_path / "global" / "kiln"
-    selected.parent.mkdir()
-    path_kiln.parent.mkdir()
-    selected.write_text("")
-    path_kiln.write_text("")
+    path_kiln = tmp_path / "path" / "kiln"
+    selected = tmp_path / "selected" / "kiln"
+    path_kiln.parent.mkdir(parents=True)
+    selected.parent.mkdir(parents=True)
+    path_kiln.write_text("#!/bin/sh\n", encoding="utf-8")
+    selected.write_text("#!/bin/sh\n", encoding="utf-8")
+
     monkeypatch.setattr(install_mcp.shutil, "which", lambda name: str(path_kiln))
 
     warning = install_mcp._path_kiln_warning(str(selected))
 
     assert warning is not None
-    assert str(selected.resolve()) in warning
     assert str(path_kiln.resolve()) in warning
+    assert str(selected.resolve()) in warning
 
 
-def test_install_mcp_writes_codex_toml_config(tmp_path, monkeypatch) -> None:
-    from click.testing import CliRunner
-    from kiln.cli import install_mcp
+# ---------------------------------------------------------------------------
+# install-mcp — Codex TOML path
+# ---------------------------------------------------------------------------
 
+
+def test_install_mcp_writes_codex_toml_config(tmp_path: Path, monkeypatch) -> None:
+    """Codex uses ``~/.codex/config.toml``, not Claude's JSON shape.
+
+    The installer must surgically replace ``[mcp_servers.kiln]`` and
+    its child tables without touching sibling tables (``[mcp_servers.docs]``,
+    ``[features]``).  Stale child tables like ``[mcp_servers.kiln.env]``
+    must be removed so old overrides don't survive a reinstall.
+    """
+    from kiln.cli import install_mcp as mod
+
+    home = tmp_path / "home"
+    _write_session(home)
     config_path = tmp_path / "codex" / "config.toml"
-    config_path.parent.mkdir()
+    config_path.parent.mkdir(parents=True)
     config_path.write_text(
         "\n".join(
             [
@@ -108,40 +172,55 @@ def test_install_mcp_writes_codex_toml_config(tmp_path, monkeypatch) -> None:
                 "memories = true",
                 "",
             ]
-        )
+        ),
+        encoding="utf-8",
     )
-    executable = tmp_path / "bin" / "kiln"
-    executable.parent.mkdir()
-    executable.write_text("#!/bin/sh\n")
+    kiln_bin = tmp_path / "venv" / "bin" / "kiln"
+    kiln_bin.parent.mkdir(parents=True)
+    kiln_bin.write_text("#!/bin/sh\n", encoding="utf-8")
 
-    monkeypatch.setattr(install_mcp, "_codex_config_path", lambda: config_path)
+    monkeypatch.setenv("KILN_AUTH_HOME", str(home))
+    monkeypatch.setattr(
+        mod,
+        "_DEFAULT_CLIENTS",
+        [mod.MCPClient("codex", "Codex", config_path, "toml")],
+    )
 
     result = CliRunner().invoke(
-        install_mcp.install_mcp,
-        [
-            "--client",
-            "codex",
-            "--command",
-            str(executable),
-        ],
+        mod.install_mcp,
+        ["--command", str(kiln_bin)],
     )
 
     assert result.exit_code == 0, result.output
-    text = config_path.read_text()
-    assert "[mcp_servers.docs]" in text
-    assert "[features]" in text
-    assert "[mcp_servers.kiln]" in text
-    assert f'command = "{executable}"' in text
+    text = config_path.read_text(encoding="utf-8")
+    assert '[mcp_servers.docs]' in text
+    assert '[features]' in text
+    assert '[mcp_servers.kiln]' in text
+    assert f'command = "{kiln_bin}"' in text
     assert 'args = ["serve"]' in text
     assert "[mcp_servers.kiln.env]" not in text
     assert "Codex" in result.output
+    assert "fresh Codex session" in result.output
 
 
-def test_install_mcp_preserves_python_module_launch_for_codex(tmp_path, monkeypatch) -> None:
-    from click.testing import CliRunner
-    from kiln.cli import install_mcp
+# ---------------------------------------------------------------------------
+# prefix_args — python -m kiln launch shape
+# ---------------------------------------------------------------------------
 
+
+def test_install_mcp_preserves_python_module_launch_for_codex(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """When the installer is launched via ``python -m kiln`` (no entry-
+    point binary on PATH), the MCP client can't run ``__main__.py``
+    directly — it must invoke the same Python with ``-m kiln serve``.
+    Verify the Codex TOML records ``args = ["-m", "kiln", "serve"]``."""
+    from kiln.cli import install_mcp as mod
+
+    home = tmp_path / "home"
+    _write_session(home)
     config_path = tmp_path / "codex" / "config.toml"
+    config_path.parent.mkdir(parents=True)
     module_main = tmp_path / "site-packages" / "kiln" / "__main__.py"
     module_main.parent.mkdir(parents=True)
     module_main.write_text("")
@@ -149,26 +228,32 @@ def test_install_mcp_preserves_python_module_launch_for_codex(tmp_path, monkeypa
     python.parent.mkdir()
     python.write_text("#!/bin/sh\n")
 
-    monkeypatch.setattr(install_mcp, "_codex_config_path", lambda: config_path)
-    monkeypatch.setattr(install_mcp.sys, "argv", [str(module_main)])
-    monkeypatch.setattr(install_mcp.sys, "executable", str(python))
-    monkeypatch.setattr(install_mcp.shutil, "which", lambda name: None)
-
-    result = CliRunner().invoke(
-        install_mcp.install_mcp,
-        ["--client", "codex"],
+    monkeypatch.setenv("KILN_AUTH_HOME", str(home))
+    monkeypatch.setattr(
+        mod,
+        "_DEFAULT_CLIENTS",
+        [mod.MCPClient("codex", "Codex", config_path, "toml")],
     )
+    monkeypatch.setattr(mod.sys, "argv", [str(module_main)])
+    monkeypatch.setattr(mod.sys, "executable", str(python))
+    monkeypatch.setattr(mod.shutil, "which", lambda name: None)
+
+    result = CliRunner().invoke(mod.install_mcp, [])
 
     assert result.exit_code == 0, result.output
-    text = config_path.read_text()
+    text = config_path.read_text(encoding="utf-8")
     assert f'command = "{python}"' in text
     assert 'args = ["-m", "kiln", "serve"]' in text
     assert f"MCP command: {python} -m kiln serve" in result.output
 
 
-def test_install_mcp_print_preserves_python_module_launch(tmp_path, monkeypatch) -> None:
-    from click.testing import CliRunner
-    from kiln.cli import install_mcp
+def test_install_mcp_print_preserves_python_module_launch(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """The ``--print`` snippet must also record the module-launch
+    shape so users copy-pasting into Cursor / custom MCP clients get
+    a config that actually starts kiln."""
+    from kiln.cli import install_mcp as mod
 
     module_main = tmp_path / "site-packages" / "kiln" / "__main__.py"
     module_main.parent.mkdir(parents=True)
@@ -177,33 +262,161 @@ def test_install_mcp_print_preserves_python_module_launch(tmp_path, monkeypatch)
     python.parent.mkdir()
     python.write_text("#!/bin/sh\n")
 
-    monkeypatch.setattr(install_mcp.sys, "argv", [str(module_main)])
-    monkeypatch.setattr(install_mcp.sys, "executable", str(python))
-    monkeypatch.setattr(install_mcp.shutil, "which", lambda name: None)
+    monkeypatch.setattr(mod.sys, "argv", [str(module_main)])
+    monkeypatch.setattr(mod.sys, "executable", str(python))
+    monkeypatch.setattr(mod.shutil, "which", lambda name: None)
+
+    result = CliRunner().invoke(mod.install_mcp, ["--print"])
+
+    assert result.exit_code == 0, result.output
+    # The generic snippet is JSON; the prefix args show up inside the
+    # ``args`` list together with ``serve``.
+    assert f'"command": "{python}"' in result.output
+    assert '"args": [' in result.output
+    assert '"-m"' in result.output
+    assert '"kiln"' in result.output
+    assert '"serve"' in result.output
+
+
+# ---------------------------------------------------------------------------
+# Auth gate
+# ---------------------------------------------------------------------------
+
+
+def test_install_mcp_requires_signed_in_session(tmp_path: Path, monkeypatch) -> None:
+    """Without a session on disk, the installer must refuse and tell
+    the user how to fix it.  The resulting config would otherwise run
+    on FREE tier and every pro-tool call would fail cold."""
+    from kiln.cli import install_mcp as mod
+
+    home = tmp_path / "home"
+    home.mkdir()  # no .kiln/auth_tokens.json inside
+    kiln_bin = tmp_path / "bin" / "kiln"
+    kiln_bin.parent.mkdir(parents=True)
+    kiln_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setenv("KILN_AUTH_HOME", str(home))
+    monkeypatch.setattr(
+        mod,
+        "_DEFAULT_CLIENTS",
+        [mod.MCPClient("claude_code", "Claude Code", tmp_path / "claude.json")],
+    )
 
     result = CliRunner().invoke(
-        install_mcp.install_mcp,
-        ["--client", "codex", "--print"],
+        mod.install_mcp,
+        ["--command", str(kiln_bin)],
+    )
+
+    assert result.exit_code != 0
+    assert "not signed in" in result.output
+
+
+def test_install_mcp_force_bypasses_signed_in_check(tmp_path: Path, monkeypatch) -> None:
+    """``--force`` skips the signed-in gate.  Rarely wanted; documented
+    as such.  This exists for power users who explicitly want a free-
+    tier install."""
+    from kiln.cli import install_mcp as mod
+
+    home = tmp_path / "home"
+    home.mkdir()  # no session file
+    config_path = tmp_path / "claude.json"
+    kiln_bin = tmp_path / "bin" / "kiln"
+    kiln_bin.parent.mkdir(parents=True)
+    kiln_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setenv("KILN_AUTH_HOME", str(home))
+    monkeypatch.setattr(
+        mod,
+        "_DEFAULT_CLIENTS",
+        [mod.MCPClient("claude_code", "Claude Code", config_path)],
+    )
+
+    result = CliRunner().invoke(
+        mod.install_mcp,
+        ["--force", "--command", str(kiln_bin)],
     )
 
     assert result.exit_code == 0, result.output
-    assert f'command = "{python}"' in result.output
-    assert 'args = ["-m", "kiln", "serve"]' in result.output
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config["mcpServers"]["kiln"]["command"] == str(kiln_bin)
 
 
-def test_install_mcp_print_codex_snippet_is_toml(tmp_path) -> None:
-    from click.testing import CliRunner
-    from kiln.cli.install_mcp import install_mcp
+# ---------------------------------------------------------------------------
+# uninstall-mcp
+# ---------------------------------------------------------------------------
 
-    executable = tmp_path / "kiln"
-    executable.write_text("#!/bin/sh\n")
 
-    result = CliRunner().invoke(
-        install_mcp,
-        ["--client", "codex", "--print", "--command", str(executable)],
+def test_uninstall_mcp_removes_codex_config_block(tmp_path: Path, monkeypatch) -> None:
+    """``kiln uninstall-mcp`` must remove the ``[mcp_servers.kiln]``
+    block from Codex's TOML config without touching sibling MCP servers
+    (``[mcp_servers.docs]``) or unrelated tables (``[features]``)."""
+    from kiln.cli import install_mcp as mod
+
+    config_path = tmp_path / "codex" / "config.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        "\n".join(
+            [
+                "[mcp_servers.docs]",
+                'url = "https://developers.openai.com/mcp"',
+                "",
+                "[mcp_servers.kiln]",
+                'command = "/old/kiln"',
+                'args = ["serve"]',
+                "",
+                "[features]",
+                "memories = true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        mod,
+        "_DEFAULT_CLIENTS",
+        [mod.MCPClient("codex", "Codex", config_path, "toml")],
     )
 
+    result = CliRunner().invoke(mod.uninstall_mcp)
+
     assert result.exit_code == 0, result.output
-    assert "[mcp_servers.kiln]" in result.output
-    assert f'command = "{executable}"' in result.output
-    assert 'args = ["serve"]' in result.output
+    text = config_path.read_text(encoding="utf-8")
+    assert "[mcp_servers.kiln]" not in text
+    assert "[mcp_servers.docs]" in text
+    assert "[features]" in text
+
+
+def test_uninstall_mcp_leaves_sibling_json_servers_alone(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """A JSON config that has other MCP servers must lose only the
+    ``kiln`` entry; siblings (``filesystem``, ``git``, etc.) stay."""
+    from kiln.cli import install_mcp as mod
+
+    config_path = tmp_path / "claude.json"
+    config_path.write_text(
+        json.dumps({
+            "mcpServers": {
+                "kiln": {"command": "/old/kiln", "args": ["serve"]},
+                "filesystem": {"command": "/usr/bin/fs-mcp", "args": []},
+            },
+            "userPref": {"keep": True},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        mod,
+        "_DEFAULT_CLIENTS",
+        [mod.MCPClient("claude_code", "Claude Code", config_path)],
+    )
+
+    result = CliRunner().invoke(mod.uninstall_mcp)
+
+    assert result.exit_code == 0, result.output
+    after = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "kiln" not in after["mcpServers"]
+    assert after["mcpServers"]["filesystem"] == {
+        "command": "/usr/bin/fs-mcp",
+        "args": [],
+    }
+    assert after["userPref"] == {"keep": True}
