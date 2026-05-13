@@ -70,14 +70,17 @@ class TestSnapshotCapability:
         adapter = MoonrakerAdapter(host="http://test")
         assert adapter.capabilities.can_snapshot is True
 
-    def test_bambu_no_snapshot_without_ffmpeg(self) -> None:
+    def test_bambu_has_snapshot_without_ffmpeg(self) -> None:
+        # As of v1.1.1, can_snapshot reflects whether the printer exposes
+        # a camera URL — ffmpeg is only needed for the MJPEG stream path,
+        # not for the single-frame snapshot used by vision agents.
         try:
             from kiln.printers.bambu import BambuAdapter
         except ImportError:
             pytest.skip("paho-mqtt not installed")
         with mock.patch("kiln.printers.bambu._find_ffmpeg", return_value=None):
             adapter = BambuAdapter(host="192.168.1.1", access_code="12345678", serial="SN123")
-            assert adapter.capabilities.can_snapshot is False
+            assert adapter.capabilities.can_snapshot is True
 
     def test_bambu_has_snapshot_with_ffmpeg(self) -> None:
         try:
