@@ -10450,28 +10450,45 @@ def health(ctx: click.Context, json_mode: bool) -> None:
         # renamed venv or a hand-edit silently leaves a client
         # pointed at a binary that no longer exists, and the user's
         # first signal is the MCP host's "Server disconnected"
-        # banner with no actionable detail.  Audit reports drift
-        # here so ``kiln health`` is the one place users go when
-        # something's wrong.
+        # banner with no actionable detail.  Audit reports drift,
+        # then the repair pass rewrites the ``command:`` field on
+        # any broken ``kiln`` entry so the next launch of the MCP
+        # host just works — making ``kiln health`` the single
+        # entry-point users go to when something's wrong.
+        _mcp_repairs: list[Any] = []
         try:
             from kiln.cli.mcp_config_audit import (
                 audit_all_mcp_clients,
                 to_json_payload,
             )
+            from kiln.cli.mcp_config_repair import (
+                repair_drifted_kiln_entries,
+                to_json_payload as _repair_to_json_payload,
+            )
 
             _mcp_results = audit_all_mcp_clients()
+            _mcp_repairs = repair_drifted_kiln_entries(_mcp_results)
+            if _mcp_repairs:
+                # Re-audit so the rendered status reflects the
+                # post-repair state; otherwise the user sees a stale
+                # "x command_missing" line right after the "Repaired"
+                # line for the same entry.
+                _mcp_results = audit_all_mcp_clients()
             checks["mcp_clients"] = to_json_payload(_mcp_results)
             checks["mcp_clients_ok"] = not any(
                 r.has_drift or r.parse_error for r in _mcp_results
             )
+            checks["mcp_clients_repaired"] = _repair_to_json_payload(_mcp_repairs)
         except Exception as exc:
             # Auditor must never break ``kiln health`` itself.  If it
             # raises (impossible by design, but defensive against
             # future regressions), surface the failure as a soft
             # warning rather than crashing the whole command.
             _mcp_results = []
+            _mcp_repairs = []
             checks["mcp_clients"] = []
             checks["mcp_clients_ok"] = None
+            checks["mcp_clients_repaired"] = []
             checks["mcp_clients_error"] = str(exc)
 
         healthy = checks.get("printer_online", False)
@@ -10497,6 +10514,11 @@ def health(ctx: click.Context, json_mode: bool) -> None:
                 click.echo(f"  [{mark_fail}] Slicer: not found")
             # Kiln version
             click.echo(f"  [*] Kiln: v{checks.get('kiln_version', 'unknown')}")
+            # Self-heal results, if any.  One line per rewrite.
+            for _action in _mcp_repairs:
+                click.echo(
+                    f"Repaired {_action.client}: {_action.old} → {_action.new}",
+                )
             # MCP client configs — one line per installed client.
             # Skip clients whose config doesn't exist (the user didn't
             # install Kiln there, no need to nag).  Show entry-level
