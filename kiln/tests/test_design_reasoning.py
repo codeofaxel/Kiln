@@ -886,3 +886,184 @@ class TestMergeStlFiles:
         d = result.to_dict()
         assert "output_path" in d
         assert "total_triangles" in d
+
+
+# ---------------------------------------------------------------------------
+# TestStructuralThresholdsTierSeam — INVERSE PATTERN
+#
+# Free tier ships with STRICTER thresholds than Kiln's curated baseline.
+# A free user sees a SUPERSET of the flags a Pro user would see for the
+# same mesh — never fewer.  Pro+ unlocks the calibrated baseline via the
+# structural_thresholds overlay.
+#
+# The test_free_tier_never_underflags_relative_to_pro test is the
+# SAFETY FLOOR.  If it goes red, the threshold direction is wrong and
+# the patch DOES NOT SHIP.
+# ---------------------------------------------------------------------------
+
+
+from kiln.design_reasoning import (  # noqa: E402
+    _CANTILEVER_RISK_RATIO_PUBLIC,
+    _MIN_CROSS_SECTION_MM2_PUBLIC,
+    _SHARP_ANGLE_THRESHOLD_DEG_PUBLIC,
+    _THIN_NECK_RATIO_PUBLIC,
+)
+
+
+# Pro-tier calibrated values; mirrors kiln_pro/data/structural_thresholds_pro_overlay.json
+_PRO_OVERLAY = {
+    "thin_neck_ratio": 0.30,
+    "cantilever_risk_ratio": 5.0,
+    "min_cross_section_mm2": 4.0,
+    "sharp_angle_threshold_deg": 60.0,
+}
+
+
+def _prism_triangles(w: float, d: float, h: float) -> list[tuple[tuple[float, ...], ...]]:
+    """12 triangles forming an axis-aligned rectangular prism (w × d × h)."""
+    v = [
+        (0.0, 0.0, 0.0), (w, 0.0, 0.0), (w, d, 0.0), (0.0, d, 0.0),
+        (0.0, 0.0, h),   (w, 0.0, h),   (w, d, h),   (0.0, d, h),
+    ]
+    faces = [
+        (0, 1, 2), (0, 2, 3),  # bottom
+        (4, 6, 5), (4, 7, 6),  # top
+        (0, 5, 1), (0, 4, 5),  # front (y=0)
+        (2, 6, 7), (2, 7, 3),  # back  (y=d)
+        (0, 3, 7), (0, 7, 4),  # left  (x=0)
+        (1, 5, 6), (1, 6, 2),  # right (x=w)
+    ]
+    return [(v[a], v[b], v[c]) for a, b, c in faces]
+
+
+@pytest.fixture()
+def borderline_cantilever_stl(tmp_path):
+    """A 5×5×22.5mm prism — height/base ratio = 4.5, which sits IN the
+    public-vs-Pro threshold gap (public flags >4.0, Pro flags >5.0).
+
+    Public tier MUST flag this as ``insufficient_base``; Pro tier
+    must NOT.  This is the inverse-pattern safety probe."""
+    stl_path = tmp_path / "borderline_cantilever.stl"
+    _write_binary_stl_file(_prism_triangles(5.0, 5.0, 22.5), str(stl_path))
+    return str(stl_path)
+
+
+class TestStructuralThresholdsTierSeam:
+    """Pin the INVERSE-PATTERN tier seam for structural-risk thresholds."""
+
+    def test_public_thresholds_are_stricter_than_pro(self):
+        """Direction invariant — if a future edit ever flips one of these,
+        free tier could under-flag and a load-bearing print could ship
+        without warning.  Catch the regression at the constants."""
+        assert _THIN_NECK_RATIO_PUBLIC > _PRO_OVERLAY["thin_neck_ratio"], (
+            "thin_neck_ratio: HIGHER value flags MORE thin necks. "
+            "Public must be > Pro."
+        )
+        assert _CANTILEVER_RISK_RATIO_PUBLIC < _PRO_OVERLAY["cantilever_risk_ratio"], (
+            "cantilever_risk_ratio: LOWER value flags MORE cantilevers. "
+            "Public must be < Pro."
+        )
+        assert _MIN_CROSS_SECTION_MM2_PUBLIC > _PRO_OVERLAY["min_cross_section_mm2"], (
+            "min_cross_section_mm2: HIGHER value flags MORE small sections. "
+            "Public must be > Pro."
+        )
+        assert _SHARP_ANGLE_THRESHOLD_DEG_PUBLIC > _PRO_OVERLAY["sharp_angle_threshold_deg"], (
+            "sharp_angle_threshold_deg: HIGHER value flags MORE corners. "
+            "Public must be > Pro."
+        )
+
+    def test_free_tier_never_underflags_relative_to_pro(
+        self, borderline_cantilever_stl, monkeypatch,
+    ):
+        """RELEASE BLOCKER.  Same mesh under free tier produces findings
+        that are a SUPERSET of (or equal to) findings under Pro tier.
+        Free can never SILENCE a finding Pro would have raised.
+
+        Borderline fixture: a 5×5×22.5mm prism — height/base = 4.5.
+        Public's 4.0 threshold flags it; Pro's 5.0 doesn't."""
+        # Free tier: empty overlay
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: {},
+        )
+        free_risks = analyze_structural_risks(borderline_cantilever_stl)
+
+        # Pro tier: calibrated overlay
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: _PRO_OVERLAY,
+        )
+        pro_risks = analyze_structural_risks(borderline_cantilever_stl)
+
+        # Pro flags must be a subset of free flags — every risk_type Pro
+        # raised must also appear in free's output.
+        pro_keys = {(r.risk_type, round(r.location_mm[2], 1)) for r in pro_risks}
+        free_keys = {(r.risk_type, round(r.location_mm[2], 1)) for r in free_risks}
+        missed = pro_keys - free_keys
+        assert not missed, (
+            f"SAFETY VIOLATION: free tier under-flagged vs Pro. "
+            f"Pro raised but free did not: {missed}"
+        )
+        # And specifically: free MUST flag the 4.5:1 ratio as insufficient_base.
+        assert any(r.risk_type == "insufficient_base" for r in free_risks), (
+            "Free tier missed the 4.5:1 height/base prism — the borderline "
+            "geometry the public-stricter threshold exists to catch."
+        )
+        # Pro should NOT flag it (calibrated 5.0 threshold; 4.5 < 5.0).
+        assert not any(r.risk_type == "insufficient_base" for r in pro_risks), (
+            "Pro tier flagged a 4.5:1 ratio prism — the calibrated baseline "
+            "should silently pass it.  Did the overlay value drift?"
+        )
+
+    def test_explicit_kwarg_overrides_both_tiers(
+        self, borderline_cantilever_stl, monkeypatch,
+    ):
+        """Power-user escape hatch: explicit kwarg beats overlay AND public.
+        Same mesh, sharp_angle_threshold_deg=89 catches every concave edge."""
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: _PRO_OVERLAY,
+        )
+        with_explicit = analyze_structural_risks(
+            borderline_cantilever_stl,
+            sharp_angle_threshold_deg=89.0,
+        )
+        without = analyze_structural_risks(borderline_cantilever_stl)
+        # Explicit-loose threshold catches at least as many sharp corners
+        # as the Pro-calibrated default (60°).
+        sharp_explicit = sum(1 for r in with_explicit if r.risk_type == "sharp_corner")
+        sharp_default = sum(1 for r in without if r.risk_type == "sharp_corner")
+        assert sharp_explicit >= sharp_default
+
+    def test_overlay_unavailable_falls_back_to_stricter_public(
+        self, borderline_cantilever_stl, monkeypatch,
+    ):
+        """When the overlay returns {} (kiln-pro absent, license missing,
+        network down beyond grace), thresholds resolve to the public-
+        stricter defaults — no crash, no silent Pro pass-through."""
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: {},
+        )
+        risks = analyze_structural_risks(borderline_cantilever_stl)
+        # Behaviour matches free-tier expectations: borderline geometry
+        # flagged as insufficient_base.
+        assert isinstance(risks, list)
+        assert any(r.risk_type == "insufficient_base" for r in risks)
+
+    def test_explicit_min_cross_section_takes_priority_over_overlay(
+        self, cube_stl, monkeypatch,
+    ):
+        """Caller-supplied min_cross_section_mm2 beats both overlay and
+        public default.  Resolution order: explicit > overlay > public."""
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: _PRO_OVERLAY,
+        )
+        # 10x10 cube has 100mm² cross-sections; threshold=200 flags every slice.
+        risks = analyze_structural_risks(cube_stl, min_cross_section_mm2=200.0)
+        thin = [r for r in risks if r.risk_type == "thin_neck"]
+        assert thin, (
+            "Explicit min_cross_section_mm2=200 should flag every layer of "
+            "a 10x10 cube as thin_neck — caller override didn't take effect."
+        )

@@ -33,23 +33,42 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Constants
+# Constants — INVERSE-PATTERN tier seam
 # ---------------------------------------------------------------------------
+#
+# Tiering for structural-risk thresholds is the inverse of the usual
+# paywall pattern: free tier ships STRICTER values so a free user
+# always sees a superset of the flags a Pro user would see for the
+# same mesh.  Pro+ unlocks the calibrated baseline via the
+# ``structural_thresholds`` overlay loaded by analyze_structural_risks.
+#
+# Stricter direction per metric:
+#   - thin_neck_ratio:           HIGHER value flags MORE thin sections
+#   - cantilever_risk_ratio:     LOWER value flags MORE cantilevers
+#   - min_cross_section_mm2:     HIGHER value flags MORE small sections
+#   - sharp_angle_threshold_deg: HIGHER value flags MORE less-acute corners
+#
+# Pro-tier calibrated values (in kiln_pro/data/structural_thresholds_pro_overlay.json):
+#   0.30 / 5.0 / 4.0 / 60.0
 
 # Stress concentration threshold: cross-section area ratio that signals a
 # "thin neck" where load transfer becomes risky.
-_THIN_NECK_RATIO = 0.3
+_THIN_NECK_RATIO_PUBLIC = 0.35
 
-# Cantilever length-to-thickness ratio where deflection becomes concerning
-_CANTILEVER_RISK_RATIO = 5.0
+# Cantilever length-to-thickness ratio where deflection becomes concerning.
+_CANTILEVER_RISK_RATIO_PUBLIC = 4.0
 
-# Minimum cross-section area (mm²) below which any section is flagged
-_MIN_CROSS_SECTION_MM2 = 4.0
+# Minimum cross-section area (mm²) below which any section is flagged.
+_MIN_CROSS_SECTION_MM2_PUBLIC = 5.0
 
-# Number of Z-slices for cross-section analysis
+# Angle (degrees) below which a vertex is "sharp" — stress-concentration risk.
+_SHARP_ANGLE_THRESHOLD_DEG_PUBLIC = 65.0
+
+# Number of Z-slices for cross-section analysis (implementation detail).
 _NUM_SLICES = 40
 
-# Overhang angle (from vertical) where layer adhesion weakens structurally
+# Overhang angle (from vertical) where layer adhesion weakens structurally.
+# 45° is textbook FDM; not tier-gated.
 _STRUCTURAL_OVERHANG_DEG = 45.0
 
 
@@ -373,9 +392,14 @@ def _find_thin_necks(
     triangles: list[tuple[tuple[float, ...], ...]],
     bbox: dict[str, float],
     *,
-    min_area_mm2: float = _MIN_CROSS_SECTION_MM2,
+    min_area_mm2: float = _MIN_CROSS_SECTION_MM2_PUBLIC,
+    ratio_threshold: float = _THIN_NECK_RATIO_PUBLIC,
 ) -> list[StructuralRisk]:
-    """Find Z-heights where cross-section suddenly narrows (thin necks)."""
+    """Find Z-heights where cross-section suddenly narrows (thin necks).
+
+    ``ratio_threshold`` controls the stress-concentration check: a
+    section is flagged when ``area / neighbor_avg < ratio_threshold``.
+    Higher threshold → more thin sections flagged (public-stricter)."""
     risks: list[StructuralRisk] = []
     z_min = bbox["min_z"]
     z_max = bbox["max_z"]
@@ -436,7 +460,7 @@ def _find_thin_necks(
                     metric_threshold=min_area_mm2,
                 )
             )
-        elif neighbor_avg > 0 and area / neighbor_avg < _THIN_NECK_RATIO:
+        elif neighbor_avg > 0 and area / neighbor_avg < ratio_threshold:
             # Sudden constriction relative to neighbors
             cx = (bbox["min_x"] + bbox["max_x"]) / 2
             cy = (bbox["min_y"] + bbox["max_y"]) / 2
@@ -457,7 +481,7 @@ def _find_thin_necks(
                     ),
                     metric_name="section_ratio",
                     metric_value=area / neighbor_avg,
-                    metric_threshold=_THIN_NECK_RATIO,
+                    metric_threshold=ratio_threshold,
                 )
             )
 
@@ -555,7 +579,7 @@ def _find_cantilevers(
 def _find_sharp_corners(
     triangles: list[tuple[tuple[float, ...], ...]],
     *,
-    angle_threshold_deg: float = 60.0,
+    angle_threshold_deg: float = _SHARP_ANGLE_THRESHOLD_DEG_PUBLIC,
 ) -> list[StructuralRisk]:
     """Find sharp internal corners that create stress concentrations.
 
@@ -633,8 +657,14 @@ def _find_sharp_corners(
 def _check_base_adequacy(
     triangles: list[tuple[tuple[float, ...], ...]],
     bbox: dict[str, float],
+    *,
+    cantilever_risk_ratio: float = _CANTILEVER_RISK_RATIO_PUBLIC,
 ) -> list[StructuralRisk]:
-    """Check if the base (bottom layer) is adequate for the part's height."""
+    """Check if the base (bottom layer) is adequate for the part's height.
+
+    ``cantilever_risk_ratio`` is the height-to-base ratio above which
+    the part is flagged as toppling-prone.  Lower → more parts flagged
+    (public-stricter)."""
     risks: list[StructuralRisk] = []
     z_min = bbox["min_z"]
     z_range = bbox["max_z"] - z_min
@@ -680,7 +710,7 @@ def _check_base_adequacy(
 
     # Tall with narrow base (stability)
     base_min_dim = min(width, depth) if min(width, depth) > 0 else max(width, depth)
-    if base_min_dim > 0 and z_range / base_min_dim > _CANTILEVER_RISK_RATIO:
+    if base_min_dim > 0 and z_range / base_min_dim > cantilever_risk_ratio:
         risks.append(
             StructuralRisk(
                 risk_type="insufficient_base",
@@ -693,12 +723,12 @@ def _check_base_adequacy(
                 region_size_mm=(width, depth, z_range * 0.2),
                 description=(
                     f"Height-to-base ratio is {z_range / base_min_dim:.1f}:1 "
-                    f"(threshold: {_CANTILEVER_RISK_RATIO:.0f}:1). Part may tip or "
+                    f"(threshold: {cantilever_risk_ratio:.1f}:1). Part may tip or "
                     f"warp during printing. Add a wider base, use a brim, or re-orient."
                 ),
                 metric_name="height_to_base_ratio",
                 metric_value=z_range / base_min_dim,
-                metric_threshold=_CANTILEVER_RISK_RATIO,
+                metric_threshold=cantilever_risk_ratio,
             )
         )
 
@@ -835,8 +865,16 @@ def _cluster_points(
 def _generate_reinforcements(
     risks: list[StructuralRisk],
     bbox: dict[str, float],
+    *,
+    min_cross_section_mm2: float = _MIN_CROSS_SECTION_MM2_PUBLIC,
+    cantilever_risk_ratio: float = _CANTILEVER_RISK_RATIO_PUBLIC,
 ) -> list[ReinforcementRecommendation]:
-    """Generate specific reinforcement recommendations for identified risks."""
+    """Generate specific reinforcement recommendations for identified risks.
+
+    Thresholds drive recommendation phrasing (e.g. "redesign with a
+    minimum X mm dimension") so they match the bands the risks were
+    flagged against.  Wording stays identical across tiers; only the
+    quoted numbers track the active threshold."""
     recs: list[ReinforcementRecommendation] = []
 
     for risk in risks:
@@ -850,7 +888,7 @@ def _generate_reinforcements(
                         f"Thicken the narrow section at Z={risk.location_mm[2]:.1f} mm. "
                         f"Current cross-section is {risk.metric_value:.1f} mm². "
                         f"Use thicken_mesh_walls() to add material, or redesign "
-                        f"with a minimum {math.sqrt(_MIN_CROSS_SECTION_MM2):.1f} mm dimension."
+                        f"with a minimum {math.sqrt(min_cross_section_mm2):.1f} mm dimension."
                     ),
                     estimated_strength_gain="2-5x at the constriction",
                     addresses_risk="thin_neck",
@@ -934,7 +972,7 @@ def _generate_reinforcements(
                         location_mm=risk.location_mm,
                         description=(
                             "Widen the base to reduce the height-to-base ratio below "
-                            f"{_CANTILEVER_RISK_RATIO:.0f}:1. Add a brim in the slicer "
+                            f"{cantilever_risk_ratio:.1f}:1. Add a brim in the slicer "
                             f"for print adhesion, or add a permanent flange to the design."
                         ),
                         estimated_strength_gain="Eliminates topple risk during print and use",
@@ -1107,10 +1145,25 @@ def _analyze_load_bearing(
 def analyze_structural_risks(
     file_path: str,
     *,
-    min_cross_section_mm2: float = _MIN_CROSS_SECTION_MM2,
-    sharp_angle_threshold_deg: float = 60.0,
+    min_cross_section_mm2: float | None = None,
+    sharp_angle_threshold_deg: float | None = None,
 ) -> list[StructuralRisk]:
     """Analyze an STL for structural risks.
+
+    Tiering — INVERSE PATTERN:
+
+    - Free tier (no overlay): STRICTER thresholds than Kiln's curated
+      baseline.  A free user sees more warnings than a Pro user would
+      for the same geometry; free tier never under-flags relative to
+      the calibrated baseline.
+    - Pro+ tier: calibrated baseline via the ``structural_thresholds``
+      overlay.  Same algorithm, same risk taxonomy, but threshold
+      bands match Kiln's curated judgment (e.g. ``thin_neck_ratio``
+      0.30 vs public 0.35).
+
+    Explicit kwargs override BOTH tiers — power-user escape hatch for
+    callers who know exactly what they want.  ``None`` means "use Pro
+    overlay if available, else the stricter public default."
 
     Performs geometric analysis to find:
     - Thin necks (narrow cross-sections that will snap)
@@ -1121,21 +1174,50 @@ def analyze_structural_risks(
     - Weak layer adhesion zones (overhangs in structural areas)
 
     :param file_path: Path to STL file.
-    :param min_cross_section_mm2: Minimum safe cross-section area.
-    :param sharp_angle_threshold_deg: Angle below which edges are "sharp".
+    :param min_cross_section_mm2: Override the resolved threshold.
+        ``None`` (default) = use Pro overlay if available, else the
+        stricter public default (5.0 mm²; Pro calibrated = 4.0).
+    :param sharp_angle_threshold_deg: Same semantics; public default
+        65.0°, Pro calibrated 60.0°.
     :returns: List of :class:`StructuralRisk` findings.
     """
+    from kiln.design_intelligence import load_pro_overlay_or_empty
+
     triangles, vertices = _parse_stl_for_analysis(file_path)
     if not triangles:
         return []
 
     bbox = _bounding_box(vertices)
-    risks: list[StructuralRisk] = []
 
-    risks.extend(_find_thin_necks(triangles, bbox, min_area_mm2=min_cross_section_mm2))
+    # --- Resolve thresholds: explicit kwarg > overlay (Pro+) > public default
+    overlay = load_pro_overlay_or_empty("structural_thresholds")
+    thin_neck_ratio = overlay.get("thin_neck_ratio", _THIN_NECK_RATIO_PUBLIC)
+    cantilever_risk_ratio = overlay.get(
+        "cantilever_risk_ratio", _CANTILEVER_RISK_RATIO_PUBLIC,
+    )
+    if min_cross_section_mm2 is None:
+        min_cross_section_mm2 = overlay.get(
+            "min_cross_section_mm2", _MIN_CROSS_SECTION_MM2_PUBLIC,
+        )
+    if sharp_angle_threshold_deg is None:
+        sharp_angle_threshold_deg = overlay.get(
+            "sharp_angle_threshold_deg", _SHARP_ANGLE_THRESHOLD_DEG_PUBLIC,
+        )
+
+    risks: list[StructuralRisk] = []
+    risks.extend(_find_thin_necks(
+        triangles, bbox,
+        min_area_mm2=min_cross_section_mm2,
+        ratio_threshold=thin_neck_ratio,
+    ))
     risks.extend(_find_cantilevers(triangles, bbox))
-    risks.extend(_find_sharp_corners(triangles, angle_threshold_deg=sharp_angle_threshold_deg))
-    risks.extend(_check_base_adequacy(triangles, bbox))
+    risks.extend(_find_sharp_corners(
+        triangles, angle_threshold_deg=sharp_angle_threshold_deg,
+    ))
+    risks.extend(_check_base_adequacy(
+        triangles, bbox,
+        cantilever_risk_ratio=cantilever_risk_ratio,
+    ))
     risks.extend(_find_weak_layer_adhesion_zones(triangles, bbox))
 
     # Sort by severity: critical first, then warning, then info
@@ -1148,14 +1230,18 @@ def analyze_structural_risks(
 def recommend_reinforcements(
     file_path: str,
     *,
-    min_cross_section_mm2: float = _MIN_CROSS_SECTION_MM2,
+    min_cross_section_mm2: float | None = None,
 ) -> list[ReinforcementRecommendation]:
     """Analyze an STL and recommend specific reinforcements.
 
     :param file_path: Path to STL file.
-    :param min_cross_section_mm2: Minimum safe cross-section area.
+    :param min_cross_section_mm2: Minimum safe cross-section area; ``None``
+        defers to ``analyze_structural_risks`` (overlay-resolved or
+        stricter public default).
     :returns: List of :class:`ReinforcementRecommendation`.
     """
+    from kiln.design_intelligence import load_pro_overlay_or_empty
+
     triangles, vertices = _parse_stl_for_analysis(file_path)
     if not triangles:
         return []
@@ -1164,7 +1250,19 @@ def recommend_reinforcements(
     risks = analyze_structural_risks(
         file_path, min_cross_section_mm2=min_cross_section_mm2
     )
-    return _generate_reinforcements(risks, bbox)
+    overlay = load_pro_overlay_or_empty("structural_thresholds")
+    resolved_min = (
+        min_cross_section_mm2 if min_cross_section_mm2 is not None
+        else overlay.get("min_cross_section_mm2", _MIN_CROSS_SECTION_MM2_PUBLIC)
+    )
+    resolved_cantilever = overlay.get(
+        "cantilever_risk_ratio", _CANTILEVER_RISK_RATIO_PUBLIC,
+    )
+    return _generate_reinforcements(
+        risks, bbox,
+        min_cross_section_mm2=resolved_min,
+        cantilever_risk_ratio=resolved_cantilever,
+    )
 
 
 def assess_load_bearing(file_path: str) -> LoadAnalysis:
@@ -1191,8 +1289,8 @@ def assess_load_bearing(file_path: str) -> LoadAnalysis:
 def generate_improvement_plan(
     file_path: str,
     *,
-    min_cross_section_mm2: float = _MIN_CROSS_SECTION_MM2,
-    sharp_angle_threshold_deg: float = 60.0,
+    min_cross_section_mm2: float | None = None,
+    sharp_angle_threshold_deg: float | None = None,
 ) -> DesignImprovementPlan:
     """Generate a complete structural improvement plan for a design.
 
@@ -1211,6 +1309,8 @@ def generate_improvement_plan(
             summary="Could not parse mesh file.",
         )
 
+    from kiln.design_intelligence import load_pro_overlay_or_empty
+
     bbox = _bounding_box(vertices)
 
     # Run all analyses
@@ -1219,7 +1319,19 @@ def generate_improvement_plan(
         min_cross_section_mm2=min_cross_section_mm2,
         sharp_angle_threshold_deg=sharp_angle_threshold_deg,
     )
-    reinforcements = _generate_reinforcements(risks, bbox)
+    overlay = load_pro_overlay_or_empty("structural_thresholds")
+    resolved_min = (
+        min_cross_section_mm2 if min_cross_section_mm2 is not None
+        else overlay.get("min_cross_section_mm2", _MIN_CROSS_SECTION_MM2_PUBLIC)
+    )
+    resolved_cantilever = overlay.get(
+        "cantilever_risk_ratio", _CANTILEVER_RISK_RATIO_PUBLIC,
+    )
+    reinforcements = _generate_reinforcements(
+        risks, bbox,
+        min_cross_section_mm2=resolved_min,
+        cantilever_risk_ratio=resolved_cantilever,
+    )
     load = _analyze_load_bearing(triangles, bbox)
 
     # Compute structural score
@@ -1343,8 +1455,8 @@ def apply_reinforcements(
     file_path: str,
     *,
     output_path: str | None = None,
-    min_cross_section_mm2: float = _MIN_CROSS_SECTION_MM2,
-    sharp_angle_threshold_deg: float = 60.0,
+    min_cross_section_mm2: float | None = None,
+    sharp_angle_threshold_deg: float | None = None,
     fillet_radius_mm: float = 1.5,
     wall_thicken_mm: float = 0.6,
     base_height_mm: float = 2.0,
@@ -1788,8 +1900,8 @@ def infer_print_settings(
     file_path: str,
     *,
     material: str = "PLA",
-    min_cross_section_mm2: float = _MIN_CROSS_SECTION_MM2,
-    sharp_angle_threshold_deg: float = 60.0,
+    min_cross_section_mm2: float | None = None,
+    sharp_angle_threshold_deg: float | None = None,
 ) -> PrintSettingsRecommendation:
     """Infer optimal print settings from structural analysis.
 
