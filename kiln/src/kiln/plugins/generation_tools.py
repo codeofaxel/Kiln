@@ -151,7 +151,15 @@ class _GenerationToolsPlugin:
                     result["bed_size_source"] = "printer_intelligence"
                     result["bed_size_model_id"] = resolved_model_id
                     result["bed_dims_mm"] = list(build_volume)
-                return result
+                try:
+                    from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
+                    return attach_inspect_bundle(
+                        result,
+                        source_path=session.best_result_path,
+                        level="quick",
+                    )
+                except ImportError:
+                    return result
             except ValueError as exc:
                 return _srv._error_dict(str(exc), code="INVALID_INPUT")
             except GenerationError as exc:
