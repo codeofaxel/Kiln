@@ -5758,7 +5758,26 @@ def preflight_check(
             result["estimated_cost"] = cost_estimate
 
         from kiln.safety_gap_warning import attach_safety_warning
-        return attach_safety_warning(result)
+        result = attach_safety_warning(result)
+
+        # Attach a FULL inspection bundle (rendered views + section +
+        # measurements + printability) to the response so agents render
+        # the mesh inline before the user commits filament + hours.
+        # Preflight is the conversion moment — the user is about to
+        # spend $5-30 of material and 2-12 hours of print time.  Visual
+        # confirmation of what they're committing to is core to the
+        # tool's purpose.  Helper is failure-closed: a render failure
+        # decorates the response with an envelope flag but cannot
+        # disrupt the preflight check itself.  Free-tier installs
+        # (no kiln-pro) fall through to the bare result unchanged.
+        try:
+            from kiln_pro.plugins.git_render_tools import (
+                attach_inspect_bundle,
+            )
+
+            return attach_inspect_bundle(result, level="full")
+        except ImportError:
+            return result
 
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(

@@ -756,11 +756,26 @@ class _RecoveryToolsPlugin:
                 plan = engine.plan_recovery(failure)
                 plan.plan_id = plan_id
                 session = engine.start_recovery(plan, failure)
-                return {
+                response = {
                     "success": True,
                     "session": session.to_dict(),
                     "message": f"Recovery session {session.session_id} started.",
                 }
+                # Attach a quick inspection bundle so the user sees the
+                # mesh being recovered.  Recovery is a stressful moment;
+                # visual reassurance that we're recovering the right
+                # design matters.  Helper is failure-closed: render
+                # failure decorates the response but cannot disrupt the
+                # recovery state-machine setup.  Free-tier installs
+                # (no kiln-pro) fall through unchanged.
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(response, level="quick")
+                except ImportError:
+                    return response
             except Exception as exc:
                 _logger.exception("Unexpected error in start_print_recovery")
                 return _srv._error_dict(
@@ -1051,7 +1066,19 @@ class _RecoveryToolsPlugin:
                     response["pro_outcome_recorded"] = True
                 if reroute_recommendation is not None:
                     response["reroute_recommendation"] = reroute_recommendation
-                return response
+                # Attach a quick inspection bundle so the user sees the
+                # mesh that just finished its recovery cycle.  Closes the
+                # recovery experience with visual confirmation.  Helper
+                # is failure-closed: render failure decorates the
+                # response but cannot disrupt the recovery completion.
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(response, level="quick")
+                except ImportError:
+                    return response
             except MonitoringThresholdNotMet as exc:
                 # Patent claim 79: structured error includes the deficit
                 # so the orchestrator/UI can prompt for additional checks.
