@@ -36,6 +36,7 @@ Example (async)::
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import enum
 import logging
 import threading
@@ -47,6 +48,32 @@ from typing import Any
 from kiln import parse_int_env
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Ambient actor context
+# ---------------------------------------------------------------------------
+#
+# Generic "who triggered this event" envelope.  An orchestrator (typically a
+# REST dispatcher, but anything that wraps a unit of work) ``set``s this
+# before invoking code that may publish events.  :class:`EventBus` attaches
+# its current value to every :class:`Event` whose ``actor`` field is not
+# already explicitly set, so downstream subscribers can attribute events to
+# their originating call.
+#
+# Deliberately opaque — Kiln itself has no schema for the dict.  Conventions
+# used by consumers (e.g. ``caller_tier``, ``caller_id``, ``request_id``) are
+# defined by the consumer, not the bus.
+#
+# Background-thread propagation: long-running publishers that spawn threads
+# (see :class:`kiln.plugins.monitoring_tools._PrintWatcher`) must capture
+# the current context via :func:`contextvars.copy_context` and run the
+# thread body inside it, otherwise the ContextVar's value is lost at the
+# thread boundary.  Synchronous publishers don't need to do anything —
+# the value is read at publish time on the same thread that set it.
+current_actor_context: contextvars.ContextVar[dict[str, Any] | None] = (
+    contextvars.ContextVar("kiln_actor_context", default=None)
+)
 
 
 class EventType(enum.Enum):
@@ -169,15 +196,25 @@ class Event:
     data: dict[str, Any] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.time)
     source: str = ""  # e.g. "printer:voron-350" or "queue"
+    # Ambient actor context — who triggered this event (caller tier,
+    # tenant id, request correlation id, etc.).  Populated automatically
+    # by :class:`EventBus` from :data:`current_actor_context` at publish
+    # time when not explicitly set.  ``None`` means no actor metadata is
+    # attached; an empty dict means "actor explicitly empty" (e.g. a
+    # system-initiated event with no caller).
+    actor: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
-        return {
+        out: dict[str, Any] = {
             "type": self.type.value,
             "data": self.data,
             "timestamp": self.timestamp,
             "source": self.source,
         }
+        if self.actor is not None:
+            out["actor"] = self.actor
+        return out
 
 
 # Type aliases for event handlers.
@@ -287,10 +324,24 @@ class EventBus:
         data: dict[str, Any] | None,
         source: str,
     ) -> Event:
-        """Normalise the flexible publish signature into an :class:`Event`."""
+        """Normalise the flexible publish signature into an :class:`Event`.
+
+        Attaches the ambient :data:`current_actor_context` to events that
+        don't carry an ``actor`` of their own.  Explicit
+        ``Event(actor=...)`` always wins over the ambient value.
+        """
         if isinstance(event_or_type, EventType):
-            return Event(type=event_or_type, data=data or {}, source=source)
-        return event_or_type
+            event = Event(type=event_or_type, data=data or {}, source=source)
+        else:
+            event = event_or_type
+        if event.actor is None:
+            ambient = current_actor_context.get()
+            if ambient is not None:
+                # Defensive copy — the ambient dict can be mutated by its
+                # owner after publish, and we want the event's actor to be
+                # a stable snapshot at publish time.
+                event.actor = dict(ambient)
+        return event
 
     def publish(
         self,
