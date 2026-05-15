@@ -211,6 +211,11 @@ class PrintabilityReport:
     model_height_mm: float = 0.0
     recommendations: list[str] = field(default_factory=list)
     estimated_print_time_modifier: float = 1.0  # 1.0 = normal
+    # Optional kiln-pro overlay block.  Populated by
+    # ``analyze_printability`` when the kiln-pro package is installed
+    # (Pro+ tier); absent on free / public installs.  See kiln3d.com
+    # for tier details.
+    enrichment: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1386,7 +1391,11 @@ def analyze_printability(
     :param material: Material ID for warping and cost analysis (default ``"pla"``).
     :param infill_percent: Interior infill density (0-100) for cost estimation.
     :returns: A :class:`PrintabilityReport` with scores, grades, and
-        recommendations.
+        recommendations.  When the kiln-pro package is installed (Pro+
+        tier), the report is enriched with material-specific tuning
+        and the ``enrichment`` field is populated; free / public
+        installs see the safety-floor result unchanged.  See
+        https://kiln3d.com for tier details.
     :raises ValueError: If the file cannot be parsed.
     """
     triangles, vertices = _parse_mesh(file_path)
@@ -1483,7 +1492,7 @@ def analyze_printability(
             adhesion_risk=bed_adhesion.adhesion_risk,
         )
 
-    return PrintabilityReport(
+    report = PrintabilityReport(
         printable=printable,
         score=score,
         grade=grade,
@@ -1500,6 +1509,44 @@ def analyze_printability(
         recommendations=recommendations,
         estimated_print_time_modifier=round(time_mod, 2),
     )
+
+    # Optional kiln-pro enrichment: when the kiln-pro package is
+    # installed, material-aware thresholds and SME-tuned scoring
+    # weights are layered onto the safety-floor result.  The overlay
+    # returns the input unchanged for unknown materials, so the call
+    # is safe to make unconditionally.  Free / public installs hit
+    # the ImportError branch and see the unmodified report.  Pro
+    # enrichment is a kiln-pro Pro+ feature — see kiln3d.com.
+    try:
+        from kiln_pro.bridge import pro_features
+    except ImportError:
+        pass
+    else:
+        if pro_features.is_available("printability_overlay"):
+            try:
+                enriched = pro_features.printability_overlay.enrich_printability_report(
+                    report.to_dict(),
+                    material=material,
+                )
+            except Exception:  # noqa: BLE001
+                # Overlay failure must never break the public path.
+                enriched = None
+            if isinstance(enriched, dict) and "enrichment" in enriched:
+                report.enrichment = enriched.get("enrichment")
+                # Mirror the overlay's recomputed top-level fields onto
+                # the dataclass so dict-consumers and dataclass-consumers
+                # agree.  Other nested analysis blocks (overhangs,
+                # thin_walls, etc.) remain authoritative on the dataclass.
+                if "score" in enriched:
+                    report.score = int(enriched["score"])
+                if "grade" in enriched:
+                    report.grade = str(enriched["grade"])
+                if "printable" in enriched:
+                    report.printable = bool(enriched["printable"])
+                if isinstance(enriched.get("recommendations"), list):
+                    report.recommendations = list(enriched["recommendations"])
+
+    return report
 
 
 # ---------------------------------------------------------------------------

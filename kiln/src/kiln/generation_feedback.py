@@ -282,6 +282,12 @@ class FeedbackType(enum.Enum):
     STRUCTURAL = "structural"
     AESTHETIC = "aesthetic"
     MATERIAL = "material"
+    # Intent-gate failures emitted by generator-declared assertions.
+    # Synthesised by an adapter in the kiln-pro package; the enum value
+    # lives in public Kiln so the existing PrintFeedback +
+    # generate_improved_prompt retry loop can consume it without a
+    # pro install.  See https://kiln3d.com for tier details.
+    INTENT = "intent"
 
 
 # ---------------------------------------------------------------------------

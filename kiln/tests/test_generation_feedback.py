@@ -47,9 +47,21 @@ class TestFeedbackTypeEnum:
             assert isinstance(ft.value, str)
 
     def test_expected_types_exist(self):
-        expected = {"printability", "dimensional", "structural", "aesthetic", "material"}
+        expected = {
+            "printability",
+            "dimensional",
+            "structural",
+            "aesthetic",
+            "material",
+            "intent",
+        }
         actual = {ft.value for ft in FeedbackType}
         assert expected == actual
+
+    def test_intent_value(self):
+        # Pinned: downstream adapters synthesise PrintFeedback items of
+        # this type, so the string value is part of the wire contract.
+        assert FeedbackType.INTENT.value == "intent"
 
 
 class TestPrintFeedbackDataclass:

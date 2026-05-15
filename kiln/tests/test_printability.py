@@ -401,3 +401,51 @@ class TestAnalyzePrintability:
             path = _write_stl(tmpdir, _cube_triangles(10.0))
             report = analyze_printability(path)
             assert report.estimated_print_time_modifier >= 1.0
+
+
+class TestProEnrichmentHook:
+    """The optional kiln-pro printability_overlay bridge call."""
+
+    def test_no_kiln_pro_installed_returns_unchanged_report(self, monkeypatch):
+        # Force the bridge import to fail, simulating a free / public
+        # Kiln install with no kiln-pro on the Python path.
+        import builtins as _builtins
+        real_import = _builtins.__import__
+
+        def _no_kiln_pro(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "kiln_pro.bridge" or name.startswith("kiln_pro"):
+                raise ImportError("simulated: kiln-pro not installed")
+            return real_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(_builtins, "__import__", _no_kiln_pro)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0))
+            report = analyze_printability(path, material="pla")
+
+        assert isinstance(report, PrintabilityReport)
+        assert report.enrichment is None
+
+    def test_kiln_pro_installed_populates_enrichment(self):
+        # When kiln-pro is installed in the test environment, the
+        # overlay should run and populate the enrichment block. Skip
+        # cleanly when running against a kiln-only install.
+        pytest.importorskip("kiln_pro.bridge")
+        from kiln_pro.bridge import pro_features
+        if not pro_features.is_available("printability_overlay"):
+            pytest.skip("kiln-pro installed but printability_overlay not loaded")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0))
+            report = analyze_printability(path, material="pla")
+
+        assert isinstance(report, PrintabilityReport)
+        # When the overlay carries data for the material, enrichment is
+        # populated.  When it doesn't, enrichment is None and the
+        # safety-floor path is preserved — both are valid outcomes.
+        if report.enrichment is not None:
+            assert report.enrichment.get("source") == "kiln_pro.printability_overlay"
+            assert report.enrichment.get("material") == "pla"
+            assert "score_delta" in report.enrichment
+            # Top-level fields stay consistent between dataclass and dict.
+            assert report.to_dict()["enrichment"] == report.enrichment
