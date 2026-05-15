@@ -307,6 +307,133 @@ _MATERIAL_SHRINKAGE_STRAIN: dict[str, float] = {
 }
 
 
+
+# ---------------------------------------------------------------------------
+# Printability-judgment tier seam — public safe-default rule lists
+# ---------------------------------------------------------------------------
+#
+# Soft seam. Free tier (overlay returns {}) uses the _*_PUBLIC_DEFAULTS
+# below — same rule shapes + values as the pre-seam code, kept here as
+# the public floor. Pro+ overlay supplies curated / tuned versions via
+# the ``printability_judgment`` overlay (kiln_pro/data/
+# printability_judgment_pro_overlay.json).
+
+_WARPING_PUBLIC_DEFAULTS: dict[str, Any] = {
+    "geometry_score_rules": [
+        {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 20000.0, "score": 2},
+        {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 2000.0,  "score": 1},
+        {"metric": "height_to_base_ratio", "operator": ">", "threshold": 5.0,     "score": 2},
+        {"metric": "height_to_base_ratio", "operator": ">", "threshold": 3.0,     "score": 1},
+        {"metric": "sharp_corners_at_base","operator": ">", "threshold": 10,      "score": 1},
+    ],
+    "material_multipliers": {"low": 0.5, "moderate": 1.0, "high": 1.5, "very_high": 2.0},
+    "risk_thresholds":      {"critical": 3.0, "high": 2.0, "moderate": 1.0},
+    "score_deductions":     {"critical": -20, "high": -12, "moderate": -6, "low": 0},
+    "recommendation_rules": [
+        {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 2000.0,
+         "template": "Large flat surface detected ({flat_area_total_mm2:.0f}mm²). Add a 5-8mm brim to resist corner lifting."},
+        {"metric": "height_to_base_ratio", "operator": ">", "threshold": 3.0,
+         "template": "Tall/narrow geometry (ratio {height_to_base_ratio:.1f}). Consider splitting into shorter sections or adding a wider base."},
+        {"metric": "material_tendency",    "operator": "in", "threshold": ["high", "very_high"],
+         "template": "Material ({material}) has {material_tendency} warping tendency. Print in an enclosed chamber and increase bed temperature to reduce thermal gradients."},
+        {"metric": "sharp_corners_at_base","operator": ">", "threshold": 5,
+         "template": "Sharp corners at the base are prone to curling. Add mouse-ear supports or a brim."},
+    ],
+}
+
+_THERMAL_STRESS_PUBLIC_DEFAULTS: dict[str, Any] = {
+    "risk_thresholds":  {"critical": 6.0, "high": 4.0, "moderate": 2.5},
+    "score_deductions": {"critical": -15, "high": -10, "moderate": -5, "low": 0},
+    "stress_zone_ratio_threshold": 2.0,
+    "max_zones_tracked": 20,
+    "max_zones_emitted": 10,
+    "recommendation_rules": [
+        {"metric": "risk_level",            "operator": "in", "threshold": ["high", "critical"],
+         "template": "Significant cross-section changes detected (max ratio {max_ratio:.1f}x). Gradual geometry transitions reduce internal stress — consider adding fillets or chamfers."},
+        {"metric": "risk_level",            "operator": "==", "threshold": "critical",
+         "template": "Critical thermal stress risk. Slow print speed in transition zones and increase layer cooling fan gradually."},
+        {"metric": "amplification_active",  "operator": "==", "threshold": True,
+         "template": "Material ({material}) amplifies thermal stress (factor {stress_factor:.1f}x). Print in an enclosure and reduce temperature gradients."},
+        {"metric": "risk_level",            "operator": "==", "threshold": "moderate",
+         "template": "Moderate cross-section variation. Adding transition layers or adjusting print speed at geometry changes can help."},
+    ],
+}
+
+_ADHESION_FORCE_PUBLIC_DEFAULTS: dict[str, Any] = {
+    "risk_thresholds":  {"secure": 3.0, "marginal": 1.5},
+    "score_deductions": {"secure": 0, "marginal": -3, "likely_detach": -10},
+    "peel_force_scale": 0.01,
+    "poor_adhesion_materials": ["pp", "nylon", "pa", "peek"],
+    "recommendation_rules": [
+        {"metric": "risk_level", "operator": "==", "threshold": "likely_detach",
+         "template": "Part will likely detach during printing. Use a brim (8mm+), glue stick, or raft."},
+        {"metric": "risk_level", "operator": "==", "threshold": "marginal",
+         "template": "Adhesion is borderline. Adding a 5mm brim is recommended."},
+        {"metric": "is_poor_adhesion_material", "operator": "==", "threshold": True,
+         "template": "Material ({material}) has very poor adhesion on standard build surfaces. Use a specialized build sheet (e.g., Garolite for nylon, PP sheet for PP)."},
+    ],
+}
+
+
+def _check_rule_op(op: str, value: Any, threshold: Any) -> bool:
+    """Compare ``value`` to ``threshold`` per ``op``.  False on any
+    operator/value mismatch (forward-compat: unknown operators are
+    silently skipped, not raised)."""
+    try:
+        if op == ">":  return value > threshold
+        if op == "<":  return value < threshold
+        if op == ">=": return value >= threshold
+        if op == "<=": return value <= threshold
+        if op == "==": return value == threshold
+        if op == "!=": return value != threshold
+        if op == "in":
+            return value in threshold
+    except TypeError:
+        return False
+    return False
+
+
+def _sum_score_rules(rules: list[dict[str, Any]], metrics: dict[str, Any]) -> int:
+    """Sum ``score`` for each matching rule.  Per-metric first-match
+    semantics — multiple rules for the same metric fire at most once
+    (mirrors the elif-chain semantics of the pre-seam code)."""
+    total = 0
+    fired_metrics: set[str] = set()
+    for rule in rules:
+        metric = rule.get("metric")
+        if metric is None or metric in fired_metrics:
+            continue
+        if metric not in metrics:
+            continue
+        if not _check_rule_op(rule.get("operator", ">"), metrics[metric], rule.get("threshold")):
+            continue
+        total += int(rule.get("score", 0))
+        fired_metrics.add(metric)
+    return total
+
+
+def _apply_recommendation_rules(
+    rules: list[dict[str, Any]],
+    metrics: dict[str, Any],
+) -> list[str]:
+    """Emit the formatted template for each rule that matches, in order."""
+    out: list[str] = []
+    for rule in rules:
+        metric = rule.get("metric")
+        if metric is None or metric not in metrics:
+            continue
+        if not _check_rule_op(rule.get("operator", ">"), metrics[metric], rule.get("threshold")):
+            continue
+        template = rule.get("template")
+        if not template:
+            continue
+        try:
+            out.append(template.format(**metrics))
+        except (KeyError, IndexError, ValueError):
+            out.append(template)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Internal geometry helpers
 # ---------------------------------------------------------------------------
@@ -780,27 +907,30 @@ def _analyze_warping(
     bbox: dict[str, float],
     *,
     material: str = "pla",
+    overlay: dict[str, Any] | None = None,
 ) -> WarpingAnalysis:
     """Assess warping risk based on geometry and material properties.
 
-    Combines large-flat-surface detection, height-to-base ratio, sharp
-    base-corner counting, and material warping tendency into a single
-    risk level with score deductions and actionable recommendations.
+    Soft tier seam: free tier (``overlay`` empty) uses
+    :data:`_WARPING_PUBLIC_DEFAULTS`; Pro+ overlay supplies curated /
+    tuned versions via the ``printability_judgment`` overlay's
+    ``warping`` block.  Geometry facts + material tendency are identical
+    across tiers; only the JUDGMENT (which bucket -> which deduction ->
+    which message) varies.
     """
+    cfg = (overlay or {}).get("warping") or _WARPING_PUBLIC_DEFAULTS
+
     z_min = bbox["z_min"]
     z_max = bbox["z_max"]
     x_span = bbox["x_max"] - bbox["x_min"]
     y_span = bbox["y_max"] - bbox["y_min"]
     z_span = z_max - z_min
 
-    # --- Large flat surfaces ---
     flat_area_total = 0.0
     large_flat_surfaces: list[dict[str, float]] = []
-
     for tri in triangles:
         n = _triangle_normal(tri[0], tri[1], tri[2])
         nn = _normalize(n)
-        # Near-parallel to build plate (top or bottom facing)
         if abs(nn[2]) > 0.95:
             area = _triangle_area(tri[0], tri[1], tri[2])
             flat_area_total += area
@@ -812,23 +942,15 @@ def _analyze_warping(
                     "centroid_y": round(centroid[1], 2),
                     "centroid_z": round(centroid[2], 2),
                 })
-
-    # Sort by area descending, keep top 10
     large_flat_surfaces.sort(key=lambda s: s["area_mm2"], reverse=True)
     large_flat_surfaces = large_flat_surfaces[:10]
 
-    # --- Sharp corners at base ---
-    # Count unique vertices in the bottom layer that participate in acute
-    # mesh angles.  We track seen vertices by rounded coordinates to
-    # deduplicate across shared triangle edges.
     base_threshold = z_min + 5.0
     _sharp_verts_seen: set[tuple[float, float, float]] = set()
-
     for tri in triangles:
         centroid = _triangle_centroid(tri[0], tri[1], tri[2])
         if centroid[2] > base_threshold:
             continue
-
         verts = [tri[0], tri[1], tri[2]]
         for i in range(3):
             v0 = verts[i]
@@ -846,81 +968,38 @@ def _analyze_warping(
             if angle_deg < 90.0:
                 rounded = (round(v0[0], 4), round(v0[1], 4), round(v0[2], 4))
                 _sharp_verts_seen.add(rounded)
-
     sharp_corners_at_base = len(_sharp_verts_seen)
 
-    # --- Height-to-base ratio ---
     base_dim = max(0.1, min(x_span, y_span))
     height_to_base_ratio = z_span / base_dim
-
-    # --- Material warping tendency ---
     tendency = _get_material_warping_tendency(material)
 
-    # --- Cross-reference risk ---
-    geometry_score = 0
-    if flat_area_total > 20000.0:
-        geometry_score += 2  # Very large flat surface (>20,000mm²)
-    elif flat_area_total > 2000.0:
-        geometry_score += 1
-    if height_to_base_ratio > 5.0:
-        geometry_score += 2
-    elif height_to_base_ratio > 3.0:
-        geometry_score += 1
-    if sharp_corners_at_base > 10:
-        geometry_score += 1
-
-    material_multiplier = {
-        "low": 0.5,
-        "moderate": 1.0,
-        "high": 1.5,
-        "very_high": 2.0,
-    }.get(tendency, 1.0)
-
+    metrics: dict[str, Any] = {
+        "flat_area_total_mm2": flat_area_total,
+        "height_to_base_ratio": height_to_base_ratio,
+        "sharp_corners_at_base": sharp_corners_at_base,
+        "material_tendency": tendency,
+        "material": material,
+    }
+    geometry_score = _sum_score_rules(cfg.get("geometry_score_rules", []), metrics)
+    material_multipliers = cfg.get("material_multipliers", {})
+    material_multiplier = material_multipliers.get(tendency, 1.0)
     final_risk = geometry_score * material_multiplier
 
-    if final_risk >= 3.0:
+    risk_thresholds = cfg.get("risk_thresholds", {})
+    if final_risk >= risk_thresholds.get("critical", 3.0):
         risk_level = "critical"
-    elif final_risk >= 2.0:
+    elif final_risk >= risk_thresholds.get("high", 2.0):
         risk_level = "high"
-    elif final_risk >= 1.0:
+    elif final_risk >= risk_thresholds.get("moderate", 1.0):
         risk_level = "moderate"
     else:
         risk_level = "low"
 
-    # --- Score deduction ---
-    score_deduction = {
-        "critical": -20,
-        "high": -12,
-        "moderate": -6,
-        "low": 0,
-    }[risk_level]
-
-    # --- Recommendations ---
-    recommendations: list[str] = []
-
-    if flat_area_total > 2000.0:
-        recommendations.append(
-            f"Large flat surface detected ({flat_area_total:.0f}mm\u00b2). "
-            f"Add a 5-8mm brim to resist corner lifting."
-        )
-
-    if height_to_base_ratio > 3.0:
-        recommendations.append(
-            f"Tall/narrow geometry (ratio {height_to_base_ratio:.1f}). "
-            f"Consider splitting into shorter sections or adding a wider base."
-        )
-
-    if tendency in ("high", "very_high"):
-        recommendations.append(
-            f"Material ({material}) has {tendency} warping tendency. "
-            f"Print in an enclosed chamber and increase bed temperature to reduce thermal gradients."
-        )
-
-    if sharp_corners_at_base > 5:
-        recommendations.append(
-            "Sharp corners at the base are prone to curling. "
-            "Add mouse-ear supports or a brim."
-        )
+    score_deduction = int(cfg.get("score_deductions", {}).get(risk_level, 0))
+    recommendations = _apply_recommendation_rules(
+        cfg.get("recommendation_rules", []), metrics,
+    )
 
     return WarpingAnalysis(
         risk_level=risk_level,
@@ -939,19 +1018,25 @@ def _analyze_thermal_stress(
     *,
     material: str = "pla",
     layer_height: float = 0.2,
+    overlay: dict[str, Any] | None = None,
 ) -> ThermalStressAnalysis:
     """Estimate thermal stress concentration from cross-section area changes.
 
-    Buckets triangles by the z-height of their centroids and computes the
-    XY-projected area per layer.  Layers with dramatic area changes relative
-    to their neighbours indicate stress concentration zones where thermal
-    contraction can cause cracking, delamination, or warping.
+    Soft tier seam: free tier uses :data:`_THERMAL_STRESS_PUBLIC_DEFAULTS`;
+    Pro+ overlay supplies tuned thresholds + recommendation templates
+    via the ``printability_judgment`` overlay's ``thermal_stress`` block.
+    Material stress factor (textbook physics) comes from the public
+    ``_MATERIAL_STRESS_FACTORS`` table — identical across tiers.
     """
+    cfg = (overlay or {}).get("thermal_stress") or _THERMAL_STRESS_PUBLIC_DEFAULTS
+    zone_ratio_threshold = cfg.get("stress_zone_ratio_threshold", 2.0)
+    max_tracked = int(cfg.get("max_zones_tracked", 20))
+    max_emitted = int(cfg.get("max_zones_emitted", 10))
+
     z_min = bbox["z_min"]
     z_max = bbox["z_max"]
     z_span = z_max - z_min
 
-    # Need at least two layers for a meaningful comparison.
     if z_span < layer_height * 2 or not triangles:
         return ThermalStressAnalysis(
             risk_level="low",
@@ -968,18 +1053,15 @@ def _analyze_thermal_stress(
 
     for tri in triangles:
         centroid = _triangle_centroid(tri[0], tri[1], tri[2])
-        # Determine which layer bucket this triangle's centroid falls in.
         bucket = int((centroid[2] - z_min) / layer_height)
         bucket = max(0, min(bucket, num_layers - 1))
 
-        # XY-projected area: |normal_z| * triangle_area
         normal = _triangle_normal(tri[0], tri[1], tri[2])
         nn = _normalize(normal)
         area = _triangle_area(tri[0], tri[1], tri[2])
         xy_area = abs(nn[2]) * area
         layer_areas[bucket] += xy_area
 
-    # Compute area change ratios between consecutive layers.
     stress_zones: list[dict[str, float]] = []
     max_ratio = 1.0
 
@@ -988,61 +1070,44 @@ def _analyze_thermal_stress(
         a_curr = layer_areas[i]
         bigger = max(a_prev, a_curr)
         smaller = min(a_prev, a_curr)
-        # Clamp to avoid division by near-zero.
         ratio = bigger / max(smaller, 0.01)
         if ratio > max_ratio:
             max_ratio = ratio
-        if ratio > 2.0 and len(stress_zones) < 20:
+        if ratio > zone_ratio_threshold and len(stress_zones) < max_tracked:
             stress_zones.append({
                 "z_mm": round(z_min + i * layer_height, 2),
                 "area_change_ratio": round(ratio, 2),
                 "layer_area_mm2": round(a_curr, 2),
             })
 
-    # Sort by ratio descending, keep top 10.
     stress_zones.sort(key=lambda z: z["area_change_ratio"], reverse=True)
-    stress_zones = stress_zones[:10]
+    stress_zones = stress_zones[:max_emitted]
 
-    # Material stress factor.
     stress_factor = _MATERIAL_STRESS_FACTORS.get(material.lower(), 1.0)
     combined_score = max_ratio * stress_factor
 
-    # Risk level from combined score.
-    if combined_score >= 6.0:
+    risk_thresholds = cfg.get("risk_thresholds", {})
+    if combined_score >= risk_thresholds.get("critical", 6.0):
         risk_level = "critical"
-        score_deduction = -15
-    elif combined_score >= 4.0:
+    elif combined_score >= risk_thresholds.get("high", 4.0):
         risk_level = "high"
-        score_deduction = -10
-    elif combined_score >= 2.5:
+    elif combined_score >= risk_thresholds.get("moderate", 2.5):
         risk_level = "moderate"
-        score_deduction = -5
     else:
         risk_level = "low"
-        score_deduction = 0
 
-    # Recommendations.
-    recommendations: list[str] = []
-    if risk_level in ("high", "critical"):
-        recommendations.append(
-            f"Significant cross-section changes detected (max ratio {max_ratio:.1f}x). "
-            f"Gradual geometry transitions reduce internal stress — consider adding fillets or chamfers."
-        )
-    if risk_level == "critical":
-        recommendations.append(
-            "Critical thermal stress risk. Slow print speed in transition zones "
-            "and increase layer cooling fan gradually."
-        )
-    if stress_factor > 1.0 and risk_level != "low":
-        recommendations.append(
-            f"Material ({material}) amplifies thermal stress (factor {stress_factor:.1f}x). "
-            f"Print in an enclosure and reduce temperature gradients."
-        )
-    if risk_level == "moderate":
-        recommendations.append(
-            "Moderate cross-section variation. Adding transition layers or adjusting "
-            "print speed at geometry changes can help."
-        )
+    score_deduction = int(cfg.get("score_deductions", {}).get(risk_level, 0))
+
+    rec_metrics: dict[str, Any] = {
+        "risk_level": risk_level,
+        "max_ratio": max_ratio,
+        "material": material,
+        "stress_factor": stress_factor,
+        "amplification_active": (stress_factor > 1.0 and risk_level != "low"),
+    }
+    recommendations = _apply_recommendation_rules(
+        cfg.get("recommendation_rules", []), rec_metrics,
+    )
 
     return ThermalStressAnalysis(
         risk_level=risk_level,
@@ -1060,14 +1125,20 @@ def _estimate_adhesion_force(
     bbox: dict[str, float],
     *,
     material: str = "pla",
+    overlay: dict[str, Any] | None = None,
 ) -> AdhesionForceEstimate:
     """Predict whether bed adhesion force exceeds warping/peel force.
 
-    Uses a force-balance heuristic: adhesion_force (from contact area times
-    material adhesion strength) vs peel_force (from thermal contraction times
-    part dimensions).  This is *not* FEA — it is a fast first-order estimate
-    for flagging high-risk parts.
+    Soft tier seam: free tier uses :data:`_ADHESION_FORCE_PUBLIC_DEFAULTS`;
+    Pro+ overlay supplies tuned risk thresholds, peel-force scale, and
+    recommendation templates via the ``printability_judgment`` overlay's
+    ``adhesion_force`` block.  Material adhesion strength + shrinkage
+    strain (textbook physics) come from the public material tables —
+    identical across tiers.
     """
+    cfg = (overlay or {}).get("adhesion_force") or _ADHESION_FORCE_PUBLIC_DEFAULTS
+    peel_scale = cfg.get("peel_force_scale", 0.01)
+
     mat_key = material.lower()
     adhesion_strength = _MATERIAL_ADHESION_STRENGTH.get(mat_key, 0.10)
     shrinkage_strain = _MATERIAL_SHRINKAGE_STRAIN.get(mat_key, 0.005)
@@ -1076,46 +1147,31 @@ def _estimate_adhesion_force(
     y_span = bbox["y_max"] - bbox["y_min"]
     z_span = bbox["z_max"] - bbox["z_min"]
 
-    # Adhesion force = contact area × adhesion strength.
     adhesion_force = contact_area_mm2 * adhesion_strength
-
-    # Peel force heuristic: shrinkage × longest XY dimension × height × scaling.
     longest_xy = max(x_span, y_span)
-    peel_force = shrinkage_strain * longest_xy * z_span * 0.01
-
-    # Force ratio (avoid div-by-zero).
+    peel_force = shrinkage_strain * longest_xy * z_span * peel_scale
     force_ratio = adhesion_force / max(peel_force, 0.001)
-
     will_detach = force_ratio < 1.0
 
-    # Risk levels.
-    if force_ratio >= 3.0:
+    risk_thresholds = cfg.get("risk_thresholds", {})
+    if force_ratio >= risk_thresholds.get("secure", 3.0):
         risk_level = "secure"
-        score_deduction = 0
-    elif force_ratio >= 1.5:
+    elif force_ratio >= risk_thresholds.get("marginal", 1.5):
         risk_level = "marginal"
-        score_deduction = -3
     else:
         risk_level = "likely_detach"
-        score_deduction = -10
 
-    # Recommendations.
-    recommendations: list[str] = []
-    if risk_level == "likely_detach":
-        recommendations.append(
-            "Part will likely detach during printing. "
-            "Use a brim (8mm+), glue stick, or raft."
-        )
-    elif risk_level == "marginal":
-        recommendations.append(
-            "Adhesion is borderline. Adding a 5mm brim is recommended."
-        )
+    score_deduction = int(cfg.get("score_deductions", {}).get(risk_level, 0))
 
-    if mat_key in ("pp", "nylon", "pa", "peek"):
-        recommendations.append(
-            f"Material ({material}) has very poor adhesion on standard build surfaces. "
-            f"Use a specialized build sheet (e.g., Garolite for nylon, PP sheet for PP)."
-        )
+    poor_materials = cfg.get("poor_adhesion_materials", [])
+    rec_metrics: dict[str, Any] = {
+        "risk_level": risk_level,
+        "material": material,
+        "is_poor_adhesion_material": (mat_key in poor_materials),
+    }
+    recommendations = _apply_recommendation_rules(
+        cfg.get("recommendation_rules", []), rec_metrics,
+    )
 
     return AdhesionForceEstimate(
         adhesion_force_n=round(adhesion_force, 3),
@@ -1398,6 +1454,8 @@ def analyze_printability(
         https://kiln3d.com for tier details.
     :raises ValueError: If the file cannot be parsed.
     """
+    from kiln.design_intelligence import load_pro_overlay_or_empty
+
     triangles, vertices = _parse_mesh(file_path)
     triangles = _normalize_triangle_winding(triangles)
 
@@ -1414,6 +1472,12 @@ def analyze_printability(
         "z_max": max(zs),
     }
     z_min = bbox["z_min"]
+
+    # Soft tier seam: load the printability_judgment overlay once and
+    # pass it to each material-derived sub-analysis. Empty overlay ->
+    # free-tier safe defaults; populated -> curated thresholds + tuned
+    # recommendation templates from Pro+.
+    judgment_overlay = load_pro_overlay_or_empty("printability_judgment")
 
     overhangs = _analyze_overhangs(
         triangles,
@@ -1437,12 +1501,16 @@ def analyze_printability(
         layer_height=layer_height,
         normalize_winding=False,
     )
-    warping = _analyze_warping(triangles, vertices, bbox, material=material)
+    warping = _analyze_warping(
+        triangles, vertices, bbox, material=material, overlay=judgment_overlay,
+    )
     thermal_stress = _analyze_thermal_stress(
         triangles, bbox, material=material, layer_height=layer_height,
+        overlay=judgment_overlay,
     )
     adhesion_force = _estimate_adhesion_force(
         bed_adhesion.contact_area_mm2, bbox, material=material,
+        overlay=judgment_overlay,
     )
 
     score = _compute_score(
@@ -1454,6 +1522,16 @@ def analyze_printability(
         overhangs, thin_walls, bridging, bed_adhesion, supports,
         warping=warping, thermal_stress=thermal_stress, adhesion_force=adhesion_force,
     )
+
+    # Free-tier upsell hook: when the judgment overlay is absent, the
+    # warping / thermal-stress / adhesion-force recommendations come
+    # from the public safety-floor templates. Pro+ supplies curated /
+    # printer-tuned / brand-aware guidance. One non-intrusive line.
+    if not judgment_overlay:
+        recommendations.append(
+            "Curated, brand-tuned recommendations (printer-specific bed temps, "
+            "enclosure choice, filament profile) are available with Kiln Pro."
+        )
 
     # Estimate print time modifier: supports and bridges add time.
     time_mod = 1.0

@@ -449,3 +449,165 @@ class TestProEnrichmentHook:
             assert "score_delta" in report.enrichment
             # Top-level fields stay consistent between dataclass and dict.
             assert report.to_dict()["enrichment"] == report.enrichment
+
+
+
+# ---------------------------------------------------------------------------
+# TestPrintabilityJudgmentTierSeam — soft seam for warping / thermal_stress /
+# adhesion_force.  Same return shape across tiers; curated thresholds +
+# recommendation templates come from the ``printability_judgment`` overlay.
+# ---------------------------------------------------------------------------
+
+
+from kiln.printability import (  # noqa: E402
+    _ADHESION_FORCE_PUBLIC_DEFAULTS,
+    _THERMAL_STRESS_PUBLIC_DEFAULTS,
+    _WARPING_PUBLIC_DEFAULTS,
+    _apply_recommendation_rules,
+    _check_rule_op,
+    _sum_score_rules,
+)
+
+
+class TestPrintabilityJudgmentTierSeam:
+    """Soft tier seam: free + Pro produce the SAME return shape with all
+    material-derived fields populated.  Only the values and the
+    recommendation wording differ.  Existing 20+ tests in
+    test_warping_analysis / test_thermal_stress / test_adhesion_force
+    keep passing because the seam preserves return shape."""
+
+    def test_free_tier_keeps_material_derived_fields_populated(
+        self, monkeypatch, tmp_path,
+    ):
+        """Free tier (overlay={}) still returns non-None for the four
+        material-derived fields — no regression vs pre-seam behaviour.
+        This is the key promise of the soft seam."""
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: {},
+        )
+        path = _write_stl(str(tmp_path), _cube_triangles(20.0))
+        report = analyze_printability(path, material="abs")
+        assert report.warping is not None
+        assert report.thermal_stress is not None
+        assert report.adhesion_force is not None
+
+    def test_free_tier_appends_pro_upsell_recommendation(
+        self, monkeypatch, tmp_path,
+    ):
+        """Free tier carries one non-intrusive line pointing at Pro for
+        brand-tuned guidance.  Honest about the gap."""
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: {},
+        )
+        path = _write_stl(str(tmp_path), _cube_triangles(20.0))
+        report = analyze_printability(path, material="pla")
+        rec_text = " ".join(report.recommendations)
+        assert "Kiln Pro" in rec_text
+
+    def test_pro_tier_skips_upsell_line(self, monkeypatch, tmp_path):
+        """When the overlay is populated, the upsell line is suppressed."""
+        pro = {
+            "warping": _WARPING_PUBLIC_DEFAULTS,
+            "thermal_stress": _THERMAL_STRESS_PUBLIC_DEFAULTS,
+            "adhesion_force": _ADHESION_FORCE_PUBLIC_DEFAULTS,
+        }
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: pro,
+        )
+        path = _write_stl(str(tmp_path), _cube_triangles(20.0))
+        report = analyze_printability(path, material="pla")
+        rec_text = " ".join(report.recommendations)
+        assert "Kiln Pro" not in rec_text
+
+    def test_overlay_drives_warping_risk_thresholds(self, monkeypatch, tmp_path):
+        """The Pro overlay's risk_thresholds are honored — a more
+        sensitive overlay flags geometry the public defaults pass."""
+        path = _write_stl(str(tmp_path), _cube_triangles(20.0))
+        sensitive = {
+            "warping": {
+                "geometry_score_rules": [
+                    {"metric": "sharp_corners_at_base", "operator": ">=",
+                     "threshold": 0, "score": 5},
+                ],
+                "material_multipliers": {"low": 1.0, "moderate": 1.0,
+                                         "high": 1.0, "very_high": 1.0},
+                "risk_thresholds": {"critical": 999.0, "high": 999.0, "moderate": 0.0},
+                "score_deductions": {"critical": -20, "high": -12, "moderate": -6, "low": 0},
+                "recommendation_rules": [],
+            },
+        }
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: sensitive,
+        )
+        report = analyze_printability(path, material="pla")
+        assert report.warping.risk_level == "moderate"
+        assert report.warping.score_deduction == -6
+
+    def test_check_rule_op_handles_all_operators(self):
+        """Operator dispatcher handles every operator the overlay uses;
+        unknown operators return False (forward-compat)."""
+        assert _check_rule_op(">", 5, 3) is True
+        assert _check_rule_op("<", 5, 3) is False
+        assert _check_rule_op(">=", 5, 5) is True
+        assert _check_rule_op("<=", 5, 5) is True
+        assert _check_rule_op("==", "a", "a") is True
+        assert _check_rule_op("!=", "a", "b") is True
+        assert _check_rule_op("in", "a", ["a", "b"]) is True
+        assert _check_rule_op("in", "z", ["a", "b"]) is False
+        assert _check_rule_op("~=", 5, 3) is False  # unknown op
+        assert _check_rule_op(">", "a", 3) is False  # type mismatch
+
+    def test_sum_score_rules_first_match_per_metric(self):
+        """Per-metric first-match semantics: multiple rules for the same
+        metric fire at most once (matches the pre-seam elif chains)."""
+        rules = [
+            {"metric": "x", "operator": ">", "threshold": 100, "score": 2},
+            {"metric": "x", "operator": ">", "threshold": 10,  "score": 1},
+            {"metric": "y", "operator": ">", "threshold": 0,   "score": 3},
+        ]
+        # x=50: matches second rule (>10), not first. y=5: matches. Total = 4
+        assert _sum_score_rules(rules, {"x": 50, "y": 5}) == 4
+        # x=200: matches first; later x rule skipped. Total = 5 (not 6)
+        assert _sum_score_rules(rules, {"x": 200, "y": 5}) == 5
+
+    def test_apply_recommendation_rules_skips_missing_template_vars(self):
+        """Missing template variables fall back to the raw template
+        string — never crashes (defensive against overlay/code drift)."""
+        rules = [
+            {"metric": "x", "operator": ">", "threshold": 0,
+             "template": "value is {does_not_exist}"},
+        ]
+        out = _apply_recommendation_rules(rules, {"x": 1})
+        assert out == ["value is {does_not_exist}"]
+
+    def test_seam_preserves_return_shape_across_tiers(
+        self, monkeypatch, tmp_path,
+    ):
+        """Same PrintabilityReport field set under both tiers — only
+        values inside vary.  Callers don't have to branch on tier."""
+        import dataclasses
+        path = _write_stl(str(tmp_path), _cube_triangles(20.0))
+
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: {},
+        )
+        free = analyze_printability(path, material="pla")
+
+        pro_ovr = {"warping": _WARPING_PUBLIC_DEFAULTS,
+                   "thermal_stress": _THERMAL_STRESS_PUBLIC_DEFAULTS,
+                   "adhesion_force": _ADHESION_FORCE_PUBLIC_DEFAULTS}
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: pro_ovr,
+        )
+        pro_rpt = analyze_printability(path, material="pla")
+
+        assert dataclasses.fields(type(free)) == dataclasses.fields(type(pro_rpt))
+        assert (free.warping is None) == (pro_rpt.warping is None)
+        assert (free.thermal_stress is None) == (pro_rpt.thermal_stress is None)
+        assert (free.adhesion_force is None) == (pro_rpt.adhesion_force is None)
