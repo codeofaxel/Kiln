@@ -24,7 +24,6 @@ import pytest
 
 from kiln.generation.validation import detect_holes
 
-
 # ---------------------------------------------------------------------------
 # STL synthesis helpers (binary STL, hand-packed — same style as the
 # pockets test file so reviewers can compare the two end-to-end).
