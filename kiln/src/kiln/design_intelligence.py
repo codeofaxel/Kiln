@@ -105,6 +105,52 @@ def _merge_pro_overlay_if_available(
     return _deep_merge_dicts(public_data, overlay)
 
 
+def load_pro_overlay_or_empty(kind: str) -> dict[str, Any]:
+    """Load a kiln-pro parameter-bag overlay, or ``{}`` on any failure.
+
+    Public modules that need PARAMETER overlays — orientation scoring
+    weights, structural thresholds, scorecard deduction rules,
+    printability judgment tables — call this and branch on whether
+    the returned dict is empty:
+
+    - ``{}`` → free tier (no kiln-pro, no license, network down past
+      grace, or unknown kind).  Caller uses its safe defaults.
+    - non-empty → Pro+ tier with a valid license.  Caller uses the
+      curated values inside.
+
+    Unlike :func:`_merge_pro_overlay_if_available`, this helper does
+    not deep-merge — parameter overlays aren't entity-keyed; they're
+    flat parameter groups the caller reads with ``.get()``.
+
+    Never raises; free tier silently returns ``{}``.
+    """
+    try:
+        from kiln_pro.data_overlays import load_overlay  # type: ignore[import-not-found]
+    except ImportError:
+        return {}
+    try:
+        return load_overlay(kind)
+    except KeyError as exc:
+        # Unknown kind — programming error, not a runtime failure.
+        # Log loudly so we catch typos in the caller's kind argument.
+        logger.error(
+            "kiln-pro overlay loader rejected kind=%r: %s. "
+            "Update _KNOWN_KINDS in kiln_pro/data_overlays.py?",
+            kind, exc,
+        )
+        return {}
+    except Exception as exc:
+        # OverlayUnavailableError, FileNotFoundError, ValueError, etc.
+        # Free-tier-equivalent: silently fall back to safe defaults,
+        # log so operators can see something happened.
+        logger.warning(
+            "kiln-pro %s overlay unavailable, falling back to safe "
+            "defaults: %s",
+            kind, exc,
+        )
+        return {}
+
+
 def _deep_merge_dicts(
     base: dict[str, Any],
     overlay: dict[str, Any],

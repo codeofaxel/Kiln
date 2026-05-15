@@ -1094,3 +1094,78 @@ class TestPrintDiagnostic:
         assert result is not None
         # PLA has annealing as a strengthening option
         assert isinstance(result.post_processing_tips, list)
+
+
+# ---------------------------------------------------------------------------
+# load_pro_overlay_or_empty — parameter-bag overlay loader
+# ---------------------------------------------------------------------------
+#
+# Pairs with the existing entity-keyed loader
+# ``_merge_pro_overlay_if_available``.  Used by public modules that
+# need a flat parameter dict (orientation scoring weights, structural
+# thresholds, scorecard deduction rules, printability judgment tables)
+# rather than a per-record deep merge.  Free tier returns ``{}`` so the
+# caller falls through to its safe-default values.
+
+
+class TestLoadProOverlayOrEmpty:
+    """Free-tier safe-default loader for parameter-bag overlays.
+
+    Three concerns pinned:
+
+      1. Unknown / unsupported overlay kind never raises — programming
+         errors silently degrade to free-tier behaviour.
+      2. Missing or unreachable kiln-pro never crashes a public module
+         — ImportError, network failure, license rejection all return
+         ``{}`` the same way.
+      3. A valid request returns a dict — even when free tier yields
+         ``{}``, the type contract holds so callers can ``.get()``.
+    """
+
+    def test_unknown_kind_returns_empty_dict(self):
+        """An unknown overlay kind logs at error level and returns ``{}``
+        rather than raising.  Callers fall through to safe defaults."""
+        from kiln.design_intelligence import load_pro_overlay_or_empty
+
+        result = load_pro_overlay_or_empty("not_a_real_overlay_kind_xyz")
+        assert result == {}
+
+    def test_known_kind_returns_dict(self, monkeypatch):
+        """A known kind returns a dict.  Whether it's populated depends
+        on whether kiln-pro is installed + license is valid; the
+        type contract is the invariant."""
+        from kiln.design_intelligence import load_pro_overlay_or_empty
+
+        # Disable any network fetch so the test doesn't depend on
+        # connectivity or license state.
+        monkeypatch.setenv("KILN_OVERLAY_DISABLE_FETCH", "1")
+        monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+        # Clear the kiln-pro in-process cache if it's importable, so
+        # repeated test runs don't see stale state.
+        try:
+            from kiln_pro.data_overlays import clear_process_cache  # type: ignore[import-not-found]
+
+            clear_process_cache()
+        except ImportError:
+            pass
+
+        result = load_pro_overlay_or_empty("materials")
+        assert isinstance(result, dict)
+
+    def test_kiln_pro_import_failure_returns_empty(self, monkeypatch):
+        """If kiln-pro is not installed, the loader returns ``{}``
+        without raising.  This is the canonical free-tier path."""
+        import sys
+
+        from kiln.design_intelligence import load_pro_overlay_or_empty
+
+        # Simulate kiln-pro absent: blank the module so the import
+        # inside the helper fails.
+        real_module = sys.modules.pop("kiln_pro.data_overlays", None)
+        monkeypatch.setitem(sys.modules, "kiln_pro.data_overlays", None)
+        try:
+            result = load_pro_overlay_or_empty("materials")
+            assert result == {}
+        finally:
+            if real_module is not None:
+                sys.modules["kiln_pro.data_overlays"] = real_module
