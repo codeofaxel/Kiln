@@ -347,7 +347,7 @@ export KILN_BAMBU_TLS_MODE=insecure
 export KILN_BAMBU_TLS_FINGERPRINT=0123abcd...
 ```
 
-**Bambu webcam streams** use `ffmpeg` to relay the RTSP feed as MJPEG. Install it if you want the continuous video stream on Bambu printers:
+**Bambu webcam capture is model-dependent.** The **A1, A1 Mini, P1P, and P1S** serve camera frames over a TLS+JPEG path that needs no extra software. The **X1 series** (X1C, X1E) serves its camera over RTSPS, which Kiln relays using `ffmpeg` — so on an X1, both snapshots *and* the continuous stream need `ffmpeg` installed:
 ```bash
 # macOS
 brew install ffmpeg
@@ -355,7 +355,7 @@ brew install ffmpeg
 # Ubuntu/Debian
 sudo apt install ffmpeg
 ```
-Without `ffmpeg`, Bambu printers still report `can_snapshot=True` and single-frame vision tools (e.g. `printer_snapshot`, `monitor_print_vision`) work normally — only the continuous MJPEG stream needs `ffmpeg`.
+`can_snapshot` is reported `True` for every Bambu model so any agent can attempt a snapshot; on an X1 without `ffmpeg`, the attempt surfaces a clear model-specific `PrinterError` rather than failing silently.
 
 ### CLI Commands
 

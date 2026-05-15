@@ -2,13 +2,13 @@
 import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
 
 const contentHtml = `
-<p><strong>Kiln 1.1.1 is out.</strong> This release tightens the loop between your AI agent and your 3D printer &mdash; cheaper status signals while a print is running, better failure detection on Pro, an install-doctor that fixes its own broken paths after a Python reinstall, and a handful of quality fixes across the agent surface and the web app at <a href="https://kiln3d.com">kiln3d.com</a>.</p>
+<p><strong>Kiln 1.1.1 is out.</strong> This release tightens the loop between your AI agent and your 3D printer &mdash; better in-print failure detection on Pro, an install-doctor that fixes its own broken paths after a Python reinstall, clearer camera-monitoring events for anything built on Kiln&rsquo;s event stream, and a handful of quality fixes across the agent surface and the web app at <a href="https://kiln3d.com">kiln3d.com</a>.</p>
 
-<h2>Cheaper signals from your print camera</h2>
+<h2>Clearer camera-monitoring events</h2>
 
-<p>Kiln&rsquo;s print monitoring has been camera-aware for a while &mdash; your AI agent could already subscribe to live updates from the printer&rsquo;s camera. The catch was that every notification carried a full snapshot image in its payload, even when the agent only needed to know the camera was working.</p>
+<p>Kiln&rsquo;s print monitoring has been camera-aware for a while &mdash; both the background watcher and your AI agent can look at the printer&rsquo;s camera mid-print. The problem: Kiln fired the <em>same</em> event whether the system auto-captured a frame on its monitoring schedule or an agent decided to look right now. Anything listening &mdash; a failure detector, a logging hook &mdash; couldn&rsquo;t tell a routine system snapshot from a deliberate agent inspection.</p>
 
-<p><strong>1.1.1 splits this into two events.</strong> A lightweight one carries just signals and a path to the latest snapshot (subscribe to this for &ldquo;is the camera seeing my print?&rdquo;). A heavier one carries the full image data (subscribe to this when an agent is actually doing visual reasoning on the frame). Agents pick the one matching their job, and the watcher warns once when the heavy event has a subscriber so the bandwidth cost doesn&rsquo;t sneak up on you.</p>
+<p><strong>1.1.1 splits them by who acted.</strong> <code>VISION_FRAME_CAPTURED</code> marks the system&rsquo;s routine auto-captures &mdash; the steady stream, carrying the snapshot image and raw signals. <code>VISION_AGENT_INSPECTION</code> marks an agent&rsquo;s explicit, on-demand look, carrying thin metadata. If you&rsquo;re building on Kiln&rsquo;s event stream, you can now subscribe to exactly the signal you mean.</p>
 
 <h2>Better in-print failure detection (Pro)</h2>
 

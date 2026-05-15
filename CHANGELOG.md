@@ -25,9 +25,12 @@ Vision event-name split, MCP-client config self-heal, an event-aware
 - Vision events: `VISION_CHECK` split into `VISION_FRAME_CAPTURED` and
   `VISION_AGENT_INSPECTION`.  Subscribers should migrate; the original
   name is removed.
-- `VISION_FRAME_CAPTURED` payloads carry raw signals alongside the
-  snapshot, with a warning so `snapshot_b64` consumers can opt out via
-  the inspection-only event.
+- The split is by **actor**, not payload size: `VISION_FRAME_CAPTURED`
+  marks a system auto-capture (background watcher / first-layer
+  monitor) and carries the snapshot bytes plus raw signals;
+  `VISION_AGENT_INSPECTION` marks an explicit agent
+  `monitor_print_vision` call and carries thin metadata.  Subscribers
+  can now distinguish routine monitoring from deliberate inspection.
 - Pro-tool manifest registers `get_design_pull_request` so agents
   discover it without a kiln-pro install.
 
