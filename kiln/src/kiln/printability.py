@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import math
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
@@ -18,6 +19,8 @@ from typing import Any
 
 from kiln import _vec
 from kiln.generation.validation import _parse_obj, _parse_stl
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -211,6 +214,15 @@ class PrintabilityReport:
     model_height_mm: float = 0.0
     recommendations: list[str] = field(default_factory=list)
     estimated_print_time_modifier: float = 1.0  # 1.0 = normal
+    # Detected cylindrical-hole features.  Each entry is a dict with
+    # keys ``position`` (dict[x_mm,y_mm,z_mm]), ``diameter_mm``,
+    # ``depth_mm``, ``axis`` (one of "x"/"y"/"z"), ``triangle_count``.
+    # Populated by ``analyze_printability`` and consumed by the kiln-pro
+    # printability overlay's hole-too-small material rule + the
+    # per-machine "hole" calibration feature class.  Free-tier installs
+    # see the list but no Pro tuning; Pro+ installs feed it into the
+    # overlay enrichment pass.
+    holes: list[dict[str, Any]] = field(default_factory=list)
     # Optional kiln-pro overlay block.  Populated by
     # ``analyze_printability`` when the kiln-pro package is installed
     # (Pro+ tier); absent on free / public installs.  See kiln3d.com
@@ -1452,6 +1464,7 @@ def analyze_printability(
     build_volume: tuple[float, float, float] | None = None,
     material: str = "pla",
     infill_percent: float = 20.0,
+    include_hole_detection: bool = True,
 ) -> PrintabilityReport:
     """Run a full printability analysis on a mesh file.
 
@@ -1464,6 +1477,11 @@ def analyze_printability(
         provided, the report will warn if the model exceeds it.
     :param material: Material ID for warping and cost analysis (default ``"pla"``).
     :param infill_percent: Interior infill density (0-100) for cost estimation.
+    :param include_hole_detection: When True (default), also run
+        :func:`kiln.generation.validation.detect_holes` and surface the
+        result on ``report.holes``.  Set False on perf-critical paths
+        that don't need the per-hole list — hole detection re-parses
+        the mesh internally, which roughly doubles the parse cost.
     :returns: A :class:`PrintabilityReport` with scores, grades, and
         recommendations.  When the kiln-pro package is installed (Pro+
         tier), the report is enriched with material-specific tuning
@@ -1519,6 +1537,24 @@ def analyze_printability(
         layer_height=layer_height,
         normalize_winding=False,
     )
+
+    # Detect cylindrical-hole features.  Wrapped in try/except — a
+    # malformed mesh or coarse triangulation can raise inside the
+    # detector, but a hole-detection failure must never break the
+    # wider printability path.  Empty list is the documented degraded
+    # output, matching the contract the kiln-pro overlay engine
+    # expects when reading ``report["holes"]``.
+    holes: list[dict[str, Any]] = []
+    if include_hole_detection:
+        from kiln.generation.validation import detect_holes
+        try:
+            holes = detect_holes(file_path)
+        except (ValueError, FileNotFoundError) as exc:
+            logger.debug(
+                "detect_holes failed silently on %s: %s",
+                file_path, exc,
+            )
+
     warping = _analyze_warping(
         triangles, vertices, bbox, material=material, overlay=judgment_overlay,
     )
@@ -1604,6 +1640,7 @@ def analyze_printability(
         model_height_mm=round(model_height, 2),
         recommendations=recommendations,
         estimated_print_time_modifier=round(time_mod, 2),
+        holes=holes,
     )
 
     # Optional kiln-pro enrichment: when the kiln-pro package is

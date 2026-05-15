@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import struct
 import tempfile
@@ -82,6 +83,70 @@ def _write_stl(tmpdir: str, triangles: list[tuple]) -> str:
     with open(path, "wb") as fh:
         fh.write(_make_binary_stl(triangles))
     return path
+
+
+def _outward_cube_triangles(size: float = 10.0) -> list[tuple]:
+    """12 triangles forming a cube [0,size]^3 with OUTWARD-facing
+    normals — the convention real-world CAD STLs use.
+
+    Distinct from ``_cube_triangles`` which uses the opposite winding
+    (and was sufficient for the per-analysis tests in this file because
+    ``analyze_printability`` normalizes winding before consuming
+    triangles).  ``detect_holes`` re-parses the file independently
+    from disk and does NOT normalize, so it sees the raw winding —
+    and the inward-faced ``_cube_triangles`` looks geometrically
+    indistinguishable from three cylindrical features.  Use this
+    helper for any test that exercises hole detection on a "no
+    holes" mesh.
+    """
+    s = size
+    p = [
+        (0.0, 0.0, 0.0),
+        (s, 0.0, 0.0),
+        (s, s, 0.0),
+        (0.0, s, 0.0),
+        (0.0, 0.0, s),
+        (s, 0.0, s),
+        (s, s, s),
+        (0.0, s, s),
+    ]
+    faces = [
+        (0, 2, 1), (0, 3, 2),       # bottom -Z
+        (4, 5, 6), (4, 6, 7),       # top +Z
+        (0, 1, 5), (0, 5, 4),       # front -Y
+        (1, 2, 6), (1, 6, 5),       # right +X
+        (2, 3, 7), (2, 7, 6),       # back +Y
+        (3, 0, 4), (3, 4, 7),       # left -X
+    ]
+    return [(p[a], p[b], p[c]) for a, b, c in faces]
+
+
+def _hole_side_wall_z(
+    cx: float,
+    cy: float,
+    radius: float,
+    z_bottom: float,
+    z_top: float,
+    segments: int = 24,
+) -> list[tuple]:
+    """Inward-facing cylindrical side walls — a Z-axis hole.
+
+    Winding mirrors the helper in ``kiln/tests/test_detect_holes.py``
+    so this file stays self-contained — face normals point INWARD
+    toward the hole's axis, which is what detect_holes requires.
+    """
+    triangles: list[tuple] = []
+    for i in range(segments):
+        a0 = 2.0 * math.pi * i / segments
+        a1 = 2.0 * math.pi * (i + 1) / segments
+        bl = (cx + radius * math.cos(a0), cy + radius * math.sin(a0), z_bottom)
+        br = (cx + radius * math.cos(a1), cy + radius * math.sin(a1), z_bottom)
+        tl = (cx + radius * math.cos(a0), cy + radius * math.sin(a0), z_top)
+        tr = (cx + radius * math.cos(a1), cy + radius * math.sin(a1), z_top)
+        # Reversed winding -> normal points inward (toward axis at cx,cy).
+        triangles.append((bl, tr, br))
+        triangles.append((bl, tl, tr))
+    return triangles
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +466,55 @@ class TestAnalyzePrintability:
             path = _write_stl(tmpdir, _cube_triangles(10.0))
             report = analyze_printability(path)
             assert report.estimated_print_time_modifier >= 1.0
+
+    def test_hole_free_mesh_reports_empty_holes_list(self):
+        """A solid cube has no cylindrical features — the holes list is
+        present but empty, never None.
+
+        Uses ``_outward_cube_triangles`` (not ``_cube_triangles``)
+        because detect_holes re-parses the STL from disk and reads its
+        raw winding; the inward-faced default cube fixture looks like
+        three cylindrical features under that geometry-only view.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _outward_cube_triangles(10.0))
+            report = analyze_printability(path)
+            assert report.holes == []
+            # The field is also reachable via to_dict() so the kiln-pro
+            # overlay's report.get("holes") read finds the same value.
+            assert report.to_dict()["holes"] == []
+
+    def test_mesh_with_z_axis_hole_populates_holes_list(self):
+        """A Z-axis cylindrical hole shows up in report.holes with the
+        documented shape (position, diameter_mm, depth_mm, axis,
+        triangle_count)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tris = _hole_side_wall_z(
+                cx=10.0, cy=10.0, radius=2.5,
+                z_bottom=0.0, z_top=10.0, segments=24,
+            )
+            path = _write_stl(tmpdir, tris)
+            report = analyze_printability(path)
+            assert len(report.holes) == 1
+            h = report.holes[0]
+            assert h["axis"] == "z"
+            assert h["diameter_mm"] == pytest.approx(5.0, abs=0.3)
+            assert h["depth_mm"] == pytest.approx(10.0, abs=0.05)
+            assert set(h["position"].keys()) == {"x_mm", "y_mm", "z_mm"}
+
+    def test_include_hole_detection_false_skips_detector(self):
+        """Opt-out: when ``include_hole_detection=False``, the report
+        carries an empty holes list even when the mesh has a hole.
+        Perf-critical callers can use this to avoid the second mesh
+        parse."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tris = _hole_side_wall_z(
+                cx=10.0, cy=10.0, radius=2.5,
+                z_bottom=0.0, z_top=10.0, segments=24,
+            )
+            path = _write_stl(tmpdir, tris)
+            report = analyze_printability(path, include_hole_detection=False)
+            assert report.holes == []
 
 
 class TestProEnrichmentHook:
