@@ -8983,6 +8983,14 @@ def generate_from_template(
                         # the generator path on overlay failure.
                         pass
 
+            try:
+                from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
+                return attach_inspect_bundle(
+                    result_dict, source_path=dl.local_path, level="quick",
+                )
+            except ImportError:
+                return result_dict
+
         return result_dict
     except GenerationError as exc:
         return _error_dict(f"Template generation failed: {exc}", code=exc.code or "GENERATION_ERROR")
@@ -9571,7 +9579,12 @@ def merge_stl(
         result = merge_stl_files(paths, output_path, positions=pos_list)
         if result.errors:
             return _error_dict("; ".join(result.errors), code="MERGE_FAILED")
-        return {"success": True, **result.to_dict()}
+        response = {"success": True, **result.to_dict()}
+        try:
+            from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
+            return attach_inspect_bundle(response, level="quick")
+        except ImportError:
+            return response
     except Exception as exc:
         return _error_dict(f"STL merge failed: {exc}")
 
@@ -13686,7 +13699,11 @@ def decorate_surface(
         except Exception:
             pass
 
-        return result_dict
+        try:
+            from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
+            return attach_inspect_bundle(result_dict, level="quick")
+        except ImportError:
+            return result_dict
 
     except FileNotFoundError as exc:
         return _error_dict(str(exc), code="FILE_NOT_FOUND")

@@ -249,7 +249,11 @@ class _GenerationAIToolsPlugin:
                 except Exception:
                     pass
 
-                return result_dict
+                try:
+                    from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
+                    return attach_inspect_bundle(result_dict, level="quick")
+                except ImportError:
+                    return result_dict
             except GenerationAuthError as exc:
                 return _srv._error_dict(
                     f"Failed to generate model (auth): {exc}. Check your provider API key is set (KILN_MESHY_API_KEY, KILN_GEMINI_API_KEY).",
@@ -316,7 +320,7 @@ class _GenerationAIToolsPlugin:
                 except Exception:
                     pass
 
-                return {
+                response = {
                     "success": True,
                     "job": job.to_dict(),
                     "experimental": True,
@@ -327,6 +331,11 @@ class _GenerationAIToolsPlugin:
                     ),
                     "message": f"Image-to-3D job submitted to {gen.display_name}.",
                 }
+                try:
+                    from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
+                    return attach_inspect_bundle(response, level="quick")
+                except ImportError:
+                    return response
             except GenerationAuthError as exc:
                 return _srv._error_dict(
                     f"Failed to generate from image (auth): {exc}. Set KILN_MESHY_API_KEY.",
@@ -872,7 +881,13 @@ class _GenerationAIToolsPlugin:
                         f"to begin printing after review."
                     )
 
-                return resp
+                try:
+                    from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
+                    return attach_inspect_bundle(
+                        resp, source_path=result.local_path, level="quick",
+                    )
+                except ImportError:
+                    return resp
             except GenerationAuthError as exc:
                 return _srv._error_dict(
                     f"Failed to generate and print (auth): {exc}. Check that KILN_MESHY_API_KEY is set.",
@@ -951,7 +966,7 @@ class _GenerationAIToolsPlugin:
                 # Step 4: Infer slicer settings
                 settings = _infer_settings(stl_path, material=material)
 
-                return {
+                response = {
                     "success": True,
                     "template": template_id,
                     "parameters_used": gen_result.get("parameters_used", {}),
@@ -979,6 +994,11 @@ class _GenerationAIToolsPlugin:
                         "with these settings."
                     ),
                 }
+                try:
+                    from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
+                    return attach_inspect_bundle(response, level="quick")
+                except ImportError:
+                    return response
             except Exception as exc:
                 return _srv._error_dict(f"Smart template generation failed: {exc}")
 
@@ -1066,12 +1086,24 @@ class _GenerationAIToolsPlugin:
 
                     variations.append(var_entry)
 
-                return {
+                response = {
                     "success": True,
                     "template": template_id,
                     "variation_count": len(variations),
                     "variations": variations,
                 }
+                # Pick the first variation with a file_path for preview.
+                first_path = next(
+                    (v.get("file_path") for v in variations if v.get("file_path")),
+                    None,
+                )
+                try:
+                    from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
+                    return attach_inspect_bundle(
+                        response, source_path=first_path, level="quick",
+                    )
+                except ImportError:
+                    return response
             except GenerationError as exc:
                 return _srv._error_dict(f"Variation generation failed: {exc}", code=exc.code or "GENERATION_ERROR")
             except Exception as exc:
