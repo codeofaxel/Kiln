@@ -75,7 +75,7 @@ class _StepToolsPlugin:
                     merge_bodies=merge_bodies,
                 )
 
-                return {
+                response = {
                     "status": "ok",
                     "output_path": result.output_path,
                     "output_paths": result.output_paths,
@@ -89,6 +89,11 @@ class _StepToolsPlugin:
                         "Run slice_model to prepare for printing.",
                     ],
                 }
+                try:
+                    from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
+                    return attach_inspect_bundle(response, level="quick")
+                except ImportError:
+                    return response
 
             except FileNotFoundError as exc:
                 return {"error": str(exc), "code": "FILE_NOT_FOUND"}
