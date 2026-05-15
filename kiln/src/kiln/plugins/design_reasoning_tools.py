@@ -288,7 +288,15 @@ class _DesignReasoningToolsPlugin:
                     wall_thicken_mm=wall_thicken_mm,
                     base_height_mm=base_height_mm,
                 )
-                return {"success": True, **result.to_dict()}
+                response = {"success": True, **result.to_dict()}
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(response, level="quick")
+                except ImportError:
+                    return response
             except ValueError as exc:
                 return _srv._error_dict(str(exc), code="INVALID_ARGS")
             except Exception as exc:
