@@ -440,3 +440,102 @@ class TestAuditOriginalDesignIntentVerification:
         assert not any(
             g.name.startswith("intent_") for g in audit.gates
         )
+
+
+# ---------------------------------------------------------------------------
+# TestAuditInspectionBundleConsumer
+#
+# Consumer-proof for bundle-as-lingua-franca.  When a pre-built
+# inspection bundle is provided, the audit reads printability findings
+# from it instead of re-running analyze_printability.  Same answer,
+# half the cost.
+# ---------------------------------------------------------------------------
+
+
+def _audit_inspection_bundle(*, score: int = 60, grade: str = "D") -> dict:
+    """Synthetic inspection bundle shaped like attach_inspect_bundle's
+    output, populated only with the printability channel."""
+    return {
+        "schema_version": "1.0",
+        "channels": {
+            "printability": {
+                "name": "printability",
+                "tier": "pro",
+                "status": "ok",
+                "images": [],
+                "findings": {
+                    "score": score,
+                    "grade": grade,
+                    "printable": score >= 50,
+                    "recommendations": [
+                        "increase wall count",
+                        "raise nozzle temperature",
+                    ],
+                },
+                "summary": f"grade {grade}",
+                "error": None,
+                "elapsed_ms": 0,
+            },
+        },
+        "channels_emitted": ["printability"],
+    }
+
+
+class TestAuditInspectionBundleConsumer:
+    """When ``inspection_bundle`` is provided, ``audit_original_design``
+    reads printability from it instead of re-running analyze_printability."""
+
+    def test_bundle_skips_analyze_printability(self):
+        """analyze_printability MUST NOT be called when the bundle has
+        the printability channel — that's the whole point of the
+        consumer-proof refactor."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            with patch(
+                "kiln.original_design.analyze_printability"
+            ) as mock_printability:
+                bundle = _audit_inspection_bundle(score=44, grade="F")
+                audit = audit_original_design(
+                    path,
+                    "test object",
+                    inspection_bundle=bundle,
+                )
+                mock_printability.assert_not_called()
+        # The printability gate read the BUNDLE's score, not the
+        # (mocked-and-never-called) analyze_printability output.
+        assert audit.printability.get("score") == 44
+        assert audit.printability.get("grade") == "F"
+
+    def test_bundle_rides_along_on_audit_result(self):
+        """The bundle dict appears on the audit result so downstream
+        consumers can read other channels (rgb evidence, measurements)
+        without re-running anything."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            bundle = _audit_inspection_bundle(score=80, grade="B")
+            with patch("kiln.original_design.analyze_printability"):
+                audit = audit_original_design(
+                    path,
+                    "test object",
+                    inspection_bundle=bundle,
+                )
+        assert audit.inspection_bundle is bundle
+
+    def test_no_bundle_legacy_path_unchanged(self):
+        """When ``inspection_bundle`` is None, behavior matches the
+        pre-refactor behavior — analyze_printability runs and the
+        result has ``inspection_bundle=None``."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            with patch(
+                "kiln.original_design.analyze_printability"
+            ) as mock_printability:
+                # Light mock — the real call shape is fine for this test
+                # since we only assert analyze_printability was called and
+                # the bundle field is None on the result.
+                mock_printability.side_effect = lambda *a, **kw: __import__(
+                    "kiln.printability", fromlist=["analyze_printability"]
+                ).analyze_printability(*a, **kw)
+                audit = audit_original_design(path, "test object")
+                mock_printability.assert_called_once()
+        assert audit.inspection_bundle is None
