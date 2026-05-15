@@ -204,3 +204,239 @@ class TestGenerateOriginalDesign:
                 "phone stand with cable slot",
                 provider="openscad",
             )
+
+
+# ---------------------------------------------------------------------------
+# Optional kiln-pro intent-verification bridge hook
+# ---------------------------------------------------------------------------
+
+
+class _FakeIntentGate:
+    """Minimal IntentGate shape used by the bridge call."""
+
+    def __init__(
+        self,
+        name: str,
+        passed: bool,
+        severity: str,
+        message: str,
+        details: dict | None = None,
+    ) -> None:
+        self.name = name
+        self.passed = passed
+        self.severity = severity
+        self.message = message
+        self.details = details or {}
+
+
+def _install_fake_kiln_pro(
+    monkeypatch,
+    *,
+    gates: list[_FakeIntentGate],
+    feedback_items: list | None = None,
+):
+    """Inject a fake ``kiln_pro.bridge`` exposing ``intent_verification``.
+
+    Pre-imports the real ``kiln_pro`` modules so that monkeypatch's
+    teardown restores them with their loaded state intact.  Without
+    this, the cleanup would simply remove the entries from sys.modules
+    and the next test's ``from kiln_pro.bridge import pro_features``
+    would trigger a fresh ``_load_features()`` cycle whose plugin-load
+    side effects can poison later test scoring.
+    """
+    import sys
+    import types
+
+    try:
+        import kiln_pro  # noqa: F401
+        import kiln_pro.bridge  # noqa: F401
+        import kiln_pro.intent_verification  # noqa: F401
+    except ImportError:
+        pass
+
+    iv_module = types.ModuleType("kiln_pro.intent_verification")
+
+    def _verify_intent_from_sidecar(_path):
+        return list(gates)
+
+    def _gates_to_feedback(_failed_gates, *, original_prompt: str = ""):
+        return list(feedback_items or [])
+
+    iv_module.verify_intent_from_sidecar = _verify_intent_from_sidecar
+    iv_module.gates_to_feedback = _gates_to_feedback
+
+    class _FakeProFeatures:
+        intent_verification = iv_module
+
+        def is_available(self, feature: str) -> bool:
+            return feature == "intent_verification"
+
+    bridge_module = types.ModuleType("kiln_pro.bridge")
+    bridge_module.pro_features = _FakeProFeatures()
+
+    pkg_module = types.ModuleType("kiln_pro")
+    pkg_module.bridge = bridge_module
+
+    monkeypatch.setitem(sys.modules, "kiln_pro", pkg_module)
+    monkeypatch.setitem(sys.modules, "kiln_pro.bridge", bridge_module)
+    monkeypatch.setitem(sys.modules, "kiln_pro.intent_verification", iv_module)
+
+
+class TestAuditOriginalDesignIntentVerification:
+    """The optional kiln-pro intent_verification bridge call."""
+
+    def test_no_kiln_pro_installed_returns_baseline_audit(self, monkeypatch):
+        import builtins as _builtins
+        real_import = _builtins.__import__
+
+        def _no_kiln_pro(name, globals=None, locals=None, fromlist=(), level=0):
+            if name.startswith("kiln_pro"):
+                raise ImportError("simulated: kiln-pro not installed")
+            return real_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(_builtins, "__import__", _no_kiln_pro)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            baseline = audit_original_design(
+                path,
+                "simple coaster",
+                printer_model="bambu_a1",
+            )
+
+        # Baseline audit has none of the intent gates.
+        assert all(
+            not g.name.startswith("intent_") for g in baseline.gates
+        )
+        # Sanity: baseline still produces the well-known gates.
+        gate_names = {g.name for g in baseline.gates}
+        assert "mesh_validation" in gate_names
+        assert "printability" in gate_names
+
+    def test_failing_intent_gates_drop_score_and_feed_retry_loop(self, monkeypatch):
+        failing_gate = _FakeIntentGate(
+            name="intent_bbox_x",
+            passed=False,
+            severity="critical",
+            message="Declared bbox_x=20.00mm, observed bbox_x=10.00mm.",
+            details={
+                "measurement": "bbox_x",
+                "expected": {"value": 20.0, "tolerance": 1.0},
+                "observed": 10.0,
+                "category": "size_and_shape",
+            },
+        )
+        passing_gate = _FakeIntentGate(
+            name="intent_bbox_z",
+            passed=True,
+            severity="info",
+            message="Declared bbox_z matches observed.",
+            details={"measurement": "bbox_z"},
+        )
+
+        fake_pf = {
+            "original_prompt": "wall plaque 20mm wide",
+            "feedback_type": "intent",
+            "issues": ["Declared bbox_x=20mm, observed 10mm"],
+            "constraints": [
+                "declared bbox_x 20.00 mm, observed 10.00 mm — "
+                "fix to match declared intent"
+            ],
+            "severity": "critical",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+
+            # Baseline: no kiln-pro present at all.
+            import builtins as _builtins
+            real_import = _builtins.__import__
+
+            def _no_kiln_pro(name, globals=None, locals=None, fromlist=(), level=0):
+                if name.startswith("kiln_pro"):
+                    raise ImportError("simulated: kiln-pro not installed")
+                return real_import(name, globals, locals, fromlist, level)
+
+            with monkeypatch.context() as m_baseline:
+                m_baseline.setattr(_builtins, "__import__", _no_kiln_pro)
+                baseline = audit_original_design(
+                    path,
+                    "wall plaque 20mm wide",
+                    printer_model="bambu_a1",
+                )
+
+            # With kiln-pro: failing critical intent gate present.
+            with monkeypatch.context() as m_pro:
+                _install_fake_kiln_pro(
+                    m_pro,
+                    gates=[failing_gate, passing_gate],
+                    feedback_items=[fake_pf],
+                )
+                audit = audit_original_design(
+                    path,
+                    "wall plaque 20mm wide",
+                    printer_model="bambu_a1",
+                )
+
+        intent_gate_names = {
+            g.name for g in audit.gates if g.name.startswith("intent_")
+        }
+        assert intent_gate_names == {"intent_bbox_x", "intent_bbox_z"}
+
+        assert audit.readiness_score < baseline.readiness_score
+        assert any(
+            "bbox_x" in blocker for blocker in audit.blockers
+        )
+
+        assert any(
+            item.get("feedback_type") == "intent"
+            for item in audit.feedback
+        )
+
+    def test_overlay_failure_never_breaks_audit(self, monkeypatch):
+        import sys
+        import types
+
+        try:
+            import kiln_pro  # noqa: F401
+            import kiln_pro.bridge  # noqa: F401
+            import kiln_pro.intent_verification  # noqa: F401
+        except ImportError:
+            pass
+
+        iv_module = types.ModuleType("kiln_pro.intent_verification")
+
+        def _broken(_path):
+            raise RuntimeError("simulated overlay failure")
+
+        iv_module.verify_intent_from_sidecar = _broken
+        iv_module.gates_to_feedback = lambda *a, **k: []
+
+        class _FakeProFeatures:
+            intent_verification = iv_module
+
+            def is_available(self, feature: str) -> bool:
+                return feature == "intent_verification"
+
+        bridge_module = types.ModuleType("kiln_pro.bridge")
+        bridge_module.pro_features = _FakeProFeatures()
+        pkg_module = types.ModuleType("kiln_pro")
+        pkg_module.bridge = bridge_module
+
+        monkeypatch.setitem(sys.modules, "kiln_pro", pkg_module)
+        monkeypatch.setitem(sys.modules, "kiln_pro.bridge", bridge_module)
+        monkeypatch.setitem(sys.modules, "kiln_pro.intent_verification", iv_module)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            audit = audit_original_design(
+                path,
+                "simple coaster",
+                printer_model="bambu_a1",
+            )
+
+        assert audit.readiness_score >= 0
+        # No intent gates added because the verify call raised.
+        assert not any(
+            g.name.startswith("intent_") for g in audit.gates
+        )

@@ -8875,6 +8875,12 @@ def generate_from_template(
     into a printable STL.  Use ``list_design_templates`` to see
     available templates and their parameters.
 
+    When the kiln-pro package is installed (Pro+ tier), the result MAY
+    carry an ``intent`` block describing the geometric assertions the
+    template parameters implied, and a sidecar ``<mesh>.intent.json``
+    is written next to the produced STL.  Free / public installs see
+    the result unchanged.  See https://kiln3d.com for tier details.
+
     Args:
         template_id: Template ID from ``list_design_templates``.
         parameters: Optional dict of parameter overrides
@@ -8941,6 +8947,35 @@ def generate_from_template(
                     "height_mm": round(h, 2),
                     "summary": f"{w:.1f} x {d:.1f} x {h:.1f} mm",
                 }
+
+            # Optional kiln-pro emission: when the kiln-pro package is
+            # installed, derive a DeclaredIntent from the template
+            # parameters and write a ``<mesh>.intent.json`` sidecar
+            # next to the produced STL.  A later ``audit_original_design``
+            # call against the same path picks the sidecar up and
+            # verifies the mesh matches what was declared.  Free /
+            # public installs hit the ImportError branch and emit
+            # nothing.  Intent verification is a kiln-pro Pro+ feature —
+            # see https://kiln3d.com for tier details.
+            try:
+                from kiln_pro.bridge import pro_features
+            except ImportError:
+                pass
+            else:
+                if pro_features.is_available("intent_verification"):
+                    try:
+                        iv = pro_features.intent_verification
+                        intent = iv.derive_intent_from_template(
+                            template_id,
+                            params,
+                            dimensions_mm=result_dict.get("dimensions"),
+                        )
+                        iv.write_intent_sidecar(intent, dl.local_path)
+                        result_dict["intent"] = intent.to_dict()
+                    except Exception:  # noqa: BLE001
+                        # Intent emission is best-effort — never break
+                        # the generator path on overlay failure.
+                        pass
 
         return result_dict
     except GenerationError as exc:

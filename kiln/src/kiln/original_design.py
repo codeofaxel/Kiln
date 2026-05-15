@@ -606,6 +606,61 @@ def audit_original_design(
             )
         )
 
+    # Optional kiln-pro intent verification: when the kiln-pro package
+    # is installed and a ``<mesh>.intent.json`` sidecar exists next to
+    # the mesh (written by an earlier pro-tier ``generate_from_template``
+    # call), verify the mesh against the declared assertions and fold
+    # the resulting gates + failure-feedback into this audit's existing
+    # channels.  The retry loop in ``generate_original_design`` already
+    # consumes that feedback unchanged.  Free / public installs and
+    # meshes without a sidecar see the audit unchanged.  Intent
+    # verification is a kiln-pro Pro+ feature — see https://kiln3d.com
+    # for tier details.
+    intent_critical_count = 0
+    intent_warning_count = 0
+    try:
+        from kiln_pro.bridge import pro_features
+    except ImportError:
+        pass
+    else:
+        if pro_features.is_available("intent_verification"):
+            try:
+                iv = pro_features.intent_verification
+                intent_gates = iv.verify_intent_from_sidecar(file_path)
+            except Exception:  # noqa: BLE001
+                intent_gates = []
+            for ig in intent_gates:
+                gates.append(
+                    AuditGate(
+                        name=ig.name,
+                        passed=ig.passed,
+                        severity=ig.severity,
+                        message=ig.message,
+                        details=ig.details,
+                    )
+                )
+                if not ig.passed:
+                    if ig.severity == "critical":
+                        intent_critical_count += 1
+                    elif ig.severity == "warning":
+                        intent_warning_count += 1
+            failed_intent_gates = [g for g in intent_gates if not g.passed]
+            if failed_intent_gates:
+                try:
+                    intent_feedback = iv.gates_to_feedback(
+                        failed_intent_gates,
+                        original_prompt=requirements_text,
+                    )
+                except TypeError:
+                    # Older adapter signature without keyword arg.
+                    intent_feedback = iv.gates_to_feedback(failed_intent_gates)
+                except Exception:  # noqa: BLE001
+                    intent_feedback = []
+                for pf in intent_feedback:
+                    feedback.append(
+                        pf.to_dict() if hasattr(pf, "to_dict") else dict(pf)
+                    )
+
     score = int(printability.score)
     if not mesh_validation.valid:
         score = min(score, 20)
@@ -627,6 +682,11 @@ def audit_original_design(
     if structural_plan is not None:
         score -= structural_plan.get("critical_count", 0) * 15
         score -= structural_plan.get("warning_count", 0) * 5
+    # Intent-verification penalty (kiln-pro Pro+ overlay) — declared
+    # geometric assertions that the mesh failed to satisfy.  Mirrors
+    # the structural_integrity contribution shape.
+    score -= intent_critical_count * 15
+    score -= intent_warning_count * 5
     score = max(0, min(100, score))
     grade = _score_to_grade(score)
 
