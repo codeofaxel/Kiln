@@ -218,7 +218,18 @@ class _VersionToolsPlugin:
                 except ImportError:
                     pass  # Free tier — no provenance enrichment
 
-                return result
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        result,
+                        level="full",
+                        source_path=recipe.stl_path or stl_path or None,
+                    )
+                except ImportError:
+                    return result
             except Exception as exc:
                 _logger.exception("save_design_version failed")
                 return {"ok": False, "error": str(exc)}
@@ -350,7 +361,7 @@ class _VersionToolsPlugin:
                 new_recipe.parameters = dict(target_recipe.parameters)
 
                 saved_path = save_recipe(new_recipe, design_directory)
-                return {
+                result = {
                     "ok": True,
                     "version": {
                         "design_id": design_id,
@@ -366,6 +377,18 @@ class _VersionToolsPlugin:
                         "changes": new_recipe.changes,
                     },
                 }
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        result,
+                        level="full",
+                        source_path=target_recipe.stl_path or None,
+                    )
+                except ImportError:
+                    return result
             except ValueError as exc:
                 return {"ok": False, "error": str(exc)}
             except Exception as exc:
