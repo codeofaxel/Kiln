@@ -13,6 +13,7 @@ no manual imports needed.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 import secrets
@@ -126,10 +127,22 @@ class _PrintWatcher:
     # -- public API --------------------------------------------------------
 
     def start(self) -> None:
-        """Start the background monitoring thread."""
+        """Start the background monitoring thread.
+
+        Captures the current Python context (incl. :data:`kiln.events.
+        current_actor_context`) via :func:`contextvars.copy_context` and
+        runs the watcher body inside it, so events published from the
+        background thread carry the caller's ambient actor metadata
+        (caller tier, tenant id, etc.) instead of falling off the
+        thread boundary.
+        """
         self._start_time = time.time()
+        # Snapshot the caller's context at start-time so the watcher
+        # thread sees the same ContextVar values the caller saw.  Python
+        # ContextVars do not auto-propagate across thread boundaries.
+        ctx = contextvars.copy_context()
         self._thread = threading.Thread(
-            target=self._run,
+            target=lambda: ctx.run(self._run),
             name=f"print-watcher-{self._watch_id}",
             daemon=True,
         )

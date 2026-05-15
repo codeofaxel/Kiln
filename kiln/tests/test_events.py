@@ -463,3 +463,171 @@ class TestEventBusThreadSafety:
         started = [e for e in events if e.type == EventType.PRINT_STARTED]
         assert len(queued) == 50
         assert len(started) == 50
+
+
+# ---------------------------------------------------------------------------
+# Ambient actor context
+# ---------------------------------------------------------------------------
+
+
+class TestActorContext:
+    """Tests for ``current_actor_context`` and its propagation onto events.
+
+    The ContextVar is a generic "who triggered this event" envelope.  An
+    orchestrator (e.g. kiln-pro's REST dispatcher) sets it before invoking
+    code that publishes events; :class:`EventBus` attaches its current
+    value to every event whose ``actor`` is not already set.  This test
+    class pins the contract — bus-level behaviour only; cross-repo
+    integration is tested kiln-pro-side.
+    """
+
+    def test_actor_defaults_to_none_on_event(self):
+        """The dataclass default — un-stamped Events have actor=None."""
+        e = Event(type=EventType.JOB_QUEUED, data={"x": 1})
+        assert e.actor is None
+
+    def test_context_var_default_is_none(self):
+        from kiln.events import current_actor_context
+
+        assert current_actor_context.get() is None
+
+    def test_publish_without_context_leaves_actor_none(self):
+        from kiln.events import current_actor_context
+
+        bus = EventBus()
+        # ContextVar default is None — sanity that no test before us leaked.
+        assert current_actor_context.get() is None
+        bus.publish(EventType.JOB_QUEUED, {"job_id": "j1"})
+        events = bus.recent_events()
+        assert len(events) == 1
+        assert events[0].actor is None
+
+    def test_publish_with_ambient_context_stamps_event(self):
+        from kiln.events import current_actor_context
+
+        bus = EventBus()
+        token = current_actor_context.set({"caller_tier": "pro", "caller_id": "t-7"})
+        try:
+            bus.publish(EventType.JOB_QUEUED, {"job_id": "j2"})
+        finally:
+            current_actor_context.reset(token)
+
+        events = bus.recent_events()
+        assert len(events) == 1
+        assert events[0].actor == {"caller_tier": "pro", "caller_id": "t-7"}
+
+    def test_explicit_event_actor_wins_over_ambient(self):
+        """Pre-built Event with actor set is NOT overwritten by the
+        ambient ContextVar — explicit always beats ambient."""
+        from kiln.events import current_actor_context
+
+        bus = EventBus()
+        explicit = Event(
+            type=EventType.JOB_QUEUED,
+            data={"job_id": "j3"},
+            actor={"caller_tier": "business"},
+        )
+        token = current_actor_context.set({"caller_tier": "free"})
+        try:
+            bus.publish(explicit)
+        finally:
+            current_actor_context.reset(token)
+
+        events = bus.recent_events()
+        assert len(events) == 1
+        assert events[0].actor == {"caller_tier": "business"}
+
+    def test_actor_snapshot_is_defensive_copy(self):
+        """Mutating the ambient dict AFTER publish must not mutate the
+        already-stamped event's actor."""
+        from kiln.events import current_actor_context
+
+        bus = EventBus()
+        ambient = {"caller_tier": "pro"}
+        token = current_actor_context.set(ambient)
+        try:
+            bus.publish(EventType.JOB_QUEUED, {"job_id": "j4"})
+        finally:
+            current_actor_context.reset(token)
+
+        # Mutate the live dict — the event's actor must not reflect this.
+        ambient["caller_tier"] = "free"
+        ambient["leaked"] = True
+        events = bus.recent_events()
+        assert events[0].actor == {"caller_tier": "pro"}
+
+    def test_to_dict_includes_actor_when_set(self):
+        e = Event(
+            type=EventType.JOB_QUEUED,
+            data={"job_id": "j5"},
+            actor={"caller_tier": "pro"},
+        )
+        d = e.to_dict()
+        assert d["actor"] == {"caller_tier": "pro"}
+
+    def test_to_dict_omits_actor_when_none(self):
+        e = Event(type=EventType.JOB_QUEUED, data={"job_id": "j6"})
+        d = e.to_dict()
+        assert "actor" not in d
+
+    def test_context_propagates_to_background_thread_via_copy_context(self):
+        """The pattern :class:`_PrintWatcher.start` uses: capture
+        :func:`contextvars.copy_context` in the calling thread, run the
+        target inside ``ctx.run(...)`` from the background thread.  This
+        test pins that the value actually survives the thread boundary —
+        without ``copy_context``, the ContextVar would default to None
+        in the child thread and publish-time stamping would silently
+        drop the actor.
+        """
+        import contextvars
+
+        from kiln.events import current_actor_context
+
+        bus = EventBus()
+        token = current_actor_context.set({"caller_tier": "pro", "caller_id": "t-9"})
+        try:
+            ctx = contextvars.copy_context()
+        finally:
+            current_actor_context.reset(token)
+
+        # ContextVar is back to default in the parent thread now.
+        assert current_actor_context.get() is None
+
+        def _publish_from_thread():
+            # Inside ctx.run, the ContextVar's value is the one snapshotted above.
+            bus.publish(EventType.JOB_QUEUED, {"job_id": "j7"})
+
+        t = threading.Thread(target=lambda: ctx.run(_publish_from_thread))
+        t.start()
+        t.join(timeout=2)
+
+        events = bus.recent_events()
+        assert len(events) == 1
+        assert events[0].actor == {"caller_tier": "pro", "caller_id": "t-9"}
+
+    def test_naked_thread_without_copy_context_loses_actor(self):
+        """Sanity check / regression guard: a thread that does NOT use
+        ``copy_context`` does NOT see the parent thread's ContextVar
+        value.  If this ever fails (e.g. Python changes ContextVar
+        semantics to auto-propagate), the ``copy_context`` ceremony in
+        _PrintWatcher.start becomes unnecessary and the comment there
+        can be simplified."""
+        from kiln.events import current_actor_context
+
+        bus = EventBus()
+        token = current_actor_context.set({"caller_tier": "pro"})
+        try:
+            def _publish_from_naked_thread():
+                # No ctx.run — ContextVar should be at its default here.
+                bus.publish(EventType.JOB_QUEUED, {"job_id": "j8"})
+
+            t = threading.Thread(target=_publish_from_naked_thread)
+            t.start()
+            t.join(timeout=2)
+        finally:
+            current_actor_context.reset(token)
+
+        events = bus.recent_events()
+        assert len(events) == 1
+        # Naked thread → ContextVar default (None) → event.actor stays None.
+        assert events[0].actor is None
