@@ -240,71 +240,93 @@ _BEDSLINGER_PRINTERS: frozenset[str] = frozenset({
     "artillery_sidewinder",
 })
 
-# Material-specific thermal stress multipliers.
-# Based on shrinkage rates and thermal contraction behavior.
-# Higher = more internal stress from temperature changes.
-_MATERIAL_STRESS_FACTORS: dict[str, float] = {
-    "pla": 0.6,      # Low shrinkage (~0.3-0.5%), crystalline
-    "petg": 0.7,     # Low shrinkage (~0.3-0.6%)
-    "abs": 1.5,      # High shrinkage (~0.7-0.8%), amorphous
-    "asa": 1.4,      # Similar to ABS
-    "nylon": 1.6,    # High shrinkage (~1.0-1.5%), hygroscopic stress
-    "pa": 1.6,       # Same as nylon
-    "pc": 1.8,       # Very high shrinkage (~0.6-0.8%), high Tg delta
-    "polycarbonate": 1.8,
-    "tpu": 0.3,      # Flexible, absorbs stress
-    "tpe": 0.3,
-    "pp": 2.0,       # Very high shrinkage (~1.5-2.0%)
-    "peek": 1.5,     # High temp, moderate shrinkage
-    "pla+": 0.6,
-    "cf-pla": 0.5,   # Carbon fiber reduces shrinkage
-    "silk-pla": 0.6,
-    "hips": 1.3,     # Similar to ABS but slightly less
-    "pva": 0.5,      # Water-soluble support, low stress
-}
+# Conservative single defaults for per-material physics constants.
+#
+# Pre-strip, public Kiln carried three curated tables — one each for
+# thermal-stress multiplier, build-plate adhesion strength (N/mm²), and
+# linear shrinkage strain — with per-material values tuned from
+# manufacturer datasheets and internal print logs.  Those tables are
+# moat: they took years of calibration prints to converge on, and any
+# competitor who scraped them got the same precision for free.
+#
+# They now live in the Pro overlay (``kiln_pro/data/
+# printability_pro_overlay.json``).  Public Kiln keeps a single
+# conservative default for each — chosen so a free-tier report is
+# safe, but uniform across materials.  Pro+ tier (kiln-pro installed)
+# bridges through to the overlay via the helpers below and gets the
+# SME-tuned per-material values.  https://kiln3d.com — per-material
+# differentiation is a kiln-pro Pro+ feature.
+_DEFAULT_STRESS_FACTOR: float = 1.0
+_DEFAULT_ADHESION_STRENGTH: float = 0.10  # N/mm²
+_DEFAULT_SHRINKAGE_STRAIN: float = 0.005  # mm/mm
 
-# Material adhesion strength to common build surfaces (N/mm²).
-# Approximate values for PEI/spring steel sheet at optimal bed temp.
-_MATERIAL_ADHESION_STRENGTH: dict[str, float] = {
-    "pla": 0.15,      # Good adhesion to most surfaces
-    "petg": 0.12,     # Good but can bond TOO well to PEI
-    "abs": 0.08,      # Needs high bed temp, weaker adhesion
-    "asa": 0.08,      # Similar to ABS
-    "nylon": 0.05,    # Poor adhesion without glue stick
-    "pa": 0.05,
-    "pc": 0.06,       # Needs adhesion aids
-    "polycarbonate": 0.06,
-    "tpu": 0.20,      # Excellent adhesion (flexible, conforms)
-    "tpe": 0.20,
-    "pp": 0.03,       # Terrible adhesion — needs special sheet
-    "peek": 0.04,     # Very poor on standard surfaces
-    "pla+": 0.15,
-    "cf-pla": 0.12,   # Carbon fiber slightly reduces adhesion
-    "silk-pla": 0.13,
-    "hips": 0.08,
-    "pva": 0.10,
-}
 
-# Approximate shrinkage strain (mm/mm) for thermal contraction force calculation.
-_MATERIAL_SHRINKAGE_STRAIN: dict[str, float] = {
-    "pla": 0.004,     # ~0.3-0.5% linear shrinkage
-    "petg": 0.005,    # ~0.3-0.6%
-    "abs": 0.008,     # ~0.7-0.8%
-    "asa": 0.007,     # Similar to ABS
-    "nylon": 0.012,   # ~1.0-1.5%
-    "pa": 0.012,
-    "pc": 0.007,      # ~0.6-0.8%
-    "polycarbonate": 0.007,
-    "tpu": 0.002,     # Minimal, flexible
-    "tpe": 0.002,
-    "pp": 0.018,      # ~1.5-2.0%, worst common material
-    "peek": 0.006,    # ~0.5-0.7%
-    "pla+": 0.004,
-    "cf-pla": 0.003,  # CF reduces shrinkage
-    "silk-pla": 0.004,
-    "hips": 0.007,
-    "pva": 0.004,
-}
+def _material_physics_from_overlay(material: str | None) -> dict[str, float]:
+    """Pull per-material physics fields from the kiln-pro overlay.
+
+    Returns ``{}`` when kiln-pro is not installed or the overlay has
+    no entry for ``material``.  Callers branch on truthiness and
+    fall back to the conservative public default.  This is the
+    single bridge point used by the three helpers below — keeping
+    the import + isinstance plumbing in one place.
+    """
+    if not material:
+        return {}
+    try:
+        from kiln_pro.bridge import pro_features  # type: ignore[import-not-found]
+    except ImportError:
+        return {}
+    if not pro_features.is_available("printability_overlay"):
+        return {}
+    try:
+        entry = pro_features.printability_overlay.lookup_material(material)
+    except Exception:  # noqa: BLE001 — overlay failure must not break public path
+        return {}
+    return entry if isinstance(entry, dict) else {}
+
+
+def _material_stress_factor(material: str | None) -> float:
+    """Return the thermal-stress multiplier for ``material``.
+
+    Free tier (no kiln-pro): the conservative default ``1.0`` for
+    every material — high enough to flag genuine stress risks
+    without being so high that every PLA print looks dangerous.
+    Pro+ tier: per-material curated values (PLA 0.6, ABS 1.5,
+    Nylon 1.6, etc.) come from the kiln-pro overlay.
+    """
+    overlay_entry = _material_physics_from_overlay(material)
+    value = overlay_entry.get("stress_factor")
+    if isinstance(value, (int, float)):
+        return float(value)
+    return _DEFAULT_STRESS_FACTOR
+
+
+def _material_adhesion_strength(material: str | None) -> float:
+    """Return bed-adhesion strength (N/mm²) for ``material``.
+
+    Free tier: the conservative default ``0.10 N/mm²``, midway
+    between PLA (good adhesion) and Nylon (poor adhesion).  Pro+
+    tier: per-material curated values from the kiln-pro overlay.
+    """
+    overlay_entry = _material_physics_from_overlay(material)
+    value = overlay_entry.get("adhesion_strength")
+    if isinstance(value, (int, float)):
+        return float(value)
+    return _DEFAULT_ADHESION_STRENGTH
+
+
+def _material_shrinkage_strain(material: str | None) -> float:
+    """Return linear shrinkage strain (mm/mm) for ``material``.
+
+    Free tier: the conservative default ``0.005`` (~0.5% linear
+    shrinkage) — a typical mid-range value.  Pro+ tier: per-material
+    curated values from the kiln-pro overlay.
+    """
+    overlay_entry = _material_physics_from_overlay(material)
+    value = overlay_entry.get("shrinkage_strain")
+    if isinstance(value, (int, float)):
+        return float(value)
+    return _DEFAULT_SHRINKAGE_STRAIN
 
 
 
@@ -1025,8 +1047,9 @@ def _analyze_thermal_stress(
     Soft tier seam: free tier uses :data:`_THERMAL_STRESS_PUBLIC_DEFAULTS`;
     Pro+ overlay supplies tuned thresholds + recommendation templates
     via the ``printability_judgment`` overlay's ``thermal_stress`` block.
-    Material stress factor (textbook physics) comes from the public
-    ``_MATERIAL_STRESS_FACTORS`` table — identical across tiers.
+    Material stress factor: free tier uses :data:`_DEFAULT_STRESS_FACTOR`
+    (1.0) for every material; kiln-pro overlay supplies per-material
+    curated values via :func:`_material_stress_factor`.
     """
     cfg = (overlay or {}).get("thermal_stress") or _THERMAL_STRESS_PUBLIC_DEFAULTS
     zone_ratio_threshold = cfg.get("stress_zone_ratio_threshold", 2.0)
@@ -1044,7 +1067,7 @@ def _analyze_thermal_stress(
             max_area_change_ratio=1.0,
             stress_concentration_zones=[],
             layer_count_analyzed=0,
-            material_stress_factor=_MATERIAL_STRESS_FACTORS.get(material.lower(), 1.0),
+            material_stress_factor=_material_stress_factor(material),
             recommendations=[],
         )
 
@@ -1083,7 +1106,7 @@ def _analyze_thermal_stress(
     stress_zones.sort(key=lambda z: z["area_change_ratio"], reverse=True)
     stress_zones = stress_zones[:max_emitted]
 
-    stress_factor = _MATERIAL_STRESS_FACTORS.get(material.lower(), 1.0)
+    stress_factor = _material_stress_factor(material)
     combined_score = max_ratio * stress_factor
 
     risk_thresholds = cfg.get("risk_thresholds", {})
@@ -1133,15 +1156,18 @@ def _estimate_adhesion_force(
     Pro+ overlay supplies tuned risk thresholds, peel-force scale, and
     recommendation templates via the ``printability_judgment`` overlay's
     ``adhesion_force`` block.  Material adhesion strength + shrinkage
-    strain (textbook physics) come from the public material tables —
-    identical across tiers.
+    strain: free tier uses :data:`_DEFAULT_ADHESION_STRENGTH` (0.10
+    N/mm²) and :data:`_DEFAULT_SHRINKAGE_STRAIN` (0.005 mm/mm) for
+    every material; kiln-pro overlay supplies per-material curated
+    values via :func:`_material_adhesion_strength` and
+    :func:`_material_shrinkage_strain`.
     """
     cfg = (overlay or {}).get("adhesion_force") or _ADHESION_FORCE_PUBLIC_DEFAULTS
     peel_scale = cfg.get("peel_force_scale", 0.01)
 
     mat_key = material.lower()
-    adhesion_strength = _MATERIAL_ADHESION_STRENGTH.get(mat_key, 0.10)
-    shrinkage_strain = _MATERIAL_SHRINKAGE_STRAIN.get(mat_key, 0.005)
+    adhesion_strength = _material_adhesion_strength(material)
+    shrinkage_strain = _material_shrinkage_strain(material)
 
     x_span = bbox["x_max"] - bbox["x_min"]
     y_span = bbox["y_max"] - bbox["y_min"]

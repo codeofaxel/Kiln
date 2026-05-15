@@ -451,6 +451,215 @@ class TestProEnrichmentHook:
             assert report.to_dict()["enrichment"] == report.enrichment
 
 
+# ---------------------------------------------------------------------------
+# TestMaterialPhysicsBridge — public Kiln no longer ships per-material
+# stress / adhesion / shrinkage tables.  Each call site now goes through
+# a bridge helper that consults the kiln-pro overlay when present and
+# falls back to a single conservative default otherwise.  This test class
+# pins the free-vs-Pro contract.
+# ---------------------------------------------------------------------------
+
+
+from kiln.printability import (  # noqa: E402
+    _DEFAULT_ADHESION_STRENGTH,
+    _DEFAULT_SHRINKAGE_STRAIN,
+    _DEFAULT_STRESS_FACTOR,
+    _material_adhesion_strength,
+    _material_physics_from_overlay,
+    _material_shrinkage_strain,
+    _material_stress_factor,
+)
+
+
+def _force_no_kiln_pro(monkeypatch):
+    """Make ``from kiln_pro.bridge import pro_features`` raise ImportError.
+
+    Simulates a free / public Kiln install where kiln-pro isn't on the
+    Python path.  Used to assert the public-default fallback.
+    """
+    import builtins as _builtins
+
+    real_import = _builtins.__import__
+
+    def _stub(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "kiln_pro.bridge" or name.startswith("kiln_pro"):
+            raise ImportError("simulated: kiln-pro not installed")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(_builtins, "__import__", _stub)
+
+
+def _stub_overlay(monkeypatch, materials: dict[str, dict]) -> None:
+    """Plug a fake kiln-pro overlay into the bridge so the helpers see
+    a Pro-tier environment with the supplied per-material physics dict.
+    """
+    import types
+
+    fake_overlay = types.SimpleNamespace(
+        lookup_material=lambda mat: materials.get(mat.lower()) if mat else None,
+    )
+    fake_features = types.SimpleNamespace(
+        is_available=lambda feat: feat == "printability_overlay",
+        printability_overlay=fake_overlay,
+    )
+    fake_bridge = types.ModuleType("kiln_pro.bridge")
+    fake_bridge.pro_features = fake_features
+    fake_pkg = types.ModuleType("kiln_pro")
+    fake_pkg.bridge = fake_bridge
+    monkeypatch.setitem(__import__("sys").modules, "kiln_pro", fake_pkg)
+    monkeypatch.setitem(__import__("sys").modules, "kiln_pro.bridge", fake_bridge)
+
+
+class TestMaterialPhysicsBridge:
+    """Free vs Pro contract for the three per-material physics helpers."""
+
+    # -- Free tier (no kiln-pro on the path) --------------------------
+
+    @pytest.mark.parametrize(
+        "material",
+        ["pla", "PLA", "abs", "ABS", "nylon", "pc", "tpu", "petg",
+         "unknown", "", None],
+    )
+    def test_free_tier_stress_factor_is_always_default(self, monkeypatch, material):
+        """Every material returns the conservative default — uniform,
+        material-agnostic.  This is the whole point of the moat strip:
+        a free user's report does not differentiate between PLA and
+        ABS at the thermal-stress level.
+        """
+        _force_no_kiln_pro(monkeypatch)
+        assert _material_stress_factor(material) == _DEFAULT_STRESS_FACTOR
+
+    @pytest.mark.parametrize(
+        "material", ["pla", "abs", "nylon", "tpu", "unknown", None],
+    )
+    def test_free_tier_adhesion_strength_is_always_default(
+        self, monkeypatch, material,
+    ):
+        _force_no_kiln_pro(monkeypatch)
+        assert _material_adhesion_strength(material) == _DEFAULT_ADHESION_STRENGTH
+
+    @pytest.mark.parametrize(
+        "material", ["pla", "abs", "nylon", "tpu", "unknown", None],
+    )
+    def test_free_tier_shrinkage_strain_is_always_default(
+        self, monkeypatch, material,
+    ):
+        _force_no_kiln_pro(monkeypatch)
+        assert _material_shrinkage_strain(material) == _DEFAULT_SHRINKAGE_STRAIN
+
+    def test_free_tier_overlay_helper_returns_empty_dict(self, monkeypatch):
+        """The shared bridge helper returns ``{}`` so callers fall
+        through to their default branch."""
+        _force_no_kiln_pro(monkeypatch)
+        assert _material_physics_from_overlay("pla") == {}
+
+    # -- Pro tier (kiln-pro overlay mocked available) ------------------
+
+    def test_pro_tier_pla_stress_factor_is_06(self, monkeypatch):
+        """PLA at Pro tier — overlay returns the curated 0.6."""
+        _stub_overlay(monkeypatch, {"pla": {"stress_factor": 0.6}})
+        assert _material_stress_factor("PLA") == pytest.approx(0.6)
+
+    def test_pro_tier_abs_stress_factor_is_15(self, monkeypatch):
+        """ABS at Pro tier — overlay returns the curated 1.5."""
+        _stub_overlay(monkeypatch, {"abs": {"stress_factor": 1.5}})
+        assert _material_stress_factor("ABS") == pytest.approx(1.5)
+
+    def test_pro_tier_nylon_stress_factor_is_16(self, monkeypatch):
+        """Nylon at Pro tier — overlay returns the curated 1.6."""
+        _stub_overlay(monkeypatch, {"nylon": {"stress_factor": 1.6}})
+        assert _material_stress_factor("Nylon") == pytest.approx(1.6)
+
+    def test_pro_tier_unknown_material_returns_default(self, monkeypatch):
+        """If a material isn't in the overlay (lookup returns None), the
+        public default takes over.  Pro tier should not crash on an
+        unknown alias — it should degrade to the safety floor."""
+        _stub_overlay(monkeypatch, {"pla": {"stress_factor": 0.6}})
+        assert _material_stress_factor("Unobtanium") == _DEFAULT_STRESS_FACTOR
+
+    def test_pro_tier_partial_overlay_uses_defaults_for_missing_fields(
+        self, monkeypatch,
+    ):
+        """Overlay entry exists but lacks one field — that field falls
+        back to the default while present fields stay overlay-sourced."""
+        _stub_overlay(
+            monkeypatch,
+            {"pla": {"stress_factor": 0.6}},  # no adhesion / shrinkage
+        )
+        assert _material_stress_factor("pla") == pytest.approx(0.6)
+        assert _material_adhesion_strength("pla") == _DEFAULT_ADHESION_STRENGTH
+        assert _material_shrinkage_strain("pla") == _DEFAULT_SHRINKAGE_STRAIN
+
+    def test_pro_tier_overlay_lookup_failure_degrades_to_default(
+        self, monkeypatch,
+    ):
+        """If the overlay's ``lookup_material`` raises, the helpers must
+        not propagate — they return the conservative default so the
+        public path never breaks because of a Pro-side bug.
+        """
+        import types
+
+        def _boom(_mat):
+            raise RuntimeError("simulated overlay corruption")
+
+        fake_overlay = types.SimpleNamespace(lookup_material=_boom)
+        fake_features = types.SimpleNamespace(
+            is_available=lambda feat: feat == "printability_overlay",
+            printability_overlay=fake_overlay,
+        )
+        fake_bridge = types.ModuleType("kiln_pro.bridge")
+        fake_bridge.pro_features = fake_features
+        fake_pkg = types.ModuleType("kiln_pro")
+        fake_pkg.bridge = fake_bridge
+        monkeypatch.setitem(__import__("sys").modules, "kiln_pro", fake_pkg)
+        monkeypatch.setitem(
+            __import__("sys").modules, "kiln_pro.bridge", fake_bridge,
+        )
+
+        assert _material_stress_factor("pla") == _DEFAULT_STRESS_FACTOR
+        assert _material_adhesion_strength("pla") == _DEFAULT_ADHESION_STRENGTH
+        assert _material_shrinkage_strain("pla") == _DEFAULT_SHRINKAGE_STRAIN
+
+    def test_pro_tier_pro_features_unavailable_degrades_to_default(
+        self, monkeypatch,
+    ):
+        """``pro_features`` exists but ``is_available('printability_overlay')``
+        returns False — the helpers must respect that and fall back."""
+        import types
+
+        fake_features = types.SimpleNamespace(
+            is_available=lambda feat: False,
+            printability_overlay=None,
+        )
+        fake_bridge = types.ModuleType("kiln_pro.bridge")
+        fake_bridge.pro_features = fake_features
+        fake_pkg = types.ModuleType("kiln_pro")
+        fake_pkg.bridge = fake_bridge
+        monkeypatch.setitem(__import__("sys").modules, "kiln_pro", fake_pkg)
+        monkeypatch.setitem(
+            __import__("sys").modules, "kiln_pro.bridge", fake_bridge,
+        )
+
+        assert _material_stress_factor("pla") == _DEFAULT_STRESS_FACTOR
+        assert _material_adhesion_strength("pla") == _DEFAULT_ADHESION_STRENGTH
+        assert _material_shrinkage_strain("pla") == _DEFAULT_SHRINKAGE_STRAIN
+
+    def test_pro_tier_full_overlay_drives_all_three_helpers(self, monkeypatch):
+        """End-to-end: a populated overlay drives every helper at once."""
+        _stub_overlay(
+            monkeypatch,
+            {
+                "abs": {
+                    "stress_factor": 1.5,
+                    "adhesion_strength": 0.08,
+                    "shrinkage_strain": 0.008,
+                },
+            },
+        )
+        assert _material_stress_factor("ABS") == pytest.approx(1.5)
+        assert _material_adhesion_strength("ABS") == pytest.approx(0.08)
+        assert _material_shrinkage_strain("ABS") == pytest.approx(0.008)
+
 
 # ---------------------------------------------------------------------------
 # TestPrintabilityJudgmentTierSeam — soft seam for warping / thermal_stress /
