@@ -155,7 +155,7 @@ class _GenerationToolsPlugin:
                     from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
                     return attach_inspect_bundle(
                         result,
-                        source_path=session.best_result_path,
+                        source_path=result.get("best_result_path"),
                         level="quick",
                     )
                 except ImportError:
