@@ -1105,3 +1105,171 @@ class TestMCPToolIntegration:
         # Partial build volume should result in None
         call_kwargs = mock_pipeline.call_args[1]
         assert call_kwargs["build_volume"] is None
+
+
+# ---------------------------------------------------------------------------
+# TestValidationPipelineInspectionBundle
+#
+# Consumer-proof for the bundle-as-lingua-franca rollout.  When a
+# pre-built inspection bundle is provided, the pipeline reads
+# printability findings from it instead of re-running
+# analyze_printability.  Same answer, half the cost.
+# ---------------------------------------------------------------------------
+
+
+def _make_inspection_bundle(
+    *, printability_score: int = 75, printability_grade: str = "B",
+    recommendations: list[str] | None = None,
+) -> dict[str, Any]:
+    """Build a synthetic inspection-bundle dict shaped like what
+    ``attach_inspect_bundle`` emits, with just the printability channel
+    populated (the only channel the validation pipeline reads)."""
+    return {
+        "schema_version": "1.0",
+        "source_path": "/tmp/synthetic.stl",
+        "source_sha": "deadbeef" * 8,
+        "bundle_dir": "/tmp/synthetic-bundle",
+        "channels_requested": ["printability"],
+        "channels_emitted": ["printability"],
+        "channels": {
+            "printability": {
+                "name": "printability",
+                "tier": "pro",
+                "status": "ok",
+                "images": [],
+                "findings": {
+                    "score": printability_score,
+                    "grade": printability_grade,
+                    "printable": printability_score >= 50,
+                    "recommendations": list(recommendations or []),
+                },
+                "summary": f"grade {printability_grade}",
+                "error": None,
+                "elapsed_ms": 0,
+            },
+        },
+        "scene": {},
+    }
+
+
+class TestValidationPipelineInspectionBundle:
+    """When ``inspection_bundle`` is provided, the pipeline reads
+    printability findings from it rather than re-running analysis."""
+
+    @patch(_PRINTABILITY)
+    @patch(_VALIDATE)
+    def test_bundle_skips_analyze_printability_call(
+        self, mock_validate, mock_printability, stl_file,
+    ):
+        """analyze_printability MUST NOT be called when the bundle has
+        printability findings — that's the whole point of the
+        consumer-proof refactor."""
+        mock_validate.return_value = _make_mesh_validation_result()
+        # If this gets called, the regression has happened.
+        mock_printability.return_value = _make_printability_report(
+            score=99, grade="A",
+        )
+
+        bundle = _make_inspection_bundle(
+            printability_score=72, printability_grade="C",
+        )
+        result = run_validation_pipeline(stl_file, inspection_bundle=bundle)
+
+        mock_printability.assert_not_called()
+        assert result.printability_score == 72
+        assert result.printability_grade == "C"
+
+    @patch(_PRINTABILITY)
+    @patch(_VALIDATE)
+    def test_bundle_findings_drive_the_score(
+        self, mock_validate, mock_printability, stl_file,
+    ):
+        """The score field on the result reflects what the BUNDLE said,
+        not what the (unused) analyze_printability would have said."""
+        mock_validate.return_value = _make_mesh_validation_result()
+        mock_printability.return_value = _make_printability_report(
+            score=99, grade="A",  # ignored — bundle wins
+        )
+
+        bundle = _make_inspection_bundle(
+            printability_score=42,
+            printability_grade="F",
+            recommendations=["increase wall count", "add brim"],
+        )
+        result = run_validation_pipeline(stl_file, inspection_bundle=bundle)
+
+        assert result.printability_score == 42
+        assert result.printability_grade == "F"
+        assert "increase wall count" in result.recommendations
+        assert "add brim" in result.recommendations
+
+    @patch(_PRINTABILITY)
+    @patch(_VALIDATE)
+    def test_no_bundle_legacy_path_unchanged(
+        self, mock_validate, mock_printability, stl_file,
+    ):
+        """When ``inspection_bundle`` is None, behavior is identical to
+        before the refactor — analyze_printability runs, its result is
+        used."""
+        mock_validate.return_value = _make_mesh_validation_result()
+        mock_printability.return_value = _make_printability_report(
+            score=80, grade="B",
+        )
+
+        result = run_validation_pipeline(stl_file)  # no inspection_bundle
+
+        mock_printability.assert_called_once()
+        assert result.printability_score == 80
+        assert result.printability_grade == "B"
+        assert result.inspection_bundle is None
+
+    @patch(_PRINTABILITY)
+    @patch(_VALIDATE)
+    def test_bundle_rides_along_on_result(
+        self, mock_validate, mock_printability, stl_file,
+    ):
+        """The bundle dict appears on the result so downstream
+        consumers can read other channels (e.g. rgb evidence PNGs)
+        without re-running anything."""
+        mock_validate.return_value = _make_mesh_validation_result()
+        mock_printability.return_value = _make_printability_report()
+
+        bundle = _make_inspection_bundle()
+        result = run_validation_pipeline(stl_file, inspection_bundle=bundle)
+
+        assert result.inspection_bundle is bundle
+
+    @patch(_PRINTABILITY)
+    @patch(_VALIDATE)
+    def test_bundle_without_printability_findings_falls_through(
+        self, mock_validate, mock_printability, stl_file,
+    ):
+        """A bundle with no printability channel (e.g. ``level="quick"``
+        which only ran rgb + measurements) falls through to the legacy
+        analyze_printability path — graceful degradation."""
+        mock_validate.return_value = _make_mesh_validation_result()
+        mock_printability.return_value = _make_printability_report(
+            score=80, grade="B",
+        )
+
+        # Bundle without printability channel — only rgb ran.
+        partial_bundle = {
+            "schema_version": "1.0",
+            "channels": {
+                "rgb": {
+                    "name": "rgb",
+                    "tier": "free",
+                    "status": "ok",
+                    "findings": {"view_count": 4},
+                },
+            },
+            "channels_emitted": ["rgb"],
+        }
+        result = run_validation_pipeline(
+            stl_file, inspection_bundle=partial_bundle,
+        )
+
+        mock_printability.assert_called_once()
+        assert result.printability_score == 80
+        # Bundle still rides along on the result for downstream readers.
+        assert result.inspection_bundle is partial_bundle

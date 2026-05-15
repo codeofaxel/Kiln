@@ -71,6 +71,11 @@ class OriginalDesignAudit:
     structural_analysis: dict[str, Any] | None = None
     gates: list[AuditGate] = field(default_factory=list)
     feedback: list[dict[str, Any]] = field(default_factory=list)
+    # Inspection bundle (when provided) — source-of-truth manifest
+    # whose printability findings drove the audit's printability gate.
+    # Consumers can read all channel evidence from here without
+    # re-running anything.  None on the legacy path.
+    inspection_bundle: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -392,8 +397,18 @@ def audit_original_design(
     nozzle_diameter: float = 0.4,
     layer_height: float = 0.2,
     max_overhang_angle: float = 45.0,
+    inspection_bundle: dict[str, Any] | None = None,
 ) -> OriginalDesignAudit:
-    """Run a harsh audit of an original design from intent to printability."""
+    """Run a harsh audit of an original design from intent to printability.
+
+    :param inspection_bundle: Optional pre-built inspection-bundle dict
+        (the ``result["inspection_bundle"]`` field produced by
+        ``attach_inspect_bundle`` in kiln-pro).  When the bundle carries
+        printability findings, the audit reads them instead of running
+        a redundant :func:`analyze_printability` pass.  Same answer,
+        half the cost when the caller already ran inspection upstream.
+        Legacy callers (no bundle) get the unchanged behavior.
+    """
     build_volume_dict = _build_volume_dict(build_volume, printer_model)
     build_volume_tuple = (
         (
@@ -420,13 +435,44 @@ def audit_original_design(
         printer_context=audit_printer_ctx,
     )
     mesh_validation = validate_mesh(file_path)
-    printability = analyze_printability(
-        file_path,
-        nozzle_diameter=nozzle_diameter,
-        layer_height=layer_height,
-        max_overhang_angle=max_overhang_angle,
-        build_volume=build_volume_tuple,
-    )
+
+    # Prefer pre-computed bundle printability over a fresh re-run.  The
+    # bundle is the bundle-as-lingua-franca contract: producers emit it
+    # once, consumers read it instead of re-deriving.  Same answer at
+    # zero marginal cost when the caller already ran inspection upstream.
+    bundle_printability_findings: dict[str, Any] | None = None
+    if inspection_bundle is not None:
+        bundle_printability_findings = (
+            inspection_bundle.get("channels", {})
+            .get("printability", {})
+            .get("findings")
+        )
+
+    if (
+        bundle_printability_findings
+        and bundle_printability_findings.get("score") is not None
+    ):
+        # Construct a SimpleNamespace shim that mimics the
+        # PrintabilityReport interface the audit's gate-construction code
+        # reads (.printable, .score, .grade, .to_dict(), .recommendations).
+        from types import SimpleNamespace
+
+        _bp = bundle_printability_findings
+        printability = SimpleNamespace(
+            printable=_bp.get("printable", _bp.get("score", 0) >= 50),
+            score=_bp.get("score", 0),
+            grade=_bp.get("grade", "F"),
+            recommendations=list(_bp.get("recommendations", [])),
+            to_dict=lambda d=dict(_bp): d,
+        )
+    else:
+        printability = analyze_printability(
+            file_path,
+            nozzle_diameter=nozzle_diameter,
+            layer_height=layer_height,
+            max_overhang_angle=max_overhang_angle,
+            build_volume=build_volume_tuple,
+        )
     design_validation = validate_design(
         file_path,
         requirements_text,
@@ -749,6 +795,7 @@ def audit_original_design(
         structural_analysis=structural_plan,
         gates=gates,
         feedback=feedback,
+        inspection_bundle=inspection_bundle,
     )
 
 

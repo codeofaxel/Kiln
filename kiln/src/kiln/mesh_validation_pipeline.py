@@ -66,6 +66,13 @@ class ValidationPipelineResult:
     # Summary
     summary: str = ""  # human-readable one-paragraph summary
 
+    # Inspection bundle (when provided) — source-of-truth manifest whose
+    # printability findings drove the score.  Consumers can read all
+    # channel evidence (PNG paths, raw measurements, view-selection
+    # reasons) from here without re-running anything.  None on the legacy
+    # path; populated when the caller passed a bundle in.
+    inspection_bundle: dict[str, Any] | None = None
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -160,6 +167,7 @@ def run_validation_pipeline(
     auto_repair: bool = True,
     auto_scale: bool = False,
     min_printability_score: int = 40,
+    inspection_bundle: dict[str, Any] | None = None,
 ) -> ValidationPipelineResult:
     """Run the full mesh validation pipeline.
 
@@ -174,6 +182,13 @@ def run_validation_pipeline(
     :param auto_repair: Attempt automatic repair of non-manifold meshes.
     :param auto_scale: Scale mesh down to fit build volume if too large.
     :param min_printability_score: Minimum printability score to pass (0-100).
+    :param inspection_bundle: Optional pre-built inspection-bundle dict
+        (the ``result["inspection_bundle"]`` field produced by
+        ``attach_inspect_bundle`` in kiln-pro).  When the bundle carries
+        printability findings, the pipeline reads them instead of
+        running a redundant :func:`analyze_printability` pass — same
+        answer, half the cost.  Legacy callers (no bundle) get the
+        unchanged path.
     :returns: :class:`ValidationPipelineResult` with full report.
     """
     from kiln.generation.validation import (
@@ -293,30 +308,59 @@ def run_validation_pipeline(
         printability_grade = "F"
         printability_details: dict[str, Any] | None = None
 
-        try:
-            from kiln.printability import analyze_printability
+        # Prefer pre-computed bundle findings over a fresh re-run.  The
+        # bundle is the bundle-as-lingua-franca contract: producers emit
+        # it once, consumers read it instead of re-deriving.  Same answer,
+        # half the cost when the caller already ran inspection upstream.
+        bundle_printability: dict[str, Any] | None = None
+        if inspection_bundle is not None:
+            bundle_printability = (
+                inspection_bundle.get("channels", {})
+                .get("printability", {})
+                .get("findings")
+            )
 
-            report = analyze_printability(
-                working_path,
-                nozzle_diameter=nozzle_diameter,
-                layer_height=layer_height,
-                material=material.lower(),
+        if (
+            bundle_printability
+            and bundle_printability.get("score") is not None
+        ):
+            printability_score = bundle_printability["score"]
+            printability_grade = bundle_printability.get("grade", "F")
+            printability_details = dict(bundle_printability)
+            recommendations.extend(
+                bundle_printability.get("recommendations", [])
             )
-            printability_score = report.score
-            printability_grade = report.grade
-            printability_details = report.to_dict()
-            recommendations.extend(report.recommendations)
             _logger.info(
-                "Printability score: %d/100 (grade %s)", report.score, report.grade,
+                "Step 3/4: Printability read from inspection bundle — "
+                "score %d/100 (grade %s); analyze_printability re-run skipped",
+                printability_score,
+                printability_grade,
             )
-        except ImportError:
-            warnings.append(
-                "Printability analysis unavailable (missing kiln.printability module).",
-            )
-            _logger.warning("kiln.printability not importable — skipping analysis")
-        except Exception as exc:
-            errors.append(f"Printability analysis failed: {exc}")
-            _logger.error("Printability analysis failed: %s", exc, exc_info=True)
+        else:
+            try:
+                from kiln.printability import analyze_printability
+
+                report = analyze_printability(
+                    working_path,
+                    nozzle_diameter=nozzle_diameter,
+                    layer_height=layer_height,
+                    material=material.lower(),
+                )
+                printability_score = report.score
+                printability_grade = report.grade
+                printability_details = report.to_dict()
+                recommendations.extend(report.recommendations)
+                _logger.info(
+                    "Printability score: %d/100 (grade %s)", report.score, report.grade,
+                )
+            except ImportError:
+                warnings.append(
+                    "Printability analysis unavailable (missing kiln.printability module).",
+                )
+                _logger.warning("kiln.printability not importable — skipping analysis")
+            except Exception as exc:
+                errors.append(f"Printability analysis failed: {exc}")
+                _logger.error("Printability analysis failed: %s", exc, exc_info=True)
 
         # ------------------------------------------------------------------
         # Step 4: Build volume check (+ optional auto-scale)
@@ -419,6 +463,7 @@ def run_validation_pipeline(
             warnings=warnings,
             recommendations=recommendations,
             summary="",
+            inspection_bundle=inspection_bundle,
         )
         result.summary = _build_summary(result)
 
