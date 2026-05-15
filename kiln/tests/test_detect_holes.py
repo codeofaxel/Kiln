@@ -370,3 +370,41 @@ class TestDetectHoles:
             detect_holes(str(stl), min_diameter_mm=0.0)
         with pytest.raises(ValueError):
             detect_holes(str(stl), min_diameter_mm=5.0, max_diameter_mm=4.0)
+
+    def test_rotated_mesh_still_detects_hole(self, tmp_path: Path) -> None:
+        """Regression: a slightly rotated mesh used to silently fail to
+        detect any holes because floating-point drift in the rotated
+        vertex coordinates broke the edge-adjacency dict's tuple-equality
+        keying.  Vertex snapping (``_snap_vertex``) preserves adjacency
+        under realistic transforms — the hole survives the rotation."""
+        stl = tmp_path / "rotated_single_hole.stl"
+        tris = _hole_side_wall_z(
+            cx=10.0, cy=10.0, radius=2.5,
+            z_bottom=0.0, z_top=10.0, segments=24,
+        )
+        # 0.5° rotation around X axis — small enough to keep face
+        # normals well inside ``axis_normal_tolerance``, large enough
+        # that the transformed vertex coordinates aren't bit-identical
+        # to their pre-rotation values.
+        theta = math.radians(0.5)
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
+
+        def _rotate_x(v: tuple[float, ...]) -> tuple[float, float, float]:
+            x, y, z = v[0], v[1], v[2]
+            return (x, y * cos_t - z * sin_t, y * sin_t + z * cos_t)
+
+        rotated_tris = [
+            tuple(_rotate_x(v) for v in tri) for tri in tris
+        ]
+        _write_binary_stl(rotated_tris, str(stl))
+        holes = detect_holes(str(stl), min_diameter_mm=1.0)
+        assert len(holes) == 1, (
+            "vertex snapping must preserve edge adjacency under "
+            "small rotations — got %d holes" % len(holes)
+        )
+        h = holes[0]
+        # Axis label survives (0.5° tilt still inside tolerance).
+        assert h["axis"] == "z"
+        # Diameter survives (rotation is isometric).
+        assert h["diameter_mm"] == pytest.approx(5.0, abs=0.3)

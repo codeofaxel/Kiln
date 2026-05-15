@@ -5315,6 +5315,37 @@ def detect_holes(
     return holes
 
 
+# Edge adjacency in ``_cluster_circular_holes`` keys on the (snapped)
+# vertex tuples shared by two triangles.  Raw float-tuple equality works
+# for STLs parsed straight off disk because adjacent triangles produce
+# literally-equal floats — but a mesh that has been rotated, scaled, or
+# decimated develops sub-micrometre drift that breaks tuple equality,
+# silently turning every triangle into its own component of size 1.
+# Snapping each vertex to a 10 nm integer grid before keying preserves
+# adjacency under realistic transforms while still keeping distinct
+# vertices (printer resolution is ~0.1 mm — ten thousand snap cells
+# coarser than the snap tolerance, so collapse is implausible).
+_HOLE_EDGE_SNAP_TOL_MM: float = 1e-5
+
+
+def _snap_vertex(
+    v: tuple[float, ...],
+    tol: float = _HOLE_EDGE_SNAP_TOL_MM,
+) -> tuple[int, int, int]:
+    """Map a 3-float vertex to an integer-grid coordinate.
+
+    Used as the dict key for edge-adjacency lookups in
+    ``_cluster_circular_holes`` so that two triangles sharing an edge
+    in a transformed mesh still collide on the same key despite small
+    floating-point drift.
+    """
+    return (
+        round(v[0] / tol),
+        round(v[1] / tol),
+        round(v[2] / tol),
+    )
+
+
 def _cluster_circular_holes(
     candidate_idx: list[int],
     tri_normals: list[tuple[float, float, float]],
@@ -5353,13 +5384,16 @@ def _cluster_circular_holes(
     candidate_set = set(candidate_idx)
 
     # Build edge → triangle map restricted to candidate triangles so
-    # adjacency lookups don't touch the rest of the mesh.
-    edge_to_tris: dict[tuple[tuple[float, ...], tuple[float, ...]], list[int]] = {}
+    # adjacency lookups don't touch the rest of the mesh.  Vertices are
+    # snapped to an integer grid before keying — see ``_snap_vertex``.
+    edge_to_tris: dict[
+        tuple[tuple[int, int, int], tuple[int, int, int]], list[int]
+    ] = {}
     for ti in candidate_idx:
         tri = triangles[ti]
         for i in range(3):
-            va = tri[i]
-            vb = tri[(i + 1) % 3]
+            va = _snap_vertex(tri[i])
+            vb = _snap_vertex(tri[(i + 1) % 3])
             edge = (min(va, vb), max(va, vb))
             edge_to_tris.setdefault(edge, []).append(ti)
 
@@ -5380,8 +5414,8 @@ def _cluster_circular_holes(
             cluster_set.append(ti)
             tri = triangles[ti]
             for i in range(3):
-                va = tri[i]
-                vb = tri[(i + 1) % 3]
+                va = _snap_vertex(tri[i])
+                vb = _snap_vertex(tri[(i + 1) % 3])
                 edge = (min(va, vb), max(va, vb))
                 for neighbor in edge_to_tris.get(edge, []):
                     if neighbor in visited or neighbor not in candidate_set:
