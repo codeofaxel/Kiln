@@ -934,3 +934,99 @@ class TestPrintabilityJudgmentTierSeam:
         assert (free.warping is None) == (pro_rpt.warping is None)
         assert (free.thermal_stress is None) == (pro_rpt.thermal_stress is None)
         assert (free.adhesion_force is None) == (pro_rpt.adhesion_force is None)
+
+
+from kiln.printability import BundlePrintabilityFindings  # noqa: E402
+
+
+class TestBundlePrintabilityFindings:
+    """Adapter that lets consumers read printability from an inspection
+    bundle without re-running ``analyze_printability``.  Exposes the same
+    ``.printable / .score / .grade / .recommendations / .to_dict()``
+    surface as :class:`PrintabilityReport`."""
+
+    def test_from_bundle_findings_reads_each_field(self):
+        findings = {
+            "score": 72,
+            "grade": "C",
+            "printable": True,
+            "recommendations": ["increase wall count"],
+        }
+        f = BundlePrintabilityFindings.from_bundle_findings(findings)
+        assert f.printable is True
+        assert f.score == 72
+        assert f.grade == "C"
+        assert f.recommendations == ["increase wall count"]
+
+    def test_printable_defaults_from_score_when_field_absent(self):
+        """If the bundle doesn't carry an explicit ``printable``, derive
+        it from score (≥50 = printable).  Same rule the SimpleNamespace
+        shim used."""
+        high = BundlePrintabilityFindings.from_bundle_findings(
+            {"score": 80, "grade": "B"}
+        )
+        low = BundlePrintabilityFindings.from_bundle_findings(
+            {"score": 30, "grade": "F"}
+        )
+        assert high.printable is True
+        assert low.printable is False
+
+    def test_to_dict_returns_raw_findings_not_adapter_fields(self):
+        """The audit pipes printability.to_dict() into its details
+        payload — that payload must stay bundle-faithful so downstream
+        consumers see every channel-specific field, not just the
+        narrow adapter surface."""
+        findings = {
+            "score": 88,
+            "grade": "A",
+            "printable": True,
+            "recommendations": ["lower nozzle"],
+            "channel_specific_evidence": {"overhangs_total_mm2": 4.2},
+        }
+        f = BundlePrintabilityFindings.from_bundle_findings(findings)
+        out = f.to_dict()
+        assert out["score"] == 88
+        assert out["channel_specific_evidence"] == {"overhangs_total_mm2": 4.2}
+
+    def test_to_dict_returns_a_copy_not_an_alias(self):
+        """Caller mutations to the returned dict must NOT propagate into
+        the adapter's stored findings."""
+        findings = {"score": 60, "grade": "D"}
+        f = BundlePrintabilityFindings.from_bundle_findings(findings)
+        out = f.to_dict()
+        out["score"] = 0
+        assert f.to_dict()["score"] == 60
+
+    def test_recommendations_default_empty_when_field_missing(self):
+        f = BundlePrintabilityFindings.from_bundle_findings(
+            {"score": 50, "grade": "D"}
+        )
+        assert f.recommendations == []
+
+    def test_missing_score_treated_as_zero(self):
+        """Defensive: a malformed bundle (no score) shouldn't crash the
+        adapter — score falls to 0, printable falls to False."""
+        f = BundlePrintabilityFindings.from_bundle_findings({})
+        assert f.score == 0
+        assert f.printable is False
+        assert f.grade == "F"
+
+    def test_audit_call_sites_compatible_with_printability_report(self):
+        """Every attribute the audit reads off ``printability`` exists
+        on the adapter — pins the duck-typing contract."""
+        f = BundlePrintabilityFindings.from_bundle_findings(
+            {
+                "score": 65,
+                "grade": "C",
+                "printable": True,
+                "recommendations": ["raise temp"],
+            }
+        )
+        # These are the only attributes ``audit_original_design`` reads.
+        # If anyone adds a new read in original_design.py, this test
+        # is where they'll discover the adapter needs to grow.
+        _ = f.printable
+        _ = f.score
+        _ = f.grade
+        _ = f.recommendations
+        _ = f.to_dict()
