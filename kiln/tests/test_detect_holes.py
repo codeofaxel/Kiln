@@ -400,8 +400,8 @@ class TestDetectHoles:
         _write_binary_stl(rotated_tris, str(stl))
         holes = detect_holes(str(stl), min_diameter_mm=1.0)
         assert len(holes) == 1, (
-            "vertex snapping must preserve edge adjacency under "
-            "small rotations — got %d holes" % len(holes)
+            f"vertex snapping must preserve edge adjacency under "
+            f"small rotations — got {len(holes)} holes"
         )
         h = holes[0]
         # Axis label survives (0.5° tilt still inside tolerance).
