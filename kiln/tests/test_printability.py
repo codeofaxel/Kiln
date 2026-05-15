@@ -522,9 +522,9 @@ class TestMaterialPhysicsBridge:
     )
     def test_free_tier_stress_factor_is_always_default(self, monkeypatch, material):
         """Every material returns the conservative default — uniform,
-        material-agnostic.  This is the whole point of the moat strip:
-        a free user's report does not differentiate between PLA and
-        ABS at the thermal-stress level.
+        material-agnostic.  Free-tier reports do not differentiate
+        between PLA and ABS at the thermal-stress level; per-material
+        differentiation arrives via the kiln-pro overlay bridge.
         """
         _force_no_kiln_pro(monkeypatch)
         assert _material_stress_factor(material) == _DEFAULT_STRESS_FACTOR

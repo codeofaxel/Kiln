@@ -242,19 +242,11 @@ _BEDSLINGER_PRINTERS: frozenset[str] = frozenset({
 
 # Conservative single defaults for per-material physics constants.
 #
-# Pre-strip, public Kiln carried three curated tables — one each for
-# thermal-stress multiplier, build-plate adhesion strength (N/mm²), and
-# linear shrinkage strain — with per-material values tuned from
-# manufacturer datasheets and internal print logs.  Those tables are
-# moat: they took years of calibration prints to converge on, and any
-# competitor who scraped them got the same precision for free.
-#
-# They now live in the Pro overlay (``kiln_pro/data/
-# printability_pro_overlay.json``).  Public Kiln keeps a single
-# conservative default for each — chosen so a free-tier report is
-# safe, but uniform across materials.  Pro+ tier (kiln-pro installed)
-# bridges through to the overlay via the helpers below and gets the
-# SME-tuned per-material values.  https://kiln3d.com — per-material
+# Public Kiln keeps a single conservative default for each constant —
+# chosen so a free-tier report is safe, but uniform across materials.
+# When kiln-pro is installed, the bridge helpers below consult
+# ``kiln_pro.printability_overlay.lookup_material`` for SME-tuned
+# per-material values.  https://kiln3d.com — per-material
 # differentiation is a kiln-pro Pro+ feature.
 _DEFAULT_STRESS_FACTOR: float = 1.0
 _DEFAULT_ADHESION_STRENGTH: float = 0.10  # N/mm²
