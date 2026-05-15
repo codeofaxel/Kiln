@@ -1465,6 +1465,7 @@ def analyze_printability(
     material: str = "pla",
     infill_percent: float = 20.0,
     include_hole_detection: bool = True,
+    printer_id: str | None = None,
 ) -> PrintabilityReport:
     """Run a full printability analysis on a mesh file.
 
@@ -1482,6 +1483,13 @@ def analyze_printability(
         result on ``report.holes``.  Set False on perf-critical paths
         that don't need the per-hole list — hole detection re-parses
         the mesh internally, which roughly doubles the parse cost.
+    :param printer_id: When supplied and kiln-pro is installed, the
+        Pro+ enrichment pass consults the per-machine calibration log
+        for measured drift on each wired feature class (wall /
+        overhang / bridge / hole) and shifts the matching threshold
+        before evaluating the report.  Absent calibration data leaves
+        thresholds untouched; absent kiln-pro leaves the report
+        unchanged.
     :returns: A :class:`PrintabilityReport` with scores, grades, and
         recommendations.  When the kiln-pro package is installed (Pro+
         tier), the report is enriched with material-specific tuning
@@ -1660,6 +1668,7 @@ def analyze_printability(
                 enriched = pro_features.printability_overlay.enrich_printability_report(
                     report.to_dict(),
                     material=material,
+                    printer_id=printer_id,
                 )
             except Exception:  # noqa: BLE001
                 # Overlay failure must never break the public path.
