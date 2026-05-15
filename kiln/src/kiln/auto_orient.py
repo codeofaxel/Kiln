@@ -210,26 +210,31 @@ def _score_orientation(
 ) -> tuple[float, float, float, float, float]:
     """Score a set of triangles in their current orientation.
 
-    Returns (score, support_volume, bed_contact, print_height, overhang_pct).
-    """
-    # Ensure model sits on the bed.
-    triangles = _translate_to_bed(triangles)
+    Returns ``(score, support_volume, bed_contact, print_height,
+    overhang_pct)``.
 
-    # Collect vertices for bounding box.
+    Tiering: free tier uses a single-factor "largest bed contact"
+    ranking — safe, defensible, never picks an unstable orientation.
+    Pro+ unlocks Kiln's curated multi-factor weighted ranking
+    (bed/support/height/overhang) via the ``orientation_scoring``
+    overlay. The four returned facts (volume, contact area, height,
+    overhang %) are identical from both paths — only the ``score``
+    differs.
+    """
+    from kiln.design_intelligence import load_pro_overlay_or_empty
+
+    # --- Geometry facts (textbook; identical from both tiers) ---------
+    triangles = _translate_to_bed(triangles)
     all_verts: list[tuple[float, ...]] = []
     for tri in triangles:
         all_verts.extend(tri)
-
     xs = [v[0] for v in all_verts]
     ys = [v[1] for v in all_verts]
     zs = [v[2] for v in all_verts]
     bbox = {
-        "x_min": min(xs),
-        "x_max": max(xs),
-        "y_min": min(ys),
-        "y_max": max(ys),
-        "z_min": min(zs),
-        "z_max": max(zs),
+        "x_min": min(xs), "x_max": max(xs),
+        "y_min": min(ys), "y_max": max(ys),
+        "z_min": min(zs), "z_max": max(zs),
     }
     z_min = bbox["z_min"]
     print_height = bbox["z_max"] - z_min
@@ -238,23 +243,15 @@ def _score_orientation(
     bed_adhesion = _analyze_bed_adhesion(triangles, z_min, bbox)
     supports = _analyze_supports(triangles, z_min)
 
-    # Normalize metrics to 0-100 scale.
-    # Bed contact: higher is better (0-100).
-    bed_score = min(100.0, bed_adhesion.contact_percentage * 2)
-
-    # Supports: lower is better (invert).
-    support_score = max(0.0, 100.0 - supports.support_percentage)
-
-    # Height: lower is better (less print time).
-    # Normalize against a reference (100mm).
-    height_score = max(0.0, 100.0 - (print_height / 100.0) * 100.0)
-    height_score = max(0.0, min(100.0, height_score))
-
-    # Overhangs: fewer is better.
-    overhang_score = max(0.0, 100.0 - overhangs.overhang_percentage)
-
-    # Weighted combination.
-    score = bed_score * 0.3 + support_score * 0.3 + height_score * 0.2 + overhang_score * 0.2
+    # --- Scoring (overlay-driven, safe-default single-factor) ---------
+    overlay = load_pro_overlay_or_empty("orientation_scoring")
+    score = _apply_orientation_scoring(
+        overlay=overlay,
+        bed_contact_pct=bed_adhesion.contact_percentage,
+        support_pct=supports.support_percentage,
+        print_height_mm=print_height,
+        overhang_pct=overhangs.overhang_percentage,
+    )
 
     return (
         round(score, 1),
@@ -262,6 +259,48 @@ def _score_orientation(
         bed_adhesion.contact_area_mm2,
         round(print_height, 2),
         overhangs.overhang_percentage,
+    )
+
+
+def _apply_orientation_scoring(
+    *,
+    overlay: dict,
+    bed_contact_pct: float,
+    support_pct: float,
+    print_height_mm: float,
+    overhang_pct: float,
+) -> float:
+    """Compute an orientation score from raw geometric facts.
+
+    Free path (``overlay`` empty): single-factor "largest bed
+    contact" — bigger base, less likely to topple or lift, no
+    chance of picking a wildly wrong orientation. Returns the
+    bed-contact percentage directly (0..100 scale).
+
+    Pro+ path (``overlay`` populated): weighted multi-factor
+    combination using the curated combination_weights +
+    normalization params from the ``orientation_scoring`` overlay.
+    """
+    weights = overlay.get("combination_weights")
+    norm = overlay.get("normalization")
+    if not (weights and norm):
+        # Free-tier safe default. Already 0..100, no scaling needed.
+        return float(bed_contact_pct)
+
+    bed = min(
+        norm["bed_contact"]["cap"],
+        bed_contact_pct * norm["bed_contact"]["multiplier"],
+    )
+    sup = max(0.0, norm["support_volume"]["invert_from"] - support_pct)
+    h_cap = norm["print_height"]["cap"]
+    h_ref = norm["print_height"]["reference_mm"]
+    height = max(0.0, min(h_cap, h_cap - (print_height_mm / h_ref) * h_cap))
+    over = max(0.0, norm["overhang"]["invert_from"] - overhang_pct)
+    return (
+        bed * weights["bed_contact"]
+        + sup * weights["support_volume"]
+        + height * weights["print_height"]
+        + over * weights["overhang"]
     )
 
 

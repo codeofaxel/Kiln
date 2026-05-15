@@ -14,6 +14,7 @@ from kiln.auto_orient import (
     OrientationCandidate,
     OrientationResult,
     SupportEstimate,
+    _apply_orientation_scoring,
     _apply_rotation,
     _build_rotation_matrix,
     _parse_3mf_transform,
@@ -849,3 +850,161 @@ class TestDuplicateStlOnPlate:
             output_path=os.path.join(str(tmp_path), "zero_space.stl"),
         )
         assert os.path.isfile(output)
+
+
+# ---------------------------------------------------------------------------
+# TestOrientationScoringTierSeam — public/Pro seam in _score_orientation
+# ---------------------------------------------------------------------------
+
+
+_PRO_ORIENTATION_OVERLAY = {
+    "combination_weights": {
+        "bed_contact": 0.3,
+        "support_volume": 0.3,
+        "print_height": 0.2,
+        "overhang": 0.2,
+    },
+    "normalization": {
+        "bed_contact": {"multiplier": 2.0, "cap": 100.0},
+        "support_volume": {"invert_from": 100.0},
+        "print_height": {"reference_mm": 100.0, "cap": 100.0},
+        "overhang": {"invert_from": 100.0},
+    },
+}
+
+
+class TestOrientationScoringTierSeam:
+    """Pin the tier seam in ``_score_orientation``:
+
+    - Free tier (overlay returns ``{}``): single-factor "largest bed
+      contact" — score = bed_contact_pct directly.  Safe textbook
+      default; never picks a wildly wrong orientation.
+    - Pro+ tier (overlay populated): weighted multi-factor combination
+      using the curated ``orientation_scoring`` overlay.
+
+    The four returned fact fields (volume, contact area, height,
+    overhang %) are identical across tiers — only the ``score`` differs.
+    """
+
+    def test_free_path_returns_bed_contact_directly(self):
+        """Empty overlay → score is the bed-contact percentage, untouched."""
+        score = _apply_orientation_scoring(
+            overlay={},
+            bed_contact_pct=42.0,
+            support_pct=10.0,
+            print_height_mm=50.0,
+            overhang_pct=5.0,
+        )
+        assert score == 42.0
+
+    def test_free_path_ignores_other_factors(self):
+        """Free path is single-factor: support/height/overhang must
+        not influence the score (they only matter once Pro unlocks
+        the weighted combination)."""
+        base = _apply_orientation_scoring(
+            overlay={},
+            bed_contact_pct=30.0,
+            support_pct=0.0,
+            print_height_mm=0.0,
+            overhang_pct=0.0,
+        )
+        worse_facts = _apply_orientation_scoring(
+            overlay={},
+            bed_contact_pct=30.0,
+            support_pct=99.0,
+            print_height_mm=999.0,
+            overhang_pct=99.0,
+        )
+        assert base == worse_facts == 30.0
+
+    def test_pro_path_uses_curated_weighting(self):
+        """Pro overlay → curated 0.3/0.3/0.2/0.2 weighting after
+        normalization.  Math: bed_contact_pct=42 → 84 capped at 100;
+        sup=10 → 90; height=50/100 → 50; overhang=5 → 95.
+        Score = 84*0.3 + 90*0.3 + 50*0.2 + 95*0.2 = 81.2.
+        """
+        score = _apply_orientation_scoring(
+            overlay=_PRO_ORIENTATION_OVERLAY,
+            bed_contact_pct=42.0,
+            support_pct=10.0,
+            print_height_mm=50.0,
+            overhang_pct=5.0,
+        )
+        assert abs(score - 81.2) < 0.01
+
+    def test_pro_path_bed_contact_caps_at_100(self):
+        """The bed-contact multiplier (2x) doesn't push past the cap."""
+        score = _apply_orientation_scoring(
+            overlay=_PRO_ORIENTATION_OVERLAY,
+            bed_contact_pct=80.0,  # would be 160 uncapped
+            support_pct=100.0,
+            print_height_mm=999.0,
+            overhang_pct=100.0,
+        )
+        # bed=100 (capped), sup=0, height=0, over=0 → 30.0
+        assert abs(score - 30.0) < 0.01
+
+    def test_partial_overlay_falls_back_to_free(self):
+        """Partial overlay (weights without normalization) is treated
+        as ``{}`` — defensive: never half-apply the curated formula."""
+        partial = {"combination_weights": _PRO_ORIENTATION_OVERLAY["combination_weights"]}
+        score = _apply_orientation_scoring(
+            overlay=partial,
+            bed_contact_pct=42.0,
+            support_pct=10.0,
+            print_height_mm=50.0,
+            overhang_pct=5.0,
+        )
+        assert score == 42.0
+
+    def test_facts_identical_across_tiers(self, tmp_path, monkeypatch):
+        """Crossing the seam does NOT change geometry facts — only the
+        score.  Callers reading bed_contact_area_mm2 etc. see identical
+        values from both tiers when scoring the same orientation."""
+        stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 5)
+
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: {},
+        )
+        free = find_optimal_orientation(stl_path)
+
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: _PRO_ORIENTATION_OVERLAY,
+        )
+        pro = find_optimal_orientation(stl_path)
+
+        # A 20x20x5 flat cube — lying flat is the right answer under both
+        # tier scorings (low height + low overhang + high bed contact).
+        # The rotation chosen as ``best`` should match; the facts at that
+        # rotation must be identical from both tiers.
+        assert free.best.rotation_x == pro.best.rotation_x
+        assert free.best.rotation_y == pro.best.rotation_y
+        assert free.best.rotation_z == pro.best.rotation_z
+        assert free.best.bed_contact_area_mm2 == pro.best.bed_contact_area_mm2
+        assert free.best.support_volume_mm3 == pro.best.support_volume_mm3
+        assert free.best.print_height_mm == pro.best.print_height_mm
+        assert free.best.overhang_percentage == pro.best.overhang_percentage
+
+    def test_orientation_result_shape_identical_across_tiers(self, tmp_path, monkeypatch):
+        """The ``OrientationResult`` dataclass shape is identical from
+        both tiers — only the numeric ``score`` field varies."""
+        import dataclasses
+
+        stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 5)
+
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: {},
+        )
+        free = find_optimal_orientation(stl_path)
+
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: _PRO_ORIENTATION_OVERLAY,
+        )
+        pro = find_optimal_orientation(stl_path)
+
+        assert dataclasses.fields(type(free)) == dataclasses.fields(type(pro))
+        assert dataclasses.fields(type(free.best)) == dataclasses.fields(type(pro.best))
