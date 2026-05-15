@@ -249,11 +249,13 @@ class _GenerationAIToolsPlugin:
                 except Exception:
                     pass
 
-                try:
-                    from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
-                    return attach_inspect_bundle(result_dict, level="quick")
-                except ImportError:
-                    return result_dict
+                # No autofire bundle here — generate_model submits an
+                # ASYNC job and the response carries only the job
+                # descriptor, not a mesh path.  The mesh becomes
+                # available downstream via ``download_generated_model``,
+                # which IS autofire-wired so the bundle attaches at the
+                # point where the mesh actually exists.
+                return result_dict
             except GenerationAuthError as exc:
                 return _srv._error_dict(
                     f"Failed to generate model (auth): {exc}. Check your provider API key is set (KILN_MESHY_API_KEY, KILN_GEMINI_API_KEY).",
@@ -331,11 +333,12 @@ class _GenerationAIToolsPlugin:
                     ),
                     "message": f"Image-to-3D job submitted to {gen.display_name}.",
                 }
-                try:
-                    from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
-                    return attach_inspect_bundle(response, level="quick")
-                except ImportError:
-                    return response
+                # No autofire bundle here — generate_model_from_image
+                # submits an ASYNC job and the response carries only
+                # the job descriptor, not a mesh path.  The mesh
+                # becomes available downstream via
+                # ``download_generated_model``, which IS autofire-wired.
+                return response
             except GenerationAuthError as exc:
                 return _srv._error_dict(
                     f"Failed to generate from image (auth): {exc}. Set KILN_MESHY_API_KEY.",
@@ -458,7 +461,7 @@ class _GenerationAIToolsPlugin:
                             "summary": f"{w:.1f} x {d:.1f} x {h:.1f} mm",
                         }
 
-                return {
+                response = {
                     "success": True,
                     "result": result.to_dict(),
                     "validation": validation,
@@ -472,6 +475,24 @@ class _GenerationAIToolsPlugin:
                     ),
                     "message": f"Model downloaded to {result.local_path}.",
                 }
+                # Autofire bundle: this is the SYNC mesh-producing step
+                # in the AI-generation flow (``generate_model`` submits
+                # an async job; this tool downloads + converts the
+                # completed result).  The mesh path is
+                # ``result.local_path`` — explicit source_path since
+                # the response nests the path under "result".
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response,
+                        source_path=result.local_path,
+                        level="quick",
+                    )
+                except ImportError:
+                    return response
             except GenerationAuthError as exc:
                 return _srv._error_dict(
                     f"Failed to download generated model (auth): {exc}. Check that KILN_MESHY_API_KEY is set.",
