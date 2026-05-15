@@ -1416,6 +1416,143 @@ class TestDesignScorecard:
         with pytest.raises(ValueError):
             design_scorecard(str(bad))
 
+    # ----------------------------------------------------------------
+    # Tier seam — free tier uses equal weighting + simple grade ladder;
+    # Pro+ overlay drives the curated 35/25/20/20 + calibrated thresholds.
+    # Function signature + return shape are identical between tiers.
+    # ----------------------------------------------------------------
+
+    def test_free_tier_uses_equal_weighting(self, tmp_path, monkeypatch):
+        """Free tier (overlay returns {}): 25/25/25/25 factor weighting.
+        Overall = round(mean of the four factor scores)."""
+        from kiln.generation import validation
+
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty", lambda kind: {},
+        )
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = validation.design_scorecard(f)
+
+        expected = round(
+            result["printability"]["score"] * 0.25
+            + result["structural"]["score"] * 0.25
+            + result["efficiency"]["score"] * 0.25
+            + result["quality"]["score"] * 0.25
+        )
+        assert result["overall_score"] == expected
+
+    def test_free_tier_uses_simple_grade_ladder(self, tmp_path, monkeypatch):
+        """Free tier: A>=80, B>=60, C>=40, D>=20.  Less demanding than
+        Pro's calibrated A>=90 ladder."""
+        from kiln.generation import validation
+
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty", lambda kind: {},
+        )
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = validation.design_scorecard(f)
+
+        overall = result["overall_score"]
+        if overall >= 80:
+            expected = "A"
+        elif overall >= 60:
+            expected = "B"
+        elif overall >= 40:
+            expected = "C"
+        elif overall >= 20:
+            expected = "D"
+        else:
+            expected = "F"
+        assert result["grade"] == expected
+
+    def test_pro_tier_uses_curated_weighting(self, tmp_path, monkeypatch):
+        """Pro tier (overlay populated): 35/25/20/20 weighting applies.
+        Overall = round(p*0.35 + s*0.25 + e*0.20 + q*0.20)."""
+        from kiln.generation import validation
+
+        pro_overlay = {
+            "overall_weights": {
+                "printability": 0.35,
+                "structural": 0.25,
+                "efficiency": 0.20,
+                "quality": 0.20,
+            },
+            "grade_thresholds": {"A": 90, "B": 80, "C": 65, "D": 50},
+        }
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty", lambda kind: pro_overlay,
+        )
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = validation.design_scorecard(f)
+
+        p = result["printability"]["score"]
+        s = result["structural"]["score"]
+        e = result["efficiency"]["score"]
+        q = result["quality"]["score"]
+        expected = round(p * 0.35 + s * 0.25 + e * 0.20 + q * 0.20)
+        assert result["overall_score"] == expected
+
+    def test_pro_tier_grade_ladder_is_stricter(self, tmp_path, monkeypatch):
+        """Pro grade ladder (A>=90) demands more than free's (A>=80).
+        Same overall_score produces a lower grade under Pro — the
+        upgrade is 'right judgment,' not 'easier As.'"""
+        from kiln.generation import validation
+
+        pro_overlay = {
+            "grade_thresholds": {"A": 90, "B": 80, "C": 65, "D": 50},
+        }
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty", lambda kind: pro_overlay,
+        )
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = validation.design_scorecard(f)
+
+        overall = result["overall_score"]
+        if overall >= 90:
+            expected = "A"
+        elif overall >= 80:
+            expected = "B"
+        elif overall >= 65:
+            expected = "C"
+        elif overall >= 50:
+            expected = "D"
+        else:
+            expected = "F"
+        assert result["grade"] == expected
+
+    def test_shape_identical_across_tiers(self, tmp_path, monkeypatch):
+        """The dict shape must not drift between free and Pro paths —
+        only the values inside differ."""
+        from kiln.generation import validation
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty", lambda kind: {},
+        )
+        free = validation.design_scorecard(f)
+
+        monkeypatch.setattr(
+            "kiln.design_intelligence.load_pro_overlay_or_empty",
+            lambda kind: {
+                "overall_weights": {
+                    "printability": 0.35, "structural": 0.25,
+                    "efficiency": 0.20, "quality": 0.20,
+                },
+                "grade_thresholds": {"A": 90, "B": 80, "C": 65, "D": 50},
+            },
+        )
+        pro = validation.design_scorecard(f)
+
+        assert set(free) == set(pro)
+        for factor in ("printability", "structural", "efficiency", "quality"):
+            assert set(free[factor]) == set(pro[factor])
+
 
 class TestMaterialCost:
     """Tests for estimate_material_cost()."""

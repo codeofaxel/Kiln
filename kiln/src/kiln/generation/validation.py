@@ -2480,129 +2480,222 @@ def simplify_mesh(
 # ---------------------------------------------------------------------------
 # Multi-factor design scorecard
 # ---------------------------------------------------------------------------
+#
+# Tiering: free tier ships with equal-weight (25/25/25/25) factor
+# combination, generic deduction values, and a simple grade ladder
+# (A=80, B=60, C=40, D=20).  Pro+ overlays the curated 35/25/20/20
+# weighting + tuned per-factor deductions + the calibrated grade
+# thresholds via the ``scorecard_weights`` overlay.  Function signature
+# and return shape are identical between tiers — only values differ.
+
+
+_OVERALL_WEIGHTS_PUBLIC: dict[str, float] = {
+    "printability": 0.25,
+    "structural": 0.25,
+    "efficiency": 0.25,
+    "quality": 0.25,
+}
+
+_GRADE_THRESHOLDS_PUBLIC: dict[str, int] = {
+    "A": 80,
+    "B": 60,
+    "C": 40,
+    "D": 20,
+}
+
+# Rule order = severity order.  First matching rule per metric wins,
+# so put more-severe thresholds first.  Free tier values are softer
+# than the Pro overlay's tuned deductions.
+_STRUCTURAL_DEDUCTIONS_PUBLIC: list[dict[str, Any]] = [
+    {"metric": "aspect_ratio",       "operator": ">",  "threshold": 10,    "deduction": -15, "note_template": "Extreme aspect ratio ({value:.0f}:1)"},
+    {"metric": "aspect_ratio",       "operator": ">",  "threshold": 5,     "deduction": -5,  "note_template": "High aspect ratio ({value:.1f}:1)"},
+    {"metric": "min_base_to_height", "operator": "<",  "threshold": 0.2,   "deduction": -10, "note_template": "Narrow base relative to height"},
+    {"metric": "components",         "operator": ">",  "threshold": 3,     "deduction": -10, "note_template": "{value} disconnected parts"},
+    {"metric": "components",         "operator": ">",  "threshold": 1,     "deduction": -5,  "note_template": None},
+    {"metric": "is_manifold",        "operator": "==", "threshold": False, "deduction": -5,  "note_template": "Non-manifold mesh"},
+]
+
+_EFFICIENCY_DEDUCTIONS_PUBLIC: list[dict[str, Any]] = [
+    {"metric": "fill_ratio",   "operator": "<", "threshold": 0.05, "deduction": -10, "note_template": "Very low fill ratio ({value:.1%})"},
+    {"metric": "fill_ratio",   "operator": "<", "threshold": 0.15, "deduction": -5,  "note_template": "Low fill ratio ({value:.1%})"},
+    {"metric": "overhang_pct", "operator": ">", "threshold": 30,   "deduction": -10, "note_template": "High overhangs ({value:.0f}%)"},
+    {"metric": "overhang_pct", "operator": ">", "threshold": 15,   "deduction": -5,  "note_template": None},
+]
+
+_QUALITY_DEDUCTIONS_PUBLIC: list[dict[str, Any]] = [
+    {"metric": "avg_tri_area_mm2", "operator": ">", "threshold": 50, "deduction": -10, "note_template": "Low mesh resolution (large triangles)"},
+    {"metric": "avg_tri_area_mm2", "operator": ">", "threshold": 20, "deduction": -5,  "note_template": "Moderate mesh resolution"},
+    {"metric": "degenerate_pct",   "operator": ">", "threshold": 5,  "deduction": -10, "note_template": "Degenerate triangles ({value:.1f}%)"},
+    {"metric": "degenerate_pct",   "operator": ">", "threshold": 0,  "deduction": -5,  "note_template": None},
+]
+
+
+def _check_scorecard_op(op: str, value: Any, threshold: Any) -> bool:
+    """Compare ``value`` to ``threshold`` per ``op``.  Centralised so
+    any future rule type maps to one tested function."""
+    if op == ">":
+        return value > threshold
+    if op == "<":
+        return value < threshold
+    if op == ">=":
+        return value >= threshold
+    if op == "<=":
+        return value <= threshold
+    if op == "==":
+        return value == threshold
+    return False
+
+
+def _extract_scorecard_metric(
+    name: str, analysis: Any,
+) -> float | int | bool | None:
+    """Pull a metric value out of the ``MeshAnalysis`` dataclass.
+
+    Returns ``None`` when the metric isn't applicable to the analysis
+    (e.g. ``dimensions_mm`` missing for an aspect-ratio metric) so the
+    rule iterator skips it cleanly rather than firing on a bogus value.
+    """
+    needs_dims = name in (
+        "aspect_ratio", "min_base_to_height", "fill_ratio", "overhang_pct",
+    )
+    if needs_dims and not analysis.dimensions_mm:
+        return None
+    if analysis.dimensions_mm:
+        w = analysis.dimensions_mm["width_mm"]
+        d = analysis.dimensions_mm["depth_mm"]
+        h = analysis.dimensions_mm["height_mm"]
+    else:
+        w = d = h = 0.0
+
+    if name == "aspect_ratio":
+        return max(w, d, h) / max(min(w, d, h), 0.01)
+    if name == "min_base_to_height":
+        return min(w, d) / max(h, 0.01)
+    if name == "components":
+        return analysis.connected_components
+    if name == "is_manifold":
+        return analysis.is_manifold
+    if name == "fill_ratio":
+        bbox_vol = w * d * h
+        if bbox_vol <= 0 or analysis.volume_mm3 <= 0:
+            return None
+        return analysis.volume_mm3 / bbox_vol
+    if name == "overhang_pct":
+        return analysis.overhang_percentage
+    if name == "avg_tri_area_mm2":
+        if analysis.triangle_count > 0 and analysis.surface_area_mm2 > 0:
+            return analysis.surface_area_mm2 / analysis.triangle_count
+        return None
+    if name == "degenerate_pct":
+        if analysis.triangle_count > 0:
+            return analysis.degenerate_triangles / analysis.triangle_count * 100
+        return None
+    return None
+
+
+def _score_factor_from_rules(
+    rules: list[dict[str, Any]], analysis: Any,
+) -> tuple[int, list[str]]:
+    """Apply deduction rules to one factor, return (score, notes).
+
+    Rules are evaluated in order; the FIRST matching rule per metric
+    wins (so severity-first ordering = max one rule per metric).  An
+    unknown metric or operator is silently skipped — adding a new rule
+    type in the Pro overlay does not break public.
+    """
+    score = 100
+    notes: list[str] = []
+    fired: set[str] = set()
+
+    for rule in rules:
+        metric = rule.get("metric")
+        if metric in fired:
+            continue
+        value = _extract_scorecard_metric(metric, analysis)
+        if value is None:
+            continue
+        if not _check_scorecard_op(
+            rule.get("operator", ">"), value, rule.get("threshold"),
+        ):
+            continue
+        score += rule.get("deduction", 0)
+        fired.add(metric)
+        tpl = rule.get("note_template")
+        if tpl:
+            try:
+                notes.append(tpl.format(value=value))
+            except (KeyError, IndexError, ValueError):
+                notes.append(tpl)
+
+    return max(0, score), notes
 
 
 def design_scorecard(file_path: str) -> dict[str, Any]:
     """Generate a multi-factor quality scorecard for a mesh.
 
-    Evaluates:
-    - **Printability** (0-100): overhangs, manifold, supports needed
-    - **Structural** (0-100): wall thickness, aspect ratio, stability
-    - **Efficiency** (0-100): material usage, void ratio, print time proxy
-    - **Quality** (0-100): triangle density, surface smoothness proxy
+    Evaluates four factors (each 0-100):
+
+    - **Printability**: overhangs, manifold, supports needed
+    - **Structural**: aspect ratio, base stability, component count
+    - **Efficiency**: fill ratio, overhang waste
+    - **Quality**: triangle density, degenerate count
+
+    Free tier ships with equal-weight (25/25/25/25) factor combination,
+    generic deductions, and a simple grade ladder (A=80, B=60, C=40,
+    D=20).  Pro+ unlocks the curated 35/25/20/20 weighting + tuned
+    deductions + the calibrated A/B/C/D/F thresholds via the
+    ``scorecard_weights`` overlay.
 
     Args:
         file_path: Path to mesh file.
 
     Returns:
-        Dict with per-factor scores, overall score, and grade.
+        Dict with per-factor scores, overall score, and grade.  Shape
+        is identical between tiers; only values differ.
     """
+    from kiln.design_intelligence import load_pro_overlay_or_empty
+
     analysis = analyze_mesh(file_path)
     if analysis.printability_issues and not analysis.triangle_count:
         raise ValueError(f"Cannot analyze mesh: {analysis.printability_issues}")
 
-    # --- Printability (from existing analysis) ---
+    overlay = load_pro_overlay_or_empty("scorecard_weights")
+
+    # --- Printability (already a 0-100 score from the upstream analysis) ---
     printability = analysis.printability_score
 
-    # --- Structural score ---
-    structural = 100
-    structural_notes: list[str] = []
-
-    if analysis.dimensions_mm:
-        w = analysis.dimensions_mm["width_mm"]
-        d = analysis.dimensions_mm["depth_mm"]
-        h = analysis.dimensions_mm["height_mm"]
-        aspect = max(w, d, h) / max(min(w, d, h), 0.01)
-        if aspect > 10:
-            structural -= 20
-            structural_notes.append(f"Extreme aspect ratio ({aspect:.0f}:1)")
-        elif aspect > 5:
-            structural -= 10
-            structural_notes.append(f"High aspect ratio ({aspect:.1f}:1)")
-
-        # Base stability
-        min_base = min(w, d)
-        if h > 0 and min_base / h < 0.2:
-            structural -= 15
-            structural_notes.append("Very narrow base relative to height")
-
-    if analysis.connected_components > 3:
-        structural -= 15
-        structural_notes.append(f"{analysis.connected_components} disconnected parts")
-    elif analysis.connected_components > 1:
-        structural -= 5
-
-    if not analysis.is_manifold:
-        structural -= 10
-        structural_notes.append("Non-manifold: may have internal voids")
-
-    structural = max(0, structural)
-
-    # --- Efficiency score ---
-    efficiency = 100
-    efficiency_notes: list[str] = []
-
-    if analysis.dimensions_mm and analysis.volume_mm3 > 0:
-        w = analysis.dimensions_mm["width_mm"]
-        d = analysis.dimensions_mm["depth_mm"]
-        h = analysis.dimensions_mm["height_mm"]
-        bbox_vol = w * d * h
-        if bbox_vol > 0:
-            fill_ratio = analysis.volume_mm3 / bbox_vol
-            if fill_ratio < 0.05:
-                efficiency -= 20
-                efficiency_notes.append(f"Very low fill ratio ({fill_ratio:.1%} of bounding box)")
-            elif fill_ratio < 0.15:
-                efficiency -= 10
-                efficiency_notes.append(f"Low fill ratio ({fill_ratio:.1%})")
-
-    # Penalize excessive overhangs (more supports = more waste)
-    if analysis.overhang_percentage > 30:
-        efficiency -= 15
-        efficiency_notes.append(f"High overhangs ({analysis.overhang_percentage:.0f}%) increase support waste")
-    elif analysis.overhang_percentage > 15:
-        efficiency -= 5
-
-    efficiency = max(0, efficiency)
-
-    # --- Quality score (mesh resolution/smoothness) ---
-    quality = 100
-    quality_notes: list[str] = []
-
-    if analysis.dimensions_mm and analysis.triangle_count > 0:
-        sa = analysis.surface_area_mm2
-        if sa > 0:
-            avg_tri_area = sa / analysis.triangle_count
-            # Very large triangles = low resolution
-            if avg_tri_area > 50:
-                quality -= 20
-                quality_notes.append("Low mesh resolution (large triangles)")
-            elif avg_tri_area > 20:
-                quality -= 10
-                quality_notes.append("Moderate mesh resolution")
-
-    if analysis.degenerate_triangles > 0:
-        pct = analysis.degenerate_triangles / analysis.triangle_count * 100
-        if pct > 5:
-            quality -= 15
-            quality_notes.append(f"Degenerate triangles ({pct:.1f}%)")
-        else:
-            quality -= 5
-
-    quality = max(0, quality)
-
-    # --- Overall ---
-    overall = round(
-        printability * 0.35 + structural * 0.25 + efficiency * 0.20 + quality * 0.20
+    # --- Structural / Efficiency / Quality (overlay-driven rules) -------
+    structural, structural_notes = _score_factor_from_rules(
+        rules=overlay.get("structural_deductions") or _STRUCTURAL_DEDUCTIONS_PUBLIC,
+        analysis=analysis,
+    )
+    efficiency, efficiency_notes = _score_factor_from_rules(
+        rules=overlay.get("efficiency_deductions") or _EFFICIENCY_DEDUCTIONS_PUBLIC,
+        analysis=analysis,
+    )
+    quality, quality_notes = _score_factor_from_rules(
+        rules=overlay.get("quality_deductions") or _QUALITY_DEDUCTIONS_PUBLIC,
+        analysis=analysis,
     )
 
-    if overall >= 90:
+    # --- Overall (weighted combination) ---------------------------------
+    weights = overlay.get("overall_weights") or _OVERALL_WEIGHTS_PUBLIC
+    overall = round(
+        printability * weights["printability"]
+        + structural * weights["structural"]
+        + efficiency * weights["efficiency"]
+        + quality * weights["quality"]
+    )
+
+    # --- Grade ladder ---------------------------------------------------
+    thresholds = overlay.get("grade_thresholds") or _GRADE_THRESHOLDS_PUBLIC
+    if overall >= thresholds["A"]:
         grade = "A"
-    elif overall >= 80:
+    elif overall >= thresholds["B"]:
         grade = "B"
-    elif overall >= 65:
+    elif overall >= thresholds["C"]:
         grade = "C"
-    elif overall >= 50:
+    elif overall >= thresholds["D"]:
         grade = "D"
     else:
         grade = "F"
