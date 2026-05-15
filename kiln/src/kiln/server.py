@@ -7390,7 +7390,7 @@ def rotate_model(
                 rotation_y=rotation_y,
             )
 
-        return {
+        response = {
             "success": True,
             "output_path": output_path,
             "rotations_applied": {
@@ -7399,6 +7399,12 @@ def rotate_model(
                 "z": rotation_z,
             },
         }
+        try:
+            from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
+
+            return attach_inspect_bundle(response, level="quick")
+        except ImportError:
+            return response
     except (ValueError, FileNotFoundError) as exc:
         return _error_dict(f"Failed to rotate model: {exc}", code="ROTATE_ERROR")
     except Exception as exc:

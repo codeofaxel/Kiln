@@ -242,7 +242,17 @@ class _AssemblyToolsPlugin:
 
                 assembly = Assembly.from_dict(json.loads(assembly_json))
                 result = compose_assembly(assembly, output_path)
-                return {"success": True, "data": result}
+                response = {"success": True, "data": result}
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", source_path=output_path,
+                    )
+                except ImportError:
+                    return response
             except json.JSONDecodeError as exc:
                 return {"success": False, "error": f"Invalid assembly JSON: {exc}"}
             except Exception as exc:

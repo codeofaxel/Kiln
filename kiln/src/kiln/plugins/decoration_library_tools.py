@@ -148,11 +148,19 @@ class _DecorationLibraryPlugin:
 
             from kiln.decoration_library import _decoration_dir
 
-            return {
+            result = {
                 "success": True,
                 "decoration": decoration.to_dict(),
                 "path": str(_decoration_dir(decoration.slug)),
             }
+            try:
+                from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
+
+                return attach_inspect_bundle(
+                    result, level="full", source_path=model_path,
+                )
+            except ImportError:
+                return result
 
         @mcp.tool()
         def list_decorations(
@@ -296,7 +304,12 @@ class _DecorationLibraryPlugin:
             if isinstance(result, dict):
                 result["decoration_used"] = name
                 result["settings_source"] = settings.get("source", "proven")
-            return result
+            try:
+                from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
+
+                return attach_inspect_bundle(result, level="quick")
+            except ImportError:
+                return result
 
         @mcp.tool()
         def decoration_info(

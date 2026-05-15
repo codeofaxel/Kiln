@@ -145,7 +145,7 @@ class _MeshToolsPlugin:
                     scale_y=scale_y,
                     scale_z=scale_z,
                 )
-                return {
+                response = {
                     "success": True,
                     **result,
                     "message": (
@@ -155,6 +155,16 @@ class _MeshToolsPlugin:
                         else f"Model rescaled by {result['scale_applied']}x."
                     ),
                 }
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("path",),
+                    )
+                except ImportError:
+                    return response
             except ValueError as exc:
                 return _error_dict(str(exc), code="INVALID_INPUT")
             except Exception as exc:
@@ -355,7 +365,17 @@ class _MeshToolsPlugin:
                 from kiln.generation.validation import repair_stl
 
                 result = repair_stl(file_path, output_path=output_path or None)
-                return {"success": True, **result}
+                response = {"success": True, **result}
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("path",),
+                    )
+                except ImportError:
+                    return response
             except Exception as exc:
                 return _error_dict(f"Mesh repair failed: {exc}", code="REPAIR_ERROR")
 
@@ -389,7 +409,17 @@ class _MeshToolsPlugin:
                     output_path=output_path or None,
                     close_holes=close_holes,
                 )
-                return {"success": True, **result}
+                response = {"success": True, **result}
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("path",),
+                    )
+                except ImportError:
+                    return response
             except Exception as exc:
                 return _error_dict(f"Advanced repair failed: {exc}", code="REPAIR_ERROR")
 
@@ -435,7 +465,17 @@ class _MeshToolsPlugin:
                     os.close(_fd)
 
                 result = _splice(top_path, bottom_path, z_plane, output_path)
-                return {"success": True, **result}
+                response = {"success": True, **result}
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("path",),
+                    )
+                except ImportError:
+                    return response
             except Exception as exc:
                 logger.exception("splice_mesh_at_z failed")
                 return _error_dict(f"Splice failed: {exc}", code="SPLICE_ERROR")
@@ -459,10 +499,20 @@ class _MeshToolsPlugin:
             try:
                 from kiln.generation.validation import mirror_mesh
 
-                return {
+                response = {
                     "success": True,
                     **mirror_mesh(file_path, axis=axis, output_path=output_path or None),
                 }
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("path",),
+                    )
+                except ImportError:
+                    return response
             except Exception as exc:
                 return _error_dict(f"Mirror failed: {exc}")
 
@@ -489,7 +539,7 @@ class _MeshToolsPlugin:
             try:
                 from kiln.generation.validation import hollow_mesh
 
-                return {
+                response = {
                     "success": True,
                     **hollow_mesh(
                         file_path,
@@ -497,6 +547,16 @@ class _MeshToolsPlugin:
                         output_path=output_path or None,
                     ),
                 }
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("path",),
+                    )
+                except ImportError:
+                    return response
             except Exception as exc:
                 return _error_dict(f"Hollowing failed: {exc}")
 
@@ -527,7 +587,7 @@ class _MeshToolsPlugin:
             try:
                 from kiln.generation.validation import thicken_walls
 
-                return {
+                response = {
                     "success": True,
                     **thicken_walls(
                         file_path,
@@ -535,6 +595,16 @@ class _MeshToolsPlugin:
                         output_path=output_path or None,
                     ),
                 }
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("path",),
+                    )
+                except ImportError:
+                    return response
             except Exception as exc:
                 return _error_dict(f"Wall thickening failed: {exc}")
 
@@ -567,7 +637,7 @@ class _MeshToolsPlugin:
             try:
                 from kiln.generation.validation import add_fillet
 
-                return {
+                response = {
                     "success": True,
                     **add_fillet(
                         file_path,
@@ -576,6 +646,16 @@ class _MeshToolsPlugin:
                         output_path=output_path or None,
                     ),
                 }
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("path",),
+                    )
+                except ImportError:
+                    return response
             except Exception as exc:
                 return _error_dict(f"Fillet failed: {exc}")
 
@@ -605,7 +685,7 @@ class _MeshToolsPlugin:
             try:
                 from kiln.generation.validation import add_chamfer
 
-                return {
+                response = {
                     "success": True,
                     **add_chamfer(
                         file_path,
@@ -614,6 +694,16 @@ class _MeshToolsPlugin:
                         output_path=output_path or None,
                     ),
                 }
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("path",),
+                    )
+                except ImportError:
+                    return response
             except Exception as exc:
                 return _error_dict(f"Chamfer failed: {exc}")
 
@@ -666,7 +756,16 @@ class _MeshToolsPlugin:
                     response["bed_size_source"] = "printer_intelligence"
                     response["bed_size_model_id"] = resolved_model_id
                     response["bed_dims_mm"] = [max_x_mm, max_y_mm, max_z_mm]
-                return response
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("path",),
+                    )
+                except ImportError:
+                    return response
             except ValueError as exc:
                 return _error_dict(str(exc), code="INVALID_ARGS")
             except Exception as exc:
@@ -752,7 +851,17 @@ class _MeshToolsPlugin:
                 from kiln.generation.validation import compose_stls
 
                 result = compose_stls(file_paths, output_path)
-                return {"success": True, **result}
+                response = {"success": True, **result}
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("path",),
+                    )
+                except ImportError:
+                    return response
             except Exception as exc:
                 return _error_dict(f"Composition failed: {exc}", code="COMPOSE_ERROR")
 
@@ -777,7 +886,17 @@ class _MeshToolsPlugin:
             try:
                 from kiln.generation.validation import merge_stl_files
 
-                return {"success": True, **merge_stl_files(file_paths, output_path=output_path)}
+                response = {"success": True, **merge_stl_files(file_paths, output_path=output_path)}
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("path",),
+                    )
+                except ImportError:
+                    return response
             except Exception as exc:
                 return _error_dict(f"Merge failed: {exc}")
 
@@ -813,7 +932,7 @@ class _MeshToolsPlugin:
             try:
                 from kiln.generation.openscad import boolean_mesh_operation
 
-                return {
+                response = {
                     "success": True,
                     **boolean_mesh_operation(
                         operation,
@@ -821,6 +940,16 @@ class _MeshToolsPlugin:
                         output_path=output_path or None,
                     ),
                 }
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("path",),
+                    )
+                except ImportError:
+                    return response
             except FileNotFoundError as exc:
                 return _error_dict(str(exc), code="FILE_NOT_FOUND")
             except ValueError as exc:
@@ -934,7 +1063,16 @@ class _MeshToolsPlugin:
                             response.setdefault("warnings", []).append(
                                 f"bed-centering failed: {exc}"
                             )
-                return response
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("path",),
+                    )
+                except ImportError:
+                    return response
             except ValueError as exc:
                 return _error_dict(str(exc), code="INVALID_ARGS")
             except Exception as exc:
@@ -965,13 +1103,23 @@ class _MeshToolsPlugin:
             try:
                 from kiln.generation.validation import split_by_component
 
-                return {
+                response = {
                     "success": True,
                     **split_by_component(
                         file_path,
                         output_dir=output_dir or None,
                     ),
                 }
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", source_path=file_path,
+                    )
+                except ImportError:
+                    return response
             except Exception as exc:
                 return _error_dict(f"Split failed: {exc}")
 
@@ -1001,7 +1149,7 @@ class _MeshToolsPlugin:
             try:
                 from kiln.generation.validation import remove_floating_regions
 
-                return {
+                response = {
                     "success": True,
                     **remove_floating_regions(
                         file_path,
@@ -1010,6 +1158,16 @@ class _MeshToolsPlugin:
                         min_triangle_pct=min_triangle_pct,
                     ),
                 }
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("path",),
+                    )
+                except ImportError:
+                    return response
             except Exception as exc:
                 return _error_dict(f"Floating region removal failed: {exc}")
 
@@ -1036,7 +1194,7 @@ class _MeshToolsPlugin:
             try:
                 from kiln.generation.validation import simplify_mesh
 
-                return {
+                response = {
                     "success": True,
                     **simplify_mesh(
                         file_path,
@@ -1044,6 +1202,16 @@ class _MeshToolsPlugin:
                         output_path=output_path or None,
                     ),
                 }
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("path",),
+                    )
+                except ImportError:
+                    return response
             except Exception as exc:
                 return _error_dict(f"Mesh simplification failed: {exc}")
 
