@@ -5,6 +5,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Printability analysis now detects holes** — each hole's position,
+  size, depth, and orientation are reported, so undersized holes can
+  be flagged.
+- `detect_holes(file_path)` is also exposed standalone in
+  `kiln.generation.validation`.
+- `analyze_printability` gets two new arguments: `printer_id`
+  (forwards to Pro+ per-printer tuning when installed) and
+  `include_hole_detection` (default True; perf opt-out).
+
+### Fixed
+
+- Hole detection now handles rotated or simplified meshes.
+
 ## [1.1.1] - 2026-05-13
 
 Vision event-name split, MCP-client config self-heal, an event-aware
