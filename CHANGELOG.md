@@ -27,6 +27,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   tool earlier in the pipeline already inspected the mesh, the audit
   reuses those findings instead of re-running them. Faster, same
   answer.
+- **Audits confirm the design matches what you asked for.** When the
+  design started from a saved brief (kiln-pro Pro+), the audit ends
+  with a plain-English summary — or names the goals that weren't
+  met.
 
 ### Changed
 
