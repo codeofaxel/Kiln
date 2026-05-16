@@ -5,43 +5,53 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+Hole-aware printability, automatic previews on the tools that change a
+mesh, audits that pick up where inspection left off, and recovery
+events on the bus so agents can wait on a recovered print instead of
+polling.
+
 ### Added
 
-- **Printability analysis now detects holes** — each hole's position,
-  size, depth, and orientation are reported, so undersized holes can
-  be flagged.
-- `detect_holes(file_path)` is also exposed standalone in
+- **Printability analysis detects holes.** Each hole's position, size,
+  depth, and orientation is reported; undersized holes get flagged.
+- `detect_holes(file_path)` is exposed standalone in
   `kiln.generation.validation`.
-- `analyze_printability` gets two new arguments: `printer_id`
-  (forwards to Pro+ per-printer tuning when installed) and
+- `analyze_printability` gets two new arguments: `printer_id` (forwards
+  to Pro+ per-printer tuning when available) and
   `include_hole_detection` (default True; perf opt-out).
 - **Automatic inspection previews** on `preflight_check`,
-  `start_print_recovery`, and `complete_print_recovery` — agents see
-  what's about to print or be recovered.
-- **Tools that change a mesh now show you what they did.** Saving
-  or rolling back a design version, applying a decoration, composing
+  `start_print_recovery`, and `complete_print_recovery`.
+- **Tools that change a mesh show you what they did.** Saving or
+  rolling back a design version, applying a decoration, composing
   parts, rotating a model, importing a STEP file, and ~20 other mesh
-  operations attach a small preview to their response — agents see
-  the result without a separate inspect call.
-- **Audits skip work when the inspection already happened.** If a
-  tool earlier in the pipeline already inspected the mesh, the audit
-  reuses those findings instead of re-running them. Faster, same
-  answer.
+  operations attach a small preview to their response.
+- **Audits skip work when the inspection already happened.** If an
+  earlier tool already inspected the mesh, the audit reuses those
+  findings instead of re-running them.
 - **Audits confirm the design matches what you asked for.** When the
-  design started from a saved brief (kiln-pro Pro+), the audit ends
-  with a plain-English summary — or names the goals that weren't
-  met.
+  design started from a saved design-goal questionnaire (Kiln Pro),
+  the audit ends with a plain-English summary or names the goals that
+  weren't met.
+- **Audits surface concrete remediation candidates.** On Kiln Pro, the
+  audit lists the specific fixes available for each warning. Pass
+  `apply_remedies=True` to let the overlay dispatch them; the default
+  surfaces the options without mutating.
+- **Recovery is on the event bus.** Three new event types —
+  `RECOVERY_NEEDED`, `RECOVERY_STARTED`, `RECOVERY_COMPLETED` — let
+  agents wait on recovery instead of polling. `watch_print_status`
+  wakes on `recovery.completed` by default.
 
 ### Changed
 
-- **Every Kiln event names who triggered it.** Each event records
-  its origin — system, agent, or user — and carries that across
-  threads. Subscribers can tell apart routine background activity
-  from agent-initiated actions.
+- **Every Kiln event names who triggered it.** Each event records its
+  origin — system, agent, or user — and carries that across threads.
 
 ### Fixed
 
-- Hole detection now handles rotated or simplified meshes.
+- Hole detection handles rotated or simplified meshes.
+- `reslice_with_overrides` and `slice_and_print` now include the
+  `calibration_used` block on the response when a calibrated profile
+  applies, matching `recommend_settings`'s shape.
 
 ## [1.1.1] - 2026-05-13
 
