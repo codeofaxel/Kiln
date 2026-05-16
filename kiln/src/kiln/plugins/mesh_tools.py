@@ -1101,6 +1101,8 @@ class _MeshToolsPlugin:
             if err := _check_auth("generate"):
                 return err
             try:
+                import os
+
                 from kiln.generation.validation import split_by_component
 
                 response = {
@@ -1110,13 +1112,26 @@ class _MeshToolsPlugin:
                         output_dir=output_dir or None,
                     ),
                 }
+                # Render the LARGEST split component as the canonical
+                # preview — that's the dominant piece and usually what
+                # the user means when they ask "what did we split into?".
+                # Other components live in response["file_paths"] for the
+                # user to inspect_design individually.  Falls back to the
+                # input mesh if no components were emitted (defensive;
+                # shouldn't happen on the success path).
+                _file_paths = response.get("file_paths") or []
+                _preview_source = (
+                    max(_file_paths, key=os.path.getsize)
+                    if _file_paths
+                    else file_path
+                )
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,
                     )
 
                     return attach_inspect_bundle(
-                        response, level="quick", source_path=file_path,
+                        response, level="quick", source_path=_preview_source,
                     )
                 except ImportError:
                     return response
