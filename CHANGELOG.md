@@ -15,6 +15,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - `analyze_printability` gets two new arguments: `printer_id`
   (forwards to Pro+ per-printer tuning when installed) and
   `include_hole_detection` (default True; perf opt-out).
+- **Automatic inspection previews** on `preflight_check`,
+  `start_print_recovery`, and `complete_print_recovery` — agents see
+  what's about to print or be recovered.
+- **Tools that change a mesh now show you what they did.** Saving
+  or rolling back a design version, applying a decoration, composing
+  parts, rotating a model, importing a STEP file, and ~20 other mesh
+  operations attach a small preview to their response — agents see
+  the result without a separate inspect call.
+- **Audits skip work when the inspection already happened.** If a
+  tool earlier in the pipeline already inspected the mesh, the audit
+  reuses those findings instead of re-running them. Faster, same
+  answer.
+
+### Changed
+
+- **Every Kiln event names who triggered it.** Each event records
+  its origin — system, agent, or user — and carries that across
+  threads. Subscribers can tell apart routine background activity
+  from agent-initiated actions.
 
 ### Fixed
 
