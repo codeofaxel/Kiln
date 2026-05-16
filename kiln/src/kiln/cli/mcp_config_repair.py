@@ -43,9 +43,10 @@ import os
 import re
 import shutil
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from kiln.cli.install_mcp import _current_kiln_command
 from kiln.cli.mcp_config_audit import (
@@ -54,7 +55,6 @@ from kiln.cli.mcp_config_audit import (
     ClientAuditResult,
     ServerEntryAuditResult,
 )
-
 
 # Statuses that mean "the entry exists and is well-formed, but its
 # binary path is broken."  These are the only statuses we self-heal —

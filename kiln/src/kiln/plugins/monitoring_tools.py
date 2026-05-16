@@ -13,6 +13,7 @@ no manual imports needed.
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import logging
 import os
@@ -1111,10 +1112,8 @@ class _MonitoringToolsPlugin:
                 }
             finally:
                 for t in type_enums:
-                    try:
+                    with contextlib.suppress(Exception):
                         bus.unsubscribe(t, _handler)
-                    except Exception:
-                        pass
 
         @mcp.tool()
         def stop_watch_print(watch_id: str) -> dict:

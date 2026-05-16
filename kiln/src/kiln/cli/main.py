@@ -10463,6 +10463,8 @@ def health(ctx: click.Context, json_mode: bool) -> None:
             )
             from kiln.cli.mcp_config_repair import (
                 repair_drifted_kiln_entries,
+            )
+            from kiln.cli.mcp_config_repair import (
                 to_json_payload as _repair_to_json_payload,
             )
 

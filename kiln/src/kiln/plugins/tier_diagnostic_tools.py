@@ -44,7 +44,6 @@ def _walk_resolution_chain() -> dict[str, Any]:
     # available regardless of intent).
     try:
         from kiln_pro.enterprise.licensing import (
-            LicenseTier,
             _caller_tier_override,
             get_license_manager,
         )

@@ -266,7 +266,7 @@ class BundlePrintabilityFindings:
     @classmethod
     def from_bundle_findings(
         cls, findings: dict[str, Any]
-    ) -> "BundlePrintabilityFindings":
+    ) -> BundlePrintabilityFindings:
         score = int(findings.get("score") or 0)
         return cls(
             printable=bool(findings.get("printable", score >= 50)),
@@ -453,12 +453,18 @@ def _check_rule_op(op: str, value: Any, threshold: Any) -> bool:
     operator/value mismatch (forward-compat: unknown operators are
     silently skipped, not raised)."""
     try:
-        if op == ">":  return value > threshold
-        if op == "<":  return value < threshold
-        if op == ">=": return value >= threshold
-        if op == "<=": return value <= threshold
-        if op == "==": return value == threshold
-        if op == "!=": return value != threshold
+        if op == ">":
+            return value > threshold
+        if op == "<":
+            return value < threshold
+        if op == ">=":
+            return value >= threshold
+        if op == "<=":
+            return value <= threshold
+        if op == "==":
+            return value == threshold
+        if op == "!=":
+            return value != threshold
         if op == "in":
             return value in threshold
     except TypeError:

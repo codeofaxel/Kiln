@@ -38,7 +38,6 @@ from typing import Any, NamedTuple
 
 import click
 
-
 # ═════════════════════════════════════════════════════════════════════
 # Client discovery
 # ═════════════════════════════════════════════════════════════════════
@@ -469,11 +468,11 @@ def _require_signed_in() -> None:
         )
     try:
         data = json.loads(tokens_path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as err:
         raise click.ClickException(
             f"{tokens_path} exists but isn't readable JSON.  "
             "Delete the file and run `kiln login` again."
-        )
+        ) from err
     if not str(data.get("access_token") or "").strip():
         raise click.ClickException(
             "Your session file has no access_token.  "

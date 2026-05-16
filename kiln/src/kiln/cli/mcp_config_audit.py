@@ -41,7 +41,6 @@ from kiln.cli.install_mcp import (
     _codex_config_path,
 )
 
-
 # Status of a single ``mcp_servers.<name>`` entry.  We use plain
 # strings rather than an Enum so the JSON output of ``kiln health``
 # stays trivially serializable; the value set is small and the
