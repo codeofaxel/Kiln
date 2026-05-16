@@ -858,3 +858,283 @@ class TestAuditInspectionBundleConsumer:
                 audit = audit_original_design(path, "test object")
                 mock_printability.assert_called_once()
         assert audit.inspection_bundle is None
+
+
+# ---------------------------------------------------------------------------
+# Optional kiln-pro printability overlay — remedy candidates + dispatch
+# ---------------------------------------------------------------------------
+
+
+def _install_fake_printability_overlay(
+    monkeypatch,
+    *,
+    recommended_actions: list[dict] | None,
+    apply_result: dict | None = None,
+    apply_raises: bool = False,
+):
+    """Inject a fake ``kiln_pro.bridge`` exposing only ``printability_overlay``.
+
+    ``recommended_actions`` controls what the fake's
+    ``enrich_printability_report`` puts in the enrichment block.  When
+    ``None``, the fake returns a copy of the public report with NO
+    enrichment block (mimics "overlay not loaded for this material").
+    ``apply_result`` is what the fake's ``apply_printability_remedies``
+    returns; ``apply_raises=True`` makes it raise instead so the
+    best-effort wrapper is exercised.
+
+    A list of recorded calls is attached to the returned spy dict so
+    tests can assert what arguments the fake saw.
+    """
+    import sys
+    import types
+
+    try:
+        import kiln_pro  # noqa: F401
+        import kiln_pro.bridge  # noqa: F401
+    except ImportError:
+        pass
+
+    spy: dict = {
+        "enrich_calls": [],
+        "apply_calls": [],
+    }
+
+    overlay_module = types.ModuleType("kiln_pro.printability_overlay")
+
+    def _enrich(public_report, material, printer_id=None):
+        spy["enrich_calls"].append(
+            {
+                "report": public_report,
+                "material": material,
+                "printer_id": printer_id,
+            }
+        )
+        if not isinstance(public_report, dict):
+            return public_report
+        out = dict(public_report)
+        if recommended_actions is not None:
+            out["enrichment"] = {"recommended_actions": list(recommended_actions)}
+        return out
+
+    def _apply(enrichment_block, mesh_path, **kwargs):
+        spy["apply_calls"].append(
+            {
+                "enrichment_block": enrichment_block,
+                "mesh_path": mesh_path,
+                "kwargs": dict(kwargs),
+            }
+        )
+        if apply_raises:
+            raise RuntimeError("simulated remedy dispatch failure")
+        return apply_result
+
+    overlay_module.enrich_printability_report = _enrich
+    overlay_module.apply_printability_remedies = _apply
+
+    class _FakeProFeatures:
+        printability_overlay = overlay_module
+
+        def is_available(self, feature: str) -> bool:
+            return feature == "printability_overlay"
+
+    bridge_module = types.ModuleType("kiln_pro.bridge")
+    bridge_module.pro_features = _FakeProFeatures()
+
+    pkg_module = types.ModuleType("kiln_pro")
+    pkg_module.bridge = bridge_module
+
+    monkeypatch.setitem(sys.modules, "kiln_pro", pkg_module)
+    monkeypatch.setitem(sys.modules, "kiln_pro.bridge", bridge_module)
+    monkeypatch.setitem(
+        sys.modules, "kiln_pro.printability_overlay", overlay_module
+    )
+    return spy
+
+
+class TestAuditOriginalDesignPrintabilityRemedies:
+    """The ``apply_remedies`` cross-wire into the kiln-pro overlay."""
+
+    def test_no_kiln_pro_omits_remediation_fields(self, monkeypatch):
+        """Free / no-kiln-pro installs leave both remediation fields None."""
+        import builtins as _builtins
+        real_import = _builtins.__import__
+
+        def _no_kiln_pro(name, globals=None, locals=None, fromlist=(), level=0):
+            if name.startswith("kiln_pro"):
+                raise ImportError("simulated: kiln-pro not installed")
+            return real_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(_builtins, "__import__", _no_kiln_pro)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            audit = audit_original_design(
+                path,
+                "simple coaster",
+                printer_model="bambu_a1",
+                apply_remedies=True,  # ignored when overlay is absent
+            )
+
+        assert audit.recommended_remedies is None
+        assert audit.applied_remedies is None
+
+    def test_dry_run_lists_candidates_without_mutation(self, monkeypatch):
+        """``apply_remedies=False`` (default) surfaces candidate actions
+        without calling the dispatcher."""
+        candidates = [
+            {
+                "rule_id": "thin_wall",
+                "remedy_design": "Thicken walls to 1.2mm",
+                "apply_design_resolved": {
+                    "fn": "thicken_walls",
+                    "params": {"target_mm": 1.2},
+                },
+            }
+        ]
+        spy = _install_fake_printability_overlay(
+            monkeypatch,
+            recommended_actions=candidates,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            audit = audit_original_design(
+                path,
+                "simple coaster",
+                material="PLA",
+                printer_model="bambu_a1",
+                # apply_remedies defaults to False
+            )
+
+        assert audit.recommended_remedies is not None
+        assert audit.recommended_remedies["applied"] is False
+        assert audit.recommended_remedies["actions"][0]["rule_id"] == "thin_wall"
+        assert audit.applied_remedies is None
+
+        # The audit-level enrich call ran with the audit's printability
+        # dict.  Other public Kiln subsystems may also probe the overlay
+        # (e.g. printability scoring), so just assert the audit-level
+        # call shape is among the recorded calls.
+        assert any(
+            call["material"] == "PLA" and call["printer_id"] == "bambu_a1"
+            for call in spy["enrich_calls"]
+        )
+
+        # And the dispatcher was NOT called.
+        assert spy["apply_calls"] == []
+
+    def test_apply_remedies_invokes_dispatcher(self, monkeypatch):
+        """``apply_remedies=True`` dispatches the overlay's remediation
+        and surfaces the result on ``applied_remedies``."""
+        candidates = [
+            {
+                "rule_id": "thin_wall",
+                "remedy_design": "Thicken walls to 1.2mm",
+                "apply_design_resolved": {
+                    "fn": "thicken_walls",
+                    "params": {"target_mm": 1.2},
+                },
+            },
+            {
+                "rule_id": "bridging_too_long",
+                "remedy_slicer": "Enable supports",
+                "apply_slicer_resolved": {
+                    "fn": "enable_supports",
+                    "params": {},
+                },
+            },
+        ]
+        apply_result = {
+            "design_fixes_applied": ["thin_wall"],
+            "design_fixes_skipped": [],
+            "slicer_overrides": {"support_material": "1"},
+            "slicer_overrides_deltas": {},
+            "remediated_mesh_path": "/tmp/remediated.stl",
+            "manual_actions_required": [],
+        }
+        spy = _install_fake_printability_overlay(
+            monkeypatch,
+            recommended_actions=candidates,
+            apply_result=apply_result,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            audit = audit_original_design(
+                path,
+                "simple coaster",
+                material="PLA",
+                printer_model="bambu_a1",
+                apply_remedies=True,
+            )
+
+        # The dispatcher was called exactly once with the enrichment block
+        # and the mesh path.
+        assert len(spy["apply_calls"]) == 1
+        call = spy["apply_calls"][0]
+        assert call["mesh_path"] == path
+        assert isinstance(call["enrichment_block"], dict)
+        # The enrichment block we pass MUST contain the recommended_actions
+        # so the dispatcher can route them to design / slicer hooks.
+        assert (
+            call["enrichment_block"].get("recommended_actions")[0]["rule_id"]
+            == "thin_wall"
+        )
+
+        assert audit.recommended_remedies is not None
+        assert audit.recommended_remedies["applied"] is True
+        assert audit.applied_remedies == apply_result
+
+    def test_dispatcher_failure_never_breaks_audit(self, monkeypatch):
+        """If the overlay's dispatch raises, the audit still returns and
+        ``applied_remedies`` is None while ``recommended_remedies`` still
+        lists the candidate actions."""
+        candidates = [
+            {
+                "rule_id": "thin_wall",
+                "apply_design_resolved": {
+                    "fn": "thicken_walls",
+                    "params": {"target_mm": 1.2},
+                },
+            }
+        ]
+        _install_fake_printability_overlay(
+            monkeypatch,
+            recommended_actions=candidates,
+            apply_raises=True,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            audit = audit_original_design(
+                path,
+                "simple coaster",
+                material="PLA",
+                apply_remedies=True,
+            )
+
+        assert audit.recommended_remedies is not None
+        # Dispatch raised → ``applied`` stays False, ``applied_remedies`` is None.
+        assert audit.recommended_remedies["applied"] is False
+        assert audit.applied_remedies is None
+
+    def test_overlay_returns_no_actions_keeps_field_none(self, monkeypatch):
+        """When the overlay enriches but emits no actions (clean mesh /
+        unknown material), both remediation fields stay None — there's
+        nothing to surface."""
+        _install_fake_printability_overlay(
+            monkeypatch,
+            recommended_actions=None,  # no enrichment block at all
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            audit = audit_original_design(
+                path,
+                "simple coaster",
+                material="PLA",
+                apply_remedies=True,
+            )
+
+        assert audit.recommended_remedies is None
+        assert audit.applied_remedies is None

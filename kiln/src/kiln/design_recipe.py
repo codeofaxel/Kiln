@@ -83,6 +83,16 @@ class DesignRecipe:
     generation_provider: str | None = None  # e.g. "gemini", "openscad", "manual"
     provenance: dict[str, Any] | None = None  # freeform context (tools_used, change_summary, source_files)
     stl_path: str | None = None  # path to the primary output STL
+    # Brief-derived provenance: when the recipe was produced from a
+    # design brief lifecycle, ``brief_id`` is the brief identifier and
+    # ``intent_hash`` is the content hash of the brief's intent payload.
+    # Both fields are optional — recipes produced outside the brief
+    # lifecycle leave them unset.  Recipes that DO carry these fields
+    # promise the caller that the recipe was generated against that
+    # brief at that intent hash, so downstream audits can verify the
+    # mesh against the same brief without re-resolving it.
+    brief_id: str | None = None
+    intent_hash: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -110,6 +120,10 @@ class DesignRecipe:
             d["provenance"] = self.provenance
         if self.stl_path is not None:
             d["stl_path"] = self.stl_path
+        if self.brief_id is not None:
+            d["brief_id"] = self.brief_id
+        if self.intent_hash is not None:
+            d["intent_hash"] = self.intent_hash
         return d
 
     @classmethod
@@ -132,6 +146,8 @@ class DesignRecipe:
             generation_provider=data.get("generation_provider"),
             provenance=data.get("provenance"),
             stl_path=data.get("stl_path"),
+            brief_id=data.get("brief_id"),
+            intent_hash=data.get("intent_hash"),
         )
 
     def save(self, directory: str) -> str:

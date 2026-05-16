@@ -76,6 +76,20 @@ class OriginalDesignAudit:
     # Consumers can read all channel evidence from here without
     # re-running anything.  None on the legacy path.
     inspection_bundle: dict[str, Any] | None = None
+    # Printability remedies surfaced by the kiln-pro overlay.  When the
+    # overlay is available (Pro+) it inspects the printability findings
+    # and emits a structured list of fixes (design-side: thicken walls,
+    # fillet corners; slicer-side: enable supports, lower bridging
+    # speed).  This field carries the CANDIDATES — what the overlay
+    # would do if the caller opted in.  None when no overlay ran.
+    # See https://kiln3d.com for tier details.
+    recommended_remedies: dict[str, Any] | None = None
+    # Result of the remediation dispatch when ``apply_remedies=True``.
+    # None when the caller didn't opt in.  When present, ``summary``
+    # mirrors the overlay's ``apply_printability_remedies`` return —
+    # design_fixes_applied, slicer_overrides, remediated_mesh_path,
+    # manual_actions_required, etc.
+    applied_remedies: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -398,6 +412,7 @@ def audit_original_design(
     layer_height: float = 0.2,
     max_overhang_angle: float = 45.0,
     inspection_bundle: dict[str, Any] | None = None,
+    apply_remedies: bool = False,
 ) -> OriginalDesignAudit:
     """Run a harsh audit of an original design from intent to printability.
 
@@ -408,6 +423,17 @@ def audit_original_design(
         a redundant :func:`analyze_printability` pass.  Same answer,
         half the cost when the caller already ran inspection upstream.
         Legacy callers (no bundle) get the unchanged behavior.
+    :param apply_remedies: When True AND the kiln-pro printability
+        overlay is installed, dispatch the overlay's structured
+        remediation hints — design-side fixes (wall thickening, base
+        plates, fillets) re-save the mesh via
+        :func:`kiln.design_reasoning.apply_reinforcements`, slicer-side
+        fixes collapse into a single overrides dict the caller can pass
+        to ``reslice_with_overrides``.  Defaults to False — destructive
+        mesh remediation never auto-fires.  Free / public installs
+        ignore this kwarg silently because the overlay isn't available.
+        Either way the audit's ``recommended_remedies`` field lists the
+        candidate fixes the overlay would apply.
     """
     build_volume_dict = _build_volume_dict(build_volume, printer_model)
     build_volume_tuple = (
@@ -803,6 +829,57 @@ def audit_original_design(
         if gate.severity == "critical"
     ) and score >= 75
 
+    # Optional kiln-pro printability overlay: when installed AND the
+    # overlay has material-aware data for the requested material, run
+    # the printability report through ``enrich_printability_report`` to
+    # extract the structured ``recommended_actions`` list (each entry
+    # carries a rule_id + design/slicer auto-fix hints).  Surface those
+    # as candidate ``recommended_remedies`` so the caller sees what the
+    # overlay would do.  When ``apply_remedies=True``, dispatch them
+    # via ``apply_printability_remedies`` — the result lands in
+    # ``applied_remedies`` and the caller can read which fixes ran vs
+    # which need manual action.  Free / public installs and meshes
+    # without an overlay match see the audit unchanged.  See
+    # https://kiln3d.com for tier details.
+    recommended_remedies: dict[str, Any] | None = None
+    applied_remedies: dict[str, Any] | None = None
+    try:
+        from kiln_pro.bridge import pro_features as _po_pro_features
+    except ImportError:
+        _po_pro_features = None  # type: ignore[assignment]
+    if _po_pro_features is not None and _po_pro_features.is_available(
+        "printability_overlay"
+    ):
+        try:
+            overlay = _po_pro_features.printability_overlay
+            enriched = overlay.enrich_printability_report(
+                printability.to_dict(),
+                material,
+                printer_model,
+            )
+            enrichment_block = (
+                enriched.get("enrichment") if isinstance(enriched, dict) else None
+            )
+        except Exception:  # noqa: BLE001
+            enrichment_block = None
+        if isinstance(enrichment_block, dict):
+            candidate_actions = enrichment_block.get("recommended_actions") or []
+            if isinstance(candidate_actions, list) and candidate_actions:
+                recommended_remedies = {
+                    "actions": list(candidate_actions),
+                    "applied": False,
+                }
+                if apply_remedies:
+                    try:
+                        applied_remedies = overlay.apply_printability_remedies(
+                            enrichment_block,
+                            file_path,
+                        )
+                    except Exception:  # noqa: BLE001
+                        applied_remedies = None
+                    if isinstance(applied_remedies, dict):
+                        recommended_remedies["applied"] = True
+
     return OriginalDesignAudit(
         file_path=file_path,
         requirements_text=requirements_text,
@@ -825,6 +902,8 @@ def audit_original_design(
         gates=gates,
         feedback=feedback,
         inspection_bundle=inspection_bundle,
+        recommended_remedies=recommended_remedies,
+        applied_remedies=applied_remedies,
     )
 
 

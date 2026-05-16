@@ -134,6 +134,47 @@ class TestDesignRecipe:
         with pytest.raises(KeyError):
             DesignRecipe.from_dict({"created": "2026-01-01T00:00:00Z"})
 
+    def test_brief_id_and_intent_hash_round_trip(self, tmp_path):
+        """When a recipe is produced from a brief lifecycle, brief_id
+        and intent_hash MUST round-trip through to_dict → JSON → from_dict
+        so downstream audits can verify the mesh against the same brief.
+        """
+        recipe = create_recipe(
+            "brief-coaster",
+            _sample_parts(),
+            source_scad="/tmp/coaster.scad",
+            parameters={"diameter": 80},
+            notes="from-brief",
+        )
+        recipe.brief_id = "brief-abc123"
+        recipe.intent_hash = "sha256:deadbeefcafe"
+
+        d = recipe.to_dict()
+        assert d["brief_id"] == "brief-abc123"
+        assert d["intent_hash"] == "sha256:deadbeefcafe"
+
+        path = save_recipe(recipe, str(tmp_path))
+        with open(path) as fh:
+            on_disk = json.load(fh)
+        assert on_disk["brief_id"] == "brief-abc123"
+        assert on_disk["intent_hash"] == "sha256:deadbeefcafe"
+
+        loaded = load_recipe(path)
+        assert loaded.brief_id == "brief-abc123"
+        assert loaded.intent_hash == "sha256:deadbeefcafe"
+
+    def test_brief_fields_default_none_and_absent_from_dict(self):
+        """Recipes outside the brief lifecycle leave both fields unset
+        AND keep them out of the serialized dict so on-disk JSON for
+        legacy recipes stays byte-identical.
+        """
+        recipe = _sample_recipe()
+        assert recipe.brief_id is None
+        assert recipe.intent_hash is None
+        d = recipe.to_dict()
+        assert "brief_id" not in d
+        assert "intent_hash" not in d
+
 
 class TestSaveLoad:
     """Filesystem save/load operations."""
