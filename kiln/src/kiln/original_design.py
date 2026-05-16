@@ -452,18 +452,10 @@ def audit_original_design(
         bundle_printability_findings
         and bundle_printability_findings.get("score") is not None
     ):
-        # Construct a SimpleNamespace shim that mimics the
-        # PrintabilityReport interface the audit's gate-construction code
-        # reads (.printable, .score, .grade, .to_dict(), .recommendations).
-        from types import SimpleNamespace
+        from kiln.printability import BundlePrintabilityFindings
 
-        _bp = bundle_printability_findings
-        printability = SimpleNamespace(
-            printable=_bp.get("printable", _bp.get("score", 0) >= 50),
-            score=_bp.get("score", 0),
-            grade=_bp.get("grade", "F"),
-            recommendations=list(_bp.get("recommendations", [])),
-            to_dict=lambda d=dict(_bp): d,
+        printability = BundlePrintabilityFindings.from_bundle_findings(
+            bundle_printability_findings
         )
     else:
         printability = analyze_printability(

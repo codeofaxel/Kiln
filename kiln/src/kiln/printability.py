@@ -233,6 +233,53 @@ class PrintabilityReport:
         return asdict(self)
 
 
+@dataclass
+class BundlePrintabilityFindings:
+    """The minimal printability surface readable from an inspection bundle.
+
+    :class:`PrintabilityReport` carries detail-rich sub-analyses
+    (overhangs, thin walls, bridging, bed adhesion, supports, warping,
+    thermal stress, adhesion force, cost) produced by running
+    :func:`analyze_printability` against a mesh.  When a caller already
+    has an inspection bundle attached upstream (the
+    ``inspection_bundle`` field from ``attach_inspect_bundle`` in
+    kiln-pro), it can read the printability summary out of the bundle's
+    channels without re-running those analyses — same answer, near-zero
+    marginal cost.
+
+    This adapter exposes only the summary fields that downstream
+    consumers (audit, validation pipelines) actually read: ``printable``,
+    ``score``, ``grade``, ``recommendations``, and ``to_dict()``.  Field
+    names and types match :class:`PrintabilityReport` exactly, so
+    callers can branch on which one they got without changing how they
+    read.  ``to_dict()`` returns the raw bundle-channel findings so the
+    audit's ``details`` payload stays bundle-faithful rather than
+    flattening to the adapter's narrower view.
+    """
+
+    printable: bool
+    score: int  # 0-100
+    grade: str  # A/B/C/D/F
+    recommendations: list[str] = field(default_factory=list)
+    _findings: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_bundle_findings(
+        cls, findings: dict[str, Any]
+    ) -> "BundlePrintabilityFindings":
+        score = int(findings.get("score") or 0)
+        return cls(
+            printable=bool(findings.get("printable", score >= 50)),
+            score=score,
+            grade=str(findings.get("grade") or "F"),
+            recommendations=list(findings.get("recommendations") or []),
+            _findings=dict(findings),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self._findings)
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
