@@ -699,6 +699,43 @@ def audit_original_design(
                         pf.to_dict() if hasattr(pf, "to_dict") else dict(pf)
                     )
 
+            # Optional saved-design summary (kiln-pro design_brief
+            # module).  When the mesh's intent sidecar was derived from
+            # a saved design — i.e. the user committed to a goal
+            # before generating — roll the per-assertion gates up into
+            # one plain-language summary so the audit report can say
+            # "your design matches what you asked for" (or doesn't)
+            # without the user having to read each gate.  The summary
+            # gate carries no score penalty: the underlying critical
+            # gates already adjusted the score above.  Free / public
+            # installs and meshes generated outside the saved-design
+            # flow see the audit unchanged.  See https://kiln3d.com
+            # for tier details.
+            if pro_features.is_available("design_brief"):
+                try:
+                    db = pro_features.design_brief
+                    intent_obj = iv.load_intent_sidecar(file_path)
+                except Exception:  # noqa: BLE001
+                    intent_obj = None
+                if intent_obj is not None:
+                    try:
+                        summary_dict = db.check_brief_honor(
+                            intent_gates=[g.to_dict() for g in intent_gates],
+                            intent_generator=intent_obj.generator,
+                        )
+                    except Exception:  # noqa: BLE001
+                        summary_dict = None
+                    if summary_dict is not None:
+                        gates.append(
+                            AuditGate(
+                                name=summary_dict["name"],
+                                passed=summary_dict["passed"],
+                                severity=summary_dict["severity"],
+                                message=summary_dict["message"],
+                                details=summary_dict.get("details", {}),
+                            )
+                        )
+
     score = int(printability.score)
     if not mesh_validation.valid:
         score = min(score, 20)

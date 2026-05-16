@@ -228,6 +228,15 @@ class _FakeIntentGate:
         self.message = message
         self.details = details or {}
 
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "passed": self.passed,
+            "severity": self.severity,
+            "message": self.message,
+            "details": dict(self.details),
+        }
+
 
 def _install_fake_kiln_pro(
     monkeypatch,
@@ -440,6 +449,316 @@ class TestAuditOriginalDesignIntentVerification:
         assert not any(
             g.name.startswith("intent_") for g in audit.gates
         )
+
+
+# ---------------------------------------------------------------------------
+# Optional kiln-pro saved-design summary
+# ---------------------------------------------------------------------------
+
+
+def _install_fake_kiln_pro_with_brief(
+    monkeypatch,
+    *,
+    intent_gates: list[_FakeIntentGate],
+    summary_dict: dict | None,
+    intent_generator: str = "design_brief:abc123",
+    has_design_brief: bool = True,
+):
+    """Inject a fake ``kiln_pro.bridge`` exposing intent_verification AND design_brief.
+
+    The audit hook only fires the saved-design summary when both
+    modules report available.  The fake's ``design_brief.check_brief_honor``
+    returns ``summary_dict`` verbatim so the test pins the wrap-as-AuditGate
+    path independently from the actual rollup logic (which lives in
+    kiln-pro and has its own tests).
+    """
+    import sys
+    import types
+
+    try:
+        import kiln_pro  # noqa: F401
+        import kiln_pro.bridge  # noqa: F401
+        import kiln_pro.intent_verification  # noqa: F401
+    except ImportError:
+        pass
+
+    iv_module = types.ModuleType("kiln_pro.intent_verification")
+
+    def _verify_intent_from_sidecar(_path):
+        return list(intent_gates)
+
+    def _gates_to_feedback(_failed_gates, *, original_prompt: str = ""):
+        return []
+
+    class _FakeIntentObject:
+        generator = intent_generator
+
+    def _load_intent_sidecar(_path):
+        return _FakeIntentObject()
+
+    iv_module.verify_intent_from_sidecar = _verify_intent_from_sidecar
+    iv_module.gates_to_feedback = _gates_to_feedback
+    iv_module.load_intent_sidecar = _load_intent_sidecar
+
+    db_module = types.ModuleType("kiln_pro.design_brief")
+
+    def _check_brief_honor(*, intent_gates, intent_generator):
+        return summary_dict
+
+    db_module.check_brief_honor = _check_brief_honor
+
+    class _FakeProFeatures:
+        intent_verification = iv_module
+        design_brief = db_module if has_design_brief else None
+
+        def is_available(self, feature: str) -> bool:
+            if feature == "intent_verification":
+                return True
+            if feature == "design_brief":
+                return has_design_brief
+            return False
+
+    bridge_module = types.ModuleType("kiln_pro.bridge")
+    bridge_module.pro_features = _FakeProFeatures()
+
+    pkg_module = types.ModuleType("kiln_pro")
+    pkg_module.bridge = bridge_module
+
+    monkeypatch.setitem(sys.modules, "kiln_pro", pkg_module)
+    monkeypatch.setitem(sys.modules, "kiln_pro.bridge", bridge_module)
+    monkeypatch.setitem(sys.modules, "kiln_pro.intent_verification", iv_module)
+    monkeypatch.setitem(sys.modules, "kiln_pro.design_brief", db_module)
+
+
+class TestAuditOriginalDesignBriefHonor:
+    """Saved-design summary gate (kiln-pro design_brief integration).
+
+    The audit appends ONE extra gate (named ``brief_honor``) when the
+    mesh's intent sidecar was derived from a saved design AND the
+    kiln-pro design_brief module is available.  In every other case
+    the audit looks identical to before.
+    """
+
+    def test_no_kiln_pro_installed_omits_brief_honor_gate(self, monkeypatch):
+        import builtins as _builtins
+        real_import = _builtins.__import__
+
+        def _no_kiln_pro(name, globals=None, locals=None, fromlist=(), level=0):
+            if name.startswith("kiln_pro"):
+                raise ImportError("simulated: kiln-pro not installed")
+            return real_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(_builtins, "__import__", _no_kiln_pro)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            audit = audit_original_design(
+                path,
+                "simple coaster",
+                printer_model="bambu_a1",
+            )
+
+        assert not any(g.name == "brief_honor" for g in audit.gates)
+
+    def test_design_brief_module_absent_omits_brief_honor_gate(self, monkeypatch):
+        """``intent_verification`` available, ``design_brief`` is not.
+
+        The intent gates still fire; the saved-design summary doesn't.
+        """
+        passing_gate = _FakeIntentGate(
+            name="intent.structure.walls",
+            passed=True,
+            severity="info",
+            message="walls — observed thickness matches expected.",
+            details={"category": "structure"},
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            _install_fake_kiln_pro_with_brief(
+                monkeypatch,
+                intent_gates=[passing_gate],
+                summary_dict=None,  # would-be summary
+                has_design_brief=False,
+            )
+            audit = audit_original_design(
+                path,
+                "simple coaster",
+                printer_model="bambu_a1",
+            )
+
+        assert not any(g.name == "brief_honor" for g in audit.gates)
+
+    def test_brief_honor_returns_none_omits_gate(self, monkeypatch):
+        """Generator string doesn't reference a saved design.
+
+        ``check_brief_honor`` returns ``None``; the audit appends nothing.
+        """
+        passing_gate = _FakeIntentGate(
+            name="intent.structure.walls",
+            passed=True,
+            severity="info",
+            message="walls — observed thickness matches expected.",
+            details={"category": "structure"},
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            _install_fake_kiln_pro_with_brief(
+                monkeypatch,
+                intent_gates=[passing_gate],
+                summary_dict=None,  # helper signals "no saved design tied"
+                intent_generator="template:phone_stand",
+            )
+            audit = audit_original_design(
+                path,
+                "simple coaster",
+                printer_model="bambu_a1",
+            )
+
+        assert not any(g.name == "brief_honor" for g in audit.gates)
+
+    def test_all_pass_summary_appears_with_normie_message(self, monkeypatch):
+        passing_gate = _FakeIntentGate(
+            name="intent.structure.walls",
+            passed=True,
+            severity="info",
+            message="walls — observed thickness matches expected.",
+            details={"category": "structure"},
+        )
+
+        summary = {
+            "name": "brief_honor",
+            "passed": True,
+            "severity": "info",
+            "message": "Your design matches what you asked for (held the load, used a safe material).",
+            "details": {"brief_id": "abc123", "passed_categories": ["structure", "safety"]},
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            _install_fake_kiln_pro_with_brief(
+                monkeypatch,
+                intent_gates=[passing_gate],
+                summary_dict=summary,
+            )
+            audit = audit_original_design(
+                path,
+                "simple coaster",
+                printer_model="bambu_a1",
+            )
+
+        brief_honor_gates = [g for g in audit.gates if g.name == "brief_honor"]
+        assert len(brief_honor_gates) == 1
+        gate = brief_honor_gates[0]
+        assert gate.passed is True
+        assert gate.severity == "info"
+        assert "matches what you asked for" in gate.message
+        # Engineering vocabulary stays out of user-facing strings.
+        lower_msg = gate.message.lower()
+        for forbidden in ("brief", "intent", "assertion", "verifier", "honored"):
+            assert forbidden not in lower_msg, (
+                f"engineering vocabulary {forbidden!r} leaked into audit gate message: {gate.message!r}"
+            )
+
+    def test_failure_summary_appears_naming_failing_categories(self, monkeypatch):
+        failing_gate = _FakeIntentGate(
+            name="intent.structure.walls",
+            passed=False,
+            severity="critical",
+            message="walls thick enough to hold the load — observed too thin.",
+            details={"category": "structure"},
+        )
+
+        summary = {
+            "name": "brief_honor",
+            "passed": False,
+            "severity": "critical",
+            "message": (
+                "Your design doesn't fully match what you asked for. "
+                "Specifically: walls thick enough to hold the load."
+            ),
+            "details": {
+                "brief_id": "abc123",
+                "failed_critical_count": 1,
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            _install_fake_kiln_pro_with_brief(
+                monkeypatch,
+                intent_gates=[failing_gate],
+                summary_dict=summary,
+            )
+            audit = audit_original_design(
+                path,
+                "simple coaster",
+                printer_model="bambu_a1",
+            )
+
+        brief_honor_gates = [g for g in audit.gates if g.name == "brief_honor"]
+        assert len(brief_honor_gates) == 1
+        gate = brief_honor_gates[0]
+        assert gate.passed is False
+        assert gate.severity == "critical"
+        assert "walls thick enough to hold the load" in gate.message
+        assert "doesn't fully match" in gate.message
+
+    def test_brief_honor_failure_never_breaks_audit(self, monkeypatch):
+        """A raise in ``check_brief_honor`` is swallowed; audit still ships."""
+        import sys
+        import types
+
+        try:
+            import kiln_pro  # noqa: F401
+            import kiln_pro.bridge  # noqa: F401
+        except ImportError:
+            pass
+
+        iv_module = types.ModuleType("kiln_pro.intent_verification")
+        iv_module.verify_intent_from_sidecar = lambda _path: []
+        iv_module.gates_to_feedback = lambda *a, **k: []
+
+        class _FakeIntentObject:
+            generator = "design_brief:abc123"
+
+        iv_module.load_intent_sidecar = lambda _path: _FakeIntentObject()
+
+        db_module = types.ModuleType("kiln_pro.design_brief")
+
+        def _broken(**_kwargs):
+            raise RuntimeError("simulated brief-honor failure")
+
+        db_module.check_brief_honor = _broken
+
+        class _FakeProFeatures:
+            intent_verification = iv_module
+            design_brief = db_module
+
+            def is_available(self, feature: str) -> bool:
+                return feature in ("intent_verification", "design_brief")
+
+        bridge_module = types.ModuleType("kiln_pro.bridge")
+        bridge_module.pro_features = _FakeProFeatures()
+        pkg_module = types.ModuleType("kiln_pro")
+        pkg_module.bridge = bridge_module
+
+        monkeypatch.setitem(sys.modules, "kiln_pro", pkg_module)
+        monkeypatch.setitem(sys.modules, "kiln_pro.bridge", bridge_module)
+        monkeypatch.setitem(sys.modules, "kiln_pro.intent_verification", iv_module)
+        monkeypatch.setitem(sys.modules, "kiln_pro.design_brief", db_module)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            audit = audit_original_design(
+                path,
+                "simple coaster",
+                printer_model="bambu_a1",
+            )
+
+        assert audit.readiness_score >= 0
+        assert not any(g.name == "brief_honor" for g in audit.gates)
 
 
 # ---------------------------------------------------------------------------
