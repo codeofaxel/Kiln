@@ -518,7 +518,7 @@ octoprint-cli print myfile.gcode --confirm
 
 ## MCP Tools (Selected)
 
-The Kiln MCP server (`kiln serve`) exposes **756 tools** to agents, plus prompts and resources for **763 total MCP capabilities**. Key tools are listed below — MCP clients can use `get_skill_manifest` and ToolSearch-style discovery to browse the complete catalog.
+The Kiln MCP server (`kiln serve`) exposes **792 tools** to agents, plus prompts and resources for **799 total MCP capabilities**. Key tools are listed below — MCP clients can use `get_skill_manifest` and ToolSearch-style discovery to browse the complete catalog.
 
 | Tool | Description |
 |------|-------------|
