@@ -4,7 +4,6 @@ interface Row {
   without: string;
   withKiln: string;
   tier?: 'pro' | 'business';
-  patent?: boolean;
 }
 
 const rows: Row[] = [
@@ -12,26 +11,22 @@ const rows: Row[] = [
     capability: 'Create a 3D object',
     without: 'Learn Fusion 360, Tinkercad, or OnShape \u2014 or browse Thingiverse manually',
     withKiln: 'Describe it or sketch it \u2014 Kiln generates, validates, and prepares it',
-    patent: true,
   },
   {
     capability: 'Validate before printing',
     without: 'Slicer warnings + experience + wasted filament',
     withKiln: '7-dimension scoring (0\u2013100), auto-repair, mesh fix, auto-scale for AI models',
-    patent: true,
   },
   {
     capability: 'Add decorations',
     without: 'Blender or Photoshop, then re-import and hope it prints',
     withKiln: 'QR codes, photos, logos, text \u2014 emboss or deboss with one command',
-    patent: true,
   },
   {
     capability: 'Add surface textures',
     without: 'UV mapping skills + texture software \u2014 not practical for most users',
     withKiln: 'Tiger stripe, marble, snakeskin, wood grain, carbon fiber, honeycomb, etc. \u2014 applied directly to any model',
     tier: 'pro',
-    patent: true,
   },
   {
     capability: 'Multicolor printing',
@@ -53,35 +48,30 @@ const rows: Row[] = [
     capability: 'Monitor for failures',
     without: 'Bambu\u2019s built-in camera or add-on webcam \u2014 no AI analysis, no auto-recovery',
     withKiln: 'AI vision analysis across any printer with automatic failure recovery',
-    patent: true,
   },
   {
     capability: 'Resume a cancelled print',
     without: 'Start over \u2014 the partial object is wasted',
     withKiln: 'Resume from the exact layer it stopped, no filament wasted',
     tier: 'pro',
-    patent: true,
   },
   {
     capability: 'Mid-print modifications',
     without: 'Cancel, redesign in CAD, re-slice, reprint from scratch',
     withKiln: 'Decorate, add features, or swap material on a live print \u2014 with atomic revert',
     tier: 'pro',
-    patent: true,
   },
   {
     capability: 'Manage a fleet',
     without: 'One dashboard per brand, no cross-brand routing or learning',
     withKiln: 'Unified fleet with smart job routing, failure rerouting, and cross-printer learning',
     tier: 'pro',
-    patent: true,
   },
   {
     capability: 'Learn from past prints',
     without: 'Start fresh every time \u2014 your experience stays in your head',
     withKiln: 'Kiln learns what worked \u2014 same material + printer = better settings next time',
     tier: 'pro',
-    patent: true,
   },
   {
     capability: 'Trust your printer\u2019s calibration',
@@ -104,28 +94,24 @@ const rows: Row[] = [
     without: 'Rename files v1, v2, v2-final, v2-final-FINAL \u2014 lose track of which printed right',
     withKiln: 'Branch, merge, cherry-pick, A/B across designs / decorations / features \u2014 three-way semantic merge at the mesh level',
     tier: 'pro',
-    patent: true,
   },
   {
     capability: 'Prove which version shipped',
     without: 'Email the STL and trust nobody edited it',
     withKiln: 'Sign a version the way you\u2019d sign a contract \u2014 anyone can verify later that nothing changed after you signed it',
     tier: 'pro',
-    patent: true,
   },
   {
     capability: 'Sync designs across devices',
     without: 'Dropbox and hope nothing drifts',
     withKiln: 'Push and pull between your machines through Kiln\u2019s cloud \u2014 tenant-isolated, RLS-secured',
     tier: 'pro',
-    patent: true,
   },
   {
     capability: 'Ship an assembly kit',
     without: 'Write a 30-page PDF in Word, photograph each step, hire a translator',
     withKiln: 'Multi-part prints ship with a printable PDF — BOM, isometric step renders, multilingual sections, "what changed" diffs for revisions',
     tier: 'pro',
-    patent: true,
   },
   {
     capability: 'Let AI run the whole thing',
@@ -157,7 +143,6 @@ const rows: Row[] = [
               <td class="cmp-new">
                 {r.withKiln}
                 {r.tier && <span class={`cmp-tier cmp-tier-${r.tier}`}>{r.tier}</span>}
-                {r.patent && <span class="cmp-patent">Patent Pending</span>}
               </td>
             </tr>
           ))}
@@ -332,16 +317,6 @@ const rows: Row[] = [
   .cmp-tier-business {
     color: #6ea8fe;
     background: rgba(110, 168, 254, 0.10);
-  }
-
-  /* ---- Patent-pending marks ---- */
-  .cmp-patent {
-    display: inline-block;
-    margin-left: 6px;
-    font-size: 10px;
-    font-style: italic;
-    color: rgba(255, 255, 255, 0.35);
-    letter-spacing: 0.02em;
   }
 
   /* ---- Responsive ---- */

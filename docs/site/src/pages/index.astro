@@ -147,6 +147,24 @@ import CTA from '../components/CTA.astro';
   <ComparisonTable />
 
   <!--
+    Intellectual property band — added 2026-05-16 as part of the
+    patent-shield rewrite.  Replaces the per-row "Patent Pending"
+    badges on the comparison table (13 badges that mapped the
+    moat row-by-row) and the per-surface breakdown that used to
+    live in the pricing footer.  One quiet, generic line in a
+    Series-A-deck "Defensibility" treatment: confirms substance
+    without naming filing surfaces a competitor could design
+    around.  Same statement appears in the pricing footer; do
+    not let the two strings drift.
+  -->
+  <section class="ip-band bordered">
+    <div class="container">
+      <p class="ip-label">Intellectual Property</p>
+      <p class="ip-statement">Kiln's core technology is protected by multiple US patents pending.</p>
+    </div>
+  </section>
+
+  <!--
     Topic hub — demoted on 2026-04-25 from section 5 to section 9.
     Rationale: docs navigation doesn't sell, it reassures.
     Reassurance belongs after the visitor is already convinced.
@@ -193,6 +211,32 @@ import CTA from '../components/CTA.astro';
 <style>
   .bordered {
     border-top: 1px solid var(--border);
+  }
+
+  /* ---- Intellectual property band ---- *
+   * Quiet, considered "Defensibility" treatment.  Single label
+   * + single statement, no list, no badges.  Strict rule: the
+   * statement string must match the .patent-footer copy in
+   * pricing.astro verbatim.  Drift here = drift in the IP
+   * signal; keep them identical. */
+  .ip-band {
+    padding: 40px 0;
+    text-align: center;
+  }
+  .ip-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+  .ip-statement {
+    font-size: 15px;
+    color: var(--text);
+    max-width: 480px;
+    margin: 0 auto;
+    line-height: 1.5;
   }
 
   /* Shared centered section heading used by the product proof blocks. */
