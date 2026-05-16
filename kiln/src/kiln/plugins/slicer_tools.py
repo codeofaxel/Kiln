@@ -661,6 +661,8 @@ class _SlicerToolsPlugin:
                     response["applied_overrides"] = parsed_overrides
                 if gate_info.get("gate") != "skipped_no_printer":
                     response["bed_fit"] = gate_info
+                if cal_used is not None:
+                    response["calibration_used"] = cal_used
 
                 # Bambu auto-wrap (same logic as slice_model) so callers
                 # don't have to know raw gcode won't start on Bambu.
@@ -1194,6 +1196,8 @@ class _SlicerToolsPlugin:
                     resp["ams_routing"] = ams_routing
                 if ams_routing_warnings:
                     resp["warnings"] = ams_routing_warnings
+                if cal_used is not None:
+                    resp["calibration_used"] = cal_used
 
                 # kiln-pro hook: when installed, generate an assembly
                 # manual alongside the print and add it to the
