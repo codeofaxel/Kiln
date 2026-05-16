@@ -5124,3 +5124,383 @@ def detect_mesh_pockets(
         "overall_height_mm": round(overall_height, 3),
         "bounding_box": {k: round(v, 3) for k, v in bbox.items()},
     }
+
+
+# ---------------------------------------------------------------------------
+# Cylindrical hole detection
+# ---------------------------------------------------------------------------
+#
+# Holes are detected by finding clusters of triangles whose face normals are
+# perpendicular to one principal axis (X/Y/Z) — these are the cylindrical
+# inner-wall faces of a hole drilled along that axis.  Inside each axis
+# bucket, we collect every vertex from the candidate triangles, project to
+# the plane perpendicular to that axis, and cluster the 2D points into
+# circles via a fixed-tolerance grid: any cluster whose points fit on a
+# circle to within ``circular_tolerance_mm`` and whose face normals all
+# point inward (toward the cluster center) is a cylindrical hole.
+#
+# The algorithm is geometry-only — no topology walk required — so it works
+# uniformly on STL, OBJ, and GLB inputs once they parse, and degrades to
+# the empty list when the mesh is too coarse to recover a usable ring (a
+# 12-triangle cube has no hole but also no false positives).
+#
+# Coordinate convention matches the rest of this module: axis ``"x"`` means
+# the hole's axis runs along the world X direction, so the radial profile
+# sits in the YZ plane.
+
+
+def detect_holes(
+    file_path: str,
+    *,
+    min_diameter_mm: float = 0.8,
+    max_diameter_mm: float = 50.0,
+    min_depth_mm: float = 0.5,
+    circular_tolerance_mm: float = 0.25,
+    axis_normal_tolerance: float = 0.15,
+) -> list[dict[str, Any]]:
+    """Detect cylindrical hole features in an STL mesh.
+
+    Walks the mesh's triangles, groups any whose face normal is
+    perpendicular to one of the three principal axes (X, Y, Z), and
+    looks for circular clusters of vertices in the perpendicular plane.
+    Each circular cluster whose normals point inward (toward the cluster
+    center) is reported as a cylindrical hole.
+
+    The detector is intentionally conservative — partial rings,
+    elliptical relief cuts, and chamfered hole entries do not register
+    as holes unless they keep a circular profile within
+    ``circular_tolerance_mm`` of the radius.  False positives are worse
+    than false negatives here: a missed hole means a missed warning,
+    but a phantom hole means a misleading printability finding.
+
+    :param file_path: Path to an STL file (binary or ASCII).
+    :param min_diameter_mm: Smallest diameter to report.  Defaults to
+        0.8 mm — below this a single-perimeter 0.4 mm nozzle can't
+        reliably print the hole regardless of material, so the absence
+        of a finding at that size is itself a signal.
+    :param max_diameter_mm: Largest diameter to consider.  Defaults to
+        50 mm — clusters wider than this are usually outer shells, not
+        through-holes; raising it picks up large counter-bores at the
+        cost of more false positives on tubular parts.
+    :param min_depth_mm: Minimum extent along the hole's axis required
+        to register a hole.  Defaults to 0.5 mm so a chamfered edge
+        doesn't read as a shallow hole.
+    :param circular_tolerance_mm: How far (in mm) a candidate vertex's
+        distance from the fitted center may deviate before the cluster
+        is rejected as non-circular.
+    :param axis_normal_tolerance: A triangle's face normal counts as
+        "perpendicular to axis a" when ``|n · a| < axis_normal_tolerance``.
+
+    :returns: List of dicts, each with the keys:
+
+        * ``position`` — dict with ``x_mm`` / ``y_mm`` / ``z_mm`` of the
+          hole's geometric center along its axis.
+        * ``diameter_mm`` — float, fitted diameter of the cylinder.
+        * ``depth_mm`` — float, extent along the hole's axis.
+        * ``axis`` — one of ``"x"``, ``"y"``, ``"z"``: which world axis
+          the hole was drilled along.
+        * ``triangle_count`` — int, triangles contributing to the ring.
+
+        Empty list when no holes are recovered (no triangles, mesh too
+        coarse, or every candidate failed the circularity / depth
+        gates).
+
+    :raises FileNotFoundError: When ``file_path`` doesn't exist.
+    :raises ValueError: When the mesh cannot be parsed.
+    """
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    if min_diameter_mm <= 0:
+        raise ValueError("min_diameter_mm must be positive")
+    if max_diameter_mm <= min_diameter_mm:
+        raise ValueError("max_diameter_mm must exceed min_diameter_mm")
+
+    errors: list[str] = []
+    triangles, _vertices = _parse_stl(path, errors)
+    if errors:
+        raise ValueError(f"STL parse errors: {'; '.join(errors)}")
+    if not triangles:
+        return []
+
+    # Index triangle data once: face normal, centroid, and the
+    # cylindrical face-direction (normal projected into the axis-
+    # perpendicular plane) per axis.  Reusing across the three axis
+    # passes keeps the algorithm O(N) in triangles.
+    tri_normals: list[tuple[float, float, float]] = []
+    tri_centroids: list[tuple[float, float, float]] = []
+    for tri in triangles:
+        v0, v1, v2 = tri
+        e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
+        e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
+        nx = e1[1] * e2[2] - e1[2] * e2[1]
+        ny = e1[2] * e2[0] - e1[0] * e2[2]
+        nz = e1[0] * e2[1] - e1[1] * e2[0]
+        length = math.sqrt(nx * nx + ny * ny + nz * nz)
+        if length < 1e-12:
+            tri_normals.append((0.0, 0.0, 0.0))
+            tri_centroids.append((
+                (v0[0] + v1[0] + v2[0]) / 3.0,
+                (v0[1] + v1[1] + v2[1]) / 3.0,
+                (v0[2] + v1[2] + v2[2]) / 3.0,
+            ))
+            continue
+        tri_normals.append((nx / length, ny / length, nz / length))
+        tri_centroids.append((
+            (v0[0] + v1[0] + v2[0]) / 3.0,
+            (v0[1] + v1[1] + v2[1]) / 3.0,
+            (v0[2] + v1[2] + v2[2]) / 3.0,
+        ))
+
+    holes: list[dict[str, Any]] = []
+    min_radius = min_diameter_mm / 2.0
+    max_radius = max_diameter_mm / 2.0
+
+    # Per-axis pass.  Axis index 0=X, 1=Y, 2=Z.
+    for axis_idx, axis_label in ((0, "x"), (1, "y"), (2, "z")):
+        u_idx = (axis_idx + 1) % 3
+        v_idx = (axis_idx + 2) % 3
+
+        # Collect triangles whose normals are perpendicular to this axis.
+        candidate_idx: list[int] = []
+        for i, normal in enumerate(tri_normals):
+            if abs(normal[axis_idx]) < axis_normal_tolerance:
+                # Also require the normal to have non-trivial magnitude
+                # in the perpendicular plane (a degenerate triangle has
+                # a zero normal and would match all three axes).
+                u = normal[u_idx]
+                v = normal[v_idx]
+                if (u * u + v * v) > 0.25:
+                    candidate_idx.append(i)
+        if not candidate_idx:
+            continue
+
+        clusters = _cluster_circular_holes(
+            candidate_idx,
+            tri_normals,
+            tri_centroids,
+            triangles,
+            u_idx=u_idx,
+            v_idx=v_idx,
+            axis_idx=axis_idx,
+            min_radius=min_radius,
+            max_radius=max_radius,
+            circular_tol=circular_tolerance_mm,
+        )
+        for cluster in clusters:
+            depth = cluster["depth_mm"]
+            if depth < min_depth_mm:
+                continue
+            center_uv = cluster["center_uv"]
+            axis_pos = cluster["axis_pos"]
+            position = [0.0, 0.0, 0.0]
+            position[u_idx] = center_uv[0]
+            position[v_idx] = center_uv[1]
+            position[axis_idx] = axis_pos
+            holes.append(
+                {
+                    "position": {
+                        "x_mm": round(position[0], 3),
+                        "y_mm": round(position[1], 3),
+                        "z_mm": round(position[2], 3),
+                    },
+                    "diameter_mm": round(2.0 * cluster["radius_mm"], 3),
+                    "depth_mm": round(depth, 3),
+                    "axis": axis_label,
+                    "triangle_count": cluster["triangle_count"],
+                }
+            )
+
+    return holes
+
+
+# Edge adjacency in ``_cluster_circular_holes`` keys on the (snapped)
+# vertex tuples shared by two triangles.  Raw float-tuple equality works
+# for STLs parsed straight off disk because adjacent triangles produce
+# literally-equal floats — but a mesh that has been rotated, scaled, or
+# decimated develops sub-micrometre drift that breaks tuple equality,
+# silently turning every triangle into its own component of size 1.
+# Snapping each vertex to a 10 nm integer grid before keying preserves
+# adjacency under realistic transforms while still keeping distinct
+# vertices (printer resolution is ~0.1 mm — ten thousand snap cells
+# coarser than the snap tolerance, so collapse is implausible).
+_HOLE_EDGE_SNAP_TOL_MM: float = 1e-5
+
+
+def _snap_vertex(
+    v: tuple[float, ...],
+    tol: float = _HOLE_EDGE_SNAP_TOL_MM,
+) -> tuple[int, int, int]:
+    """Map a 3-float vertex to an integer-grid coordinate.
+
+    Used as the dict key for edge-adjacency lookups in
+    ``_cluster_circular_holes`` so that two triangles sharing an edge
+    in a transformed mesh still collide on the same key despite small
+    floating-point drift.
+    """
+    return (
+        round(v[0] / tol),
+        round(v[1] / tol),
+        round(v[2] / tol),
+    )
+
+
+def _cluster_circular_holes(
+    candidate_idx: list[int],
+    tri_normals: list[tuple[float, float, float]],
+    tri_centroids: list[tuple[float, float, float]],
+    triangles: list[tuple[tuple[float, ...], ...]],
+    *,
+    u_idx: int,
+    v_idx: int,
+    axis_idx: int,
+    min_radius: float,
+    max_radius: float,
+    circular_tol: float,
+) -> list[dict[str, Any]]:
+    """Group axis-aligned candidate triangles into hole clusters.
+
+    Algorithm: build an edge-adjacency graph over the candidate
+    triangles (two triangles are adjacent when they share an edge),
+    flood-fill connected components, then validate each component as a
+    cylindrical hole via:
+
+    * circular radius fit in the (u, v) plane (``circular_tol`` spread),
+    * inward-normal check (cluster normals point TOWARD the fitted
+      center, not outward — rejects solid pillars),
+    * angular coverage (≥ 6 of 8 octants — rejects degenerate
+      projections of cylinders from a different axis),
+    * radius bounds (``min_radius`` / ``max_radius``).
+
+    Edge adjacency rather than spatial-bin region growing lets two
+    distinct holes that fall within max-radius of each other in (u, v)
+    stay separate — the side walls of one hole share no edges with
+    the other.
+    """
+    if not candidate_idx:
+        return []
+
+    candidate_set = set(candidate_idx)
+
+    # Build edge → triangle map restricted to candidate triangles so
+    # adjacency lookups don't touch the rest of the mesh.  Vertices are
+    # snapped to an integer grid before keying — see ``_snap_vertex``.
+    edge_to_tris: dict[
+        tuple[tuple[int, int, int], tuple[int, int, int]], list[int]
+    ] = {}
+    for ti in candidate_idx:
+        tri = triangles[ti]
+        for i in range(3):
+            va = _snap_vertex(tri[i])
+            vb = _snap_vertex(tri[(i + 1) % 3])
+            edge = (min(va, vb), max(va, vb))
+            edge_to_tris.setdefault(edge, []).append(ti)
+
+    visited: set[int] = set()
+    clusters: list[dict[str, Any]] = []
+
+    for seed in candidate_idx:
+        if seed in visited:
+            continue
+        # BFS over edge-adjacent candidate triangles.
+        cluster_set: list[int] = []
+        stack = [seed]
+        while stack:
+            ti = stack.pop()
+            if ti in visited:
+                continue
+            visited.add(ti)
+            cluster_set.append(ti)
+            tri = triangles[ti]
+            for i in range(3):
+                va = _snap_vertex(tri[i])
+                vb = _snap_vertex(tri[(i + 1) % 3])
+                edge = (min(va, vb), max(va, vb))
+                for neighbor in edge_to_tris.get(edge, []):
+                    if neighbor in visited or neighbor not in candidate_set:
+                        continue
+                    stack.append(neighbor)
+
+        if len(cluster_set) < 3:
+            continue
+
+        # Fit a center: average of centroid (u, v) — robust enough for
+        # well-meshed cylinders.  For a single hole the cluster is
+        # symmetric so the centroid IS the axis.
+        sum_u = 0.0
+        sum_v = 0.0
+        for ti in cluster_set:
+            ci = tri_centroids[ti]
+            sum_u += ci[u_idx]
+            sum_v += ci[v_idx]
+        c_u = sum_u / len(cluster_set)
+        c_v = sum_v / len(cluster_set)
+
+        # Compute radii and angles of each triangle's centroid relative
+        # to the fitted center.
+        radii: list[float] = []
+        angles: list[float] = []
+        for ti in cluster_set:
+            ci = tri_centroids[ti]
+            du2 = ci[u_idx] - c_u
+            dv2 = ci[v_idx] - c_v
+            radii.append(math.sqrt(du2 * du2 + dv2 * dv2))
+            angles.append(math.atan2(dv2, du2))
+        r_mean = sum(radii) / len(radii)
+
+        # Radius-bounds gate.
+        if r_mean < min_radius or r_mean > max_radius:
+            continue
+        # Circularity gate — radius spread must be within tolerance.
+        if (max(radii) - min(radii)) > circular_tol * 2.0:
+            continue
+
+        # Angular-coverage gate: a real cylindrical hole has triangles
+        # covering all 360 deg around the axis.  Reject any cluster
+        # that fills less than 6 of 8 octants, which catches the
+        # degenerate case where one axis pass picks up the side faces
+        # of an orthogonally-oriented cylinder.
+        octant_hits = [0] * 8
+        for ang in angles:
+            octant = int((ang + math.pi) / (math.pi / 4.0)) % 8
+            octant_hits[octant] = 1
+        if sum(octant_hits) < 6:
+            continue
+
+        # Inward-normal check: average dot of (normal · radial
+        # direction) must be negative.  Equivalent to "the surface
+        # points toward its central axis" — rejects solid pillars.
+        inward_dot_sum = 0.0
+        for ti in cluster_set:
+            n = tri_normals[ti]
+            ci = tri_centroids[ti]
+            ru = ci[u_idx] - c_u
+            rv = ci[v_idx] - c_v
+            r_mag = math.sqrt(ru * ru + rv * rv)
+            if r_mag < 1e-9:
+                continue
+            inward_dot_sum += (n[u_idx] * ru + n[v_idx] * rv) / r_mag
+        if inward_dot_sum >= 0.0:
+            continue
+
+        # Extent along the hole's axis = max - min axis coordinate
+        # across all cluster vertices.
+        axis_coords: list[float] = []
+        for ti in cluster_set:
+            for v in triangles[ti]:
+                axis_coords.append(v[axis_idx])
+        depth = max(axis_coords) - min(axis_coords)
+        axis_center = (max(axis_coords) + min(axis_coords)) / 2.0
+
+        clusters.append(
+            {
+                "center_uv": (c_u, c_v),
+                "axis_pos": axis_center,
+                "radius_mm": r_mean,
+                "depth_mm": depth,
+                "triangle_count": len(cluster_set),
+            }
+        )
+
+    return clusters
