@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-05-16T02:30:40.401116+00:00",
+  "generated": "2026-05-16T04:30:28.389267+00:00",
   "tool_count": 303,
   "categories": {
     "product_generators": {
@@ -1722,7 +1722,7 @@
     {
       "name": "auto_multicolor_from_texture",
       "description": "Segment a textured OBJ mesh into discrete color zones for multi-material printing.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "tier": "free",
       "category": "decoration",
       "parameters": {
         "properties": {
@@ -2179,8 +2179,8 @@
     },
     {
       "name": "inspect_design",
-      "description": "Render structured inspection evidence for a 3D mesh.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Render and analyze a 3D mesh \u2014 shaded previews, cross-section slices, raw measurements (volume, watertightness, dimensions), and a print-readiness verdict (Pro+). Channels are opt-in, results land in a manifest.json bundle.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
       "category": "design_inspection",
       "parameters": {
         "properties": {
@@ -2307,7 +2307,7 @@
     },
     {
       "name": "design_session",
-      "description": "Talk to Kiln about what you're making and produce a design that matches what you asked for.",
+      "description": "Conversational design generator \u2014 describe what you want in plain English, answer a few quick questions, save the brief, generate an STL with a sidecar report of which design checks it passes. Verbs: start, update, save, generate.",
       "tier": "free",
       "category": "design_session",
       "parameters": {
@@ -3018,6 +3018,16 @@
           },
           "version_id_b": {
             "title": "Version Id B",
+            "type": "string"
+          },
+          "mesh_path_a": {
+            "default": "",
+            "title": "Mesh Path A",
+            "type": "string"
+          },
+          "mesh_path_b": {
+            "default": "",
+            "title": "Mesh Path B",
             "type": "string"
           }
         },
@@ -9420,7 +9430,7 @@
     {
       "name": "generate_ashtray",
       "description": "Generate an ashtray with optional branding and QR code.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "tier": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -9487,7 +9497,7 @@
     {
       "name": "generate_bookmark",
       "description": "Generate a bookmark with optional decoration and page clip.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "tier": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -9549,7 +9559,7 @@
     {
       "name": "generate_coaster",
       "description": "Generate a coaster with optional branding and QR code.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "tier": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -9601,7 +9611,7 @@
     {
       "name": "generate_fridge_magnet",
       "description": "Generate a printable fridge magnet with front decoration.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "tier": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -9735,7 +9745,7 @@
     {
       "name": "generate_jewelry_tray",
       "description": "Generate a jewelry tray with optional decoration and QR code.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "tier": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -9822,7 +9832,7 @@
     {
       "name": "generate_keychain",
       "description": "Generate a 3D-printable keychain.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "tier": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -10068,7 +10078,7 @@
     {
       "name": "generate_ornament",
       "description": "Generate a hanging ornament with optional decoration.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "tier": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -10217,7 +10227,7 @@
     {
       "name": "generate_pet_bowl",
       "description": "Generate a tapered pet bowl optimized for FDM printing.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "tier": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -10274,7 +10284,7 @@
     {
       "name": "generate_pet_tag",
       "description": "Generate a 3D-printable pet ID tag.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "tier": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -10415,7 +10425,7 @@
     {
       "name": "generate_wall_plaque",
       "description": "Generate a wall-mountable photo plaque.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "tier": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -10533,7 +10543,7 @@
     {
       "name": "batch_generate_products",
       "description": "Generate N decorated products from N photos in one call (Pro).\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "tier": "free",
       "category": "product_intelligence",
       "parameters": {
         "properties": {
@@ -10609,7 +10619,7 @@
     {
       "name": "generate_decorated_product",
       "description": "Generate a fully decorated product from a photo in one step (Pro).\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "tier": "free",
       "category": "product_intelligence",
       "parameters": {
         "properties": {
@@ -11556,7 +11566,7 @@
     {
       "name": "apply_geometric_texture",
       "description": "Apply a procedural texture as physical surface relief.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "tier": "free",
       "category": "textures",
       "parameters": {
         "properties": {
@@ -11635,7 +11645,7 @@
     {
       "name": "apply_image_texture",
       "description": "Apply a photo-based texture as a tiled deboss/emboss pattern.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "tier": "free",
       "category": "textures",
       "parameters": {
         "properties": {
@@ -11694,7 +11704,7 @@
     {
       "name": "apply_procedural_texture",
       "description": "Apply a multicolor procedural texture (requires AMS/MMU for multi-material printing).\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "tier": "free",
       "category": "textures",
       "parameters": {
         "properties": {
