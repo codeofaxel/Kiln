@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-05-13T06:02:22.433392+00:00",
-  "tool_count": 301,
+  "generated": "2026-05-16T02:30:40.401116+00:00",
+  "tool_count": 303,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -78,6 +78,14 @@
     "engineering_intelligence": {
       "label": "Engineering Intelligence",
       "pitch": "Curated industry-standard fastener, hole, and joint data \u2014 ANSI/ISO specs, FDM-aware clearance recommendations, heat-set insert sizing, joint-strategy decision tree.  Pro+ engineering reference for any design that drills a hole or threads a fastener."
+    },
+    "design_inspection": {
+      "label": "Design Inspection",
+      "pitch": "Structured visual evidence for any design \u2014 renders, cross-section slices, raw measurements, and a print-readiness verdict \u2014 bundled into one inspectable report with a manifest."
+    },
+    "design_session": {
+      "label": "Design Sessions",
+      "pitch": "Conversational entry-point \u2014 describe what you want to make in plain English, answer a few quick questions if Kiln needs them, then produce an STL that comes with a report of which design checks it passes."
     }
   },
   "tools": [
@@ -2170,6 +2178,50 @@
       }
     },
     {
+      "name": "inspect_design",
+      "description": "Render structured inspection evidence for a 3D mesh.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_inspection",
+      "parameters": {
+        "properties": {
+          "mesh_path": {
+            "title": "Mesh Path",
+            "type": "string"
+          },
+          "channels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Channels"
+          },
+          "bundle_dir": {
+            "default": "",
+            "title": "Bundle Dir",
+            "type": "string"
+          },
+          "product_type": {
+            "default": "",
+            "title": "Product Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mesh_path"
+        ],
+        "title": "inspect_designArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "change_part_color",
       "description": "Change a part's color in a design recipe and re-slice (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -2250,6 +2302,87 @@
           "instruction"
         ],
         "title": "smart_redesignArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "design_session",
+      "description": "Talk to Kiln about what you're making and produce a design that matches what you asked for.",
+      "tier": "free",
+      "category": "design_session",
+      "parameters": {
+        "properties": {
+          "verb": {
+            "enum": [
+              "start",
+              "update",
+              "save",
+              "commit",
+              "generate",
+              "make"
+            ],
+            "title": "Verb",
+            "type": "string"
+          },
+          "idea": {
+            "default": "",
+            "title": "Idea",
+            "type": "string"
+          },
+          "session_id": {
+            "default": "",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "answers": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Answers"
+          },
+          "override_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Override Prompt"
+          },
+          "target_size_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Size Mm"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verb"
+        ],
+        "title": "design_sessionArguments",
         "type": "object"
       }
     },
@@ -4767,6 +4900,18 @@
             ],
             "default": null,
             "title": "Notes"
+          },
+          "mesh_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Mesh Path"
           }
         },
         "required": [
@@ -4854,6 +4999,18 @@
             ],
             "default": null,
             "title": "Design Id"
+          },
+          "mesh_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Mesh Path"
           }
         },
         "required": [
