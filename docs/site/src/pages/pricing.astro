@@ -146,7 +146,7 @@ const pricingFaqSchema = {
             <li><span class="check">&#10003;</span> Natural-language to physical fabrication &mdash; text/image to validated 3D print</li>
             <li><span class="check">&#10003;</span> Multi-modal decoration engine &mdash; 3/mo (QR, photos, text, SVG, brand assets)</li>
             <li><span class="check">&#10003;</span> Closed-loop AI generation feedback &mdash; failed prints auto-improve future generations</li>
-            <li><span class="check">&#10003;</span> Printability engine (7-dimension analysis)</li>
+            <li><span class="check">&#10003;</span> Printability engine (7-dimension analysis with conservative material defaults)</li>
             <li><span class="check">&#10003;</span> Multi-part assembly (up to 10 parts)</li>
             <li><span class="check">&#10003;</span> Cost estimation &amp; recommendations</li>
             <li><span class="check">&#10003;</span> 14-component parametric catalog</li>
@@ -193,6 +193,10 @@ const pricingFaqSchema = {
             <li><span class="check">&#10003;</span> Design provenance, regression detection, cross-branch outcome A/B</li>
             <li><span class="check">&#10003;</span> Manual speed control &amp; print learning</li>
             <li><span class="check">&#10003;</span> Per-printer calibration grounding &amp; continuous learning &mdash; Kiln imports your OrcaSlicer / Bambu Studio / PrusaSlicer profiles AND keeps refining per-printer offsets from your actual prints. Freshness tracking knows when your printer drifts; ask &ldquo;why is this dimension what it is?&rdquo; and get a real answer with full provenance.</li>
+            <li><span class="check">&#10003;</span> Material-aware printability &mdash; PLA, PETG, ABS and every other Kiln-supported material get per-material checks. Free uses one conservative default; Pro tunes to what&rsquo;s on your spool.</li>
+            <li><span class="check">&#10003;</span> Kiln learns your printer&rsquo;s habits &mdash; knows whether yours prints walls thicker or thinner than designed, and tunes the warnings to fit.</li>
+            <li><span class="check">&#10003;</span> Every warning has a fix &mdash; Pro shows both the design fix (&ldquo;thicken to 1.5mm&rdquo;) and the slicer fix (&ldquo;or set 4+ perimeters&rdquo;), and can apply the slicer fix for you.</li>
+            <li><span class="check">&#10003;</span> Design matches what you asked for &mdash; tell Kiln what you&rsquo;re making, and it checks the result actually does the job. PLA in a cookie cutter? Approved. PLA in a water bottle? Steered to PETG.</li>
             <li><span class="check">&#10003;</span> REST API server</li>
           </ul>
           <button type="button" class="btn card-cta checkout-cta" data-tier="pro">Get Pro &#8594;</button>
