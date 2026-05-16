@@ -1008,10 +1008,15 @@ class _MonitoringToolsPlugin:
                     this (e.g. 120s) so the call returns cleanly instead
                     of being killed mid-wait.
                 event_types: Optional list of event-type strings to wait
-                    on.  Defaults to ``["vision.alert", "print.terminal"]``
-                    — failure alerts and print completion.  Pass a custom
-                    list to wait on different events (e.g.
-                    ``["vision.frame_captured"]`` to wake on every snapshot).
+                    on.  Defaults to
+                    ``["vision.alert", "print.terminal", "recovery.completed"]``
+                    — failure alerts, print completion, and recovery
+                    terminal state (so a recovered-and-resumed print
+                    doesn't leave the watcher hanging if no
+                    ``print.terminal`` fires for the failed attempt).
+                    Pass a custom list to wait on different events
+                    (e.g. ``["vision.frame_captured"]`` to wake on
+                    every snapshot).
 
             When ``block_until_event=True`` and an event arrives, the
             return payload includes ``events_received`` (list of events)
@@ -1036,7 +1041,9 @@ class _MonitoringToolsPlugin:
             from kiln.events import Event, EventType
 
             requested_types = (
-                event_types if event_types is not None else ["vision.alert", "print.terminal"]
+                event_types
+                if event_types is not None
+                else ["vision.alert", "print.terminal", "recovery.completed"]
             )
             try:
                 type_enums = {EventType(t) for t in requested_types}

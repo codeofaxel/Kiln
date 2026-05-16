@@ -57,7 +57,33 @@ class TestEventType:
         assert EventType.FILE_UPLOADED.value == "file.uploaded"
 
     def test_all_members_count(self):
-        assert len(EventType) == 62
+        assert len(EventType) == 65
+
+    def test_recovery_events(self):
+        # Recovery events surface kiln-pro's auto_recover lifecycle on
+        # the public bus so agents can wait on recovery without
+        # importing kiln_pro.
+        assert EventType.RECOVERY_NEEDED.value == "recovery.needed"
+        assert EventType.RECOVERY_STARTED.value == "recovery.started"
+        assert EventType.RECOVERY_COMPLETED.value == "recovery.completed"
+
+    def test_recovery_events_roundtrip(self):
+        # Each recovery event publishes and round-trips through the
+        # synchronous EventBus so subscribers see the data dict and
+        # source intact.
+        for et, data in [
+            (EventType.RECOVERY_NEEDED, {"printer_name": "p1", "trigger": "vision_alert"}),
+            (EventType.RECOVERY_STARTED, {"printer_name": "p1", "auto_recover_id": "ar-1"}),
+            (EventType.RECOVERY_COMPLETED, {"printer_name": "p1", "success": True}),
+        ]:
+            bus = EventBus()
+            received: list[Event] = []
+            bus.subscribe(et, received.append)
+            bus.publish(Event(type=et, data=data, source="test"))
+            assert len(received) == 1
+            assert received[0].type is et
+            assert received[0].data == data
+            assert received[0].source == "test"
 
     def test_from_value(self):
         assert EventType("job.queued") is EventType.JOB_QUEUED

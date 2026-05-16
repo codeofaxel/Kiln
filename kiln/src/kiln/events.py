@@ -187,6 +187,43 @@ class EventType(enum.Enum):
     MONITOR_SNAPSHOT = "monitor.snapshot"
     MONITOR_COMPLETE = "monitor.complete"
 
+    # Failure recovery (orchestrated by kiln-pro's auto_recover engine
+    # when the kiln-pro plugin is installed; the EventType values exist
+    # in public Kiln so agents can subscribe without an import-time
+    # dependency on the pro package).
+    #
+    # RECOVERY_NEEDED — a failure signal has crossed a threshold that
+    # warrants recovery action.  Published by the upstream detector
+    # (vision alert subscriber, stall watchdog, future signals).
+    # Payload SHOULD include: ``printer_name`` (str),
+    # ``trigger`` (str — "vision_alert", "stall", "operator", ...),
+    # ``failure_type`` (str — best-effort classification, e.g.
+    # "spaghetti"), ``recommended_action`` (str — short summary),
+    # and any upstream signal context (``alert_type``, ``watch_id``,
+    # ``frame_hash``, ``confidence``).  Publishing this does NOT imply
+    # recovery has started — auto-fire is gated separately.
+    #
+    # RECOVERY_STARTED — the recovery engine has committed to a
+    # strategy and begun executing it.  Payload SHOULD include:
+    # ``printer_name``, ``auto_recover_id`` (orchestration id),
+    # ``recovery_session_id`` (engine id), ``strategy`` (string),
+    # ``failure_type`` (string), ``trigger`` (string — "vision_alert",
+    # "operator", ...) so subscribers can distinguish system-initiated
+    # from user-initiated recoveries.
+    #
+    # RECOVERY_COMPLETED — recovery terminated, success or failure.
+    # Payload SHOULD include: ``printer_name``, ``auto_recover_id``,
+    # ``recovery_session_id``, ``success`` (bool), ``status`` (str —
+    # the AutoRecoverStatus terminal value), ``failure_reason``
+    # (optional str), ``strategy`` (str), ``failure_type`` (str), and
+    # ``notes`` (optional str).  Agents waiting on "this print to
+    # actually finish" should listen for this in addition to
+    # ``print.terminal`` — a recovered-then-resumed print may not
+    # publish ``print.terminal`` for the failed attempt.
+    RECOVERY_NEEDED = "recovery.needed"
+    RECOVERY_STARTED = "recovery.started"
+    RECOVERY_COMPLETED = "recovery.completed"
+
 
 @dataclass
 class Event:
