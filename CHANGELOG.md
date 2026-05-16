@@ -5,6 +5,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-05-16
+
 Hole-aware printability, automatic previews on the tools that change a
 mesh, audits that pick up where inspection left off, and recovery
 events on the bus so agents can wait on a recovered print instead of
