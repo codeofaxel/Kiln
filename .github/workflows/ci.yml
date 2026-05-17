@@ -39,6 +39,26 @@ jobs:
       - name: Verify installed dependency graph
         run: pip check
 
+      - name: Verify kiln-pro is NOT installed in public CI
+        # The public Kiln test surface must pass standalone — no
+        # leakage from the private kiln-pro overlay.  Past incident:
+        # 4 adhesion tests passed locally (where kiln-pro was on
+        # PYTHONPATH) but failed in CI without surface explanation
+        # until 2026-05-16.  This guard asserts the install context
+        # matches what users get from `pip install kiln3d`.
+        run: |
+          if pip show kiln-pro >/dev/null 2>&1; then
+            echo "::error::kiln-pro is installed in the public CI environment — public tests must run without it. Investigate which install step pulled it in."
+            pip show kiln-pro
+            exit 1
+          fi
+          if python -c "import kiln_pro" 2>/dev/null; then
+            echo "::error::kiln_pro is importable in the public CI environment (likely sys.path leakage). Public tests must run without it."
+            python -c "import kiln_pro; print('kiln_pro at:', kiln_pro.__file__)"
+            exit 1
+          fi
+          echo "✓ kiln-pro is correctly absent from the public CI environment"
+
       - name: Lint kiln
         run: cd kiln && ruff check src/
 

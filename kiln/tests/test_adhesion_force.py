@@ -267,3 +267,43 @@ class TestAdhesionForce:
             f"Compact geometry must remain 'secure', got "
             f"risk_level={report.adhesion_force.risk_level}"
         )
+
+    def test_model_confidence_high_on_clear_extreme(self, tmp_path):
+        """model_confidence is 'high' on a clearly-secure cube.
+
+        A 30x30x30 PLA cube produces a force ratio well above 10,
+        which is the upper boundary of the "approximate" middle
+        range.  Pins the contract that high-confidence verdicts
+        survive any future tuning of the boundary.
+        """
+        stl_path = str(tmp_path / "cube.stl")
+        _write_box_stl(stl_path, 30, 30, 30)
+
+        report = analyze_printability(stl_path, material="pla")
+        assert report.adhesion_force is not None
+        assert report.adhesion_force.model_confidence == "high", (
+            f"Cube ratio {report.adhesion_force.force_ratio} should be "
+            f"high-confidence secure; got model_confidence="
+            f"{report.adhesion_force.model_confidence}"
+        )
+
+    def test_model_confidence_approximate_when_geometry_guard_fires(self, tmp_path):
+        """Geometry-guard upgrade flips model_confidence to 'approximate'.
+
+        When the force-balance model says "secure" but the
+        geometry guard upgrades to "marginal", the verdict was
+        produced by a heuristic on top of an uncertain model —
+        so the confidence band must reflect that.  Pins the
+        contract so callers can branch on confidence to soften
+        wording in agent replies.
+        """
+        stl_path = str(tmp_path / "tower.stl")
+        _write_box_stl(stl_path, 1, 1, 100)
+
+        report = analyze_printability(stl_path, material="pla")
+        assert report.adhesion_force is not None
+        assert report.adhesion_force.risk_level in ("marginal", "likely_detach")
+        assert report.adhesion_force.model_confidence == "approximate", (
+            f"Geometry-guarded verdict should be 'approximate', got "
+            f"model_confidence={report.adhesion_force.model_confidence}"
+        )

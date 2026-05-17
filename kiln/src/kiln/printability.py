@@ -162,7 +162,21 @@ class ThermalStressAnalysis:
 
 @dataclass
 class AdhesionForceEstimate:
-    """Force-balance adhesion prediction."""
+    """Force-balance adhesion prediction.
+
+    ``risk_level`` is a best-effort approximation from a static
+    force-balance model.  It is reliable at the extremes (clear
+    detach vs. clear secure) and approximate in the middle range
+    where dynamic peel stress, thermal cycling, and material-
+    specific bed-chemistry effects dominate.  For high-aspect-ratio
+    prints in warp-prone materials (PP, Nylon, ABS), treat a
+    ``secure`` verdict as ``plausible`` rather than ``verified``.
+    The ``model_confidence`` field exposes this band per result so
+    callers can decide how much to trust it.
+
+    Empirical work to recalibrate the model against real outcomes
+    (see ``outcome_tracker``) is tracked as a separate project.
+    """
 
     adhesion_force_n: float  # estimated adhesion force in Newtons
     peel_force_n: float  # estimated thermal peel force in Newtons
@@ -171,6 +185,13 @@ class AdhesionForceEstimate:
     risk_level: str  # "secure", "marginal", "likely_detach"
     score_deduction: int  # 0 to -10
     recommendations: list[str]
+    # Confidence band on the verdict itself.  ``high`` for clear
+    # extremes (ratio outside [0.5, 10] OR an absolute likely_detach);
+    # ``approximate`` for the messy middle.  Callers SHOULD branch
+    # on this when surfacing a verdict to a user — e.g. soften an
+    # ``approximate``+``secure`` to "looks OK but worth a brim" in
+    # an agent reply, vs. trust a ``high``+``secure`` as-is.
+    model_confidence: str = "high"  # "high" | "approximate"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1305,6 +1326,20 @@ def _estimate_adhesion_force(
             "material physics on top.",
         ]
 
+    # Model-confidence band.  The static force-balance model is
+    # reliable at clear extremes (ratio > 10 = definitively secure;
+    # ratio < 0.5 = definitively likely_detach) and approximate in
+    # the messy middle range where dynamic peel stress and material-
+    # specific bed chemistry dominate.  A geometry-guard upgrade
+    # also marks the verdict as approximate, since the guard fired
+    # because the force-balance result was suspect for this shape.
+    if geometry_extreme:
+        model_confidence = "approximate"
+    elif force_ratio > 10.0 or force_ratio < 0.5:
+        model_confidence = "high"
+    else:
+        model_confidence = "approximate"
+
     return AdhesionForceEstimate(
         adhesion_force_n=round(adhesion_force, 3),
         peel_force_n=round(peel_force, 3),
@@ -1313,6 +1348,7 @@ def _estimate_adhesion_force(
         risk_level=risk_level,
         score_deduction=score_deduction,
         recommendations=recommendations,
+        model_confidence=model_confidence,
     )
 
 
