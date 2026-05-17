@@ -421,68 +421,26 @@ def _material_shrinkage_strain(material: str | None) -> float:
 
 _WARPING_PUBLIC_DEFAULTS: dict[str, Any] = {
     "geometry_score_rules": [
-        # Score-2 threshold lowered 20000 -> 15000 mm² so a 100x100x5
-        # plate (flat_area=20000) fires the full 2-point geometry hit
-        # rather than the boundary-missed 1-point hit.  Score-1 raised
-        # 2000 -> 4000 mm² so 40x40-ish compact parts (flat 3200) don't
-        # auto-trip a moderate verdict for warp-prone materials.
-        # Verified against the 70+-case calibration matrix: no false
-        # positives on the should-be-secure side; catches Nylon / PEEK /
-        # PP medium plates that the old thresholds missed.
-        {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 15000.0, "score": 2},
-        {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 6000.0,  "score": 1},
+        {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 20000.0, "score": 2},
+        {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 2000.0,  "score": 1},
         {"metric": "height_to_base_ratio", "operator": ">", "threshold": 5.0,     "score": 2},
-        {"metric": "height_to_base_ratio", "operator": ">", "threshold": 2.4,     "score": 1},
+        {"metric": "height_to_base_ratio", "operator": ">", "threshold": 3.0,     "score": 1},
         {"metric": "sharp_corners_at_base","operator": ">", "threshold": 10,      "score": 1},
     ],
     "material_multipliers": {"low": 0.5, "moderate": 1.0, "high": 1.5, "very_high": 2.0},
     "risk_thresholds":      {"critical": 3.0, "high": 2.0, "moderate": 1.0},
     "score_deductions":     {"critical": -20, "high": -12, "moderate": -6, "low": 0},
-    # Materials missing from public materials.json fall back to "moderate"
-    # tendency = 1.0 multiplier, which understates PEEK / PA6 / PC-alias /
-    # PA12 / HIPS / ABS-CF / ASA-CF.  These overrides restore datasheet-
-    # grounded multipliers (Stratasys / Solvay / Bambu wiki) without
-    # requiring schema-complete materials.json entries.
-    "material_specific_multipliers": {
-        "peek": 2.0,
-        "pa6": 2.0,
-        "pa12": 1.5,
-        "hips": 1.0,
-        "abs_cf": 1.0,
-        "asa_cf": 1.0,
-        "pc": 2.0,
-    },
-    # Per-material baseline-risk floor (free tier).  Warp-prone materials
-    # carry intrinsic stress that compact geometry alone doesn't surface
-    # — a 30mm PP cube has no flat-area / aspect-ratio signal but still
-    # lifts off the bed because PP shrinks 1.5-2% during cooling.  The
-    # baseline adds a per-material risk floor before geometry is layered
-    # on; the conservative free-tier values below catch the worst
-    # offenders (PP, polycarbonate, nylon, ABS) without false-positives
-    # on small low-warp prints.  Materials not listed default to 0.0.
-    # Pro overlay supplies a more aggressive, finer-grained schedule
-    # plus higher resolution between adjacent risk levels — see the
-    # ``printability_judgment`` overlay's ``warping`` block.
-    #
-    # Schedule grounded in /tmp/warping_datasheet_research.md (datasheet
-    # CTE + linear-shrinkage) cross-checked against the curated
-    # warping_factor values in kiln_pro/data/printability_pro_overlay.json
-    # (~50-60% of the Pro values; Pro retains the upside).
-    "material_baseline_risk": {
-        # Low-warp materials (PLA family, PETG family, TPU, CF-loaded
-        # PLA/PETG, PET-CF, PVB) intentionally absent -> default 0.0.
-        "hips": 0.2, "petg_hf": 0.15, "pva": 0.25,
-        "abs": 0.4, "asa": 0.4,
-        "abs_cf": 0.2, "asa_cf": 0.25,
-        "pc_abs": 0.35,
-        "polycarbonate": 0.45, "pc": 0.45,
-        "nylon": 0.5, "pa": 0.5,
-        "pa12": 0.45,
-        "cf_nylon": 0.3,
-        "pa6_gf": 0.45,
-        "pa6": 0.55,
-        "pp": 0.7, "peek": 1.0,
-    },
+    # ``material_baseline_risk`` and ``material_specific_multipliers``
+    # are intentionally absent in the free-tier safety floor.  The
+    # formula ``(baseline + geometry_score) * material_multiplier``
+    # reads both as ``cfg.get(..., {})``-defaulted dicts; absent ->
+    # empty -> baseline 0.0 and multiplier falls through to the
+    # tendency mapping above.  Free tier = geometric risk + textbook
+    # tendency labels.  Pro overlay (kiln_pro/data/
+    # printability_judgment_pro_overlay.json) supplies the curated
+    # per-material baselines + multiplier overrides (datasheet-grounded
+    # against NatureWorks / BASF / Stratasys / Solvay / Bambu wiki /
+    # passive-components.eu) — that's the engineering-moat overlay.
     "recommendation_rules": [
         {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 2000.0,
          "template": "Large flat surface detected ({flat_area_total_mm2:.0f}mm²). Add a 5-8mm brim to resist corner lifting."},
