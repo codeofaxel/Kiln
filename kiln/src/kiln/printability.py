@@ -421,11 +421,30 @@ def _material_shrinkage_strain(material: str | None) -> float:
 
 _WARPING_PUBLIC_DEFAULTS: dict[str, Any] = {
     "geometry_score_rules": [
+        # Textbook-geometric safety-floor thresholds.  No per-material
+        # curation here — Pro overlay can override the same shape with
+        # tighter values; these are the floor any FDM practitioner
+        # would agree on.  Tightened 2026-05-17:
+        # - flat>2000 -> flat>4000 score 1.  The pre-rework 2000 floor
+        #   fired score 1 for compact prints (40x40x?, 60x30x?) at
+        #   3000-4000 mm² flat area, producing "moderate" verdicts on
+        #   tall PLA vases / small ASA brackets / compact ABS cubes
+        #   that PLA-family / ASA-family prints handle fine.  4000 is
+        #   the threshold above which flat-area genuinely matters even
+        #   for forgiving materials (any FDM textbook agrees).
+        # - h/b>3 -> h/b>2.4 score 1.  Tall-thin geometry concentrates
+        #   warping stress at the base regardless of material; 2.4 is
+        #   the threshold above which the practical "tall thin" label
+        #   applies (CNC Kitchen / Stefan Hermann convention).
+        # - sharp_corners>10 -> sharp_corners>8 score 1.  Same idea:
+        #   sharp corners curl at the base in any high-CTE material;
+        #   8 corners (2 per side on a typical box base) is the floor
+        #   above which curling becomes the dominant failure mode.
         {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 20000.0, "score": 2},
-        {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 2000.0,  "score": 1},
+        {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 4000.0,  "score": 1},
         {"metric": "height_to_base_ratio", "operator": ">", "threshold": 5.0,     "score": 2},
-        {"metric": "height_to_base_ratio", "operator": ">", "threshold": 3.0,     "score": 1},
-        {"metric": "sharp_corners_at_base","operator": ">", "threshold": 10,      "score": 1},
+        {"metric": "height_to_base_ratio", "operator": ">", "threshold": 2.4,     "score": 1},
+        {"metric": "sharp_corners_at_base","operator": ">", "threshold": 8,       "score": 1},
     ],
     "material_multipliers": {"low": 0.5, "moderate": 1.0, "high": 1.5, "very_high": 2.0},
     "risk_thresholds":      {"critical": 3.0, "high": 2.0, "moderate": 1.0},
