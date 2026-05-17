@@ -1133,7 +1133,6 @@ def _analyze_bed_adhesion(
 
 
 _BRIDGE_SUBSTITUTION_MAX_SPAN_MM = 30.0
-_BRIDGE_SUBSTITUTION_MIN_OVERHANG_COVERAGE = 0.7
 
 
 def _likely_bridge_substituted(
