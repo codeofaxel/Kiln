@@ -2793,10 +2793,53 @@ def _generate_print_comment(
     return " ".join(comments)
 
 
+def _resolve_brief_context(brief_id: str) -> dict | None:
+    """Load the saved-goal context for *brief_id* via kiln-pro, or None.
+
+    Used by ``monitor_print`` and ``await_print_completion`` to surface a
+    "Goal: ..." line / dict alongside their primary print reporting.
+    Best-effort: kiln-pro absent silently returns None.  Same broad
+    except as the audit honor-gate hook in ``original_design`` — a
+    print-reporting tool must never fail because of an optional
+    goal-context lookup.
+    """
+    if not brief_id:
+        return None
+    try:
+        from kiln_pro.design_brief.context import brief_context_dict
+        return brief_context_dict(brief_id)
+    except Exception:
+        logger.debug(
+            "_resolve_brief_context: skipped (best-effort)",
+            exc_info=True,
+        )
+        return None
+
+
+def _format_goal_line_for_monitor(brief_id: str) -> str:
+    """Render the saved-goal context as a single ``Goal: ...`` line.
+
+    Empty string when there's nothing to render — caller appends only
+    when non-empty.  Format mirrors the rest of ``monitor_print``'s
+    plain-English report.
+    """
+    ctx = _resolve_brief_context(brief_id)
+    if ctx is None:
+        return ""
+    duty = ctx.get("duty_label") or ctx.get("duty") or ""
+    env = ctx.get("environment") or []
+    if duty and env:
+        return f"Goal: {duty} design for {', '.join(env)}"
+    if duty:
+        return f"Goal: {duty} design"
+    return ""
+
+
 @mcp.tool()
 def monitor_print(
     printer_name: str | None = None,
     include_snapshot: bool = True,
+    brief_id: str = "",
 ) -> str | dict:
     """One-shot print status report (human-readable text: progress, temps, speed, cost, ETA).
 
@@ -2808,6 +2851,12 @@ def monitor_print(
 
     :param printer_name: Target printer name.  Omit for the default printer.
     :param include_snapshot: Whether to capture and save a camera snapshot.
+    :param brief_id: Optional saved-goal id from ``design_session``.  When
+        the brief resolves, the report appends a single ``Goal:`` line
+        with the design's duty and environment — so the agent watching
+        a print can answer "is this the right design for the goal?"
+        without a separate lookup.  Best-effort: a missing kiln-pro
+        install or an unresolvable brief silently skips the line.
     """
     try:
         if printer_name:
@@ -3177,6 +3226,14 @@ def monitor_print(
             lines.append(f"- {_auto_pause_line}")
         if _reroute_line:
             lines.append(f"- {_reroute_line}")
+        # B10 brief tail: surface the saved-goal context when the caller
+        # supplied a brief_id and kiln-pro can resolve it.  Best-effort —
+        # absent / unresolvable brief silently omits the line so the
+        # report stays clean.
+        goal_line = _format_goal_line_for_monitor(brief_id)
+        if goal_line:
+            lines.append(goal_line)
+
         lines.extend(
             [
                 f"Camera: {snapshot_line}",
@@ -8044,6 +8101,7 @@ def await_print_completion(
     job_id: str | None = None,
     timeout: int = 7200,
     poll_interval: int = 15,
+    brief_id: str = "",
 ) -> dict:
     """Wait for the current print to finish and return the final status.
 
@@ -8058,10 +8116,16 @@ def await_print_completion(
             omitted, monitors the printer directly for idle/error state.
         timeout: Maximum seconds to wait (default 7200 = 2 hours).
         poll_interval: Seconds between status checks (default 15).
+        brief_id: Optional saved-goal id from ``design_session``.  When
+            the brief resolves, the terminal-outcome response gains a
+            ``design_goal`` block with the design's duty / environment /
+            safety notes — so the agent surfacing the print result can
+            answer "did this match the goal?" without a separate
+            lookup.  Best-effort: missing kiln-pro silently skips.
 
     Returns a dict with ``outcome`` (completed / failed / cancelled /
-    timeout), final printer state, elapsed time, and completion
-    percentage history.
+    timeout), final printer state, elapsed time, completion percentage
+    history, and (when ``brief_id`` resolves) a ``design_goal`` block.
     """
     if err := _check_auth("print"):
         return err
@@ -8069,17 +8133,28 @@ def await_print_completion(
     start = time.time()
     progress_log: list[dict] = []
     last_pct: float | None = None
+    # B10: resolve once at entry — the brief context is stable for the
+    # lifetime of this poll loop.  We attach the same dict to every
+    # terminal-state response so the agent always sees the goal
+    # alongside the outcome.
+    _goal_ctx = _resolve_brief_context(brief_id)
+
+    def _attach_goal(result: dict) -> dict:
+        """Add the design_goal block to a terminal-state result dict."""
+        if _goal_ctx is not None:
+            result["design_goal"] = _goal_ctx
+        return result
 
     while True:
         elapsed = time.time() - start
         if elapsed >= timeout:
-            return {
+            return _attach_goal({
                 "success": True,
                 "outcome": "timeout",
                 "elapsed_seconds": round(elapsed, 1),
                 "message": f"Timed out after {timeout}s waiting for print to finish.",
                 "progress_log": progress_log[-20:],
-            }
+            })
 
         try:
             # --- Job-based tracking (via queue) ---
@@ -8090,30 +8165,30 @@ def await_print_completion(
                     return _error_dict(f"Job {job_id!r} not found.", code="JOB_NOT_FOUND")
 
                 if job.status == JobStatus.COMPLETED:
-                    return {
+                    return _attach_goal({
                         "success": True,
                         "outcome": "completed",
                         "job": job.to_dict(),
                         "elapsed_seconds": round(elapsed, 1),
                         "progress_log": progress_log[-20:],
-                    }
+                    })
                 if job.status == JobStatus.FAILED:
-                    return {
+                    return _attach_goal({
                         "success": True,
                         "outcome": "failed",
                         "job": job.to_dict(),
                         "error": job.error,
                         "elapsed_seconds": round(elapsed, 1),
                         "progress_log": progress_log[-20:],
-                    }
+                    })
                 if job.status == JobStatus.CANCELLED:
-                    return {
+                    return _attach_goal({
                         "success": True,
                         "outcome": "cancelled",
                         "job": job.to_dict(),
                         "elapsed_seconds": round(elapsed, 1),
                         "progress_log": progress_log[-20:],
-                    }
+                    })
 
                 # Still running — log progress
                 time.sleep(poll_interval)
@@ -8135,30 +8210,30 @@ def await_print_completion(
                 last_pct = pct
 
             if state.state == PrinterStatus.IDLE:
-                return {
+                return _attach_goal({
                     "success": True,
                     "outcome": "completed",
                     "state": state.state.value,
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
-                }
+                })
             if state.state == PrinterStatus.ERROR:
-                return {
+                return _attach_goal({
                     "success": True,
                     "outcome": "failed",
                     "state": state.state.value,
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
-                }
+                })
             if state.state == PrinterStatus.OFFLINE:
-                return {
+                return _attach_goal({
                     "success": True,
                     "outcome": "failed",
                     "state": state.state.value,
                     "error": "Printer went offline during print.",
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
-                }
+                })
 
         except (PrinterError, RuntimeError) as exc:
             return _error_dict(f"Failed to poll print status: {exc}. Check that the printer is online.")
