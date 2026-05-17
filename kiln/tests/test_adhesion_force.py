@@ -215,3 +215,55 @@ class TestAdhesionForce:
             f"force_ratio {report.adhesion_force.force_ratio} != "
             f"adhesion/peel {expected_ratio}"
         )
+
+    def test_geometry_guard_flags_extreme_aspect_ratio(self, tmp_path):
+        """Geometry guard: aspect_ratio > 50 forces secure → marginal.
+
+        Pure-geometry check that fires regardless of material or
+        overlay availability.  Catches the failure mode where the
+        force-balance model says ``secure`` but the bounding-box
+        aspect ratio is extreme enough that dynamic peel stress
+        will detach the print in practice.  Runs in clean CI
+        without needing the kiln-pro overlay.
+
+        Test geometry: 1x1x100mm tower (aspect ratio 100, well
+        above the 50 threshold).  Force balance with public
+        defaults would otherwise rate this "secure" because the
+        small contact area also means small peel force.
+        """
+        stl_path = str(tmp_path / "thin_tower.stl")
+        _write_box_stl(stl_path, 1, 1, 100)
+
+        # PLA is intentional: PLA's strong adhesion means without
+        # the geometry guard, even PLA at this aspect ratio passes
+        # the force-balance check.  This pins the guard's effect.
+        report = analyze_printability(stl_path, material="pla")
+        assert report.adhesion_force is not None
+        assert report.adhesion_force.risk_level in ("marginal", "likely_detach"), (
+            f"Geometry guard should have flagged aspect ratio 100, "
+            f"got risk_level={report.adhesion_force.risk_level}"
+        )
+        recs = " ".join(report.adhesion_force.recommendations).lower()
+        assert any(
+            kw in recs for kw in ("aspect", "tall", "narrow", "geometry")
+        ), (
+            f"Expected geometry-based recommendation, got: "
+            f"{report.adhesion_force.recommendations}"
+        )
+
+    def test_geometry_guard_leaves_normal_geometry_secure(self, tmp_path):
+        """Geometry guard does NOT downgrade compact prints to marginal.
+
+        A 30x30x30 PLA cube has aspect ratio 1.0 — far below the
+        50 threshold — so the guard must not fire.  Pins the
+        no-false-positive side of the contract.
+        """
+        stl_path = str(tmp_path / "cube.stl")
+        _write_box_stl(stl_path, 30, 30, 30)
+
+        report = analyze_printability(stl_path, material="pla")
+        assert report.adhesion_force is not None
+        assert report.adhesion_force.risk_level == "secure", (
+            f"Compact geometry must remain 'secure', got "
+            f"risk_level={report.adhesion_force.risk_level}"
+        )

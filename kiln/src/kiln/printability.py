@@ -437,6 +437,17 @@ _ADHESION_FORCE_PUBLIC_DEFAULTS: dict[str, Any] = {
     "score_deductions": {"secure": 0, "marginal": -3, "likely_detach": -10},
     "peel_force_scale": 0.01,
     "poor_adhesion_materials": ["pp", "nylon", "pa", "peek"],
+    # Geometry-only adhesion guard.  The force-balance model uses
+    # static material constants and undercounts dynamic peel stress
+    # on extreme aspect ratios — even Pro-tier per-material values
+    # rate a 2x2x250mm PP tower as "secure" via force ratio alone,
+    # despite real-world detach risk.  When the bounding-box aspect
+    # ratio (z / min(x,y)) exceeds this threshold, the geometry
+    # itself is enough to warrant a "marginal" verdict regardless of
+    # the force-balance result.  Set to ``None`` in the overlay to
+    # disable.  Tracked separately from the model rework planned for
+    # the next release; this is the surgical pre-rework guard.
+    "aspect_ratio_extreme_threshold": 50.0,
     "recommendation_rules": [
         {"metric": "risk_level", "operator": "==", "threshold": "likely_detach",
          "template": "Part will likely detach during printing. Use a brim (8mm+), glue stick, or raft."},
@@ -1244,6 +1255,28 @@ def _estimate_adhesion_force(
     else:
         risk_level = "likely_detach"
 
+    # Geometry-only adhesion guard.  The force-balance model is
+    # decent at extremes but undercounts dynamic peel stress on
+    # tall-narrow prints in the middle range.  When aspect ratio
+    # is extreme, the geometry itself warrants a "marginal" verdict
+    # regardless of what the force ratio says — a 2x2x250mm tower
+    # detaches in practice even when the static force balance
+    # passes.  Only upgrades secure→marginal; never downgrades
+    # an already-flagged verdict.  Disabled by setting the
+    # threshold to ``None`` in the overlay.
+    min_base_dim = min(x_span, y_span)
+    aspect_ratio = (z_span / min_base_dim) if min_base_dim > 0.1 else 0.0
+    # Default to 50 when the overlay doesn't override.  Overlay can
+    # set this to ``None`` to disable the guard entirely (e.g. a
+    # caller who has their own geometry analysis).
+    aspect_threshold = cfg.get("aspect_ratio_extreme_threshold", 50.0)
+    geometry_extreme = (
+        aspect_threshold is not None
+        and aspect_ratio > float(aspect_threshold)
+    )
+    if geometry_extreme and risk_level == "secure":
+        risk_level = "marginal"
+
     score_deduction = int(cfg.get("score_deductions", {}).get(risk_level, 0))
 
     poor_materials = cfg.get("poor_adhesion_materials", [])
@@ -1255,6 +1288,22 @@ def _estimate_adhesion_force(
     recommendations = _apply_recommendation_rules(
         cfg.get("recommendation_rules", []), rec_metrics,
     )
+
+    # The geometry guard is a code-level upgrade (not a config-driven
+    # rule), so its explanation is appended here rather than via the
+    # rules system.  This ensures the recommendation fires for both
+    # free tier (public defaults) and Pro tier (overlay), since the
+    # overlay's own ``recommendation_rules`` may not include this
+    # specific guard.
+    if geometry_extreme:
+        recommendations = list(recommendations) + [
+            f"Tall, narrow geometry (aspect ratio {aspect_ratio:.0f}) "
+            "concentrates peel stress at the base regardless of "
+            "material. Use a brim or raft and verify your bed "
+            "surface is clean and level. The force-balance verdict "
+            "alone can understate this risk; Kiln Pro adds per-"
+            "material physics on top.",
+        ]
 
     return AdhesionForceEstimate(
         adhesion_force_n=round(adhesion_force, 3),
