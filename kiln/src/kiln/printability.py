@@ -469,6 +469,25 @@ _ADHESION_FORCE_PUBLIC_DEFAULTS: dict[str, Any] = {
     # disable.  Tracked separately from the model rework planned for
     # the next release; this is the surgical pre-rework guard.
     "aspect_ratio_extreme_threshold": 50.0,
+    # Aspect-ratio multiplier on peel force.  Tall-narrow geometry
+    # concentrates peel stress at the base nonlinearly — the static
+    # model linear in z systematically undercounts this for aspect
+    # ratios above ~10.  Multiplies peel_force by
+    # ``max(1.0, (aspect_ratio / 10) ** exponent)`` so the verdict
+    # for messy-middle geometries shifts toward "marginal" without
+    # affecting compact prints (aspect <= 10 → no change).
+    #
+    # Exponent calibration: 1.5 chosen against the 24-case sweep
+    # (see kiln/tests/test_adhesion_force.py calibration matrix +
+    # kiln-pro tasks.md adhesion model section).  Strict improvement
+    # over no multiplier: catches PP narrow column 10x10x200 with
+    # zero false positives on the 23 safe-print sample.  Set to
+    # ``None`` in the overlay to disable; tune to a different value
+    # (e.g. 2.0 catches one more case but introduces a false
+    # positive on PLA candleholder 4x4x200).  Awaiting empirical
+    # recalibration from outcome_tracker data — see Layer 3 in
+    # kiln-pro tasks.md.
+    "aspect_ratio_peel_exponent": 1.5,
     "recommendation_rules": [
         {"metric": "risk_level", "operator": "==", "threshold": "likely_detach",
          "template": "Part will likely detach during printing. Use a brim (8mm+), glue stick, or raft."},
@@ -1262,9 +1281,26 @@ def _estimate_adhesion_force(
     y_span = bbox["y_max"] - bbox["y_min"]
     z_span = bbox["z_max"] - bbox["z_min"]
 
+    min_base_dim = min(x_span, y_span)
+    aspect_ratio = (z_span / min_base_dim) if min_base_dim > 0.1 else 0.0
+
     adhesion_force = contact_area_mm2 * adhesion_strength
     longest_xy = max(x_span, y_span)
     peel_force = shrinkage_strain * longest_xy * z_span * peel_scale
+
+    # Aspect-ratio peel multiplier.  Tall-narrow geometry
+    # concentrates peel stress at the base in a nonlinear way the
+    # static linear-in-z formula doesn't capture.  Multiplies peel
+    # by ``max(1.0, (aspect / 10) ** exponent)`` so compact prints
+    # (aspect <= 10) get unchanged peel, while tall-narrow prints
+    # see proportionally more peel pressure on their small base.
+    # Disabled by setting the exponent to ``None`` in the overlay.
+    # See _ADHESION_FORCE_PUBLIC_DEFAULTS docstring for calibration
+    # rationale (1.5 chosen against the 24-case sweep).
+    aspect_exp = cfg.get("aspect_ratio_peel_exponent", 1.5)
+    if aspect_exp is not None and aspect_ratio > 10.0:
+        peel_force *= (aspect_ratio / 10.0) ** float(aspect_exp)
+
     force_ratio = adhesion_force / max(peel_force, 0.001)
     will_detach = force_ratio < 1.0
 
@@ -1285,8 +1321,6 @@ def _estimate_adhesion_force(
     # passes.  Only upgrades secure→marginal; never downgrades
     # an already-flagged verdict.  Disabled by setting the
     # threshold to ``None`` in the overlay.
-    min_base_dim = min(x_span, y_span)
-    aspect_ratio = (z_span / min_base_dim) if min_base_dim > 0.1 else 0.0
     # Default to 50 when the overlay doesn't override.  Overlay can
     # set this to ``None`` to disable the guard entirely (e.g. a
     # caller who has their own geometry analysis).

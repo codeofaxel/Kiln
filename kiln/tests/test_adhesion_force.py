@@ -324,9 +324,12 @@ class TestAdhesionForce:
 # match the new model and verify catch rate improves toward the
 # ``reality`` column.
 #
-# Failure rate today: ~50% catch on truly-risky prints; 0% false
-# positives on safe prints.  Target after Layer 2: ≥90% catch with
-# 0 false positives.
+# Catch rate today (after geometry guard + aspect-ratio peel
+# multiplier with exponent 1.5): 5/8 on truly-risky prints; 0
+# false positives on the 23 safe-print sample.  Target after the
+# rest of Layer 2 (thermal-stress contribution, perimeter-aware
+# adhesion, threshold recalibration): ≥90% catch with 0 false
+# positives.
 # ---------------------------------------------------------------------------
 
 
@@ -356,14 +359,15 @@ _CALIBRATION_MATRIX = [
     ("PLA candleholder",      "pla",      4,   4, 200, "secure",  "secure"),
     ("PETG tall tower",       "petg",    20,  20, 300, "secure",  "secure"),
     # ── SHOULD-BE-FLAGGED PRINTS (catch rate target ≥90% post-Layer-2) ──
-    # CAUGHT TODAY (geometry guard fires at aspect > 50):
-    ("Hairlike PLA tower",    "pla",      1,   1, 100, "marginal", "likely_detach"),
+    # CAUGHT TODAY (geometry guard at aspect>50 + aspect-ratio peel
+    # multiplier with exponent 1.5):
+    ("Hairlike PLA tower",    "pla",      1,   1, 100, "likely_detach", "likely_detach"),
     ("PP test tall tower",    "pp",       2,   2, 250, "likely_detach", "likely_detach"),
-    ("PP needle pillar",      "pp",       3,   3, 300, "marginal", "likely_detach"),
-    ("PETG ultra-tall thin",  "petg",     5,   5, 400, "marginal", "marginal"),
+    ("PP needle pillar",      "pp",       3,   3, 300, "likely_detach", "likely_detach"),
+    ("PETG ultra-tall thin",  "petg",     5,   5, 400, "likely_detach", "marginal"),
+    ("PP narrow column",      "pp",      10,  10, 200, "marginal",  "marginal"),
     # MISSED TODAY (Layer 2 work needs to catch these):
     ("Skyscraper PLA",        "pla",     10,  10, 500, "secure",  "marginal"),
-    ("PP narrow column",      "pp",      10,  10, 200, "secure",  "marginal"),
     ("Nylon thin tower",      "nylon",   10,  10, 200, "secure",  "marginal"),
     ("ABS tall thin",         "abs",     10,  10, 250, "secure",  "marginal"),
 ]
