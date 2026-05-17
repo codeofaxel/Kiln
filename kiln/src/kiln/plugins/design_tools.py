@@ -21,7 +21,7 @@ class _DesignToolsPlugin:
     """Design intelligence tools — knowledge, constraints, recommendations.
 
     Tools (FDM desktop):
-        - get_design_brief
+        - analyze_design_requirements
         - build_generation_prompt
         - audit_original_design
         - get_material_design_profile
@@ -69,17 +69,24 @@ class _DesignToolsPlugin:
         """Register design intelligence tools with the MCP server."""
 
         @mcp.tool()
-        def get_design_brief(
+        def analyze_design_requirements(
             requirements: str,
             material: str | None = None,
         ) -> dict:
-            """Get a complete design brief for a functional requirement.
+            """Analyze a functional requirement and return technical recommendations.
 
-            This is the PRIMARY tool agents should call before designing or
-            generating any 3D model.  Given a natural language description of
-            what the object needs to do, returns material recommendations,
-            applicable design patterns, dimensional constraints, print
-            orientation rules, and expert guidance notes.
+            This is the internal-lookup tool that resolves a natural-language
+            requirement into material recommendations, applicable design
+            patterns, dimensional constraints, print orientation rules, and
+            expert guidance notes.
+
+            For the user-facing flow — capturing what a user is making at the
+            duty / environment / materials / safety layer and producing a
+            saved goal that drives generation, the audit, and the post-print
+            review — call ``design_session(verb="start", idea="...")`` first.
+            That tool internally calls this one for technical lookups; agents
+            calling ``analyze_design_requirements`` directly should treat it
+            as a pre-design analysis pass, not the user-facing entry point.
 
             Examples:
                 "shelf bracket that holds 10 lbs of books"
@@ -99,15 +106,17 @@ class _DesignToolsPlugin:
             from kiln.design_intelligence import get_design_constraints
 
             try:
-                brief = get_design_constraints(
+                analysis = get_design_constraints(
                     requirements,
                     material=material,
                 )
-                result = brief.to_dict()
+                result = analysis.to_dict()
                 result["success"] = True
                 return result
             except Exception as exc:
-                _logger.error("Design brief failed: %s", exc, exc_info=True)
+                _logger.error(
+                    "analyze_design_requirements failed: %s", exc, exc_info=True,
+                )
                 return {"success": False, "error": str(exc)}
 
         @mcp.tool()
@@ -684,7 +693,7 @@ class _DesignToolsPlugin:
 
             Args:
                 file_path: Path to STL or OBJ file.
-                requirements: Same requirements text used for get_design_brief.
+                requirements: Same requirements text used for analyze_design_requirements.
                 material: Optional material (e.g. "petg").
             """
             from kiln.design_validator import validate_design

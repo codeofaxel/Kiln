@@ -10263,6 +10263,107 @@ def versions_rollback(design_id: str, version_id: str, json_mode: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# goals — saved design sessions (kiln-pro DesignBrief artifacts)
+# ---------------------------------------------------------------------------
+
+
+@cli.group("goals")
+def goals_group() -> None:
+    """Manage saved design goals captured by `design_session`."""
+    pass
+
+
+@goals_group.command("list")
+@click.option(
+    "--filter",
+    "filter_status",
+    type=click.Choice([
+        "all", "needs_questions", "ready_to_generate",
+        "matches_what_you_asked_for",
+    ]),
+    default="all",
+    help="Filter by goal status (default: all).",
+)
+@click.option("--limit", default=50, help="Max sessions to show (default 50).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def goals_list(filter_status: str, limit: int, json_mode: bool) -> None:
+    """List your saved design goals.
+
+    A saved goal is what `design_session` writes when you tell Kiln
+    what you're making and answer the duty / environment / materials /
+    safety questions. This is the CLI equivalent of the web /goals
+    inbox: shows what you've committed and which prints have honored
+    each goal.
+
+    Requires kiln-pro (the design_session lifecycle lives there).
+    """
+    try:
+        from kiln_pro.design_brief import list_briefs
+    except ImportError:
+        click.echo(
+            format_error(
+                "Saved goals require Kiln Pro (the design_session lifecycle "
+                "and its DesignBrief store live in kiln-pro). Install with: "
+                "pip install kiln-pro — or upgrade at https://kiln3d.com/pricing",
+                code="REQUIRES_KILN_PRO",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+    # Map the friendly CLI filter to the substrate enum.
+    substrate_filter: str | None = {
+        "all": None,
+        "needs_questions": "needs_clarification",
+        "ready_to_generate": "ready",
+        "matches_what_you_asked_for": "honored",
+    }[filter_status]
+
+    try:
+        briefs = list_briefs(filter_status=substrate_filter)[:max(1, min(limit, 1000))]
+        if json_mode:
+            click.echo(format_response(
+                "success",
+                data={
+                    "sessions": [b.to_dict() for b in briefs],
+                    "count": len(briefs),
+                    "filter_status": filter_status,
+                },
+                json_mode=True,
+            ))
+            return
+        if not briefs:
+            click.echo(
+                "No saved goals yet."
+                if filter_status == "all"
+                else f"No goals with status '{filter_status}'."
+            )
+            click.echo(
+                "  Start one by telling the agent: "
+                "'design_session(verb=\"start\", idea=\"...\")'"
+            )
+            return
+        click.echo(f"Saved goals ({len(briefs)} shown):")
+        for b in briefs:
+            short = b.brief_id[:8]
+            status_label = {
+                "needs_clarification": "needs questions",
+                "ready":               "ready",
+                "honored":             "honored",
+            }.get(b.status, b.status)
+            env = ", ".join(b.environment) if b.environment else "-"
+            click.echo(
+                f"  {short}  [{status_label}]  {b.idea or '<no idea>'}"
+            )
+            click.echo(
+                f"           duty: {b.duty or '-'} | environment: {env}"
+            )
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # ams
 # ---------------------------------------------------------------------------
 

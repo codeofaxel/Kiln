@@ -40,7 +40,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing)) add Git-for-3D ver
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
 - **No printer? No problem** — Outsource jobs to Craftcloud's 150+ manufacturing services through the hosted proxy, or use direct mode with your own provider credentials.
-- **AI-native** — 799 MCP capabilities and 220 CLI commands built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — 800 MCP capabilities and 220 CLI commands built for AI agents. Not a web UI with an API bolted on.
 - **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print.
 - **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command.
 - **Manuals included** — Multi-part prints can generate printable PDF assembly manuals with Bill of Materials, isometric step renders, mating arrows, and pause-and-check verification gates. (Pro)
@@ -499,7 +499,7 @@ kiln signin
 kiln pair KLN-ABCD-EFGH
 ```
 
-Tool tiers automatically match model capability: **essential** (16 tools) for smaller models, **standard** (61 tools) for mid-range, **full** (133 tools) for stronger models. All 792 tools are available via MCP (`kiln serve`).
+Tool tiers automatically match model capability: **essential** (16 tools) for smaller models, **standard** (61 tools) for mid-range, **full** (133 tools) for stronger models. All 793 tools are available via MCP (`kiln serve`).
 
 ### OctoPrint CLI
 
@@ -518,7 +518,7 @@ octoprint-cli print myfile.gcode --confirm
 
 ## MCP Tools (Selected)
 
-The Kiln MCP server (`kiln serve`) exposes **792 tools** to agents, plus prompts and resources for **799 total MCP capabilities**. Key tools are listed below — MCP clients can use `get_skill_manifest` and ToolSearch-style discovery to browse the complete catalog.
+The Kiln MCP server (`kiln serve`) exposes **792 tools** to agents, plus prompts and resources for **800 total MCP capabilities**. Key tools are listed below — MCP clients can use `get_skill_manifest` and ToolSearch-style discovery to browse the complete catalog.
 
 | Tool | Description |
 |------|-------------|
@@ -711,7 +711,7 @@ The Kiln MCP server (`kiln serve`) exposes **792 tools** to agents, plus prompts
 | `log_project_cost` | Log a cost entry (material, printer time, labor, etc.) against a project (Enterprise) |
 | `project_cost_summary` | Aggregate cost summary with budget tracking for a project (Enterprise) |
 | `client_cost_report` | Cross-project cost report for a client (Enterprise) |
-| `get_design_brief` | Complete design brief for a functional requirement (materials, patterns, constraints) |
+| `analyze_design_requirements` | Functional-requirements analysis (materials, patterns, constraints). For the user-facing saved-goal flow that drives the audit + post-print review, use `design_session` (kiln-pro). |
 | `build_generation_prompt` | Turn a natural-language idea into a printer-aware, design-constrained generation prompt |
 | `audit_original_design` | Harsh original-design audit: brief + validation + printability + diagnostics + feedback |
 | `get_material_design_profile` | Full engineering properties for a 3D printing material |

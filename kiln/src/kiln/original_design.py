@@ -61,7 +61,7 @@ class OriginalDesignAudit:
     ready_for_print: bool
     blockers: list[str]
     next_actions: list[str]
-    design_brief: dict[str, Any]
+    design_requirements: dict[str, Any]
     enhanced_prompt: dict[str, Any]
     mesh_validation: dict[str, Any]
     printability: dict[str, Any]
@@ -140,7 +140,7 @@ class OriginalDesignGeneration:
     best_result_path: str | None
     summary: str
     next_actions: list[str]
-    design_brief: dict[str, Any]
+    design_requirements: dict[str, Any]
     initial_prompt: dict[str, Any]
     attempts: list[OriginalDesignGenerationAttempt] = field(default_factory=list)
 
@@ -281,7 +281,7 @@ def _resolve_original_design_provider(
 
     if _looks_like_openscad_code(requirements_text):
         raise GenerationError(
-            "generate_original_design expects a natural-language design brief, not "
+            "generate_original_design expects natural-language requirements, not "
             "raw OpenSCAD code. Use generate_model(provider='openscad') for direct "
             "code compilation.",
             code="INVALID_INPUT",
@@ -725,8 +725,8 @@ def audit_original_design(
                         pf.to_dict() if hasattr(pf, "to_dict") else dict(pf)
                     )
 
-            # Optional saved-design summary (kiln-pro design_brief
-            # module).  When the mesh's intent sidecar was derived from
+            # Optional saved-goal summary (kiln-pro design_session
+            # lifecycle).  When the mesh's intent sidecar was derived from
             # a saved design — i.e. the user committed to a goal
             # before generating — roll the per-assertion gates up into
             # one plain-language summary so the audit report can say
@@ -891,7 +891,7 @@ def audit_original_design(
         ready_for_print=ready_for_print,
         blockers=blockers,
         next_actions=next_actions,
-        design_brief=brief.to_dict(),
+        design_requirements=brief.to_dict(),
         enhanced_prompt=prompt.to_dict(),
         mesh_validation=mesh_validation.to_dict(),
         printability=printability.to_dict(),
@@ -1148,7 +1148,7 @@ def generate_original_design(
         best_result_path=best_result_path,
         summary=summary,
         next_actions=next_actions,
-        design_brief=brief.to_dict(),
+        design_requirements=brief.to_dict(),
         initial_prompt=seed_prompt.to_dict(),
         attempts=attempts,
     )

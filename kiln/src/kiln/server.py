@@ -717,7 +717,8 @@ def _build_instructions() -> str:
     parts.append(
         "DESIGN INTELLIGENCE: Kiln has a comprehensive design knowledge system "
         "(25 materials with 45 brand-specific filament profiles, 18 design templates). Key tools:\n"
-        "  - `get_design_brief(requirements)` — functional analysis BEFORE designing\n"
+        "  - `design_session(verb=\"start\", idea=\"...\")` — user-facing entry point for any new design (captures saved goal at duty / environment / materials / safety layer)\n"
+        "  - `analyze_design_requirements(requirements)` — internal functional-analysis lookup `design_session` calls into\n"
         "  - `recommend_design_material(use_case)` — intelligent material selection\n"
         "  - `find_design_templates(use_case)` — proven design templates\n"
         "  - `get_material_design_profile(material)` — material-specific rules\n"
@@ -735,7 +736,8 @@ def _build_instructions() -> str:
             "`preview_generated_model` to render multi-angle previews (including "
             "bottom view for bed adhesion) BEFORE printing. Show the preview "
             "images to the user and check for issues. Never skip preview.\n"
-            "Use `get_design_brief()` BEFORE generation for better results.\n"
+            "Start any new design with `design_session(verb=\"start\", idea=\"...\")` so "
+            "the saved goal drives the audit and the post-print review.\n"
             "Use `build_generation_prompt()` to enhance prompts with design intelligence."
         )
 
@@ -2793,10 +2795,101 @@ def _generate_print_comment(
     return " ".join(comments)
 
 
+def _resolve_brief_context(brief_id: str) -> dict | None:
+    """Load the saved-goal context for *brief_id* via kiln-pro, or None.
+
+    Used by ``monitor_print`` and ``await_print_completion`` to surface a
+    "Goal: ..." line / dict alongside their primary print reporting.
+    Best-effort: kiln-pro absent silently returns None.  Same broad
+    except as the audit honor-gate hook in ``original_design`` — a
+    print-reporting tool must never fail because of an optional
+    goal-context lookup.
+    """
+    if not brief_id:
+        return None
+    try:
+        from kiln_pro.design_brief.context import brief_context_dict
+        return brief_context_dict(brief_id)
+    except Exception:
+        logger.debug(
+            "_resolve_brief_context: skipped (best-effort)",
+            exc_info=True,
+        )
+        return None
+
+
+def _auto_derive_brief_id(printer_file_name: str | None) -> str:
+    """D3: derive brief_id from the printed file's intent sidecar.
+
+    Pipeline:
+      printer file_name → upload manifest → source path → intent sidecar
+      → ``generator`` starts with ``design_brief:`` → return the id.
+
+    Returns ``""`` (not None) when ANY step fails, matching the rest of
+    the brief_id surface (the empty-string-means-absent convention used
+    by every ``brief_id: str = ""`` param).  Best-effort throughout.
+
+    Why this exists: Jobs' design call on B10 — the user shouldn't have
+    to remember which goal a print belongs to when they call
+    ``monitor_print()``.  The upload manifest (populated by
+    ``upload_file``) provides the source-path link; the source's intent
+    sidecar provides the brief_id.
+    """
+    if not printer_file_name or printer_file_name == "N/A":
+        return ""
+    try:
+        from kiln.upload_manifest import resolve_source_path
+        source_path = resolve_source_path(printer_file_name)
+    except Exception:
+        logger.debug(
+            "_auto_derive_brief_id: manifest lookup skipped (best-effort)",
+            exc_info=True,
+        )
+        return ""
+    if not source_path:
+        return ""
+    try:
+        from kiln_pro.intent_verification import load_intent_sidecar
+        intent = load_intent_sidecar(source_path)
+        if (
+            intent is not None
+            and isinstance(intent.generator, str)
+            and intent.generator.startswith("design_brief:")
+        ):
+            candidate = intent.generator.split(":", 1)[1].strip()
+            return candidate or ""
+    except Exception:
+        logger.debug(
+            "_auto_derive_brief_id: sidecar read skipped (best-effort)",
+            exc_info=True,
+        )
+    return ""
+
+
+def _format_goal_line_for_monitor(brief_id: str) -> str:
+    """Render the saved-goal context as a single ``Goal: ...`` line.
+
+    Empty string when there's nothing to render — caller appends only
+    when non-empty.  Format mirrors the rest of ``monitor_print``'s
+    plain-English report.
+    """
+    ctx = _resolve_brief_context(brief_id)
+    if ctx is None:
+        return ""
+    duty = ctx.get("duty_label") or ctx.get("duty") or ""
+    env = ctx.get("environment") or []
+    if duty and env:
+        return f"Goal: {duty} design for {', '.join(env)}"
+    if duty:
+        return f"Goal: {duty} design"
+    return ""
+
+
 @mcp.tool()
 def monitor_print(
     printer_name: str | None = None,
     include_snapshot: bool = True,
+    brief_id: str = "",
 ) -> str | dict:
     """One-shot print status report (human-readable text: progress, temps, speed, cost, ETA).
 
@@ -2808,6 +2901,12 @@ def monitor_print(
 
     :param printer_name: Target printer name.  Omit for the default printer.
     :param include_snapshot: Whether to capture and save a camera snapshot.
+    :param brief_id: Optional saved-goal id from ``design_session``.  When
+        the brief resolves, the report appends a single ``Goal:`` line
+        with the design's duty and environment — so the agent watching
+        a print can answer "is this the right design for the goal?"
+        without a separate lookup.  Best-effort: a missing kiln-pro
+        install or an unresolvable brief silently skips the line.
     """
     try:
         if printer_name:
@@ -3177,6 +3276,16 @@ def monitor_print(
             lines.append(f"- {_auto_pause_line}")
         if _reroute_line:
             lines.append(f"- {_reroute_line}")
+        # B10 brief tail + D3 sidecar auto-derivation: surface the
+        # saved-goal context when either the caller supplied a brief_id
+        # OR the printed file's intent sidecar resolves to one (via the
+        # upload manifest).  Best-effort — absent / unresolvable brief
+        # silently omits the line so the report stays clean.
+        effective_brief_id = brief_id or _auto_derive_brief_id(file_name)
+        goal_line = _format_goal_line_for_monitor(effective_brief_id)
+        if goal_line:
+            lines.append(goal_line)
+
         lines.extend(
             [
                 f"Camera: {snapshot_line}",
@@ -3398,6 +3507,28 @@ def upload_file(file_path: str) -> dict:
         resp = result.to_dict()
         if scan_warnings:
             resp["warnings"] = scan_warnings
+
+        # D3: record source_path → printer_file_name in the upload
+        # manifest so monitor_print / await_print_completion can later
+        # auto-derive the brief_id by reading the source's intent
+        # sidecar.  Best-effort — manifest IO failures must not break
+        # the upload return.  The printer-reported file name lives at
+        # ``resp["file_name"]`` (or ``resp["filename"]`` on some
+        # adapters); fall back to the basename of file_path otherwise.
+        try:
+            from kiln.upload_manifest import record_upload
+            printer_file_name = (
+                resp.get("file_name")
+                or resp.get("filename")
+                or os.path.basename(file_path)
+            )
+            record_upload(file_path, printer_file_name)
+        except Exception:
+            logger.debug(
+                "upload_file: manifest record failed (best-effort)",
+                exc_info=True,
+            )
+
         return resp
     except FileNotFoundError as exc:
         return _error_dict(f"Failed to upload file: {exc}", code="FILE_NOT_FOUND")
@@ -8044,6 +8175,7 @@ def await_print_completion(
     job_id: str | None = None,
     timeout: int = 7200,
     poll_interval: int = 15,
+    brief_id: str = "",
 ) -> dict:
     """Wait for the current print to finish and return the final status.
 
@@ -8058,10 +8190,16 @@ def await_print_completion(
             omitted, monitors the printer directly for idle/error state.
         timeout: Maximum seconds to wait (default 7200 = 2 hours).
         poll_interval: Seconds between status checks (default 15).
+        brief_id: Optional saved-goal id from ``design_session``.  When
+            the brief resolves, the terminal-outcome response gains a
+            ``design_goal`` block with the design's duty / environment /
+            safety notes — so the agent surfacing the print result can
+            answer "did this match the goal?" without a separate
+            lookup.  Best-effort: missing kiln-pro silently skips.
 
     Returns a dict with ``outcome`` (completed / failed / cancelled /
-    timeout), final printer state, elapsed time, and completion
-    percentage history.
+    timeout), final printer state, elapsed time, completion percentage
+    history, and (when ``brief_id`` resolves) a ``design_goal`` block.
     """
     if err := _check_auth("print"):
         return err
@@ -8069,17 +8207,44 @@ def await_print_completion(
     start = time.time()
     progress_log: list[dict] = []
     last_pct: float | None = None
+    # B10 + D3: resolve once at entry — the brief context is stable for
+    # the lifetime of this poll loop.  We attach the same dict to every
+    # terminal-state response so the agent always sees the goal
+    # alongside the outcome.  When the caller didn't supply a brief_id,
+    # try to derive one from the currently-printing file's intent
+    # sidecar (via the upload manifest) — Jobs' design call from the
+    # original B10 review.  Best-effort throughout.
+    effective_brief_id = brief_id
+    if not effective_brief_id:
+        try:
+            adapter = _get_adapter()
+            job_at_entry = adapter.get_job()
+            jd_at_entry = job_at_entry.to_dict()
+            file_name_at_entry = jd_at_entry.get("file_name")
+            effective_brief_id = _auto_derive_brief_id(file_name_at_entry)
+        except Exception:
+            logger.debug(
+                "await_print_completion: brief auto-derive skipped (best-effort)",
+                exc_info=True,
+            )
+    _goal_ctx = _resolve_brief_context(effective_brief_id)
+
+    def _attach_goal(result: dict) -> dict:
+        """Add the design_goal block to a terminal-state result dict."""
+        if _goal_ctx is not None:
+            result["design_goal"] = _goal_ctx
+        return result
 
     while True:
         elapsed = time.time() - start
         if elapsed >= timeout:
-            return {
+            return _attach_goal({
                 "success": True,
                 "outcome": "timeout",
                 "elapsed_seconds": round(elapsed, 1),
                 "message": f"Timed out after {timeout}s waiting for print to finish.",
                 "progress_log": progress_log[-20:],
-            }
+            })
 
         try:
             # --- Job-based tracking (via queue) ---
@@ -8090,30 +8255,30 @@ def await_print_completion(
                     return _error_dict(f"Job {job_id!r} not found.", code="JOB_NOT_FOUND")
 
                 if job.status == JobStatus.COMPLETED:
-                    return {
+                    return _attach_goal({
                         "success": True,
                         "outcome": "completed",
                         "job": job.to_dict(),
                         "elapsed_seconds": round(elapsed, 1),
                         "progress_log": progress_log[-20:],
-                    }
+                    })
                 if job.status == JobStatus.FAILED:
-                    return {
+                    return _attach_goal({
                         "success": True,
                         "outcome": "failed",
                         "job": job.to_dict(),
                         "error": job.error,
                         "elapsed_seconds": round(elapsed, 1),
                         "progress_log": progress_log[-20:],
-                    }
+                    })
                 if job.status == JobStatus.CANCELLED:
-                    return {
+                    return _attach_goal({
                         "success": True,
                         "outcome": "cancelled",
                         "job": job.to_dict(),
                         "elapsed_seconds": round(elapsed, 1),
                         "progress_log": progress_log[-20:],
-                    }
+                    })
 
                 # Still running — log progress
                 time.sleep(poll_interval)
@@ -8135,30 +8300,30 @@ def await_print_completion(
                 last_pct = pct
 
             if state.state == PrinterStatus.IDLE:
-                return {
+                return _attach_goal({
                     "success": True,
                     "outcome": "completed",
                     "state": state.state.value,
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
-                }
+                })
             if state.state == PrinterStatus.ERROR:
-                return {
+                return _attach_goal({
                     "success": True,
                     "outcome": "failed",
                     "state": state.state.value,
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
-                }
+                })
             if state.state == PrinterStatus.OFFLINE:
-                return {
+                return _attach_goal({
                     "success": True,
                     "outcome": "failed",
                     "state": state.state.value,
                     "error": "Printer went offline during print.",
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
-                }
+                })
 
         except (PrinterError, RuntimeError) as exc:
             return _error_dict(f"Failed to poll print status: {exc}. Check that the printer is online.")
@@ -11692,6 +11857,7 @@ def smart_reprint(
     search_dirs: str | None = None,
     extra_overrides: str | None = None,
     auto_ams: bool = True,
+    brief_id: str = "",
 ) -> dict:
     """Smart one-shot material-switch reprint — finds the model, detects the
     right AMS slot, adjusts slicer settings, and prints.
@@ -11721,6 +11887,14 @@ def smart_reprint(
     is loaded in AMS slot 1, adjust temps/speeds for PETG, reslice, and
     start printing — all in one call.
 
+    Saved-goal carry-forward: when the source model on disk has a
+    ``<file>.intent.json`` sidecar tagged with a saved goal, that
+    goal's id is auto-recovered and surfaced as ``brief_id`` in the
+    result so downstream ``record_print_outcome`` correctly links the
+    reprint back to the goal. Pass ``brief_id="..."`` explicitly to
+    override the sidecar derivation (rare — useful for one-off
+    re-attributions).
+
     Args:
         file_name: Full or partial file name to search for (e.g.
             ``"grip_extension"`` or ``"grip_extension.stl"``).
@@ -11735,6 +11909,12 @@ def smart_reprint(
         auto_ams: If ``True`` (default), automatically detect AMS slot
             for the target material. Set to ``False`` to skip AMS
             detection (useful for non-Bambu printers).
+        brief_id: Optional saved-goal id from ``design_session``.  When
+            omitted, the source model's intent sidecar (if any) is read
+            and the saved goal's id is derived from its ``generator``
+            field — so a reprint of a brief-attached design keeps the
+            goal link automatically.  Best-effort: missing kiln-pro or
+            missing sidecar silently skips.
     """
     if err := _check_auth("print"):
         return err
@@ -11937,6 +12117,38 @@ def smart_reprint(
                 )
 
         # ---------------------------------------------------------------
+        # Step 2.5: D2 — saved-goal carry-forward.
+        # When the caller didn't supply brief_id, try to recover it
+        # from the source model's intent sidecar.  Best-effort: kiln-pro
+        # not installed / no sidecar / unparseable generator string
+        # silently leaves resolved_brief_id None, matching the pre-D2
+        # baseline (no goal link on the reprint).
+        # ---------------------------------------------------------------
+        resolved_brief_id: str | None = brief_id or None
+        if resolved_brief_id is None:
+            try:
+                from kiln_pro.intent_verification import load_intent_sidecar
+                intent = load_intent_sidecar(found_path)
+                if (
+                    intent is not None
+                    and isinstance(intent.generator, str)
+                    and intent.generator.startswith("design_brief:")
+                ):
+                    candidate = intent.generator.split(":", 1)[1].strip()
+                    if candidate:
+                        resolved_brief_id = candidate
+                        steps_log.append({
+                            "step": "brief_carry_forward",
+                            "method": "sidecar_derived",
+                            "brief_id": resolved_brief_id,
+                        })
+            except Exception:
+                logger.debug(
+                    "smart_reprint: brief carry-forward skipped (best-effort)",
+                    exc_info=True,
+                )
+
+        # ---------------------------------------------------------------
         # Step 3: Delegate to reprint_with_material
         # ---------------------------------------------------------------
         result = reprint_with_material(
@@ -11955,6 +12167,11 @@ def smart_reprint(
             result["model_path"] = found_path
             if ams_slot_info:
                 result["ams_slot_selected"] = ams_slot_info
+            # D2: surface brief_id so the caller's subsequent
+            # record_print_outcome call can link the print back to
+            # the saved goal without re-reading the sidecar.
+            if resolved_brief_id is not None:
+                result["brief_id"] = resolved_brief_id
 
         return result
     except Exception as exc:

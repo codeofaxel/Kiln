@@ -269,7 +269,7 @@ class TestSchemaIntegration:
             "submit_job",
             "save_agent_note",
             "analyze_printability",
-            "get_design_brief",
+            "analyze_design_requirements",
             "build_generation_prompt",
             "audit_original_design",
             "generate_original_design",

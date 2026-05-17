@@ -155,8 +155,34 @@ class TestWarpingAnalysis:
         recs_text = " ".join(report.warping.recommendations).lower()
         assert "enclos" in recs_text or "chamber" in recs_text
 
-    def test_warping_integrated_in_printability_score(self, tmp_path):
-        """Warping deductions should appear in the overall printability score."""
+    def test_warping_integrated_in_printability_score(self, tmp_path, monkeypatch):
+        """Warping deductions should appear in the overall public printability
+        score.
+
+        Tests PUBLIC-tier behavior — this test was previously passing only
+        because a Pro-overlay bug (thin-wall over-firing on every clean
+        mesh) accidentally deducted 12 points alongside the legitimate
+        public warping deduction, masking the fact that Pro's score-cap
+        formula erases public-side deductions when Pro has no penalties
+        of its own.  The 2026-05-17 thin-wall audit fixed the over-firing
+        bug, exposing the cap issue.  This test now isolates from Pro
+        enrichment so it actually tests what its name claims.
+        """
+        # Force-disable Pro enrichment so we test the PUBLIC score path
+        # in isolation.  Without this, kiln-pro's overlay layer can
+        # raise the enriched_score back above the public deduction
+        # (see ``enrich_printability_report``'s cap formula).
+        try:
+            import kiln_pro.bridge as _bridge
+
+            class _NoPro:
+                def is_available(self, _name):
+                    return False
+
+            monkeypatch.setattr(_bridge, "pro_features", _NoPro())
+        except ImportError:
+            pass  # kiln-pro not installed; nothing to disable
+
         stl = str(tmp_path / "big_plate.stl")
         _write_box_stl(stl, 200.0, 200.0, 2.0)
 

@@ -319,7 +319,7 @@ def validate_design(
 
     :param file_path: Path to the STL or OBJ file.
     :param requirements_text: Natural language requirements (same text
-        used for ``get_design_brief``).
+        used for ``analyze_design_requirements``).
     :param material: Optional material override (e.g. ``"petg"``).
     :param printer_model: Optional printer model for capability lookup.
     :param build_volume: Optional (X, Y, Z) build volume in mm.

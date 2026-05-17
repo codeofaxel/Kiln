@@ -5,6 +5,80 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+Adhesion analysis catches tall-narrow detach risk regardless of
+material, models thermal stress from layer cooling, and admits
+when it's uncertain. The model that ships in v1.1.2 caught the
+obvious extremes; this iteration catches the messy middle —
+the warp-prone tall thin prints that look fine to a static force
+balance but actually detach in practice.
+
+### Added
+
+- **Adhesion model knows when geometry alone is risky.** A 2×2×250
+  mm tower in any material now reads as "marginal" regardless of
+  the force ratio — extreme aspect ratios (> 50) concentrate peel
+  stress at the base in ways the static formula doesn't capture.
+- **Aspect-ratio-aware peel force.** Peel grows nonlinearly with
+  height-to-base ratio above ~10:1. Tall vases / pen holders stay
+  secure; tall narrow towers in any material get flagged.
+- **Thermal-stress contribution to peel** (free tier sees it for
+  every material at a conservative default; Pro tier tunes it per
+  material). ABS, ASA, Nylon, PP, and PEEK now generate larger
+  effective peel stress on tall prints because they actually do —
+  cooling layers cyclically pull at the base. PLA / PETG see
+  proportionally less because they actually shrink less.
+- **Adhesion verdicts admit when they're uncertain.** Every
+  `AdhesionForceEstimate` now carries a `model_confidence` field:
+  `"high"` for clear extremes, `"approximate"` for the messy middle
+  where the static model is less reliable. Lets agents soften
+  wording on uncertain verdicts.
+
+### Changed
+
+- **Adhesion docstring honesty** — the `risk_level` field is now
+  documented as a best-effort approximation, especially in the
+  middle range. For high-aspect-ratio prints in warp-prone
+  materials, treat `secure` as `plausible` rather than `verified`.
+- **Thin-wall fallback returns 0.0 sentinel instead of nozzle width.**
+  When `_analyze_thin_walls` finds nothing below the nozzle, the
+  returned `min_wall_thickness_mm` is now `0.0` (sentinel = "no
+  signal") rather than `nozzle_diameter`. Downstream consumers
+  (kiln-pro overlay, design validator, generation feedback) all
+  already gate on `thin_wall_count > 0` before reading the value,
+  so this change is safe — but it removes a footgun where the
+  nozzle-fallback value triggered false "wall too thin" warnings
+  on every clean mesh through the Pro layer. Discovered in the
+  2026-05-17 thin-wall audit (300-case sweep).
+- **`PrintabilityReport.triangle_count` exposed.** The total
+  triangle count of the parsed mesh is now reported so coverage-
+  aware consumers can branch on mesh density. Defaults to 0 for
+  reports constructed directly (without going through
+  `analyze_printability`).
+- **Nozzle diameter plumbed through to the kiln-pro enrichment
+  call.** When kiln-pro is installed, the per-material wall and
+  hole floors now scale with the user's nozzle (was: hard-coded
+  to a 0.4 mm baseline). Falls back to the prior signature if an
+  older kiln-pro version is on the path. Interim measure until the
+  underlying edge-length proxy is replaced with a real
+  wall-thickness measurement — see THIN_WALL_KNOWLEDGE.md in
+  kiln-pro for the per-material × per-nozzle table the analyzer
+  should use.
+
+### Internal
+
+- New CI guard asserts the `kiln-pro` package is NOT installed in
+  the public Kiln CI environment — prevents future "tier-coupling
+  leak" regressions where public tests silently depended on the
+  Pro overlay.
+- 30-case parameterized calibration matrix in
+  `kiln/tests/test_adhesion_force.py` — explicitly pins both
+  free-tier and Pro-tier model behavior across realistic prints.
+  Becomes the regression baseline for future adhesion model work.
+
+### Compatibility
+
+- No version bump yet.
+
 ## [1.1.2] - 2026-05-16
 
 Hole-aware printability, automatic previews on the tools that change a
