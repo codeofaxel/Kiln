@@ -2818,6 +2818,54 @@ def _resolve_brief_context(brief_id: str) -> dict | None:
         return None
 
 
+def _auto_derive_brief_id(printer_file_name: str | None) -> str:
+    """D3: derive brief_id from the printed file's intent sidecar.
+
+    Pipeline:
+      printer file_name → upload manifest → source path → intent sidecar
+      → ``generator`` starts with ``design_brief:`` → return the id.
+
+    Returns ``""`` (not None) when ANY step fails, matching the rest of
+    the brief_id surface (the empty-string-means-absent convention used
+    by every ``brief_id: str = ""`` param).  Best-effort throughout.
+
+    Why this exists: Jobs' design call on B10 — the user shouldn't have
+    to remember which goal a print belongs to when they call
+    ``monitor_print()``.  The upload manifest (populated by
+    ``upload_file``) provides the source-path link; the source's intent
+    sidecar provides the brief_id.
+    """
+    if not printer_file_name or printer_file_name == "N/A":
+        return ""
+    try:
+        from kiln.upload_manifest import resolve_source_path
+        source_path = resolve_source_path(printer_file_name)
+    except Exception:
+        logger.debug(
+            "_auto_derive_brief_id: manifest lookup skipped (best-effort)",
+            exc_info=True,
+        )
+        return ""
+    if not source_path:
+        return ""
+    try:
+        from kiln_pro.intent_verification import load_intent_sidecar
+        intent = load_intent_sidecar(source_path)
+        if (
+            intent is not None
+            and isinstance(intent.generator, str)
+            and intent.generator.startswith("design_brief:")
+        ):
+            candidate = intent.generator.split(":", 1)[1].strip()
+            return candidate or ""
+    except Exception:
+        logger.debug(
+            "_auto_derive_brief_id: sidecar read skipped (best-effort)",
+            exc_info=True,
+        )
+    return ""
+
+
 def _format_goal_line_for_monitor(brief_id: str) -> str:
     """Render the saved-goal context as a single ``Goal: ...`` line.
 
@@ -3228,11 +3276,13 @@ def monitor_print(
             lines.append(f"- {_auto_pause_line}")
         if _reroute_line:
             lines.append(f"- {_reroute_line}")
-        # B10 brief tail: surface the saved-goal context when the caller
-        # supplied a brief_id and kiln-pro can resolve it.  Best-effort —
-        # absent / unresolvable brief silently omits the line so the
-        # report stays clean.
-        goal_line = _format_goal_line_for_monitor(brief_id)
+        # B10 brief tail + D3 sidecar auto-derivation: surface the
+        # saved-goal context when either the caller supplied a brief_id
+        # OR the printed file's intent sidecar resolves to one (via the
+        # upload manifest).  Best-effort — absent / unresolvable brief
+        # silently omits the line so the report stays clean.
+        effective_brief_id = brief_id or _auto_derive_brief_id(file_name)
+        goal_line = _format_goal_line_for_monitor(effective_brief_id)
         if goal_line:
             lines.append(goal_line)
 
@@ -3457,6 +3507,28 @@ def upload_file(file_path: str) -> dict:
         resp = result.to_dict()
         if scan_warnings:
             resp["warnings"] = scan_warnings
+
+        # D3: record source_path → printer_file_name in the upload
+        # manifest so monitor_print / await_print_completion can later
+        # auto-derive the brief_id by reading the source's intent
+        # sidecar.  Best-effort — manifest IO failures must not break
+        # the upload return.  The printer-reported file name lives at
+        # ``resp["file_name"]`` (or ``resp["filename"]`` on some
+        # adapters); fall back to the basename of file_path otherwise.
+        try:
+            from kiln.upload_manifest import record_upload
+            printer_file_name = (
+                resp.get("file_name")
+                or resp.get("filename")
+                or os.path.basename(file_path)
+            )
+            record_upload(file_path, printer_file_name)
+        except Exception:
+            logger.debug(
+                "upload_file: manifest record failed (best-effort)",
+                exc_info=True,
+            )
+
         return resp
     except FileNotFoundError as exc:
         return _error_dict(f"Failed to upload file: {exc}", code="FILE_NOT_FOUND")
@@ -8135,11 +8207,27 @@ def await_print_completion(
     start = time.time()
     progress_log: list[dict] = []
     last_pct: float | None = None
-    # B10: resolve once at entry — the brief context is stable for the
-    # lifetime of this poll loop.  We attach the same dict to every
+    # B10 + D3: resolve once at entry — the brief context is stable for
+    # the lifetime of this poll loop.  We attach the same dict to every
     # terminal-state response so the agent always sees the goal
-    # alongside the outcome.
-    _goal_ctx = _resolve_brief_context(brief_id)
+    # alongside the outcome.  When the caller didn't supply a brief_id,
+    # try to derive one from the currently-printing file's intent
+    # sidecar (via the upload manifest) — Jobs' design call from the
+    # original B10 review.  Best-effort throughout.
+    effective_brief_id = brief_id
+    if not effective_brief_id:
+        try:
+            adapter = _get_adapter()
+            job_at_entry = adapter.get_job()
+            jd_at_entry = job_at_entry.to_dict()
+            file_name_at_entry = jd_at_entry.get("file_name")
+            effective_brief_id = _auto_derive_brief_id(file_name_at_entry)
+        except Exception:
+            logger.debug(
+                "await_print_completion: brief auto-derive skipped (best-effort)",
+                exc_info=True,
+            )
+    _goal_ctx = _resolve_brief_context(effective_brief_id)
 
     def _attach_goal(result: dict) -> dict:
         """Add the design_goal block to a terminal-state result dict."""
