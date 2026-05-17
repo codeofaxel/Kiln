@@ -345,11 +345,18 @@ class PrinterDesignProfile:
 
 @dataclass
 class DesignBrief:
-    """Complete design brief combining all constraint sources.
+    """Design requirements analysis — output type of ``analyze_design_requirements``.
 
-    This is what an agent uses before generating geometry — the full set
-    of constraints, material recommendations, applicable patterns, and
-    guidance notes for the design task.
+    Holds the combined material recommendation, applicable patterns,
+    dimensional constraints, and guidance notes derived from a natural-
+    language requirements string.  An agent uses this as the technical
+    lookup before generating geometry.
+
+    Internal class name retained for backward import compatibility.
+    User-facing surfaces (JSON keys, tool docstrings, agent prompts)
+    refer to this as "design requirements" to avoid colliding with
+    kiln-pro's ``DesignBrief`` (the saved goal captured by
+    ``design_session``, which is a different artifact entirely).
     """
 
     functional_constraints: list[DesignConstraintSet]
@@ -2010,12 +2017,13 @@ def get_design_constraints(
     material: str | None = None,
     printer_model: str | None = None,
 ) -> DesignBrief:
-    """Decompose functional requirements into a complete design brief.
+    """Decompose functional requirements into a complete design-requirements analysis.
 
-    This is the main entry point for agents.  Given a natural language
-    description of what the user needs, returns a :class:`DesignBrief`
-    with material recommendation, applicable patterns, combined
-    constraints, and guidance notes.
+    Internal entry point that ``analyze_design_requirements`` (the MCP
+    tool) and ``design_session`` (the user-facing saved-goal flow) both
+    call into.  Given a natural language description of what the user
+    needs, returns a :class:`DesignBrief` with material recommendation,
+    applicable patterns, combined constraints, and guidance notes.
 
     :param requirements_text: What the object needs to do (e.g.
         ``"phone mount for car dashboard, holds phone securely, survives

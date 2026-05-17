@@ -80,10 +80,17 @@ class _GenerationToolsPlugin:
             """Generate and harshly audit an original printable design.
 
             This is the highest-level original-creation tool in Kiln. It takes
-            a natural-language design brief, chooses the best available
-            idea-to-3D backend, generates a candidate, audits the result for
-            printability and design correctness, and can perform one or more
-            corrective retries using feedback from failed attempts.
+            a natural-language description of what to make, chooses the best
+            available idea-to-3D backend, generates a candidate, audits the
+            result for printability and design correctness, and can perform
+            one or more corrective retries using feedback from failed
+            attempts.
+
+            For the user-facing saved-goal flow (capturing duty / environment /
+            materials / safety so the audit and post-print review can verify
+            the result against the user's intent), call this through
+            ``design_session(verb="generate", session_id=...)`` rather than
+            calling ``generate_original_design`` directly.
 
             Provider notes:
             - ``auto`` prefers Gemini for idea-to-CAD when available.

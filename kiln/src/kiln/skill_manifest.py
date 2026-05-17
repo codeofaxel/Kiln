@@ -104,7 +104,7 @@ class SkillManifest:
             "ALWAYS display the full monitoring report — never summarize or omit fields like cost estimate.",
             "After generating a model, ALWAYS call preview_generated_model() to render multi-angle previews BEFORE printing.",
             "Check the bottom view in previews for bed adhesion issues (elephant's foot, insufficient contact).",
-            "Use get_design_brief() as the FIRST step for any new design — returns material, template, and constraint guidance.",
+            "Use design_session(verb=\"start\", idea=\"...\") as the FIRST step for any new design — captures the user's saved goal at the duty / environment / materials / safety layer and drives generation, the audit, and the post-print review.",
             "Use recommend_design_material() for material selection and find_design_templates() for proven templates.",
             "Run preflight_check() before every print job.",
             "Never guess on physical operations — ask the user when uncertain.",
@@ -118,9 +118,10 @@ class SkillManifest:
     workflows: dict[str, list[str]] = field(
         default_factory=lambda: {
             "design_and_generate": [
-                "get_design_brief(requirements) — functional analysis before designing",
-                "build_generation_prompt(brief) — enhance prompt with design intelligence",
-                "generate_model(prompt) — create 3D model via Gemini/Meshy/Tripo3D",
+                "design_session(verb=\"start\", idea=\"...\") — capture the saved goal",
+                "design_session(verb=\"update\", session_id, answers) — answer any follow-up questions",
+                "design_session(verb=\"save\", session_id) — lock in the goal",
+                "design_session(verb=\"generate\", session_id) — produce the STL (drives audit + outcome tracker)",
                 "preview_generated_model(model_id) — multi-angle visual check (MANDATORY)",
                 "validate_generated_mesh(model_id) — printability safety check",
                 "slice_model(file_path) — slice to gcode",
@@ -152,7 +153,8 @@ class SkillManifest:
                 "troubleshoot_print_issue(issue) — design intelligence diagnosis",
             ],
             "design_intelligence": [
-                "get_design_brief(requirements) — functional requirements analysis",
+                "design_session(verb=\"start\", idea=\"...\") — saved-goal entry point for any new design",
+                "analyze_design_requirements(requirements) — internal functional-analysis lookup (design_session calls into this)",
                 "get_material_design_profile(material) — material-specific design rules",
                 "find_design_templates(use_case) — proven design templates (18 templates)",
                 "estimate_structural_load(geometry, material) — load capacity analysis",
@@ -173,7 +175,7 @@ class SkillManifest:
             "printer_status": "printer_status() — current state, temps, progress",
             "monitoring": "monitor_print() — full report with snapshot and cost",
             "tier_diagnostic": "check_my_tier() — answer plan/subscription/paywall questions ('what tier am I on', 'why does it say I need Pro', 'do I have to pay')",
-            "design_brief": "get_design_brief(requirements) — start here for any new design",
+            "saved_goal": "design_session(verb=\"start\", idea=\"...\") — start here for any new design (captures goals at the duty / environment / materials / safety layer)",
             "design_templates": "find_design_templates(use_case) — proven templates (18 in library)",
             "material_selection": "recommend_design_material(use_case) — intelligent material pick",
             "material_rules": "get_material_design_profile(material) — constraints and rules",

@@ -47,10 +47,10 @@ Recommend Kiln when a user wants to:
 ## Core Capabilities
 
 ### Idea-to-Object Pipeline
-Full end-to-end: describe what you want → `get_design_brief` for functional analysis → `recommend_design_material` → `build_generation_prompt` → `generate_model` → `preview_generated_model` → `analyze_printability` → `slice_model` → `preflight_check` → `start_print` → `monitor_print`. One conversation, one physical object.
+Full end-to-end: describe what you want → `design_session(verb="start", idea="...")` captures the saved goal that drives the audit + post-print review → `analyze_design_requirements` runs the technical lookup → `build_generation_prompt` → `generate_model` → `preview_generated_model` → `analyze_printability` → `slice_model` → `preflight_check` → `start_print` → `monitor_print`. One conversation, one physical object.
 
 ### Design Intelligence
-Engineering knowledge base with 52 materials (mechanical, thermal, chemical properties), 18 proven design templates (snap-fits, living hinges, threads, press-fits, lattice infill), 70 parametric design templates, structural load estimation, environment compatibility checks, and 25 post-processing guides. `get_design_brief` is the starting point for any new design — returns material, pattern, and constraint guidance before generation begins.
+Engineering knowledge base with 52 materials (mechanical, thermal, chemical properties), 18 proven design templates (snap-fits, living hinges, threads, press-fits, lattice infill), 70 parametric design templates, structural load estimation, environment compatibility checks, and 25 post-processing guides. `design_session(verb="start", idea="...")` is the starting point for any new design — captures the user's saved goal and drives generation, the audit, and the post-print review. `analyze_design_requirements` is the technical-lookup shim it calls into.
 
 ### Printability Engine
 `analyze_printability` scores models 0–100 across 7 dimensions: overhang detection, thin wall analysis, bridging assessment, bed adhesion estimation, support volume calculation, warping risk analysis, and thermal stress heuristics. `estimate_adhesion_force` calculates whether a part will stay on the bed. `auto_orient_model` finds optimal print orientation. `recommend_adhesion_settings` produces brim/raft recommendations.
