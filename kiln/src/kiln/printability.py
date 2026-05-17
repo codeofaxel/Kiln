@@ -488,6 +488,26 @@ _ADHESION_FORCE_PUBLIC_DEFAULTS: dict[str, Any] = {
     # recalibration from outcome_tracker data — see Layer 3 in
     # kiln-pro tasks.md.
     "aspect_ratio_peel_exponent": 1.5,
+    # Thermal-stress contribution to peel force.  Warp-prone
+    # materials (high CTE — ABS, ASA, Nylon, PP, PEEK) generate
+    # cyclic peel stress as each layer cools and contracts against
+    # the constrained base.  This stress accumulates with print
+    # height roughly linearly until thermal equilibrium.  Multiplies
+    # peel by ``(1.0 + stress_factor * z / thermal_z_scale)`` so
+    # warp-prone tall prints see proportionally more peel pressure
+    # while PLA / PETG (low stress_factor 0.3-0.7) see modest impact.
+    #
+    # Calibration: thermal_z_scale=100 (mm) chosen against the
+    # 31-case calibration matrix — catches all 8 truly-risky cases
+    # (100% catch rate) with zero false positives on the 23 safe-
+    # print sample.  The PLA candleholder 4x4x200 (aspect 50,
+    # PLA stress=0.6) lands at ratio 3.05, just above the 3.0
+    # secure threshold — that's the only borderline case in the
+    # sample, and it's correctly classified.  Set to ``None`` in
+    # the overlay to disable.  Lower values (e.g. 50) over-flag
+    # warp-prone PLA; higher values (e.g. 200) miss ABS tall thin.
+    # Awaiting empirical recalibration from outcome_tracker data.
+    "peel_thermal_z_scale": 100.0,
     "recommendation_rules": [
         {"metric": "risk_level", "operator": "==", "threshold": "likely_detach",
          "template": "Part will likely detach during printing. Use a brim (8mm+), glue stick, or raft."},
@@ -1300,6 +1320,21 @@ def _estimate_adhesion_force(
     aspect_exp = cfg.get("aspect_ratio_peel_exponent", 1.5)
     if aspect_exp is not None and aspect_ratio > 10.0:
         peel_force *= (aspect_ratio / 10.0) ** float(aspect_exp)
+
+    # Thermal-stress contribution to peel.  Warp-prone materials
+    # (high CTE, high stress_factor) generate cyclic peel stress as
+    # each layer cools and contracts against the constrained base.
+    # Linear-in-z accumulation until thermal equilibrium; multiplied
+    # by per-material stress_factor (PLA ~0.6, ABS ~1.5, PP ~2.0,
+    # Nylon ~1.6).  Disabled by setting thermal_z_scale to ``None``
+    # in the overlay.  See _ADHESION_FORCE_PUBLIC_DEFAULTS docstring
+    # for calibration rationale (z_scale=100 chosen against the
+    # 31-case sweep; catches all 8 truly-risky cases with zero
+    # false positives).
+    thermal_z_scale = cfg.get("peel_thermal_z_scale", 100.0)
+    if thermal_z_scale is not None and z_span > 0:
+        stress_factor = _material_stress_factor(material)
+        peel_force *= 1.0 + float(stress_factor) * (z_span / float(thermal_z_scale))
 
     force_ratio = adhesion_force / max(peel_force, 0.001)
     will_detach = force_ratio < 1.0

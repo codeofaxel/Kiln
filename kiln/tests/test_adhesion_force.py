@@ -204,16 +204,25 @@ class TestAdhesionForce:
         assert report.adhesion_force.score_deduction == -10
 
     def test_force_ratio_calculation(self, tmp_path):
-        """Verify force_ratio = adhesion_force_n / peel_force_n."""
+        """Verify force_ratio ≈ adhesion_force_n / peel_force_n.
+
+        Tolerance is relative (0.5%) rather than absolute because
+        adhesion_force_n / peel_force_n are rounded to 3 decimal
+        places before storage, while force_ratio is computed from
+        the unrounded values.  For small peel values the rounding
+        loss is ~0.5% of the ratio.
+        """
         stl_path = str(tmp_path / "cube.stl")
         _write_box_stl(stl_path, 20, 20, 20)
 
         report = analyze_printability(stl_path, material="pla")
         assert report.adhesion_force is not None
         expected_ratio = report.adhesion_force.adhesion_force_n / report.adhesion_force.peel_force_n
-        assert abs(report.adhesion_force.force_ratio - expected_ratio) < 0.01, (
+        # Relative tolerance: |observed - expected| / expected ≤ 1%.
+        rel_err = abs(report.adhesion_force.force_ratio - expected_ratio) / max(expected_ratio, 0.001)
+        assert rel_err < 0.01, (
             f"force_ratio {report.adhesion_force.force_ratio} != "
-            f"adhesion/peel {expected_ratio}"
+            f"adhesion/peel {expected_ratio} (relative error {rel_err:.4f})"
         )
 
     def test_geometry_guard_flags_extreme_aspect_ratio(self, tmp_path):
@@ -325,11 +334,13 @@ class TestAdhesionForce:
 # ``reality`` column.
 #
 # Catch rate today (after geometry guard + aspect-ratio peel
-# multiplier with exponent 1.5): 5/8 on truly-risky prints; 0
-# false positives on the 23 safe-print sample.  Target after the
-# rest of Layer 2 (thermal-stress contribution, perimeter-aware
-# adhesion, threshold recalibration): ≥90% catch with 0 false
-# positives.
+# multiplier exp=1.5 + thermal-stress contribution z_scale=100):
+# 8/8 on truly-risky prints; 0 false positives on the 23 safe-
+# print sample (PLA candleholder at ratio 3.05, just above the
+# 3.0 secure threshold — the closest boundary in the sweep).
+# Target maintained as Layer 2 lands the remaining pieces
+# (perimeter-aware adhesion, threshold recalibration, etc.) and
+# Layer 3 wires outcome_tracker for empirical recalibration.
 # ---------------------------------------------------------------------------
 
 
@@ -358,18 +369,16 @@ _CALIBRATION_MATRIX = [
     ("PLA pen holder",        "pla",     25,  25, 120, "secure",  "secure"),
     ("PLA candleholder",      "pla",      4,   4, 200, "secure",  "secure"),
     ("PETG tall tower",       "petg",    20,  20, 300, "secure",  "secure"),
-    # ── SHOULD-BE-FLAGGED PRINTS (catch rate target ≥90% post-Layer-2) ──
-    # CAUGHT TODAY (geometry guard at aspect>50 + aspect-ratio peel
-    # multiplier with exponent 1.5):
+    # ── SHOULD-BE-FLAGGED PRINTS (8/8 caught after geometry guard +
+    # aspect-ratio peel multiplier + thermal-stress contribution) ──
     ("Hairlike PLA tower",    "pla",      1,   1, 100, "likely_detach", "likely_detach"),
     ("PP test tall tower",    "pp",       2,   2, 250, "likely_detach", "likely_detach"),
     ("PP needle pillar",      "pp",       3,   3, 300, "likely_detach", "likely_detach"),
     ("PETG ultra-tall thin",  "petg",     5,   5, 400, "likely_detach", "marginal"),
-    ("PP narrow column",      "pp",      10,  10, 200, "marginal",  "marginal"),
-    # MISSED TODAY (Layer 2 work needs to catch these):
-    ("Skyscraper PLA",        "pla",     10,  10, 500, "secure",  "marginal"),
-    ("Nylon thin tower",      "nylon",   10,  10, 200, "secure",  "marginal"),
-    ("ABS tall thin",         "abs",     10,  10, 250, "secure",  "marginal"),
+    ("PP narrow column",      "pp",      10,  10, 200, "likely_detach", "marginal"),
+    ("Skyscraper PLA",        "pla",     10,  10, 500, "marginal", "marginal"),
+    ("Nylon thin tower",      "nylon",   10,  10, 200, "marginal", "marginal"),
+    ("ABS tall thin",         "abs",     10,  10, 250, "marginal", "marginal"),
 ]
 
 
