@@ -12,6 +12,14 @@ obvious extremes; this iteration catches the messy middle —
 the warp-prone tall thin prints that look fine to a static force
 balance but actually detach in practice.
 
+Support-volume detection now works on every compound geometry
+(T-shapes, mushrooms, tabletops, umbrellas, gear-on-post, ...) —
+not just isolated convex shapes near the bottom of the bbox.
+A long-standing winding-normalization heuristic was silently
+flipping legitimate overhangs above the model centroid to face
+up and deleting them from detection. Fixed; a 64-case calibration
+sweep drops false negatives from 25/64 (39%) to 1/64 (1.5%).
+
 ### Added
 
 - **Adhesion model knows when geometry alone is risky.** A 2×2×250
@@ -32,6 +40,26 @@ balance but actually detach in practice.
   `"high"` for clear extremes, `"approximate"` for the messy middle
   where the static model is less reliable. Lets agents soften
   wording on uncertain verdicts.
+- **`SupportAnalysis.likely_substituted_by_bridge` field.** Flags
+  when PrusaSlicer auto-supports will probably bridge over the
+  overhang instead of generating supports (short-span horizontal
+  undersides above 4-corner-leg topologies, square bridges,
+  U-shapes). Lets agents tell users "you'll get a rough underside
+  unless you force supports" instead of letting them assume the
+  absent supports number means self-supporting.
+- **`analyze_printability(slicer_style=...)`** accepts `"grid"`
+  (default), `"snug"`, `"organic"`, or `"tree"`. Pro tier consumes
+  this to translate the naive area×height upper bound into
+  expected slicer extrusion volume; free tier returns the naive
+  number unchanged. Defaults preserve existing behavior on every
+  pre-existing caller.
+- **Pro tier: calibrated support-volume gram count.** Every Pro+
+  printability report ships an `enrichment.supports_calibration`
+  block with `headline_g` (grams of filament for supports) tuned
+  to the selected slicer style and material (PETG ×1.3 for peel
+  safety, TPU emits a removal-difficulty warning, Nylon ×1.1,
+  PEEK ×1.2). Empirical divisors from a 64-case PrusaSlicer 2.9.4
+  ground-truth sweep: Grid ÷ 2.0, Snug ÷ 3.0, Organic / Tree ÷ 5.0.
 
 ### Changed
 
@@ -49,6 +77,22 @@ balance but actually detach in practice.
   wall and hole floors now match the nozzle you're actually
   printing with. A 0.6 mm nozzle gets 0.6 mm-appropriate thresholds
   instead of always using the 0.4 mm baseline.
+- **`_normalize_triangle_winding` rewritten with a signed-volume
+  fast-path.** Real CAD-exported solids (consistent outward winding)
+  return through the normalizer unchanged. Inverted-but-consistent
+  winding gets one global flip. Only genuinely inconsistent input
+  (hand-edited / scanned STLs) falls back to the legacy centroid
+  heuristic, preserved verbatim under
+  `_normalize_triangle_winding_centroid`. The previous "flip
+  triangles whose normals point toward the mesh center" pass ran on
+  every input and silently deleted overhangs whose centroid sat
+  above the model midline (T-shape bar underside, mushroom cap,
+  tabletop, umbrella, cantilever, ...).
+- **`support_percentage` clamped at 100%.** The naive area×height
+  projection could exceed model volume on long-thin-overhang
+  geometries (e.g. a thin disc on a tall post reported 116%
+  pre-clamp). The raw `estimated_support_volume_mm3` stays accurate
+  as an upper bound; only the percentage sanity-checks at ≤100%.
 
 ### Internal
 
@@ -60,6 +104,13 @@ balance but actually detach in practice.
   `kiln/tests/test_adhesion_force.py` — explicitly pins both
   free-tier and Pro-tier model behavior across realistic prints.
   Becomes the regression baseline for future adhesion model work.
+- 12-case `test_winding_normalizer.py` pins the three
+  signed-volume classification branches plus a T-shape regression
+  that fails loudly if the normalizer ever silently flips an
+  above-centroid overhang again.
+- 11-case `test_support_surface_extensions.py` covers the new
+  `slicer_style` propagation, `likely_substituted_by_bridge`
+  heuristic, and `support_percentage` clamp.
 
 ### Compatibility
 

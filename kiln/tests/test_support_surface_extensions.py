@@ -144,6 +144,45 @@ def test_bridge_substitution_threshold_constant():
     assert _BRIDGE_SUBSTITUTION_MAX_SPAN_MM == 30.0
 
 
+def test_bridge_substitution_rejects_scattered_overhang_regions():
+    """Multi-arm geometry (star, spider, plus-sign) has overhangs at
+    far corners of the bbox. Even when the bbox is small enough to
+    pass the short-axis check, scattered regions can't be replaced by
+    a single bridge — the slicer has to support each arm. The
+    clustering check rejects these."""
+    regions = [
+        {"x": -9.0, "y": -9.0, "z": 20.0, "volume_mm3": 100.0},
+        {"x": 9.0, "y": 9.0, "z": 20.0, "volume_mm3": 100.0},
+    ]
+    bbox = {"x_min": -10, "x_max": 10, "y_min": -10, "y_max": 10,
+            "z_min": 0, "z_max": 30}
+    # Region span = 18mm, bbox max = 20mm → ratio 0.90 > 0.80 → False
+    assert _likely_bridge_substituted(regions, bbox=bbox) is False
+
+
+def test_bridge_substitution_accepts_clustered_overhang_regions():
+    """A part with overhangs clustered in one zone (a localized cavity)
+    IS a bridge candidate: the slicer can span the bridge in one go."""
+    regions = [
+        {"x": -3.0, "y": -3.0, "z": 20.0, "volume_mm3": 100.0},
+        {"x": 3.0, "y": 3.0, "z": 20.0, "volume_mm3": 100.0},
+    ]
+    bbox = {"x_min": -10, "x_max": 10, "y_min": -10, "y_max": 10,
+            "z_min": 0, "z_max": 30}
+    # Region span = 6mm, bbox max = 20mm → ratio 0.30 ≤ 0.80 → True
+    assert _likely_bridge_substituted(regions, bbox=bbox) is True
+
+
+def test_bridge_substitution_regions_without_centroid_fallback():
+    """Defensive: a region dict missing x/y (future schema change)
+    shouldn't break the heuristic — fall back to the bbox-only signal."""
+    regions = [{"z": 20.0, "volume_mm3": 100.0}]
+    bbox = {"x_min": 0, "x_max": 25, "y_min": 0, "y_max": 25,
+            "z_min": 0, "z_max": 30}
+    # No centroid data → fall back to bbox-only check (25 ≤ 30 → True)
+    assert _likely_bridge_substituted(regions, bbox=bbox) is True
+
+
 # ---------------------------------------------------------------------------
 # _analyze_supports — bbox plumbing + clamp
 # ---------------------------------------------------------------------------

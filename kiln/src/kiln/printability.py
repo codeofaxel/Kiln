@@ -15,7 +15,7 @@ import math
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from kiln import _vec
 from kiln.generation.validation import _parse_obj, _parse_stl
@@ -1133,6 +1133,7 @@ def _analyze_bed_adhesion(
 
 
 _BRIDGE_SUBSTITUTION_MAX_SPAN_MM = 30.0
+_BRIDGE_SUBSTITUTION_MAX_REGION_SPREAD_RATIO = 0.8
 
 
 def _likely_bridge_substituted(
@@ -1142,40 +1143,48 @@ def _likely_bridge_substituted(
     """Heuristic for whether PrusaSlicer's auto-supports will choose to
     bridge over the overhang instead of generating support material.
 
-    Slicers prefer bridging when (a) the unsupported span is short
-    enough for the slicer to traverse without sagging — empirically
-    PrusaSlicer's threshold sits at roughly 30mm — and (b) the
-    overhang region is large enough relative to the part footprint
-    that the slicer treats it as an enclosed cavity rather than a
-    small protrusion. The check below is a coarse pre-flight: it
-    fires when the LARGEST overhang region's footprint span fits
-    within the bridgeable range.
+    Slicers prefer bridging when ALL THREE of:
 
-    Returns False (no substitution likely) when ``support_regions`` is
-    empty — no overhangs to substitute. Returns True when the largest
-    overhang region is plausibly a bridge candidate; the user may
-    still want to FORCE supports for surface-quality reasons on a
-    show-surface underside.
+    1. There IS at least one detected overhang (else nothing to
+       substitute).
+    2. The PART's short-axis bbox dimension is ≤30mm — the slicer
+       can find SOME orientation along which the bridge fits in its
+       reliable-bridging length.
+    3. The detected overhang REGIONS cluster within ≤80% of the
+       longer bbox axis — i.e. the overhang is a localized cavity
+       (a 4-corner-leg tabletop, a U-shape, a picture-frame interior)
+       NOT scattered across the whole footprint (multi-arm star,
+       spider, gear-on-post — those need supports under each arm).
+
+    Returns True when all three conditions hold. The user may still
+    want to FORCE supports for surface-quality reasons on a
+    show-surface underside; this flag is "the slicer will probably
+    bridge if left to its defaults," not "you shouldn't generate
+    supports here."
     """
     if not support_regions:
         return False
-    # The support_regions list carries the largest overhangs (sorted
-    # by volume_mm3 descending). Without per-region x/y extents we
-    # use the largest region's footprint as a proxy via the bbox's
-    # horizontal dimensions when available. The conservative
-    # substitution call only fires when the bbox span is short enough
-    # for the slicer to bridge AND the region looks like a
-    # 4-corner-leg / picture-frame style enclosed gap.
     if bbox is None:
         return False
+
     span_x = bbox.get("x_max", 0.0) - bbox.get("x_min", 0.0)
     span_y = bbox.get("y_max", 0.0) - bbox.get("y_min", 0.0)
-    # Span = the SHORTER bbox dimension. The slicer bridges in the
-    # easiest direction, so the worst-case span the slicer must cross
-    # is min(dx, dy), not max — short axis tells us whether the slicer
-    # can find SOME orientation that bridges cleanly.
-    span = min(span_x, span_y)
-    return 0.0 < span <= _BRIDGE_SUBSTITUTION_MAX_SPAN_MM
+    # Condition 2: short-axis bbox check
+    if not (0.0 < min(span_x, span_y) <= _BRIDGE_SUBSTITUTION_MAX_SPAN_MM):
+        return False
+
+    # Condition 3: overhang-region clustering check. The support_regions
+    # carry centroid x/y per region; if they spread across most of the
+    # part, no single bridge can span them — the slicer will support
+    # each region individually.
+    xs = [r.get("x", 0.0) for r in support_regions if isinstance(r.get("x"), (int, float))]
+    ys = [r.get("y", 0.0) for r in support_regions if isinstance(r.get("y"), (int, float))]
+    if not xs or not ys:
+        # No centroid data — fall back to the bbox-only signal.
+        return True
+    region_span = max(max(xs) - min(xs), max(ys) - min(ys))
+    largest_part_span = max(span_x, span_y, 1e-9)
+    return (region_span / largest_part_span) <= _BRIDGE_SUBSTITUTION_MAX_REGION_SPREAD_RATIO
 
 
 def _analyze_supports(
@@ -2007,7 +2016,7 @@ def analyze_printability(
     infill_percent: float = 20.0,
     include_hole_detection: bool = True,
     printer_id: str | None = None,
-    slicer_style: str = "grid",
+    slicer_style: Literal["grid", "snug", "organic", "tree"] = "grid",
 ) -> PrintabilityReport:
     """Run a full printability analysis on a mesh file.
 
