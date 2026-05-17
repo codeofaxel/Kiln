@@ -17,6 +17,41 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 
+def _attach_brief_to_iteration_result(
+    brief_id: str, best_result: dict[str, Any],
+) -> None:
+    """Write a ``design_brief:<id>`` intent sidecar next to the best mesh.
+
+    Best-effort: when kiln-pro isn't installed, the saved goal can't be
+    loaded, or the sidecar write fails for any reason, silently no-op
+    — the iteration result is still valid.  Same pattern as the audit
+    honor-gate hook in ``kiln.original_design``.
+
+    Reads the mesh path out of either ``best_result["result"]["local_path"]``
+    (download_result envelope) or ``best_result["job"]["local_path"]``.
+    """
+    mesh_path: str | None = None
+    for nested in ("result", "job"):
+        block = best_result.get(nested)
+        if isinstance(block, dict):
+            v = block.get("local_path")
+            if isinstance(v, str) and v:
+                mesh_path = v
+                break
+    if not mesh_path:
+        return
+    try:
+        from kiln_pro.design_brief.explicit_attach import (
+            attach_brief_id_to_result,
+        )
+        attach_brief_id_to_result(brief_id, {"local_path": mesh_path})
+    except Exception:
+        _logger.debug(
+            "iterate_design: brief sidecar attach skipped (best-effort)",
+            exc_info=True,
+        )
+
+
 def _resolve_tool_build_volume(
     printer_id: str | None,
 ) -> tuple[str, tuple[float, float, float]] | None:
@@ -877,6 +912,7 @@ class _DesignReasoningToolsPlugin:
             max_iterations: int = 3,
             material: str = "",
             printer_model: str = "",
+            brief_id: str = "",
         ) -> dict:
             """Automated design iteration: generate -> validate -> improve -> regenerate.
 
@@ -890,6 +926,15 @@ class _DesignReasoningToolsPlugin:
             :param max_iterations: Maximum improvement attempts (1-5).
             :param material: Optional material for design intelligence.
             :param printer_model: Optional printer model for constraints.
+            :param brief_id: Optional saved-goal id from ``design_session``.
+                When supplied AND the best iteration produced a mesh, a
+                ``design_brief:<id>`` intent sidecar is written next to
+                the produced file so the audit's "matches what you
+                asked for" gate, the brief failure_history wiring, and
+                the ``compare_design_versions`` intent diff all light
+                up against the saved goal — without the user having to
+                re-attach the brief after every iteration round.
+                Best-effort: kiln-pro not installed silently skips.
             :returns: Dict with the best result and iteration history.
             """
             if err := _srv._check_auth("generate"):
@@ -1012,11 +1057,22 @@ class _DesignReasoningToolsPlugin:
             if best_result is None:
                 return _srv._error_dict("All iterations failed.", code="ITERATION_EXHAUSTED")
 
+            # B11 brief passthrough: if the caller supplied a saved-goal id
+            # AND the winning iteration produced a mesh, write the
+            # ``design_brief:<id>`` intent sidecar next to the best file so
+            # downstream audit honor + failure_history + compare-versions
+            # all light up against the saved goal.  Best-effort — kiln-pro
+            # not installed silently skips, same pattern as the audit's
+            # honor-gate hook in original_design.py.
+            if brief_id:
+                _attach_brief_to_iteration_result(brief_id, best_result)
+
             return {
                 "success": True,
                 "iterations": iterations,
                 "iteration_count": len(iterations),
                 "best_score": best_score,
+                "brief_id": brief_id or None,
                 **best_result,
             }
 
