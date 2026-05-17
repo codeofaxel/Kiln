@@ -148,6 +148,68 @@ class TestSaveDesignVersion:
         # No crash from missing kiln_pro
         assert "version" in result
 
+    def test_brief_id_persists_on_first_version(self, monkeypatch, tmp_path):
+        """A4: caller-supplied brief_id lands on the recipe + in the response."""
+        monkeypatch.setattr("kiln.plugins.version_tools._DESIGNS_ROOT", str(tmp_path))
+        mcp = _make_mcp_with_tools()
+        result = mcp["save_design_version"](
+            design_id="goal-coaster",
+            scad_source="cube([80, 80, 3]);",
+            brief_id="abc123",
+            intent_hash="ih-deadbeef",
+        )
+        assert result["ok"] is True
+        ver = result["version"]
+        assert ver["brief_id"] == "abc123"
+        assert ver["intent_hash"] == "ih-deadbeef"
+
+    def test_brief_id_inherited_from_parent_when_omitted(self, monkeypatch, tmp_path):
+        """A4: an iteration of a brief-attached design inherits the brief."""
+        monkeypatch.setattr("kiln.plugins.version_tools._DESIGNS_ROOT", str(tmp_path))
+        mcp = _make_mcp_with_tools()
+        # First version attaches a brief
+        mcp["save_design_version"](
+            design_id="iter-coaster",
+            scad_source="cube([80, 80, 3]);",
+            brief_id="parent-brief-id",
+            intent_hash="parent-intent",
+        )
+        # Second version omits brief_id — must inherit from parent
+        result = mcp["save_design_version"](
+            design_id="iter-coaster",
+            scad_source="cube([90, 90, 3]);",
+        )
+        assert result["ok"] is True
+        assert result["version"]["brief_id"] == "parent-brief-id"
+        assert result["version"]["intent_hash"] == "parent-intent"
+
+    def test_explicit_brief_id_overrides_inheritance(self, monkeypatch, tmp_path):
+        """A4: caller-supplied brief_id overrides the parent's brief on iterate."""
+        monkeypatch.setattr("kiln.plugins.version_tools._DESIGNS_ROOT", str(tmp_path))
+        mcp = _make_mcp_with_tools()
+        mcp["save_design_version"](
+            design_id="reassign-coaster",
+            scad_source="cube([80, 80, 3]);",
+            brief_id="original-brief",
+        )
+        result = mcp["save_design_version"](
+            design_id="reassign-coaster",
+            scad_source="cube([90, 90, 3]);",
+            brief_id="new-brief",
+        )
+        assert result["version"]["brief_id"] == "new-brief"
+
+    def test_no_brief_means_no_brief(self, monkeypatch, tmp_path):
+        """Default (no brief): recipe field stays None, doesn't fabricate."""
+        monkeypatch.setattr("kiln.plugins.version_tools._DESIGNS_ROOT", str(tmp_path))
+        mcp = _make_mcp_with_tools()
+        result = mcp["save_design_version"](
+            design_id="no-goal-coaster",
+            scad_source="cube([50, 50, 3]);",
+        )
+        assert result["version"]["brief_id"] is None
+        assert result["version"]["intent_hash"] is None
+
 
 # ---------------------------------------------------------------------------
 # TestListDesignVersions
