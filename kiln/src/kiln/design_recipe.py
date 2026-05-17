@@ -83,14 +83,16 @@ class DesignRecipe:
     generation_provider: str | None = None  # e.g. "gemini", "openscad", "manual"
     provenance: dict[str, Any] | None = None  # freeform context (tools_used, change_summary, source_files)
     stl_path: str | None = None  # path to the primary output STL
-    # Brief-derived provenance: when the recipe was produced from a
-    # design brief lifecycle, ``brief_id`` is the brief identifier and
-    # ``intent_hash`` is the content hash of the brief's intent payload.
-    # Both fields are optional — recipes produced outside the brief
-    # lifecycle leave them unset.  Recipes that DO carry these fields
-    # promise the caller that the recipe was generated against that
-    # brief at that intent hash, so downstream audits can verify the
-    # mesh against the same brief without re-resolving it.
+    # Saved-goal provenance: when the recipe was produced via the
+    # kiln-pro design_session lifecycle, ``brief_id`` is the saved-goal
+    # identifier (kiln_pro.design_brief.DesignBrief.brief_id) and
+    # ``intent_hash`` is the content hash of the goal's derived intent
+    # payload.  Both fields are optional — recipes produced outside the
+    # design_session flow leave them unset.  Recipes that DO carry
+    # these fields promise the caller that the recipe was generated
+    # against that saved goal at that intent hash, so downstream
+    # audits can verify the mesh against the same goal without
+    # re-resolving it.
     brief_id: str | None = None
     intent_hash: str | None = None
 

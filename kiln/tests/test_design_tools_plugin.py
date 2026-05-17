@@ -40,9 +40,13 @@ class TestDesignToolsPlugin:
         assert "design_tools" in names
 
     def test_registers_original_design_tools(self, registered_tools) -> None:
-        assert "get_design_brief" in registered_tools
+        assert "analyze_design_requirements" in registered_tools
         assert "build_generation_prompt" in registered_tools
         assert "audit_original_design" in registered_tools
+
+    def test_get_design_brief_is_gone(self, registered_tools) -> None:
+        """Hard-cut: the old name must not be registered (no shim)."""
+        assert "get_design_brief" not in registered_tools
 
     def test_audit_original_design_wires_to_core_loop(self, registered_tools, monkeypatch) -> None:
         session = SimpleNamespace(

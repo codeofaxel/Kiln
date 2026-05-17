@@ -91,6 +91,8 @@ class _VersionToolsPlugin:
             provenance: dict | None = None,
             stl_path: str = "",
             parent_version_id: str = "",
+            brief_id: str = "",
+            intent_hash: str = "",
         ) -> dict:
             """Save a new version of a parametric design.
 
@@ -119,6 +121,17 @@ class _VersionToolsPlugin:
                 parent_version_id: Unused in this implementation; kept for
                     backward compatibility.  The parent is always the most
                     recent existing version.
+                brief_id: Optional saved-goal id from ``design_session``.
+                    When supplied, the new version's recipe records the
+                    link so the audit's "matches what you asked for" gate,
+                    the brief failure_history wiring, and the
+                    ``compare_design_versions`` intent diff all join back
+                    to the goal.  When omitted, an earlier version's
+                    ``brief_id`` (read from the parent recipe) is
+                    inherited automatically.
+                intent_hash: Optional content hash of the brief's derived
+                    intent payload, paired with ``brief_id``.  Same
+                    inheritance fall-back as ``brief_id``.
 
             Returns:
                 The saved version record including version number, diff, and
@@ -152,6 +165,9 @@ class _VersionToolsPlugin:
                     recipe.prompt = prompt or None
                     recipe.provenance = provenance or None
                     recipe.stl_path = stl_path or None
+                    # Saved-goal provenance (A4): caller-supplied wins.
+                    recipe.brief_id = brief_id or None
+                    recipe.intent_hash = intent_hash or None
                     diff_text: str | None = None
                 else:
                     parent = load_recipe(existing_path)
@@ -177,6 +193,12 @@ class _VersionToolsPlugin:
                     recipe.prompt = prompt or parent.prompt
                     recipe.provenance = provenance or None
                     recipe.stl_path = stl_path or None
+                    # Saved-goal provenance (A4): caller-supplied wins;
+                    # otherwise inherit from the parent recipe so an
+                    # iteration of a brief-attached design doesn't
+                    # silently lose the goal link.
+                    recipe.brief_id = brief_id or parent.brief_id
+                    recipe.intent_hash = intent_hash or parent.intent_hash
 
                 saved_path = save_recipe(recipe, design_directory)
                 result: dict = {
@@ -197,6 +219,8 @@ class _VersionToolsPlugin:
                         "changes": recipe.changes,
                         "stl_path": recipe.stl_path,
                         "provenance": recipe.provenance,
+                        "brief_id": recipe.brief_id,
+                        "intent_hash": recipe.intent_hash,
                     },
                 }
 

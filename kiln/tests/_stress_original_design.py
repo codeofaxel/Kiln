@@ -29,7 +29,7 @@ class TestOriginalDesignAuditDataclass:
             ready_for_print=True,
             blockers=[],
             next_actions=[],
-            design_brief={},
+            design_requirements={},
             enhanced_prompt={},
             mesh_validation={},
             printability={},

@@ -395,7 +395,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 792 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 799 total MCP capabilities**. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
+Kiln exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 793 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 800 total MCP capabilities**. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
 
 kiln-pro tools are discoverable through the public `pro_tool_manifest.json` even when kiln-pro is not installed locally. Free-tier callers receive structured `TIER_REQUIRED` responses with the required tier and pricing URL; paired machines can proxy eligible paid-tier tool calls through the hosted Kiln REST endpoint so the paid code stays server-side.
 
@@ -890,7 +890,7 @@ Constraint-aware design reasoning — agents query material properties, design t
 
 | Tool | Input | Output |
 |---|---|---|
-| `get_design_brief` | `requirements`, `material` | Complete design brief (materials, patterns, constraints, orientation) |
+| `analyze_design_requirements` | `requirements`, `material` | Functional-requirements analysis (materials, patterns, constraints, orientation). Use `design_session` for the user-facing saved-goal flow. |
 | `get_material_design_profile` | `material` | Full engineering properties for a printing material |
 | `list_design_materials` | — | All available materials with summary properties |
 | `recommend_design_material` | `requirements`, constraints | Best material recommendation with reasoning |

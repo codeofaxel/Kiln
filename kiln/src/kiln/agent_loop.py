@@ -229,7 +229,7 @@ _STANDARD_TOOLS = _ESSENTIAL_TOOLS | frozenset(
         "download_generated_model",
         "await_generation",
         "validate_generated_mesh",
-        "get_design_brief",
+        "analyze_design_requirements",
         "build_generation_prompt",
         "audit_original_design",
         "validate_design_for_requirements",

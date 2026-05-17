@@ -26,7 +26,7 @@ Success means four things at once:
 4. `openscad`
    Use only when the agent already has explicit OpenSCAD code or a very clear parametric construction plan.
 
-## Required design brief fields
+## Required design-requirements fields
 
 Before generation, the agent should pin down as many of these as possible:
 
@@ -71,7 +71,7 @@ Implications for agents:
 
 ## Kiln workflow for original creation
 
-1. Call `get_design_brief` when the task is ambiguous or functional.
+1. Call `analyze_design_requirements` when the task is ambiguous or functional (or `design_session(verb="start", idea="...")` for the user-facing saved-goal flow that drives the audit + post-print review).
 2. Call `build_generation_prompt` to ground the idea in material, printer, and printability constraints.
 3. Prefer `generate_original_design` for end-to-end creation.
 4. If the result is not ready, inspect `feedback`, `next_actions`, and `next_prompt_suggestion`.
