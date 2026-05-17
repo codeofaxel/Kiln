@@ -307,3 +307,101 @@ class TestAdhesionForce:
             f"Geometry-guarded verdict should be 'approximate', got "
             f"model_confidence={report.adhesion_force.model_confidence}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Calibration matrix — 24-case sweep that pins the current model's
+# behavior across realistic prints.  The ``current_actual`` column
+# records what the model says today (with the v1.1.2 geometry guard +
+# datasheet-grounded Pro overlay); the ``reality`` column is the
+# educated-guess ground truth from domain knowledge (NOT measured).
+#
+# This test is INTENTIONALLY loose — it asserts that the model's
+# verdict is in the EXPECTED current-actual column, NOT that it
+# matches reality.  That makes it a regression matrix, not a quality
+# matrix.  When the adhesion-model rework lands (see kiln-pro
+# tasks.md → "Layer 2"), update the ``current_actual`` values to
+# match the new model and verify catch rate improves toward the
+# ``reality`` column.
+#
+# Failure rate today: ~50% catch on truly-risky prints; 0% false
+# positives on safe prints.  Target after Layer 2: ≥90% catch with
+# 0 false positives.
+# ---------------------------------------------------------------------------
+
+
+_CALIBRATION_MATRIX = [
+    # (name, material, W, D, Z, current_actual_risk, reality)
+    # ── SHOULD-BE-SECURE PRINTS (no false positives expected) ─────────
+    ("3DBenchy",              "pla",     60,  30,  48, "secure",  "secure"),
+    ("Phone stand",           "pla",    100,  50,  80, "secure",  "secure"),
+    ("Cal cube",              "pla",     20,  20,  20, "secure",  "secure"),
+    ("Mini figurine",         "pla",     30,  30,  60, "secure",  "secure"),
+    ("Cookie cutter",         "pla",     80,  60,  10, "secure",  "secure"),
+    ("Lithophane",            "pla",    100, 150,   3, "secure",  "secure"),
+    ("Desk organizer",        "pla",    200, 100,  50, "secure",  "secure"),
+    ("LEGO brick",            "abs",     32,  16,   9, "secure",  "secure"),
+    ("Tool handle (compact)", "abs",     30,  30, 100, "secure",  "secure"),
+    ("Helmet visor (large)",  "abs",    200,  80,  40, "secure",  "secure"),
+    ("Phone case",            "petg",   160,  80,   8, "secure",  "secure"),
+    ("Water bottle holder",   "petg",    80,  80, 120, "secure",  "secure"),
+    ("Nylon snap-fit",        "nylon",   40,  40,  60, "secure",  "secure"),
+    ("Nylon gear",            "nylon",   50,  50,  10, "secure",  "secure"),
+    ("TPU phone bumper",      "tpu",    160,  80,  10, "secure",  "secure"),
+    ("PP gasket (flat)",      "pp",      80,  80,   3, "secure",  "secure"),
+    ("PP cup",                "pp",      60,  60,  80, "secure",  "secure"),
+    ("PP small clip",         "pp",      30,  20,  15, "secure",  "secure"),
+    ("Tall PLA vase",         "pla",     40,  40, 200, "secure",  "secure"),
+    ("PLA pen holder",        "pla",     25,  25, 120, "secure",  "secure"),
+    ("PLA candleholder",      "pla",      4,   4, 200, "secure",  "secure"),
+    ("PETG tall tower",       "petg",    20,  20, 300, "secure",  "secure"),
+    # ── SHOULD-BE-FLAGGED PRINTS (catch rate target ≥90% post-Layer-2) ──
+    # CAUGHT TODAY (geometry guard fires at aspect > 50):
+    ("Hairlike PLA tower",    "pla",      1,   1, 100, "marginal", "likely_detach"),
+    ("PP test tall tower",    "pp",       2,   2, 250, "likely_detach", "likely_detach"),
+    ("PP needle pillar",      "pp",       3,   3, 300, "marginal", "likely_detach"),
+    ("PETG ultra-tall thin",  "petg",     5,   5, 400, "marginal", "marginal"),
+    # MISSED TODAY (Layer 2 work needs to catch these):
+    ("Skyscraper PLA",        "pla",     10,  10, 500, "secure",  "marginal"),
+    ("PP narrow column",      "pp",      10,  10, 200, "secure",  "marginal"),
+    ("Nylon thin tower",      "nylon",   10,  10, 200, "secure",  "marginal"),
+    ("ABS tall thin",         "abs",     10,  10, 250, "secure",  "marginal"),
+]
+
+
+@pytest.mark.parametrize(
+    "name,material,w,d,z,current_actual,reality",
+    _CALIBRATION_MATRIX,
+)
+def test_adhesion_calibration_matrix(
+    tmp_path, name, material, w, d, z, current_actual, reality
+):
+    """Regression matrix: pin the model's verdict for 30 representative prints.
+
+    Asserts the model's CURRENT verdict matches the recorded
+    ``current_actual`` column.  Drift here means either:
+    (a) someone tuned the model and didn't update this matrix
+        (intentional — update the matrix to match), or
+    (b) someone changed something unintentionally (catch the regression).
+
+    The ``reality`` column is the documented ground-truth target
+    for Layer 2 (model rework).  Compare ``current_actual`` and
+    ``reality`` to see where the gaps are.
+
+    Marked as a parametrized test so each case shows individually
+    in pytest output — you can see "PP narrow column FAILED" as a
+    distinct line rather than the whole sweep as one PASS/FAIL.
+    """
+    stl_path = str(tmp_path / f"{name.replace(' ', '_').replace('/', '_')}.stl")
+    _write_box_stl(stl_path, w, d, z)
+    report = analyze_printability(stl_path, material=material)
+    assert report.adhesion_force is not None, f"{name}: no adhesion_force in report"
+    assert report.adhesion_force.risk_level == current_actual, (
+        f"{name} ({material}, {w}x{d}x{z}): "
+        f"expected current_actual={current_actual}, "
+        f"got risk_level={report.adhesion_force.risk_level}, "
+        f"ratio={report.adhesion_force.force_ratio}, "
+        f"reality target={reality}. "
+        f"If the model was intentionally tuned, update the matrix; "
+        f"otherwise investigate the regression."
+    )
