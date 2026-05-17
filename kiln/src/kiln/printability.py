@@ -249,6 +249,14 @@ class PrintabilityReport:
     # (Pro+ tier); absent on free / public installs.  See kiln3d.com
     # for tier details.
     enrichment: dict[str, Any] | None = None
+    # Total triangle count in the parsed mesh.  Exposed so downstream
+    # consumers (notably the kiln-pro overlay's coverage notes) can
+    # gauge mesh-density confidence — a coarse mesh below ~500
+    # triangles with ``thin_walls.thin_wall_count == 0`` is a "Pro
+    # cannot analyze" signal, not a "no thin walls" signal.  Defaults
+    # to 0 for clients that construct PrintabilityReport directly
+    # without going through ``analyze_printability``.
+    triangle_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -845,7 +853,16 @@ def _analyze_thin_walls(
                 )
 
     if min_thickness == float("inf"):
-        min_thickness = nozzle_diameter  # No thin walls found
+        # Sentinel: no thin walls were detected.  We return 0.0 rather
+        # than ``nozzle_diameter`` so downstream consumers (especially
+        # the kiln-pro overlay's per-material thin-wall check) can
+        # distinguish "no signal" from "a real wall measured at the
+        # nozzle width".  The 2026-05-17 thin-wall audit found that
+        # the prior ``nozzle_diameter`` fallback caused Pro to fire
+        # "wall too thin" on every clean mesh — every public consumer
+        # already gates on ``thin_wall_count > 0`` before reading
+        # ``min_wall_thickness_mm`` so this change is safe.
+        min_thickness = 0.0
 
     thin_pct = (thin_count / total * 100.0) if total > 0 else 0.0
 
@@ -1856,6 +1873,7 @@ def analyze_printability(
         recommendations=recommendations,
         estimated_print_time_modifier=round(time_mod, 2),
         holes=holes,
+        triangle_count=len(triangles),
     )
 
     # Optional kiln-pro enrichment: when the kiln-pro package is
@@ -1876,7 +1894,22 @@ def analyze_printability(
                     report.to_dict(),
                     material=material,
                     printer_id=printer_id,
+                    nozzle_diameter_mm=nozzle_diameter,
                 )
+            except TypeError:
+                # Older kiln-pro that pre-dates the nozzle_diameter_mm
+                # parameter — call without it so this public surface
+                # stays forward-compatible with both signatures.  When
+                # the installed kiln-pro picks up the new parameter,
+                # the user's nozzle starts scaling per-material floors.
+                try:
+                    enriched = pro_features.printability_overlay.enrich_printability_report(
+                        report.to_dict(),
+                        material=material,
+                        printer_id=printer_id,
+                    )
+                except Exception:  # noqa: BLE001
+                    enriched = None
             except Exception:  # noqa: BLE001
                 # Overlay failure must never break the public path.
                 enriched = None

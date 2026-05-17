@@ -241,7 +241,10 @@ class TestThinWallAnalysis:
         verts = list({v for tri in tris for v in tri})
         result = _analyze_thin_walls(tris, verts, nozzle_diameter=0.4)
         assert result.thin_wall_count == 0
-        assert result.min_wall_thickness_mm >= 0.4
+        # When no thin walls are detected, ``min_wall_thickness_mm`` is
+        # the 0.0 sentinel — distinguishes "no signal" from "wall measured
+        # at nozzle width" for downstream consumers (see 2026-05-17 audit).
+        assert result.min_wall_thickness_mm == 0.0
 
     def test_thin_triangle_detected(self):
         # Triangle with a very short edge (0.1 mm).
@@ -460,6 +463,39 @@ class TestAnalyzePrintability:
             path = _write_stl(tmpdir, _cube_triangles(10.0))
             report = analyze_printability(path, nozzle_diameter=0.8)
             assert isinstance(report, PrintabilityReport)
+
+    def test_no_thin_walls_returns_zero_sentinel(self):
+        """When ``_analyze_thin_walls`` finds nothing below the nozzle
+        threshold, ``min_wall_thickness_mm`` is the 0.0 sentinel — NOT
+        the nozzle diameter.  The sentinel lets downstream consumers
+        distinguish "no signal" from "a real wall measured at the
+        nozzle width".  Without this, every clean mesh produces a
+        spurious thin-wall warning at the Pro-overlay layer because
+        ``nozzle_diameter < material_min_wall`` is always true."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _outward_cube_triangles(20.0))
+            for nozzle in (0.2, 0.4, 0.6, 0.8):
+                report = analyze_printability(path, nozzle_diameter=nozzle)
+                assert report.thin_walls.thin_wall_count == 0
+                assert report.thin_walls.min_wall_thickness_mm == 0.0, (
+                    f"nozzle={nozzle}: expected 0.0 sentinel, got "
+                    f"{report.thin_walls.min_wall_thickness_mm}"
+                )
+
+    def test_triangle_count_populated_on_report(self):
+        """``PrintabilityReport.triangle_count`` exposes the mesh's
+        triangle count so coverage-aware consumers (kiln-pro's
+        ``analysis_notes`` field) can branch on mesh density.  Field
+        defaults to 0 only when constructed directly without going
+        through ``analyze_printability``."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(20.0))
+            report = analyze_printability(path)
+            # A simple cube STL has 12 triangles (2 per face × 6 faces).
+            assert report.triangle_count == 12
+            # And to_dict() round-trips the field for kiln-pro overlay
+            # consumption.
+            assert report.to_dict()["triangle_count"] == 12
 
     def test_print_time_modifier_base(self):
         with tempfile.TemporaryDirectory() as tmpdir:
