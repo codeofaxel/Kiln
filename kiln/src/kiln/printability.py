@@ -971,11 +971,28 @@ def _analyze_overhangs(
         material_limits = cfg.get("material_limits_deg") or {}
         default_limit = cfg.get("default_limit_deg",
                                 _OVERHANGS_PUBLIC_DEFAULTS["default_limit_deg"])
-        max_overhang_angle = float(
-            material_limits.get(material, default_limit)
-            if material is not None
-            else default_limit
-        )
+        # Case-insensitive + delimiter-folded lookup.  The overlay JSON
+        # mixes UPPERCASE+dash legacy keys ("PLA", "CF-PETG") with
+        # lowercase+underscore catalog keys ("pla_plus", "tpu_85a") and
+        # callers pass material names in either convention (Kiln tools
+        # typically lowercase from materials.json; tests + Pro tools
+        # often uppercase).  Without normalization, "tpu" misses the
+        # "TPU" overlay entry and falls through to the 45° default —
+        # silently disabling the per-material tier seam.  Mirrors the
+        # _normalize_material_key helper in
+        # kiln_pro/printability_overlay/data_loader.py.
+        if material is not None:
+            normalized_target = material.strip().lower().replace(
+                "-", "_"
+            ).replace(" ", "_")
+            limit_value = default_limit
+            for key, val in material_limits.items():
+                if key.strip().lower().replace("-", "_").replace(" ", "_") == normalized_target:
+                    limit_value = val
+                    break
+            max_overhang_angle = float(limit_value)
+        else:
+            max_overhang_angle = float(default_limit)
 
     if normalize_winding:
         triangles = _normalize_triangle_winding(triangles)

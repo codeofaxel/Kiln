@@ -355,6 +355,60 @@ class TestOverhangMaterialAwareThreshold:
         )
         assert r.overhang_triangle_count > 0
 
+    def test_material_lookup_is_case_insensitive(self):
+        """Overlay keys mix UPPERCASE legacy ('PLA', 'CF-PETG') with
+        lowercase catalog ('pla_plus', 'tpu_85a').  Callers pass
+        material in either case — Kiln tools typically use lowercase
+        from materials.json; tests often uppercase.  The lookup must
+        be case-insensitive so ``material='tpu'`` matches the 'TPU'
+        overlay key and doesn't silently fall through to the universal
+        45 deg default (which would disable the per-material tier
+        seam entirely for that material).
+
+        Mirrors the ``_normalize_material_key`` helper in
+        kiln_pro/printability_overlay/data_loader.py."""
+        tris = _make_slope_wedge_triangles(overhang_deg=36.0)
+        overlay = {
+            "overhangs": {
+                "default_limit_deg": 45.0,
+                "material_limits_deg": {"TPU": 35},
+            },
+        }
+        for mat in ("TPU", "tpu", "Tpu", "tPU"):
+            r = _analyze_overhangs(
+                tris, z_min=0.0, material=mat, overlay=overlay,
+            )
+            assert r.overhang_triangle_count > 0, (
+                f"material='{mat}' must match overlay key 'TPU' "
+                f"case-insensitively; got count="
+                f"{r.overhang_triangle_count}"
+            )
+
+    def test_material_lookup_folds_dash_underscore_space(self):
+        """The overlay carries entries in both ``UPPERCASE+dash`` (e.g.
+        'CF-PETG') and ``lowercase+underscore`` (e.g. 'cf_petg')
+        conventions.  The lookup must collapse all four delimiter
+        styles so any caller convention matches any overlay entry.
+
+        Same scope as kiln-pro's ``_normalize_material_key``."""
+        tris = _make_slope_wedge_triangles(overhang_deg=42.0)
+        overlay = {
+            "overhangs": {
+                "default_limit_deg": 45.0,
+                "material_limits_deg": {"CF-PETG": 40},
+            },
+        }
+        for mat in ("CF-PETG", "cf-petg", "cf_petg", "CF_PETG",
+                    "Cf-Petg", "cf petg"):
+            r = _analyze_overhangs(
+                tris, z_min=0.0, material=mat, overlay=overlay,
+            )
+            assert r.overhang_triangle_count > 0, (
+                f"material='{mat}' must match overlay key 'CF-PETG' "
+                f"across delimiter conventions; got count="
+                f"{r.overhang_triangle_count}"
+            )
+
     def test_explicit_max_overhang_angle_overrides_overlay(self):
         """Explicit ``max_overhang_angle`` bypasses the overlay
         lookup.  Pins the priority order: caller > overlay > public."""
