@@ -82,24 +82,44 @@ class TestThermalStress:
         assert report.thermal_stress.risk_level == "low"
         assert report.thermal_stress.score_deduction == 0
 
-    def test_tall_thin_to_wide_base_stress(self, tmp_path):
-        """A wide flat plate (100x100x2mm) should show high area change ratio.
+    def test_wide_base_narrow_tower_stress(self, tmp_path):
+        """A wide base (80x80x5) with a narrow tower (5x5x40) on top should
+        show a high cross-section transition ratio at z=5.
 
-        All cross-section area is concentrated in 2mm of height, so the
-        layer analysis should detect a dramatic area drop to zero above that.
+        The thermal-stress model proxies cross-section change by
+        comparing per-layer vertical-wall area between adjacent layers.
+        A wide base has high wall perimeter; the narrow tower above has
+        much less — the transition layer registers a large ratio.
+
+        Uniform-cross-section boxes (cubes, plates, towers) all read
+        max_ratio = 1.0 under the corrected model: no false-positive
+        "critical thermal stress" verdict on a plain print.
         """
-        stl_path = str(tmp_path / "plate.stl")
-        _write_box_stl(stl_path, 100, 100, 2)
+        base_path = str(tmp_path / "base.stl")
+        tower_path = str(tmp_path / "tower.stl")
+        merged_path = str(tmp_path / "merged.stl")
+        _write_box_stl(base_path, 80, 80, 5)
+        _write_box_stl(tower_path, 5, 5, 40, offset_z=5)
+        _merge_stl_files(merged_path, base_path, tower_path)
 
-        report = analyze_printability(stl_path, material="pla")
+        report = analyze_printability(merged_path, material="pla")
         assert report.thermal_stress is not None
-        # The area change from large cross-section to zero should give a high ratio.
-        assert report.thermal_stress.max_area_change_ratio > 1.0
+        # 80x80 base wall perimeter ~320 vs 5x5 tower ~20 = ratio ~16.
+        assert report.thermal_stress.max_area_change_ratio > 5.0
 
     def test_material_affects_stress(self, tmp_path):
-        """ABS should have higher thermal stress risk than PLA for same geometry."""
-        stl_path = str(tmp_path / "box.stl")
-        _write_box_stl(stl_path, 100, 100, 2)
+        """ABS should have higher thermal stress risk than PLA for same geometry.
+
+        Wall-vs-face fix means the comparison must run on geometry that
+        actually has cross-section change — a uniform plate now correctly
+        reads max_ratio=1.0 for any material.
+        """
+        base_path = str(tmp_path / "base.stl")
+        tower_path = str(tmp_path / "tower.stl")
+        stl_path = str(tmp_path / "merged.stl")
+        _write_box_stl(base_path, 80, 80, 5)
+        _write_box_stl(tower_path, 5, 5, 40, offset_z=5)
+        _merge_stl_files(stl_path, base_path, tower_path)
 
         report_pla = analyze_printability(stl_path, material="pla")
         report_abs = analyze_printability(stl_path, material="abs")
@@ -128,13 +148,18 @@ class TestThermalStress:
         assert hasattr(report.thermal_stress, "recommendations")
 
     def test_stress_concentration_zones_populated(self, tmp_path):
-        """A flat plate (100x100x2mm) should have stress concentration zones."""
-        stl_path = str(tmp_path / "plate.stl")
-        _write_box_stl(stl_path, 100, 100, 2)
+        """Genuine cross-section transition geometry should populate
+        stress concentration zones."""
+        base_path = str(tmp_path / "base.stl")
+        tower_path = str(tmp_path / "tower.stl")
+        merged_path = str(tmp_path / "merged.stl")
+        _write_box_stl(base_path, 80, 80, 5)
+        _write_box_stl(tower_path, 5, 5, 40, offset_z=5)
+        _merge_stl_files(merged_path, base_path, tower_path)
 
-        report = analyze_printability(stl_path, material="pla")
+        report = analyze_printability(merged_path, material="pla")
         assert report.thermal_stress is not None
-        # The transition from full cross-section to zero should produce zones.
+        # Wide-to-narrow transition at z=5 should produce zones.
         assert len(report.thermal_stress.stress_concentration_zones) > 0
         # Each zone should have expected keys.
         zone = report.thermal_stress.stress_concentration_zones[0]
@@ -142,9 +167,13 @@ class TestThermalStress:
         assert "area_change_ratio" in zone
 
     def test_stress_recommendations_generated(self, tmp_path):
-        """High-stress geometry with ABS should produce stress recommendations."""
-        stl_path = str(tmp_path / "plate.stl")
-        _write_box_stl(stl_path, 100, 100, 2)
+        """Real cross-section-change geometry with ABS should produce stress recommendations."""
+        base_path = str(tmp_path / "base.stl")
+        tower_path = str(tmp_path / "tower.stl")
+        stl_path = str(tmp_path / "merged.stl")
+        _write_box_stl(base_path, 80, 80, 5)
+        _write_box_stl(tower_path, 5, 5, 40, offset_z=5)
+        _merge_stl_files(stl_path, base_path, tower_path)
 
         report = analyze_printability(stl_path, material="abs")
         assert report.thermal_stress is not None

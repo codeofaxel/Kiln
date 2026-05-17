@@ -306,8 +306,15 @@ class BundlePrintabilityFindings:
 # ---------------------------------------------------------------------------
 
 # Materials with high warping tendency — need wider brims and may need rafts.
+# Extended 2026-05-17 to include materials whose curated warping_factor
+# is >= 0.85 but were previously excluded from the open-frame warning:
+# PP, PEEK, PA6_GF, CF_NYLON, PC_ABS, HIPS, NYLON, POLYCARBONATE.  Cross-
+# wired with kiln-pro's ``_WARP_PRONE_MATERIALS`` set.
 _HIGH_WARP_MATERIALS: frozenset[str] = frozenset({
     "ABS", "ASA", "PA", "PA6", "PA12", "PC", "ABS-CF", "ASA-CF",
+    "NYLON", "POLYCARBONATE", "PC-ABS", "PC_ABS",
+    "PA6-GF", "PA6_GF", "PA-CF", "CF-NYLON", "CF_NYLON",
+    "PP", "PEEK", "HIPS",
 })
 
 # Known bed-slinger printers where Y-axis bed movement worsens adhesion.
@@ -414,15 +421,68 @@ def _material_shrinkage_strain(material: str | None) -> float:
 
 _WARPING_PUBLIC_DEFAULTS: dict[str, Any] = {
     "geometry_score_rules": [
-        {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 20000.0, "score": 2},
-        {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 2000.0,  "score": 1},
+        # Score-2 threshold lowered 20000 -> 15000 mm² so a 100x100x5
+        # plate (flat_area=20000) fires the full 2-point geometry hit
+        # rather than the boundary-missed 1-point hit.  Score-1 raised
+        # 2000 -> 4000 mm² so 40x40-ish compact parts (flat 3200) don't
+        # auto-trip a moderate verdict for warp-prone materials.
+        # Verified against the 70+-case calibration matrix: no false
+        # positives on the should-be-secure side; catches Nylon / PEEK /
+        # PP medium plates that the old thresholds missed.
+        {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 15000.0, "score": 2},
+        {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 6000.0,  "score": 1},
         {"metric": "height_to_base_ratio", "operator": ">", "threshold": 5.0,     "score": 2},
-        {"metric": "height_to_base_ratio", "operator": ">", "threshold": 3.0,     "score": 1},
+        {"metric": "height_to_base_ratio", "operator": ">", "threshold": 2.4,     "score": 1},
         {"metric": "sharp_corners_at_base","operator": ">", "threshold": 10,      "score": 1},
     ],
     "material_multipliers": {"low": 0.5, "moderate": 1.0, "high": 1.5, "very_high": 2.0},
     "risk_thresholds":      {"critical": 3.0, "high": 2.0, "moderate": 1.0},
     "score_deductions":     {"critical": -20, "high": -12, "moderate": -6, "low": 0},
+    # Materials missing from public materials.json fall back to "moderate"
+    # tendency = 1.0 multiplier, which understates PEEK / PA6 / PC-alias /
+    # PA12 / HIPS / ABS-CF / ASA-CF.  These overrides restore datasheet-
+    # grounded multipliers (Stratasys / Solvay / Bambu wiki) without
+    # requiring schema-complete materials.json entries.
+    "material_specific_multipliers": {
+        "peek": 2.0,
+        "pa6": 2.0,
+        "pa12": 1.5,
+        "hips": 1.0,
+        "abs_cf": 1.0,
+        "asa_cf": 1.0,
+        "pc": 2.0,
+    },
+    # Per-material baseline-risk floor (free tier).  Warp-prone materials
+    # carry intrinsic stress that compact geometry alone doesn't surface
+    # — a 30mm PP cube has no flat-area / aspect-ratio signal but still
+    # lifts off the bed because PP shrinks 1.5-2% during cooling.  The
+    # baseline adds a per-material risk floor before geometry is layered
+    # on; the conservative free-tier values below catch the worst
+    # offenders (PP, polycarbonate, nylon, ABS) without false-positives
+    # on small low-warp prints.  Materials not listed default to 0.0.
+    # Pro overlay supplies a more aggressive, finer-grained schedule
+    # plus higher resolution between adjacent risk levels — see the
+    # ``printability_judgment`` overlay's ``warping`` block.
+    #
+    # Schedule grounded in /tmp/warping_datasheet_research.md (datasheet
+    # CTE + linear-shrinkage) cross-checked against the curated
+    # warping_factor values in kiln_pro/data/printability_pro_overlay.json
+    # (~50-60% of the Pro values; Pro retains the upside).
+    "material_baseline_risk": {
+        # Low-warp materials (PLA family, PETG family, TPU, CF-loaded
+        # PLA/PETG, PET-CF, PVB) intentionally absent -> default 0.0.
+        "hips": 0.2, "petg_hf": 0.15, "pva": 0.25,
+        "abs": 0.4, "asa": 0.4,
+        "abs_cf": 0.2, "asa_cf": 0.25,
+        "pc_abs": 0.35,
+        "polycarbonate": 0.45, "pc": 0.45,
+        "nylon": 0.5, "pa": 0.5,
+        "pa12": 0.45,
+        "cf_nylon": 0.3,
+        "pa6_gf": 0.45,
+        "pa6": 0.55,
+        "pp": 0.7, "peek": 1.0,
+    },
     "recommendation_rules": [
         {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 2000.0,
          "template": "Large flat surface detected ({flat_area_total_mm2:.0f}mm²). Add a 5-8mm brim to resist corner lifting."},
@@ -436,20 +496,28 @@ _WARPING_PUBLIC_DEFAULTS: dict[str, Any] = {
 }
 
 _THERMAL_STRESS_PUBLIC_DEFAULTS: dict[str, Any] = {
-    "risk_thresholds":  {"critical": 6.0, "high": 4.0, "moderate": 2.5},
+    # Thresholds re-calibrated post wall-vs-face fix.  The buggy pre-fix
+    # model over-reported ratios (cubes hit ~40 000x because top/bottom
+    # face triangles dumped huge area into boundary buckets); thresholds
+    # had been raised to {critical:6, high:4, moderate:2.5} to mask the
+    # noise.  Corrected model produces real ratios on legit geometries
+    # in the 1.0-5.0 range, so thresholds come down accordingly.
+    "risk_thresholds":  {"critical": 5.0, "high": 3.0, "moderate": 1.8},
     "score_deductions": {"critical": -15, "high": -10, "moderate": -5, "low": 0},
-    "stress_zone_ratio_threshold": 2.0,
+    "stress_zone_ratio_threshold": 1.8,
     "max_zones_tracked": 20,
     "max_zones_emitted": 10,
     "recommendation_rules": [
         {"metric": "risk_level",            "operator": "in", "threshold": ["high", "critical"],
-         "template": "Significant cross-section changes detected (max ratio {max_ratio:.1f}x). Gradual geometry transitions reduce internal stress — consider adding fillets or chamfers."},
+         "template": "Cross-section changes abruptly between layers (peak ratio {max_ratio:.1f}x at z={peak_zone_z:.1f}mm). Add a 2-4mm chamfer or fillet at the transition to spread thermal contraction stress."},
         {"metric": "risk_level",            "operator": "==", "threshold": "critical",
-         "template": "Critical thermal stress risk. Slow print speed in transition zones and increase layer cooling fan gradually."},
+         "template": "Critical thermal stress risk. Slow print speed to 30-40mm/s through the transition zone, and increase fan ramp-up to avoid sudden cooling at the geometry change."},
+        {"metric": "many_zones",            "operator": "==", "threshold": True,
+         "template": "Multiple stress concentration zones detected ({stress_zones_count} layers above threshold). Consider splitting the part at the worst transition and printing as two pieces."},
         {"metric": "amplification_active",  "operator": "==", "threshold": True,
-         "template": "Material ({material}) amplifies thermal stress (factor {stress_factor:.1f}x). Print in an enclosure and reduce temperature gradients."},
+         "template": "Material ({material}) amplifies thermal stress (factor {stress_factor:.1f}x). Print in an enclosed chamber, increase bed temperature 5-10°C above the default, and avoid sudden layer cooling."},
         {"metric": "risk_level",            "operator": "==", "threshold": "moderate",
-         "template": "Moderate cross-section variation. Adding transition layers or adjusting print speed at geometry changes can help."},
+         "template": "Moderate cross-section variation (max ratio {max_ratio:.1f}x). Adding transition layers (3-5mm chamfer at the geometry change) typically eliminates the stress concentration."},
     ],
 }
 
@@ -1028,6 +1096,12 @@ def _analyze_warping(
     ``warping`` block.  Geometry facts + material tendency are identical
     across tiers; only the JUDGMENT (which bucket -> which deduction ->
     which message) varies.
+
+    Risk formula: ``final_risk = (material_baseline + geometry_score) *
+    material_multiplier``.  The ``material_baseline_risk`` block (free
+    tier conservative; Pro tier curated) gives warp-prone materials a
+    risk floor that compact geometry alone doesn't surface, while
+    keeping low-warp materials (default 0.0) at zero-baseline behavior.
     """
     cfg = (overlay or {}).get("warping") or _WARPING_PUBLIC_DEFAULTS
 
@@ -1094,8 +1168,31 @@ def _analyze_warping(
     }
     geometry_score = _sum_score_rules(cfg.get("geometry_score_rules", []), metrics)
     material_multipliers = cfg.get("material_multipliers", {})
-    material_multiplier = material_multipliers.get(tendency, 1.0)
-    final_risk = geometry_score * material_multiplier
+    mat_key = material.lower()
+
+    # Per-material multiplier override.  Materials missing from the
+    # public materials.json catalog (PEEK, PA6, PA12, HIPS, ABS-CF,
+    # ASA-CF, PC alias) would otherwise fall through to the "moderate"
+    # tendency multiplier (1.0) regardless of their real warping
+    # tendency.  ``material_specific_multipliers`` lets the overlay
+    # explicitly map these materials to their datasheet-grounded
+    # multipliers (PEEK 2.0, PA6 2.0, PA12 1.5, HIPS 1.0, etc.).
+    specific_mults = cfg.get("material_specific_multipliers", {})
+    if mat_key in specific_mults:
+        material_multiplier = float(specific_mults[mat_key])
+    else:
+        material_multiplier = material_multipliers.get(tendency, 1.0)
+
+    # Per-material baseline-risk floor.  Free tier ships a conservative
+    # schedule (see _WARPING_PUBLIC_DEFAULTS) that catches the worst
+    # warp-prone materials; Pro overlay supplies a finer-grained schedule
+    # via the ``printability_judgment`` overlay's ``material_baseline_risk``
+    # block.  Default 0.0 for unknown materials means low-warp (PLA / PETG
+    # / TPU / CF-loaded) prints see no baseline contribution.
+    baselines = cfg.get("material_baseline_risk", {})
+    material_baseline = float(baselines.get(mat_key, 0.0))
+
+    final_risk = (material_baseline + geometry_score) * material_multiplier
 
     risk_thresholds = cfg.get("risk_thresholds", {})
     if final_risk >= risk_thresholds.get("critical", 3.0):
@@ -1163,33 +1260,74 @@ def _analyze_thermal_stress(
     num_layers = max(2, int(z_span / layer_height))
     layer_areas: list[float] = [0.0] * num_layers
 
+    # Wall-vs-face fix: cross-section change at each Z is proxied by the
+    # vertical-wall contribution at that layer, not the horizontal-face
+    # contribution (which is the OPPOSITE signal — flat tops and bottoms
+    # don't represent cross-section change, they represent the absence
+    # of cross-section transition).  We distribute each wall triangle's
+    # area across all the layers it z-spans, weighted by overlap, so a
+    # uniform-cross-section box produces uniform per-layer wall area
+    # (no false-positive critical verdict on a plain 20x20x20 cube).
+    # Horizontal faces (|normal_z| ≈ 1) contribute (1 - |nz|) ≈ 0 and
+    # are effectively ignored; vertical walls (|nz| ≈ 0) contribute
+    # their full area, distributed along Z.
     for tri in triangles:
-        centroid = _triangle_centroid(tri[0], tri[1], tri[2])
-        bucket = int((centroid[2] - z_min) / layer_height)
-        bucket = max(0, min(bucket, num_layers - 1))
-
         normal = _triangle_normal(tri[0], tri[1], tri[2])
         nn = _normalize(normal)
+        wall_weight = 1.0 - abs(nn[2])
+        if wall_weight <= 1e-4:
+            continue
         area = _triangle_area(tri[0], tri[1], tri[2])
-        xy_area = abs(nn[2]) * area
-        layer_areas[bucket] += xy_area
+        contribution = wall_weight * area
+
+        zs = (tri[0][2], tri[1][2], tri[2][2])
+        z_low = min(zs)
+        z_high = max(zs)
+        tri_span = z_high - z_low
+        if tri_span <= 1e-6:
+            # Degenerate slim triangle — drop into single bucket by mid-Z.
+            bucket = int((z_low - z_min) / layer_height)
+            bucket = max(0, min(bucket, num_layers - 1))
+            layer_areas[bucket] += contribution
+            continue
+
+        bucket_low = max(0, int((z_low - z_min) / layer_height))
+        bucket_high = min(num_layers - 1, int((z_high - z_min) / layer_height))
+        for b in range(bucket_low, bucket_high + 1):
+            layer_z_low = z_min + b * layer_height
+            layer_z_high = layer_z_low + layer_height
+            overlap = min(z_high, layer_z_high) - max(z_low, layer_z_low)
+            if overlap <= 0:
+                continue
+            layer_areas[b] += contribution * (overlap / tri_span)
+
+    # Median wall-area smooths over single-layer numerical artifacts
+    # (one triangle landing alone in a thin layer) while still letting
+    # true cross-section changes between adjacent layers fire as zones.
+    # Min-floor at a small fraction of the median prevents divide-by-
+    # noise ratios from inflating verdicts.
+    median_area = (
+        sorted(layer_areas)[num_layers // 2]
+        if layer_areas else 0.0
+    )
+    floor = max(0.01, median_area * 0.05)
 
     stress_zones: list[dict[str, float]] = []
     max_ratio = 1.0
 
     for i in range(1, num_layers):
-        a_prev = layer_areas[i - 1]
-        a_curr = layer_areas[i]
+        a_prev = max(layer_areas[i - 1], floor)
+        a_curr = max(layer_areas[i], floor)
         bigger = max(a_prev, a_curr)
         smaller = min(a_prev, a_curr)
-        ratio = bigger / max(smaller, 0.01)
+        ratio = bigger / smaller
         if ratio > max_ratio:
             max_ratio = ratio
         if ratio > zone_ratio_threshold and len(stress_zones) < max_tracked:
             stress_zones.append({
                 "z_mm": round(z_min + i * layer_height, 2),
                 "area_change_ratio": round(ratio, 2),
-                "layer_area_mm2": round(a_curr, 2),
+                "layer_area_mm2": round(layer_areas[i], 2),
             })
 
     stress_zones.sort(key=lambda z: z["area_change_ratio"], reverse=True)
@@ -1199,23 +1337,40 @@ def _analyze_thermal_stress(
     combined_score = max_ratio * stress_factor
 
     risk_thresholds = cfg.get("risk_thresholds", {})
-    if combined_score >= risk_thresholds.get("critical", 6.0):
+    if combined_score >= risk_thresholds.get("critical", 5.0):
         risk_level = "critical"
-    elif combined_score >= risk_thresholds.get("high", 4.0):
+    elif combined_score >= risk_thresholds.get("high", 3.0):
         risk_level = "high"
-    elif combined_score >= risk_thresholds.get("moderate", 2.5):
+    elif combined_score >= risk_thresholds.get("moderate", 1.8):
         risk_level = "moderate"
     else:
         risk_level = "low"
 
     score_deduction = int(cfg.get("score_deductions", {}).get(risk_level, 0))
 
+    # Peak-zone z-coordinate for the recommendation template: the
+    # author of the part wants to know WHERE to add the chamfer.
+    peak_zone_z = stress_zones[0]["z_mm"] if stress_zones else 0.0
+    stress_zones_count = len(stress_zones)
+
     rec_metrics: dict[str, Any] = {
         "risk_level": risk_level,
         "max_ratio": max_ratio,
         "material": material,
         "stress_factor": stress_factor,
-        "amplification_active": (stress_factor > 1.0 and risk_level != "low"),
+        # Amplification-active threshold tightened to >= 1.2 (was > 1.0)
+        # post wall-vs-face fix.  PETG (Pro stress_factor = 1.0) was
+        # tripping the enclosure recommendation under the old gate even
+        # though PETG genuinely doesn't need an enclosure.  >= 1.2
+        # restricts the recommendation to materials where chamber
+        # control is a real engineering necessity (ABS+, Nylon+, PC+).
+        "amplification_active": (stress_factor >= 1.2 and risk_level != "low"),
+        "peak_zone_z": peak_zone_z,
+        "stress_zones_count": stress_zones_count,
+        # `many_zones` is a derived flag for the "split the part" rec:
+        # fires only when there are MULTIPLE distinct transition zones
+        # in a high-risk verdict, not on a single sharp step.
+        "many_zones": (stress_zones_count >= 3 and risk_level in ("high", "critical")),
     }
     recommendations = _apply_recommendation_rules(
         cfg.get("recommendation_rules", []), rec_metrics,

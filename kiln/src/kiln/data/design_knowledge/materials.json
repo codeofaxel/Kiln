@@ -1301,7 +1301,7 @@
         80,
         100
       ],
-      "warping_tendency": "high"
+      "warping_tendency": "moderate"
     },
     "chemical": {
       "uv_resistance": "moderate",
@@ -1718,7 +1718,7 @@
         85,
         100
       ],
-      "warping_tendency": "high"
+      "warping_tendency": "very_high"
     },
     "chemical": {
       "uv_resistance": "poor",
