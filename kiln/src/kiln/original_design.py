@@ -410,7 +410,7 @@ def audit_original_design(
     build_volume: tuple[float, float, float] | None = None,
     nozzle_diameter: float = 0.4,
     layer_height: float = 0.2,
-    max_overhang_angle: float = 45.0,
+    max_overhang_angle: float | None = None,
     inspection_bundle: dict[str, Any] | None = None,
     apply_remedies: bool = False,
 ) -> OriginalDesignAudit:
@@ -918,7 +918,7 @@ def generate_original_design(
     build_volume: tuple[float, float, float] | None = None,
     nozzle_diameter: float = 0.4,
     layer_height: float = 0.2,
-    max_overhang_angle: float = 45.0,
+    max_overhang_angle: float | None = None,
     timeout: int = 600,
     poll_interval: int = 10,
     max_attempts: int = 2,
