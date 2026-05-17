@@ -1,0 +1,338 @@
+"""Thermal-stress calibration matrix.
+
+Pins the corrected thermal-stress verdict across a 42-case sweep that
+spans uniform-prism (low-stress regression), gradual transitions,
+material variants of the same geometry (for tier-diff coverage), and
+extreme cross-section discontinuities.  Built per the simulation-
+engineering review report at /tmp/thermal_stress_model_research.md
+plus 12 additional cases that exercise the per-material stress_factor
+seam between free and Pro.
+
+Key fixtures:
+
+- `cube_pla_20` — the canonical regression fixture.  Pre-fix model
+  flagged it "critical" because top + bottom face triangles dumped
+  huge area into Z-boundary buckets.  Corrected model reads
+  `max_ratio = 1.0` → "low" verdict on any uniform-cross-section
+  prism, regardless of material.
+- `wide_base_tower_*` and `flange_to_pin_*` — genuine cross-section
+  discontinuities the model SHOULD catch.  Per-material stress_factor
+  determines whether the verdict lands "moderate" (PLA-forgiving) or
+  "critical" (ABS / Nylon / PP / PEEK / PC amplify).
+
+Tier seam: 18 cases land at different risk_level buckets between
+free (uniform stress_factor=1.0) and Pro (curated per-material
+values from kiln-pro's printability_pro_overlay).  Free over-flags
+PLA / PETG-relative cases (no stress reduction), Pro escalates
+warp-prone materials (PP / Nylon / PEEK / PC stress_factor > 1.0).
+"""
+
+from __future__ import annotations
+
+import struct
+
+import pytest
+
+from kiln.printability import analyze_printability
+
+
+def _overlay_available() -> bool:
+    try:
+        from kiln_pro.bridge import pro_features  # type: ignore[import-not-found]
+    except ImportError:
+        return False
+    try:
+        return bool(pro_features.is_available("printability_overlay"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+_pro_overlay_required = pytest.mark.skipif(
+    not _overlay_available(),
+    reason="requires kiln-pro printability_overlay for tier-specific verdicts",
+)
+
+
+@pytest.fixture
+def _force_free_tier(monkeypatch):
+    from kiln import design_intelligence as _di
+    from kiln import printability as _p
+    monkeypatch.setattr(_di, "load_pro_overlay_or_empty", lambda kind: {})
+    monkeypatch.setattr(_p, "_material_physics_from_overlay", lambda mat: {})
+
+
+def _write_box(path: str, x: float, y: float, z: float, *, offset_z: float = 0.0) -> None:
+    hx, hy = x / 2, y / 2
+    z0, z1 = offset_z, offset_z + z
+    v = [
+        (-hx, -hy, z0), (hx, -hy, z0), (hx, hy, z0), (-hx, hy, z0),
+        (-hx, -hy, z1), (hx, -hy, z1), (hx, hy, z1), (-hx, hy, z1),
+    ]
+    faces = [
+        (0, 2, 1), (0, 3, 2),
+        (4, 5, 6), (4, 6, 7),
+        (0, 1, 5), (0, 5, 4),
+        (2, 3, 7), (2, 7, 6),
+        (1, 2, 6), (1, 6, 5),
+        (0, 4, 7), (0, 7, 3),
+    ]
+    with open(path, "wb") as f:
+        f.write(b"\x00" * 80)
+        f.write(struct.pack("<I", len(faces)))
+        for face in faces:
+            v0, v1, v2 = v[face[0]], v[face[1]], v[face[2]]
+            f.write(struct.pack("<fff", 0, 0, 0))
+            for vert in (v0, v1, v2):
+                f.write(struct.pack("<fff", *vert))
+            f.write(struct.pack("<H", 0))
+
+
+def _merge_stl(out_path: str, *in_paths: str) -> None:
+    tris: list[bytes] = []
+    for p in in_paths:
+        with open(p, "rb") as f:
+            f.read(80)
+            count = struct.unpack("<I", f.read(4))[0]
+            for _ in range(count):
+                tris.append(f.read(50))
+    with open(out_path, "wb") as f:
+        f.write(b"\x00" * 80)
+        f.write(struct.pack("<I", len(tris)))
+        for t in tris:
+            f.write(t)
+
+
+def _make_stacked(tmpdir, name: str, parts: list[tuple[int, int, int, int]]) -> str:
+    part_paths = []
+    for i, (w, d, z, oz) in enumerate(parts):
+        p = str(tmpdir / f"{name}_part{i}.stl")
+        _write_box(p, w, d, z, offset_z=oz)
+        part_paths.append(p)
+    merged = str(tmpdir / f"{name}.stl")
+    _merge_stl(merged, *part_paths)
+    return merged
+
+
+# (name, material, kind, geometry) where kind="box" geometry=(w,d,z) and
+# kind="stack" geometry=list of (w,d,z,offset_z)
+_GEOM: list = [
+    # ── LOW (uniform geometry — corrects the cube-explosion regression) ──
+    ("cube_pla_20",         "pla",            "box", (20, 20, 20)),
+    ("cube_petg_50",        "petg",           "box", (50, 50, 50)),
+    ("tall_tower_pla",      "pla",            "box", (20, 20, 200)),
+    ("plate_pla",           "pla",            "box", (100, 100, 2)),
+    ("cylinder_solid_pla",  "pla",            "box", (30, 30, 60)),
+    ("thin_wall_box_pla",   "pla",            "box", (40, 40, 40)),
+    ("coaster_pla",         "pla",            "box", (80, 80, 4)),
+    ("phone_stand_petg",    "petg",           "box", (80, 60, 60)),
+    ("pla_cube_30",         "pla",            "box", (30, 30, 30)),
+    ("pla_box_60",          "pla",            "box", (60, 60, 60)),
+    ("petg_box_40",         "petg",           "box", (40, 40, 40)),
+    ("pla_disc",            "pla",            "box", (50, 50, 5)),
+    ("abs_cube_30",         "abs",            "box", (30, 30, 30)),
+    ("nylon_cube_30",       "nylon",          "box", (30, 30, 30)),
+    ("pp_cube_30",          "pp",             "box", (30, 30, 30)),
+    # ── GRADUAL TRANSITIONS — small cross-section steps (tier-diff candidates) ──
+    ("cone_step_pla",       "pla",            "stack",
+        [(50, 50, 10, 0), (30, 30, 30, 10)]),
+    ("bracket_unfilleted",  "pla",            "stack",
+        [(60, 40, 4, 0), (60, 4, 36, 4)]),
+    ("coupler_abs",         "abs",            "stack",
+        [(20, 20, 30, 0), (30, 30, 30, 30)]),
+    ("bottle_neck_pla",     "pla",            "stack",
+        [(40, 40, 40, 0), (20, 20, 20, 40)]),
+    ("T_junction_petg",     "petg",           "stack",
+        [(10, 10, 30, 0), (60, 10, 10, 30)]),
+    ("step_pyramid_pla",    "pla",            "stack",
+        [(50, 50, 8, 0), (40, 40, 8, 8), (30, 30, 8, 16), (20, 20, 8, 24), (10, 10, 8, 32)]),
+    ("bushing_petg",        "petg",           "stack",
+        [(40, 40, 3, 0), (30, 30, 37, 3)]),
+    ("step_pyramid_abs",    "abs",            "stack",
+        [(50, 50, 8, 0), (40, 40, 8, 8), (30, 30, 8, 16), (20, 20, 8, 24), (10, 10, 8, 32)]),
+    ("step_pyramid_nylon",  "nylon",          "stack",
+        [(50, 50, 8, 0), (40, 40, 8, 8), (30, 30, 8, 16), (20, 20, 8, 24), (10, 10, 8, 32)]),
+    ("cone_step_abs",       "abs",            "stack",
+        [(50, 50, 10, 0), (30, 30, 30, 10)]),
+    ("cone_step_nylon",     "nylon",          "stack",
+        [(50, 50, 10, 0), (30, 30, 30, 10)]),
+    ("cone_step_pp",        "pp",             "stack",
+        [(50, 50, 10, 0), (30, 30, 30, 10)]),
+    ("cone_step_peek",      "peek",           "stack",
+        [(50, 50, 10, 0), (30, 30, 30, 10)]),
+    # ── HIGH / CRITICAL — significant transitions ──
+    ("wide_base_tower_pla", "pla",            "stack",
+        [(80, 80, 5, 0), (20, 20, 60, 5)]),
+    ("wide_base_tower_petg","petg",           "stack",
+        [(80, 80, 5, 0), (20, 20, 60, 5)]),
+    ("wide_base_tower_abs", "abs",            "stack",
+        [(80, 80, 5, 0), (20, 20, 60, 5)]),
+    ("wide_base_tower_nylon", "nylon",        "stack",
+        [(80, 80, 5, 0), (20, 20, 60, 5)]),
+    ("pcb_mount_abs",       "abs",            "stack",
+        [(100, 60, 3, 0), (5, 5, 20, 3)]),
+    ("funnel_step_pc",      "polycarbonate",  "stack",
+        [(40, 40, 20, 0), (10, 10, 40, 20)]),
+    ("bracket_pa6_gf",      "pa6_gf",         "stack",
+        [(50, 40, 4, 0), (50, 4, 40, 4)]),
+    ("gear_blank_cf_nylon", "cf_nylon",       "stack",
+        [(60, 60, 8, 0), (15, 15, 30, 8)]),
+    # ── EXTREME cross-section discontinuity ──
+    ("dumbbell_peek",       "peek",           "stack",
+        [(40, 40, 10, 0), (6, 6, 30, 10), (40, 40, 10, 40)]),
+    ("flange_to_pin_abs",   "abs",            "stack",
+        [(60, 60, 6, 0), (4, 4, 40, 6)]),
+    ("multi_step_tower_pc", "polycarbonate",  "stack",
+        [(60, 60, 10, 0), (30, 30, 10, 10), (15, 15, 10, 20), (8, 8, 10, 30)]),
+    ("t_joint_unfilleted_pp", "pp",           "stack",
+        [(80, 80, 5, 0), (8, 8, 40, 5)]),
+    ("dumbbell_pla",        "pla",            "stack",
+        [(40, 40, 10, 0), (6, 6, 30, 10), (40, 40, 10, 40)]),
+    ("flange_to_pin_nylon", "nylon",          "stack",
+        [(60, 60, 6, 0), (4, 4, 40, 6)]),
+]
+
+
+# Pro tier outputs (curated material-physics-aware stress_factor).
+# Generated against the corrected wall-vs-face thermal-stress model.
+_PRO_EXPECTED: dict[str, str] = {
+    "cube_pla_20": "low", "cube_petg_50": "low",
+    "tall_tower_pla": "low", "plate_pla": "low",
+    "cylinder_solid_pla": "low", "thin_wall_box_pla": "low",
+    "coaster_pla": "low", "phone_stand_petg": "low",
+    "pla_cube_30": "low", "pla_box_60": "low",
+    "petg_box_40": "low", "pla_disc": "low",
+    "abs_cube_30": "low", "nylon_cube_30": "low",
+    "pp_cube_30": "moderate",
+    "cone_step_pla": "low", "bracket_unfilleted": "low",
+    "coupler_abs": "moderate", "bottle_neck_pla": "low",
+    "T_junction_petg": "moderate",
+    "step_pyramid_pla": "low",
+    "bushing_petg": "low",
+    "step_pyramid_abs": "moderate", "step_pyramid_nylon": "high",
+    "cone_step_abs": "moderate", "cone_step_nylon": "moderate",
+    "cone_step_pp": "high", "cone_step_peek": "moderate",
+    "wide_base_tower_pla": "moderate", "wide_base_tower_petg": "moderate",
+    "wide_base_tower_abs": "critical", "wide_base_tower_nylon": "critical",
+    "pcb_mount_abs": "critical", "funnel_step_pc": "critical",
+    "bracket_pa6_gf": "moderate", "gear_blank_cf_nylon": "high",
+    "dumbbell_peek": "critical", "flange_to_pin_abs": "critical",
+    "multi_step_tower_pc": "high",
+    "t_joint_unfilleted_pp": "critical",
+    "dumbbell_pla": "high", "flange_to_pin_nylon": "critical",
+}
+
+
+# Free tier outputs (uniform stress_factor=1.0 — over-flags PLA /
+# PETG-relative cases, under-flags warp-prone-material cases).
+_FREE_EXPECTED: dict[str, str] = {
+    "cube_pla_20": "low", "cube_petg_50": "low",
+    "tall_tower_pla": "low", "plate_pla": "low",
+    "cylinder_solid_pla": "low", "thin_wall_box_pla": "low",
+    "coaster_pla": "low", "phone_stand_petg": "low",
+    "pla_cube_30": "low", "pla_box_60": "low",
+    "petg_box_40": "low", "pla_disc": "low",
+    "abs_cube_30": "low", "nylon_cube_30": "low",
+    "pp_cube_30": "low",
+    "cone_step_pla": "low", "bracket_unfilleted": "low",
+    "coupler_abs": "low", "bottle_neck_pla": "moderate",
+    "T_junction_petg": "high",
+    "step_pyramid_pla": "moderate", "bushing_petg": "low",
+    "step_pyramid_abs": "moderate", "step_pyramid_nylon": "moderate",
+    "cone_step_abs": "low", "cone_step_nylon": "low",
+    "cone_step_pp": "low", "cone_step_peek": "low",
+    "wide_base_tower_pla": "high", "wide_base_tower_petg": "high",
+    "wide_base_tower_abs": "high", "wide_base_tower_nylon": "high",
+    "pcb_mount_abs": "critical", "funnel_step_pc": "high",
+    "bracket_pa6_gf": "low", "gear_blank_cf_nylon": "high",
+    "dumbbell_peek": "critical", "flange_to_pin_abs": "critical",
+    "multi_step_tower_pc": "moderate",
+    "t_joint_unfilleted_pp": "critical",
+    "dumbbell_pla": "critical", "flange_to_pin_nylon": "critical",
+}
+
+
+def _build(tmp_path, name: str, mat: str, kind: str, geom) -> str:
+    if kind == "box":
+        w, d, z = geom
+        path = str(tmp_path / f"{name}.stl")
+        _write_box(path, w, d, z)
+        return path
+    return _make_stacked(tmp_path, name, geom)
+
+
+@pytest.mark.parametrize("name,material,kind,geom", _GEOM)
+def test_thermal_stress_calibration_free_tier(
+    tmp_path, _force_free_tier, name, material, kind, geom,
+):
+    """FREE-tier regression — pins the wall-vs-face thermal-stress model
+    output without the kiln-pro per-material stress_factor.
+
+    Uniform stress_factor=1.0 in free tier; metric reads the corrected
+    `max_ratio` (vertical-wall-area ratio between adjacent layer
+    buckets, z-distributed across each wall triangle).  Uniform-prism
+    geometries (cube_pla_20, cube_petg_50, etc.) read max_ratio=1.0
+    and verdict=low — the canonical regression that the pre-fix model
+    got wrong.
+    """
+    path = _build(tmp_path, name, material, kind, geom)
+    report = analyze_printability(path, material=material)
+    assert report.thermal_stress is not None, f"{name}: no thermal_stress report"
+    expected = _FREE_EXPECTED[name]
+    assert report.thermal_stress.risk_level == expected, (
+        f"{name} (free, {material}): expected {expected}, got "
+        f"{report.thermal_stress.risk_level} "
+        f"(max_ratio={report.thermal_stress.max_area_change_ratio})"
+    )
+
+
+@_pro_overlay_required
+@pytest.mark.parametrize("name,material,kind,geom", _GEOM)
+def test_thermal_stress_calibration_pro_tier(
+    tmp_path, name, material, kind, geom,
+):
+    """PRO-tier regression — pins overlay-tuned thermal-stress verdict.
+
+    Pro overlay supplies per-material stress_factor (PLA 0.6, PETG 0.7,
+    ABS 1.5, Nylon 1.6, PP 2.0, PEEK 1.5, PC 1.8) — multiplies the
+    corrected max_ratio to produce material-aware verdicts.  PLA-
+    relative cases stay low even at moderate ratios; warp-prone
+    materials escalate.
+    """
+    path = _build(tmp_path, name, material, kind, geom)
+    report = analyze_printability(path, material=material)
+    assert report.thermal_stress is not None, f"{name}: no thermal_stress report"
+    expected = _PRO_EXPECTED[name]
+    assert report.thermal_stress.risk_level == expected, (
+        f"{name} (pro, {material}): expected {expected}, got "
+        f"{report.thermal_stress.risk_level} "
+        f"(max_ratio={report.thermal_stress.max_area_change_ratio})"
+    )
+
+
+def test_uniform_cube_regression_no_false_critical(_force_free_tier, tmp_path):
+    """Canonical regression: every closed-prism geometry reads "low"
+    on the corrected model regardless of material.
+
+    Pre-fix bug: bottom + top face triangles dumped huge area into
+    Z-boundary buckets, producing ratios of ~40 000 → critical.
+    Corrected: only vertical-wall area enters the per-layer metric;
+    closed prisms read max_ratio=1.0.
+    """
+    materials = ["pla", "petg", "abs", "nylon", "pp", "tpu", "polycarbonate"]
+    cubes = [(20, 20, 20), (30, 30, 30), (50, 50, 50)]
+    for mat in materials:
+        for w, d, z in cubes:
+            path = str(tmp_path / f"{mat}_{w}_{d}_{z}.stl")
+            _write_box(path, w, d, z)
+            report = analyze_printability(path, material=mat)
+            assert report.thermal_stress is not None
+            assert report.thermal_stress.risk_level == "low", (
+                f"{mat} {w}x{d}x{z} should read 'low' but got "
+                f"{report.thermal_stress.risk_level} "
+                f"(max_ratio={report.thermal_stress.max_area_change_ratio})"
+            )
+            assert report.thermal_stress.max_area_change_ratio == 1.0, (
+                f"{mat} {w}x{d}x{z} max_ratio should be 1.0 (uniform "
+                f"cross-section) but got "
+                f"{report.thermal_stress.max_area_change_ratio}"
+            )
