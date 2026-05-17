@@ -11692,6 +11692,7 @@ def smart_reprint(
     search_dirs: str | None = None,
     extra_overrides: str | None = None,
     auto_ams: bool = True,
+    brief_id: str = "",
 ) -> dict:
     """Smart one-shot material-switch reprint — finds the model, detects the
     right AMS slot, adjusts slicer settings, and prints.
@@ -11721,6 +11722,14 @@ def smart_reprint(
     is loaded in AMS slot 1, adjust temps/speeds for PETG, reslice, and
     start printing — all in one call.
 
+    Saved-goal carry-forward: when the source model on disk has a
+    ``<file>.intent.json`` sidecar tagged with a saved goal, that
+    goal's id is auto-recovered and surfaced as ``brief_id`` in the
+    result so downstream ``record_print_outcome`` correctly links the
+    reprint back to the goal. Pass ``brief_id="..."`` explicitly to
+    override the sidecar derivation (rare — useful for one-off
+    re-attributions).
+
     Args:
         file_name: Full or partial file name to search for (e.g.
             ``"grip_extension"`` or ``"grip_extension.stl"``).
@@ -11735,6 +11744,12 @@ def smart_reprint(
         auto_ams: If ``True`` (default), automatically detect AMS slot
             for the target material. Set to ``False`` to skip AMS
             detection (useful for non-Bambu printers).
+        brief_id: Optional saved-goal id from ``design_session``.  When
+            omitted, the source model's intent sidecar (if any) is read
+            and the saved goal's id is derived from its ``generator``
+            field — so a reprint of a brief-attached design keeps the
+            goal link automatically.  Best-effort: missing kiln-pro or
+            missing sidecar silently skips.
     """
     if err := _check_auth("print"):
         return err
@@ -11937,6 +11952,38 @@ def smart_reprint(
                 )
 
         # ---------------------------------------------------------------
+        # Step 2.5: D2 — saved-goal carry-forward.
+        # When the caller didn't supply brief_id, try to recover it
+        # from the source model's intent sidecar.  Best-effort: kiln-pro
+        # not installed / no sidecar / unparseable generator string
+        # silently leaves resolved_brief_id None, matching the pre-D2
+        # baseline (no goal link on the reprint).
+        # ---------------------------------------------------------------
+        resolved_brief_id: str | None = brief_id or None
+        if resolved_brief_id is None:
+            try:
+                from kiln_pro.intent_verification import load_intent_sidecar
+                intent = load_intent_sidecar(found_path)
+                if (
+                    intent is not None
+                    and isinstance(intent.generator, str)
+                    and intent.generator.startswith("design_brief:")
+                ):
+                    candidate = intent.generator.split(":", 1)[1].strip()
+                    if candidate:
+                        resolved_brief_id = candidate
+                        steps_log.append({
+                            "step": "brief_carry_forward",
+                            "method": "sidecar_derived",
+                            "brief_id": resolved_brief_id,
+                        })
+            except Exception:
+                logger.debug(
+                    "smart_reprint: brief carry-forward skipped (best-effort)",
+                    exc_info=True,
+                )
+
+        # ---------------------------------------------------------------
         # Step 3: Delegate to reprint_with_material
         # ---------------------------------------------------------------
         result = reprint_with_material(
@@ -11955,6 +12002,11 @@ def smart_reprint(
             result["model_path"] = found_path
             if ams_slot_info:
                 result["ams_slot_selected"] = ams_slot_info
+            # D2: surface brief_id so the caller's subsequent
+            # record_print_outcome call can link the print back to
+            # the saved goal without re-reading the sidecar.
+            if resolved_brief_id is not None:
+                result["brief_id"] = resolved_brief_id
 
         return result
     except Exception as exc:
