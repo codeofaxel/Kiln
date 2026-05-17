@@ -77,6 +77,50 @@ def _cube_triangles(size: float = 10.0) -> list[tuple]:
     return [(verts[a], verts[b], verts[c]) for a, b, c in faces]
 
 
+def _make_slope_wedge_triangles(
+    overhang_deg: float,
+    *,
+    base_w: float = 30.0,
+    base_d: float = 30.0,
+    height: float = 20.0,
+) -> list[tuple]:
+    """A closed parallelogram prism with two outward-leaning side walls.
+
+    Cross-section: trapezoid widening upward such that the side walls
+    lean ``overhang_deg`` from vertical.  When ``overhang_deg`` is 0
+    the walls are vertical (no overhangs); when ``overhang_deg`` is
+    near 90 the walls approach horizontal ceilings.
+
+    Returns 12 triangles forming a manifold solid suitable for
+    ``_analyze_overhangs`` plus the winding normalizer (the bbox
+    centre is offset from each face's centroid, so the mesh-centre
+    heuristic produces stable orientation).  Used by the
+    floating-point-precision regression tests around the 45°
+    threshold.
+    """
+    import math
+    h_shift = height * math.tan(math.radians(overhang_deg))
+    v = [
+        (0.0, 0.0, 0.0),
+        (base_w, 0.0, 0.0),
+        (base_w, base_d, 0.0),
+        (0.0, base_d, 0.0),
+        (-h_shift, 0.0, height),
+        (base_w + h_shift, 0.0, height),
+        (base_w + h_shift, base_d, height),
+        (-h_shift, base_d, height),
+    ]
+    faces = [
+        (0, 2, 1), (0, 3, 2),
+        (4, 5, 6), (4, 6, 7),
+        (0, 1, 5), (0, 5, 4),
+        (3, 7, 6), (3, 6, 2),
+        (1, 2, 6), (1, 6, 5),
+        (0, 4, 7), (0, 7, 3),
+    ]
+    return [(v[a], v[b], v[c]) for a, b, c in faces]
+
+
 def _write_stl(tmpdir: str, triangles: list[tuple]) -> str:
     """Write a binary STL file and return its path."""
     path = os.path.join(tmpdir, "test_model.stl")
@@ -228,6 +272,60 @@ class TestOverhangAnalysis:
         d = result.to_dict()
         assert "max_overhang_angle" in d
         assert "overhang_triangle_count" in d
+
+    def test_exact_45deg_slope_classified_as_overhang(self):
+        """A wall leaning exactly 45° from vertical is the canonical
+        rule-of-thumb edge case — and floating-point precision turned
+        it into a silent miss.
+
+        ``math.acos(0.7071067811865475)`` returns
+        ``0.7853981633974484`` radians, which converts to
+        ``45.00000000000001°``.  ``90 - that = 44.99999999999999°``.
+        A strict ``overhang_angle < 45.0`` filter rejected the result
+        by one ULP, so a true 45° slope was classified ``max=0.0,
+        needs_supports=False``.
+
+        The fix is an epsilon-tolerant comparison
+        (``overhang_angle + 1e-9 < max_overhang_angle``).  This test
+        pins the corrected behavior so the regression cannot return.
+
+        Uses a full closed wedge geometry (12 triangles, parallelogram
+        prism with two outward-leaning side walls) so the winding
+        normalizer's mesh-center heuristic operates on real geometry,
+        not on a 3-vertex degenerate where bbox-center and centroid
+        coincide.
+        """
+        tris = _make_slope_wedge_triangles(overhang_deg=45.0)
+        result = _analyze_overhangs(tris, max_overhang_angle=45.0, z_min=0.0)
+        assert result.overhang_triangle_count > 0, (
+            f"a true 45° slope must count as an overhang at the 45° "
+            f"threshold (FP quirk regression); got count="
+            f"{result.overhang_triangle_count}, max_overhang_angle="
+            f"{result.max_overhang_angle}"
+        )
+        assert 44.99 <= result.max_overhang_angle <= 45.01
+
+    def test_46deg_slope_still_classified_as_overhang(self):
+        """Non-regression: a 46° slope (clearly above the 45° floor)
+        must still register as an overhang after the epsilon fix.  Pins
+        that the epsilon didn't accidentally widen the filter."""
+        tris = _make_slope_wedge_triangles(overhang_deg=46.0)
+        result = _analyze_overhangs(tris, max_overhang_angle=45.0, z_min=0.0)
+        assert result.overhang_triangle_count > 0
+        assert 45.99 <= result.max_overhang_angle <= 46.01
+
+    def test_44deg_slope_not_classified_as_overhang(self):
+        """Non-regression: a 44° slope (clearly below the 45° floor)
+        must NOT register as an overhang after the epsilon fix.  Pins
+        that the 1e-9 epsilon is narrow enough not to swallow legit
+        sub-threshold geometry."""
+        tris = _make_slope_wedge_triangles(overhang_deg=44.0)
+        result = _analyze_overhangs(tris, max_overhang_angle=45.0, z_min=0.0)
+        assert result.overhang_triangle_count == 0, (
+            f"a 44° slope (below 45° threshold) must NOT count as "
+            f"overhang; got count={result.overhang_triangle_count}, "
+            f"max_overhang_angle={result.max_overhang_angle}"
+        )
 
 
 # ---------------------------------------------------------------------------
