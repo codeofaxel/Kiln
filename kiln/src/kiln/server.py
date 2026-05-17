@@ -717,7 +717,8 @@ def _build_instructions() -> str:
     parts.append(
         "DESIGN INTELLIGENCE: Kiln has a comprehensive design knowledge system "
         "(25 materials with 45 brand-specific filament profiles, 18 design templates). Key tools:\n"
-        "  - `get_design_brief(requirements)` — functional analysis BEFORE designing\n"
+        "  - `design_session(verb=\"start\", idea=\"...\")` — user-facing entry point for any new design (captures saved goal at duty / environment / materials / safety layer)\n"
+        "  - `analyze_design_requirements(requirements)` — internal functional-analysis lookup `design_session` calls into\n"
         "  - `recommend_design_material(use_case)` — intelligent material selection\n"
         "  - `find_design_templates(use_case)` — proven design templates\n"
         "  - `get_material_design_profile(material)` — material-specific rules\n"
@@ -735,7 +736,8 @@ def _build_instructions() -> str:
             "`preview_generated_model` to render multi-angle previews (including "
             "bottom view for bed adhesion) BEFORE printing. Show the preview "
             "images to the user and check for issues. Never skip preview.\n"
-            "Use `get_design_brief()` BEFORE generation for better results.\n"
+            "Start any new design with `design_session(verb=\"start\", idea=\"...\")` so "
+            "the saved goal drives the audit and the post-print review.\n"
             "Use `build_generation_prompt()` to enhance prompts with design intelligence."
         )
 

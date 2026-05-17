@@ -74,7 +74,7 @@ TIER_STANDARD: list[str] = TIER_ESSENTIAL + [
     "download_generated_model",
     "await_generation",
     "validate_generated_mesh",
-    "get_design_brief",
+    "analyze_design_requirements",
     "build_generation_prompt",
     "audit_original_design",
     "validate_design_for_requirements",
@@ -212,7 +212,7 @@ TIER_FULL: list[str] = [
     "analyze_generation_feedback",
     "improve_generation_prompt",
     # --- Original design intelligence ---
-    "get_design_brief",
+    "analyze_design_requirements",
     "build_generation_prompt",
     "audit_original_design",
     "get_material_design_profile",

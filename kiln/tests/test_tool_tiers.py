@@ -239,7 +239,7 @@ class TestToolPresence:
     def test_original_design_flow_tools_in_standard(self):
         assert "generate_model" in TIER_STANDARD
         assert "generate_original_design" in TIER_STANDARD
-        assert "get_design_brief" in TIER_STANDARD
+        assert "analyze_design_requirements" in TIER_STANDARD
         assert "build_generation_prompt" in TIER_STANDARD
         assert "audit_original_design" in TIER_STANDARD
         assert "analyze_printability" in TIER_STANDARD
@@ -257,7 +257,7 @@ class TestToolPresence:
         assert "generate_original_design" in TIER_FULL
         assert "build_generation_prompt" in TIER_FULL
         assert "audit_original_design" in TIER_FULL
-        assert "get_design_brief" in TIER_FULL
+        assert "analyze_design_requirements" in TIER_FULL
         assert "analyze_printability" in TIER_FULL
 
     def test_billing_tools_only_in_full(self):

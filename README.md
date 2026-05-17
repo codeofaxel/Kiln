@@ -711,7 +711,7 @@ The Kiln MCP server (`kiln serve`) exposes **792 tools** to agents, plus prompts
 | `log_project_cost` | Log a cost entry (material, printer time, labor, etc.) against a project (Enterprise) |
 | `project_cost_summary` | Aggregate cost summary with budget tracking for a project (Enterprise) |
 | `client_cost_report` | Cross-project cost report for a client (Enterprise) |
-| `get_design_brief` | Complete design brief for a functional requirement (materials, patterns, constraints) |
+| `analyze_design_requirements` | Functional-requirements analysis (materials, patterns, constraints). For the user-facing saved-goal flow that drives the audit + post-print review, use `design_session` (kiln-pro). |
 | `build_generation_prompt` | Turn a natural-language idea into a printer-aware, design-constrained generation prompt |
 | `audit_original_design` | Harsh original-design audit: brief + validation + printability + diagnostics + feedback |
 | `get_material_design_profile` | Full engineering properties for a 3D printing material |

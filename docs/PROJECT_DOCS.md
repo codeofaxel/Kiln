@@ -890,7 +890,7 @@ Constraint-aware design reasoning — agents query material properties, design t
 
 | Tool | Input | Output |
 |---|---|---|
-| `get_design_brief` | `requirements`, `material` | Complete design brief (materials, patterns, constraints, orientation) |
+| `analyze_design_requirements` | `requirements`, `material` | Functional-requirements analysis (materials, patterns, constraints, orientation). Use `design_session` for the user-facing saved-goal flow. |
 | `get_material_design_profile` | `material` | Full engineering properties for a printing material |
 | `list_design_materials` | — | All available materials with summary properties |
 | `recommend_design_material` | `requirements`, constraints | Best material recommendation with reasoning |
