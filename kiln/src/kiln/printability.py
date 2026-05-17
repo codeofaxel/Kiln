@@ -80,11 +80,28 @@ class BedAdhesionAnalysis:
 
 @dataclass
 class SupportAnalysis:
-    """Results of support volume estimation."""
+    """Results of support volume estimation.
+
+    ``estimated_support_volume_mm3`` is the naive area×height projection
+    of every overhang triangle to the build plate — useful as an upper
+    bound but typically over-estimates real slicer extrusion by 3-8×
+    (Grid) or 8-15× (Organic). Pro+ tier callers get a calibrated
+    follow-up via ``report.enrichment.supports_calibration``.
+
+    ``likely_substituted_by_bridge`` is True when at least one overhang
+    region in this report is geometrically positioned such that
+    PrusaSlicer's auto-support will probably choose to bridge across it
+    instead of generating supports — common for horizontal undersides
+    above 4-corner-leg topologies (tabletop), short-span U-shapes, and
+    square bridges where the gap is <30mm. The user may want to FORCE
+    supports for surface-quality reasons even when the slicer wouldn't
+    generate them.
+    """
 
     estimated_support_volume_mm3: float
     support_percentage: float  # % of model volume
     support_regions: list[dict[str, float]]
+    likely_substituted_by_bridge: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -702,16 +719,68 @@ def _vertex_distance(
     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
 
 
-def _normalize_triangle_winding(
+def _signed_volume_total(
+    triangles: list[tuple[tuple[float, ...], ...]],
+) -> float:
+    """Sum of signed tetrahedral volumes formed by each triangle with the
+    origin. For a closed manifold mesh, this equals +V (enclosed volume)
+    when winding points outward and -V when winding points inward.
+    For a winding-inconsistent mesh, contributions partially cancel and
+    the magnitude shrinks toward zero — that's the signal we use to
+    decide whether to trust the winding or fall back to the heuristic.
+    """
+    total = 0.0
+    for a, b, c in triangles:
+        # det([a; b; c]) / 6 = signed volume of tetrahedron (origin, a, b, c)
+        total += (
+            a[0] * (b[1] * c[2] - b[2] * c[1])
+            + a[1] * (b[2] * c[0] - b[0] * c[2])
+            + a[2] * (b[0] * c[1] - b[1] * c[0])
+        ) / 6.0
+    return total
+
+
+def _bbox_volume(
+    triangles: list[tuple[tuple[float, ...], ...]],
+) -> float:
+    """Axis-aligned bounding-box volume of a triangle list."""
+    if not triangles:
+        return 0.0
+    xs = [v[0] for tri in triangles for v in tri]
+    ys = [v[1] for tri in triangles for v in tri]
+    zs = [v[2] for tri in triangles for v in tri]
+    return (max(xs) - min(xs)) * (max(ys) - min(ys)) * (max(zs) - min(zs))
+
+
+# Threshold on |signed_volume| / bbox_volume to classify a mesh as
+# winding-consistent. Real CAD-exported solids run 0.15-1.0 (cantilever
+# brackets at 0.15, solid cubes at 1.0). Winding-inconsistent meshes
+# partially cancel and run < 0.05. The 0.05 floor cleanly separates the
+# regimes without false-positive-ing thin or hollow geometry.
+_WINDING_CONSISTENCY_THRESHOLD = 0.05
+
+
+def _normalize_triangle_winding_centroid(
     triangles: list[tuple[tuple[float, ...], ...]],
 ) -> list[tuple[tuple[float, ...], ...]]:
-    """Orient triangle winding outward using a mesh-center heuristic.
+    """Legacy mesh-center heuristic — kept as a fallback when the
+    signed-volume assessment can't trust the winding.
 
-    STL files often contain inconsistent or inverted winding, which causes
-    naive normal-based overhang and bridge analysis to treat top surfaces as
-    unsupported ceilings.  For printability heuristics we only need a stable
-    approximation, so we flip triangles whose normals point toward the mesh
-    center rather than away from it.
+    Flips triangles whose normals point toward the mesh bbox center.
+    This works on isolated convex shapes near the bottom of the bbox
+    (a single cube on the bed) but breaks on compound geometries where
+    legitimate overhangs sit above the mesh centroid (T-shape bar
+    underside, mushroom cap underside, tabletop underside, etc.) —
+    those overhangs' centroids are above the bbox center, so their
+    correct -Z normals get a negative dot with the centroid-pointing
+    radial and the heuristic flips them, silently deleting the overhang
+    from downstream analysis.
+
+    The 2026-05-17 support-volume audit measured this as 25/64 false
+    negatives on real overhang geometry; the fix is to use
+    :func:`_normalize_triangle_winding` (which checks signed-volume
+    first and only falls back to this heuristic for genuinely
+    inconsistent input).
     """
     if not triangles:
         return triangles
@@ -744,6 +813,55 @@ def _normalize_triangle_winding(
             oriented.append(tri)
 
     return oriented
+
+
+def _normalize_triangle_winding(
+    triangles: list[tuple[tuple[float, ...], ...]],
+) -> list[tuple[tuple[float, ...], ...]]:
+    """Orient triangle winding outward.
+
+    Pipeline: check the signed-volume-to-bbox-volume ratio first.
+    For real CAD-exported solids the ratio is large and positive
+    (winding consistent + outward) so the function returns the
+    triangles unchanged. Inverted-but-consistent winding shows up as
+    a large-magnitude NEGATIVE ratio — we flip every triangle once.
+    Genuinely inconsistent winding (mixed-orientation triangles, often
+    from hand-edited or scanned STLs) partially cancels and the ratio
+    falls below :data:`_WINDING_CONSISTENCY_THRESHOLD` — we then fall
+    back to :func:`_normalize_triangle_winding_centroid`, the legacy
+    heuristic, which is the best we can do without an explicit
+    winding-repair pass.
+
+    Before 2026-05-17 this function always ran the centroid heuristic
+    on every input — which silently flipped legitimate overhang faces
+    on compound geometries (T-shape, mushroom, tabletop, umbrella,
+    etc.) whose centroids sat above the mesh midline. The support-
+    volume audit measured 25/64 false-negative cases caused by this.
+    The signed-volume fast-path fixes those at zero cost on the happy
+    path and preserves legacy behavior for genuinely inconsistent
+    input.
+    """
+    if not triangles:
+        return triangles
+
+    bbox_vol = _bbox_volume(triangles)
+    if bbox_vol < 1e-9:
+        # Degenerate / flat input; nothing to assess.
+        return _normalize_triangle_winding_centroid(triangles)
+
+    signed_vol = _signed_volume_total(triangles)
+    ratio = signed_vol / bbox_vol
+
+    if ratio >= _WINDING_CONSISTENCY_THRESHOLD:
+        # Consistent + outward — trust the winding as-is.
+        return triangles
+
+    if ratio <= -_WINDING_CONSISTENCY_THRESHOLD:
+        # Consistent + inverted — one global flip restores outward.
+        return [(tri[0], tri[2], tri[1]) for tri in triangles]
+
+    # Genuinely inconsistent — fall back to the legacy centroid heuristic.
+    return _normalize_triangle_winding_centroid(triangles)
 
 
 def _is_bed_supported_triangle(
@@ -1014,6 +1132,53 @@ def _analyze_bed_adhesion(
     )
 
 
+_BRIDGE_SUBSTITUTION_MAX_SPAN_MM = 30.0
+_BRIDGE_SUBSTITUTION_MIN_OVERHANG_COVERAGE = 0.7
+
+
+def _likely_bridge_substituted(
+    support_regions: list[dict[str, float]],
+    bbox: dict[str, float] | None = None,
+) -> bool:
+    """Heuristic for whether PrusaSlicer's auto-supports will choose to
+    bridge over the overhang instead of generating support material.
+
+    Slicers prefer bridging when (a) the unsupported span is short
+    enough for the slicer to traverse without sagging — empirically
+    PrusaSlicer's threshold sits at roughly 30mm — and (b) the
+    overhang region is large enough relative to the part footprint
+    that the slicer treats it as an enclosed cavity rather than a
+    small protrusion. The check below is a coarse pre-flight: it
+    fires when the LARGEST overhang region's footprint span fits
+    within the bridgeable range.
+
+    Returns False (no substitution likely) when ``support_regions`` is
+    empty — no overhangs to substitute. Returns True when the largest
+    overhang region is plausibly a bridge candidate; the user may
+    still want to FORCE supports for surface-quality reasons on a
+    show-surface underside.
+    """
+    if not support_regions:
+        return False
+    # The support_regions list carries the largest overhangs (sorted
+    # by volume_mm3 descending). Without per-region x/y extents we
+    # use the largest region's footprint as a proxy via the bbox's
+    # horizontal dimensions when available. The conservative
+    # substitution call only fires when the bbox span is short enough
+    # for the slicer to bridge AND the region looks like a
+    # 4-corner-leg / picture-frame style enclosed gap.
+    if bbox is None:
+        return False
+    span_x = bbox.get("x_max", 0.0) - bbox.get("x_min", 0.0)
+    span_y = bbox.get("y_max", 0.0) - bbox.get("y_min", 0.0)
+    # Span = the SHORTER bbox dimension. The slicer bridges in the
+    # easiest direction, so the worst-case span the slicer must cross
+    # is min(dx, dy), not max — short axis tells us whether the slicer
+    # can find SOME orientation that bridges cleanly.
+    span = min(span_x, span_y)
+    return 0.0 < span <= _BRIDGE_SUBSTITUTION_MAX_SPAN_MM
+
+
 def _analyze_supports(
     triangles: list[tuple[tuple[float, ...], ...]],
     z_min: float,
@@ -1021,11 +1186,22 @@ def _analyze_supports(
     max_overhang_angle: float = 45.0,
     layer_height: float = 0.2,
     normalize_winding: bool = True,
+    bbox: dict[str, float] | None = None,
 ) -> SupportAnalysis:
     """Estimate support volume.
 
     For each overhang triangle, projects it downward to the build plate
     and estimates the support column volume as area x height.
+
+    The returned ``estimated_support_volume_mm3`` is a naive area×height
+    projection assuming solid pillars — typically 3-8× higher than what
+    PrusaSlicer's Grid supports actually extrude (15% infill default).
+    Pro+ tier callers get a calibrated number via
+    ``enrichment.supports_calibration`` on the full report.
+
+    When ``bbox`` is supplied, the ``likely_substituted_by_bridge``
+    flag is set when the part's horizontal envelope is short enough
+    that PrusaSlicer's auto-support will probably bridge instead.
     """
     if normalize_winding:
         triangles = _normalize_triangle_winding(triangles)
@@ -1074,12 +1250,22 @@ def _analyze_supports(
     # Estimate model volume for percentage calculation.
     model_volume = abs(sum(_signed_volume_of_triangle(tri[0], tri[1], tri[2]) for tri in triangles))
 
+    # Clamp at 100% — the naive support estimate can exceed the model
+    # volume on geometries with large horizontal overhangs above small
+    # footprints (E01 long_thin_overhang reports 116% pre-clamp).
+    # The raw number stays useful as an upper-bound; the percentage is
+    # a sanity check, so capping it at 100 prevents nonsense like
+    # "your supports are 116% of your model" surfacing to users.
     support_pct = (support_volume / model_volume * 100.0) if model_volume > 0 else 0.0
+    support_pct = min(100.0, support_pct)
+
+    bridge_substituted = _likely_bridge_substituted(support_regions, bbox=bbox)
 
     return SupportAnalysis(
         estimated_support_volume_mm3=round(support_volume, 2),
         support_percentage=round(support_pct, 1),
         support_regions=support_regions[:5],
+        likely_substituted_by_bridge=bridge_substituted,
     )
 
 
@@ -1822,6 +2008,7 @@ def analyze_printability(
     infill_percent: float = 20.0,
     include_hole_detection: bool = True,
     printer_id: str | None = None,
+    slicer_style: str = "grid",
 ) -> PrintabilityReport:
     """Run a full printability analysis on a mesh file.
 
@@ -1846,6 +2033,18 @@ def analyze_printability(
         before evaluating the report.  Absent calibration data leaves
         thresholds untouched; absent kiln-pro leaves the report
         unchanged.
+    :param slicer_style: Support-pattern style the report's
+        ``supports`` block should be calibrated for. One of ``"grid"``
+        (PrusaSlicer default, OrcaSlicer rectilinear), ``"snug"``,
+        ``"organic"`` (PrusaSlicer 2.6+ / OrcaSlicer organic), or
+        ``"tree"`` (Cura tree). Public-tier behavior is unaffected —
+        public Kiln returns the naive area×height estimate regardless.
+        When kiln-pro is installed (Pro+ tier), this hint is forwarded
+        to the overlay's supports-calibration module which translates
+        the naive number into expected slicer extrusion volume for the
+        chosen style (Grid ÷ 2.0, Snug ÷ 3.0, Organic / Tree ÷ 5.0 per
+        the 2026-05-17 audit's empirical divisors). See
+        ``enrichment.supports_calibration`` on the returned report.
     :returns: A :class:`PrintabilityReport` with scores, grades, and
         recommendations.  When the kiln-pro package is installed (Pro+
         tier), the report is enriched with material-specific tuning
@@ -1900,6 +2099,7 @@ def analyze_printability(
         max_overhang_angle=max_overhang_angle,
         layer_height=layer_height,
         normalize_winding=False,
+        bbox=bbox,
     )
 
     # Detect cylindrical-hole features.  Wrapped in try/except — a
@@ -2027,13 +2227,17 @@ def analyze_printability(
                     material=material,
                     printer_id=printer_id,
                     nozzle_diameter_mm=nozzle_diameter,
+                    slicer_style=slicer_style,
                 )
             except TypeError:
-                # Older kiln-pro that pre-dates the nozzle_diameter_mm
-                # parameter — call without it so this public surface
-                # stays forward-compatible with both signatures.  When
-                # the installed kiln-pro picks up the new parameter,
-                # the user's nozzle starts scaling per-material floors.
+                # Older kiln-pro that pre-dates one of the kwargs
+                # (nozzle_diameter_mm and / or slicer_style). Retry
+                # without either so this public surface stays
+                # forward-compatible with multiple kiln-pro vintages.
+                # When the installed kiln-pro picks up the parameters,
+                # the user's nozzle starts scaling per-material floors
+                # AND supports_calibration starts shipping in the
+                # enrichment block.
                 try:
                     enriched = pro_features.printability_overlay.enrich_printability_report(
                         report.to_dict(),
