@@ -4,10 +4,39 @@ from __future__ import annotations
 
 import struct
 
+import pytest
+
 from kiln.printability import (
     AdhesionForceEstimate,
     PrintabilityReport,
     analyze_printability,
+)
+
+
+def _overlay_available() -> bool:
+    """True when kiln-pro's per-material printability overlay is loaded.
+
+    A subset of the assertions below describe Pro-tier behavior — they
+    expect curated per-material values (e.g. PP adhesion_strength=0.03,
+    shrinkage=0.018) that ``_material_physics_from_overlay`` only
+    returns when the kiln-pro package is installed and its overlay
+    module is reachable.  In a clean public-Kiln environment the
+    defaults are uniform (adhesion_strength=0.10, shrinkage=0.005) and
+    those assertions are inapplicable, so the affected tests skip.
+    """
+    try:
+        from kiln_pro.bridge import pro_features  # type: ignore[import-not-found]
+    except ImportError:
+        return False
+    try:
+        return bool(pro_features.is_available("printability_overlay"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+_pro_overlay_required = pytest.mark.skipif(
+    not _overlay_available(),
+    reason="requires kiln-pro printability_overlay for per-material physics",
 )
 
 # ---------------------------------------------------------------------------
@@ -59,6 +88,7 @@ class TestAdhesionForce:
         assert report.adhesion_force.force_ratio > 1.0
         assert report.adhesion_force.will_detach is False
 
+    @_pro_overlay_required
     def test_tall_narrow_poor_adhesion(self, tmp_path):
         """A 2x2x250mm PP tower should have poor adhesion.
 
@@ -95,6 +125,7 @@ class TestAdhesionForce:
         recs = " ".join(report.adhesion_force.recommendations).lower()
         assert "pp" in recs or "adhesion" in recs or "build" in recs
 
+    @_pro_overlay_required
     def test_pla_vs_abs_adhesion(self, tmp_path):
         """PLA should have better adhesion than ABS for the same geometry."""
         stl_path = str(tmp_path / "box.stl")
@@ -138,6 +169,7 @@ class TestAdhesionForce:
         assert hasattr(report.adhesion_force, "score_deduction")
         assert hasattr(report.adhesion_force, "recommendations")
 
+    @_pro_overlay_required
     def test_will_detach_flag(self, tmp_path):
         """A geometry that triggers will_detach=True should recommend brim/raft.
 
@@ -157,6 +189,7 @@ class TestAdhesionForce:
             kw in recs for kw in ("brim", "raft", "detach", "adhesion")
         ), f"Expected adhesion recommendations, got: {report.adhesion_force.recommendations}"
 
+    @_pro_overlay_required
     def test_adhesion_score_deduction(self, tmp_path):
         """A part with likely_detach should get score_deduction of -10.
 
