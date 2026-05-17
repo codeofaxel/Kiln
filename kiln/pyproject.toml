@@ -89,6 +89,7 @@ pythonpath = ["src"]
 norecursedirs = ["src/kiln/data"]
 markers = [
     "live: requires a real OctoPrint instance (deselect with '-m \"not live\"')",
+    "slow: opt-in regression sweep (deselect with '-m \"not slow\"', include with '-m slow')",
 ]
 
 [tool.ruff]
