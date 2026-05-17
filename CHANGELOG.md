@@ -39,30 +39,16 @@ balance but actually detach in practice.
   documented as a best-effort approximation, especially in the
   middle range. For high-aspect-ratio prints in warp-prone
   materials, treat `secure` as `plausible` rather than `verified`.
-- **Thin-wall fallback returns 0.0 sentinel instead of nozzle width.**
-  When `_analyze_thin_walls` finds nothing below the nozzle, the
-  returned `min_wall_thickness_mm` is now `0.0` (sentinel = "no
-  signal") rather than `nozzle_diameter`. Downstream consumers
-  (kiln-pro overlay, design validator, generation feedback) all
-  already gate on `thin_wall_count > 0` before reading the value,
-  so this change is safe — but it removes a footgun where the
-  nozzle-fallback value triggered false "wall too thin" warnings
-  on every clean mesh through the Pro layer. Discovered in the
-  2026-05-17 thin-wall audit (300-case sweep).
-- **`PrintabilityReport.triangle_count` exposed.** The total
-  triangle count of the parsed mesh is now reported so coverage-
-  aware consumers can branch on mesh density. Defaults to 0 for
-  reports constructed directly (without going through
-  `analyze_printability`).
-- **Nozzle diameter plumbed through to the kiln-pro enrichment
-  call.** When kiln-pro is installed, the per-material wall and
-  hole floors now scale with the user's nozzle (was: hard-coded
-  to a 0.4 mm baseline). Falls back to the prior signature if an
-  older kiln-pro version is on the path. Interim measure until the
-  underlying edge-length proxy is replaced with a real
-  wall-thickness measurement — see THIN_WALL_KNOWLEDGE.md in
-  kiln-pro for the per-material × per-nozzle table the analyzer
-  should use.
+- **Thin-wall reports return `0.0` when no thin walls are found.**
+  Was `nozzle_diameter`. Read `thin_wall_count > 0` before treating
+  `min_wall_thickness_mm` as a measurement.
+- **`PrintabilityReport.triangle_count`** — the mesh's triangle
+  count is now on the report so callers can tell coarse meshes
+  apart from detailed ones.
+- **Pro thresholds scale with your nozzle.** Kiln Pro's per-material
+  wall and hole floors now match the nozzle you're actually
+  printing with. A 0.6 mm nozzle gets 0.6 mm-appropriate thresholds
+  instead of always using the 0.4 mm baseline.
 
 ### Internal
 
