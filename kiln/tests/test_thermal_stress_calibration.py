@@ -113,6 +113,64 @@ def _make_stacked(tmpdir, name: str, parts: list[tuple[int, int, int, int]]) -> 
     return merged
 
 
+def _write_vase_stl(path: str, outer_r: float, wall_mm: float, height: float, *, n_sides: int = 24) -> None:
+    """Write a hollow cylindrical "vase" STL — tall walls tessellated as
+    one quad strip per radial sector, each quad split into 2 triangles
+    that span z=0..z=height.
+
+    This is the canonical false-positive case the thermal-stress fix
+    research report flagged: a sparse-tessellation hollow vase whose
+    wall triangles each have a centroid at ~z=height/2 but physically
+    span the full height.  The pre-z-distribution fix would bucket
+    all that wall area into one Z layer (~mid-height) and read it as
+    a single huge "stress concentration" — producing a critical
+    verdict on a perfectly uniform-cross-section shape.  Correct
+    behavior: max_ratio ≈ 1.0, verdict ``low``.
+    """
+    import math
+    inner_r = outer_r - wall_mm
+    if inner_r <= 0:
+        raise ValueError("wall thicker than radius")
+
+    # Outer + inner rings at z=0 and z=height.
+    outer_bot: list[tuple[float, float, float]] = []
+    inner_bot: list[tuple[float, float, float]] = []
+    outer_top: list[tuple[float, float, float]] = []
+    inner_top: list[tuple[float, float, float]] = []
+    for i in range(n_sides):
+        a = 2 * math.pi * i / n_sides
+        c, s = math.cos(a), math.sin(a)
+        outer_bot.append((outer_r * c, outer_r * s, 0.0))
+        inner_bot.append((inner_r * c, inner_r * s, 0.0))
+        outer_top.append((outer_r * c, outer_r * s, height))
+        inner_top.append((inner_r * c, inner_r * s, height))
+
+    tris: list[tuple[tuple[float, float, float], ...]] = []
+    for i in range(n_sides):
+        j = (i + 1) % n_sides
+        # Outer wall (each quad becomes 2 triangles spanning full z).
+        tris.append((outer_bot[i], outer_bot[j], outer_top[j]))
+        tris.append((outer_bot[i], outer_top[j], outer_top[i]))
+        # Inner wall (reversed winding so normals face inward).
+        tris.append((inner_bot[i], inner_top[j], inner_bot[j]))
+        tris.append((inner_bot[i], inner_top[i], inner_top[j]))
+        # Bottom annulus ring (horizontal, normal -z).
+        tris.append((outer_bot[i], inner_bot[j], outer_bot[j]))
+        tris.append((outer_bot[i], inner_bot[i], inner_bot[j]))
+        # Top annulus ring (horizontal, normal +z).
+        tris.append((outer_top[i], outer_top[j], inner_top[j]))
+        tris.append((outer_top[i], inner_top[j], inner_top[i]))
+
+    with open(path, "wb") as f:
+        f.write(b"\x00" * 80)
+        f.write(struct.pack("<I", len(tris)))
+        for tri in tris:
+            f.write(struct.pack("<fff", 0, 0, 0))
+            for vert in tri:
+                f.write(struct.pack("<fff", *vert))
+            f.write(struct.pack("<H", 0))
+
+
 # (name, material, kind, geometry) where kind="box" geometry=(w,d,z) and
 # kind="stack" geometry=list of (w,d,z,offset_z)
 _GEOM: list = [
@@ -336,3 +394,42 @@ def test_uniform_cube_regression_no_false_critical(_force_free_tier, tmp_path):
                 f"cross-section) but got "
                 f"{report.thermal_stress.max_area_change_ratio}"
             )
+
+
+def test_hollow_vase_no_false_critical(_force_free_tier, tmp_path):
+    """Z-distribution regression: a hollow vase tessellated as one quad
+    strip per radial sector — each wall triangle spans z=0..z=height
+    with centroid at ~z=height/2 — reads ``low`` on the corrected
+    model.
+
+    Pre-fix candidate (wall-vs-face inversion only, no z-distribution):
+    every wall triangle dumps its area into the single ~mid-height
+    bucket, producing a fake stress concentration at ~z=height/2 → a
+    "critical" verdict on a perfectly uniform-perimeter shape.  The
+    z-overlap distribution in the corrected model spreads each wall
+    triangle's area across every layer its z-extent crosses (weighted
+    by overlap), so the per-layer wall-area distribution is uniform
+    and max_ratio ≈ 1.0.
+
+    Sweep across the common FDM materials so the regression also
+    confirms the fix is material-independent.
+    """
+    for mat in ["pla", "petg", "abs", "nylon", "pp", "peek", "polycarbonate"]:
+        path = str(tmp_path / f"vase_{mat}.stl")
+        _write_vase_stl(path, outer_r=15.0, wall_mm=1.2, height=100.0, n_sides=24)
+        report = analyze_printability(path, material=mat)
+        assert report.thermal_stress is not None
+        assert report.thermal_stress.risk_level == "low", (
+            f"Hollow {mat} vase (Ø30 wall 1.2 height 100) should read "
+            f"'low' but got {report.thermal_stress.risk_level} "
+            f"(max_ratio={report.thermal_stress.max_area_change_ratio}). "
+            f"This is the z-distribution regression — the candidate "
+            f"wall-vs-face fix alone is INSUFFICIENT without the "
+            f"per-layer overlap-weighted distribution."
+        )
+        assert report.thermal_stress.max_area_change_ratio < 1.5, (
+            f"Hollow {mat} vase max_ratio should be ~1.0 (uniform "
+            f"perimeter) but got "
+            f"{report.thermal_stress.max_area_change_ratio} — the "
+            f"z-distribution code path may have regressed"
+        )
