@@ -588,6 +588,24 @@ _ADHESION_FORCE_PUBLIC_DEFAULTS: dict[str, Any] = {
     ],
 }
 
+# Public floor: the universal 45° rule that every cited 3D-printing
+# source treats as the safety-baseline angle below which any FDM
+# material prints cleanly without supports.  The free tier sees this
+# floor for every material.  Pro+ overlay (``printability_judgment``
+# overlay's ``overhangs`` block) supplies per-material limits keyed by
+# filament identifier; warp-prone materials (TPU, PP) drop below 45°,
+# forgiving materials (PLA, pla_plus) can sit above it.  The lookup
+# falls back to ``default_limit_deg`` when a material is absent from
+# the overlay's ``material_limits_deg``, and to the public 45° rule
+# when the overlay itself is absent.
+_OVERHANGS_PUBLIC_DEFAULTS: dict[str, Any] = {
+    "default_limit_deg": 45.0,
+    # Free tier ships zero per-material overrides — the universal 45°
+    # rule is the only floor.  Pro+ overlay provides the per-material
+    # SME-tuned values; see kiln3d.com for tier details.
+    "material_limits_deg": {},
+}
+
 
 def _check_rule_op(op: str, value: Any, threshold: Any) -> bool:
     """Compare ``value`` to ``threshold`` per ``op``.  False on any
@@ -912,17 +930,53 @@ def _parse_mesh(
 def _analyze_overhangs(
     triangles: list[tuple[tuple[float, ...], ...]],
     *,
-    max_overhang_angle: float = 45.0,
+    max_overhang_angle: float | None = None,
     z_min: float | None = None,
     layer_height: float = 0.2,
     normalize_winding: bool = True,
+    material: str | None = None,
+    overlay: dict[str, Any] | None = None,
 ) -> OverhangAnalysis:
     """Detect overhanging triangles.
 
     A triangle is an overhang if its normal points downward (negative Z
-    component) and the face angle from vertical exceeds
-    ``max_overhang_angle``.
+    component) and the face angle from vertical exceeds the per-material
+    threshold.
+
+    Threshold resolution (first match wins):
+
+    1. ``max_overhang_angle`` explicit kwarg — caller forces a specific
+       angle.  Used by tests and by power-users who want a
+       single-threshold run regardless of material.
+    2. ``material`` + ``overlay`` — per-material lookup in
+       ``overlay["overhangs"]["material_limits_deg"][material]``.  The
+       Pro+ ``printability_judgment`` overlay supplies SME-tuned
+       per-material values (TPU 35°, PLA 50°, …) so warp-prone
+       materials get caught earlier and forgiving materials don't get
+       false-positive support recommendations.
+    3. ``overlay["overhangs"]["default_limit_deg"]`` — overlay-wide
+       fallback when the material isn't in ``material_limits_deg``.
+    4. ``_OVERHANGS_PUBLIC_DEFAULTS["default_limit_deg"]`` (= 45.0) —
+       the universal 45° rule applied to free-tier installs and any
+       material the overlay doesn't recognize.
+
+    Soft tier seam: free tier (``overlay`` empty or absent) uses the
+    universal 45° floor for every material.  Pro+ overlay supplies
+    curated per-material values via the ``printability_judgment``
+    overlay's ``overhangs`` block.  Geometry math is identical across
+    tiers; only the threshold (which faces get counted) varies.
     """
+    cfg = (overlay or {}).get("overhangs") or _OVERHANGS_PUBLIC_DEFAULTS
+    if max_overhang_angle is None:
+        material_limits = cfg.get("material_limits_deg") or {}
+        default_limit = cfg.get("default_limit_deg",
+                                _OVERHANGS_PUBLIC_DEFAULTS["default_limit_deg"])
+        max_overhang_angle = float(
+            material_limits.get(material, default_limit)
+            if material is not None
+            else default_limit
+        )
+
     if normalize_winding:
         triangles = _normalize_triangle_winding(triangles)
 
@@ -2010,7 +2064,7 @@ def analyze_printability(
     *,
     nozzle_diameter: float = 0.4,
     layer_height: float = 0.2,
-    max_overhang_angle: float = 45.0,
+    max_overhang_angle: float | None = None,
     build_volume: tuple[float, float, float] | None = None,
     material: str = "pla",
     infill_percent: float = 20.0,
@@ -2092,6 +2146,8 @@ def analyze_printability(
         z_min=z_min,
         layer_height=layer_height,
         normalize_winding=False,
+        material=material,
+        overlay=judgment_overlay,
     )
     thin_walls = _analyze_thin_walls(triangles, vertices, nozzle_diameter=nozzle_diameter)
     bridging = _analyze_bridging(
@@ -2101,10 +2157,15 @@ def analyze_printability(
         normalize_winding=False,
     )
     bed_adhesion = _analyze_bed_adhesion(triangles, z_min, bbox, layer_height=layer_height)
+    # ``_analyze_supports`` still uses a single-threshold model — keep the
+    # 45° public floor here so support volume estimation doesn't
+    # depend on the per-material overlay.  The overhang detector
+    # already consumes the per-material threshold; supports follow
+    # the same family of fixes in a separate change.
     supports = _analyze_supports(
         triangles,
         z_min,
-        max_overhang_angle=max_overhang_angle,
+        max_overhang_angle=max_overhang_angle if max_overhang_angle is not None else 45.0,
         layer_height=layer_height,
         normalize_winding=False,
         bbox=bbox,

@@ -77,6 +77,48 @@ def _cube_triangles(size: float = 10.0) -> list[tuple]:
     return [(verts[a], verts[b], verts[c]) for a, b, c in faces]
 
 
+def _make_slope_wedge_triangles(
+    overhang_deg: float,
+    *,
+    base_w: float = 30.0,
+    base_d: float = 30.0,
+    height: float = 20.0,
+) -> list[tuple]:
+    """A closed parallelogram prism with two outward-leaning side walls.
+
+    Cross-section: trapezoid widening upward such that the side walls
+    lean ``overhang_deg`` from vertical.  When ``overhang_deg`` is 0
+    the walls are vertical; near 90 the walls approach horizontal
+    ceilings.
+
+    Returns 12 triangles forming a manifold solid suitable for
+    ``_analyze_overhangs`` plus the winding normalizer (the bbox
+    centre is offset from each face's centroid, so the mesh-centre
+    heuristic produces stable orientation).
+    """
+    import math
+    h_shift = height * math.tan(math.radians(overhang_deg))
+    v = [
+        (0.0, 0.0, 0.0),
+        (base_w, 0.0, 0.0),
+        (base_w, base_d, 0.0),
+        (0.0, base_d, 0.0),
+        (-h_shift, 0.0, height),
+        (base_w + h_shift, 0.0, height),
+        (base_w + h_shift, base_d, height),
+        (-h_shift, base_d, height),
+    ]
+    faces = [
+        (0, 2, 1), (0, 3, 2),
+        (4, 5, 6), (4, 6, 7),
+        (0, 1, 5), (0, 5, 4),
+        (3, 7, 6), (3, 6, 2),
+        (1, 2, 6), (1, 6, 5),
+        (0, 4, 7), (0, 7, 3),
+    ]
+    return [(v[a], v[b], v[c]) for a, b, c in faces]
+
+
 def _write_stl(tmpdir: str, triangles: list[tuple]) -> str:
     """Write a binary STL file and return its path."""
     path = os.path.join(tmpdir, "test_model.stl")
@@ -228,6 +270,106 @@ class TestOverhangAnalysis:
         d = result.to_dict()
         assert "max_overhang_angle" in d
         assert "overhang_triangle_count" in d
+
+
+# ---------------------------------------------------------------------------
+# TestOverhangMaterialAwareThreshold — soft tier seam.  Free tier
+# consumes the universal 45° rule via _OVERHANGS_PUBLIC_DEFAULTS;
+# Pro+ overlay supplies per-material limits (TPU 35, PLA 50, …) via
+# the printability_judgment overlay's ``overhangs`` block.
+# ---------------------------------------------------------------------------
+
+
+class TestOverhangMaterialAwareThreshold:
+    """The overlay-aware lookup mirrors the existing pattern used by
+    ``_analyze_warping`` and ``_analyze_thermal_stress`` — caller can
+    inject ``overlay`` + ``material`` and the function looks up the
+    per-material threshold without knowing any specific values."""
+
+    def test_free_tier_default_45deg_when_no_overlay(self):
+        """Free tier (no overlay) keeps the universal 45° rule.  Pins
+        the no-regression contract for installs without kiln-pro."""
+        tris = _make_slope_wedge_triangles(overhang_deg=40.0)
+        r = _analyze_overhangs(tris, z_min=0.0, material="TPU")
+        assert r.overhang_triangle_count == 0
+        assert not r.needs_supports
+
+    def test_free_tier_default_45deg_when_overlay_lacks_overhangs_block(self):
+        """An overlay dict without an ``overhangs`` block also falls
+        through to 45°.  Pins the safe-default contract when an older
+        Pro+ overlay schema is loaded."""
+        tris = _make_slope_wedge_triangles(overhang_deg=40.0)
+        overlay_without_overhangs = {"warping": {"risk_thresholds": {}}}
+        r = _analyze_overhangs(
+            tris, z_min=0.0, material="TPU",
+            overlay=overlay_without_overhangs,
+        )
+        assert r.overhang_triangle_count == 0
+
+    def test_pro_tier_tpu_at_36deg_flagged_via_overlay(self):
+        """Pro+ overlay TPU=35° → 36° slope on TPU must register —
+        the exact behavior the material-aware floor unlocks vs the
+        universal 45° rule."""
+        tris = _make_slope_wedge_triangles(overhang_deg=36.0)
+        overlay = {
+            "overhangs": {
+                "default_limit_deg": 45.0,
+                "material_limits_deg": {"TPU": 35, "PLA": 50},
+            },
+        }
+        r = _analyze_overhangs(
+            tris, z_min=0.0, material="TPU", overlay=overlay,
+        )
+        assert r.overhang_triangle_count > 0
+        assert 35.99 <= r.max_overhang_angle <= 36.01
+
+    def test_pro_tier_pla_at_48deg_not_flagged_via_overlay(self):
+        """Pro+ overlay PLA=50° → 48° slope on PLA must NOT register —
+        the forgiving side of per-material tuning that removes the
+        universal 45° rule's PLA false positives."""
+        tris = _make_slope_wedge_triangles(overhang_deg=48.0)
+        overlay = {
+            "overhangs": {
+                "default_limit_deg": 45.0,
+                "material_limits_deg": {"TPU": 35, "PLA": 50},
+            },
+        }
+        r = _analyze_overhangs(
+            tris, z_min=0.0, material="PLA", overlay=overlay,
+        )
+        assert r.overhang_triangle_count == 0
+
+    def test_unknown_material_falls_back_to_overlay_default(self):
+        """A material absent from ``material_limits_deg`` falls back
+        to the overlay's ``default_limit_deg``.  Pins the fallback
+        chain so forgetting an entry is safe."""
+        tris = _make_slope_wedge_triangles(overhang_deg=44.0)
+        overlay = {
+            "overhangs": {
+                "default_limit_deg": 40.0,
+                "material_limits_deg": {"PLA": 50},
+            },
+        }
+        r = _analyze_overhangs(
+            tris, z_min=0.0, material="Unobtanium", overlay=overlay,
+        )
+        assert r.overhang_triangle_count > 0
+
+    def test_explicit_max_overhang_angle_overrides_overlay(self):
+        """Explicit ``max_overhang_angle`` bypasses the overlay
+        lookup.  Pins the priority order: caller > overlay > public."""
+        tris = _make_slope_wedge_triangles(overhang_deg=44.0)
+        overlay = {
+            "overhangs": {
+                "default_limit_deg": 35.0,
+                "material_limits_deg": {"TPU": 30},
+            },
+        }
+        r = _analyze_overhangs(
+            tris, z_min=0.0, material="TPU", overlay=overlay,
+            max_overhang_angle=50.0,
+        )
+        assert r.overhang_triangle_count == 0
 
 
 # ---------------------------------------------------------------------------
