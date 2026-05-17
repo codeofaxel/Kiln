@@ -153,7 +153,7 @@ class SkillManifest:
             ],
             "design_intelligence": [
                 "design_session(verb=\"start\", idea=\"...\") — saved-goal Q&A entry point; drives audit + post-print review",
-                "list_design_sessions(filter_status=\"all\") — inbox of every goal the user has committed",
+                "list_design_goals(filter_status=\"all\") — inbox of every goal the user has committed",
                 "get_design_brief(requirements) — functional-requirements analysis (design_session calls into this)",
                 "get_material_design_profile(material) — material-specific design rules",
                 "find_design_templates(use_case) — proven design templates (18 templates)",
@@ -176,7 +176,7 @@ class SkillManifest:
             "monitoring": "monitor_print() — full report with snapshot and cost",
             "tier_diagnostic": "check_my_tier() — answer plan/subscription/paywall questions ('what tier am I on', 'why does it say I need Pro', 'do I have to pay')",
             "saved_goal_start": "design_session(verb=\"start\", idea=\"...\") — start a new saved goal; the Q&A captures duty / environment / materials / safety and drives the audit + post-print review",
-            "saved_goal_list":  "list_design_sessions(filter_status=\"all\") — list every saved goal; filter by status (needs_questions / ready_to_generate / matches_what_you_asked_for) to triage",
+            "saved_goal_list":  "list_design_goals(filter_status=\"all\") — list every saved goal; filter by status (needs_questions / ready_to_generate / matches_what_you_asked_for) to triage",
             "design_brief":     "get_design_brief(requirements) — internal functional-requirements lookup (design_session calls into this; agents rarely call directly)",
             "design_templates": "find_design_templates(use_case) — proven templates (18 in library)",
             "material_selection": "recommend_design_material(use_case) — intelligent material pick",
