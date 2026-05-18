@@ -110,6 +110,13 @@ the slicer would actually print.
   segments — rare in CAD exports, common in low-poly props) also
   stay together where the previous version shattered them on a
   floating-point boundary.
+- **Hex pockets are distinguishable from drilled holes.** Each
+  detected hole carries a new `facet_segments` field: smoothly
+  tessellated round bores report 20-48 facets, hex nut traps
+  report 6, octagonal pockets 8. Callers (printability
+  recommendations, kiln-pro overlays) can use the count to suppress
+  hole-diameter warnings on intentional polygonal pockets without
+  the detector having to guess intent from the mesh.
 
 ### Internal
 

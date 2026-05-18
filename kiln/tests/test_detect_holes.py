@@ -425,11 +425,21 @@ class TestDetectHoles:
         assert len(holes) == 1
         h = holes[0]
         assert set(h.keys()) == {
-            "position", "diameter_mm", "depth_mm", "axis", "triangle_count",
+            "position",
+            "diameter_mm",
+            "depth_mm",
+            "axis",
+            "triangle_count",
+            "facet_segments",
         }
         assert set(h["position"].keys()) == {"x_mm", "y_mm", "z_mm"}
         assert h["axis"] in {"x", "y", "z"}
         assert isinstance(h["triangle_count"], int)
+        assert isinstance(h["facet_segments"], int)
+        assert h["facet_segments"] >= 6, (
+            "24-segment cylinder should expose at least its 6-octant "
+            f"worth of distinct facets; got {h['facet_segments']}"
+        )
 
     def test_invalid_parameters_raise(self, tmp_path: Path) -> None:
         """min_diameter_mm <= 0 and max <= min are both contract
@@ -631,6 +641,160 @@ class TestDetectHoles:
         assert len(holes) == 1, (
             f"6-segment cylinder cluster must not shatter at the "
             f"floating-point cos(60°) boundary; got {len(holes)} holes"
+        )
+
+    def test_sparse_6_segment_cylinder_rotated_45deg_detected(
+        self, tmp_path: Path,
+    ) -> None:
+        """Combined stress: low-poly cylinder + 45° tilt.
+
+        Catches the regression class where the FP-noise-on-cohesion
+        fix (threshold 0.45) and the rotation-tolerant axis recovery
+        independently work but their interaction breaks: a 6-segment
+        cylinder rotated 45° produces both an FP-borderline cohesion
+        case AND an off-principal-axis cluster.  Multi-axis trial
+        must still find the rotated axis and validate.
+        """
+        stl = tmp_path / "sparse_6_rot45.stl"
+        tris = _hole_side_wall_z(
+            cx=10.0, cy=10.0, radius=2.5,
+            z_bottom=0.0, z_top=10.0, segments=6,
+        )
+        theta = math.radians(45)
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
+
+        def _rotate_x(v: tuple[float, ...]) -> tuple[float, float, float]:
+            x, y, z = v[0], v[1], v[2]
+            return (x, y * cos_t - z * sin_t, y * sin_t + z * cos_t)
+
+        rotated_tris = [tuple(_rotate_x(v) for v in tri) for tri in tris]
+        _write_binary_stl(rotated_tris, str(stl))
+        holes = detect_holes(str(stl), min_diameter_mm=1.0)
+        assert len(holes) == 1, (
+            f"6-segment cylinder rotated 45° must surface; "
+            f"got {len(holes)} (FP cos+rotation interaction)"
+        )
+
+    def test_facet_segments_distinguishes_hex_pocket_from_smooth_hole(
+        self, tmp_path: Path,
+    ) -> None:
+        """``facet_segments`` reports the cluster's distinct face-normal
+        directions snapped to 10° bins.
+
+        Lets downstream callers tell a hex nut trap (6 facets) from a
+        true 5 mm drilled hole (24+ facets) when the geometry is
+        otherwise identical (both are valid cylindrical clusters that
+        pass the gates).  The detector intentionally does NOT suppress
+        polygonal pockets — the mesh alone can't recover intent — but
+        the field gives callers the data to apply their own policy.
+        """
+        # 6-segment hex pocket — should report facet_segments == 6.
+        hex_stl = tmp_path / "hex_pocket.stl"
+        _write_binary_stl(
+            _hole_side_wall_z(
+                cx=10.0, cy=10.0, radius=2.5,
+                z_bottom=0.0, z_top=10.0, segments=6,
+            ),
+            str(hex_stl),
+        )
+        hex_holes = detect_holes(str(hex_stl), min_diameter_mm=1.0)
+        assert len(hex_holes) == 1
+        assert hex_holes[0]["facet_segments"] == 6, (
+            f"hex pocket must expose 6 facet segments; "
+            f"got {hex_holes[0]['facet_segments']}"
+        )
+
+        # 24-segment smooth hole — should report 24.
+        smooth_stl = tmp_path / "smooth_hole.stl"
+        _write_binary_stl(
+            _hole_side_wall_z(
+                cx=10.0, cy=10.0, radius=2.5,
+                z_bottom=0.0, z_top=10.0, segments=24,
+            ),
+            str(smooth_stl),
+        )
+        smooth_holes = detect_holes(str(smooth_stl), min_diameter_mm=1.0)
+        assert len(smooth_holes) == 1
+        assert smooth_holes[0]["facet_segments"] >= 20, (
+            f"24-segment smooth hole should expose ≥ 20 facet "
+            f"segments after 10° snapping; got "
+            f"{smooth_holes[0]['facet_segments']}"
+        )
+
+    def test_facet_segments_is_rotation_invariant(
+        self, tmp_path: Path,
+    ) -> None:
+        """A 6-facet hex pocket rotated 30° still reports 6 facets.
+
+        Pins that ``facet_segments`` is computed in the cluster's
+        recovered (u, v) basis, not world XY — otherwise a tilted
+        hex pocket would show garbage counts."""
+        stl = tmp_path / "hex_rotated.stl"
+        tris = _hole_side_wall_z(
+            cx=10.0, cy=10.0, radius=2.5,
+            z_bottom=0.0, z_top=10.0, segments=6,
+        )
+        theta = math.radians(30)
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
+
+        def _rotate_x(v: tuple[float, ...]) -> tuple[float, float, float]:
+            x, y, z = v[0], v[1], v[2]
+            return (x, y * cos_t - z * sin_t, y * sin_t + z * cos_t)
+
+        rotated_tris = [tuple(_rotate_x(v) for v in tri) for tri in tris]
+        _write_binary_stl(rotated_tris, str(stl))
+        holes = detect_holes(str(stl), min_diameter_mm=1.0)
+        assert len(holes) == 1
+        assert holes[0]["facet_segments"] == 6, (
+            f"rotated hex pocket must still expose 6 facets; "
+            f"got {holes[0]['facet_segments']}"
+        )
+
+    def test_detection_perf_smoke_50_hole_mesh(
+        self, tmp_path: Path,
+    ) -> None:
+        """Wall-clock smoke gate: detection on a 50-hole mesh
+        (~2400 triangles) must complete in under 5 seconds.
+
+        Pins the multi-axis trial overhead — the trial only fires on
+        contaminated clusters that fail the first axis attempt, so
+        typical-mesh overhead is single-digit-percent vs the v1.1.x
+        single-axis pass.  A 5-second budget for a 50-hole mesh
+        gives ~50× headroom over local-dev timing (~100 ms on a
+        2025 MBP) so the test stays green on slow CI without
+        missing a true quadratic-blowup regression.
+        """
+        import time
+        stl = tmp_path / "perf_smoke.stl"
+        # 5x10 grid of 2 mm bores, spaced 5 mm apart.
+        tris: list[tuple[tuple[float, ...], ...]] = []
+        for row in range(5):
+            for col in range(10):
+                cx = 5.0 + col * 5.0
+                cy = 5.0 + row * 5.0
+                tris.extend(
+                    _hole_side_wall_z(
+                        cx=cx, cy=cy, radius=1.0,
+                        z_bottom=0.0, z_top=5.0, segments=24,
+                    ),
+                )
+        _write_binary_stl(tris, str(stl))
+        # Warm the parser cache + Python bytecode JIT (CPython has none,
+        # but module imports still amortize first-call cost).
+        detect_holes(str(stl), min_diameter_mm=1.0)
+        t0 = time.perf_counter()
+        holes = detect_holes(str(stl), min_diameter_mm=1.0)
+        elapsed = time.perf_counter() - t0
+        assert len(holes) == 50, (
+            f"50-hole grid should detect 50 holes; got {len(holes)}"
+        )
+        assert elapsed < 5.0, (
+            f"50-hole detection took {elapsed:.2f}s — well past the 5 s "
+            f"perf-smoke budget.  A regression introduced quadratic "
+            f"behavior somewhere in the cohesion BFS or multi-axis "
+            f"trial."
         )
 
 

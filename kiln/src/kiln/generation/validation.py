@@ -5254,6 +5254,16 @@ def detect_holes(
           exact axis direction should rely on the geometry, not the
           label.
         * ``triangle_count`` — int, triangles contributing to the ring.
+        * ``facet_segments`` — int, distinct face-normal directions
+          around the cylinder, snapped to 10° bins.  A smoothly
+          tessellated 5 mm round hole exported from CAD has
+          24-48 facets; a hex nut trap has 6; an octagonal pocket has
+          8.  The geometry of a "6-segment circle" and a hex pocket
+          is identical, so the detector cannot tell intent apart from
+          the mesh — but ``facet_segments`` lets downstream callers
+          (printability recommendations, kiln-pro overlays) treat a
+          ≤ 8-facet detection as "polygonal pocket, not a drilled
+          hole" and suppress hole-diameter warnings accordingly.
 
         Empty list when no holes are recovered (no triangles, mesh too
         coarse, or every candidate failed the circularity / depth
@@ -5873,6 +5883,26 @@ def _validate_cluster_against_axis(
     else:
         axis_label = "z"
 
+    # Step 11: facet-segment count.  Tells callers whether the cluster
+    # is a smoothly-tessellated round bore (many distinct facet
+    # directions) or a polygonal pocket (a few — typically 6 for a
+    # nut trap).  The dict field is purely informational; the gates
+    # don't change behavior based on it, because the geometry of a
+    # 6-segment "circle" and a 6-segment hex pocket is identical and
+    # the intent isn't recoverable from the mesh alone.
+    facet_directions: set[int] = set()
+    for ti in filtered:
+        n = tri_normals[ti]
+        n_u = n[0] * u_hat[0] + n[1] * u_hat[1] + n[2] * u_hat[2]
+        n_v = n[0] * v_hat[0] + n[1] * v_hat[1] + n[2] * v_hat[2]
+        # 10° bins in the perpendicular plane (36 bins around the
+        # circle).  Snap with round-half-to-even — fine enough that a
+        # 24-segment cylinder gets 24 distinct bins, coarse enough
+        # that floating-point jitter on identical normals stays in
+        # the same bin.
+        angle_deg = math.atan2(n_v, n_u) * 180.0 / math.pi
+        facet_directions.add(round(angle_deg / 10.0))
+
     return {
         "position": {
             "x_mm": round(px, 3),
@@ -5883,4 +5913,5 @@ def _validate_cluster_against_axis(
         "depth_mm": round(depth, 3),
         "axis": axis_label,
         "triangle_count": len(filtered),
+        "facet_segments": len(facet_directions),
     }
