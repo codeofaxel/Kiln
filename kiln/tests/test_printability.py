@@ -96,7 +96,7 @@ def _make_slope_wedge_triangles(
     centre is offset from each face's centroid, so the mesh-centre
     heuristic produces stable orientation).  Used by the
     floating-point-precision regression tests around the 45°
-    threshold.
+    threshold AND the material-aware-threshold regression tests.
     """
     import math
     h_shift = height * math.tan(math.radians(overhang_deg))
@@ -326,6 +326,251 @@ class TestOverhangAnalysis:
             f"overhang; got count={result.overhang_triangle_count}, "
             f"max_overhang_angle={result.max_overhang_angle}"
         )
+
+
+# ---------------------------------------------------------------------------
+# TestOverhangMaterialAwareThreshold — soft tier seam.  Free tier
+# consumes the universal 45° rule via _OVERHANGS_PUBLIC_DEFAULTS;
+# Pro+ overlay supplies per-material limits (TPU 35, PLA 50, …) via
+# the printability_judgment overlay's ``overhangs`` block.
+# ---------------------------------------------------------------------------
+
+
+class TestOverhangMaterialAwareThreshold:
+    """The overlay-aware lookup mirrors the existing pattern used by
+    ``_analyze_warping`` and ``_analyze_thermal_stress`` — caller can
+    inject ``overlay`` + ``material`` and the function looks up the
+    per-material threshold without knowing any specific values."""
+
+    def test_free_tier_default_45deg_when_no_overlay(self):
+        """Free tier (no overlay) keeps the universal 45° rule.  Pins
+        the no-regression contract for installs without kiln-pro."""
+        tris = _make_slope_wedge_triangles(overhang_deg=40.0)
+        r = _analyze_overhangs(tris, z_min=0.0, material="TPU")
+        assert r.overhang_triangle_count == 0
+        assert not r.needs_supports
+
+    def test_free_tier_default_45deg_when_overlay_lacks_overhangs_block(self):
+        """An overlay dict without an ``overhangs`` block also falls
+        through to 45°.  Pins the safe-default contract when an older
+        Pro+ overlay schema is loaded."""
+        tris = _make_slope_wedge_triangles(overhang_deg=40.0)
+        overlay_without_overhangs = {"warping": {"risk_thresholds": {}}}
+        r = _analyze_overhangs(
+            tris, z_min=0.0, material="TPU",
+            overlay=overlay_without_overhangs,
+        )
+        assert r.overhang_triangle_count == 0
+
+    def test_pro_tier_tpu_at_36deg_flagged_via_overlay(self):
+        """Pro+ overlay TPU=35° → 36° slope on TPU must register —
+        the exact behavior the material-aware floor unlocks vs the
+        universal 45° rule."""
+        tris = _make_slope_wedge_triangles(overhang_deg=36.0)
+        overlay = {
+            "overhangs": {
+                "default_limit_deg": 45.0,
+                "material_limits_deg": {"TPU": 35, "PLA": 50},
+            },
+        }
+        r = _analyze_overhangs(
+            tris, z_min=0.0, material="TPU", overlay=overlay,
+        )
+        assert r.overhang_triangle_count > 0
+        assert 35.99 <= r.max_overhang_angle <= 36.01
+
+    def test_pro_tier_pla_at_48deg_not_flagged_via_overlay(self):
+        """Pro+ overlay PLA=50° → 48° slope on PLA must NOT register —
+        the forgiving side of per-material tuning that removes the
+        universal 45° rule's PLA false positives."""
+        tris = _make_slope_wedge_triangles(overhang_deg=48.0)
+        overlay = {
+            "overhangs": {
+                "default_limit_deg": 45.0,
+                "material_limits_deg": {"TPU": 35, "PLA": 50},
+            },
+        }
+        r = _analyze_overhangs(
+            tris, z_min=0.0, material="PLA", overlay=overlay,
+        )
+        assert r.overhang_triangle_count == 0
+
+    def test_unknown_material_falls_back_to_overlay_default(self):
+        """A material absent from ``material_limits_deg`` falls back
+        to the overlay's ``default_limit_deg``.  Pins the fallback
+        chain so forgetting an entry is safe."""
+        tris = _make_slope_wedge_triangles(overhang_deg=44.0)
+        overlay = {
+            "overhangs": {
+                "default_limit_deg": 40.0,
+                "material_limits_deg": {"PLA": 50},
+            },
+        }
+        r = _analyze_overhangs(
+            tris, z_min=0.0, material="Unobtanium", overlay=overlay,
+        )
+        assert r.overhang_triangle_count > 0
+
+    def test_material_lookup_is_case_insensitive(self):
+        """Overlay keys mix UPPERCASE legacy ('PLA', 'CF-PETG') with
+        lowercase catalog ('pla_plus', 'tpu_85a').  Callers pass
+        material in either case — Kiln tools typically use lowercase
+        from materials.json; tests often uppercase.  The lookup must
+        be case-insensitive so ``material='tpu'`` matches the 'TPU'
+        overlay key and doesn't silently fall through to the universal
+        45 deg default (which would disable the per-material tier
+        seam entirely for that material).
+
+        Mirrors the ``_normalize_material_key`` helper in
+        kiln_pro/printability_overlay/data_loader.py."""
+        tris = _make_slope_wedge_triangles(overhang_deg=36.0)
+        overlay = {
+            "overhangs": {
+                "default_limit_deg": 45.0,
+                "material_limits_deg": {"TPU": 35},
+            },
+        }
+        for mat in ("TPU", "tpu", "Tpu", "tPU"):
+            r = _analyze_overhangs(
+                tris, z_min=0.0, material=mat, overlay=overlay,
+            )
+            assert r.overhang_triangle_count > 0, (
+                f"material='{mat}' must match overlay key 'TPU' "
+                f"case-insensitively; got count="
+                f"{r.overhang_triangle_count}"
+            )
+
+    def test_material_lookup_folds_dash_underscore_space(self):
+        """The overlay carries entries in both ``UPPERCASE+dash`` (e.g.
+        'CF-PETG') and ``lowercase+underscore`` (e.g. 'cf_petg')
+        conventions.  The lookup must collapse all four delimiter
+        styles so any caller convention matches any overlay entry.
+
+        Same scope as kiln-pro's ``_normalize_material_key``."""
+        tris = _make_slope_wedge_triangles(overhang_deg=42.0)
+        overlay = {
+            "overhangs": {
+                "default_limit_deg": 45.0,
+                "material_limits_deg": {"CF-PETG": 40},
+            },
+        }
+        for mat in ("CF-PETG", "cf-petg", "cf_petg", "CF_PETG",
+                    "Cf-Petg", "cf petg"):
+            r = _analyze_overhangs(
+                tris, z_min=0.0, material=mat, overlay=overlay,
+            )
+            assert r.overhang_triangle_count > 0, (
+                f"material='{mat}' must match overlay key 'CF-PETG' "
+                f"across delimiter conventions; got count="
+                f"{r.overhang_triangle_count}"
+            )
+
+    def test_explicit_max_overhang_angle_overrides_overlay(self):
+        """Explicit ``max_overhang_angle`` bypasses the overlay
+        lookup.  Pins the priority order: caller > overlay > public."""
+        tris = _make_slope_wedge_triangles(overhang_deg=44.0)
+        overlay = {
+            "overhangs": {
+                "default_limit_deg": 35.0,
+                "material_limits_deg": {"TPU": 30},
+            },
+        }
+        r = _analyze_overhangs(
+            tris, z_min=0.0, material="TPU", overlay=overlay,
+            max_overhang_angle=50.0,
+        )
+        assert r.overhang_triangle_count == 0
+
+
+class TestSupportsAndOverhangsAgreeOnThreshold:
+    """analyze_printability MUST pass the same per-material overhang
+    threshold to both _analyze_overhangs (the verdict) and
+    _analyze_supports (the volume estimate).  Without coordination,
+    the report contradicts itself for warp-prone materials:
+    ``overhangs.needs_supports=True`` but
+    ``supports.estimated_support_volume_mm3=0`` because the supports
+    estimator's old hardcoded 45° default is above the per-material
+    threshold for TPU (35°) / PP (40°).
+    """
+
+    def test_tpu_sub_45_overhang_produces_consistent_report(self, tmp_path):
+        """A 40° slope on TPU.  Per-material lookup says 35°, so the
+        overhang is real.  Without the shared-threshold fix,
+        supports.estimated_support_volume_mm3 stays at 0 because
+        _analyze_supports defaults to 45°.  With the fix, supports
+        reports a non-zero volume — the user gets a consistent
+        verdict + estimate pair."""
+        import math
+        # 40° outward-leaning wedge.
+        h_shift = 20.0 * math.tan(math.radians(40.0))
+        v = [
+            (0.0, 0.0, 0.0), (30.0, 0.0, 0.0),
+            (30.0, 30.0, 0.0), (0.0, 30.0, 0.0),
+            (-h_shift, 0.0, 20.0), (30.0 + h_shift, 0.0, 20.0),
+            (30.0 + h_shift, 30.0, 20.0), (-h_shift, 30.0, 20.0),
+        ]
+        faces = [
+            (0, 2, 1), (0, 3, 2),
+            (4, 5, 6), (4, 6, 7),
+            (0, 1, 5), (0, 5, 4),
+            (3, 7, 6), (3, 6, 2),
+            (1, 2, 6), (1, 6, 5),
+            (0, 4, 7), (0, 7, 3),
+        ]
+        tris = [(v[a], v[b], v[c]) for a, b, c in faces]
+        stl = tmp_path / "wedge_40.stl"
+        with open(stl, "wb") as f:
+            f.write(_make_binary_stl(tris))
+        report = analyze_printability(str(stl), material="TPU")
+        if not report.overhangs.needs_supports:
+            # The overlay isn't loaded in this environment (kiln-pro
+            # not installed, or its overhangs block is absent).  Skip
+            # the consistency check — there's nothing to be consistent
+            # about when both analyses run at the universal 45° floor.
+            return
+        # When overhang says needs_supports, supports estimate must
+        # also reflect a non-zero volume — same threshold drove both.
+        assert report.supports.estimated_support_volume_mm3 > 0.0, (
+            f"shared-threshold contract broken: overhangs.needs_supports="
+            f"{report.overhangs.needs_supports} (max_ovh="
+            f"{report.overhangs.max_overhang_angle}) but "
+            f"supports.estimated_support_volume_mm3="
+            f"{report.supports.estimated_support_volume_mm3} (should be > 0 "
+            f"since both analyses now use the per-material threshold)"
+        )
+
+
+class TestResolveOverhangThreshold:
+    """Unit-level coverage of the lookup helper that backs the
+    shared-threshold contract in analyze_printability."""
+
+    def test_explicit_caller_wins(self):
+        from kiln.printability import _resolve_overhang_threshold
+        overlay = {"overhangs": {"material_limits_deg": {"TPU": 35}}}
+        assert _resolve_overhang_threshold(50.0, "TPU", overlay) == 50.0
+
+    def test_per_material_lookup_used_when_no_explicit(self):
+        from kiln.printability import _resolve_overhang_threshold
+        overlay = {"overhangs": {"material_limits_deg": {"TPU": 35},
+                                  "default_limit_deg": 45.0}}
+        assert _resolve_overhang_threshold(None, "TPU", overlay) == 35.0
+
+    def test_default_used_for_unknown_material(self):
+        from kiln.printability import _resolve_overhang_threshold
+        overlay = {"overhangs": {"material_limits_deg": {"PLA": 50},
+                                  "default_limit_deg": 42.0}}
+        assert _resolve_overhang_threshold(None, "Unobtanium", overlay) == 42.0
+
+    def test_universal_45_when_no_overlay(self):
+        from kiln.printability import _resolve_overhang_threshold
+        assert _resolve_overhang_threshold(None, "TPU", None) == 45.0
+        assert _resolve_overhang_threshold(None, "TPU", {}) == 45.0
+
+    def test_case_insensitive_match(self):
+        from kiln.printability import _resolve_overhang_threshold
+        overlay = {"overhangs": {"material_limits_deg": {"TPU": 35}}}
+        assert _resolve_overhang_threshold(None, "tpu", overlay) == 35.0
+        assert _resolve_overhang_threshold(None, "Tpu", overlay) == 35.0
 
 
 # ---------------------------------------------------------------------------

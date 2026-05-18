@@ -47,6 +47,12 @@ the slicer would actually print.
   will use.** A number you can plan a spool around. Matches what
   your slicer will actually print — sticky filaments like PETG and
   TPU get bumped up because they take more to peel cleanly.
+- **Overhang detection knows your filament.** Free tier uses the
+  universal 45° rule; Kiln Pro tunes it per material — TPU gets
+  flagged at lower angles, PLA gets the slack it deserves.
+- **Support volume matches the overhang verdict.** A flagged
+  overhang always reports a non-zero support volume now — no more
+  "needs supports but estimate says zero" on warp-prone filaments.
 
 ### Changed
 
@@ -70,6 +76,9 @@ the slicer would actually print.
 - Exact 45° slopes register as overhangs. A floating-point
   edge case was letting canonical 45° walls slip past the
   detector.
+- `audit_original_design` honors per-material thresholds. The
+  audit pipeline was forcing the universal 45° rule even when the
+  caller specified a filament.
 - Support estimates no longer come back as zero on T-shapes,
   mushrooms, tabletops, umbrellas, and other shapes where the
   overhang sits above a narrower base.
