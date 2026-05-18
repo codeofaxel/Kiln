@@ -1160,42 +1160,128 @@ def _analyze_bridging(
     """Detect unsupported horizontal spans (bridges).
 
     Identifies triangles with normals pointing nearly straight down
-    that are above the first layer (not bed-touching).  Measures the
-    longest edge of such triangles as the bridge length.
+    that are above the first layer (not bed-touching), then
+    aggregates them into connected regions before measuring.
+
+    ``max_bridge_length_mm`` is the larger XY-bounding-box dimension
+    of the largest connected bridge region — the conservative span
+    the slicer would need to cross in the worst-case bridging
+    direction.  Connected-region aggregation closes the arch-under-
+    measurement gap: an arched ceiling is one bridge with the chord
+    as its span, not N tiny facets each reporting their own edge.
+    For a flat rectangular cavity ceiling (2 triangles in one
+    region) the region bbox is identical to the per-triangle
+    measurement, so this fix is additive on flat cases and only
+    changes behavior on curved / multi-triangle bridges.
+
+    Prior single-triangle implementations used ``max(triangle_edge)``
+    which over-stated by hypotenuse-bias on cavities where depth >>
+    span (a 2 mm bridge × 8 mm depth reported 8.25 mm instead of
+    8 mm).  Bbox replaces hypotenuse; region-aggregation replaces
+    per-facet.
+
+    ``bridge_count`` is the per-TRIANGLE count (back-compat with
+    the public scoring formula's ``min(15, 5 + bridge_count)`` —
+    switching to per-region would lower the score deduction on real
+    arches, which we don't want until the scoring formula is
+    updated in lockstep).
     """
     if normalize_winding:
         triangles = _normalize_triangle_winding(triangles)
 
-    bridge_count = 0
-    max_bridge_len = 0.0
-
     bed_threshold = z_min + layer_height * 2
 
+    # ---- Filter pass: collect bridge-candidate triangles -----------
+    candidates: list[tuple[tuple[float, ...], ...]] = []
     for tri in triangles:
         if _is_bed_supported_triangle(tri, z_min, layer_height):
             continue
-
-        # Skip triangles near the bed (they're supported).
         centroid = _triangle_centroid(tri[0], tri[1], tri[2])
         if centroid[2] <= bed_threshold:
             continue
-
         n = _triangle_normal(tri[0], tri[1], tri[2])
         nn = _normalize(n)
-
-        # Bridge: normal points nearly straight down (nz < -0.9).
         if nn[2] > -0.9:
             continue
+        candidates.append(tri)
 
-        # Measure the longest edge as the bridge span.
-        e1 = _vertex_distance(tri[0], tri[1])
-        e2 = _vertex_distance(tri[1], tri[2])
-        e3 = _vertex_distance(tri[2], tri[0])
-        longest = max(e1, e2, e3)
+    bridge_count = len(candidates)
+    if not candidates:
+        return BridgingAnalysis(
+            max_bridge_length_mm=0.0,
+            bridge_count=0,
+            needs_supports_for_bridges=False,
+        )
 
-        bridge_count += 1
-        if longest > max_bridge_len:
-            max_bridge_len = longest
+    # ---- Connectivity pass: union-find by shared edge --------------
+    # Round vertex coordinates to a sub-micron grid so STL float drift
+    # doesn't make two genuinely-identical vertices hash differently.
+    def _vkey(v: tuple[float, ...]) -> tuple[int, int, int]:
+        # 6 decimals = 1 nm precision; enough margin to absorb f32 noise
+        # from STL parsing while still distinguishing real-world
+        # neighboring vertices.
+        return (
+            int(round(v[0] * 1_000_000)),
+            int(round(v[1] * 1_000_000)),
+            int(round(v[2] * 1_000_000)),
+        )
+
+    parent = list(range(len(candidates)))
+
+    def _find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]  # path compression
+            i = parent[i]
+        return i
+
+    def _union(a: int, b: int) -> None:
+        ra, rb = _find(a), _find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    edge_to_tri: dict[tuple, int] = {}
+    for i, tri in enumerate(candidates):
+        v0, v1, v2 = _vkey(tri[0]), _vkey(tri[1]), _vkey(tri[2])
+        e_ab = (v0, v1) if v0 < v1 else (v1, v0)
+        e_bc = (v1, v2) if v1 < v2 else (v2, v1)
+        e_ca = (v2, v0) if v2 < v0 else (v0, v2)
+        for e in (e_ab, e_bc, e_ca):
+            if e in edge_to_tri:
+                _union(i, edge_to_tri[e])
+            else:
+                edge_to_tri[e] = i
+
+    # ---- Measurement pass: per-region XY bbox ----------------------
+    region_x_min: dict[int, float] = {}
+    region_x_max: dict[int, float] = {}
+    region_y_min: dict[int, float] = {}
+    region_y_max: dict[int, float] = {}
+    for i, tri in enumerate(candidates):
+        root = _find(i)
+        for v in tri:
+            x, y = v[0], v[1]
+            if root not in region_x_min:
+                region_x_min[root] = x
+                region_x_max[root] = x
+                region_y_min[root] = y
+                region_y_max[root] = y
+            else:
+                if x < region_x_min[root]:
+                    region_x_min[root] = x
+                elif x > region_x_max[root]:
+                    region_x_max[root] = x
+                if y < region_y_min[root]:
+                    region_y_min[root] = y
+                elif y > region_y_max[root]:
+                    region_y_max[root] = y
+
+    max_bridge_len = 0.0
+    for root in region_x_min:
+        dx = region_x_max[root] - region_x_min[root]
+        dy = region_y_max[root] - region_y_min[root]
+        bbox_dim = max(dx, dy)
+        if bbox_dim > max_bridge_len:
+            max_bridge_len = bbox_dim
 
     # Bridges > 10mm typically need supports.
     needs_supports = max_bridge_len > 10.0

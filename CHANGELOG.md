@@ -58,9 +58,16 @@ the slicer would actually print.
 - **Support volume matches the overhang verdict.** A flagged
   overhang always reports a non-zero support volume now — no more
   "needs supports but estimate says zero" on warp-prone filaments.
+- **Arched and pillared ceilings appear in the bridging report.**
+  Curved doorway tops, colonnaded ceilings, rows of windows above
+  pillars — each unsupported span shows up with its actual length,
+  so bridge warnings fire.
 
 ### Changed
 
+- **Bridge length uses the longer XY axis of the bridge
+  footprint** so warnings fire regardless of which direction the
+  slicer chooses to bridge.
 - **Adhesion docstring honesty** — the `risk_level` field is now
   documented as a best-effort approximation, especially in the
   middle range. For high-aspect-ratio prints in warp-prone
