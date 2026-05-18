@@ -1428,6 +1428,47 @@ class TestAnalyzePrintability:
                 "axis-line families"
             )
 
+    def test_component_size_uniformity_high_on_lattice(self):
+        # A cubic lattice of identical struts — every axis-line family
+        # has the same bbox extent.  Uniformity should be high (near
+        # 1.0) so the kiln-pro overlay's secondary classifier signal
+        # confirms strut topology.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tris = _cubic_lattice_triangles(cell_mm=4.0, strut_mm=1.5, grid_n=3)
+            path = _write_stl(tmpdir, tris)
+            report = analyze_printability(path)
+            assert report.component_size_uniformity > 0.8, (
+                f"lattice uniformity {report.component_size_uniformity} "
+                "— expected near 1.0 (identical struts have identical bbox)"
+            )
+
+    def test_component_size_uniformity_low_on_uneven_soup(self):
+        # Two boxes of very different sizes (1×1×1 mm and 20×20×20 mm).
+        # Uniformity must be LOW so the kiln-pro overlay's secondary
+        # classifier rejects this as a lattice — it's more likely a
+        # host-plate-plus-inclusion topology that wants wall semantics.
+        small = _axis_box_triangles(0, 0, 0, 1, 1, 1)
+        large = _axis_box_triangles(100, 0, 0, 20, 20, 20)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, small + large)
+            report = analyze_printability(path)
+            assert report.connected_components == 2
+            assert report.component_size_uniformity < 0.3, (
+                f"uneven soup uniformity {report.component_size_uniformity} "
+                "— expected low (very different bbox volumes)"
+            )
+
+    def test_component_size_uniformity_single_body_is_one(self):
+        # Single-component meshes have no spread by definition.
+        # Uniformity is 1.0.  The secondary classifier doesn't engage
+        # because the primary (n_components < threshold) gate dominates,
+        # but the field's semantics must stay coherent.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _outward_cube_triangles(10.0))
+            report = analyze_printability(path)
+            assert report.connected_components == 1
+            assert report.component_size_uniformity == 1.0
+
     def test_nonexistent_file_raises(self):
         with pytest.raises(ValueError, match="File not found"):
             analyze_printability("/nonexistent/model.stl")

@@ -327,6 +327,16 @@ class PrintabilityReport:
     # continuous-wall floors.  Defaults to 0 for clients that construct
     # PrintabilityReport directly.
     connected_components: int = 0
+    # Component-size uniformity: 0.0–1.0 scalar (rounded to 3 places).
+    # 1.0 = every component has the same bbox volume (canonical lattice
+    # — identical struts).  Near 0.0 = one big component plus tiny
+    # ones (e.g. host plate with floating inclusions).  Secondary
+    # signal the kiln-pro overlay uses ALONGSIDE
+    # ``connected_components`` to confirm lattice topology before
+    # applying strut semantics — guards against multi-body soups that
+    # AREN'T lattices but happen to have many components.  Trivially
+    # 1.0 for single-component meshes (no spread).  Defaults to 0.0.
+    component_size_uniformity: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -2864,12 +2874,53 @@ def analyze_printability(
     # overlay can route lattice / scaffold topologies through strut-
     # specific load-bearing thresholds (a 1.5 mm TPU strut needs a
     # different floor than a 1.5 mm continuous TPU wall).
-    try:
-        component_count = int(
-            _label_mesh_components(np.asarray(triangles, dtype=np.float64)).max() + 1
-        ) if len(triangles) > 0 else 0
-    except (ValueError, IndexError):
-        component_count = 0
+    #
+    # ``component_size_uniformity`` is a 0–1 scalar describing how
+    # similar the components are in volume — 1.0 = all components have
+    # identical bbox volume (canonical lattice signature); near 0.0 =
+    # one big component plus tiny ones (host plate with small floating
+    # inclusions).  The kiln-pro overlay uses this as a SECONDARY
+    # signal to confirm that a multi-component mesh actually IS a
+    # lattice / scaffold before applying strut semantics, rather than
+    # an unrelated multi-body soup that happens to have many parts.
+    component_count = 0
+    component_size_uniformity = 0.0
+    if len(triangles) > 0:
+        try:
+            tris_arr = np.asarray(triangles, dtype=np.float64)
+            comp_ids = _label_mesh_components(tris_arr)
+            component_count = int(comp_ids.max() + 1)
+            if component_count >= 2:
+                # Per-component bbox volume: max-min along each axis.
+                # Coefficient of variation (std / mean) measures spread;
+                # uniformity = 1 - clamp(cv, 0, 1) maps to 0–1 with 1 =
+                # all components identical.
+                tri_min = tris_arr.min(axis=1)  # (T, 3) per-tri min
+                tri_max = tris_arr.max(axis=1)  # (T, 3) per-tri max
+                comp_bbox_volumes = np.zeros(component_count)
+                for cid in range(component_count):
+                    mask = comp_ids == cid
+                    if not mask.any():
+                        continue
+                    lo = tri_min[mask].min(axis=0)
+                    hi = tri_max[mask].max(axis=0)
+                    extents = np.maximum(hi - lo, 1e-12)
+                    comp_bbox_volumes[cid] = float(extents.prod())
+                mean_vol = float(comp_bbox_volumes.mean())
+                if mean_vol > 0:
+                    std_vol = float(comp_bbox_volumes.std())
+                    cv = std_vol / mean_vol
+                    component_size_uniformity = float(
+                        max(0.0, min(1.0, 1.0 - cv))
+                    )
+            else:
+                # Single-component mesh: uniformity is trivially 1.0
+                # (one component, no spread).  The secondary signal
+                # is only meaningful when n_components >= 2.
+                component_size_uniformity = 1.0
+        except (ValueError, IndexError):
+            component_count = 0
+            component_size_uniformity = 0.0
     bridging = _analyze_bridging(
         triangles,
         z_min,
@@ -3112,6 +3163,7 @@ def analyze_printability(
         holes=holes,
         triangle_count=len(triangles),
         connected_components=component_count,
+        component_size_uniformity=round(component_size_uniformity, 3),
     )
 
     # Optional kiln-pro enrichment: when the kiln-pro package is
