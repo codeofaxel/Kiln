@@ -46,6 +46,13 @@ dependencies = [
     "rich>=12.0",
     "paho-mqtt>=2.0",
     "cryptography>=41.0",
+    # numpy powers the ray-cast wall-thickness measurement in
+    # ``kiln.printability._analyze_thin_walls`` — promoted from the
+    # ``mesh-diagnostics`` extra so every install measures walls
+    # correctly out of the box rather than falling back to the prior
+    # tessellation-dependent edge-length proxy.  ~25 MB on disk;
+    # bounded cost for a correct verdict.
+    "numpy>=1.24",
 ]
 
 [project.optional-dependencies]

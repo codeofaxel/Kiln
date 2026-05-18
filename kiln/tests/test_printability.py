@@ -580,22 +580,139 @@ class TestResolveOverhangThreshold:
 
 class TestThinWallAnalysis:
     def test_cube_no_thin_walls(self):
-        tris = _cube_triangles(10.0)
+        # Use the outward-faced cube so the ray-cast measurement's
+        # inward rays actually probe the cube's interior — the default
+        # ``_cube_triangles`` fixture has inward normals (a historical
+        # quirk pre-dating the ray-cast measurement).
+        tris = _outward_cube_triangles(10.0)
         verts = list({v for tri in tris for v in tri})
         result = _analyze_thin_walls(tris, verts, nozzle_diameter=0.4)
+        # A solid 10 mm cube has no thin walls (no wall thinner than nozzle).
         assert result.thin_wall_count == 0
-        # When no thin walls are detected, ``min_wall_thickness_mm`` is
-        # the 0.0 sentinel — distinguishes "no signal" from "wall measured
-        # at nozzle width" for downstream consumers (see 2026-05-17 audit).
-        assert result.min_wall_thickness_mm == 0.0
+        # ``min_wall_thickness_mm`` carries the smallest measured wall
+        # regardless of the nozzle threshold so the kiln-pro overlay can
+        # compare against per-material structural floors.  The 0.0 sentinel
+        # is reserved for measurement failure on degenerate meshes; a
+        # successful measurement on a solid 10 mm cube reads a meaningful
+        # number (the inward ray hits the opposite face, ~10 mm).
+        assert result.min_wall_thickness_mm > 0.0
 
-    def test_thin_triangle_detected(self):
-        # Triangle with a very short edge (0.1 mm).
+    def test_isolated_thin_triangle_is_not_a_wall(self):
+        # A single isolated triangle with a short edge does NOT constitute
+        # a thin wall — there is no opposing surface for the ray-cast
+        # measurement to hit.  The prior edge-length proxy flagged this
+        # as a thin wall because it counted short edges; the new
+        # measurement correctly returns no signal because no wall exists.
         tris = [((0, 0, 0), (0.1, 0, 0), (0, 10, 0))]
         verts = [(0, 0, 0), (0.1, 0, 0), (0, 10, 0)]
         result = _analyze_thin_walls(tris, verts, nozzle_diameter=0.4)
-        assert result.thin_wall_count == 1
-        assert result.min_wall_thickness_mm < 0.4
+        assert result.thin_wall_count == 0
+        assert result.min_wall_thickness_mm == 0.0
+
+    def test_hollow_box_thin_walls_detected(self):
+        # A hollow box with 0.3 mm walls (below the 0.4 mm nozzle floor)
+        # MUST be flagged by the ray-cast measurement.  The prior proxy
+        # missed walls in the [0.3 mm, 2.0 mm] band on coarse meshes; the
+        # new measurement reads the actual wall thickness regardless of
+        # tessellation density.
+        outer = 20.0
+        wall = 0.3
+        inner = outer - 2 * wall
+        o = outer / 2.0
+        i = inner / 2.0
+        ov = [
+            (-o, -o, -o), (o, -o, -o), (o, o, -o), (-o, o, -o),
+            (-o, -o, o), (o, -o, o), (o, o, o), (-o, o, o),
+        ]
+        iv = [
+            (-i, -i, -i), (i, -i, -i), (i, i, -i), (-i, i, -i),
+            (-i, -i, i), (i, -i, i), (i, i, i), (-i, i, i),
+        ]
+        # Outer faces (CCW outward), inner faces (CCW inward).
+        outer_idx = [
+            (0, 3, 2), (0, 2, 1), (4, 5, 6), (4, 6, 7),
+            (0, 1, 5), (0, 5, 4), (2, 3, 7), (2, 7, 6),
+            (1, 2, 6), (1, 6, 5), (0, 4, 7), (0, 7, 3),
+        ]
+        inner_idx = [
+            (0, 2, 3), (0, 1, 2), (4, 6, 5), (4, 7, 6),
+            (0, 5, 1), (0, 4, 5), (2, 7, 3), (2, 6, 7),
+            (1, 6, 2), (1, 5, 6), (0, 3, 7), (0, 7, 4),
+        ]
+        tris = [tuple(ov[i] for i in face) for face in outer_idx]
+        tris += [tuple(iv[i] for i in face) for face in inner_idx]
+        verts = ov + iv
+        result = _analyze_thin_walls(tris, verts, nozzle_diameter=0.4)
+        assert result.thin_wall_count > 0
+        # Measured thickness should match the actual wall thickness
+        # within ray-cast precision (the offset and self-hit epsilons
+        # bound the reading slightly below the geometric value).
+        assert abs(result.min_wall_thickness_mm - wall) < 0.05
+
+    def test_tessellation_invariance(self):
+        # The same physical 2 mm wall must measure ~2 mm regardless of
+        # how the mesh is tessellated.  The prior edge-length proxy
+        # produced different ``min_wall_thickness_mm`` values for the
+        # same physical wall at different subdivision densities — a 2 mm
+        # cube split into 16×16 quads reported 0.125 mm.  The ray-cast
+        # measurement reads geometry, not edge length.
+        def hollow_box_tris(subdiv_iters):
+            outer, wall = 20.0, 2.0
+            inner = outer - 2 * wall
+            o = outer / 2.0
+            i = inner / 2.0
+            ov = [
+                (-o, -o, -o), (o, -o, -o), (o, o, -o), (-o, o, -o),
+                (-o, -o, o), (o, -o, o), (o, o, o), (-o, o, o),
+            ]
+            iv = [
+                (-i, -i, -i), (i, -i, -i), (i, i, -i), (-i, i, -i),
+                (-i, -i, i), (i, -i, i), (i, i, i), (-i, i, i),
+            ]
+            outer_idx = [
+                (0, 3, 2), (0, 2, 1), (4, 5, 6), (4, 6, 7),
+                (0, 1, 5), (0, 5, 4), (2, 3, 7), (2, 7, 6),
+                (1, 2, 6), (1, 6, 5), (0, 4, 7), (0, 7, 3),
+            ]
+            inner_idx = [
+                (0, 2, 3), (0, 1, 2), (4, 6, 5), (4, 7, 6),
+                (0, 5, 1), (0, 4, 5), (2, 7, 3), (2, 6, 7),
+                (1, 6, 2), (1, 5, 6), (0, 3, 7), (0, 7, 4),
+            ]
+            tris = [tuple(ov[i] for i in face) for face in outer_idx]
+            tris += [tuple(iv[i] for i in face) for face in inner_idx]
+            for _ in range(subdiv_iters):
+                new_tris = []
+                for a, b, c in tris:
+                    ab = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2)
+                    bc = ((b[0] + c[0]) / 2, (b[1] + c[1]) / 2, (b[2] + c[2]) / 2)
+                    ca = ((c[0] + a[0]) / 2, (c[1] + a[1]) / 2, (c[2] + a[2]) / 2)
+                    new_tris.append((a, ab, ca))
+                    new_tris.append((ab, b, bc))
+                    new_tris.append((ca, bc, c))
+                    new_tris.append((ab, bc, ca))
+                tris = new_tris
+            return tris
+        # Sample-rays alone shouldn't push the measurement off — the
+        # measurement is the GEOMETRIC distance to the next surface, not
+        # an estimate.
+        for subdiv in [0, 1, 2, 3]:
+            tris = hollow_box_tris(subdiv)
+            result = _analyze_thin_walls(tris, [], nozzle_diameter=0.4)
+            # 2 mm wall is well above the 0.4 mm nozzle threshold, so
+            # the measurement reports no thin walls at every subdivision.
+            assert result.thin_wall_count == 0, (
+                f"subdiv={subdiv}: 2 mm wall should not be flagged "
+                f"(got count={result.thin_wall_count} at this density)"
+            )
+            # And the measured min wall thickness lands at ~2 mm — the
+            # heart of tessellation-invariance.  Across 24 / 96 / 384 /
+            # 1536 triangles the answer must stay within ±5 % of the
+            # true wall, not drift with mesh density.
+            assert abs(result.min_wall_thickness_mm - 2.0) < 0.1, (
+                f"subdiv={subdiv}: tessellation-invariant measurement "
+                f"should read ~2.0 mm, got {result.min_wall_thickness_mm}"
+            )
 
     def test_to_dict(self):
         tris = _cube_triangles()
@@ -1003,22 +1120,25 @@ class TestAnalyzePrintability:
             report = analyze_printability(path, nozzle_diameter=0.8)
             assert isinstance(report, PrintabilityReport)
 
-    def test_no_thin_walls_returns_zero_sentinel(self):
-        """When ``_analyze_thin_walls`` finds nothing below the nozzle
-        threshold, ``min_wall_thickness_mm`` is the 0.0 sentinel — NOT
-        the nozzle diameter.  The sentinel lets downstream consumers
-        distinguish "no signal" from "a real wall measured at the
-        nozzle width".  Without this, every clean mesh produces a
-        spurious thin-wall warning at the Pro-overlay layer because
-        ``nozzle_diameter < material_min_wall`` is always true."""
+    def test_clean_cube_carries_measured_wall(self):
+        """A clean 20 mm cube has no thin walls (no wall thinner than
+        nozzle) but its ``min_wall_thickness_mm`` carries the measured
+        thickness — the inward ray from each face hits the opposite
+        face at roughly the cube extent.  The kiln-pro overlay reads
+        this value to compare against per-material structural floors
+        (e.g. flag a 1 mm PLA wall against the 1.2 mm structural floor
+        even when it's above the 0.4 mm nozzle); the 0.0 sentinel is
+        reserved for measurement failure on degenerate meshes."""
         with tempfile.TemporaryDirectory() as tmpdir:
             path = _write_stl(tmpdir, _outward_cube_triangles(20.0))
             for nozzle in (0.2, 0.4, 0.6, 0.8):
                 report = analyze_printability(path, nozzle_diameter=nozzle)
                 assert report.thin_walls.thin_wall_count == 0
-                assert report.thin_walls.min_wall_thickness_mm == 0.0, (
-                    f"nozzle={nozzle}: expected 0.0 sentinel, got "
-                    f"{report.thin_walls.min_wall_thickness_mm}"
+                # Measurement should report the actual wall thickness
+                # (the cube's diameter when probed from any face).
+                assert report.thin_walls.min_wall_thickness_mm > 0.0, (
+                    f"nozzle={nozzle}: measurement should report cube "
+                    f"extent, not the 0.0 sentinel"
                 )
 
     def test_triangle_count_populated_on_report(self):
