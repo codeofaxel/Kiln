@@ -66,7 +66,7 @@ class CavityAnalysis:
 
     Sibling to ``ThinWallAnalysis`` but measures CAVITY DIMENSIONS rather
     than wall thicknesses.  Rays cast OUTWARD from each surface triangle's
-    centroid; hits within ``_CAVITY_RAY_MAX_DIST_MM`` register a cavity
+    centroid; hits within a bbox-scaled cavity cap register a cavity
     width.  Outer-surface rays hit nothing (they travel into open space
     and get culled by the max-distance threshold), so only meaningful
     cavities — engraved grooves, debossed text, narrow slots,
@@ -318,6 +318,15 @@ class PrintabilityReport:
     # to 0 for clients that construct PrintabilityReport directly
     # without going through ``analyze_printability``.
     triangle_count: int = 0
+    # Number of disjoint connected components in the mesh (triangle
+    # islands joined by shared-vertex adjacency).  A single closed body
+    # is 1; a lattice/scaffold of N independent struts is N; a plate
+    # with an embedded floating inclusion is 2.  Exposed so the
+    # kiln-pro overlay can route lattice/scaffold topologies through
+    # strut-specific load-bearing thresholds rather than apply the
+    # continuous-wall floors.  Defaults to 0 for clients that construct
+    # PrintabilityReport directly.
+    connected_components: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1163,13 +1172,25 @@ _THIN_WALL_RAY_EPS_DET: float = 1e-6      # parallel-ray determinant cutoff
 _THIN_WALL_RAY_EPS_T: float = 1e-3        # self-hit cutoff (mm)
 _THIN_WALL_RAY_ORIGIN_OFFSET: float = 1e-4  # mm — nudge origin off the face
 
-# Outward (cavity) ray-cast: max distance considered a "cavity".  Engraved
-# grooves, debossed text, narrow slots have widths in the [0, ~5mm] band;
-# capping outward rays at 10 × nozzle (= 4 mm for the default 0.4 mm
-# nozzle) prevents outward rays from outer surfaces (which travel into
-# infinity) from registering spurious "cavities" at the build-volume
-# boundary.
-_CAVITY_RAY_MAX_DIST_MM: float = 10.0  # 10 × default nozzle (0.4 mm) = 4 mm
+# Outward (cavity) ray-cast: minimum max distance considered a "cavity".
+# Engraved grooves, debossed text, narrow slots have widths in the
+# [0, ~5mm] band; this is the FLOOR — the wall/cavity callers compute a
+# bbox-aware cap (half the part's smallest bbox extent) and pick the
+# larger of the two, so a 20 mm hollow box's 19 mm cavity registers but
+# outward rays from a tiny part still cap at a reasonable distance.
+_CAVITY_RAY_MIN_MAX_DIST_MM: float = 10.0  # 10 × default nozzle (0.4 mm) = 4 mm
+
+# Strict-perpendicular dot threshold for ray-cast hits.  A ray that
+# enters the body and exits through the opposing wall hits a face whose
+# outward normal is approximately aligned (anti-parallel for cavities,
+# parallel for walls) with the ray direction — ``|dot| ≈ 1``.  Hits at
+# ``|dot| < threshold`` are slanted — typically tessellation artifacts
+# (helical thread face hitting the perpendicular end cap from close
+# range, dot ≈ 0.77).  Threshold tuned so legitimate measurements
+# (including curved walls on real CAD parts) pass while the
+# thread-cap artifact class is filtered.  See the probe at
+# ``/tmp/probe_dot_filter.py`` for the empirical justification.
+_THIN_WALL_MIN_PERPENDICULAR_DOT: float = 0.85
 
 
 
@@ -1375,6 +1396,7 @@ def _analyze_thin_walls(
             comp_target_v0,
             comp_target_e1,
             comp_target_e2,
+            min_abs_perpendicular_dot=_THIN_WALL_MIN_PERPENDICULAR_DOT,
         )
         exit_dist[ray_mask] = comp_dist
 
@@ -1542,12 +1564,23 @@ def _analyze_cavity_widths(
             comp_target_v0,
             comp_target_e1,
             comp_target_e2,
+            min_abs_perpendicular_dot=_THIN_WALL_MIN_PERPENDICULAR_DOT,
         )
         hit_dist[ray_mask] = comp_dist
 
     # Cap at the cavity-distance threshold — anything longer is "ray
     # exited the part into open space," not a cavity measurement.
-    cavity_mask = (hit_dist < _CAVITY_RAY_MAX_DIST_MM) & np.isfinite(hit_dist)
+    # The cap is the LARGER of the static floor (10 × default nozzle,
+    # ~4 mm) and the mesh's bbox-aware ceiling (half the smallest bbox
+    # extent).  A 20 mm hollow box gets a 10 mm cap so a 9 mm internal
+    # cavity registers; a tiny 3 mm part stays at the floor so outward
+    # rays from outer faces don't accidentally pick up build-volume
+    # artifacts at extreme distances.
+    bbox_min = tris[valid_face].reshape(-1, 3).min(axis=0)
+    bbox_max = tris[valid_face].reshape(-1, 3).max(axis=0)
+    bbox_extent = float((bbox_max - bbox_min).min())
+    cavity_max_dist = max(_CAVITY_RAY_MIN_MAX_DIST_MM, bbox_extent / 2.0)
+    cavity_mask = (hit_dist < cavity_max_dist) & np.isfinite(hit_dist)
     cavity_count = int(cavity_mask.sum())
     if cavity_count == 0:
         return CavityAnalysis(
@@ -1585,19 +1618,44 @@ def _raycast_min_distances(
     v0: np.ndarray,
     edge1: np.ndarray,
     edge2: np.ndarray,
+    *,
+    min_abs_perpendicular_dot: float | None = None,
 ) -> np.ndarray:
     """Vectorized Möller-Trumbore ray-triangle intersection.
 
     For each ray, return the minimum positive hit distance against the
-    triangle set (``inf`` for rays that miss every triangle).  Used by
-    the outward cavity path where the first hit IS the cavity width —
-    no watertight tracking needed because there's no overlap to
-    disambiguate (rays travel through empty space until hitting the
-    opposite cavity wall or missing entirely).
+    triangle set (``inf`` for rays that miss every triangle).
+
+    ``min_abs_perpendicular_dot`` filters hits whose
+    ``|dot(ray_direction, hit_face_outward_normal)|`` falls below the
+    threshold — i.e. rays that hit the target face at a slanted angle
+    rather than approximately head-on.  For a legitimate wall
+    measurement (ray exits through the opposite wall), the dot is
+    ``≈ +1``; for a cavity measurement (ray exits the cavity through
+    its opposite wall), the dot is ``≈ -1``.  Both pass the
+    ``|dot| >= threshold`` test.  Grazing artifacts — e.g. a helical
+    thread face hitting the perpendicular end cap from very close
+    range — sit at ``|dot| ≈ 0.77`` and get filtered.  None (the
+    default) skips the filter for back-compat with cavity callers
+    that don't need it.
     """
     n_rays = origins.shape[0]
     min_dist = np.full(n_rays, np.inf, dtype=np.float64)
     chunk = _THIN_WALL_INTERSECTION_CHUNK
+
+    if min_abs_perpendicular_dot is not None:
+        # Per-target outward normals for the angle filter.  Re-computed
+        # from edge1 × edge2 (already-implied geometry) so callers don't
+        # have to thread normals through the API.
+        target_normals = np.cross(edge1, edge2)
+        target_norm_len = np.linalg.norm(target_normals, axis=1)
+        target_normals = np.where(
+            target_norm_len[:, None] > 1e-10,
+            target_normals / np.where(
+                target_norm_len[:, None] > 1e-10, target_norm_len[:, None], 1.0
+            ),
+            0.0,
+        )
 
     for start in range(0, n_rays, chunk):
         end = min(start + chunk, n_rays)
@@ -1625,6 +1683,13 @@ def _raycast_min_distances(
             & ((u + v) <= 1.0)
             & (t > _THIN_WALL_RAY_EPS_T)
         )
+
+        if min_abs_perpendicular_dot is not None:
+            # |dot(direction, target_normal)| ≥ threshold — keeps
+            # head-on hits (legitimate wall/cavity), drops slanted ones.
+            dn = np.einsum("cj,tj->ct", d, target_normals)
+            hit = hit & (np.abs(dn) >= min_abs_perpendicular_dot)
+
         t_masked = np.where(hit, t, np.inf)
         min_dist[start:end] = t_masked.min(axis=1)
 
@@ -2793,6 +2858,18 @@ def analyze_printability(
     )
     thin_walls = _analyze_thin_walls(triangles, vertices, nozzle_diameter=nozzle_diameter)
     cavities = _analyze_cavity_widths(triangles, vertices, nozzle_diameter=nozzle_diameter)
+
+    # Connected-component count: one closed body = 1; an N-strut lattice
+    # = N axis-line components.  Exposed on the report so the kiln-pro
+    # overlay can route lattice / scaffold topologies through strut-
+    # specific load-bearing thresholds (a 1.5 mm TPU strut needs a
+    # different floor than a 1.5 mm continuous TPU wall).
+    try:
+        component_count = int(
+            _label_mesh_components(np.asarray(triangles, dtype=np.float64)).max() + 1
+        ) if len(triangles) > 0 else 0
+    except (ValueError, IndexError):
+        component_count = 0
     bridging = _analyze_bridging(
         triangles,
         z_min,
@@ -3034,6 +3111,7 @@ def analyze_printability(
         estimated_print_time_modifier=round(time_mod, 2),
         holes=holes,
         triangle_count=len(triangles),
+        connected_components=component_count,
     )
 
     # Optional kiln-pro enrichment: when the kiln-pro package is

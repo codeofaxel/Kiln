@@ -866,26 +866,70 @@ class TestThinWallLatticeAndComponent:
         assert result.thin_wall_count > 0
         assert abs(result.min_wall_thickness_mm - 0.4) < 0.05
 
+    def test_thread_cap_artifact_filtered(self):
+        # The end-cap artifact: a helical face near the rod's +Z cap
+        # sends an inward ray that grazes the cap at sub-millimetre
+        # distance (dot(ray_dir, cap_outward_normal) ≈ 0.77, well below
+        # the strict-perpendicular threshold of 0.85).  The filter
+        # excludes that hit; the ray's true wall reading is the
+        # opposing helical surface across the rod.
+        #
+        # Approximate a rod-with-cap geometry by stacking a slanted
+        # helical-like face (normal at ~40° from axial) very close to
+        # an axis-aligned cap.  Without the filter, the cap hit would
+        # read at ~0.1 mm.  With the filter, the slanted hit is rejected.
+        # The geometry is hand-built so the test is deterministic.
+        slanted_normal_z = 0.77  # mirrors probe data on real threads
+        slanted_normal_y = (1.0 - slanted_normal_z ** 2) ** 0.5
+        # Slanted triangle slightly below the cap, pointing outward
+        # (+Y +Z-ish).  Plane: y * slanted_normal_y + z * slanted_normal_z = c
+        # Pick centroid at (0, 0.5, 19.96) so the inward ray (-Y -Z) hits
+        # the cap at z=20 at very short range.
+        tri_slanted = (
+            (-1.0, 0.4, 19.97),
+            (1.0, 0.4, 19.97),
+            (0.0, 0.6, 19.95),
+        )
+        # Cap at z=20, square, outward normal (0, 0, 1).
+        cap_a = ((-1.0, -1.0, 20.0), (1.0, -1.0, 20.0), (1.0, 1.0, 20.0))
+        cap_b = ((-1.0, -1.0, 20.0), (1.0, 1.0, 20.0), (-1.0, 1.0, 20.0))
+        # Floor at z=0, square, outward normal (0, 0, -1).
+        floor_a = ((-1.0, -1.0, 0.0), (1.0, 1.0, 0.0), (1.0, -1.0, 0.0))
+        floor_b = ((-1.0, -1.0, 0.0), (-1.0, 1.0, 0.0), (1.0, 1.0, 0.0))
+        tris = [tri_slanted, cap_a, cap_b, floor_a, floor_b]
+        result = _analyze_thin_walls(tris, [], nozzle_diameter=0.4)
+        # Without the filter, the slanted face's inward ray would hit
+        # the cap at ~0.03 mm and flag count > 0.  With the filter, no
+        # ray reads sub-nozzle.  Whatever rays do return must be ≥ the
+        # cap-to-floor distance (≈ 20 mm) which is well above the nozzle.
+        assert result.thin_wall_count == 0, (
+            f"strict-perpendicular dot filter regression: thread cap "
+            f"artifact leaked through (count={result.thin_wall_count}, "
+            f"min={result.min_wall_thickness_mm})"
+        )
+
     def test_lattice_cavity_no_joint_artifact(self):
         # The cavity ray-cast had the inverse joint-overlap artifact:
         # outward rays from a strut's surface would hit the back of an
         # intruding face from a neighbouring perpendicular strut at
-        # strut-half-thickness, producing phantom "cavity" readings.
-        # Per-component scoping restricts cavity rays to the same body,
-        # so a lattice — N independent strut components — reads no
-        # cavity at the strut-half-thickness band.  Whatever the
-        # cavity returns must be ≥ the cell size between strut tips on
-        # the same axis-line.
+        # strut-half-thickness, producing phantom "cavity" readings at
+        # strut/2 (= 0.75 mm for the 1.5 mm strut).  Per-component
+        # scoping restricts cavity rays to the same body, so the only
+        # cavity readings within an axis-line component come from
+        # strut-tip-to-strut-tip distances (= cell_mm = 4 mm).
         tris = _cubic_lattice_triangles(cell_mm=4.0, strut_mm=1.5)
         result = _analyze_cavity_widths(tris, [], nozzle_diameter=0.4)
-        # The joint-artifact value would be strut/2 = 0.75; the real
-        # post-fix value is the strut-tip-to-strut-tip gap along an
-        # axis line (= cell_mm).  Either way, definitely above 0.75.
-        if result.cavity_sample_count > 0:
-            assert result.min_cavity_width_mm > 1.5, (
-                f"lattice cavity {result.min_cavity_width_mm} mm — "
-                "joint-overlap artifact regression"
-            )
+        # The test requires SAMPLES to exist so a future regression that
+        # silently zeroes the cavity count can't hide the assertion.
+        assert result.cavity_sample_count > 0, (
+            "lattice cavity probe returned zero samples — measurement "
+            "regression (the strut-tip-to-strut-tip readings disappeared)"
+        )
+        assert result.min_cavity_width_mm > 1.5, (
+            f"lattice cavity {result.min_cavity_width_mm} mm — "
+            "joint-overlap artifact regression (must be above the "
+            "strut/2 = 0.75 mm band)"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1354,6 +1398,35 @@ class TestAnalyzePrintability:
             assert "grade" in d
             assert "overhangs" in d
             assert "thin_walls" in d
+
+    def test_connected_components_single_body(self):
+        # A single closed cube must report ``connected_components = 1``
+        # — the kiln-pro overlay branches on this field to apply
+        # lattice / scaffold rules vs continuous-wall rules.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _outward_cube_triangles(10.0))
+            report = analyze_printability(path)
+            assert report.connected_components == 1, (
+                f"single cube reports {report.connected_components} "
+                "components — kiln-pro overlay's lattice detection would "
+                "misclassify"
+            )
+
+    def test_connected_components_lattice(self):
+        # A cubic lattice must report multiple components (one per
+        # axis-line family).  The exact count is fixture-dependent;
+        # what matters for the kiln-pro overlay is "> threshold" so it
+        # routes through strut-specific load-bearing thresholds rather
+        # than continuous-wall floors.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tris = _cubic_lattice_triangles(cell_mm=4.0, strut_mm=1.5, grid_n=3)
+            path = _write_stl(tmpdir, tris)
+            report = analyze_printability(path)
+            assert report.connected_components > 5, (
+                f"lattice reports {report.connected_components} components "
+                "— expected the strut topology to split into many "
+                "axis-line families"
+            )
 
     def test_nonexistent_file_raises(self):
         with pytest.raises(ValueError, match="File not found"):
