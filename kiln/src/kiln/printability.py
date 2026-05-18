@@ -2383,10 +2383,11 @@ def analyze_printability(
     # output, matching the contract the kiln-pro overlay engine
     # expects when reading ``report["holes"]``.
     holes: list[dict[str, Any]] = []
+    hole_diagnostics: dict[str, int] = {}
     if include_hole_detection:
         from kiln.generation.validation import detect_holes
         try:
-            holes = detect_holes(file_path)
+            holes = detect_holes(file_path, diagnostics=hole_diagnostics)
         except (ValueError, FileNotFoundError) as exc:
             logger.debug(
                 "detect_holes failed silently on %s: %s",
@@ -2430,6 +2431,26 @@ def analyze_printability(
             f"without supports — no action needed.  Force-enable supports "
             f"in your slicer if the underside is a show surface and you "
             f"want a smoother finish."
+        )
+
+    # Hole-detection diagnostic notices: surface features the detector
+    # silently dropped.  Each fires only when its counter is non-zero.
+    sub_floor_count = hole_diagnostics.get("sub_floor_clusters", 0)
+    if sub_floor_count > 0:
+        recommendations.append(
+            f"Detected {sub_floor_count} circular feature(s) below the "
+            "0.8 mm hole-detection floor. FDM with a 0.4 mm nozzle "
+            "cannot reliably print holes below ~1 mm regardless of "
+            "material; enlarge in CAD or drill after printing."
+        )
+    non_circular_count = hole_diagnostics.get("non_circular_clusters", 0)
+    if non_circular_count > 0:
+        recommendations.append(
+            f"Detected {non_circular_count} non-circular feature(s) "
+            "(slot, elliptical relief, or chamfered hole entry). "
+            "Per-material hole-floor warnings only apply to cylindrical "
+            "features — verify slot widths against your material's "
+            "minimum feature size manually."
         )
 
     # Free-tier upsell hook: when the judgment overlay is absent, the

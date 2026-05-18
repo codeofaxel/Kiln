@@ -5157,6 +5157,7 @@ def detect_holes(
     min_depth_mm: float = 0.5,
     circular_tolerance_mm: float = 0.25,
     axis_normal_tolerance: float = 0.15,
+    diagnostics: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Detect cylindrical hole features in an STL mesh.
 
@@ -5190,6 +5191,31 @@ def detect_holes(
         is rejected as non-circular.
     :param axis_normal_tolerance: A triangle's face normal counts as
         "perpendicular to axis a" when ``|n · a| < axis_normal_tolerance``.
+    :param diagnostics: When supplied, the detector populates this
+        mutable dict in-place with rejection counters so callers can
+        emit informational notices about features that "looked like
+        a hole but didn't qualify."  Keys (all int):
+
+        * ``"sub_floor_clusters"`` — a circular feature was found
+          below ``min_diameter_mm``.  Typical signal: the user
+          designed a hole below FDM's practical floor for a 0.4 mm
+          nozzle, which won't print reliably.
+        * ``"non_circular_clusters"`` — axis-perpendicular clusters
+          whose radius spread exceeded ``circular_tolerance_mm``.
+          Typical signals: slots, elliptical reliefs, chamfered or
+          tapered hole entries.
+        * ``"oversize_clusters"`` — clusters larger than
+          ``max_diameter_mm``; usually outer shells of tubes.
+        * ``"partial_arc_clusters"`` — clusters covering < 6 of 8
+          octants; usually degenerate projections of an
+          orthogonally-oriented cylinder picked up by the wrong
+          axis pass.
+        * ``"pillar_clusters"`` — outward-facing cylinders (solid
+          pillars rather than holes).
+
+        Counters accumulate across all three axis passes.  Pass
+        ``None`` (default) to skip diagnostic accounting — preserves
+        backwards compatibility for callers that don't need notices.
 
     :returns: List of dicts, each with the keys:
 
@@ -5257,14 +5283,44 @@ def detect_holes(
     min_radius = min_diameter_mm / 2.0
     max_radius = max_diameter_mm / 2.0
 
-    # Per-axis pass.  Axis index 0=X, 1=Y, 2=Z.
-    for axis_idx, axis_label in ((0, "x"), (1, "y"), (2, "z")):
+    # Compute the mesh's (X, Y, Z) extent once — used by the cluster gate
+    # to filter out mesh-spanning clusters (BFS-merged cross-axis noise)
+    # that geometrically look like a slot but are really an annulus +
+    # outer-wall artefact.  A real slot inside a mesh covers a small
+    # fraction of the mesh's bbox; noise covers most of it.
+    if triangles:
+        all_x = [v[0] for tri in triangles for v in tri]
+        all_y = [v[1] for tri in triangles for v in tri]
+        all_z = [v[2] for tri in triangles for v in tri]
+        mesh_extent = (
+            max(all_x) - min(all_x),
+            max(all_y) - min(all_y),
+            max(all_z) - min(all_z),
+        )
+    else:
+        mesh_extent = (0.0, 0.0, 0.0)
+
+    # Per-axis pass.  Order is Z, X, Y — Z first because Z-axis holes are
+    # the most common in print-oriented designs (vertical bores) and their
+    # cylindrical wall triangles cross-pollute the X/Y passes via BFS
+    # adjacency.  Claiming the triangles that became part of a detected
+    # hole and excluding them from subsequent axis-pass candidate sets
+    # eliminates the cross-axis pass noise at its source — the alternative
+    # (heuristically filtering "non-circular" rejections after the fact)
+    # can't distinguish a real slot from a Z-hole's top-annulus seen
+    # sideways.
+    claimed_triangles: set[int] = set()
+
+    for axis_idx, axis_label in ((2, "z"), (0, "x"), (1, "y")):
         u_idx = (axis_idx + 1) % 3
         v_idx = (axis_idx + 2) % 3
 
-        # Collect triangles whose normals are perpendicular to this axis.
+        # Collect triangles whose normals are perpendicular to this axis,
+        # excluding any already claimed by a hole detected on a prior axis.
         candidate_idx: list[int] = []
         for i, normal in enumerate(tri_normals):
+            if i in claimed_triangles:
+                continue
             if abs(normal[axis_idx]) < axis_normal_tolerance:
                 # Also require the normal to have non-trivial magnitude
                 # in the perpendicular plane (a degenerate triangle has
@@ -5287,10 +5343,16 @@ def detect_holes(
             min_radius=min_radius,
             max_radius=max_radius,
             circular_tol=circular_tolerance_mm,
+            diagnostics=diagnostics,
+            mesh_extent_uv=(mesh_extent[u_idx], mesh_extent[v_idx]),
         )
         for cluster in clusters:
             depth = cluster["depth_mm"]
             if depth < min_depth_mm:
+                if diagnostics is not None:
+                    diagnostics["shallow_clusters"] = (
+                        diagnostics.get("shallow_clusters", 0) + 1
+                    )
                 continue
             center_uv = cluster["center_uv"]
             axis_pos = cluster["axis_pos"]
@@ -5311,6 +5373,9 @@ def detect_holes(
                     "triangle_count": cluster["triangle_count"],
                 }
             )
+            # Claim this cluster's triangles so subsequent axis passes
+            # don't pick them up.
+            claimed_triangles.update(cluster.get("triangle_indices", ()))
 
     return holes
 
@@ -5358,6 +5423,8 @@ def _cluster_circular_holes(
     min_radius: float,
     max_radius: float,
     circular_tol: float,
+    diagnostics: dict[str, int] | None = None,
+    mesh_extent_uv: tuple[float, float] | None = None,
 ) -> list[dict[str, Any]]:
     """Group axis-aligned candidate triangles into hole clusters.
 
@@ -5377,6 +5444,21 @@ def _cluster_circular_holes(
     distinct holes that fall within max-radius of each other in (u, v)
     stay separate — the side walls of one hole share no edges with
     the other.
+
+    :param diagnostics: When supplied, counters for each rejection
+        reason are accumulated in-place so callers can surface them
+        as informational notices.  Keys (all int):
+        ``"sub_floor_clusters"`` (r_mean < min_radius — likely a
+        sub-0.8 mm designed hole the detector won't accept),
+        ``"oversize_clusters"`` (r_mean > max_radius — likely the
+        outer shell of a tube, not a hole),
+        ``"non_circular_clusters"`` (radius spread > tolerance —
+        slots, elliptical reliefs, chamfered hole entries),
+        ``"partial_arc_clusters"`` (< 6 of 8 octants covered —
+        degenerate axis-pass projections),
+        ``"pillar_clusters"`` (inward-normal check failed — solid
+        pillars rather than holes).  Pass ``None`` to skip diagnostic
+        accounting (slight perf win on hot paths).
     """
     if not candidate_idx:
         return []
@@ -5449,23 +5531,102 @@ def _cluster_circular_holes(
             angles.append(math.atan2(dv2, du2))
         r_mean = sum(radii) / len(radii)
 
-        # Radius-bounds gate.
-        if r_mean < min_radius or r_mean > max_radius:
-            continue
-        # Circularity gate — radius spread must be within tolerance.
-        if (max(radii) - min(radii)) > circular_tol * 2.0:
-            continue
-
-        # Angular-coverage gate: a real cylindrical hole has triangles
-        # covering all 360 deg around the axis.  Reject any cluster
-        # that fills less than 6 of 8 octants, which catches the
-        # degenerate case where one axis pass picks up the side faces
-        # of an orthogonally-oriented cylinder.
+        # Angular-coverage gate runs FIRST so the diagnostic counters
+        # downstream stay meaningful.  Cross-axis pass noise (a Z-axis
+        # hole's triangles also satisfy the perpendicularity test for
+        # the X/Y axis passes) produces clusters with partial octant
+        # coverage; routing them to ``partial_arc_clusters`` here keeps
+        # ``sub_floor_clusters`` clean for the user-facing notice emit
+        # in ``analyze_printability``.
         octant_hits = [0] * 8
         for ang in angles:
             octant = int((ang + math.pi) / (math.pi / 4.0)) % 8
             octant_hits[octant] = 1
         if sum(octant_hits) < 6:
+            if diagnostics is not None:
+                diagnostics["partial_arc_clusters"] = (
+                    diagnostics.get("partial_arc_clusters", 0) + 1
+                )
+            continue
+
+        # Cross-axis noise filter: BFS clusters formed in the X/Y
+        # passes after a Z-axis hole's cylinder triangles are claimed
+        # frequently merge a hole's top/bottom annulus + the box's
+        # outer wall triangles via shared corner vertices.  Those
+        # clusters fail circularity (spread > tolerance) but are NOT
+        # user-meaningful features — they're the part's bounding
+        # geometry, not a slot or elliptical relief.
+        #
+        # Discriminator: a cluster is cross-axis noise when it both
+        # (a) spans the mesh's full extent in at least one
+        # dimension (>= 90%), AND (b) would fail the downstream
+        # circularity check (spread > 2 * circular_tol).  Real
+        # circular features in any mesh (including cylinder-only
+        # test STLs) have spread ≈ 0 and pass the second condition
+        # check, so they're exempt even when they span the mesh.
+        # Real slots inside larger parts don't span the mesh, so
+        # they're exempt from the first condition.
+        spread = max(radii) - min(radii)
+        would_fail_circularity = spread > circular_tol * 2.0
+        if mesh_extent_uv is not None and would_fail_circularity:
+            # Single-pass min/max over the cluster's (u, v) centroids.
+            first_ti = cluster_set[0]
+            u_min = u_max = tri_centroids[first_ti][u_idx]
+            v_min = v_max = tri_centroids[first_ti][v_idx]
+            for ti in cluster_set[1:]:
+                cu = tri_centroids[ti][u_idx]
+                cv = tri_centroids[ti][v_idx]
+                if cu < u_min:
+                    u_min = cu
+                elif cu > u_max:
+                    u_max = cu
+                if cv < v_min:
+                    v_min = cv
+                elif cv > v_max:
+                    v_max = cv
+            mesh_u_extent, mesh_v_extent = mesh_extent_uv
+            u_fraction = (
+                (u_max - u_min) / mesh_u_extent if mesh_u_extent > 0 else 0.0
+            )
+            v_fraction = (
+                (v_max - v_min) / mesh_v_extent if mesh_v_extent > 0 else 0.0
+            )
+            # Either dimension >= 0.9 of mesh extent => mesh-spanning.
+            # OR catches the flat-annulus case (one span ≈ 0, the
+            # other = 1.0).
+            if u_fraction >= 0.9 or v_fraction >= 0.9:
+                if diagnostics is not None:
+                    diagnostics["partial_arc_clusters"] = (
+                        diagnostics.get("partial_arc_clusters", 0) + 1
+                    )
+                continue
+
+        # Radius-bounds gate.  Split sub-floor vs oversize for the
+        # diagnostic counter so callers can distinguish "user designed
+        # too-small holes" (informational, FDM can't print these
+        # reliably) from "this is the outer shell of a tube, not a hole."
+        if r_mean < min_radius:
+            if diagnostics is not None:
+                diagnostics["sub_floor_clusters"] = (
+                    diagnostics.get("sub_floor_clusters", 0) + 1
+                )
+            continue
+        if r_mean > max_radius:
+            if diagnostics is not None:
+                diagnostics["oversize_clusters"] = (
+                    diagnostics.get("oversize_clusters", 0) + 1
+                )
+            continue
+        # Circularity gate — radius spread must be within tolerance.
+        # By the time we reach here we know the cluster is fully
+        # circumferential, so a circularity failure is a TRUE non-circular
+        # feature (slot / ellipse / chamfered entry), not a cross-axis
+        # projection artifact.
+        if (max(radii) - min(radii)) > circular_tol * 2.0:
+            if diagnostics is not None:
+                diagnostics["non_circular_clusters"] = (
+                    diagnostics.get("non_circular_clusters", 0) + 1
+                )
             continue
 
         # Inward-normal check: average dot of (normal · radial
@@ -5482,6 +5643,10 @@ def _cluster_circular_holes(
                 continue
             inward_dot_sum += (n[u_idx] * ru + n[v_idx] * rv) / r_mag
         if inward_dot_sum >= 0.0:
+            if diagnostics is not None:
+                diagnostics["pillar_clusters"] = (
+                    diagnostics.get("pillar_clusters", 0) + 1
+                )
             continue
 
         # Extent along the hole's axis = max - min axis coordinate
@@ -5500,6 +5665,12 @@ def _cluster_circular_holes(
                 "radius_mm": r_mean,
                 "depth_mm": depth,
                 "triangle_count": len(cluster_set),
+                # Triangle indices contributing to this cluster — used by
+                # ``detect_holes`` to remove claimed-by-a-hole triangles
+                # from subsequent axis passes' candidate sets so a
+                # detected Z-axis hole doesn't generate phantom
+                # ``non_circular_clusters`` noise in the X/Y passes.
+                "triangle_indices": list(cluster_set),
             }
         )
 

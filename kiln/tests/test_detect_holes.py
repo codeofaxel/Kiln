@@ -408,3 +408,284 @@ class TestDetectHoles:
         assert h["axis"] == "z"
         # Diameter survives (rotation is isometric).
         assert h["diameter_mm"] == pytest.approx(5.0, abs=0.3)
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics out-param — informational notices for features that "looked
+# like a hole but didn't qualify."  See detect_holes docstring for the
+# semantics of each counter.
+# ---------------------------------------------------------------------------
+
+
+class TestDetectHolesDiagnostics:
+    """detect_holes accepts an optional ``diagnostics`` dict and populates
+    it with rejection counters so callers can surface informational
+    notices for sub-floor / non-circular / pillar / partial-arc features."""
+
+    def test_diagnostics_default_none_does_not_break_legacy_callers(
+        self, tmp_path: Path,
+    ) -> None:
+        """Backwards compat: calls without ``diagnostics`` work exactly
+        as before — the parameter is opt-in."""
+        stl = tmp_path / "single_hole.stl"
+        tris = _hole_side_wall_z(
+            cx=10.0, cy=10.0, radius=2.5,
+            z_bottom=0.0, z_top=10.0, segments=24,
+        )
+        _write_binary_stl(tris, str(stl))
+        # No diagnostics arg — old call signature.
+        holes = detect_holes(str(stl))
+        assert len(holes) == 1
+
+    def test_clean_hole_produces_no_user_facing_diagnostics(
+        self, tmp_path: Path,
+    ) -> None:
+        """A clean hole produces a valid finding and no user-facing
+        diagnostic notices.  Internal counters (partial_arc_clusters
+        from cross-axis pass noise) may fire — those are not surfaced
+        to the user.  But the user-facing counters
+        (sub_floor_clusters, non_circular_clusters) must stay at zero
+        on a clean cylindrical hole; notices for those would be
+        misleading.
+        """
+        stl = tmp_path / "clean_hole.stl"
+        tris = _hole_side_wall_z(
+            cx=10.0, cy=10.0, radius=2.5,
+            z_bottom=0.0, z_top=10.0, segments=24,
+        )
+        _write_binary_stl(tris, str(stl))
+        diagnostics: dict[str, int] = {}
+        holes = detect_holes(str(stl), diagnostics=diagnostics)
+        assert len(holes) == 1
+        # User-facing counters MUST be zero on a clean hole.
+        assert diagnostics.get("sub_floor_clusters", 0) == 0
+        assert diagnostics.get("non_circular_clusters", 0) == 0
+
+    def test_sub_floor_hole_diagnostic_fires(
+        self, tmp_path: Path,
+    ) -> None:
+        """A circular hole below the detector's min_diameter_mm floor
+        increments the sub_floor_clusters counter."""
+        stl = tmp_path / "sub_floor_hole.stl"
+        # 0.3 mm radius = 0.6 mm diameter — well below the 0.8 mm floor.
+        tris = _hole_side_wall_z(
+            cx=10.0, cy=10.0, radius=0.3,
+            z_bottom=0.0, z_top=10.0, segments=24,
+        )
+        _write_binary_stl(tris, str(stl))
+        diagnostics: dict[str, int] = {}
+        holes = detect_holes(str(stl), diagnostics=diagnostics)
+        assert holes == []  # below floor, not surfaced as a hole
+        assert diagnostics.get("sub_floor_clusters", 0) >= 1, (
+            f"expected at least one sub_floor rejection; got {diagnostics!r}"
+        )
+
+    def test_pillar_diagnostic_fires_on_outward_cylinder(
+        self, tmp_path: Path,
+    ) -> None:
+        """An outward-facing cylinder (solid pillar) is rejected by the
+        inward-normal check and increments the pillar_clusters counter."""
+        stl = tmp_path / "pillar.stl"
+        tris = _pillar_side_wall_z(
+            cx=10.0, cy=10.0, radius=2.5,
+            z_bottom=0.0, z_top=10.0, segments=24,
+        )
+        _write_binary_stl(tris, str(stl))
+        diagnostics: dict[str, int] = {}
+        holes = detect_holes(str(stl), diagnostics=diagnostics)
+        assert holes == []  # pillars don't register as holes
+        assert diagnostics.get("pillar_clusters", 0) >= 1, (
+            f"expected pillar rejection; got {diagnostics!r}"
+        )
+
+    def test_diagnostic_keys_use_documented_names(
+        self, tmp_path: Path,
+    ) -> None:
+        """Pin the exact key names so downstream callers
+        (analyze_printability recommendations) can rely on them.
+
+        Documented keys, all int:
+            sub_floor_clusters, oversize_clusters, non_circular_clusters,
+            partial_arc_clusters, pillar_clusters, shallow_clusters.
+
+        This test asserts that ANY key created lives in the documented
+        set — catches accidental key renames.
+        """
+        documented = {
+            "sub_floor_clusters",
+            "oversize_clusters",
+            "non_circular_clusters",
+            "partial_arc_clusters",
+            "pillar_clusters",
+            "shallow_clusters",
+        }
+        stl = tmp_path / "pillar_for_keys.stl"
+        tris = _pillar_side_wall_z(
+            cx=10.0, cy=10.0, radius=2.5,
+            z_bottom=0.0, z_top=10.0, segments=24,
+        )
+        _write_binary_stl(tris, str(stl))
+        diagnostics: dict[str, int] = {}
+        detect_holes(str(stl), diagnostics=diagnostics)
+        assert diagnostics, "expected at least one key in diagnostics"
+        extras = set(diagnostics) - documented
+        assert not extras, (
+            f"undocumented diagnostic keys: {extras} — update the "
+            f"detect_holes docstring before adding new ones"
+        )
+
+
+def _stadium_slot_in_block(
+    length_mm: float, width_mm: float,
+    block_x: float = 60.0, block_y: float = 40.0, block_z: float = 10.0,
+    segments: int = 24,
+) -> list[tuple[tuple[float, ...], ...]]:
+    """Triangulated stadium-shaped through-bore inside a block.
+
+    Stadium = 2 semicircular ends (radius = width/2) + 2 straight
+    side walls.  Inner wall is the stadium perimeter extruded along
+    Z.  Outer box wall is added so the slot sits INSIDE a larger
+    part (mesh extent > slot extent) — this matches real designs and
+    is necessary for the detector's cross-axis noise filter to
+    classify the slot as a "non-circular feature" rather than a
+    mesh-spanning cluster.
+
+    Returns triangles only — caller wraps with ``_write_binary_stl``.
+    """
+    cx, cy = block_x / 2.0, block_y / 2.0
+    r = width_mm / 2.0
+    half_straight = (length_mm - width_mm) / 2.0
+    if half_straight < 0:
+        raise ValueError("length_mm must exceed width_mm for a true stadium")
+    # Walk the stadium perimeter counter-clockwise: right semicircle +
+    # top straight + left semicircle + bottom straight (closes implicitly).
+    perim: list[tuple[float, float]] = []
+    for i in range(segments + 1):
+        theta = -math.pi / 2 + math.pi * i / segments
+        perim.append((
+            cx + half_straight + r * math.cos(theta),
+            cy + r * math.sin(theta),
+        ))
+    perim.append((cx - half_straight, cy + r))
+    for i in range(1, segments + 1):
+        theta = math.pi / 2 + math.pi * i / segments
+        perim.append((
+            cx - half_straight + r * math.cos(theta),
+            cy + r * math.sin(theta),
+        ))
+    # Triangulate the inner wall (extruded along Z, normals point
+    # INWARD toward the slot interior).
+    tris: list[tuple[tuple[float, ...], ...]] = []
+    for i in range(len(perim) - 1):
+        x0, y0 = perim[i]
+        x1, y1 = perim[i + 1]
+        a = (x0, y0, 0.0)
+        b = (x1, y1, 0.0)
+        c = (x1, y1, block_z)
+        d = (x0, y0, block_z)
+        tris.append((a, c, b))
+        tris.append((a, d, c))
+    # Box side walls (4 vertical, no holes — caps omitted; detector
+    # keys on side walls regardless).
+    bw = [
+        (0.0, 0.0, 0.0), (block_x, 0.0, 0.0),
+        (block_x, block_y, 0.0), (0.0, block_y, 0.0),
+        (0.0, 0.0, block_z), (block_x, 0.0, block_z),
+        (block_x, block_y, block_z), (0.0, block_y, block_z),
+    ]
+    for a, b, c in [
+        (0, 1, 5), (0, 5, 4), (1, 2, 6), (1, 6, 5),
+        (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7),
+    ]:
+        tris.append((bw[a], bw[b], bw[c]))
+    return tris
+
+
+class TestNonCircularFeatureDetection:
+    """The ``non_circular_clusters`` diagnostic fires on true elongated
+    features (slots, elliptical reliefs) and stays silent on clean
+    cylindrical holes — the cross-axis pass noise that previously
+    polluted the counter is now routed to ``partial_arc_clusters`` by
+    the mesh-spanning + would-fail-circularity discriminator in
+    ``_cluster_circular_holes``.
+
+    The 2026-05-17 godtier audit shipped the ``non_circular_clusters``
+    counter as infrastructure but couldn't surface a user-facing
+    notice because of the false-positive rate.  These tests pin the
+    cleanup.
+    """
+
+    def test_true_stadium_slot_fires_non_circular_diagnostic(
+        self, tmp_path: Path,
+    ) -> None:
+        """A true elongated slot (stadium: 10 mm × 3 mm) inside a
+        60×40×10 block produces zero detected holes (correct — it's
+        not cylindrical) and at least one ``non_circular_clusters``
+        rejection so callers can surface "this feature isn't covered
+        by hole-floor warnings."
+        """
+        stl = tmp_path / "slot_in_block.stl"
+        tris = _stadium_slot_in_block(length_mm=10.0, width_mm=3.0)
+        _write_binary_stl(tris, str(stl))
+        diagnostics: dict[str, int] = {}
+        holes = detect_holes(str(stl), diagnostics=diagnostics)
+        # Slot is not a cylinder, so no holes are reported.
+        assert holes == [], (
+            f"a stadium slot must not register as a cylindrical hole; "
+            f"detector returned: {holes!r}"
+        )
+        # The diagnostic counter captures the feature.
+        assert diagnostics.get("non_circular_clusters", 0) >= 1, (
+            f"expected non_circular_clusters ≥ 1 for a true slot; "
+            f"got diagnostics: {diagnostics!r}"
+        )
+
+    def test_clean_hole_in_block_does_not_fire_non_circular(
+        self, tmp_path: Path,
+    ) -> None:
+        """A clean cylindrical hole inside a block (the realistic
+        case) produces ``non_circular_clusters = 0`` — no false
+        positives from cross-axis pass merging of the hole's top +
+        bottom annulus + outer wall triangles into one BFS cluster.
+        """
+        # Build a 30×30×10 block with a single 5 mm Z-axis through-hole.
+        # Inline mesh assembly here so the test is self-contained.
+        cx, cy = 15.0, 15.0
+        r = 2.5
+        z_top = 10.0
+        segments = 24
+        tris: list[tuple[tuple[float, ...], ...]] = []
+        # Inner cylinder wall (inward normals).
+        for i in range(segments):
+            a0 = 2.0 * math.pi * i / segments
+            a1 = 2.0 * math.pi * (i + 1) / segments
+            bl = (cx + r * math.cos(a0), cy + r * math.sin(a0), 0.0)
+            br = (cx + r * math.cos(a1), cy + r * math.sin(a1), 0.0)
+            tl = (cx + r * math.cos(a0), cy + r * math.sin(a0), z_top)
+            tr = (cx + r * math.cos(a1), cy + r * math.sin(a1), z_top)
+            tris.append((bl, tr, br))
+            tris.append((bl, tl, tr))
+        # Box vertical walls (4 sides).
+        bw = [
+            (0.0, 0.0, 0.0), (30.0, 0.0, 0.0), (30.0, 30.0, 0.0), (0.0, 30.0, 0.0),
+            (0.0, 0.0, z_top), (30.0, 0.0, z_top), (30.0, 30.0, z_top), (0.0, 30.0, z_top),
+        ]
+        for a, b, c in [
+            (0, 1, 5), (0, 5, 4), (1, 2, 6), (1, 6, 5),
+            (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7),
+        ]:
+            tris.append((bw[a], bw[b], bw[c]))
+
+        stl = tmp_path / "hole_in_block.stl"
+        _write_binary_stl(tris, str(stl))
+        diagnostics: dict[str, int] = {}
+        holes = detect_holes(str(stl), diagnostics=diagnostics)
+        assert len(holes) == 1, (
+            f"expected one detected hole for a clean 5 mm Z-bore; "
+            f"got {len(holes)} (diagnostics: {diagnostics!r})"
+        )
+        # No phantom non-circular features.
+        assert diagnostics.get("non_circular_clusters", 0) == 0, (
+            f"clean hole produced phantom non_circular_clusters: "
+            f"{diagnostics!r}"
+        )
