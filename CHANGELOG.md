@@ -101,6 +101,15 @@ the slicer would actually print.
   hole warnings; now the detector recovers each hole's axis from
   its own geometry, so 3°, 30°, 45° — any tilt — surfaces the
   same warnings a flat-laid part would.
+- **Chamfered hole entries no longer hide the underlying hole.**
+  Holes with countersunk or 45° chamfered mouths used to read as
+  "non-circular feature" once the chamfer ate enough of the
+  cluster's normal budget; the detector now tries every principal
+  direction of the cluster as a candidate axis and keeps just the
+  cylinder wall for the radius fit. Sparse-mesh cylinders (6-8
+  segments — rare in CAD exports, common in low-poly props) also
+  stay together where the previous version shattered them on a
+  floating-point boundary.
 
 ### Internal
 

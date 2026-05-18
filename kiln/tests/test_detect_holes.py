@@ -154,6 +154,76 @@ def _hole_side_wall_y(
     return tris
 
 
+def _chamfered_hole_z(
+    cx: float,
+    cy: float,
+    radius: float,
+    z_bottom: float,
+    z_top: float,
+    chamfer_mm: float,
+    segments: int = 24,
+) -> list[tuple[tuple[float, ...], ...]]:
+    """Cylindrical Z-hole with a 45° chamfer at z=``z_top``.
+
+    Produces:
+
+    * cylindrical wall from ``z_bottom`` to ``z_top - chamfer_mm``
+      (inward radial normals),
+    * a 45° conical chamfer from radius=``radius`` at the wall top
+      to radius=``radius + chamfer_mm`` at z=``z_top``, AND
+    * matching top + bottom annular caps stretching to the bounding
+      box at ±half_block (so the cluster includes annulus normals
+      perpendicular to the cylinder axis — the contamination pattern
+      that broke the v1.1.x cohesion-only detector before the
+      multi-axis-trial fix).
+
+    Used as the regression mesh for the chamfered-hole class.
+    """
+    big_r = max(15.0, 2.0 * radius + 2.0 * chamfer_mm)
+    z_cyl_top = z_top - chamfer_mm
+    tris: list[tuple[tuple[float, ...], ...]] = []
+    # Cylinder wall.
+    for i in range(segments):
+        a0 = 2.0 * math.pi * i / segments
+        a1 = 2.0 * math.pi * (i + 1) / segments
+        bl = (cx + radius * math.cos(a0), cy + radius * math.sin(a0), z_bottom)
+        br = (cx + radius * math.cos(a1), cy + radius * math.sin(a1), z_bottom)
+        tl = (cx + radius * math.cos(a0), cy + radius * math.sin(a0), z_cyl_top)
+        tr = (cx + radius * math.cos(a1), cy + radius * math.sin(a1), z_cyl_top)
+        tris.append((bl, tr, br))
+        tris.append((bl, tl, tr))
+    # Chamfer cone (45°, inward-facing).
+    r_top = radius + chamfer_mm
+    for i in range(segments):
+        a0 = 2.0 * math.pi * i / segments
+        a1 = 2.0 * math.pi * (i + 1) / segments
+        bl = (cx + radius * math.cos(a0), cy + radius * math.sin(a0), z_cyl_top)
+        br = (cx + radius * math.cos(a1), cy + radius * math.sin(a1), z_cyl_top)
+        tl = (cx + r_top * math.cos(a0), cy + r_top * math.sin(a0), z_top)
+        tr = (cx + r_top * math.cos(a1), cy + r_top * math.sin(a1), z_top)
+        tris.append((bl, tr, br))
+        tris.append((bl, tl, tr))
+    # Top + bottom annulus caps.
+    for i in range(segments):
+        a0 = 2.0 * math.pi * i / segments
+        a1 = 2.0 * math.pi * (i + 1) / segments
+        # Top (normal +z)
+        bi_top = (cx + r_top * math.cos(a0), cy + r_top * math.sin(a0), z_top)
+        ci_top = (cx + r_top * math.cos(a1), cy + r_top * math.sin(a1), z_top)
+        bo_top = (cx + big_r * math.cos(a0), cy + big_r * math.sin(a0), z_top)
+        co_top = (cx + big_r * math.cos(a1), cy + big_r * math.sin(a1), z_top)
+        tris.append((bi_top, ci_top, bo_top))
+        tris.append((ci_top, co_top, bo_top))
+        # Bottom (normal -z, flipped winding)
+        bi_bot = (cx + radius * math.cos(a0), cy + radius * math.sin(a0), z_bottom)
+        ci_bot = (cx + radius * math.cos(a1), cy + radius * math.sin(a1), z_bottom)
+        bo_bot = (cx + big_r * math.cos(a0), cy + big_r * math.sin(a0), z_bottom)
+        co_bot = (cx + big_r * math.cos(a1), cy + big_r * math.sin(a1), z_bottom)
+        tris.append((bi_bot, bo_bot, ci_bot))
+        tris.append((ci_bot, bo_bot, co_bot))
+    return tris
+
+
 def _solid_cube_triangles(size: float) -> list[tuple[tuple[float, ...], ...]]:
     """Standard axis-aligned cube spanning (0,0,0)→(size,size,size).
 
@@ -469,6 +539,100 @@ class TestDetectHoles:
         )
         assert holes[0]["diameter_mm"] == pytest.approx(10.0, abs=0.4)
 
+    def test_chamfered_hole_with_deep_chamfer_detected(
+        self, tmp_path: Path,
+    ) -> None:
+        """A 5 mm hole with a 1.5 mm 45° chamfer + annular cap stays
+        detected.
+
+        Cohesion BFS pulls cylinder + chamfer + annulus into one cluster
+        (each transition sits at cos 0.707, above the 0.45 BFS gate).
+        On the unit-normal covariance matrix the cylinder contributes
+        XY-plane variance and the annulus contributes Z² — heavy enough
+        on this mesh that the SMALLEST eigenvector lands in the XY
+        plane, not along Z.  The multi-axis trial inside
+        ``_cluster_circular_holes`` is what saves it: the LARGEST
+        eigenvector IS Z, the per-axis perpendicularity filter keeps
+        just the cylinder triangles, and the gates validate as a
+        clean hole.  Without the trial this regressed to zero holes
+        relative to v1.1.x.
+        """
+        stl = tmp_path / "chamfered_deep.stl"
+        tris = _chamfered_hole_z(
+            cx=15.0, cy=15.0, radius=2.5,
+            z_bottom=0.0, z_top=10.0,
+            chamfer_mm=1.5, segments=24,
+        )
+        _write_binary_stl(tris, str(stl))
+        holes = detect_holes(str(stl), min_diameter_mm=1.0)
+        assert len(holes) == 1, (
+            f"deep chamfer must not hide the underlying hole; "
+            f"got {len(holes)} holes"
+        )
+        # Diameter recovered from the unchamfered cylinder portion —
+        # tolerance widened a touch because the per-axis filter may
+        # admit a few near-perpendicular chamfer triangles.
+        assert holes[0]["diameter_mm"] == pytest.approx(5.0, abs=0.4)
+
+    def test_chamfered_hole_rotated_30deg_detected(
+        self, tmp_path: Path,
+    ) -> None:
+        """Compound stress test: chamfered hole + 30° tilt around X.
+
+        Exercises both the rotation-tolerant axis recovery AND the
+        multi-axis trial in the same call.  Combined OLD failures
+        (off-axis tilt ≥ 10° + chamfer-contaminated cluster) used to
+        return zero holes."""
+        stl = tmp_path / "chamfered_rot30.stl"
+        tris = _chamfered_hole_z(
+            cx=15.0, cy=15.0, radius=2.5,
+            z_bottom=0.0, z_top=10.0,
+            chamfer_mm=1.0, segments=24,
+        )
+        theta = math.radians(30)
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
+
+        def _rotate_x(v: tuple[float, ...]) -> tuple[float, float, float]:
+            x, y, z = v[0], v[1], v[2]
+            return (x, y * cos_t - z * sin_t, y * sin_t + z * cos_t)
+
+        rotated_tris = [tuple(_rotate_x(v) for v in tri) for tri in tris]
+        _write_binary_stl(rotated_tris, str(stl))
+        holes = detect_holes(str(stl), min_diameter_mm=1.0)
+        assert len(holes) == 1, (
+            f"chamfered hole rotated 30° must surface; got {len(holes)}"
+        )
+        assert holes[0]["diameter_mm"] == pytest.approx(5.0, abs=0.4)
+
+    def test_sparse_6_segment_cylinder_detected(
+        self, tmp_path: Path,
+    ) -> None:
+        """A 6-segment cylinder pins the cohesion-BFS threshold.
+
+        Adjacent triangles' normals differ by 60° (cos 0.5).  Cosine
+        is computed in floating-point, which lands at ``0.4999...`` for
+        several of the 12 triangle pairs in this mesh — landing right
+        ON a 0.5 threshold splits the cluster into disconnected arcs
+        that fail the octant-coverage gate.  The default cohesion
+        threshold of 0.45 absorbs that FP noise and keeps the cylinder
+        as one cluster.
+
+        Sparse cylinders aren't common in real CAD exports (slicers
+        prefer ≥ 24 segments) but the test pins the threshold so a
+        future tightening can't silently regress it."""
+        stl = tmp_path / "sparse_6.stl"
+        tris = _hole_side_wall_z(
+            cx=10.0, cy=10.0, radius=2.5,
+            z_bottom=0.0, z_top=10.0, segments=6,
+        )
+        _write_binary_stl(tris, str(stl))
+        holes = detect_holes(str(stl), min_diameter_mm=1.0)
+        assert len(holes) == 1, (
+            f"6-segment cylinder cluster must not shatter at the "
+            f"floating-point cos(60°) boundary; got {len(holes)} holes"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Diagnostics out-param — informational notices for features that "looked
@@ -592,6 +756,42 @@ class TestDetectHolesDiagnostics:
         assert not extras, (
             f"undocumented diagnostic keys: {extras} — update the "
             f"detect_holes docstring before adding new ones"
+        )
+
+    def test_chamfered_hole_fires_no_spurious_user_diagnostics(
+        self, tmp_path: Path,
+    ) -> None:
+        """A chamfered hole that DOES detect must not fire user-facing
+        diagnostic notices.
+
+        The multi-axis trial validates the cluster against three
+        candidate axes; the smallest-eigvec axis fails circularity on
+        the contaminated cluster, but the largest-eigvec axis succeeds.
+        Bumping ``non_circular_clusters`` on the first failure would
+        emit a spurious "non-circular feature" recommendation to the
+        user for a hole that's actually been detected.  Diagnostic
+        accounting must NOT happen when any axis succeeds.
+        """
+        stl = tmp_path / "chamfered_quiet.stl"
+        tris = _chamfered_hole_z(
+            cx=15.0, cy=15.0, radius=2.5,
+            z_bottom=0.0, z_top=10.0,
+            chamfer_mm=1.5, segments=24,
+        )
+        _write_binary_stl(tris, str(stl))
+        diagnostics: dict[str, int] = {}
+        holes = detect_holes(str(stl), diagnostics=diagnostics)
+        assert len(holes) == 1, (
+            f"expected the chamfered hole to register; got {len(holes)}"
+        )
+        # User-facing counters must stay at zero — analyze_printability
+        # would otherwise surface "1 non-circular feature" / "1 sub-floor"
+        # notices that contradict the (correctly detected) hole.
+        assert diagnostics.get("non_circular_clusters", 0) == 0, (
+            f"chamfered hole bumped non_circular_clusters: {diagnostics!r}"
+        )
+        assert diagnostics.get("sub_floor_clusters", 0) == 0, (
+            f"chamfered hole bumped sub_floor_clusters: {diagnostics!r}"
         )
 
 
