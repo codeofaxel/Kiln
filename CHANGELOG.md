@@ -62,6 +62,18 @@ the slicer would actually print.
   Curved doorway tops, colonnaded ceilings, rows of windows above
   pillars — each unsupported span shows up with its actual length,
   so bridge warnings fire.
+- **Wall thickness probed directly from the mesh.** Stable across
+  tessellation densities, single-body or multi-body.
+- **Lattices and scaffolds: each bar measured separately.** A
+  1.5 mm lattice bar reads at 1.5 mm regardless of joint geometry.
+- **Helical-surface filter on thin-wall probes.** Threaded rods and
+  springs report at their structural thickness.
+- **Cavity-width check** for engraved grooves, slot cuts, and
+  debossed text — narrow cuts below the slicer's extrusion floor
+  now show up with their actual widths.
+- **Slicer support style on `analyze_printability`** —
+  `slicer_style="grid"|"snug"|"organic"|"tree"`. Kiln Pro
+  estimates support grams that style actually extrudes.
 
 ### Changed
 
@@ -82,6 +94,11 @@ the slicer would actually print.
   wall and hole floors now match the nozzle you're actually
   printing with. A 0.6 mm nozzle gets 0.6 mm-appropriate thresholds
   instead of always using the 0.4 mm baseline.
+- **Cavity check scales with part dimensions** so large interior
+  cavities register.
+- **New `PrintabilityReport` shape signals:** `dimensions_mm`,
+  `connected_components`, `component_size_uniformity`. Kiln Pro
+  reads these to recognize lattices and multi-part topologies.
 
 ### Fixed
 
