@@ -105,6 +105,52 @@ def _merge_pro_overlay_if_available(
     return _deep_merge_dicts(public_data, overlay)
 
 
+def _engineering_overlay_loaded() -> bool:
+    """Probe whether the kiln-pro engineering overlay actually merged.
+
+    Used by free-tier-honest consumer tools (``troubleshoot_print_issue``,
+    ``get_post_processing``, ``check_environment_compatibility``, the
+    ``troubleshoot_printer`` MCP wrapper) to attach an ``upgrade_hint``
+    field when the response shape is shallow because the overlay didn't
+    merge — so a free user (or an agent acting on their behalf) sees an
+    honest "here's where to find the depth" signal instead of an empty
+    array with no context.
+
+    Returns False when kiln-pro is absent, the license is invalid, the
+    network is past the offline-grace window, or the overlay endpoint
+    is down.  Returns True only when the merge actually produced the
+    moat content — verified structurally via ``pla.agent_guidance``,
+    which only exists in the overlay-merged record.
+
+    Cheap: a single dict lookup.  No I/O on the hot path.
+    """
+    try:
+        kb = _get_kb()
+        return bool(kb.materials.get("pla", {}).get("agent_guidance"))
+    except Exception:
+        return False
+
+
+# Free-tier upgrade-hint copy.  Kept short and terminal-friendly so MCP
+# agents can surface it verbatim; ends with the canonical pricing URL
+# so a user (or the agent itself) can act on it without further lookup.
+_UPGRADE_HINT_TROUBLESHOOTING = (
+    "Kiln Pro adds per-symptom diagnostic playbooks "
+    "(root cause + ordered fixes + prevention). "
+    "See https://kiln3d.com/pricing"
+)
+_UPGRADE_HINT_POST_PROCESSING = (
+    "Kiln Pro adds step-by-step procedures, safety notes, "
+    "and strengthening tradeoffs. "
+    "See https://kiln3d.com/pricing"
+)
+_UPGRADE_HINT_ENVIRONMENT = (
+    "Kiln Pro adds curated SME notes on what each rating means "
+    "and what to do about it. "
+    "See https://kiln3d.com/pricing"
+)
+
+
 def load_pro_overlay_or_empty(kind: str) -> dict[str, Any]:
     """Load a kiln-pro parameter-bag overlay, or ``{}`` on any failure.
 
@@ -309,13 +355,22 @@ class LoadEstimate:
 
 @dataclass
 class EnvironmentReport:
-    """Material survivability report for a described environment."""
+    """Material survivability report for a described environment.
+
+    ``upgrade_hint`` is set (with the canonical Kiln Pro upsell + pricing
+    URL) only when the kiln-pro engineering overlay didn't merge — i.e.
+    free tier, missing license, or overlay endpoint unreachable past
+    grace.  Pro+ tier with a valid license sees this field empty.  Lets
+    an MCP agent surface the upgrade path verbatim without having to
+    invent the copy.
+    """
 
     material: str
     environment: str
     per_category_ratings: dict[str, Any]
     warnings: list[str]
     overall_verdict: str
+    upgrade_hint: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -379,12 +434,21 @@ class DesignBrief:
 
 @dataclass
 class TroubleshootingResult:
-    """Matched print issues with fixes for a material+symptom query."""
+    """Matched print issues with fixes for a material+symptom query.
+
+    ``upgrade_hint`` is set (with the canonical Kiln Pro upsell + pricing
+    URL) only when the kiln-pro engineering overlay didn't merge — i.e.
+    free tier, missing license, or overlay endpoint unreachable past
+    grace.  Pro+ tier with a valid license sees this field empty.  Lets
+    an MCP agent surface the upgrade path verbatim without having to
+    invent the copy.
+    """
 
     material: str
     matched_issues: list[dict[str, Any]]
     storage_requirements: dict[str, Any] | None
     break_in_tips: list[str]
+    upgrade_hint: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -403,12 +467,21 @@ class PrinterCompatibilityReport:
 
 @dataclass
 class PostProcessingGuide:
-    """Post-processing techniques, paintability, and strengthening for a material."""
+    """Post-processing techniques, paintability, and strengthening for a material.
+
+    ``upgrade_hint`` is set (with the canonical Kiln Pro upsell + pricing
+    URL) only when the kiln-pro engineering overlay didn't merge — i.e.
+    free tier, missing license, or overlay endpoint unreachable past
+    grace.  Pro+ tier with a valid license sees this field empty.  Lets
+    an MCP agent surface the upgrade path verbatim without having to
+    invent the copy.
+    """
 
     material: str
     techniques: list[dict[str, Any]]
     paintability: dict[str, Any] | None
     strengthening: list[dict[str, Any]]
+    upgrade_hint: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1888,6 +1961,7 @@ def check_environment_compatibility(
         per_category_ratings=per_category,
         warnings=warnings,
         overall_verdict=verdict,
+        upgrade_hint="" if _engineering_overlay_loaded() else _UPGRADE_HINT_ENVIRONMENT,
     )
 
 
@@ -2240,6 +2314,7 @@ def troubleshoot_print_issue(
         matched_issues=issues,
         storage_requirements=data.get("storage_requirements"),
         break_in_tips=data.get("break_in_tips", []),
+        upgrade_hint="" if _engineering_overlay_loaded() else _UPGRADE_HINT_TROUBLESHOOTING,
     )
 
 
@@ -2327,6 +2402,7 @@ def get_post_processing(material_id: str) -> PostProcessingGuide | None:
         techniques=data.get("techniques", []),
         paintability=data.get("paintability"),
         strengthening=data.get("strengthening", []),
+        upgrade_hint="" if _engineering_overlay_loaded() else _UPGRADE_HINT_POST_PROCESSING,
     )
 
 

@@ -10179,6 +10179,21 @@ def troubleshoot_printer(
     try:
         matches = diagnose_issue(printer_id, symptom)
         intel = get_printer_intel(printer_id)
+        # Free-tier honest signal: when the kiln-pro overlay didn't merge
+        # (no license / network past grace / kiln-pro absent), per-printer
+        # quirks + failure_modes are empty arrays, so this tool returns
+        # zero diagnostic content regardless of symptom.  Surface the
+        # upgrade path verbatim so the agent can communicate it cleanly
+        # instead of inventing copy.  Empty when overlay is loaded.
+        from kiln.design_intelligence import _engineering_overlay_loaded
+        upgrade_hint = (
+            ""
+            if _engineering_overlay_loaded()
+            else (
+                "Kiln Pro adds per-printer firmware quirks + "
+                "failure-mode playbooks. See https://kiln3d.com/pricing"
+            )
+        )
         return {
             "success": True,
             "printer": intel.display_name,
@@ -10186,6 +10201,7 @@ def troubleshoot_printer(
             "matches": matches,
             "count": len(matches),
             "quirks": intel.quirks,
+            "upgrade_hint": upgrade_hint,
         }
     except KeyError:
         return _error_dict(
