@@ -288,6 +288,11 @@ class PrintabilityReport:
     # widths flag as ``unprintable`` in the kiln-pro overlay.  Defaults
     # to ``None`` for clients that construct the report directly.
     cavities: CavityAnalysis | None = None
+    # Bounding-box dimensions exposed for density-based topology checks
+    # (the kiln-pro overlay reads these to detect lattice / thread /
+    # dense-feature geometries where the wall verdict downgrades to
+    # advisory).  Keys: ``width_mm``, ``depth_mm``, ``height_mm``.
+    dimensions_mm: dict[str, float] = field(default_factory=dict)
     model_height_mm: float = 0.0
     recommendations: list[str] = field(default_factory=list)
     estimated_print_time_modifier: float = 1.0  # 1.0 = normal
@@ -1165,6 +1170,7 @@ _THIN_WALL_RAY_ORIGIN_OFFSET: float = 1e-4  # mm — nudge origin off the face
 # infinity) from registering spurious "cavities" at the build-volume
 # boundary.
 _CAVITY_RAY_MAX_DIST_MM: float = 10.0  # 10 × default nozzle (0.4 mm) = 4 mm
+
 
 
 def _analyze_thin_walls(
@@ -2885,6 +2891,11 @@ def analyze_printability(
         adhesion_force=adhesion_force,
         cost=cost,
         cavities=cavities,
+        dimensions_mm={
+            "width_mm": round(bbox["x_max"] - bbox["x_min"], 3),
+            "depth_mm": round(bbox["y_max"] - bbox["y_min"], 3),
+            "height_mm": round(bbox["z_max"] - bbox["z_min"], 3),
+        },
         model_height_mm=round(model_height, 2),
         recommendations=recommendations,
         estimated_print_time_modifier=round(time_mod, 2),
