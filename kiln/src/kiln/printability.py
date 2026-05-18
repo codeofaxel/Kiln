@@ -2142,12 +2142,21 @@ def analyze_printability(
     # Addresses the 5/64 bridge false positives surfaced by the
     # 2026-05-17 PrusaSlicer cross-validation (C03/C04 square_bridge,
     # C09 U_upside_down, F01/F02 tabletop).
+    _bridge_substituted_overhang_pct: float | None = None
     if (
         overhangs.needs_supports
         and overhangs.max_overhang_angle >= 89.0
         and supports.likely_substituted_by_bridge
     ):
         from dataclasses import replace
+        # Capture the pre-downgrade overhang percentage so the
+        # recommendation below can name it ("slicer will bridge the
+        # 7% horizontal overhang..."), giving the user visibility
+        # into why no supports are needed.  Silent downgrade is
+        # worse UX than the pre-fix "needs supports + likely bridge"
+        # pair — at least the old version surfaced both signals,
+        # even if contradictory.
+        _bridge_substituted_overhang_pct = overhangs.overhang_percentage
         overhangs = replace(overhangs, needs_supports=False)
 
     # Detect cylindrical-hole features.  Wrapped in try/except — a
@@ -2188,6 +2197,23 @@ def analyze_printability(
         overhangs, thin_walls, bridging, bed_adhesion, supports,
         warping=warping, thermal_stress=thermal_stress, adhesion_force=adhesion_force,
     )
+
+    # Surface the bridge-substitution downgrade.  When the
+    # ``needs_supports`` verdict was downgraded above, give the user
+    # an explicit "the slicer will bridge this" line so they
+    # understand WHY no supports are needed despite the horizontal
+    # overhang in the geometry.  Silent downgrade is worse UX than
+    # "needs supports + slicer will bridge" was — at least the old
+    # version told the user something.
+    if _bridge_substituted_overhang_pct is not None:
+        recommendations.insert(
+            0,
+            f"Slicer will likely bridge the "
+            f"{_bridge_substituted_overhang_pct:.0f}% horizontal overhang "
+            f"without supports — no action needed.  Force-enable supports "
+            f"in your slicer if the underside is a show surface and you "
+            f"want a smoother finish."
+        )
 
     # Free-tier upsell hook: when the judgment overlay is absent, the
     # warping / thermal-stress / adhesion-force recommendations come

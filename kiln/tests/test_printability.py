@@ -412,6 +412,69 @@ class TestBridgeAwareOverhangVerdict:
         report = analyze_printability(str(stl), material="PLA")
         assert not report.overhangs.needs_supports
 
+    def test_downgrade_surfaces_slicer_bridge_recommendation(self, tmp_path):
+        """When the correlator downgrades needs_supports=True → False,
+        the report must explain WHY via a top-of-list recommendation
+        so the user isn't left wondering whether their horizontal
+        overhang was missed.  Silent downgrade is worse UX than the
+        pre-fix 'needs supports + likely_substituted_by_bridge' pair —
+        at least the old version told the user something."""
+        tris = _make_short_bridge_triangles(span=8.0)
+        stl = tmp_path / "short_bridge.stl"
+        with open(stl, "wb") as f:
+            f.write(_make_binary_stl(tris))
+        report = analyze_printability(str(stl), material="PLA")
+        # Downgrade fired.
+        assert not report.overhangs.needs_supports
+        # And a recommendation explains the bridging delegation.
+        bridge_recs = [
+            r for r in report.recommendations
+            if "bridge" in r.lower() and "horizontal overhang" in r.lower()
+        ]
+        assert bridge_recs, (
+            f"bridge-substitution downgrade must surface a "
+            f"slicer-will-bridge recommendation; got: "
+            f"{report.recommendations}"
+        )
+        # The recommendation should sit FIRST so the user sees it
+        # ahead of generic guidance.
+        assert "bridge" in report.recommendations[0].lower()
+
+    def test_no_downgrade_means_no_bridge_recommendation(self, tmp_path):
+        """A 60° wedge (no downgrade should fire).  The bridge
+        recommendation must NOT appear — adding it on every steep
+        overhang would be noise."""
+        import math
+        a = math.radians(60.0)
+        h_shift = 10.0 * math.tan(a)
+        v = [
+            (0.0, 0.0, 0.0), (8.0, 0.0, 0.0),
+            (8.0, 10.0, 0.0), (0.0, 10.0, 0.0),
+            (-h_shift, 0.0, 10.0), (8.0 + h_shift, 0.0, 10.0),
+            (8.0 + h_shift, 10.0, 10.0), (-h_shift, 10.0, 10.0),
+        ]
+        faces = [
+            (0, 2, 1), (0, 3, 2),
+            (4, 5, 6), (4, 6, 7),
+            (0, 1, 5), (0, 5, 4),
+            (3, 7, 6), (3, 6, 2),
+            (1, 2, 6), (1, 6, 5),
+            (0, 4, 7), (0, 7, 3),
+        ]
+        tris = [(v[a], v[b], v[c]) for a, b, c in faces]
+        stl = tmp_path / "wedge_60.stl"
+        with open(stl, "wb") as f:
+            f.write(_make_binary_stl(tris))
+        report = analyze_printability(str(stl), material="PLA")
+        bridge_recs = [
+            r for r in report.recommendations
+            if "slicer will" in r.lower() and "bridge" in r.lower()
+        ]
+        assert not bridge_recs, (
+            f"non-downgrade case must NOT have a bridge recommendation; "
+            f"got: {bridge_recs}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # TestBedAdhesionAnalysis
