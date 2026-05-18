@@ -1196,10 +1196,11 @@ _CAVITY_RAY_MIN_MAX_DIST_MM: float = 10.0  # 10 × default nozzle (0.4 mm) = 4 m
 # parallel for walls) with the ray direction — ``|dot| ≈ 1``.  Hits at
 # ``|dot| < threshold`` are slanted — typically tessellation artifacts
 # (helical thread face hitting the perpendicular end cap from close
-# range, dot ≈ 0.77).  Threshold tuned so legitimate measurements
-# (including curved walls on real CAD parts) pass while the
-# thread-cap artifact class is filtered.  See the probe at
-# ``/tmp/probe_dot_filter.py`` for the empirical justification.
+# range, ``|dot| ≈ 0.77`` empirically across the audit threaded-rod
+# fixtures).  Threshold tuned so legitimate measurements (including
+# curved walls on real CAD parts: a 1 mm-radius shell with a 0.5 mm
+# wall produces ``|dot| ≈ 0.88``, well above the threshold) pass
+# while the thread-cap artifact class is filtered.
 _THIN_WALL_MIN_PERPENDICULAR_DOT: float = 0.85
 
 
