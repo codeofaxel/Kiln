@@ -1173,32 +1173,103 @@ _CAVITY_RAY_MAX_DIST_MM: float = 10.0  # 10 × default nozzle (0.4 mm) = 4 mm
 
 
 
+def _label_mesh_components(
+    triangles: np.ndarray,
+) -> np.ndarray:
+    """Label triangles by connected component (shared-edge adjacency).
+
+    Triangles that share an edge (two vertices with identical coords)
+    belong to the same component.  Vertices are deduplicated by exact
+    tuple equality — the same scheme the STL parser uses.
+
+    Returns a ``(T,)`` int array of compact component IDs in ``[0, k)``
+    where ``k`` is the component count.  Single-body meshes return
+    ``np.zeros(T)``.
+
+    Implementation: ``np.unique``-based vertex dedup + edge sort, then
+    union-find on triangle pairs sharing an edge.  Pure numpy; the
+    Python loop iterates the union list (one entry per shared edge),
+    not per triangle.  ~240 ms on a 100 k-triangle single body.
+    """
+    T = triangles.shape[0]
+    if T == 0:
+        return np.empty(0, dtype=np.int64)
+
+    flat = triangles.reshape(-1, 3)  # (3T, 3) — all vertex coords
+    _, vid = np.unique(flat, axis=0, return_inverse=True)
+    tri_verts = vid.reshape(T, 3).astype(np.int64)
+
+    # Three edges per triangle, with vertex IDs in canonical (u, v) order.
+    edges = np.stack(
+        [tri_verts[:, [0, 1]], tri_verts[:, [1, 2]], tri_verts[:, [2, 0]]],
+        axis=1,
+    ).reshape(-1, 2)
+    edges.sort(axis=1)
+
+    # Sort all (3T) edges so duplicates are adjacent — duplicates mean
+    # two triangles share that edge.
+    order = np.lexsort((edges[:, 1], edges[:, 0]))
+    sorted_edges = edges[order]
+    tri_of_slot = np.repeat(np.arange(T, dtype=np.int64), 3)[order]
+
+    same = (
+        (sorted_edges[1:, 0] == sorted_edges[:-1, 0])
+        & (sorted_edges[1:, 1] == sorted_edges[:-1, 1])
+    )
+    union_a = tri_of_slot[:-1][same]
+    union_b = tri_of_slot[1:][same]
+
+    parent = np.arange(T, dtype=np.int64)
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for a, b in zip(union_a.tolist(), union_b.tolist()):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    roots = np.fromiter((find(i) for i in range(T)), dtype=np.int64, count=T)
+    _, comp_ids = np.unique(roots, return_inverse=True)
+    return comp_ids.astype(np.int64)
+
+
 def _analyze_thin_walls(
     triangles: list[tuple[tuple[float, ...], ...]],
     vertices: list[tuple[float, ...]],
     *,
     nozzle_diameter: float = 0.4,
 ) -> ThinWallAnalysis:
-    """Measure thin walls via vectorized inward ray-casting.
+    """Measure thin walls via per-component vectorized inward ray-casting.
 
     For each sampled surface triangle, cast a ray from its centroid
     along the inward-pointing normal.  The distance to the first
-    triangle intersection is the local wall thickness at that point —
-    insensitive to tessellation density, unlike the prior edge-length
-    proxy.
+    intersection with a triangle *in the same connected component* is
+    the local wall thickness at that point — insensitive to
+    tessellation density (unlike the prior edge-length proxy) and to
+    overlap with adjacent bodies (unlike a global first-hit ray-cast).
+
+    Connected-component scoping eliminates the "joint-overlap" artifact
+    on lattice / scaffold geometries: each strut is its own component,
+    so a ray cast inward from a strut face hits only that strut's
+    opposing wall, never an intruding face from a neighbouring strut
+    that happens to share volume at the joint.
 
     Walls with measured thickness below ``nozzle_diameter`` are flagged
     as thin.  ``min_wall_thickness_mm`` is the absolute smallest
     measurement on the mesh; the 0.0 sentinel is reserved for
     measurement failure on degenerate meshes.
 
-    Known limitation: on geometries where two convex bodies overlap
-    (lattice strut joints, intersecting struts), the first-hit
-    measurement reads the union's internal face at half-strut distance
-    rather than the true outer span — flagging lattice geometries as
-    artificially thin.  See ``THIN_WALL_KNOWLEDGE.md`` for the lattice
-    + thread + engrave-cavity feature classes that this measurement
-    under-handles.  Engraved-groove widths are measured separately by
+    Known limitation: helical features (threaded rods, springs) form a
+    single component, so per-component scoping does not help — rays
+    cast from helical faces near the rod's end caps can hit the cap
+    from very close, returning sub-millimetre tessellation artifacts
+    on a structurally-thick part.  Cylindrical hole-bore tessellation
+    artifacts on round holes are similarly out-of-scope.  Engraved-
+    groove widths are measured separately by
     :func:`_analyze_cavity_widths`.
     """
     total = len(triangles)
@@ -1231,6 +1302,7 @@ def _analyze_thin_walls(
     # Sample origins from valid faces only — degenerate ones can't host
     # a probe (no normal to invert).
     centroids_all = (v0 + v1 + v2) / 3.0
+    valid_indices = np.where(valid_face)[0]
     valid_centroids = centroids_all[valid_face]
     valid_inward = -(normals[valid_face] / norm_len[valid_face, None])
     valid_areas = norm_len[valid_face] / 2.0
@@ -1252,28 +1324,59 @@ def _analyze_thin_walls(
     )
     directions = valid_inward[sample_idx]
 
-    # Intersect against ALL valid triangles (or a representative subsample
-    # if the mesh is very large) — the target set is what determines
-    # where rays can hit.
-    if valid_face.sum() > _THIN_WALL_INTERSECTION_TRI_CAP:
-        rng_target = np.random.default_rng(1)
-        target_idx = rng_target.choice(
-            n_total,
-            size=_THIN_WALL_INTERSECTION_TRI_CAP,
-            replace=False,
-            p=(valid_areas / valid_areas.sum()),
-        )
-        tgt_v0 = v0[valid_face][target_idx]
-        tgt_e1 = edge1[valid_face][target_idx]
-        tgt_e2 = edge2[valid_face][target_idx]
-    else:
-        tgt_v0 = v0[valid_face]
-        tgt_e1 = edge1[valid_face]
-        tgt_e2 = edge2[valid_face]
+    # Component labelling: identify which connected piece of the mesh
+    # each triangle belongs to.  Single-body meshes return all-zeros and
+    # behaviour reduces to the prior global ray-cast.
+    comp_ids = _label_mesh_components(tris)  # (T,)
+    origin_comps = comp_ids[valid_indices[sample_idx]]  # one per ray
+    valid_face_comps = comp_ids[valid_indices]          # one per valid target
 
-    exit_dist = _raycast_min_distances(
-        origins, directions, tgt_v0, tgt_e1, tgt_e2,
-    )
+    exit_dist = np.full(n_sample, np.inf, dtype=np.float64)
+
+    # Iterate the small set of components touched by sampled rays.  For
+    # a 1-component mesh this is a single iteration — same work as the
+    # prior global cast.  For a lattice of N struts the budget splits
+    # across struts; each strut casts only against its own triangles.
+    for cid in np.unique(origin_comps):
+        ray_mask = origin_comps == cid
+        target_mask = valid_face_comps == cid
+
+        # A component with fewer than 4 triangles can't enclose space —
+        # rays from it would miss everything anyway.  Skip the cast.
+        if target_mask.sum() < 4:
+            continue
+
+        # Component-local target subsampling: apply the global cap to
+        # each component so a single huge body still benefits from the
+        # memory budget, but small components keep all their triangles.
+        comp_target_v0 = v0[valid_face][target_mask]
+        comp_target_e1 = edge1[valid_face][target_mask]
+        comp_target_e2 = edge2[valid_face][target_mask]
+        comp_target_areas = valid_areas[target_mask]
+        if comp_target_v0.shape[0] > _THIN_WALL_INTERSECTION_TRI_CAP:
+            rng_target = np.random.default_rng(1)
+            t_probs = comp_target_areas / comp_target_areas.sum()
+            t_idx = rng_target.choice(
+                comp_target_v0.shape[0],
+                size=_THIN_WALL_INTERSECTION_TRI_CAP,
+                replace=False,
+                p=t_probs,
+            )
+            comp_target_v0 = comp_target_v0[t_idx]
+            comp_target_e1 = comp_target_e1[t_idx]
+            comp_target_e2 = comp_target_e2[t_idx]
+
+        comp_origins = origins[ray_mask]
+        comp_directions = directions[ray_mask]
+
+        comp_dist = _raycast_min_distances(
+            comp_origins,
+            comp_directions,
+            comp_target_v0,
+            comp_target_e1,
+            comp_target_e2,
+        )
+        exit_dist[ray_mask] = comp_dist
 
     finite_mask = np.isfinite(exit_dist)
     if not finite_mask.any():
@@ -1327,16 +1430,25 @@ def _analyze_cavity_widths(
     *,
     nozzle_diameter: float = 0.4,
 ) -> CavityAnalysis:
-    """Measure cavity widths via outward ray-casting.
+    """Measure cavity widths via per-component outward ray-casting.
 
     Sibling to ``_analyze_thin_walls`` but measures the dimensions of
     cavities cut INTO the mesh (engraved grooves, debossed text, narrow
     slots, pocketed/inset features) rather than the thickness of walls
     forming the mesh.  For each sampled surface triangle, cast a ray
-    from its centroid along the OUTWARD normal.  Hits within
-    ``_CAVITY_RAY_MAX_DIST_MM`` register a cavity width — outer-surface
-    rays travel into open space, miss everything, and contribute no
-    signal.
+    from its centroid along the OUTWARD normal — restricted to hits
+    against triangles in the same connected component, so cavities are
+    only measured WITHIN a single body.  Outer-surface rays travel
+    into open space, miss everything, and contribute no signal.
+
+    Per-component scoping matters for the same reason it does for
+    walls: in a multi-body soup (lattice/scaffold), outward rays from
+    one strut's surface can otherwise graze the surface of a
+    neighbouring strut at the joint overlap, producing a phantom
+    "cavity" reading equal to the strut-half-thickness.  Real cavities
+    are by construction inside a single body, so component-scoping
+    drops the artifact without affecting any legitimate cavity
+    measurement.
 
     Sub-perimeter cavities (groove widths below the slicer's thinnest
     extrusion) cannot be reproduced during printing; the kiln-pro
@@ -1368,8 +1480,10 @@ def _analyze_cavity_widths(
         return CavityAnalysis(0.0, 0, [])
 
     centroids_all = (v0 + v1 + v2) / 3.0
+    valid_indices = np.where(valid_face)[0]
     valid_centroids = centroids_all[valid_face]
-    # OUTWARD direction (the only difference from _analyze_thin_walls).
+    # OUTWARD direction (the only direction difference from
+    # _analyze_thin_walls).
     valid_outward = normals[valid_face] / norm_len[valid_face, None]
     valid_areas = norm_len[valid_face] / 2.0
 
@@ -1388,29 +1502,48 @@ def _analyze_cavity_widths(
     )
     directions = valid_outward[sample_idx]
 
-    if valid_face.sum() > _THIN_WALL_INTERSECTION_TRI_CAP:
-        rng_target = np.random.default_rng(1)
-        target_idx = rng_target.choice(
-            n_total,
-            size=_THIN_WALL_INTERSECTION_TRI_CAP,
-            replace=False,
-            p=(valid_areas / valid_areas.sum()),
-        )
-        tgt_v0 = v0[valid_face][target_idx]
-        tgt_e1 = edge1[valid_face][target_idx]
-        tgt_e2 = edge2[valid_face][target_idx]
-    else:
-        tgt_v0 = v0[valid_face]
-        tgt_e1 = edge1[valid_face]
-        tgt_e2 = edge2[valid_face]
+    # Component labelling — same approach as walls (single-body meshes
+    # take one iteration; lattices loop per-strut).
+    comp_ids = _label_mesh_components(tris)
+    origin_comps = comp_ids[valid_indices[sample_idx]]
+    valid_face_comps = comp_ids[valid_indices]
 
-    # For cavities, the first hit IS the cavity width — outward rays
-    # don't need watertight tracking because there's no overlap to
-    # disambiguate (we're traveling through empty space until we hit
-    # the opposite cavity wall, or we miss the cavity entirely).
-    hit_dist = _raycast_min_distances(
-        origins, directions, tgt_v0, tgt_e1, tgt_e2,
-    )
+    hit_dist = np.full(n_sample, np.inf, dtype=np.float64)
+
+    for cid in np.unique(origin_comps):
+        ray_mask = origin_comps == cid
+        target_mask = valid_face_comps == cid
+        if target_mask.sum() < 4:
+            continue
+
+        comp_target_v0 = v0[valid_face][target_mask]
+        comp_target_e1 = edge1[valid_face][target_mask]
+        comp_target_e2 = edge2[valid_face][target_mask]
+        comp_target_areas = valid_areas[target_mask]
+        if comp_target_v0.shape[0] > _THIN_WALL_INTERSECTION_TRI_CAP:
+            rng_target = np.random.default_rng(1)
+            t_probs = comp_target_areas / comp_target_areas.sum()
+            t_idx = rng_target.choice(
+                comp_target_v0.shape[0],
+                size=_THIN_WALL_INTERSECTION_TRI_CAP,
+                replace=False,
+                p=t_probs,
+            )
+            comp_target_v0 = comp_target_v0[t_idx]
+            comp_target_e1 = comp_target_e1[t_idx]
+            comp_target_e2 = comp_target_e2[t_idx]
+
+        comp_origins = origins[ray_mask]
+        comp_directions = directions[ray_mask]
+
+        comp_dist = _raycast_min_distances(
+            comp_origins,
+            comp_directions,
+            comp_target_v0,
+            comp_target_e1,
+            comp_target_e2,
+        )
+        hit_dist[ray_mask] = comp_dist
 
     # Cap at the cavity-distance threshold — anything longer is "ray
     # exited the part into open space," not a cavity measurement.

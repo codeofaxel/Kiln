@@ -24,6 +24,7 @@ from kiln.printability import (
     _analyze_supports,
     _analyze_thin_walls,
     _compute_score,
+    _label_mesh_components,
     _score_to_grade,
     _triangle_area,
     _triangle_centroid,
@@ -193,6 +194,65 @@ def _hole_side_wall_z(
         triangles.append((bl, tr, br))
         triangles.append((bl, tl, tr))
     return triangles
+
+
+def _open_top_hollow_box_triangles(
+    *, outer_mm: float, wall_mm: float, height_mm: float | None = None,
+) -> list[tuple]:
+    """Watertight one-component open-top hollow box.
+
+    Outer footprint ``outer_mm`` × ``outer_mm`` × ``height_mm`` (default
+    ``outer_mm``) with walls of ``wall_mm`` thickness in X/Y/Z (floor
+    has thickness ``wall_mm``; top is open into the cavity).  The
+    annular top rim connects outer top edge to inner top edge so the
+    outer and inner shells share edges — the mesh is one connected
+    component, the way a real CAD-exported hollow part is.
+
+    Mirrors the audit-extension ``stl_gen.hollow_cube`` fixture; the
+    earlier inline test fixture built two nested closed cubes (no
+    rim), which is non-manifold and not measurable by the new per-
+    component ray-cast — it was passing only because the prior
+    measurement ignored connectivity.
+    """
+    if height_mm is None:
+        height_mm = outer_mm
+    o = outer_mm / 2.0
+    i = o - wall_mm
+    z_floor = wall_mm
+    z_top = height_mm
+    outer_pts = [
+        (-o, -o, 0.0), (o, -o, 0.0), (o, o, 0.0), (-o, o, 0.0),
+        (-o, -o, z_top), (o, -o, z_top), (o, o, z_top), (-o, o, z_top),
+    ]
+    inner_pts = [
+        (-i, -i, z_floor), (i, -i, z_floor), (i, i, z_floor), (-i, i, z_floor),
+        (-i, -i, z_top), (i, -i, z_top), (i, i, z_top), (-i, i, z_top),
+    ]
+    tris: list[tuple] = []
+    O, I = outer_pts, inner_pts
+    # Outer bottom (normal -Z)
+    tris += [(O[0], O[2], O[1]), (O[0], O[3], O[2])]
+    # Outer 4 sides (outward normals)
+    tris += [(O[0], O[1], O[5]), (O[0], O[5], O[4])]  # -Y
+    tris += [(O[1], O[2], O[6]), (O[1], O[6], O[5])]  # +X
+    tris += [(O[2], O[3], O[7]), (O[2], O[7], O[6])]  # +Y
+    tris += [(O[3], O[0], O[4]), (O[3], O[4], O[7])]  # -X
+    # Inner 4 sides (reversed winding → normals point into the
+    # material from the cavity side, away from the wall's inside face).
+    tris += [(I[0], I[5], I[1]), (I[0], I[4], I[5])]  # -Y
+    tris += [(I[1], I[6], I[2]), (I[1], I[5], I[6])]  # +X
+    tris += [(I[2], I[7], I[3]), (I[2], I[6], I[7])]  # +Y
+    tris += [(I[3], I[4], I[0]), (I[3], I[7], I[4])]  # -X
+    # Cavity floor at z=z_floor (top face of bottom slab, normal +Z)
+    tris += [(I[0], I[1], I[2]), (I[0], I[2], I[3])]
+    # Top rim — annular at z=z_top, connecting outer top edge to inner
+    # top edge.  Outward normal +Z.  These shared edges are what makes
+    # the mesh one connected component instead of two nested shells.
+    tris += [(O[4], O[5], I[5]), (O[4], I[5], I[4])]  # front
+    tris += [(O[5], O[6], I[6]), (O[5], I[6], I[5])]  # right
+    tris += [(O[6], O[7], I[7]), (O[6], I[7], I[6])]  # back
+    tris += [(O[7], O[4], I[4]), (O[7], I[4], I[7])]  # left
+    return tris
 
 
 # ---------------------------------------------------------------------------
@@ -617,39 +677,13 @@ class TestThinWallAnalysis:
         # missed walls in the [0.3 mm, 2.0 mm] band on coarse meshes; the
         # new measurement reads the actual wall thickness regardless of
         # tessellation density.
-        outer = 20.0
-        wall = 0.3
-        inner = outer - 2 * wall
-        o = outer / 2.0
-        i = inner / 2.0
-        ov = [
-            (-o, -o, -o), (o, -o, -o), (o, o, -o), (-o, o, -o),
-            (-o, -o, o), (o, -o, o), (o, o, o), (-o, o, o),
-        ]
-        iv = [
-            (-i, -i, -i), (i, -i, -i), (i, i, -i), (-i, i, -i),
-            (-i, -i, i), (i, -i, i), (i, i, i), (-i, i, i),
-        ]
-        # Outer faces (CCW outward), inner faces (CCW inward).
-        outer_idx = [
-            (0, 3, 2), (0, 2, 1), (4, 5, 6), (4, 6, 7),
-            (0, 1, 5), (0, 5, 4), (2, 3, 7), (2, 7, 6),
-            (1, 2, 6), (1, 6, 5), (0, 4, 7), (0, 7, 3),
-        ]
-        inner_idx = [
-            (0, 2, 3), (0, 1, 2), (4, 6, 5), (4, 7, 6),
-            (0, 5, 1), (0, 4, 5), (2, 7, 3), (2, 6, 7),
-            (1, 6, 2), (1, 5, 6), (0, 3, 7), (0, 7, 4),
-        ]
-        tris = [tuple(ov[i] for i in face) for face in outer_idx]
-        tris += [tuple(iv[i] for i in face) for face in inner_idx]
-        verts = ov + iv
-        result = _analyze_thin_walls(tris, verts, nozzle_diameter=0.4)
+        tris = _open_top_hollow_box_triangles(outer_mm=20.0, wall_mm=0.3)
+        result = _analyze_thin_walls(tris, [], nozzle_diameter=0.4)
         assert result.thin_wall_count > 0
         # Measured thickness should match the actual wall thickness
         # within ray-cast precision (the offset and self-hit epsilons
         # bound the reading slightly below the geometric value).
-        assert abs(result.min_wall_thickness_mm - wall) < 0.05
+        assert abs(result.min_wall_thickness_mm - 0.3) < 0.05
 
     def test_tessellation_invariance(self):
         # The same physical 2 mm wall must measure ~2 mm regardless of
@@ -658,31 +692,8 @@ class TestThinWallAnalysis:
         # same physical wall at different subdivision densities — a 2 mm
         # cube split into 16×16 quads reported 0.125 mm.  The ray-cast
         # measurement reads geometry, not edge length.
-        def hollow_box_tris(subdiv_iters):
-            outer, wall = 20.0, 2.0
-            inner = outer - 2 * wall
-            o = outer / 2.0
-            i = inner / 2.0
-            ov = [
-                (-o, -o, -o), (o, -o, -o), (o, o, -o), (-o, o, -o),
-                (-o, -o, o), (o, -o, o), (o, o, o), (-o, o, o),
-            ]
-            iv = [
-                (-i, -i, -i), (i, -i, -i), (i, i, -i), (-i, i, -i),
-                (-i, -i, i), (i, -i, i), (i, i, i), (-i, i, i),
-            ]
-            outer_idx = [
-                (0, 3, 2), (0, 2, 1), (4, 5, 6), (4, 6, 7),
-                (0, 1, 5), (0, 5, 4), (2, 3, 7), (2, 7, 6),
-                (1, 2, 6), (1, 6, 5), (0, 4, 7), (0, 7, 3),
-            ]
-            inner_idx = [
-                (0, 2, 3), (0, 1, 2), (4, 6, 5), (4, 7, 6),
-                (0, 5, 1), (0, 4, 5), (2, 7, 3), (2, 6, 7),
-                (1, 6, 2), (1, 5, 6), (0, 3, 7), (0, 7, 4),
-            ]
-            tris = [tuple(ov[i] for i in face) for face in outer_idx]
-            tris += [tuple(iv[i] for i in face) for face in inner_idx]
+        def subdivided_hollow_box(subdiv_iters):
+            tris = _open_top_hollow_box_triangles(outer_mm=20.0, wall_mm=2.0)
             for _ in range(subdiv_iters):
                 new_tris = []
                 for a, b, c in tris:
@@ -699,7 +710,7 @@ class TestThinWallAnalysis:
         # measurement is the GEOMETRIC distance to the next surface, not
         # an estimate.
         for subdiv in [0, 1, 2, 3]:
-            tris = hollow_box_tris(subdiv)
+            tris = subdivided_hollow_box(subdiv)
             result = _analyze_thin_walls(tris, [], nozzle_diameter=0.4)
             # 2 mm wall is well above the 0.4 mm nozzle threshold, so
             # the measurement reports no thin walls at every subdivision.
@@ -708,9 +719,9 @@ class TestThinWallAnalysis:
                 f"(got count={result.thin_wall_count} at this density)"
             )
             # And the measured min wall thickness lands at ~2 mm — the
-            # heart of tessellation-invariance.  Across 24 / 96 / 384 /
-            # 1536 triangles the answer must stay within ±5 % of the
-            # true wall, not drift with mesh density.
+            # heart of tessellation-invariance.  Across all densities
+            # the answer must stay within ±5 % of the true wall, not
+            # drift with mesh density.
             assert abs(result.min_wall_thickness_mm - 2.0) < 0.1, (
                 f"subdiv={subdiv}: tessellation-invariant measurement "
                 f"should read ~2.0 mm, got {result.min_wall_thickness_mm}"
@@ -721,6 +732,160 @@ class TestThinWallAnalysis:
         verts = list({v for tri in tris for v in tri})
         d = _analyze_thin_walls(tris, verts).to_dict()
         assert "min_wall_thickness_mm" in d
+
+
+def _axis_box_triangles(
+    cx: float, cy: float, cz: float, dx: float, dy: float, dz: float,
+) -> list[tuple]:
+    """12 outward-wound triangles for an axis-aligned box."""
+    x0, x1 = cx - dx / 2, cx + dx / 2
+    y0, y1 = cy - dy / 2, cy + dy / 2
+    z0, z1 = cz - dz / 2, cz + dz / 2
+    v = [
+        (x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0),
+        (x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1),
+    ]
+    idx = [
+        (0, 2, 1), (0, 3, 2),  # bottom
+        (4, 5, 6), (4, 6, 7),  # top
+        (0, 1, 5), (0, 5, 4),  # -Y
+        (1, 2, 6), (1, 6, 5),  # +X
+        (2, 3, 7), (2, 7, 6),  # +Y
+        (3, 0, 4), (3, 4, 7),  # -X
+    ]
+    return [tuple(v[i] for i in face) for face in idx]
+
+
+def _cubic_lattice_triangles(
+    *, cell_mm: float = 4.0, strut_mm: float = 1.5, grid_n: int = 3,
+) -> list[tuple]:
+    """Mirrors the audit's cubic_lattice fixture.
+
+    A 3D grid of axis-aligned strut boxes — one box per edge of each
+    grid cell.  Adjacent struts overlap at corners but their triangle
+    triples are independently emitted (no shared vertices), so a
+    component labeller WILL split the soup correctly along axis
+    families.
+    """
+    tris: list[tuple] = []
+    for i in range(grid_n + 1):
+        for j in range(grid_n + 1):
+            for k in range(grid_n + 1):
+                x, y, z = i * cell_mm, j * cell_mm, k * cell_mm
+                if i < grid_n:
+                    tris += _axis_box_triangles(
+                        x + cell_mm / 2, y, z, cell_mm, strut_mm, strut_mm,
+                    )
+                if j < grid_n:
+                    tris += _axis_box_triangles(
+                        x, y + cell_mm / 2, z, strut_mm, cell_mm, strut_mm,
+                    )
+                if k < grid_n:
+                    tris += _axis_box_triangles(
+                        x, y, z + cell_mm / 2, strut_mm, strut_mm, cell_mm,
+                    )
+    return tris
+
+
+class TestComponentLabelling:
+    """Connected-component labelling underpins the lattice wall fix."""
+
+    def test_single_body_one_component(self):
+        # A solid cube is one connected body.  _label_mesh_components
+        # must return all zeros (or a single unique ID).
+        import numpy as np
+        tris = _outward_cube_triangles(10.0)
+        arr = np.asarray(tris, dtype=np.float64)
+        comp = _label_mesh_components(arr)
+        assert comp.shape == (len(tris),)
+        assert int(comp.max()) == 0
+
+    def test_two_disjoint_boxes_two_components(self):
+        # Two boxes far enough apart that no vertices coincide must
+        # split into two components.  The lattice fix depends on this:
+        # adjacent struts share no STL vertices, so they split.
+        import numpy as np
+        a = _axis_box_triangles(0, 0, 0, 1, 1, 1)
+        b = _axis_box_triangles(10, 10, 10, 1, 1, 1)
+        arr = np.asarray(a + b, dtype=np.float64)
+        comp = _label_mesh_components(arr)
+        unique_ids = set(int(c) for c in comp)
+        assert unique_ids == {0, 1}
+        assert (comp[:12] == comp[0]).all()
+        assert (comp[12:] == comp[12]).all()
+        assert comp[0] != comp[12]
+
+    def test_lattice_splits_into_axis_families(self):
+        # The audit cubic_lattice fixture writes each strut as a
+        # separate box.  Adjacent perpendicular struts share volume but
+        # not vertices, so they remain separate components.  Three
+        # collinear struts along one axis DO share vertices end-to-end,
+        # so they merge into one component per axis-line.  For
+        # ``grid_n=3``: (grid_n+1)**2 lines per axis × 3 axes = 48.
+        import numpy as np
+        tris = _cubic_lattice_triangles(cell_mm=4.0, strut_mm=1.5, grid_n=3)
+        arr = np.asarray(tris, dtype=np.float64)
+        comp = _label_mesh_components(arr)
+        assert int(comp.max() + 1) == 48
+
+
+class TestThinWallLatticeAndComponent:
+    """Per-component scoping eliminates the lattice joint-overlap artifact.
+
+    Pre-fix, a 1.5 mm strut lattice measured 0.75 mm at every corner
+    (the strut/2 chord across the joint overlap).  Per-component
+    casting confines each ray to its strut, recovering the true strut
+    thickness.
+    """
+
+    def test_lattice_15mm_strut_reads_full_strut(self):
+        tris = _cubic_lattice_triangles(strut_mm=1.5)
+        result = _analyze_thin_walls(tris, [], nozzle_diameter=0.4)
+        # The strut IS 1.5 mm thick — the measurement should not flag a
+        # 1.5 mm wall against a 0.4 mm nozzle threshold.
+        assert result.thin_wall_count == 0
+        # And the measured min should land at the strut thickness.
+        assert abs(result.min_wall_thickness_mm - 1.5) < 0.05, (
+            f"strut=1.5: expected ≈1.5 mm, got "
+            f"{result.min_wall_thickness_mm}"
+        )
+
+    def test_lattice_08mm_strut_at_nozzle_floor_reads_strut(self):
+        tris = _cubic_lattice_triangles(strut_mm=0.8)
+        result = _analyze_thin_walls(tris, [], nozzle_diameter=0.4)
+        # 0.8 mm strut is above the 0.4 mm nozzle floor — no thin flag.
+        # Pre-fix this would have read 0.4 mm and triggered the warning.
+        assert result.thin_wall_count == 0
+        assert abs(result.min_wall_thickness_mm - 0.8) < 0.05
+
+    def test_lattice_thin_strut_still_flagged(self):
+        # The fix mustn't silently swallow legitimately-thin struts.
+        # 0.4 mm at a 0.4 mm nozzle is at the floor — still flagged.
+        tris = _cubic_lattice_triangles(strut_mm=0.4)
+        result = _analyze_thin_walls(tris, [], nozzle_diameter=0.4)
+        assert result.thin_wall_count > 0
+        assert abs(result.min_wall_thickness_mm - 0.4) < 0.05
+
+    def test_lattice_cavity_no_joint_artifact(self):
+        # The cavity ray-cast had the inverse joint-overlap artifact:
+        # outward rays from a strut's surface would hit the back of an
+        # intruding face from a neighbouring perpendicular strut at
+        # strut-half-thickness, producing phantom "cavity" readings.
+        # Per-component scoping restricts cavity rays to the same body,
+        # so a lattice — N independent strut components — reads no
+        # cavity at the strut-half-thickness band.  Whatever the
+        # cavity returns must be ≥ the cell size between strut tips on
+        # the same axis-line.
+        tris = _cubic_lattice_triangles(cell_mm=4.0, strut_mm=1.5)
+        result = _analyze_cavity_widths(tris, [], nozzle_diameter=0.4)
+        # The joint-artifact value would be strut/2 = 0.75; the real
+        # post-fix value is the strut-tip-to-strut-tip gap along an
+        # axis line (= cell_mm).  Either way, definitely above 0.75.
+        if result.cavity_sample_count > 0:
+            assert result.min_cavity_width_mm > 1.5, (
+                f"lattice cavity {result.min_cavity_width_mm} mm — "
+                "joint-overlap artifact regression"
+            )
 
 
 # ---------------------------------------------------------------------------
