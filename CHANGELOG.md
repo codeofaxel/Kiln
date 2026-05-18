@@ -72,11 +72,6 @@ the slicer would actually print.
   documented as a best-effort approximation, especially in the
   middle range. For high-aspect-ratio prints in warp-prone
   materials, treat `secure` as `plausible` rather than `verified`.
-- **Hole detection rotation-handling clarification.** v1.1.2's
-  "handles rotated or simplified meshes" was too broad. Axis-aligned
-  rotation (90°/180°) and mesh simplification work; off-principal-axis
-  tilts above ~8° don't register. Tilt the part back to a principal
-  axis before running printability if rotation accuracy matters.
 - **Thin-wall reports return `0.0` when no thin walls are found.**
   Was `nozzle_diameter`. Read `thin_wall_count > 0` before treating
   `min_wall_thickness_mm` as a measurement.
@@ -100,6 +95,12 @@ the slicer would actually print.
   overhang sits above a narrower base.
 - Support percentage no longer reports above 100% on rare
   thin-disc-on-tall-post geometries.
+- **Hole detection works on tilted parts.** No more straightening
+  required. Parts coming out of slicer auto-orient or hand-tilted
+  CAD exports (typically 15–30° off) used to silently produce zero
+  hole warnings; now the detector recovers each hole's axis from
+  its own geometry, so 3°, 30°, 45° — any tilt — surfaces the
+  same warnings a flat-laid part would.
 
 ### Internal
 

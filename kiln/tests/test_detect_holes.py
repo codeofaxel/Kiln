@@ -409,6 +409,66 @@ class TestDetectHoles:
         # Diameter survives (rotation is isometric).
         assert h["diameter_mm"] == pytest.approx(5.0, abs=0.3)
 
+    def test_z_hole_rotated_30deg_around_x_detected(
+        self, tmp_path: Path,
+    ) -> None:
+        """A 5 mm Z-axis hole rotated 30° around the X axis still
+        registers as one hole.  Before per-cluster axis recovery
+        landed, any tilt > ~8° pushed every wall normal outside the
+        principal-axis perpendicularity tolerance and produced zero
+        detections."""
+        stl = tmp_path / "z_hole_rot30x.stl"
+        tris = _hole_side_wall_z(
+            cx=10.0, cy=10.0, radius=2.5,
+            z_bottom=0.0, z_top=10.0, segments=24,
+        )
+        theta = math.radians(30)
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
+
+        def _rotate_x(v: tuple[float, ...]) -> tuple[float, float, float]:
+            x, y, z = v[0], v[1], v[2]
+            return (x, y * cos_t - z * sin_t, y * sin_t + z * cos_t)
+
+        rotated_tris = [tuple(_rotate_x(v) for v in tri) for tri in tris]
+        _write_binary_stl(rotated_tris, str(stl))
+        holes = detect_holes(str(stl), min_diameter_mm=1.0)
+        assert len(holes) == 1, (
+            f"30° tilt around X must still surface the Z-axis hole; "
+            f"got {len(holes)} holes"
+        )
+        # Diameter is rotation-invariant.
+        assert holes[0]["diameter_mm"] == pytest.approx(5.0, abs=0.3)
+
+    def test_y_hole_rotated_45deg_around_x_detected(
+        self, tmp_path: Path,
+    ) -> None:
+        """A 10 mm Y-axis hole rotated 45° around the X axis still
+        registers as one hole.  At 45° the recovered axis sits exactly
+        between Y and Z, so this also exercises the basis-construction
+        and inward-normal gates in the rotated reference frame."""
+        stl = tmp_path / "y_hole_rot45x.stl"
+        tris = _hole_side_wall_y(
+            cx=5.0, cz=5.0, radius=5.0,
+            y_front=0.0, y_back=15.0, segments=24,
+        )
+        theta = math.radians(45)
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
+
+        def _rotate_x(v: tuple[float, ...]) -> tuple[float, float, float]:
+            x, y, z = v[0], v[1], v[2]
+            return (x, y * cos_t - z * sin_t, y * sin_t + z * cos_t)
+
+        rotated_tris = [tuple(_rotate_x(v) for v in tri) for tri in tris]
+        _write_binary_stl(rotated_tris, str(stl))
+        holes = detect_holes(str(stl), min_diameter_mm=1.0)
+        assert len(holes) == 1, (
+            f"45° tilt around X must still surface the Y-axis hole; "
+            f"got {len(holes)} holes"
+        )
+        assert holes[0]["diameter_mm"] == pytest.approx(10.0, abs=0.4)
+
 
 # ---------------------------------------------------------------------------
 # Diagnostics out-param — informational notices for features that "looked
@@ -688,4 +748,35 @@ class TestNonCircularFeatureDetection:
         assert diagnostics.get("non_circular_clusters", 0) == 0, (
             f"clean hole produced phantom non_circular_clusters: "
             f"{diagnostics!r}"
+        )
+
+    def test_rotated_stadium_slot_still_fires_non_circular(
+        self, tmp_path: Path,
+    ) -> None:
+        """A stadium slot rotated 30° around X must still NOT register
+        as a cylindrical hole and must still increment
+        ``non_circular_clusters`` — the rotation-tolerant gates have
+        to keep the same negative discrimination on tilted parts that
+        the old per-axis detector had on aligned ones."""
+        tris = _stadium_slot_in_block(length_mm=10.0, width_mm=3.0)
+        theta = math.radians(30)
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
+
+        def _rotate_x(v: tuple[float, ...]) -> tuple[float, float, float]:
+            x, y, z = v[0], v[1], v[2]
+            return (x, y * cos_t - z * sin_t, y * sin_t + z * cos_t)
+
+        rotated_tris = [tuple(_rotate_x(v) for v in tri) for tri in tris]
+        stl = tmp_path / "rotated_slot.stl"
+        _write_binary_stl(rotated_tris, str(stl))
+        diagnostics: dict[str, int] = {}
+        holes = detect_holes(str(stl), diagnostics=diagnostics)
+        assert holes == [], (
+            f"a rotated slot must not register as a cylindrical hole; "
+            f"detector returned: {holes!r}"
+        )
+        assert diagnostics.get("non_circular_clusters", 0) >= 1, (
+            f"expected non_circular_clusters ≥ 1 for a rotated slot; "
+            f"got diagnostics: {diagnostics!r}"
         )
