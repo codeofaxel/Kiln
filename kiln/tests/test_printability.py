@@ -1469,6 +1469,81 @@ class TestAnalyzePrintability:
             assert report.connected_components == 1
             assert report.component_size_uniformity == 1.0
 
+    def test_genus_solid_cube_is_zero(self):
+        # A closed solid (zero through-holes) must report genus 0.  The
+        # kiln-pro overlay's planned second-signal strut classifier
+        # depends on this baseline being right: every clean continuous-
+        # wall body reads genus 0, so a positive genus reliably means
+        # "topologically complex" (handles, through-holes, lattice
+        # scaffolds — see ``test_genus_curved_lattice_signal_for_pro``).
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _outward_cube_triangles(10.0))
+            report = analyze_printability(path)
+            assert report.genus == 0, (
+                f"solid cube reports genus {report.genus} — Euler "
+                "characteristic formula is wrong, or vertex dedup "
+                "is dropping shared corners"
+            )
+
+    def test_genus_torus_is_one(self):
+        # A torus has exactly one independent hole through it → genus 1.
+        # This is the canonical handle-counting test and the simplest
+        # closed-manifold mesh whose genus is provably non-zero from
+        # the Euler characteristic alone.
+        import math
+        R, r = 10.0, 3.0
+        n_major, n_minor = 24, 12
+        verts = []
+        for i in range(n_major):
+            theta = 2 * math.pi * i / n_major
+            for j in range(n_minor):
+                phi = 2 * math.pi * j / n_minor
+                x = (R + r * math.cos(phi)) * math.cos(theta)
+                y = (R + r * math.cos(phi)) * math.sin(theta)
+                z = r * math.sin(phi)
+                verts.append((x, y, z))
+
+        def vidx(i, j):
+            return (i % n_major) * n_minor + (j % n_minor)
+
+        torus_tris: list[tuple] = []
+        for i in range(n_major):
+            for j in range(n_minor):
+                a = verts[vidx(i, j)]
+                b = verts[vidx(i, j + 1)]
+                c = verts[vidx(i + 1, j + 1)]
+                d = verts[vidx(i + 1, j)]
+                torus_tris.append((a, b, c))
+                torus_tris.append((a, c, d))
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, torus_tris)
+            report = analyze_printability(path)
+            assert report.genus == 1, (
+                f"torus reports genus {report.genus} — the canonical "
+                "handle-counting case must read exactly 1; off-by-one "
+                "or sign-flip in the Euler-char formula"
+            )
+
+    def test_genus_cubic_lattice_caught_by_n_components_not_genus(self):
+        # Cubic lattice composed of disjoint bars: each bar is a closed
+        # box (genus 0), the total is the sum (0).  The strut classifier
+        # routes this through ``connected_components`` (existing
+        # signal), NOT through genus.  This test pins the
+        # "complementary signals" property — n_components catches
+        # multi-body lattices, genus catches single-component scaffolds.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tris = _cubic_lattice_triangles(cell_mm=4.0, strut_mm=1.5, grid_n=3)
+            path = _write_stl(tmpdir, tris)
+            report = analyze_printability(path)
+            # n_components is the trigger for cubic lattices
+            assert report.connected_components > 5
+            # Genus is NOT (low / zero — disjoint bars each genus 0)
+            assert report.genus <= 5, (
+                f"cubic lattice reports genus {report.genus} — expected "
+                "near 0 because disjoint bars contribute 0 each; the "
+                "n_components signal handles this topology, not genus"
+            )
+
     def test_nonexistent_file_raises(self):
         with pytest.raises(ValueError, match="File not found"):
             analyze_printability("/nonexistent/model.stl")

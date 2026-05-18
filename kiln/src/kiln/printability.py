@@ -337,6 +337,20 @@ class PrintabilityReport:
     # AREN'T lattices but happen to have many components.  Trivially
     # 1.0 for single-component meshes (no spread).  Defaults to 0.0.
     component_size_uniformity: float = 0.0
+    # Topological genus, summed across components, derived from the
+    # Euler characteristic χ = V − E + F.  Counts independent "holes
+    # through the body" — a closed solid is 0, a torus (or a plate with
+    # one through-hole) is 1, a curved lattice infill (gyroid / TPMS) is
+    # many.  Complements ``connected_components`` for the kiln-pro
+    # overlay's strut classifier: cubic lattices fragment into many
+    # disjoint bars (n_components catches them, genus does not), while
+    # curved lattice infills are one connected scaffold with many
+    # handles (genus catches them, n_components does not).  Together
+    # the two signals cover both lattice families.  Negative values
+    # indicate a non-closed / non-manifold mesh where the formula
+    # doesn't apply; clients should treat anything < 0 as no signal.
+    # Defaults to 0.
+    genus: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1203,6 +1217,61 @@ _CAVITY_RAY_MIN_MAX_DIST_MM: float = 10.0  # 10 × default nozzle (0.4 mm) = 4 m
 # while the thread-cap artifact class is filtered.
 _THIN_WALL_MIN_PERPENDICULAR_DOT: float = 0.85
 
+
+
+def _compute_mesh_genus(
+    triangles: np.ndarray,
+    n_components: int,
+) -> int:
+    """Total topological genus across all components, via Euler char.
+
+    For a closed orientable manifold mesh: χ = V − E + F = 2 − 2g.
+    For a disjoint union of ``c`` closed surfaces with genera ``g_i``:
+    ``χ_total = sum(2 − 2 g_i) = 2 c − 2 g_total``, so
+    ``g_total = c − χ_total / 2``.
+
+    The c-aware formula matters: a cubic strut lattice composed of
+    disjoint bars has many components, each genus 0 → ``g_total = 0``.
+    Pro's existing ``n_components`` signal already routes those
+    through strut semantics.  Genus is the COMPLEMENT signal for
+    single-component topologically-complex meshes (curved lattice
+    infills — gyroid, Schwarz P / D, and other triply-periodic
+    minimal surfaces) where ``n_components == 1`` misses the lattice
+    nature and Pro otherwise applies continuous-wall semantics.
+
+    Returns 0 for empty / degenerate meshes.  Returns a non-negative
+    integer in the closed-manifold case.  Can return NEGATIVE values
+    for non-closed / non-manifold meshes (boundary edges aren't
+    paired so V/E/F drift from the closed-formula identity); callers
+    should treat ``genus < 0`` as a "mesh isn't closed, no topology
+    signal" sentinel rather than a structural fact.
+
+    Pure numpy.  Shares the vertex-dedup + edge-sort scheme with
+    ``_label_mesh_components`` so the cost adds ~50 ms on a 100 k-tri
+    mesh on top of the existing component-labelling pass.
+    """
+    T = triangles.shape[0]
+    if T == 0 or n_components <= 0:
+        return 0
+    flat = triangles.reshape(-1, 3)
+    _, vid = np.unique(flat, axis=0, return_inverse=True)
+    V = int(vid.max() + 1) if vid.size > 0 else 0
+    tri_verts = vid.reshape(T, 3).astype(np.int64)
+    edges = np.stack(
+        [tri_verts[:, [0, 1]], tri_verts[:, [1, 2]], tri_verts[:, [2, 0]]],
+        axis=1,
+    ).reshape(-1, 2)
+    edges.sort(axis=1)
+    E = int(np.unique(edges, axis=0).shape[0])
+    F = int(T)
+    chi = V - E + F
+    # g_total = c − χ / 2.  Multiply by 2 first to keep integer
+    # arithmetic exact; mesh-closed χ is always even so the divide
+    # is clean.  Non-closed meshes can produce odd 2*g_total values;
+    # the round() handles that gracefully but the negative branch is
+    # the real signal that the formula doesn't apply.
+    two_g = 2 * n_components - chi
+    return int(round(two_g / 2))
 
 
 def _label_mesh_components(
@@ -2886,11 +2955,13 @@ def analyze_printability(
     # an unrelated multi-body soup that happens to have many parts.
     component_count = 0
     component_size_uniformity = 0.0
+    mesh_genus = 0
     if len(triangles) > 0:
         try:
             tris_arr = np.asarray(triangles, dtype=np.float64)
             comp_ids = _label_mesh_components(tris_arr)
             component_count = int(comp_ids.max() + 1)
+            mesh_genus = _compute_mesh_genus(tris_arr, component_count)
             if component_count >= 2:
                 # Per-component bbox volume: max-min along each axis.
                 # Coefficient of variation (std / mean) measures spread;
@@ -2922,6 +2993,7 @@ def analyze_printability(
         except (ValueError, IndexError):
             component_count = 0
             component_size_uniformity = 0.0
+            mesh_genus = 0
     bridging = _analyze_bridging(
         triangles,
         z_min,
@@ -3165,6 +3237,7 @@ def analyze_printability(
         triangle_count=len(triangles),
         connected_components=component_count,
         component_size_uniformity=round(component_size_uniformity, 3),
+        genus=mesh_genus,
     )
 
     # Optional kiln-pro enrichment: when the kiln-pro package is
