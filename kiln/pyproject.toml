@@ -45,7 +45,7 @@ dependencies = [
     "zeroconf>=0.80",
     "rich>=12.0",
     "paho-mqtt>=2.0",
-    "cryptography>=41.0",
+    "cryptography>=48.0.0",
     # numpy powers the ray-cast wall-thickness measurement in
     # ``kiln.printability._analyze_thin_walls`` — promoted from the
     # ``mesh-diagnostics`` extra so every install measures walls
@@ -64,7 +64,7 @@ postgres = ["psycopg2-binary>=2.9"]
 # The REST API ships in kiln-pro itself; install it directly from the
 # private repo (see kiln3d.com/docs) — don't promise it here.
 stripe = ["stripe>=5.0"]
-payments = ["stripe>=5.0", "cryptography>=41.0"]
+payments = ["stripe>=5.0", "cryptography>=48.0.0"]
 serial = ["pyserial>=3.5"]
 qr = ["qrcode[pil]>=7.0"]
 emboss = ["Pillow>=9.0", "rembg>=2.0", "onnxruntime>=1.16"]

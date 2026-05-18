@@ -11,7 +11,7 @@ cffi==2.0.0
 charset-normalizer==3.4.7
 click==8.3.3
 coverage==7.13.5
-cryptography==47.0.0
+cryptography==48.0.0
 h11==0.16.0
 httpcore==1.0.9
 httpx-sse==0.4.3
