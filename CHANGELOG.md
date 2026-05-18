@@ -72,6 +72,11 @@ the slicer would actually print.
   documented as a best-effort approximation, especially in the
   middle range. For high-aspect-ratio prints in warp-prone
   materials, treat `secure` as `plausible` rather than `verified`.
+- **Hole detection rotation-handling clarification.** v1.1.2's
+  "handles rotated or simplified meshes" was too broad. Axis-aligned
+  rotation (90°/180°) and mesh simplification work; off-principal-axis
+  tilts above ~8° don't register. Tilt the part back to a principal
+  axis before running printability if rotation accuracy matters.
 - **Thin-wall reports return `0.0` when no thin walls are found.**
   Was `nozzle_diameter`. Read `thin_wall_count > 0` before treating
   `min_wall_thickness_mm` as a measurement.
