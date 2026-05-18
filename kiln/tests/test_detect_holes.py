@@ -853,7 +853,12 @@ class TestDetectHolesDiagnostics:
         self, tmp_path: Path,
     ) -> None:
         """A circular hole below the detector's min_diameter_mm floor
-        increments the sub_floor_clusters counter."""
+        increments the sub_floor_clusters counter.
+
+        24 segments → 24 distinct facet directions (well above the
+        polygonal threshold of 8), so the round-bore bucket fires,
+        not the polygonal one.
+        """
         stl = tmp_path / "sub_floor_hole.stl"
         # 0.3 mm radius = 0.6 mm diameter — well below the 0.8 mm floor.
         tris = _hole_side_wall_z(
@@ -865,7 +870,40 @@ class TestDetectHolesDiagnostics:
         holes = detect_holes(str(stl), diagnostics=diagnostics)
         assert holes == []  # below floor, not surfaced as a hole
         assert diagnostics.get("sub_floor_clusters", 0) >= 1, (
-            f"expected at least one sub_floor rejection; got {diagnostics!r}"
+            f"expected at least one round-bore sub_floor rejection; "
+            f"got {diagnostics!r}"
+        )
+        assert diagnostics.get("sub_floor_polygonal_clusters", 0) == 0, (
+            f"24-seg smooth bore must not route to the polygonal "
+            f"bucket; got {diagnostics!r}"
+        )
+
+    def test_sub_floor_polygonal_pocket_routes_to_polygonal_bucket(
+        self, tmp_path: Path,
+    ) -> None:
+        """A below-floor 6-segment hex pocket fires
+        ``sub_floor_polygonal_clusters``, NOT ``sub_floor_clusters``.
+
+        Lets the printability layer word the recommendation
+        accurately — a 0.6 mm hex pocket can't be "drilled after
+        printing," so the round-bore advice would mislead the user.
+        """
+        stl = tmp_path / "sub_floor_hex.stl"
+        tris = _hole_side_wall_z(
+            cx=10.0, cy=10.0, radius=0.3,
+            z_bottom=0.0, z_top=10.0, segments=6,
+        )
+        _write_binary_stl(tris, str(stl))
+        diagnostics: dict[str, int] = {}
+        holes = detect_holes(str(stl), diagnostics=diagnostics)
+        assert holes == []
+        assert diagnostics.get("sub_floor_polygonal_clusters", 0) >= 1, (
+            f"expected a polygonal sub_floor bucket increment; "
+            f"got {diagnostics!r}"
+        )
+        assert diagnostics.get("sub_floor_clusters", 0) == 0, (
+            f"6-seg polygonal pocket must not bump the round bucket; "
+            f"got {diagnostics!r}"
         )
 
     def test_pillar_diagnostic_fires_on_outward_cylinder(
@@ -901,6 +939,7 @@ class TestDetectHolesDiagnostics:
         """
         documented = {
             "sub_floor_clusters",
+            "sub_floor_polygonal_clusters",
             "oversize_clusters",
             "non_circular_clusters",
             "partial_arc_clusters",

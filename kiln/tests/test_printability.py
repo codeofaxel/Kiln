@@ -1091,6 +1091,63 @@ class TestAnalyzePrintability:
             report = analyze_printability(path, include_hole_detection=False)
             assert report.holes == []
 
+    def test_sub_floor_round_bore_recommends_enlarge_or_drill(self):
+        """A sub-floor 24-segment hole produces the round-bore
+        recommendation that mentions drilling after printing."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tris = _hole_side_wall_z(
+                cx=10.0, cy=10.0, radius=0.3,
+                z_bottom=0.0, z_top=10.0, segments=24,
+            )
+            path = _write_stl(tmpdir, tris)
+            report = analyze_printability(path)
+            sub_floor_recs = [
+                r for r in report.recommendations
+                if "0.8 mm hole-detection floor" in r
+            ]
+            assert len(sub_floor_recs) == 1, (
+                f"expected exactly one sub_floor recommendation; "
+                f"got {sub_floor_recs!r}"
+            )
+            assert "drill after printing" in sub_floor_recs[0], (
+                f"round-bore recommendation must offer drilling "
+                f"workaround; got {sub_floor_recs[0]!r}"
+            )
+
+    def test_sub_floor_polygonal_pocket_recommends_no_drill(self):
+        """A sub-floor 6-segment hex pocket produces a recommendation
+        that explicitly says drilling won't help — wording must
+        differ from the round-bore case."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tris = _hole_side_wall_z(
+                cx=10.0, cy=10.0, radius=0.3,
+                z_bottom=0.0, z_top=10.0, segments=6,
+            )
+            path = _write_stl(tmpdir, tris)
+            report = analyze_printability(path)
+            poly_recs = [
+                r for r in report.recommendations
+                if "polygonal pocket" in r
+            ]
+            assert len(poly_recs) == 1, (
+                f"expected exactly one polygonal sub_floor "
+                f"recommendation; got {poly_recs!r}"
+            )
+            assert "Drilling won't help" in poly_recs[0], (
+                f"polygonal pocket recommendation must NOT offer "
+                f"drilling; got {poly_recs[0]!r}"
+            )
+            # And the round-bore recommendation must NOT also fire —
+            # otherwise the user sees two contradictory notices.
+            round_recs = [
+                r for r in report.recommendations
+                if "drill after printing" in r
+            ]
+            assert round_recs == [], (
+                f"polygonal-only sub_floor must not also fire the "
+                f"round-bore recommendation; got {round_recs!r}"
+            )
+
 
 class TestProEnrichmentHook:
     """The optional kiln-pro printability_overlay bridge call."""

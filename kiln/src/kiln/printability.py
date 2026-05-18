@@ -2435,13 +2435,41 @@ def analyze_printability(
 
     # Hole-detection diagnostic notices: surface features the detector
     # silently dropped.  Each fires only when its counter is non-zero.
-    sub_floor_count = hole_diagnostics.get("sub_floor_clusters", 0)
-    if sub_floor_count > 0:
+    # Sub-floor rejects split round vs polygonal so the wording
+    # matches what the user actually has: a round bore can be drilled
+    # after printing, a hex pocket cannot — so a single "enlarge in
+    # CAD or drill" recommendation would be wrong for polygonal
+    # pockets.
+    sub_floor_round = hole_diagnostics.get("sub_floor_clusters", 0)
+    sub_floor_polygonal = hole_diagnostics.get(
+        "sub_floor_polygonal_clusters", 0,
+    )
+    if sub_floor_round > 0 and sub_floor_polygonal > 0:
         recommendations.append(
-            f"Detected {sub_floor_count} circular feature(s) below the "
-            "0.8 mm hole-detection floor. FDM with a 0.4 mm nozzle "
-            "cannot reliably print holes below ~1 mm regardless of "
-            "material; enlarge in CAD or drill after printing."
+            f"Detected {sub_floor_round + sub_floor_polygonal} "
+            f"feature(s) below the 0.8 mm hole-detection floor "
+            f"({sub_floor_round} round bore(s) + "
+            f"{sub_floor_polygonal} polygonal pocket(s)). FDM with "
+            "a 0.4 mm nozzle cannot reliably print details below "
+            "~1 mm; enlarge round bores in CAD (or drill after "
+            "printing) and review polygonal pockets — they may be "
+            "intentional wrench grips that need to stay tight."
+        )
+    elif sub_floor_round > 0:
+        recommendations.append(
+            f"Detected {sub_floor_round} circular feature(s) below "
+            "the 0.8 mm hole-detection floor. FDM with a 0.4 mm "
+            "nozzle cannot reliably print holes below ~1 mm "
+            "regardless of material; enlarge in CAD or drill after "
+            "printing."
+        )
+    elif sub_floor_polygonal > 0:
+        recommendations.append(
+            f"Detected {sub_floor_polygonal} polygonal pocket(s) "
+            "below the 0.8 mm hole-detection floor (likely hex "
+            "nut traps or setscrew sockets). Drilling won't help "
+            "— either enlarge the pocket in CAD or accept that the "
+            "FDM-printed walls won't grip a fastener cleanly."
         )
     non_circular_count = hole_diagnostics.get("non_circular_clusters", 0)
     if non_circular_count > 0:

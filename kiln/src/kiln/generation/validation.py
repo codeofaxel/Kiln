@@ -5221,10 +5221,17 @@ def detect_holes(
         emit informational notices about features that "looked like
         a hole but didn't qualify."  Keys (all int):
 
-        * ``"sub_floor_clusters"`` — a circular feature was found
-          below ``min_diameter_mm``.  Typical signal: the user
-          designed a hole below FDM's practical floor for a 0.4 mm
-          nozzle, which won't print reliably.
+        * ``"sub_floor_clusters"`` — a SMOOTH round bore below
+          ``min_diameter_mm`` (> 8 distinct facet directions in the
+          perpendicular plane).  Typical signal: a designed hole
+          below FDM's practical floor for a 0.4 mm nozzle, which
+          won't print reliably.  The printability layer surfaces a
+          "drill after printing" recommendation for these.
+        * ``"sub_floor_polygonal_clusters"`` — a POLYGONAL pocket
+          below ``min_diameter_mm`` (≤ 8 distinct facet directions
+          — hex nut traps, octagonal sockets).  Same dimensional
+          concern, but no drill-after-printing workaround, so the
+          recommendation wording differs.
         * ``"non_circular_clusters"`` — axis-perpendicular clusters
           whose radius spread exceeded ``circular_tolerance_mm``.
           Typical signals: slots, elliptical reliefs, chamfered or
@@ -5574,6 +5581,41 @@ def _all_eigvecs_3x3(
     return out
 
 
+# A detected hole with this many or fewer distinct facet directions
+# (snapped to 10° bins around the recovered axis) is classified as a
+# polygonal pocket rather than a smooth bore.  Standard CAD exports
+# tessellate round holes at 24-48 segments; nut traps and intentional
+# polygonal pockets land at 6-8.  The boundary at 8 captures both hex
+# (6) and octagonal (8) pockets while leaving 12-segment "coarse-but-
+# round" holes on the smooth side.
+_POLYGONAL_FACET_THRESHOLD: int = 8
+
+
+def _count_facet_directions_uv(
+    triangles_idx: list[int],
+    tri_normals: list[tuple[float, float, float]],
+    u_hat: tuple[float, float, float],
+    v_hat: tuple[float, float, float],
+    *,
+    snap_deg: float = 10.0,
+) -> int:
+    """Distinct face-normal directions in the cluster's (u, v) plane.
+
+    Used both by the public ``facet_segments`` field on detected holes
+    and by the sub-floor diagnostic split (polygonal pockets routed to
+    ``sub_floor_polygonal_clusters`` so printability can word the
+    recommendation accurately).
+    """
+    bins: set[int] = set()
+    for ti in triangles_idx:
+        n = tri_normals[ti]
+        n_u = n[0] * u_hat[0] + n[1] * u_hat[1] + n[2] * u_hat[2]
+        n_v = n[0] * v_hat[0] + n[1] * v_hat[1] + n[2] * v_hat[2]
+        angle_deg = math.atan2(n_v, n_u) * 180.0 / math.pi
+        bins.add(round(angle_deg / snap_deg))
+    return len(bins)
+
+
 def _basis_perpendicular_to(
     axis: tuple[float, float, float],
 ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
@@ -5805,12 +5847,22 @@ def _validate_cluster_against_axis(
                 )
             return None
 
-    # Step 5: radius bounds.
+    # Step 5: radius bounds.  Sub-floor rejects split by facet count
+    # so the printability layer can word the recommendation
+    # accurately — a 0.5 mm round bore needs "drill after printing,"
+    # a 0.5 mm hex pocket can't be drilled and is probably an
+    # intentional setscrew socket.
     if r_mean < min_radius:
         if diagnostics is not None:
-            diagnostics["sub_floor_clusters"] = (
-                diagnostics.get("sub_floor_clusters", 0) + 1
+            facet_count = _count_facet_directions_uv(
+                filtered, tri_normals, u_hat, v_hat,
             )
+            key = (
+                "sub_floor_polygonal_clusters"
+                if facet_count <= _POLYGONAL_FACET_THRESHOLD
+                else "sub_floor_clusters"
+            )
+            diagnostics[key] = diagnostics.get(key, 0) + 1
         return None
     if r_mean > max_radius:
         if diagnostics is not None:
@@ -5890,18 +5942,9 @@ def _validate_cluster_against_axis(
     # don't change behavior based on it, because the geometry of a
     # 6-segment "circle" and a 6-segment hex pocket is identical and
     # the intent isn't recoverable from the mesh alone.
-    facet_directions: set[int] = set()
-    for ti in filtered:
-        n = tri_normals[ti]
-        n_u = n[0] * u_hat[0] + n[1] * u_hat[1] + n[2] * u_hat[2]
-        n_v = n[0] * v_hat[0] + n[1] * v_hat[1] + n[2] * v_hat[2]
-        # 10° bins in the perpendicular plane (36 bins around the
-        # circle).  Snap with round-half-to-even — fine enough that a
-        # 24-segment cylinder gets 24 distinct bins, coarse enough
-        # that floating-point jitter on identical normals stays in
-        # the same bin.
-        angle_deg = math.atan2(n_v, n_u) * 180.0 / math.pi
-        facet_directions.add(round(angle_deg / 10.0))
+    facet_count = _count_facet_directions_uv(
+        filtered, tri_normals, u_hat, v_hat,
+    )
 
     return {
         "position": {
@@ -5913,5 +5956,5 @@ def _validate_cluster_against_axis(
         "depth_mm": round(depth, 3),
         "axis": axis_label,
         "triangle_count": len(filtered),
-        "facet_segments": len(facet_directions),
+        "facet_segments": facet_count,
     }

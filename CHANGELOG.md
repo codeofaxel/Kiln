@@ -117,6 +117,13 @@ the slicer would actually print.
   recommendations, kiln-pro overlays) can use the count to suppress
   hole-diameter warnings on intentional polygonal pockets without
   the detector having to guess intent from the mesh.
+- **Sub-floor pocket recommendations now match what you can
+  actually do about them.** A 0.5 mm round bore below the FDM
+  hole-printing floor gets the existing "enlarge in CAD or drill
+  after printing" recommendation; a 0.5 mm hex pocket gets a
+  different one that explicitly says drilling won't help and points
+  at the inscribed-dimension issue. Polygonal pockets used to get
+  the round-bore advice, which was misleading.
 
 ### Internal
 
