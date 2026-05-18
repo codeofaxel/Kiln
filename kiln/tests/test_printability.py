@@ -12,12 +12,14 @@ import pytest
 from kiln.printability import (
     BedAdhesionAnalysis,
     BridgingAnalysis,
+    CavityAnalysis,
     OverhangAnalysis,
     PrintabilityReport,
     SupportAnalysis,
     ThinWallAnalysis,
     _analyze_bed_adhesion,
     _analyze_bridging,
+    _analyze_cavity_widths,
     _analyze_overhangs,
     _analyze_supports,
     _analyze_thin_walls,
@@ -719,6 +721,107 @@ class TestThinWallAnalysis:
         verts = list({v for tri in tris for v in tri})
         d = _analyze_thin_walls(tris, verts).to_dict()
         assert "min_wall_thickness_mm" in d
+
+
+# ---------------------------------------------------------------------------
+# TestCavityAnalysis
+# ---------------------------------------------------------------------------
+
+
+def _plate_with_groove_triangles(
+    plate_xy: float = 40.0,
+    plate_z: float = 3.0,
+    groove_width_mm: float = 1.0,
+    groove_depth_mm: float = 0.5,
+    groove_length_mm: float = 20.0,
+) -> list[tuple]:
+    """Flat plate with a single rectangular groove along the X axis.
+
+    Mirrors the audit-extension engraved-plate fixture: outer plate
+    triangulated with the groove "cut out" of the top face, then the
+    groove's vertical walls + floor added inward.  Used to validate
+    that outward ray-casting from a groove side wall measures the
+    groove WIDTH (not the plate residual).
+    """
+    s = plate_xy / 2
+    gw = groove_width_mm / 2
+    gl = groove_length_mm / 2
+    z_top = plate_z
+    z_floor = plate_z - groove_depth_mm
+    # Outer plate corners.
+    o = [
+        (-s, -s, 0.0), (s, -s, 0.0), (s, s, 0.0), (-s, s, 0.0),
+        (-s, -s, z_top), (s, -s, z_top), (s, s, z_top), (-s, s, z_top),
+    ]
+    tris = []
+    tris += [(o[0], o[2], o[1]), (o[0], o[3], o[2])]  # bottom
+    tris += [(o[0], o[1], o[5]), (o[0], o[5], o[4])]  # -Y
+    tris += [(o[1], o[2], o[6]), (o[1], o[6], o[5])]  # +X
+    tris += [(o[2], o[3], o[7]), (o[2], o[7], o[6])]  # +Y
+    tris += [(o[3], o[0], o[4]), (o[3], o[4], o[7])]  # -X
+    # Top face with the groove rectangle punched out (4 strips around groove).
+    gt = [
+        (-gl, -gw, z_top), (gl, -gw, z_top),
+        (gl, gw, z_top), (-gl, gw, z_top),
+    ]
+    tris += [(o[4], o[5], gt[1]), (o[4], gt[1], gt[0])]
+    tris += [(o[5], o[6], gt[2]), (o[5], gt[2], gt[1])]
+    tris += [(o[6], o[7], gt[3]), (o[6], gt[3], gt[2])]
+    tris += [(o[7], o[4], gt[0]), (o[7], gt[0], gt[3])]
+    # Groove side walls (4 sides) going from z_top down to z_floor.
+    # Wind outward-INTO-cavity (so the cavity-width measurement, which
+    # casts outward from each face's centroid, sees the groove
+    # interior).  For the -Y wall (at y=-gw), outward = +Y; for the
+    # +X wall (at x=+gl), outward = -X; etc.
+    gb = [
+        (-gl, -gw, z_floor), (gl, -gw, z_floor),
+        (gl, gw, z_floor), (-gl, gw, z_floor),
+    ]
+    tris += [(gt[0], gt[1], gb[1]), (gt[0], gb[1], gb[0])]  # -Y wall, normal +Y
+    tris += [(gt[1], gt[2], gb[2]), (gt[1], gb[2], gb[1])]  # +X wall, normal -X
+    tris += [(gt[2], gt[3], gb[3]), (gt[2], gb[3], gb[2])]  # +Y wall, normal -Y
+    tris += [(gt[3], gt[0], gb[0]), (gt[3], gb[0], gb[3])]  # -X wall, normal +X
+    # Groove floor — outward normal +Z (out of the groove cavity).
+    tris += [(gb[0], gb[1], gb[2]), (gb[0], gb[2], gb[3])]
+    return tris
+
+
+class TestCavityAnalysis:
+    def test_clean_cube_no_cavities(self):
+        """A solid cube has no inward features — outward rays from each
+        face travel into open space and miss everything within the
+        cavity max-distance threshold.  Result: zero cavity samples,
+        0.0 sentinel for min_cavity_width_mm."""
+        tris = _outward_cube_triangles(10.0)
+        verts = list({v for tri in tris for v in tri})
+        result = _analyze_cavity_widths(tris, verts, nozzle_diameter=0.4)
+        assert result.cavity_sample_count == 0
+        assert result.min_cavity_width_mm == 0.0
+
+    def test_groove_width_measured_correctly(self):
+        """A 1 mm-wide groove cut into a 40 mm plate must read as a
+        1 mm cavity.  Outward rays from the groove's vertical side
+        walls travel across the groove opening to the opposite side
+        wall — that's the cavity width."""
+        tris = _plate_with_groove_triangles(groove_width_mm=1.0)
+        verts = list({v for tri in tris for v in tri})
+        result = _analyze_cavity_widths(tris, verts, nozzle_diameter=0.4)
+        assert result.cavity_sample_count > 0
+        # Within ray-cast precision (1e-4 origin offset bounds the
+        # reading slightly below the geometric width).
+        assert abs(result.min_cavity_width_mm - 1.0) < 0.05
+
+    def test_subperimeter_groove_detected(self):
+        """A 0.3 mm-wide groove (below the 0.4 mm nozzle floor) must
+        still be measured.  The kiln-pro overlay flags it as
+        ``unprintable``; the public measurement just returns the width.
+        Pre-fix: this fell through both wall and cavity analyses
+        because the wall path had the wrong ray direction."""
+        tris = _plate_with_groove_triangles(groove_width_mm=0.3)
+        verts = list({v for tri in tris for v in tri})
+        result = _analyze_cavity_widths(tris, verts, nozzle_diameter=0.4)
+        assert result.cavity_sample_count > 0
+        assert abs(result.min_cavity_width_mm - 0.3) < 0.05
 
 
 # ---------------------------------------------------------------------------
