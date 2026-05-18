@@ -61,6 +61,33 @@ class ThinWallAnalysis:
 
 
 @dataclass
+class CavityAnalysis:
+    """Results of cavity / engrave / slot width detection.
+
+    Sibling to ``ThinWallAnalysis`` but measures CAVITY DIMENSIONS rather
+    than wall thicknesses.  Rays cast OUTWARD from each surface triangle's
+    centroid; hits within ``_CAVITY_RAY_MAX_DIST_MM`` register a cavity
+    width.  Outer-surface rays hit nothing (they travel into open space
+    and get culled by the max-distance threshold), so only meaningful
+    cavities — engraved grooves, debossed text, narrow slots,
+    pocketed/inset features — produce signal.
+
+    ``min_cavity_width_mm`` is the smallest measured cavity (or 0.0
+    sentinel when no cavities are detected on the mesh).  Sub-perimeter
+    cavities flag as 'unprintable' in the kiln-pro overlay (the slicer
+    cannot reproduce a sub-extrusion gap; the feature closes up during
+    printing).
+    """
+
+    min_cavity_width_mm: float
+    cavity_sample_count: int  # samples whose outward ray hit within the cap
+    problematic_regions: list[dict[str, float]]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class BridgingAnalysis:
     """Results of bridging assessment."""
 
@@ -255,6 +282,12 @@ class PrintabilityReport:
     thermal_stress: ThermalStressAnalysis | None = None
     adhesion_force: AdhesionForceEstimate | None = None
     cost: CostAnalysis | None = None
+    # Cavity-width analysis — sibling to ``thin_walls`` measuring the
+    # dimensions of cavities cut INTO the mesh (engraved grooves,
+    # debossed text, narrow slots).  Outward ray-casting; sub-perimeter
+    # widths flag as ``unprintable`` in the kiln-pro overlay.  Defaults
+    # to ``None`` for clients that construct the report directly.
+    cavities: CavityAnalysis | None = None
     model_height_mm: float = 0.0
     recommendations: list[str] = field(default_factory=list)
     estimated_print_time_modifier: float = 1.0  # 1.0 = normal
@@ -1125,6 +1158,14 @@ _THIN_WALL_RAY_EPS_DET: float = 1e-6      # parallel-ray determinant cutoff
 _THIN_WALL_RAY_EPS_T: float = 1e-3        # self-hit cutoff (mm)
 _THIN_WALL_RAY_ORIGIN_OFFSET: float = 1e-4  # mm — nudge origin off the face
 
+# Outward (cavity) ray-cast: max distance considered a "cavity".  Engraved
+# grooves, debossed text, narrow slots have widths in the [0, ~5mm] band;
+# capping outward rays at 10 × nozzle (= 4 mm for the default 0.4 mm
+# nozzle) prevents outward rays from outer surfaces (which travel into
+# infinity) from registering spurious "cavities" at the build-volume
+# boundary.
+_CAVITY_RAY_MAX_DIST_MM: float = 10.0  # 10 × default nozzle (0.4 mm) = 4 mm
+
 
 def _analyze_thin_walls(
     triangles: list[tuple[tuple[float, ...], ...]],
@@ -1135,13 +1176,24 @@ def _analyze_thin_walls(
     """Measure thin walls via vectorized inward ray-casting.
 
     For each sampled surface triangle, cast a ray from its centroid
-    along the inward-pointing normal.  The distance to the next surface
-    intersection is the local wall thickness at that point — insensitive
-    to tessellation density, unlike the prior edge-length proxy.
+    along the inward-pointing normal.  The distance to the first
+    triangle intersection is the local wall thickness at that point —
+    insensitive to tessellation density, unlike the prior edge-length
+    proxy.
 
     Walls with measured thickness below ``nozzle_diameter`` are flagged
-    as thin.  ``min_wall_thickness_mm`` is set to the smallest such
-    measurement, or to the 0.0 sentinel when no thin walls are detected.
+    as thin.  ``min_wall_thickness_mm`` is the absolute smallest
+    measurement on the mesh; the 0.0 sentinel is reserved for
+    measurement failure on degenerate meshes.
+
+    Known limitation: on geometries where two convex bodies overlap
+    (lattice strut joints, intersecting struts), the first-hit
+    measurement reads the union's internal face at half-strut distance
+    rather than the true outer span — flagging lattice geometries as
+    artificially thin.  See ``THIN_WALL_KNOWLEDGE.md`` for the lattice
+    + thread + engrave-cavity feature classes that this measurement
+    under-handles.  Engraved-groove widths are measured separately by
+    :func:`_analyze_cavity_widths`.
     """
     total = len(triangles)
     if total < 4:
@@ -1205,11 +1257,6 @@ def _analyze_thin_walls(
             replace=False,
             p=(valid_areas / valid_areas.sum()),
         )
-        tgt_v0 = valid_centroids[target_idx] - (
-            (v1[valid_face][target_idx] + v2[valid_face][target_idx]) / 3.0
-            - (v0[valid_face][target_idx] + v1[valid_face][target_idx] + v2[valid_face][target_idx]) / 3.0
-        )
-        # Rebuild target geometry from the original triangle vertex array.
         tgt_v0 = v0[valid_face][target_idx]
         tgt_e1 = edge1[valid_face][target_idx]
         tgt_e2 = edge2[valid_face][target_idx]
@@ -1218,16 +1265,12 @@ def _analyze_thin_walls(
         tgt_e1 = edge1[valid_face]
         tgt_e2 = edge2[valid_face]
 
-    min_dist = _raycast_min_distances(
+    exit_dist = _raycast_min_distances(
         origins, directions, tgt_v0, tgt_e1, tgt_e2,
     )
 
-    finite_mask = np.isfinite(min_dist)
+    finite_mask = np.isfinite(exit_dist)
     if not finite_mask.any():
-        # No ray hit anything — measurement totally failed (typically
-        # non-manifold input or isolated triangles).  Return the 0.0
-        # sentinel so downstream consumers can distinguish "no signal"
-        # from "measured a thick wall".
         return ThinWallAnalysis(
             min_wall_thickness_mm=0.0,
             thin_wall_count=0,
@@ -1235,11 +1278,10 @@ def _analyze_thin_walls(
             problematic_regions=[],
         )
 
-    finite_dists = min_dist[finite_mask]
-    finite_origins = origins[finite_mask]
+    finite_dists = exit_dist[finite_mask]
     measured_min = float(finite_dists.min())
 
-    thin_mask = min_dist < nozzle_diameter
+    thin_mask = exit_dist < nozzle_diameter
     thin_count = int((thin_mask & finite_mask).sum())
     thin_pct = thin_count / n_sample * 100.0
 
@@ -1252,7 +1294,7 @@ def _analyze_thin_walls(
     # measurement failure on degenerate meshes.
     problematic: list[dict[str, float]] = []
     if thin_count > 0:
-        thin_dists = min_dist[thin_mask & finite_mask]
+        thin_dists = exit_dist[thin_mask & finite_mask]
         thin_origins = origins[thin_mask & finite_mask]
         order = np.argsort(thin_dists)[:5]
         for i in order:
@@ -1273,6 +1315,131 @@ def _analyze_thin_walls(
     )
 
 
+def _analyze_cavity_widths(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    vertices: list[tuple[float, ...]],
+    *,
+    nozzle_diameter: float = 0.4,
+) -> CavityAnalysis:
+    """Measure cavity widths via outward ray-casting.
+
+    Sibling to ``_analyze_thin_walls`` but measures the dimensions of
+    cavities cut INTO the mesh (engraved grooves, debossed text, narrow
+    slots, pocketed/inset features) rather than the thickness of walls
+    forming the mesh.  For each sampled surface triangle, cast a ray
+    from its centroid along the OUTWARD normal.  Hits within
+    ``_CAVITY_RAY_MAX_DIST_MM`` register a cavity width — outer-surface
+    rays travel into open space, miss everything, and contribute no
+    signal.
+
+    Sub-perimeter cavities (groove widths below the slicer's thinnest
+    extrusion) cannot be reproduced during printing; the kiln-pro
+    overlay flags these as ``unprintable``.  Material-specific floors
+    apply to the cavity dimensions exactly as they do to wall thicknesses.
+    """
+    total = len(triangles)
+    if total < 4:
+        return CavityAnalysis(
+            min_cavity_width_mm=0.0,
+            cavity_sample_count=0,
+            problematic_regions=[],
+        )
+
+    tris = np.asarray(triangles, dtype=np.float64)
+    if tris.ndim != 3 or tris.shape[1] != 3 or tris.shape[2] != 3:
+        return CavityAnalysis(0.0, 0, [])
+
+    v0 = tris[:, 0, :]
+    v1 = tris[:, 1, :]
+    v2 = tris[:, 2, :]
+    edge1 = v1 - v0
+    edge2 = v2 - v0
+
+    normals = np.cross(edge1, edge2)
+    norm_len = np.linalg.norm(normals, axis=1)
+    valid_face = norm_len > 1e-10
+    if not valid_face.any():
+        return CavityAnalysis(0.0, 0, [])
+
+    centroids_all = (v0 + v1 + v2) / 3.0
+    valid_centroids = centroids_all[valid_face]
+    # OUTWARD direction (the only difference from _analyze_thin_walls).
+    valid_outward = normals[valid_face] / norm_len[valid_face, None]
+    valid_areas = norm_len[valid_face] / 2.0
+
+    n_total = len(valid_centroids)
+    n_sample = min(_THIN_WALL_RAY_SAMPLE_CAP, n_total)
+    if n_total > n_sample:
+        rng = np.random.default_rng(0)
+        probs = valid_areas / valid_areas.sum()
+        sample_idx = rng.choice(n_total, size=n_sample, replace=False, p=probs)
+    else:
+        sample_idx = np.arange(n_total)
+
+    origins = (
+        valid_centroids[sample_idx]
+        + _THIN_WALL_RAY_ORIGIN_OFFSET * valid_outward[sample_idx]
+    )
+    directions = valid_outward[sample_idx]
+
+    if valid_face.sum() > _THIN_WALL_INTERSECTION_TRI_CAP:
+        rng_target = np.random.default_rng(1)
+        target_idx = rng_target.choice(
+            n_total,
+            size=_THIN_WALL_INTERSECTION_TRI_CAP,
+            replace=False,
+            p=(valid_areas / valid_areas.sum()),
+        )
+        tgt_v0 = v0[valid_face][target_idx]
+        tgt_e1 = edge1[valid_face][target_idx]
+        tgt_e2 = edge2[valid_face][target_idx]
+    else:
+        tgt_v0 = v0[valid_face]
+        tgt_e1 = edge1[valid_face]
+        tgt_e2 = edge2[valid_face]
+
+    # For cavities, the first hit IS the cavity width — outward rays
+    # don't need watertight tracking because there's no overlap to
+    # disambiguate (we're traveling through empty space until we hit
+    # the opposite cavity wall, or we miss the cavity entirely).
+    hit_dist = _raycast_min_distances(
+        origins, directions, tgt_v0, tgt_e1, tgt_e2,
+    )
+
+    # Cap at the cavity-distance threshold — anything longer is "ray
+    # exited the part into open space," not a cavity measurement.
+    cavity_mask = (hit_dist < _CAVITY_RAY_MAX_DIST_MM) & np.isfinite(hit_dist)
+    cavity_count = int(cavity_mask.sum())
+    if cavity_count == 0:
+        return CavityAnalysis(
+            min_cavity_width_mm=0.0,
+            cavity_sample_count=0,
+            problematic_regions=[],
+        )
+
+    cavity_dists = hit_dist[cavity_mask]
+    cavity_origins = origins[cavity_mask]
+    min_cavity = float(cavity_dists.min())
+
+    problematic: list[dict[str, float]] = []
+    order = np.argsort(cavity_dists)[:5]
+    for i in order:
+        problematic.append(
+            {
+                "x": round(float(cavity_origins[i, 0]), 2),
+                "y": round(float(cavity_origins[i, 1]), 2),
+                "z": round(float(cavity_origins[i, 2]), 2),
+                "width_mm": round(float(cavity_dists[i]), 3),
+            }
+        )
+
+    return CavityAnalysis(
+        min_cavity_width_mm=round(min_cavity, 3),
+        cavity_sample_count=cavity_count,
+        problematic_regions=problematic,
+    )
+
+
 def _raycast_min_distances(
     origins: np.ndarray,
     directions: np.ndarray,
@@ -1283,8 +1450,11 @@ def _raycast_min_distances(
     """Vectorized Möller-Trumbore ray-triangle intersection.
 
     For each ray, return the minimum positive hit distance against the
-    triangle set (``inf`` for rays that miss every triangle).  Chunks
-    rays so the intermediate broadcast (CHUNK × T × 3) stays bounded.
+    triangle set (``inf`` for rays that miss every triangle).  Used by
+    the outward cavity path where the first hit IS the cavity width —
+    no watertight tracking needed because there's no overlap to
+    disambiguate (rays travel through empty space until hitting the
+    opposite cavity wall or missing entirely).
     """
     n_rays = origins.shape[0]
     min_dist = np.full(n_rays, np.inf, dtype=np.float64)
@@ -2483,6 +2653,7 @@ def analyze_printability(
         overlay=judgment_overlay,
     )
     thin_walls = _analyze_thin_walls(triangles, vertices, nozzle_diameter=nozzle_diameter)
+    cavities = _analyze_cavity_widths(triangles, vertices, nozzle_diameter=nozzle_diameter)
     bridging = _analyze_bridging(
         triangles,
         z_min,
@@ -2713,6 +2884,7 @@ def analyze_printability(
         thermal_stress=thermal_stress,
         adhesion_force=adhesion_force,
         cost=cost,
+        cavities=cavities,
         model_height_mm=round(model_height, 2),
         recommendations=recommendations,
         estimated_print_time_modifier=round(time_mod, 2),
