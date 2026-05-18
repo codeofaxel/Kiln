@@ -461,15 +461,33 @@ class TestCrossFileConsistency:
 
 @pytest.fixture(scope="module")
 def compat_data() -> dict:
-    with open(COMPAT_FILE) as f:
-        return json.load(f)
+    """Printer-material compatibility matrix MERGED with the kiln-pro overlay.
+
+    Public file holds the status/upgrades_needed mechanical facts; the
+    overlay layers the curated SME notes back in (Phase 2 split,
+    2026-05-17).  Gated by requires_engineering_overlay so the test only
+    runs when the overlay is loaded.
+    """
+    from kiln.design_intelligence import _get_kb
+    merged = _get_kb().printer_compatibility
+    # Preserve the public _meta block by re-wrapping (the loader strips _meta
+    # but the test surfaces below filter underscore-keys, so this is fine).
+    return merged
 
 
 @pytest.fixture(scope="module")
 def printer_intel() -> dict:
-    with open(PRINTER_INTEL_FILE) as f:
-        data = json.load(f)
-    return {k: v for k, v in data.items() if not k.startswith("_")}
+    """Printer intelligence MERGED with the kiln-pro overlay.
+
+    Public file holds the spec sheet + per-material recipe numbers + the
+    structured has_input_shaping bool; the overlay layers quirks +
+    calibration recipes + failure_modes + per-material notes back in
+    (Phase 2 split, 2026-05-17).
+    """
+    from kiln.printer_intelligence import _load, _load_raw, _raw_cache
+    _load()         # ensure dataclass cache is primed
+    _load_raw()     # ensure raw cache is primed (also runs the overlay merge)
+    return dict(_raw_cache)
 
 
 class TestCompatibilityMatrix:
@@ -574,13 +592,21 @@ class TestCompatibilityMatrix:
 
 @pytest.fixture(scope="module")
 def troubleshoot_data() -> dict:
+    """Raw public file — used only by tests that don't read moat fields."""
     with open(TROUBLESHOOT_FILE) as f:
         return json.load(f)
 
 
 @pytest.fixture(scope="module")
-def troubleshoot(troubleshoot_data: dict) -> dict:
-    return {k: v for k, v in troubleshoot_data.items() if not k.startswith("_")}
+def troubleshoot() -> dict:
+    """Material troubleshooting MERGED with the kiln-pro overlay.
+
+    Public file holds the storage_requirements safety floor; the overlay
+    layers common_issues + break_in_tips back in (Phase 2 split,
+    2026-05-17).
+    """
+    from kiln.design_intelligence import _get_kb
+    return _get_kb().troubleshooting
 
 
 class TestTroubleshootingSchema:
@@ -665,8 +691,14 @@ class TestTroubleshootingSchema:
 
 @pytest.fixture(scope="module")
 def multi_mat_data() -> dict:
-    with open(MULTI_MAT_FILE) as f:
-        return json.load(f)
+    """Multi-material pairing MERGED with the kiln-pro overlay.
+
+    Public file holds pair skeletons + dissolution_method + ratings; the
+    overlay layers per-pair notes + general_rules back in (Phase 2 split,
+    2026-05-17).
+    """
+    from kiln.design_intelligence import _get_kb
+    return _get_kb().multi_material
 
 
 class TestMultiMaterialPairing:
@@ -742,13 +774,21 @@ class TestMultiMaterialPairing:
 
 @pytest.fixture(scope="module")
 def post_proc_data() -> dict:
+    """Raw public file — used only by tests that don't read moat fields."""
     with open(POST_PROC_FILE) as f:
         return json.load(f)
 
 
 @pytest.fixture(scope="module")
-def post_proc(post_proc_data: dict) -> dict:
-    return {k: v for k, v in post_proc_data.items() if not k.startswith("_")}
+def post_proc() -> dict:
+    """Post-processing MERGED with the kiln-pro overlay.
+
+    Public file holds technique skeleton + paintability bool + strengthening
+    skeleton; the overlay layers procedure/result/safety_notes/tradeoffs
+    prose back in (Phase 2 split, 2026-05-17).
+    """
+    from kiln.design_intelligence import _get_kb
+    return _get_kb().post_processing
 
 
 class TestPostProcessingGuide:

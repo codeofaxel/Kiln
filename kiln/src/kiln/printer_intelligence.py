@@ -100,6 +100,53 @@ _cache: dict[str, PrinterIntel] = {}
 _loaded: bool = False
 
 
+def _deep_merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge ``overlay`` into ``base``, returning a new dict.
+
+    Overlay values win on conflict; lists are replaced wholesale (matches
+    the helper in kiln.design_intelligence so the printer_intelligence
+    overlay merges the same way the other engineering-moat overlays do).
+    """
+    result = dict(base)
+    for key, value in overlay.items():
+        if (
+            key in result
+            and isinstance(result[key], dict)
+            and isinstance(value, dict)
+        ):
+            result[key] = _deep_merge_dicts(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def _merge_pro_overlay_if_available(public: dict[str, Any]) -> dict[str, Any]:
+    """Merge the kiln-pro printer_intelligence overlay into the public raw
+    dict.  Free tier (kiln-pro absent / no license / overlay unreachable)
+    returns ``public`` unchanged.  Pro+ tier gets the curated quirks,
+    calibration recipes, failure_modes, and per-material notes restored.
+
+    Phase 2 split (2026-05-17): public file carries the spec sheet +
+    per-material recipe numbers + the structured ``has_input_shaping``
+    bool; the curated prose moves here.  Audit:
+    kiln_pro/data/DESIGN_KNOWLEDGE_LEAK_AUDIT.md.
+    """
+    try:
+        from kiln_pro.data_overlays import load_overlay  # type: ignore[import-not-found]
+    except ImportError:
+        return public
+    try:
+        overlay = load_overlay("printer_intelligence")
+    except Exception as exc:
+        logger.warning(
+            "kiln-pro printer_intelligence overlay unavailable, "
+            "falling back to safety-floor: %s",
+            exc,
+        )
+        return public
+    return _deep_merge_dicts(public, overlay)
+
+
 def _load() -> None:
     global _loaded
     if _loaded:
@@ -111,6 +158,8 @@ def _load() -> None:
         logger.error("Failed to load printer intelligence: %s", exc)
         _loaded = True
         return
+
+    raw = _merge_pro_overlay_if_available(raw)
 
     for key, data in raw.items():
         if key == "_meta":
@@ -539,12 +588,21 @@ def _resolve_caps(printer_id: str) -> dict[str, Any] | None:
     #    derate to practical printing speeds.
     raw = _get_raw(normalised)
     if raw and "max_speed_mm_s" in raw:
+        # has_input_shaping is a structured textbook field on each printer
+        # entry (added in the Phase 2 catalog moat split, 2026-05-17).  We
+        # used to scan the curated quirks prose for "input shaping" — but
+        # that quirks list now lives in the Pro+ overlay, so free-tier
+        # callers wouldn't see it.  has_input_shaping stays in the public
+        # JSON for every printer, so the signal is preserved regardless of
+        # license tier.  Firmware fallback preserves behavior for any
+        # legacy entry that predates the field.
+        has_is = raw.get("has_input_shaping")
+        if has_is is None:
+            has_is = raw.get("firmware") in ("bambu", "klipper")
         return {
             "max_speed": int(raw["max_speed_mm_s"]),
             "max_accel": int(raw.get("max_acceleration_mm_s2", 5000)),
-            "input_shaping": "input shaping" in " ".join(raw.get("quirks", [])).lower()
-            or raw.get("firmware") == "bambu"
-            or raw.get("firmware") == "klipper",
+            "input_shaping": bool(has_is),
             "quality_factor": 0.50,  # conservative: hardware max != practical max
         }
 

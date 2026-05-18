@@ -2,294 +2,239 @@
   "_meta": {
     "version": "1.0.0",
     "domain": "fdm",
-    "description": "Material survival matrix for environment and exposure checks. Ratings are qualitative and intended for fast agent triage before geometry generation."
+    "description": "Material survival matrix for environment and exposure checks. Ratings are qualitative and intended for fast agent triage before geometry generation.",
+    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (per-block notes + cycle_life_estimates) is available in Kiln Pro; see https://kiln3d.com/pricing."
   },
   "pla": {
     "uv_resistance": {
       "rating": "poor",
-      "hours_to_noticeable_degradation": 80,
-      "notes": "Direct sun causes embrittlement and color fade quickly; not suitable for long outdoor service."
+      "hours_to_noticeable_degradation": 80
     },
     "temperature_range": {
       "min_service_c": -10,
-      "max_service_c": 50,
-      "notes": "Above 50-55C, creep and deformation accelerate rapidly."
+      "max_service_c": 50
     },
     "moisture": {
       "rating": "moderate",
       "immersion_safe": false,
       "absorption_pct": 0.4,
-      "swelling_risk": "low",
-      "notes": "Short wet exposure is usually fine, but long immersion and heat can hydrolyze PLA over time."
+      "swelling_risk": "low"
     },
     "chemicals": {
       "household_cleaners": "moderate",
       "oils_greases": "poor",
       "fuels": "poor",
       "solvents": "poor",
-      "acids": "poor",
-      "notes": "PLA is broadly vulnerable to solvents and fuel exposure."
+      "acids": "poor"
     },
     "vibration_fatigue": {
-      "rating": "poor",
-      "cycle_life_estimate": "~10k low-amplitude cycles before crack risk rises",
-      "notes": "Brittle failure mode limits repeated cyclic duty."
+      "rating": "poor"
     },
     "abrasion_resistance": {
-      "rating": "poor",
-      "notes": "Surface wears quickly under sliding contact."
+      "rating": "poor"
     }
   },
   "petg": {
     "uv_resistance": {
       "rating": "moderate",
-      "hours_to_noticeable_degradation": 500,
-      "notes": "Can survive periodic outdoor use, but long direct UV exposure eventually embrittles the surface."
+      "hours_to_noticeable_degradation": 500
     },
     "temperature_range": {
       "min_service_c": -20,
-      "max_service_c": 65,
-      "notes": "A common upper bound for functional parts; avoid prolonged loads above this range."
+      "max_service_c": 65
     },
     "moisture": {
       "rating": "good",
       "immersion_safe": true,
       "absorption_pct": 0.2,
-      "swelling_risk": "low",
-      "notes": "Low absorption makes PETG a practical choice for wet functional parts."
+      "swelling_risk": "low"
     },
     "chemicals": {
       "household_cleaners": "good",
       "oils_greases": "good",
       "fuels": "moderate",
       "solvents": "conditional",
-      "acids": "moderate",
-      "notes": "Resists many household chemicals; avoid aggressive solvent soak."
+      "acids": "moderate"
     },
     "vibration_fatigue": {
-      "rating": "moderate",
-      "cycle_life_estimate": "~500k moderate-load cycles",
-      "notes": "Reasonable resilience, but lower fatigue life than nylon."
+      "rating": "moderate"
     },
     "abrasion_resistance": {
-      "rating": "moderate",
-      "notes": "Adequate for intermittent sliding; not ideal for bearing surfaces."
+      "rating": "moderate"
     }
   },
   "abs": {
     "uv_resistance": {
       "rating": "poor",
-      "hours_to_noticeable_degradation": 200,
-      "notes": "UV exposure causes chalking and brittleness; use ASA for long-term sun."
+      "hours_to_noticeable_degradation": 200
     },
     "temperature_range": {
       "min_service_c": -20,
-      "max_service_c": 85,
-      "notes": "Suitable for warmer environments than PETG/PLA when printed well."
+      "max_service_c": 85
     },
     "moisture": {
       "rating": "moderate",
       "immersion_safe": true,
       "absorption_pct": 0.4,
-      "swelling_risk": "moderate",
-      "notes": "Handles occasional water contact; not ideal for long immersion precision parts."
+      "swelling_risk": "moderate"
     },
     "chemicals": {
       "household_cleaners": "moderate",
       "oils_greases": "good",
       "fuels": "moderate",
       "solvents": "poor",
-      "acids": "conditional",
-      "notes": "Avoid ketones/aromatic solvents; stress cracking can occur."
+      "acids": "conditional"
     },
     "vibration_fatigue": {
-      "rating": "good",
-      "cycle_life_estimate": "~1M moderate-load cycles",
-      "notes": "Tough matrix provides useful fatigue performance in impact-prone parts."
+      "rating": "good"
     },
     "abrasion_resistance": {
-      "rating": "good",
-      "notes": "Better wear behavior than PLA/PETG in many dry sliding applications."
+      "rating": "good"
     }
   },
   "tpu": {
     "uv_resistance": {
       "rating": "moderate",
-      "hours_to_noticeable_degradation": 600,
-      "notes": "Flexible parts tolerate outdoor use better than PLA, but prolonged UV still hardens material."
+      "hours_to_noticeable_degradation": 600
     },
     "temperature_range": {
       "min_service_c": -30,
-      "max_service_c": 80,
-      "notes": "Flexibility remains usable over wide temperatures, though stiffness changes with temperature."
+      "max_service_c": 80
     },
     "moisture": {
       "rating": "moderate",
       "immersion_safe": true,
       "absorption_pct": 1.0,
-      "swelling_risk": "moderate",
-      "notes": "Can be used in wet service, but dimensions can drift in long immersion."
+      "swelling_risk": "moderate"
     },
     "chemicals": {
       "household_cleaners": "good",
       "oils_greases": "good",
       "fuels": "conditional",
       "solvents": "poor",
-      "acids": "poor",
-      "notes": "Many TPU blends are solvent-sensitive; verify for specific filament chemistry."
+      "acids": "poor"
     },
     "vibration_fatigue": {
-      "rating": "outstanding",
-      "cycle_life_estimate": ">5M flex cycles in low-strain duty",
-      "notes": "Excellent for damping and repeated deformation components."
+      "rating": "outstanding"
     },
     "abrasion_resistance": {
-      "rating": "excellent",
-      "notes": "High wear resilience makes TPU suitable for bumpers and friction interfaces."
+      "rating": "excellent"
     }
   },
   "asa": {
     "uv_resistance": {
       "rating": "excellent",
-      "hours_to_noticeable_degradation": 2500,
-      "notes": "Designed for outdoor exposure; maintains color and toughness significantly longer than ABS."
+      "hours_to_noticeable_degradation": 2500
     },
     "temperature_range": {
       "min_service_c": -30,
-      "max_service_c": 85,
-      "notes": "Good weathering plus temperature stability for exterior fixtures."
+      "max_service_c": 85
     },
     "moisture": {
       "rating": "good",
       "immersion_safe": true,
       "absorption_pct": 0.3,
-      "swelling_risk": "low",
-      "notes": "Low moisture uptake supports stable dimensions in humid outdoor conditions."
+      "swelling_risk": "low"
     },
     "chemicals": {
       "household_cleaners": "good",
       "oils_greases": "good",
       "fuels": "good",
       "solvents": "moderate",
-      "acids": "conditional",
-      "notes": "Performs well in general outdoor/garage chemical contact, but avoid strong solvents."
+      "acids": "conditional"
     },
     "vibration_fatigue": {
-      "rating": "good",
-      "cycle_life_estimate": "~1.5M moderate-load cycles",
-      "notes": "Reliable for outdoor mounts and enclosures with moderate vibration."
+      "rating": "good"
     },
     "abrasion_resistance": {
-      "rating": "good",
-      "notes": "Stable surface wear for utility hardware and external housings."
+      "rating": "good"
     }
   },
   "nylon": {
     "uv_resistance": {
       "rating": "moderate",
-      "hours_to_noticeable_degradation": 700,
-      "notes": "Unfilled nylon outdoors benefits from UV-stable pigments or coatings for long life."
+      "hours_to_noticeable_degradation": 700
     },
     "temperature_range": {
       "min_service_c": -40,
-      "max_service_c": 80,
-      "notes": "Maintains toughness across broad temperatures; moisture state affects stiffness."
+      "max_service_c": 80
     },
     "moisture": {
       "rating": "poor",
       "immersion_safe": false,
       "absorption_pct": 2.5,
-      "swelling_risk": "high",
-      "notes": "High absorption can cause dimensional growth and property drift in humid or wet service."
+      "swelling_risk": "high"
     },
     "chemicals": {
       "household_cleaners": "good",
       "oils_greases": "excellent",
       "fuels": "excellent",
       "solvents": "good",
-      "acids": "conditional",
-      "notes": "Excellent for lubricated/mechanical environments, but strong acids can attack polyamide."
+      "acids": "conditional"
     },
     "vibration_fatigue": {
-      "rating": "excellent",
-      "cycle_life_estimate": "~3M moderate-load cycles",
-      "notes": "One of the best FDM materials for repeated cyclic loading."
+      "rating": "excellent"
     },
     "abrasion_resistance": {
-      "rating": "excellent",
-      "notes": "Low-friction and high wear resistance make nylon strong for gears and bushings."
+      "rating": "excellent"
     }
   },
   "polycarbonate": {
     "uv_resistance": {
       "rating": "moderate",
-      "hours_to_noticeable_degradation": 800,
-      "notes": "UV exposure causes yellowing and some property loss; UV-stabilized PC performs better."
+      "hours_to_noticeable_degradation": 800
     },
     "temperature_range": {
       "min_service_c": -40,
-      "max_service_c": 120,
-      "notes": "Highest practical service temperature among common desktop FDM materials."
+      "max_service_c": 120
     },
     "moisture": {
       "rating": "moderate",
       "immersion_safe": true,
       "absorption_pct": 0.7,
-      "swelling_risk": "moderate",
-      "notes": "Moderate uptake; dry-state assumptions are needed for precision and long-term stiffness."
+      "swelling_risk": "moderate"
     },
     "chemicals": {
       "household_cleaners": "conditional",
       "oils_greases": "good",
       "fuels": "good",
       "solvents": "poor",
-      "acids": "poor",
-      "notes": "Susceptible to environmental stress cracking with solvents and some cleaners."
+      "acids": "poor"
     },
     "vibration_fatigue": {
-      "rating": "excellent",
-      "cycle_life_estimate": "~2M moderate-load cycles",
-      "notes": "Combines high toughness with good fatigue behavior in structural duty."
+      "rating": "excellent"
     },
     "abrasion_resistance": {
-      "rating": "excellent",
-      "notes": "Robust wear resistance when printed with high interlayer fusion quality."
+      "rating": "excellent"
     }
   },
   "pvb": {
     "uv_resistance": {
       "rating": "poor",
-      "hours_to_noticeable_degradation": 60,
-      "notes": "PVB degrades rapidly under UV exposure — yellowing, embrittlement, and surface crazing. Indoor use only."
+      "hours_to_noticeable_degradation": 60
     },
     "temperature_range": {
       "min_service_c": -5,
-      "max_service_c": 55,
-      "notes": "Low heat deflection temperature limits PVB to cool indoor environments. Softens noticeably above 55C."
+      "max_service_c": 55
     },
     "moisture": {
       "rating": "poor",
       "immersion_safe": false,
       "absorption_pct": 2.0,
-      "swelling_risk": "high",
-      "notes": "Extremely hygroscopic. PVB absorbs moisture aggressively, causing dimensional swelling and mechanical degradation. Not suitable for wet or humid environments."
+      "swelling_risk": "high"
     },
     "chemicals": {
       "household_cleaners": "poor",
       "oils_greases": "poor",
       "fuels": "poor",
       "solvents": "poor",
-      "acids": "poor",
-      "notes": "PVB dissolves in isopropyl alcohol and many common solvents. Very poor chemical resistance overall. Avoid contact with alcohols, ketones, and most organic solvents."
+      "acids": "poor"
     },
     "vibration_fatigue": {
-      "rating": "poor",
-      "cycle_life_estimate": "~5k low-amplitude cycles before crack initiation",
-      "notes": "Weak interlayer adhesion makes PVB prone to delamination under cyclic loading. Not suitable for vibration-prone applications."
+      "rating": "poor"
     },
     "abrasion_resistance": {
-      "rating": "poor",
-      "notes": "Softer than PLA. Surface wears quickly under sliding contact. IPA-smoothed surfaces are slightly more durable but still not suitable for wear applications."
+      "rating": "poor"
     }
   }
 }

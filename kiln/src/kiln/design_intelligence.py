@@ -534,6 +534,40 @@ class _DesignKnowledgeBase:
             self._templates, "design_templates"
         )
 
+        # Phase 2 catalog moat splits (2026-05-17) — public files carry the
+        # safety floor + textbook math / spec sheets; the curated SME prose
+        # (troubleshooting playbooks, post-processing procedures, per-(printer,
+        # material) notes, environment notes, requirement worked examples,
+        # load-table caveats, multi-material chemistry notes, printer
+        # agent_notes) ships via these overlays when kiln-pro is installed.
+        # See kiln_pro/data/DESIGN_KNOWLEDGE_LEAK_AUDIT.md for the field-by-
+        # field classification.  printer_intelligence.json has its own loader
+        # (kiln/printer_intelligence.py); its merge call lives there.
+        self._troubleshooting = _merge_pro_overlay_if_available(
+            self._troubleshooting, "material_troubleshooting"
+        )
+        self._post_processing = _merge_pro_overlay_if_available(
+            self._post_processing, "post_processing"
+        )
+        self._printer_compatibility = _merge_pro_overlay_if_available(
+            self._printer_compatibility, "printer_material_compatibility"
+        )
+        self._environment = _merge_pro_overlay_if_available(
+            self._environment, "environment_compatibility"
+        )
+        self._requirements = _merge_pro_overlay_if_available(
+            self._requirements, "functional_requirements"
+        )
+        self._load_tables = _merge_pro_overlay_if_available(
+            self._load_tables, "load_tables"
+        )
+        self._multi_material = _merge_pro_overlay_if_available(
+            self._multi_material, "multi_material_pairing"
+        )
+        self._printers = _merge_pro_overlay_if_available(
+            self._printers, "printer_profiles"
+        )
+
         self._loaded = True
         logger.info(
             "Design knowledge loaded: %d materials, %d templates, %d requirements, "
