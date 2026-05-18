@@ -607,6 +607,43 @@ _OVERHANGS_PUBLIC_DEFAULTS: dict[str, Any] = {
 }
 
 
+def _resolve_overhang_threshold(
+    explicit: float | None,
+    material: str | None,
+    overlay: dict[str, Any] | None,
+) -> float:
+    """Centralized lookup: caller > overlay material > overlay default > 45°.
+
+    Single source of truth for the effective overhang threshold so the
+    overhang detector and the support-volume estimator stay synchronized.
+    Without this, ``_analyze_supports`` would silently use a different
+    threshold than ``_analyze_overhangs`` (which IS material-aware),
+    producing the contradictory report ``needs_supports=True`` with
+    ``estimated_support_volume_mm3=0`` for materials whose per-material
+    threshold falls below the supports estimator's 45° default.
+
+    Mirrors the lookup pattern inside ``_analyze_overhangs`` but exposes
+    it for callers that need the resolved value upstream (i.e.
+    ``analyze_printability``, which feeds both sub-analyses).
+    """
+    if explicit is not None:
+        return float(explicit)
+    cfg = (overlay or {}).get("overhangs") or _OVERHANGS_PUBLIC_DEFAULTS
+    material_limits = cfg.get("material_limits_deg") or {}
+    default_limit = cfg.get(
+        "default_limit_deg",
+        _OVERHANGS_PUBLIC_DEFAULTS["default_limit_deg"],
+    )
+    if material is not None:
+        normalized_target = material.strip().lower().replace(
+            "-", "_"
+        ).replace(" ", "_")
+        for key, val in material_limits.items():
+            if key.strip().lower().replace("-", "_").replace(" ", "_") == normalized_target:
+                return float(val)
+    return float(default_limit)
+
+
 def _check_rule_op(op: str, value: Any, threshold: Any) -> bool:
     """Compare ``value`` to ``threshold`` per ``op``.  False on any
     operator/value mismatch (forward-compat: unknown operators are
@@ -2157,9 +2194,20 @@ def analyze_printability(
     # recommendation templates from Pro+.
     judgment_overlay = load_pro_overlay_or_empty("printability_judgment")
 
+    # Resolve the effective overhang threshold ONCE so both
+    # ``_analyze_overhangs`` and ``_analyze_supports`` see the same
+    # value.  Without this, the support-volume estimator runs at the
+    # universal 45° rule while the overhang detector uses the
+    # per-material threshold — producing the contradictory report
+    # "TPU at 38° needs_supports=True, but supports.estimated_support_volume_mm3=0"
+    # because 38° is below the supports estimator's 45° floor.  Pin
+    # them together so the verdict and the volume estimate agree.
+    _resolved_threshold = _resolve_overhang_threshold(
+        max_overhang_angle, material, judgment_overlay,
+    )
     overhangs = _analyze_overhangs(
         triangles,
-        max_overhang_angle=max_overhang_angle,
+        max_overhang_angle=_resolved_threshold,
         z_min=z_min,
         layer_height=layer_height,
         normalize_winding=False,
@@ -2174,15 +2222,10 @@ def analyze_printability(
         normalize_winding=False,
     )
     bed_adhesion = _analyze_bed_adhesion(triangles, z_min, bbox, layer_height=layer_height)
-    # ``_analyze_supports`` still uses a single-threshold model — keep the
-    # 45° public floor here so support volume estimation doesn't
-    # depend on the per-material overlay.  The overhang detector
-    # already consumes the per-material threshold; supports follow
-    # the same family of fixes in a separate change.
     supports = _analyze_supports(
         triangles,
         z_min,
-        max_overhang_angle=max_overhang_angle if max_overhang_angle is not None else 45.0,
+        max_overhang_angle=_resolved_threshold,
         layer_height=layer_height,
         normalize_winding=False,
         bbox=bbox,

@@ -426,6 +426,97 @@ class TestOverhangMaterialAwareThreshold:
         assert r.overhang_triangle_count == 0
 
 
+class TestSupportsAndOverhangsAgreeOnThreshold:
+    """analyze_printability MUST pass the same per-material overhang
+    threshold to both _analyze_overhangs (the verdict) and
+    _analyze_supports (the volume estimate).  Without coordination,
+    the report contradicts itself for warp-prone materials:
+    ``overhangs.needs_supports=True`` but
+    ``supports.estimated_support_volume_mm3=0`` because the supports
+    estimator's old hardcoded 45° default is above the per-material
+    threshold for TPU (35°) / PP (40°).
+    """
+
+    def test_tpu_sub_45_overhang_produces_consistent_report(self, tmp_path):
+        """A 40° slope on TPU.  Per-material lookup says 35°, so the
+        overhang is real.  Without the shared-threshold fix,
+        supports.estimated_support_volume_mm3 stays at 0 because
+        _analyze_supports defaults to 45°.  With the fix, supports
+        reports a non-zero volume — the user gets a consistent
+        verdict + estimate pair."""
+        import math
+        # 40° outward-leaning wedge.
+        h_shift = 20.0 * math.tan(math.radians(40.0))
+        v = [
+            (0.0, 0.0, 0.0), (30.0, 0.0, 0.0),
+            (30.0, 30.0, 0.0), (0.0, 30.0, 0.0),
+            (-h_shift, 0.0, 20.0), (30.0 + h_shift, 0.0, 20.0),
+            (30.0 + h_shift, 30.0, 20.0), (-h_shift, 30.0, 20.0),
+        ]
+        faces = [
+            (0, 2, 1), (0, 3, 2),
+            (4, 5, 6), (4, 6, 7),
+            (0, 1, 5), (0, 5, 4),
+            (3, 7, 6), (3, 6, 2),
+            (1, 2, 6), (1, 6, 5),
+            (0, 4, 7), (0, 7, 3),
+        ]
+        tris = [(v[a], v[b], v[c]) for a, b, c in faces]
+        stl = tmp_path / "wedge_40.stl"
+        with open(stl, "wb") as f:
+            f.write(_make_binary_stl(tris))
+        report = analyze_printability(str(stl), material="TPU")
+        if not report.overhangs.needs_supports:
+            # The overlay isn't loaded in this environment (kiln-pro
+            # not installed, or its overhangs block is absent).  Skip
+            # the consistency check — there's nothing to be consistent
+            # about when both analyses run at the universal 45° floor.
+            return
+        # When overhang says needs_supports, supports estimate must
+        # also reflect a non-zero volume — same threshold drove both.
+        assert report.supports.estimated_support_volume_mm3 > 0.0, (
+            f"shared-threshold contract broken: overhangs.needs_supports="
+            f"{report.overhangs.needs_supports} (max_ovh="
+            f"{report.overhangs.max_overhang_angle}) but "
+            f"supports.estimated_support_volume_mm3="
+            f"{report.supports.estimated_support_volume_mm3} (should be > 0 "
+            f"since both analyses now use the per-material threshold)"
+        )
+
+
+class TestResolveOverhangThreshold:
+    """Unit-level coverage of the lookup helper that backs the
+    shared-threshold contract in analyze_printability."""
+
+    def test_explicit_caller_wins(self):
+        from kiln.printability import _resolve_overhang_threshold
+        overlay = {"overhangs": {"material_limits_deg": {"TPU": 35}}}
+        assert _resolve_overhang_threshold(50.0, "TPU", overlay) == 50.0
+
+    def test_per_material_lookup_used_when_no_explicit(self):
+        from kiln.printability import _resolve_overhang_threshold
+        overlay = {"overhangs": {"material_limits_deg": {"TPU": 35},
+                                  "default_limit_deg": 45.0}}
+        assert _resolve_overhang_threshold(None, "TPU", overlay) == 35.0
+
+    def test_default_used_for_unknown_material(self):
+        from kiln.printability import _resolve_overhang_threshold
+        overlay = {"overhangs": {"material_limits_deg": {"PLA": 50},
+                                  "default_limit_deg": 42.0}}
+        assert _resolve_overhang_threshold(None, "Unobtanium", overlay) == 42.0
+
+    def test_universal_45_when_no_overlay(self):
+        from kiln.printability import _resolve_overhang_threshold
+        assert _resolve_overhang_threshold(None, "TPU", None) == 45.0
+        assert _resolve_overhang_threshold(None, "TPU", {}) == 45.0
+
+    def test_case_insensitive_match(self):
+        from kiln.printability import _resolve_overhang_threshold
+        overlay = {"overhangs": {"material_limits_deg": {"TPU": 35}}}
+        assert _resolve_overhang_threshold(None, "tpu", overlay) == 35.0
+        assert _resolve_overhang_threshold(None, "Tpu", overlay) == 35.0
+
+
 # ---------------------------------------------------------------------------
 # TestThinWallAnalysis
 # ---------------------------------------------------------------------------
