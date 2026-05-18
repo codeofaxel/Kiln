@@ -43,21 +43,21 @@ the slicer would actually print.
   the slicer usually crosses the gap with a bridge rather than
   building a support tower. Kiln now flags those so you can force
   supports if you want a smoother bottom surface.
-- **Bridgeable cavities don't show as "needs supports" anymore.**
-  When the geometry clearly matches the bridge-substitution
-  pattern and the overhang is truly horizontal, the supports flag
-  drops and a single recommendation explains why — one consistent
-  answer instead of two contradictory ones.
+- **Smart bridging.** Kiln no longer tells you to add supports
+  when your printer can simply bridge across a small horizontal
+  gap on its own. One clear verdict with the reason.
 - **Kiln Pro tells you how many grams of filament your supports
   will use.** A number you can plan a spool around. Matches what
   your slicer will actually print — sticky filaments like PETG and
   TPU get bumped up because they take more to peel cleanly.
-- **Overhang detection knows your filament.** Free tier uses the
-  universal 45° rule; Kiln Pro tunes it per material — TPU gets
-  flagged at lower angles, PLA gets the slack it deserves.
-- **Support volume matches the overhang verdict.** A flagged
-  overhang always reports a non-zero support volume now — no more
-  "needs supports but estimate says zero" on warp-prone filaments.
+- **Overhang limits know your filament.** Bendy filaments like
+  TPU get flagged at steeper angles; stiff ones like PLA get more
+  leeway. (Free tier still uses the universal 45° rule of thumb;
+  Kiln Pro tunes it per material.)
+- **Support estimates always match the verdict.** If Kiln says
+  you need supports, it now always tells you roughly how much
+  filament those supports will take. No more "needs supports"
+  paired with a 0-gram estimate.
 - **Arched and pillared ceilings appear in the bridging report.**
   Curved doorway tops, colonnaded ceilings, rows of windows above
   pillars — each unsupported span shows up with its actual length,
@@ -90,12 +90,11 @@ the slicer would actually print.
 
 ### Fixed
 
-- Exact 45° slopes register as overhangs. A floating-point
-  edge case was letting canonical 45° walls slip past the
-  detector.
-- `audit_original_design` honors per-material thresholds. The
-  audit pipeline was forcing the universal 45° rule even when the
-  caller specified a filament.
+- Walls angled exactly 45° now get checked properly. A rounding
+  quirk was letting them sneak past the overhang check.
+- When you tell Kiln what filament you're using, design audits
+  now use that filament's actual overhang limit instead of
+  falling back to the generic 45° rule.
 - Support estimates no longer come back as zero on T-shapes,
   mushrooms, tabletops, umbrellas, and other shapes where the
   overhang sits above a narrower base.
