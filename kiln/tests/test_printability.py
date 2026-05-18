@@ -624,6 +624,202 @@ class TestBridgingAnalysis:
 
 
 # ---------------------------------------------------------------------------
+# TestBridgeAwareOverhangVerdict — analyze_printability downgrades
+# needs_supports=True → False when ALL THREE bridge-substitution
+# conditions align (bbox heuristic + bridge-length + horizontal
+# overhang).  Pins the 2026-05-17 PrusaSlicer cross-validation
+# finding that 5/64 audit cases (square_bridge / U_upside_down /
+# tabletop) get false-positive support flags otherwise.
+# ---------------------------------------------------------------------------
+
+
+def _make_short_bridge_triangles(span: float = 8.0, depth: float = 12.0) -> list[tuple]:
+    """π-shape (two pillars + horizontal top); top underside is a
+    horizontal overhang.  ``span`` ≤ 10mm keeps the bridge below the
+    universal slicing limit; bbox short axis stays ≤ 30mm to match
+    main's _likely_bridge_substituted heuristic.
+    """
+    pillar_w = 3.0
+    pillar_h = 15.0
+    top_thick = 3.0
+    z_top = pillar_h + top_thick
+    py2 = depth / 2
+    pillar_xs = (-(span / 2 + pillar_w), span / 2)
+    cs: list[tuple[float, float]] = [
+        (pillar_xs[0], 0.0),
+        (pillar_xs[0] + pillar_w, 0.0),
+        (pillar_xs[0] + pillar_w, pillar_h),
+        (pillar_xs[1], pillar_h),
+        (pillar_xs[1], 0.0),
+        (pillar_xs[1] + pillar_w, 0.0),
+        (pillar_xs[1] + pillar_w, z_top),
+        (pillar_xs[0], z_top),
+    ]
+    n = len(cs)
+    v: list[tuple[float, float, float]] = []
+    for (x, z) in cs:
+        v.append((x, -py2, z))
+    for (x, z) in cs:
+        v.append((x, py2, z))
+    faces: list[tuple[int, int, int]] = []
+    for i in range(n):
+        j = (i + 1) % n
+        a, b, c, d = i, j, n + j, n + i
+        faces.append((a, b, c))
+        faces.append((a, c, d))
+    for i in range(2, n):
+        faces.append((0, i - 1, i))
+        faces.append((n + 0, n + i, n + i - 1))
+    return [(v[a], v[b], v[c]) for a, b, c in faces]
+
+
+class TestBridgeAwareOverhangVerdict:
+    def test_short_bridge_downgrades_verdict(self, tmp_path):
+        """8mm horizontal bridge with no other overhangs.  bbox short
+        axis is 12mm (≤30mm gate passes); overhang regions cluster
+        within the bbox (clustering gate passes); overhang is 90°
+        horizontal (horizontal gate passes).  Two-gate correlator
+        downgrades needs_supports to False."""
+        tris = _make_short_bridge_triangles(span=8.0)
+        stl = tmp_path / "short_bridge.stl"
+        with open(stl, "wb") as f:
+            f.write(_make_binary_stl(tris))
+        report = analyze_printability(str(stl), material="PLA")
+        assert report.overhangs.max_overhang_angle >= 89.0
+        assert report.supports.likely_substituted_by_bridge
+        assert not report.overhangs.needs_supports, (
+            f"short bridge must downgrade verdict to no-supports-needed; "
+            f"got max_ovh={report.overhangs.max_overhang_angle}, "
+            f"likely_sub={report.supports.likely_substituted_by_bridge}, "
+            f"needs={report.overhangs.needs_supports}"
+        )
+
+    def test_wide_bbox_disables_bridge_substitution(self, tmp_path):
+        """A π-shape stretched to 35mm wide in BOTH bbox axes —
+        bbox short axis (35mm) exceeds main's 30mm gate, so
+        _likely_bridge_substituted returns False.  Correlator must
+        NOT downgrade because the bbox-substitution heuristic
+        disagrees."""
+        # span 35 means each pillar is at ±17.5; bbox spans 41.5 in X.
+        # depth 35 makes bbox short axis 35 → above the 30mm gate.
+        tris = _make_short_bridge_triangles(span=35.0, depth=35.0)
+        stl = tmp_path / "wide_bridge.stl"
+        with open(stl, "wb") as f:
+            f.write(_make_binary_stl(tris))
+        report = analyze_printability(str(stl), material="PLA")
+        assert report.overhangs.max_overhang_angle >= 89.0
+        assert not report.supports.likely_substituted_by_bridge, (
+            f"35mm bbox short axis must trip main's >30mm gate; "
+            f"got likely_sub={report.supports.likely_substituted_by_bridge}"
+        )
+        assert report.overhangs.needs_supports
+
+    def test_steep_non_horizontal_overhang_keeps_supports(self, tmp_path):
+        """60° outward-leaning wedge.  Bridging is fundamentally only
+        applicable to near-horizontal overhangs; a steep slope is NOT
+        bridgeable regardless of length.  Correlator must NOT downgrade."""
+        import math
+        height = 10.0
+        base_w = 8.0
+        base_d = 10.0
+        h_shift = height * math.tan(math.radians(60.0))
+        v = [
+            (0.0, 0.0, 0.0), (base_w, 0.0, 0.0),
+            (base_w, base_d, 0.0), (0.0, base_d, 0.0),
+            (-h_shift, 0.0, height), (base_w + h_shift, 0.0, height),
+            (base_w + h_shift, base_d, height), (-h_shift, base_d, height),
+        ]
+        faces = [
+            (0, 2, 1), (0, 3, 2),
+            (4, 5, 6), (4, 6, 7),
+            (0, 1, 5), (0, 5, 4),
+            (3, 7, 6), (3, 6, 2),
+            (1, 2, 6), (1, 6, 5),
+            (0, 4, 7), (0, 7, 3),
+        ]
+        tris = [(v[a], v[b], v[c]) for a, b, c in faces]
+        stl = tmp_path / "wedge_60.stl"
+        with open(stl, "wb") as f:
+            f.write(_make_binary_stl(tris))
+        report = analyze_printability(str(stl), material="PLA")
+        assert 55.0 <= report.overhangs.max_overhang_angle <= 65.0
+        assert report.overhangs.needs_supports
+
+    def test_no_overhang_stays_no_supports(self, tmp_path):
+        """No-overhang baseline.  Correlator must not flip a verdict
+        that was already False."""
+        tris = _outward_cube_triangles(20.0)
+        stl = tmp_path / "cube.stl"
+        with open(stl, "wb") as f:
+            f.write(_make_binary_stl(tris))
+        report = analyze_printability(str(stl), material="PLA")
+        assert not report.overhangs.needs_supports
+
+    def test_downgrade_surfaces_slicer_bridge_recommendation(self, tmp_path):
+        """When the correlator downgrades needs_supports=True → False,
+        the report must explain WHY via a top-of-list recommendation
+        so the user isn't left wondering whether their horizontal
+        overhang was missed.  Silent downgrade is worse UX than the
+        pre-fix 'needs supports + likely_substituted_by_bridge' pair —
+        at least the old version told the user something."""
+        tris = _make_short_bridge_triangles(span=8.0)
+        stl = tmp_path / "short_bridge.stl"
+        with open(stl, "wb") as f:
+            f.write(_make_binary_stl(tris))
+        report = analyze_printability(str(stl), material="PLA")
+        # Downgrade fired.
+        assert not report.overhangs.needs_supports
+        # And a recommendation explains the bridging delegation.
+        bridge_recs = [
+            r for r in report.recommendations
+            if "bridge" in r.lower() and "horizontal overhang" in r.lower()
+        ]
+        assert bridge_recs, (
+            f"bridge-substitution downgrade must surface a "
+            f"slicer-will-bridge recommendation; got: "
+            f"{report.recommendations}"
+        )
+        # The recommendation should sit FIRST so the user sees it
+        # ahead of generic guidance.
+        assert "bridge" in report.recommendations[0].lower()
+
+    def test_no_downgrade_means_no_bridge_recommendation(self, tmp_path):
+        """A 60° wedge (no downgrade should fire).  The bridge
+        recommendation must NOT appear — adding it on every steep
+        overhang would be noise."""
+        import math
+        a = math.radians(60.0)
+        h_shift = 10.0 * math.tan(a)
+        v = [
+            (0.0, 0.0, 0.0), (8.0, 0.0, 0.0),
+            (8.0, 10.0, 0.0), (0.0, 10.0, 0.0),
+            (-h_shift, 0.0, 10.0), (8.0 + h_shift, 0.0, 10.0),
+            (8.0 + h_shift, 10.0, 10.0), (-h_shift, 10.0, 10.0),
+        ]
+        faces = [
+            (0, 2, 1), (0, 3, 2),
+            (4, 5, 6), (4, 6, 7),
+            (0, 1, 5), (0, 5, 4),
+            (3, 7, 6), (3, 6, 2),
+            (1, 2, 6), (1, 6, 5),
+            (0, 4, 7), (0, 7, 3),
+        ]
+        tris = [(v[a], v[b], v[c]) for a, b, c in faces]
+        stl = tmp_path / "wedge_60.stl"
+        with open(stl, "wb") as f:
+            f.write(_make_binary_stl(tris))
+        report = analyze_printability(str(stl), material="PLA")
+        bridge_recs = [
+            r for r in report.recommendations
+            if "slicer will" in r.lower() and "bridge" in r.lower()
+        ]
+        assert not bridge_recs, (
+            f"non-downgrade case must NOT have a bridge recommendation; "
+            f"got: {bridge_recs}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # TestBedAdhesionAnalysis
 # ---------------------------------------------------------------------------
 

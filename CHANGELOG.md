@@ -43,6 +43,11 @@ the slicer would actually print.
   the slicer usually crosses the gap with a bridge rather than
   building a support tower. Kiln now flags those so you can force
   supports if you want a smoother bottom surface.
+- **Bridgeable cavities don't show as "needs supports" anymore.**
+  When the geometry clearly matches the bridge-substitution
+  pattern and the overhang is truly horizontal, the supports flag
+  drops and a single recommendation explains why — one consistent
+  answer instead of two contradictory ones.
 - **Kiln Pro tells you how many grams of filament your supports
   will use.** A number you can plan a spool around. Matches what
   your slicer will actually print — sticky filaments like PETG and
