@@ -945,7 +945,12 @@ def _analyze_overhangs(
 
         angle_from_down = math.degrees(math.acos(max(-1.0, min(1.0, -nz))))
         overhang_angle = max(0.0, 90.0 - angle_from_down)
-        if overhang_angle < max_overhang_angle:
+        # Epsilon-tolerant comparison so an exact 45.0° slope is
+        # classified as an overhang.  math.acos(sqrt(2)/2) returns
+        # 45.00000000000001° (one ULP above 45), making
+        # `90 - that` land at 44.99999999999999° — below 45.0 by
+        # one ULP, so a strict `<` filter skipped real 45° slopes.
+        if overhang_angle + 1e-9 < max_overhang_angle:
             continue
 
         overhang_count += 1
@@ -1230,7 +1235,12 @@ def _analyze_supports(
 
         angle_from_down = math.degrees(math.acos(max(-1.0, min(1.0, -nz))))
         overhang_angle = max(0.0, 90.0 - angle_from_down)
-        if overhang_angle < max_overhang_angle:
+        # Epsilon-tolerant comparison so an exact 45.0° slope is
+        # classified as an overhang.  math.acos(sqrt(2)/2) returns
+        # 45.00000000000001° (one ULP above 45), making
+        # `90 - that` land at 44.99999999999999° — below 45.0 by
+        # one ULP, so a strict `<` filter skipped real 45° slopes.
+        if overhang_angle + 1e-9 < max_overhang_angle:
             continue
 
         centroid = _triangle_centroid(tri[0], tri[1], tri[2])
