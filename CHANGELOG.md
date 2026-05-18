@@ -67,6 +67,9 @@ the slicer would actually print.
 
 ### Fixed
 
+- Exact 45° slopes register as overhangs. A floating-point
+  edge case was letting canonical 45° walls slip past the
+  detector.
 - Support estimates no longer come back as zero on T-shapes,
   mushrooms, tabletops, umbrellas, and other shapes where the
   overhang sits above a narrower base.
