@@ -96,8 +96,8 @@ the slicer would actually print.
 - Support percentage no longer reports above 100% on rare
   thin-disc-on-tall-post geometries.
 - **Hole detection works on tilted parts.** No more straightening
-  required. Parts coming out of slicer auto-orient or hand-tilted
-  CAD exports (typically 15–30° off) used to silently produce zero
+  required. Parts coming out of slicer auto-orient or any other
+  tilt source (typically 15–30° off) used to silently produce zero
   hole warnings; now the detector recovers each hole's axis from
   its own geometry, so 3°, 30°, 45° — any tilt — surfaces the
   same warnings a flat-laid part would.
@@ -107,9 +107,8 @@ the slicer would actually print.
   cluster's normal budget; the detector now tries every principal
   direction of the cluster as a candidate axis and keeps just the
   cylinder wall for the radius fit. Sparse-mesh cylinders (6-8
-  segments — rare in CAD exports, common in low-poly props) also
-  stay together where the previous version shattered them on a
-  floating-point boundary.
+  segments — common in low-poly props) also stay together where
+  the previous version shattered them on a floating-point boundary.
 - **Hex pockets are distinguishable from drilled holes.** Each
   detected hole carries a new `facet_segments` field: smoothly
   tessellated round bores report 20-48 facets, hex nut traps
