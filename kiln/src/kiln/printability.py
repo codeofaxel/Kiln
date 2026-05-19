@@ -1246,9 +1246,12 @@ def _compute_mesh_genus(
     should treat ``genus < 0`` as a "mesh isn't closed, no topology
     signal" sentinel rather than a structural fact.
 
-    Pure numpy.  Shares the vertex-dedup + edge-sort scheme with
-    ``_label_mesh_components`` so the cost adds ~50 ms on a 100 k-tri
-    mesh on top of the existing component-labelling pass.
+    Pure numpy.  Shares the vertex-dedup + edge-canonicalize scheme
+    with ``_label_mesh_components``.  Measured on a 100 k-tri torus:
+    ``_compute_mesh_genus`` takes ~235 ms, similar to the existing
+    ``_label_mesh_components`` cost (~260 ms) — roughly doubles the
+    topology-pass budget rather than the ~50 ms I initially eyeballed
+    before benchmarking.
     """
     T = triangles.shape[0]
     if T == 0 or n_components <= 0:
