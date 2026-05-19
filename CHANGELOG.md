@@ -68,6 +68,12 @@ the slicer would actually print.
   1.5 mm lattice bar reads at 1.5 mm regardless of joint geometry.
 - **Helical-surface filter on thin-wall probes.** Threaded rods and
   springs report at their structural thickness.
+- **Pro+ measures your rod's actual diameter.** Threaded rods,
+  springs, and knurled grips come back with two concrete numbers
+  — the rod's structural cross-section and the depth of its
+  surface features — when you have Kiln Pro. Replaces the
+  free-tier "this reading might be measuring surface texture"
+  qualifier with hard numbers.
 - **Cavity-width check** for engraved grooves, slot cuts, and
   debossed text — narrow cuts below the slicer's extrusion floor
   now show up with their actual widths.
