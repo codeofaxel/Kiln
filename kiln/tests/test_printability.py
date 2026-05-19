@@ -1524,6 +1524,35 @@ class TestAnalyzePrintability:
                 "or sign-flip in the Euler-char formula"
             )
 
+    def test_sliver_chord_floor_filters_sub_50um_measurements(self):
+        # ``_SLIVER_CHORD_FLOOR_MM`` drops chord measurements below
+        # 0.05 mm before computing ``min_wall_thickness_mm``.  No
+        # physical FDM nozzle is smaller than 0.2 mm; sub-50 µm chords
+        # are measurement artefacts (round-4 topology audit identified
+        # the gyroid boundary-sliver class).
+        #
+        # This test pins the constant against accidental zeroing.
+        # Behavior coverage for "normal walls pass through the filter
+        # unchanged" comes from existing thin-wall tests like
+        # ``test_lattice_15mm_strut_reads_full_strut`` (a 1.5 mm strut
+        # passes through the ``non_sliver.size > 0`` branch and reads
+        # 1.5 mm).
+        from kiln.printability import _SLIVER_CHORD_FLOOR_MM
+        assert _SLIVER_CHORD_FLOOR_MM == 0.05, (
+            f"sliver-chord floor changed from documented 50 µm to "
+            f"{_SLIVER_CHORD_FLOOR_MM*1000:.0f} µm — verify the change "
+            f"is intentional and update the constant's docstring"
+        )
+
+        # Sanity: a clean cube reads ~10 mm and isn't affected by the
+        # filter (every chord is well above 50 µm).
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _outward_cube_triangles(10.0))
+            report = analyze_printability(path)
+            assert report.thin_walls.min_wall_thickness_mm > 1.0, (
+                "filter accidentally drops normal-thickness measurements"
+            )
+
     def test_genus_on_open_tube_is_anomalous(self):
         # Closed-formula genus assumes a closed orientable manifold.
         # Pin the documented caveat: a tube (cube with both Z-axis

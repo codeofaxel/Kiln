@@ -1219,6 +1219,23 @@ _CAVITY_RAY_MIN_MAX_DIST_MM: float = 10.0  # 10 × default nozzle (0.4 mm) = 4 m
 # while the thread-cap artifact class is filtered.
 _THIN_WALL_MIN_PERPENDICULAR_DOT: float = 0.85
 
+# Sliver-chord floor for the ``min_wall_thickness_mm`` aggregation.
+# Chord measurements below this value are physically implausible — the
+# smallest commercial FDM nozzle is 0.2 mm (200 µm) and every realistic
+# wall is well above the 50 µm floor here.  Sub-floor readings
+# typically arise at the boundary of curved surfaces clipped to a
+# bounding box (the round-4 topology audit identified this on gyroid
+# fixtures, where a 0.5 mm strut produced a 0.05 mm chord reading
+# because the curved sheet grazes the box face at a thin angle).
+# Filtering them out before computing the per-mesh minimum makes the
+# surfaced number reflect actual wall thickness rather than
+# measurement artefacts.
+#
+# If every chord on a mesh is sub-floor (degenerate / non-manifold),
+# the filter falls through to the original min so the consumer sees
+# the anomaly rather than a silenced no-signal.
+_SLIVER_CHORD_FLOOR_MM: float = 0.05
+
 
 
 def _compute_mesh_genus(
@@ -1496,7 +1513,18 @@ def _analyze_thin_walls(
         )
 
     finite_dists = exit_dist[finite_mask]
-    measured_min = float(finite_dists.min())
+    # Sliver-chord filter — drop measurements below the physical floor
+    # (50 µm; well under any nozzle).  Sub-floor chords typically come
+    # from boundary slivers where curved surfaces graze the bounding
+    # box at a thin angle (round-4 topology audit, gyroid clipping).
+    # Fall through to the raw min when every chord is sub-floor
+    # (degenerate mesh) so the consumer sees the anomaly rather than
+    # a silenced no-signal.
+    non_sliver = finite_dists[finite_dists >= _SLIVER_CHORD_FLOOR_MM]
+    if non_sliver.size > 0:
+        measured_min = float(non_sliver.min())
+    else:
+        measured_min = float(finite_dists.min())
 
     thin_mask = exit_dist < nozzle_diameter
     thin_count = int((thin_mask & finite_mask).sum())
