@@ -1524,6 +1524,43 @@ class TestAnalyzePrintability:
                 "or sign-flip in the Euler-char formula"
             )
 
+    def test_genus_on_open_tube_is_anomalous(self):
+        # Closed-formula genus assumes a closed orientable manifold.
+        # Pin the documented caveat: a tube (cube with both Z-axis
+        # caps removed → 2 boundary loops) is physically genus 0 — it
+        # deforms to a flat strip — but the Euler formula returns
+        # ``g = 1`` because the formula collapses the boundary-loop
+        # count into the genus term (χ = 2 − 2g − b, but the formula
+        # here assumes b = 0).
+        #
+        # Pinning this anomaly serves two purposes: (1) verifies the
+        # docstring claim that non-closed meshes produce non-physical
+        # values, (2) gives a regression target if someone later
+        # makes the formula boundary-aware (then this test would
+        # newly read 0 and need updating to match the corrected
+        # behavior).  Consumers should pair genus with
+        # ``is_manifold`` and ignore the value on non-closed meshes.
+        full = _outward_cube_triangles(10.0)
+        # The cube's first 4 triangles are bottom (-Z) and top (+Z)
+        # — see _outward_cube_triangles winding.  Drop them to leave
+        # only the 4 vertical side faces (8 triangles).
+        tube = full[4:]
+        with tempfile.TemporaryDirectory() as tmp_full, \
+             tempfile.TemporaryDirectory() as tmp_tube:
+            full_path = _write_stl(tmp_full, full)
+            tube_path = _write_stl(tmp_tube, tube)
+            assert analyze_printability(full_path).genus == 0, (
+                "closed cube control reads non-zero genus — formula bug"
+            )
+            tube_report = analyze_printability(tube_path)
+            assert tube_report.genus == 1, (
+                f"open tube reads genus {tube_report.genus} — expected "
+                "the documented anomaly (formula returns 1, true "
+                "physical genus is 0).  Either the formula gained "
+                "boundary awareness (good — update the field docstring "
+                "and this test) or the test mesh isn't actually a tube"
+            )
+
     def test_genus_cubic_lattice_caught_by_n_components_not_genus(self):
         # Cubic lattice composed of disjoint bars: each bar is a closed
         # box (genus 0), the total is the sum (0).  The strut classifier

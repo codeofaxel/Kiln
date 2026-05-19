@@ -341,15 +341,17 @@ class PrintabilityReport:
     # Euler characteristic χ = V − E + F.  Counts independent "holes
     # through the body" — a closed solid is 0, a torus (or a plate with
     # one through-hole) is 1, a curved lattice infill (gyroid / TPMS) is
-    # many.  Complements ``connected_components`` for the kiln-pro
+    # typically tens to hundreds (roughly one handle per period of the
+    # surface).  Complements ``connected_components`` for the kiln-pro
     # overlay's strut classifier: cubic lattices fragment into many
     # disjoint bars (n_components catches them, genus does not), while
     # curved lattice infills are one connected scaffold with many
     # handles (genus catches them, n_components does not).  Together
-    # the two signals cover both lattice families.  Negative values
-    # indicate a non-closed / non-manifold mesh where the formula
-    # doesn't apply; clients should treat anything < 0 as no signal.
-    # Defaults to 0.
+    # the two signals cover both lattice families.  Non-closed /
+    # non-manifold meshes produce anomalous values that don't match
+    # the physical handle count; consumers should not treat the
+    # number as authoritative when ``is_manifold`` is False or when
+    # the mesh is otherwise known-open.  Defaults to 0.
     genus: int = 0
 
     def to_dict(self) -> dict[str, Any]:
@@ -1240,11 +1242,12 @@ def _compute_mesh_genus(
     nature and Pro otherwise applies continuous-wall semantics.
 
     Returns 0 for empty / degenerate meshes.  Returns a non-negative
-    integer in the closed-manifold case.  Can return NEGATIVE values
-    for non-closed / non-manifold meshes (boundary edges aren't
-    paired so V/E/F drift from the closed-formula identity); callers
-    should treat ``genus < 0`` as a "mesh isn't closed, no topology
-    signal" sentinel rather than a structural fact.
+    integer in the closed-manifold case.  Returns ANOMALOUS values
+    (typically 0–2, not matching the physical handle count) on
+    non-closed or non-manifold meshes — boundary edges aren't paired
+    so V/E/F drift from the closed-formula identity.  Consumers
+    should pair this with the ``is_manifold`` flag from the report
+    and ignore the genus value when the mesh isn't a closed manifold.
 
     Pure numpy.  Shares the vertex-dedup + edge-canonicalize scheme
     with ``_label_mesh_components``.  Measured on a 100 k-tri torus:
