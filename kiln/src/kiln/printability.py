@@ -2990,12 +2990,17 @@ def analyze_printability(
     component_count = 0
     component_size_uniformity = 0.0
     mesh_genus = 0
+    # Numpy view of triangles, kept around so the kiln-pro enrichment
+    # call can pass it through to the Pro+ rod-feature analyzer
+    # (computed there, not here — the algorithm is a Pro-tier wedge).
+    tris_arr_for_pro: np.ndarray | None = None
     if len(triangles) > 0:
         try:
             tris_arr = np.asarray(triangles, dtype=np.float64)
             comp_ids = _label_mesh_components(tris_arr)
             component_count = int(comp_ids.max() + 1)
             mesh_genus = _compute_mesh_genus(tris_arr, component_count)
+            tris_arr_for_pro = tris_arr
             if component_count >= 2:
                 # Per-component bbox volume: max-min along each axis.
                 # Coefficient of variation (std / mean) measures spread;
@@ -3028,6 +3033,7 @@ def analyze_printability(
             component_count = 0
             component_size_uniformity = 0.0
             mesh_genus = 0
+            tris_arr_for_pro = None
     bridging = _analyze_bridging(
         triangles,
         z_min,
@@ -3294,24 +3300,43 @@ def analyze_printability(
                     printer_id=printer_id,
                     nozzle_diameter_mm=nozzle_diameter,
                     slicer_style=slicer_style,
+                    mesh_triangles=tris_arr_for_pro,
                 )
             except TypeError:
-                # Older kiln-pro that pre-dates one of the kwargs
-                # (nozzle_diameter_mm and / or slicer_style). Retry
-                # without either so this public surface stays
-                # forward-compatible with multiple kiln-pro vintages.
-                # When the installed kiln-pro picks up the parameters,
-                # the user's nozzle starts scaling per-material floors
-                # AND supports_calibration starts shipping in the
-                # enrichment block.
-                try:
-                    enriched = pro_features.printability_overlay.enrich_printability_report(
-                        report.to_dict(),
-                        material=material,
-                        printer_id=printer_id,
-                    )
-                except Exception:  # noqa: BLE001
-                    enriched = None
+                # Older kiln-pro that pre-dates one of the newer kwargs.
+                # Retry shedding the freshest one first, then the next,
+                # so this public surface stays forward-compatible with
+                # multiple kiln-pro vintages.  ``mesh_triangles`` is the
+                # 2026-05-19 addition; ``nozzle_diameter_mm`` /
+                # ``slicer_style`` arrived earlier.  When the installed
+                # kiln-pro picks up each parameter, the user's nozzle
+                # starts scaling per-material floors, supports_calibration
+                # starts shipping in the enrichment block, and rod_features
+                # starts populating on rod-like meshes.
+                enriched = None
+                for kwargs in (
+                    {
+                        "material": material,
+                        "printer_id": printer_id,
+                        "nozzle_diameter_mm": nozzle_diameter,
+                        "slicer_style": slicer_style,
+                    },
+                    {
+                        "material": material,
+                        "printer_id": printer_id,
+                    },
+                ):
+                    try:
+                        enriched = pro_features.printability_overlay.enrich_printability_report(
+                            report.to_dict(),
+                            **kwargs,
+                        )
+                        break
+                    except TypeError:
+                        continue
+                    except Exception:  # noqa: BLE001
+                        enriched = None
+                        break
             except Exception:  # noqa: BLE001
                 # Overlay failure must never break the public path.
                 enriched = None
