@@ -37,6 +37,8 @@ from kiln.printer_intelligence import (
 )
 from kiln.slicer_profiles import _DATA_FILE as _SLICER_DATA_FILE
 
+from .conftest import requires_printer_intelligence_overlay
+
 CREALITY_PROFILE_IDS = {
     "ender3",
     "ender3_s1",
@@ -200,6 +202,7 @@ class TestGetPrinterIntel:
         assert intel.capabilities["cfs_compatible"] is False
         assert intel.capabilities["multicolor_system"] == "none"
 
+    @requires_printer_intelligence_overlay
     def test_all_creality_profiles_have_capability_schema(self) -> None:
         for printer_id in CREALITY_PROFILE_IDS:
             intel = get_printer_intel(printer_id)
@@ -330,6 +333,7 @@ class TestGetMaterialSettings:
 class TestDiagnoseIssue:
     """Tests for diagnose_issue() symptom matching."""
 
+    @requires_printer_intelligence_overlay
     def test_ender3_under_extrusion(self) -> None:
         matches = diagnose_issue("ender3", "under-extrusion")
         assert len(matches) >= 1
@@ -337,6 +341,7 @@ class TestDiagnoseIssue:
         symptoms = [m["symptom"] for m in matches]
         assert any("Under-extrusion" in s or "under-extrusion" in s.lower() for s in symptoms)
 
+    @requires_printer_intelligence_overlay
     def test_ender3_stringing(self) -> None:
         matches = diagnose_issue("ender3", "stringing")
         assert len(matches) >= 1
@@ -357,10 +362,12 @@ class TestDiagnoseIssue:
         matches = diagnose_issue("default", "anything")
         assert matches == []
 
+    @requires_printer_intelligence_overlay
     def test_bambu_x1c_ams_issue(self) -> None:
         matches = diagnose_issue("bambu_x1c", "AMS")
         assert len(matches) >= 1
 
+    @requires_printer_intelligence_overlay
     def test_qidi_x_plus3_firmware_issue(self) -> None:
         matches = diagnose_issue("qidi_x_plus3", "firmware")
         assert len(matches) >= 1
@@ -518,6 +525,7 @@ class TestFailureMode:
 class TestPrinterIntelStructure:
     """Tests for PrinterIntel field types and structure."""
 
+    @requires_printer_intelligence_overlay
     def test_quirks_is_list(self) -> None:
         intel = get_printer_intel("ender3")
         assert isinstance(intel.quirks, list)
@@ -528,6 +536,7 @@ class TestPrinterIntelStructure:
         for q in intel.quirks:
             assert isinstance(q, str)
 
+    @requires_printer_intelligence_overlay
     def test_calibration_is_dict(self) -> None:
         intel = get_printer_intel("ender3")
         assert isinstance(intel.calibration, dict)

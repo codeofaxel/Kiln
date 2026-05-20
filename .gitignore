@@ -42,12 +42,21 @@ AGENTS.md
 fly.toml
 deploy.sh
 Dockerfile.api
-scripts/
+# scripts/ is operator-private by default — ignore contents, but allow
+# the directory itself to exist so surgical exceptions below can
+# re-include named files.  `scripts/*` (not `scripts/`) is the right
+# form: ignoring the directory rules-out re-including children.
+scripts/*
 # …with a surgical exception for the marketing site's CI-relevant
 # build helpers, which need to be tracked so .github/workflows can
 # run them and contributors can read what they do.
 !docs/site/scripts/
 !docs/site/scripts/**
+# …and for the wheel-inventory release gate, which runs in
+# publish.yml before SBOM/sign/upload to assert the wheel ships the
+# catalogs, OpenSCAD libraries, and printer g-code files that runtime
+# code depends on — prevents `package-data` glob regressions.
+!scripts/audit_wheel_inventory.py
 
 # Internal working docs (backed up via iCloud)
 .dev

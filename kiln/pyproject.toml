@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kiln3d"
-version = "1.1.2"
+version = "1.1.3"
 description = "MCP server + CLI that gives AI agents safe access to 3D printers (OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo) — 800 MCP capabilities for AI-driven print workflows"
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
@@ -115,4 +115,32 @@ ignore = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-kiln = ["data/*.json", "py.typed", "generation/scad_library/*.scad"]
+# Ship the kiln/data tree completely so pip-installed users get the same
+# files the source tree carries: design-knowledge catalogs (read by
+# design_intelligence.py / printability.py / assembly.py), BOSL2 +
+# MCAD OpenSCAD libraries (resolved at runtime when generated SCAD uses
+# `include <BOSL2/...>` or `<MCAD/...>`), Bambu A1 g-code wrappers
+# (read by printers/bambu_3mf.py), and third-party LICENSE files
+# (legal compliance — BOSL2 BSD-2-Clause, MCAD LGPL-2.1).
+#
+# Why the recursive globs: prior `data/*.json` was non-recursive and
+# silently dropped data/design_knowledge/**, data/scad_libraries/BOSL2/**,
+# data/scad_libraries/MCAD/**, and the A1 .gcode wrappers from every
+# PyPI wheel since v0.3.3.  Runtime code at `_DATA_DIR / "<...>"` gates on
+# `path.exists()` so most callers got silently-degraded fallbacks instead
+# of crashes; A1 connectivity hit a hard exception because bambu_3mf.py
+# raises when the gcode file is missing.  Audit caught it 2026-05-19.
+#
+# When adding a new data file type under kiln/data/, extend this list
+# rather than relying on the default-include behavior — `package-data`
+# is the source of truth for what reaches a pip-installed user's disk.
+kiln = [
+    "data/*.json",
+    "data/*.gcode",
+    "data/design_knowledge/*.json",
+    "data/scad_libraries/BOSL2/*.scad",
+    "data/scad_libraries/BOSL2/LICENSE",
+    "data/scad_libraries/MCAD/*.scad",
+    "py.typed",
+    "generation/scad_library/*.scad",
+]

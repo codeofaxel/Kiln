@@ -2829,7 +2829,7 @@ def _auto_derive_brief_id(printer_file_name: str | None) -> str:
     the brief_id surface (the empty-string-means-absent convention used
     by every ``brief_id: str = ""`` param).  Best-effort throughout.
 
-    Why this exists: Jobs' design call on B10 — the user shouldn't have
+    Why this exists: B10 design call — the user shouldn't have
     to remember which goal a print belongs to when they call
     ``monitor_print()``.  The upload manifest (populated by
     ``upload_file``) provides the source-path link; the source's intent
@@ -8212,7 +8212,7 @@ def await_print_completion(
     # terminal-state response so the agent always sees the goal
     # alongside the outcome.  When the caller didn't supply a brief_id,
     # try to derive one from the currently-printing file's intent
-    # sidecar (via the upload manifest) — Jobs' design call from the
+    # sidecar (via the upload manifest) — design call from the
     # original B10 review.  Best-effort throughout.
     effective_brief_id = brief_id
     if not effective_brief_id:

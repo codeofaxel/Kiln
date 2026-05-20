@@ -3,6 +3,37 @@
 import json
 import struct
 
+import pytest
+
+
+def _overlay_available() -> bool:
+    """True when kiln-pro's printability overlay is loaded.
+
+    Mirrors the helper in test_adhesion_force.py — used to skip
+    Pro-tier tests in a clean public-Kiln CI environment.
+    """
+    try:
+        from kiln_pro.bridge import pro_features  # type: ignore[import-not-found]
+    except ImportError:
+        return False
+    try:
+        return bool(pro_features.is_available("printability_overlay"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+_pro_overlay_required = pytest.mark.skipif(
+    not _overlay_available(),
+    reason="requires kiln-pro printability_overlay for tier-specific verdicts",
+)
+
+
+@pytest.fixture
+def _force_free_tier(monkeypatch):
+    """Force the warping path to use public defaults (no overlay)."""
+    from kiln import printability as _p
+    monkeypatch.setattr(_p, "_material_physics_from_overlay", lambda mat: {})
+
 
 def _write_box_stl(path: str, x: float, y: float, z: float) -> None:
     """Write a binary STL rectangular prism with dimensions x*y*z."""

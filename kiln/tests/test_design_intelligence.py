@@ -24,7 +24,13 @@ from __future__ import annotations
 
 import pytest
 
-from .conftest import requires_engineering_overlay
+from .conftest import (
+    requires_engineering_overlay,
+    requires_multi_material_overlay,
+    requires_post_processing_overlay,
+    requires_printer_profiles_overlay,
+    requires_troubleshooting_overlay,
+)
 
 from kiln.design_intelligence import (
     DesignBrief,
@@ -420,7 +426,13 @@ class TestDesignBrief:
         assert isinstance(brief, DesignBrief)
         assert brief.recommended_material is not None
 
+    @requires_printer_profiles_overlay
     def test_printer_model_influences_brief(self):
+        # ``get_design_constraints`` with a ``printer_model`` arg goes
+        # through ``get_printer_design_profile``, which hard-keys the
+        # ``agent_notes`` moat field; and ``combined_guidance`` rolls
+        # up that same moat content (the ``"consumer platform"``
+        # substring lives there).
         brief = get_design_constraints(
             "outdoor garden sign that lives in the sun",
             printer_model="bambu_a1",
@@ -431,7 +443,11 @@ class TestDesignBrief:
         assert "printer_supported_materials" in brief.combined_rules
         assert any("consumer platform" in note.lower() for note in brief.combined_guidance)
 
+    @requires_printer_profiles_overlay
     def test_material_override_warns_when_printer_is_a_bad_fit(self):
+        # Same as above — the printer-profile lookup hard-keys
+        # ``agent_notes``; without the overlay the warning code is
+        # never reached.
         brief = get_design_constraints(
             "outdoor bracket",
             material="asa",
@@ -609,6 +625,14 @@ class TestEnvironmentCompatibility:
 
 
 class TestPrinterProfiles:
+    # NOTE: every test that calls ``get_printer_design_profile`` or
+    # ``list_printer_profiles`` exercises a constructor that
+    # hard-keys the moat-tier ``agent_notes`` field; without the
+    # kiln-pro printer_profiles overlay those calls raise KeyError.
+    # The unknown-printer path is the one exception — it returns
+    # None before touching the constructor.
+
+    @requires_printer_profiles_overlay
     def test_get_known_printer_profile(self):
         profile = get_printer_design_profile("bambu_x1c")
         assert isinstance(profile, PrinterDesignProfile)
@@ -619,11 +643,13 @@ class TestPrinterProfiles:
     def test_unknown_printer_returns_none(self):
         assert get_printer_design_profile("unknown_printer") is None
 
+    @requires_printer_profiles_overlay
     def test_case_insensitive_lookup(self):
         profile = get_printer_design_profile("BAMBU_X1C")
         assert profile is not None
         assert profile.printer_id == "bambu_x1c"
 
+    @requires_printer_profiles_overlay
     def test_list_printers_includes_all_known_profiles(self):
         profiles = list_printer_profiles()
         assert len(profiles) >= 9
@@ -632,6 +658,7 @@ class TestPrinterProfiles:
         assert "voron_2_4" in ids
         assert "prusa_mk4" in ids
 
+    @requires_printer_profiles_overlay
     def test_filter_has_enclosure(self):
         enclosed = [p for p in list_printer_profiles() if p.has_enclosure]
         ids = {p.printer_id for p in enclosed}
@@ -639,23 +666,27 @@ class TestPrinterProfiles:
         assert "voron_2_4" in ids
         assert "prusa_mini_plus" not in ids
 
+    @requires_printer_profiles_overlay
     def test_filter_supported_materials(self):
         nylon_capable = [p.printer_id for p in list_printer_profiles() if "nylon" in p.supported_materials]
         assert "bambu_x1c" in nylon_capable
         assert "voron_2_4" in nylon_capable
         assert "prusa_mini_plus" not in nylon_capable
 
+    @requires_printer_profiles_overlay
     def test_polycarbonate_support_subset(self):
         pc_capable = [p.printer_id for p in list_printer_profiles() if "polycarbonate" in p.supported_materials]
         assert "bambu_x1c" in pc_capable
         assert "voron_2_4" in pc_capable
         assert "ender_3_v2" not in pc_capable
 
+    @requires_printer_profiles_overlay
     def test_default_layer_heights_present(self):
         profile = get_printer_design_profile("prusa_mk4")
         assert profile is not None
         assert profile.default_layer_heights_mm == [0.08, 0.12, 0.16, 0.2, 0.28]
 
+    @requires_printer_profiles_overlay
     def test_direct_drive_capability_differs_between_enders(self):
         v2 = get_printer_design_profile("ender_3_v2")
         s1 = get_printer_design_profile("ender_3_s1")
@@ -664,6 +695,7 @@ class TestPrinterProfiles:
         assert v2.has_direct_drive is False
         assert s1.has_direct_drive is True
 
+    @requires_printer_profiles_overlay
     def test_printer_profile_to_dict(self):
         profile = get_printer_design_profile("bambu_a1")
         assert profile is not None
@@ -719,7 +751,13 @@ class TestGenerationFeedbackEnhancement:
         result = enhance_prompt_with_design_intelligence("a cool robot toy")
         assert len(result.constraints_added) > 0
 
+    @requires_printer_profiles_overlay
     def test_enhance_can_include_printer_build_volume(self):
+        # The enhance pipeline calls ``get_printer_design_profile``,
+        # which raises KeyError without the moat-tier ``agent_notes``
+        # field; the enhance helper swallows that exception and
+        # returns the unmodified prompt, so the build-volume string
+        # never makes it into the result.
         from kiln.generation_feedback import enhance_prompt_with_design_intelligence
 
         result = enhance_prompt_with_design_intelligence(
@@ -756,6 +794,13 @@ class TestKnowledgeBaseIsolation:
 
 
 class TestTroubleshooting:
+    # NOTE: ``common_issues`` (matched_issues) and ``break_in_tips``
+    # are moat fields — public material_troubleshooting.json carries
+    # only ``storage_requirements``.  Tests that exercise those moat
+    # fields are gated; the storage-requirements test stays free
+    # because that data ships in public.
+
+    @requires_troubleshooting_overlay
     def test_all_issues_for_material(self):
         result = troubleshoot_print_issue("pla")
         assert result is not None
@@ -763,11 +808,13 @@ class TestTroubleshooting:
         assert result.material == "pla"
         assert len(result.matched_issues) > 0
 
+    @requires_troubleshooting_overlay
     def test_symptom_match_stringing(self):
         result = troubleshoot_print_issue("pla", "stringing")
         assert result is not None
         assert any("string" in i["symptom"].lower() for i in result.matched_issues)
 
+    @requires_troubleshooting_overlay
     def test_symptom_match_warping(self):
         result = troubleshoot_print_issue("abs", "warping")
         assert result is not None
@@ -781,6 +828,7 @@ class TestTroubleshooting:
         values = [severity_order.get(s, 2) for s in severities]
         assert values == sorted(values)
 
+    @requires_troubleshooting_overlay
     def test_fixes_have_priority(self):
         result = troubleshoot_print_issue("pla", "stringing")
         assert result is not None
@@ -795,6 +843,7 @@ class TestTroubleshooting:
         assert result.storage_requirements is not None
         assert result.storage_requirements["humidity_sensitive"] is True
 
+    @requires_troubleshooting_overlay
     def test_break_in_tips(self):
         result = troubleshoot_print_issue("pla")
         assert result is not None
@@ -927,7 +976,11 @@ class TestPostProcessing:
         assert guide.material == "pla"
         assert len(guide.techniques) > 0
 
+    @requires_post_processing_overlay
     def test_techniques_have_fields(self):
+        # The ``procedure`` walkthrough is moat-tier — public-only
+        # post_processing.json carries just ``name``, ``difficulty``,
+        # and ``tools_needed``.
         guide = get_post_processing("pla")
         assert guide is not None
         tech = guide.techniques[0]
@@ -1003,7 +1056,12 @@ class TestMultiMaterialCompatibility:
         assert report.compatible is False
         assert report.interface_adhesion == "unknown"
 
+    @requires_multi_material_overlay
     def test_general_rules_included(self):
+        # ``general_rules`` is a moat-tier list of co-print guidance
+        # bullets; public multi_material_pairing.json carries an
+        # empty list at that key so the safety-floor consumer at
+        # least sees the field.
         report = check_multi_material_compatibility("pla", "petg")
         assert len(report.general_rules) > 0
 
@@ -1038,6 +1096,12 @@ class TestMultiMaterialCompatibility:
 
 
 class TestPrintDiagnostic:
+    # ``matched_issues`` for the diagnostic comes from the
+    # troubleshooting catalog's ``common_issues`` — a moat field.
+    # Without the overlay the diagnostic still returns a result, but
+    # the issues list is empty.
+
+    @requires_troubleshooting_overlay
     def test_basic_diagnostic(self):
         result = get_print_diagnostic("pla", symptom="stringing")
         assert result is not None
@@ -1072,6 +1136,7 @@ class TestPrintDiagnostic:
     def test_unknown_material_returns_none(self):
         assert get_print_diagnostic("unobtainium") is None
 
+    @requires_troubleshooting_overlay
     def test_no_symptom_returns_all_issues(self):
         result = get_print_diagnostic("pla")
         assert result is not None

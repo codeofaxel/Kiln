@@ -3,20 +3,12 @@
 All notable changes to Kiln are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [1.1.3] - 2026-05-19
 
-Adhesion analysis catches tall-narrow detach risk regardless of
-material, models thermal stress from layer cooling, and admits
-when it's uncertain. The model that ships in v1.1.2 caught the
-obvious extremes; this iteration catches the messy middle —
-the warp-prone tall thin prints that look fine to a static force
-balance but actually detach in practice.
-
-Support estimates also start working on the shapes they used to
-silently skip — T-bars, mushrooms, tabletops, umbrellas, gears
-on posts. Anything with an overhang above a narrower base
-previously came back as "no supports needed"; now it reads what
-the slicer would actually print.
+Adhesion catches tall narrow detach risk regardless of material,
+accounts for thermal stress from layer cooling, and admits when
+it's uncertain.  Prints remember which goal they came from, so
+monitoring, reprints, and version saves don't need to be told twice.
 
 ### Added
 
@@ -80,6 +72,15 @@ the slicer would actually print.
 - **Slicer support style on `analyze_printability`** —
   `slicer_style="grid"|"snug"|"organic"|"tree"`. Kiln Pro
   estimates support grams that style actually extrudes.
+- **Saved goals are listable.** The CLI and any MCP client can ask
+  Kiln for the list of saved goals, so agents and the web app can
+  show an inbox view.
+- **Free-tier design intelligence finds what you ask for.** Material
+  recommendations, design template discovery, printer profile
+  lookups, BOSL2-using SCAD generators, and Bambu A1 print prep now
+  have their catalogs on disk.
+- **Release gate** asserts data files ship in the wheel before any
+  PyPI publish.
 
 ### Changed
 
@@ -105,6 +106,14 @@ the slicer would actually print.
 - **New `PrintabilityReport` shape signals:** `dimensions_mm`,
   `connected_components`, `component_size_uniformity`. Kiln Pro
   reads these to recognize lattices and multi-part topologies.
+- **Prints remember which goal they came from.** Monitoring a print,
+  reprinting it, saving a new version, or iterating on a design all
+  pick up the saved goal automatically.  Agents no longer need to
+  restate the goal at every step.
+- `get_design_brief` is renamed `analyze_design_requirements`. The
+  old name is removed. This only affects callers that asked for the
+  functional analysis directly; the user-facing entry point for new
+  designs (`design_session`) is unchanged.
 
 ### Fixed
 
@@ -150,20 +159,14 @@ the slicer would actually print.
 ### Internal
 
 - New CI guard asserts the `kiln-pro` package is NOT installed in
-  the public Kiln CI environment — prevents future "tier-coupling
-  leak" regressions where public tests silently depended on the
-  Pro overlay.
-- 30-case parameterized calibration matrix in
-  `kiln/tests/test_adhesion_force.py` — explicitly pins both
-  free-tier and Pro-tier model behavior across realistic prints.
-  Becomes the regression baseline for future adhesion model work.
-- New test suites pin the support-detection fix and the new
-  `slicer_style` / bridge-heads-up surface so future model
-  changes don't silently regress them.
+  the public Kiln CI environment — prevents future tier-coupling
+  leak regressions where public tests silently depend on the Pro
+  overlay.
 
 ### Compatibility
 
-- No version bump yet.
+- Released as `kiln3d` 1.1.3 — pair with `kiln-pro` 1.1.3 for the
+  Pro+ experience.
 
 ## [1.1.2] - 2026-05-16
 

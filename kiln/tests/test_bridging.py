@@ -37,25 +37,56 @@ from kiln.printability import (
 
 
 # ---------------------------------------------------------------------------
-# Pro-overlay availability helper (mirrors test_adhesion_force.py pattern)
+# Pro-overlay availability helper (mirrors test_adhesion_force.py pattern,
+# plus a data probe — see note below).
 # ---------------------------------------------------------------------------
+#
+# Note on the data probe: the bare ``is_available`` flag answers "is the
+# overlay module importable", but says nothing about whether the data
+# inside is the audited 2026-05-17 schedule.  Tests in
+# ``TestProOverlayBridging`` assert against the audited reality-labels
+# (Bambu TDS + CNC Kitchen + Prusa forum) — PLA 30 mm reliable, PETG
+# 25 mm reliable, ABS 15 mm open-frame / 40 mm enclosed, TPU 5 mm.  A
+# stale overlay JSON (pre-audit values like PLA 10 mm, ABS 7 mm) would
+# answer ``is_available = True`` but emit verdicts that contradict the
+# reality-labels.  So the helper probes the loaded overlay's PLA
+# bridging limit — anything ≥ 30 indicates the audited schedule is
+# loaded; anything less (or missing) means we should skip the audited-
+# data tests.  Aligns with the helper pattern in
+# ``test_warping_analysis.py`` (which doesn't need the probe because
+# its assertions are tier-shape, not specific-value).
 
 
 def _overlay_available() -> bool:
-    """True when kiln-pro's per-material printability overlay is loaded."""
+    """True when kiln-pro's per-material printability overlay is loaded
+    AND its data is the audited 2026-05-17 bridging schedule."""
     try:
         from kiln_pro.bridge import pro_features  # type: ignore[import-not-found]
     except ImportError:
         return False
     try:
-        return bool(pro_features.is_available("printability_overlay"))
+        if not pro_features.is_available("printability_overlay"):
+            return False
+    except Exception:  # noqa: BLE001
+        return False
+    # Data-shape probe: the audited overlay raises PLA's bridging
+    # limit to ≥30 mm (Bambu PLA Basic TDS reliable envelope).  A
+    # stale or pre-audit overlay reports lower values; skip in that
+    # environment rather than fail the assertions.
+    try:
+        from kiln_pro.printability_overlay import lookup_material  # type: ignore[import-not-found]
+        entry = lookup_material("pla") or {}
+        return float(entry.get("bridging_limit_mm", 0.0)) >= 30.0
     except Exception:  # noqa: BLE001
         return False
 
 
 _pro_overlay_required = pytest.mark.skipif(
     not _overlay_available(),
-    reason="requires kiln-pro printability_overlay for per-material bridging limits",
+    reason=(
+        "requires kiln-pro printability_overlay with the audited "
+        "2026-05-17 per-material bridging schedule"
+    ),
 )
 
 

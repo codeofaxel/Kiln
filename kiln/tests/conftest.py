@@ -497,6 +497,244 @@ requires_engineering_overlay = pytest.mark.skipif(
 
 
 # ---------------------------------------------------------------------------
+# Catalog-overlay skip markers (Phase 2 moat split — printer_profiles,
+# material_troubleshooting, post_processing, multi_material_pairing)
+# ---------------------------------------------------------------------------
+# Each of these catalogs had curated SME content stripped out of public
+# Kiln in the Phase 2 catalog moat split.  Public files now carry only
+# the safety-floor / discovery surface; the moat fields ship in a
+# kiln-pro overlay and are restored at runtime by
+# ``_merge_pro_overlay_if_available``.
+#
+# Tests that assert on moat fields — or whose code path goes through a
+# call site that hard-keys a moat field (e.g. PrinterDesignProfile's
+# ``agent_notes``) — should be marked with the matching skip decorator
+# so they SKIP in public-only CI and RUN cleanly when the overlay is
+# installed.
+
+
+def _printer_profiles_overlay_loaded() -> bool:
+    """Probe whether the kiln-pro printer_profiles overlay is loaded.
+
+    Public printer_profiles.json carries only the safety-floor fields
+    (display_name, build_volume_mm, supported_materials, etc.).  The
+    ``agent_notes`` moat field ships in the kiln-pro overlay; without
+    it, ``get_printer_design_profile`` raises KeyError at the
+    constructor call site.  Probing that path tells us if the overlay
+    is present.
+    """
+    try:
+        from kiln.design_intelligence import (
+            _reset_knowledge_base,
+            get_printer_design_profile,
+        )
+        _reset_knowledge_base()
+        profile = get_printer_design_profile("bambu_x1c")
+        if profile is None or not profile.agent_notes:
+            return False
+    except Exception:
+        return False
+    return True
+
+
+_PRINTER_PROFILES_OVERLAY_PRESENT = _printer_profiles_overlay_loaded()
+
+requires_printer_profiles_overlay = pytest.mark.skipif(
+    not _PRINTER_PROFILES_OVERLAY_PRESENT,
+    reason=(
+        "kiln-pro printer_profiles overlay not loaded; this assertion "
+        "exercises a code path that requires the agent_notes moat field "
+        "(or any other field that ships in the kiln-pro overlay). "
+        "Install kiln-pro to run this test."
+    ),
+)
+
+
+def _troubleshooting_overlay_loaded() -> bool:
+    """Probe whether the kiln-pro material_troubleshooting overlay is loaded.
+
+    Public material_troubleshooting.json carries only the
+    ``storage_requirements`` safety-floor field.  The moat fields
+    (common_issues, break_in_tips, severity rankings, fix priorities)
+    ship in the kiln-pro overlay.
+    """
+    try:
+        from kiln.design_intelligence import (
+            _reset_knowledge_base,
+            troubleshoot_print_issue,
+        )
+        _reset_knowledge_base()
+        result = troubleshoot_print_issue("pla")
+        if result is None or not result.matched_issues or not result.break_in_tips:
+            return False
+    except Exception:
+        return False
+    return True
+
+
+_TROUBLESHOOTING_OVERLAY_PRESENT = _troubleshooting_overlay_loaded()
+
+requires_troubleshooting_overlay = pytest.mark.skipif(
+    not _TROUBLESHOOTING_OVERLAY_PRESENT,
+    reason=(
+        "kiln-pro material_troubleshooting overlay not loaded; this "
+        "assertion requires common_issues / break_in_tips / severity "
+        "moat fields. Install kiln-pro to run this test."
+    ),
+)
+
+
+def _post_processing_overlay_loaded() -> bool:
+    """Probe whether the kiln-pro post_processing overlay is loaded.
+
+    Public post_processing.json carries technique names + tool lists
+    (safety floor — what materials can use what techniques).  The
+    detailed ``procedure`` walkthroughs and ``difficulty`` calibrations
+    ship in the kiln-pro overlay.
+    """
+    try:
+        from kiln.design_intelligence import (
+            _reset_knowledge_base,
+            get_post_processing,
+        )
+        _reset_knowledge_base()
+        guide = get_post_processing("pla")
+        if guide is None or not guide.techniques:
+            return False
+        first = guide.techniques[0]
+        if "procedure" not in first:
+            return False
+    except Exception:
+        return False
+    return True
+
+
+_POST_PROCESSING_OVERLAY_PRESENT = _post_processing_overlay_loaded()
+
+requires_post_processing_overlay = pytest.mark.skipif(
+    not _POST_PROCESSING_OVERLAY_PRESENT,
+    reason=(
+        "kiln-pro post_processing overlay not loaded; this assertion "
+        "requires the procedure-walkthrough moat field. Install "
+        "kiln-pro to run this test."
+    ),
+)
+
+
+def _multi_material_overlay_loaded() -> bool:
+    """Probe whether the kiln-pro multi_material_pairing overlay is loaded.
+
+    Public multi_material_pairing.json carries the support_pairs +
+    co_print_compatibility matrix (safety floor — what pairs work).
+    The ``general_rules`` guidance bullets ship in the kiln-pro
+    overlay.
+    """
+    try:
+        from kiln.design_intelligence import (
+            _reset_knowledge_base,
+            check_multi_material_compatibility,
+        )
+        _reset_knowledge_base()
+        report = check_multi_material_compatibility("pla", "petg")
+        if report is None or not report.general_rules:
+            return False
+    except Exception:
+        return False
+    return True
+
+
+_MULTI_MATERIAL_OVERLAY_PRESENT = _multi_material_overlay_loaded()
+
+requires_multi_material_overlay = pytest.mark.skipif(
+    not _MULTI_MATERIAL_OVERLAY_PRESENT,
+    reason=(
+        "kiln-pro multi_material_pairing overlay not loaded; this "
+        "assertion requires the general_rules moat field. Install "
+        "kiln-pro to run this test."
+    ),
+)
+
+
+def _printer_intelligence_overlay_loaded() -> bool:
+    """Probe whether the kiln-pro printer_intelligence overlay is loaded.
+
+    Public printer_intelligence.json carries the spec sheet + per-
+    material recipe numbers + the structured ``has_input_shaping``
+    bool.  The curated ``quirks``, ``calibration`` recipes, and
+    ``failure_modes`` ship in the kiln-pro overlay.  Probe by
+    reading a known profile (ender3) that has empty moat lists on
+    the safety-floor side.
+    """
+    try:
+        from kiln.printer_intelligence import (
+            _cache,
+            _load,
+            get_printer_intel,
+        )
+        # Force a fresh load so a previous test that primed the
+        # cache without the overlay doesn't poison this probe.
+        _cache.clear()
+        import kiln.printer_intelligence as _mod
+        _mod._loaded = False
+        _load()
+        intel = get_printer_intel("ender3")
+        if not intel.quirks or not intel.failure_modes:
+            return False
+    except Exception:
+        return False
+    return True
+
+
+_PRINTER_INTELLIGENCE_OVERLAY_PRESENT = _printer_intelligence_overlay_loaded()
+
+requires_printer_intelligence_overlay = pytest.mark.skipif(
+    not _PRINTER_INTELLIGENCE_OVERLAY_PRESENT,
+    reason=(
+        "kiln-pro printer_intelligence overlay not loaded; this "
+        "assertion requires the curated ``quirks`` / ``calibration`` "
+        "/ ``failure_modes`` moat fields. Install kiln-pro to run "
+        "this test."
+    ),
+)
+
+
+def _printer_compatibility_overlay_loaded() -> bool:
+    """Probe whether the kiln-pro printer_material_compatibility overlay is loaded.
+
+    Public printer_material_compatibility.json carries the
+    ``status`` + ``upgrades_needed`` safety-floor fields (what
+    works on what printer, what upgrade is required).  The curated
+    ``notes`` prose for each (printer, material) cell ships in the
+    kiln-pro overlay.
+    """
+    try:
+        from kiln.design_intelligence import _get_kb, _reset_knowledge_base
+        _reset_knowledge_base()
+        compat = _get_kb().printer_compatibility
+        for printer_id, mat_map in compat.items():
+            if printer_id.startswith("_"):
+                continue
+            for entry in mat_map.values():
+                if isinstance(entry, dict) and entry.get("notes"):
+                    return True
+        return False
+    except Exception:
+        return False
+
+
+_PRINTER_COMPATIBILITY_OVERLAY_PRESENT = _printer_compatibility_overlay_loaded()
+
+requires_printer_compatibility_overlay = pytest.mark.skipif(
+    not _PRINTER_COMPATIBILITY_OVERLAY_PRESENT,
+    reason=(
+        "kiln-pro printer_material_compatibility overlay not loaded; "
+        "this assertion requires the curated ``notes`` moat field on "
+        "each (printer, material) cell. Install kiln-pro to run this test."
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
 # License tier bypass for tests
 # ---------------------------------------------------------------------------
 

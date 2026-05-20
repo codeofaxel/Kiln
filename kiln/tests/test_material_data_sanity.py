@@ -19,7 +19,13 @@ from pathlib import Path
 
 import pytest
 
-from .conftest import requires_engineering_overlay
+from .conftest import (
+    requires_engineering_overlay,
+    requires_multi_material_overlay,
+    requires_post_processing_overlay,
+    requires_printer_compatibility_overlay,
+    requires_troubleshooting_overlay,
+)
 
 pytestmark = requires_engineering_overlay
 
@@ -577,6 +583,7 @@ class TestCompatibilityMatrix:
                         f"'{upg}', valid: {self.VALID_UPGRADES}"
                     )
 
+    @requires_printer_compatibility_overlay
     def test_every_entry_has_notes(self, compat_data):
         for printer_id, mat_map in compat_data.items():
             if printer_id.startswith("_"):
@@ -630,6 +637,7 @@ class TestTroubleshootingSchema:
             f"Troubleshooting has unknown materials: {extra}"
         )
 
+    @requires_troubleshooting_overlay
     def test_minimum_common_issues(self, troubleshoot):
         for mat_id, entry in troubleshoot.items():
             count = len(entry["common_issues"])
@@ -637,6 +645,7 @@ class TestTroubleshootingSchema:
                 f"{mat_id} has only {count} common_issues (need >= 5)"
             )
 
+    @requires_troubleshooting_overlay
     def test_issue_has_required_fields(self, troubleshoot):
         required = {"symptom", "severity", "root_cause", "fixes", "prevention"}
         for mat_id, entry in troubleshoot.items():
@@ -646,6 +655,7 @@ class TestTroubleshootingSchema:
                     f"{mat_id}.common_issues[{i}] missing: {missing}"
                 )
 
+    @requires_troubleshooting_overlay
     def test_severity_values_valid(self, troubleshoot):
         for mat_id, entry in troubleshoot.items():
             for i, issue in enumerate(entry["common_issues"]):
@@ -654,6 +664,7 @@ class TestTroubleshootingSchema:
                     f"'{issue['severity']}' not valid"
                 )
 
+    @requires_troubleshooting_overlay
     def test_fixes_have_sequential_priorities(self, troubleshoot):
         for mat_id, entry in troubleshoot.items():
             for i, issue in enumerate(entry["common_issues"]):
@@ -678,6 +689,7 @@ class TestTroubleshootingSchema:
                 f"{mat_id}.storage_requirements missing: {missing}"
             )
 
+    @requires_troubleshooting_overlay
     def test_break_in_tips_present(self, troubleshoot):
         for mat_id, entry in troubleshoot.items():
             tips = entry.get("break_in_tips", [])
@@ -720,6 +732,7 @@ class TestMultiMaterialPairing:
                 f"'{pair['support_material']}' not in materials.json"
             )
 
+    @requires_multi_material_overlay
     def test_support_pairs_have_required_fields(self, multi_mat_data):
         required = {
             "model_material", "support_material",
@@ -762,6 +775,7 @@ class TestMultiMaterialPairing:
                     f"'{entry['interface_adhesion']}' not valid"
                 )
 
+    @requires_multi_material_overlay
     def test_general_rules_present(self, multi_mat_data):
         rules = multi_mat_data.get("general_rules", [])
         assert len(rules) >= 5, (
@@ -815,6 +829,7 @@ class TestPostProcessingGuide:
                 f"{mat_id} has only {count} techniques (need >= 2)"
             )
 
+    @requires_post_processing_overlay
     def test_technique_has_required_fields(self, post_proc):
         required = {
             "name", "difficulty", "tools_needed",

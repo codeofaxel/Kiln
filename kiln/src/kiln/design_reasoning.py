@@ -33,14 +33,15 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Constants — INVERSE-PATTERN tier seam
+# Constants — INVERSE-PATTERN overlay seam
 # ---------------------------------------------------------------------------
 #
 # Tiering for structural-risk thresholds is the inverse of the usual
-# paywall pattern: free tier ships STRICTER values so a free user
-# always sees a superset of the flags a Pro user would see for the
-# same mesh.  Pro+ unlocks the calibrated baseline via the
-# ``structural_thresholds`` overlay loaded by analyze_structural_risks.
+# paywall pattern: the no-overlay path ships STRICTER values so a
+# caller without the overlay always sees a superset of the flags an
+# overlay-loaded caller would see for the same mesh.  The kiln-pro
+# ``structural_thresholds`` overlay (loaded by
+# ``analyze_structural_risks``) unlocks the calibrated baseline.
 #
 # Stricter direction per metric:
 #   - thin_neck_ratio:           HIGHER value flags MORE thin sections
@@ -48,7 +49,7 @@ logger = logging.getLogger(__name__)
 #   - min_cross_section_mm2:     HIGHER value flags MORE small sections
 #   - sharp_angle_threshold_deg: HIGHER value flags MORE less-acute corners
 #
-# Pro-tier calibrated values (in kiln_pro/data/structural_thresholds_pro_overlay.json):
+# Overlay-calibrated values (in kiln_pro/data/structural_thresholds_pro_overlay.json):
 #   0.30 / 5.0 / 4.0 / 60.0
 
 # Stress concentration threshold: cross-section area ratio that signals a
@@ -1150,20 +1151,21 @@ def analyze_structural_risks(
 ) -> list[StructuralRisk]:
     """Analyze an STL for structural risks.
 
-    Tiering — INVERSE PATTERN:
+    Threshold tiering — INVERSE PATTERN:
 
-    - Free tier (no overlay): STRICTER thresholds than Kiln's curated
-      baseline.  A free user sees more warnings than a Pro user would
-      for the same geometry; free tier never under-flags relative to
-      the calibrated baseline.
-    - Pro+ tier: calibrated baseline via the ``structural_thresholds``
-      overlay.  Same algorithm, same risk taxonomy, but threshold
-      bands match Kiln's curated judgment (e.g. ``thin_neck_ratio``
-      0.30 vs public 0.35).
+    - Without the ``structural_thresholds`` overlay: STRICTER
+      thresholds than the calibrated baseline.  A caller without the
+      overlay sees more warnings than a caller with the overlay
+      would for the same geometry; the no-overlay path never
+      under-flags relative to the calibrated baseline.
+    - With the ``structural_thresholds`` overlay: calibrated baseline
+      thresholds.  Same algorithm, same risk taxonomy, but threshold
+      bands match the curated judgment (e.g. ``thin_neck_ratio``
+      0.30 vs no-overlay 0.35).
 
-    Explicit kwargs override BOTH tiers — power-user escape hatch for
-    callers who know exactly what they want.  ``None`` means "use Pro
-    overlay if available, else the stricter public default."
+    Explicit kwargs override both paths — power-user escape hatch
+    for callers who know exactly what they want.  ``None`` means
+    "use the overlay if loaded, else the stricter public default."
 
     Performs geometric analysis to find:
     - Thin necks (narrow cross-sections that will snap)
@@ -1175,10 +1177,10 @@ def analyze_structural_risks(
 
     :param file_path: Path to STL file.
     :param min_cross_section_mm2: Override the resolved threshold.
-        ``None`` (default) = use Pro overlay if available, else the
-        stricter public default (5.0 mm²; Pro calibrated = 4.0).
+        ``None`` (default) = use the overlay if loaded, else the
+        stricter public default (5.0 mm²; overlay-calibrated = 4.0).
     :param sharp_angle_threshold_deg: Same semantics; public default
-        65.0°, Pro calibrated 60.0°.
+        65.0°, overlay-calibrated 60.0°.
     :returns: List of :class:`StructuralRisk` findings.
     """
     from kiln.design_intelligence import load_pro_overlay_or_empty
@@ -1189,7 +1191,7 @@ def analyze_structural_risks(
 
     bbox = _bounding_box(vertices)
 
-    # --- Resolve thresholds: explicit kwarg > overlay (Pro+) > public default
+    # --- Resolve thresholds: explicit kwarg > overlay > public default
     overlay = load_pro_overlay_or_empty("structural_thresholds")
     thin_neck_ratio = overlay.get("thin_neck_ratio", _THIN_NECK_RATIO_PUBLIC)
     cantilever_risk_ratio = overlay.get(

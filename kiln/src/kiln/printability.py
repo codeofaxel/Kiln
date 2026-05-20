@@ -3204,9 +3204,9 @@ def analyze_printability(
             "minimum feature size manually."
         )
 
-    # Free-tier upsell hook: when the judgment overlay is absent, the
+    # Upsell hook: when the judgment overlay is absent, the
     # warping / thermal-stress / adhesion-force recommendations come
-    # from the public safety-floor templates. Pro+ supplies curated /
+    # from the public safety-floor templates. With the overlay, curated /
     # printer-tuned / brand-aware guidance. One non-intrusive line.
     if not judgment_overlay:
         recommendations.append(

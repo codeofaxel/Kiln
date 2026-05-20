@@ -185,7 +185,7 @@ This threat model covers the following components of the Kiln system:
 | I-5 | Webcam snapshot exposure | Medium | Medium | No authentication on MJPEG proxy endpoint | High — unauthenticated video stream on network |
 | I-6 | SQLite as exfiltration target | High | Low | Filesystem permissions | Medium — single file contains all operational data |
 | I-7 | Bambu TLS bypass | High | Low | TLS transport used, but `CERT_NONE` disables verification | Medium — MITM possible on LAN |
-| D-1 | Queue flooding | Medium | Medium | Free tier: 10-job limit; paid tiers: unlimited | Medium — paid tiers have no queue cap |
+| D-1 | Queue flooding | Medium | Medium | Per-account queue cap (10-job default; configurable for accounts that opt in) | Medium — accounts with raised caps lack a hard ceiling |
 | D-2 | Event bus saturation | Medium | Low | None | Medium — no retention policy or rate limit |
 | D-3 | Webhook thread exhaustion | Low | Low | Best-effort delivery; configurable retries | Low — limited practical impact |
 | D-4 | Rate limit bypass (distributed) | Medium | Low | Per-client sliding window rate limiter | Medium — no global limit |

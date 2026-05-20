@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-05-16T04:30:28.389267+00:00",
-  "tool_count": 303,
+  "generated": "2026-05-19T23:33:32.053387+00:00",
+  "tool_count": 304,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -645,6 +645,11 @@
             ],
             "default": null,
             "title": "Step Overrides"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
+            "type": "string"
           }
         },
         "required": [
@@ -2272,6 +2277,11 @@
           "recipe_path": {
             "title": "Recipe Path",
             "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
+            "type": "string"
           }
         },
         "required": [
@@ -2294,6 +2304,11 @@
           },
           "instruction": {
             "title": "Instruction",
+            "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
             "type": "string"
           }
         },
@@ -2329,9 +2344,9 @@
             "title": "Idea",
             "type": "string"
           },
-          "session_id": {
+          "goal_id": {
             "default": "",
-            "title": "Session Id",
+            "title": "Goal Id",
             "type": "string"
           },
           "answers": {
@@ -2383,6 +2398,34 @@
           "verb"
         ],
         "title": "design_sessionArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_design_goals",
+      "description": "List saved design sessions (saved goals).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_session",
+      "parameters": {
+        "properties": {
+          "filter_status": {
+            "default": "all",
+            "enum": [
+              "all",
+              "needs_questions",
+              "ready_to_generate",
+              "matches_what_you_asked_for"
+            ],
+            "title": "Filter Status",
+            "type": "string"
+          },
+          "limit": {
+            "default": 200,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "list_design_goalsArguments",
         "type": "object"
       }
     },
@@ -4630,6 +4673,11 @@
             ],
             "default": null,
             "title": "Review Artifact"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
+            "type": "string"
           }
         },
         "required": [
@@ -8727,6 +8775,11 @@
             "default": "",
             "title": "Material Type",
             "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
+            "type": "string"
           }
         },
         "required": [
@@ -9488,6 +9541,11 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
+            "type": "string"
           }
         },
         "title": "generate_ashtrayArguments",
@@ -9550,6 +9608,11 @@
             "default": "",
             "title": "Size",
             "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
+            "type": "string"
           }
         },
         "title": "generate_bookmarkArguments",
@@ -9601,6 +9664,11 @@
           "photo_mask": {
             "default": "",
             "title": "Photo Mask",
+            "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
             "type": "string"
           }
         },
@@ -9679,6 +9747,11 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
+            "type": "string"
           }
         },
         "title": "generate_fridge_magnetArguments",
@@ -9735,6 +9808,11 @@
           "photo_mask": {
             "default": "circle",
             "title": "Photo Mask",
+            "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
             "type": "string"
           }
         },
@@ -9823,6 +9901,11 @@
             "default": "",
             "title": "Photo Mask",
             "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
+            "type": "string"
           }
         },
         "title": "generate_jewelry_trayArguments",
@@ -9894,6 +9977,11 @@
           "photo_mask": {
             "default": "",
             "title": "Photo Mask",
+            "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
             "type": "string"
           }
         },
@@ -9997,6 +10085,11 @@
             "default": "",
             "title": "Size",
             "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
+            "type": "string"
           }
         },
         "title": "generate_license_plate_frameArguments",
@@ -10069,6 +10162,11 @@
             "default": "",
             "title": "Size",
             "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
+            "type": "string"
           }
         },
         "title": "generate_nameplateArguments",
@@ -10135,6 +10233,11 @@
           "photo_mask": {
             "default": "",
             "title": "Photo Mask",
+            "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
             "type": "string"
           }
         },
@@ -10218,6 +10321,11 @@
             "default": "auto",
             "title": "Photo Mask",
             "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
+            "type": "string"
           }
         },
         "title": "generate_pen_cupArguments",
@@ -10274,6 +10382,11 @@
           "photo_mask": {
             "default": "",
             "title": "Photo Mask",
+            "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
             "type": "string"
           }
         },
@@ -10340,6 +10453,11 @@
           "color_overrides": {
             "default": "",
             "title": "Color Overrides",
+            "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
             "type": "string"
           }
         },
@@ -10416,6 +10534,11 @@
             "default": "rounded_rectangle",
             "title": "Photo Mask",
             "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
+            "type": "string"
           }
         },
         "title": "generate_soap_dishArguments",
@@ -10481,6 +10604,11 @@
           "size": {
             "default": "",
             "title": "Size",
+            "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
             "type": "string"
           }
         },
@@ -10655,6 +10783,11 @@
             "default": "",
             "title": "Material",
             "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
+            "type": "string"
           }
         },
         "required": [
@@ -10689,6 +10822,11 @@
           "size_preset": {
             "default": "",
             "title": "Size Preset",
+            "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
             "type": "string"
           }
         },

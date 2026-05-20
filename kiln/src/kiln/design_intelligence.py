@@ -52,28 +52,29 @@ def _merge_pro_overlay_if_available(
 ) -> dict[str, dict[str, Any]]:
     """Merge the kiln-pro engineering-moat overlay into ``public_data``.
 
-    Free tier (kiln-pro not installed): returns ``public_data`` as-is.
-    Pro+ tier (kiln-pro installed + valid license): kiln-pro fetches
-    the overlay from ``api.kiln3d.com/api/internal/overlay/<kind>`` at
-    runtime, deep-merges it into each material/pattern record, and
-    restores the full record (mechanical, design_limits,
-    use_case_ratings, agent_guidance, brand-tunings, curated guidance).
+    When kiln-pro is not installed, returns ``public_data`` as-is.
+    When kiln-pro is installed and the license is valid, kiln-pro
+    fetches the overlay from
+    ``api.kiln3d.com/api/internal/overlay/<kind>`` at runtime,
+    deep-merges it into each material/pattern record, and restores
+    the full record (mechanical, design_limits, use_case_ratings,
+    agent_guidance, brand-tunings, curated guidance).
 
     The overlay is NOT bundled in the kiln-pro wheel (closes the
-    on-disk-grep leak vector for pip-install Pro+ users); it lives
-    server-side and is fetched per process with an encrypted local
-    cache.  See ``kiln_pro.data_overlays`` for the full caching
-    behavior (24h TTL, 7d offline grace, license-key-derived cache
-    encryption).  We never import kiln-pro at module load — only on
-    first use — so the public package keeps working when kiln-pro
-    isn't installed.
+    on-disk-grep leak vector for installs that carry kiln-pro on
+    disk); it lives server-side and is fetched per process with an
+    encrypted local cache.  See ``kiln_pro.data_overlays`` for the
+    full caching behavior (24h TTL, 7d offline grace, license-key-
+    derived cache encryption).  We never import kiln-pro at module
+    load — only on first use — so the public package keeps working
+    when kiln-pro isn't installed.
 
     :param public_data: Safety-floor data loaded from public Kiln's
         ``data/design_knowledge/<kind>.json``.
     :param kind: ``"materials"`` or ``"design_patterns"`` — selects
         which overlay file to load.
-    :returns: Either the unmodified safety-floor dict (free tier) or
-        the deep-merged full record (Pro+).
+    :returns: Either the unmodified safety-floor dict (no overlay)
+        or the deep-merged full record (overlay loaded).
     """
     try:
         from kiln_pro.data_overlays import load_overlay  # type: ignore[import-not-found]
@@ -93,7 +94,7 @@ def _merge_pro_overlay_if_available(
         return public_data
     except Exception as exc:
         # Catches OverlayUnavailableError (network / license / cache),
-        # FileNotFoundError, ValueError, anything else.  Free tier
+        # FileNotFoundError, ValueError, anything else.  No-overlay
         # behavior: silently fall back to safety-floor data, log at
         # warning level so the operator can see something happened.
         logger.warning(
@@ -159,16 +160,17 @@ def load_pro_overlay_or_empty(kind: str) -> dict[str, Any]:
     printability judgment tables — call this and branch on whether
     the returned dict is empty:
 
-    - ``{}`` → free tier (no kiln-pro, no license, network down past
-      grace, or unknown kind).  Caller uses its safe defaults.
-    - non-empty → Pro+ tier with a valid license.  Caller uses the
+    - ``{}`` → no overlay loaded (kiln-pro not installed, no license,
+      network down past the grace window, or unknown kind).  Caller
+      uses its safe defaults.
+    - non-empty → overlay loaded successfully.  Caller uses the
       curated values inside.
 
     Unlike :func:`_merge_pro_overlay_if_available`, this helper does
     not deep-merge — parameter overlays aren't entity-keyed; they're
     flat parameter groups the caller reads with ``.get()``.
 
-    Never raises; free tier silently returns ``{}``.
+    Never raises; silently returns ``{}`` when no overlay is loaded.
     """
     try:
         from kiln_pro.data_overlays import load_overlay  # type: ignore[import-not-found]
@@ -187,7 +189,7 @@ def load_pro_overlay_or_empty(kind: str) -> dict[str, Any]:
         return {}
     except Exception as exc:
         # OverlayUnavailableError, FileNotFoundError, ValueError, etc.
-        # Free-tier-equivalent: silently fall back to safe defaults,
+        # No-overlay equivalent: silently fall back to safe defaults,
         # log so operators can see something happened.
         logger.warning(
             "kiln-pro %s overlay unavailable, falling back to safe "
@@ -242,11 +244,11 @@ _RATING_ORDER = {
 class MaterialProfile:
     """Full material property sheet for design reasoning.
 
-    Free tier: ``mechanical``, ``design_limits``, ``use_case_ratings``,
-    and ``agent_guidance`` may be empty (the engineering moat ships in
-    Kiln Pro's overlay).  Consumers MUST treat these as optional and
-    fall back to safety-floor inference when absent.  See
-    :func:`has_engineering_data` for the canonical check.
+    When the kiln-pro engineering overlay isn't loaded,
+    ``mechanical``, ``design_limits``, ``use_case_ratings``, and
+    ``agent_guidance`` may be empty; consumers MUST treat these as
+    optional and fall back to safety-floor inference when absent.
+    See :func:`has_engineering_data` for the canonical check.
     """
 
     material_id: str
@@ -262,9 +264,10 @@ class MaterialProfile:
     def has_engineering_data(self) -> bool:
         """True when the kiln-pro engineering overlay is loaded.
 
-        Free tier returns False — consumers should fall back to
-        safety-floor inference (see :func:`_recommend_from_safety_floor`)
-        and emit the upgrade nudge in their response.
+        Returns False when the kiln-pro engineering overlay isn't
+        loaded — consumers should fall back to safety-floor
+        inference (see :func:`_recommend_from_safety_floor`) and
+        emit the upgrade nudge in their response.
         """
         return bool(self.mechanical) and bool(self.use_case_ratings)
 
@@ -276,11 +279,11 @@ class MaterialProfile:
 class DesignTemplate:
     """A functional design template with constraints and guidance.
 
-    Free tier: ``design_rules``, ``print_orientation_reason``, and
-    ``agent_guidance`` may be empty (the engineering moat ships in
-    Kiln Pro's overlay). Consumers MUST treat these as optional and
-    fall back to discovery-only behavior when absent. See
-    :func:`has_engineering_data` for the canonical check.
+    When the kiln-pro engineering overlay isn't loaded,
+    ``design_rules``, ``print_orientation_reason``, and
+    ``agent_guidance`` may be empty; consumers MUST treat these as
+    optional and fall back to discovery-only behavior when absent.
+    See :func:`has_engineering_data` for the canonical check.
     """
 
     template_id: str
@@ -296,10 +299,11 @@ class DesignTemplate:
     def has_engineering_data(self) -> bool:
         """True when the kiln-pro engineering overlay is loaded.
 
-        Free tier returns False — consumers should fall back to
-        discovery-only output (display_name, use_cases, material
-        compatibility, print orientation label) and emit the upgrade
-        nudge in their response.
+        Returns False when the kiln-pro engineering overlay isn't
+        loaded — consumers should fall back to discovery-only
+        output (display_name, use_cases, material compatibility,
+        print orientation label) and emit the upgrade nudge in
+        their response.
         """
         return bool(self.design_rules) and bool(self.agent_guidance)
 
@@ -378,7 +382,15 @@ class EnvironmentReport:
 
 @dataclass
 class PrinterDesignProfile:
-    """Printer capability profile for design-for-manufacturing decisions."""
+    """Printer capability profile for design-for-manufacturing decisions.
+
+    ``agent_notes`` is part of the engineering moat — the public file
+    ships the spec sheet (build volume, temps, materials, layer heights)
+    while the curated agent-facing notes move to the kiln-pro overlay
+    (see Phase 2 catalog split in ``data/design_knowledge/_split_note``).
+    ``agent_notes`` is therefore optional and defaults to an empty list
+    when the overlay is not loaded.
+    """
 
     printer_id: str
     display_name: str
@@ -392,7 +404,7 @@ class PrinterDesignProfile:
     typical_tolerance_mm: float
     max_print_speed_mm_s: int
     default_layer_heights_mm: list[float]
-    agent_notes: list[str]
+    agent_notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -593,11 +605,12 @@ class _DesignKnowledgeBase:
                 setattr(self, attr, {k: v for k, v in raw.items() if not k.startswith("_")})
 
         # Single choke point: merge the kiln-pro engineering moat overlays
-        # if present.  Free tier sees safety-floor + discovery only; Pro+
-        # sees the full record (mechanical + design_limits + use_case_ratings
-        # + agent_guidance + brand-tuning + curated guidance for materials;
-        # design_rules + agent_guidance + failure_modes + sources + variant
-        # tables + Phase 4 depth for design_patterns) restored via deep
+        # if present.  Without the overlay, the loader sees safety-floor
+        # + discovery only; with the overlay, the full record
+        # (mechanical + design_limits + use_case_ratings + agent_guidance
+        # + brand-tuning + curated guidance for materials; design_rules
+        # + agent_guidance + failure_modes + sources + variant tables
+        # + Phase 4 depth for design_patterns) is restored via deep
         # merge.  Engineering moat is in kiln-pro; this loader never
         # imports kiln-pro at module load — only at first use.
         self._materials = _merge_pro_overlay_if_available(
@@ -769,7 +782,7 @@ def list_material_profiles() -> list[MaterialProfile]:
 
 
 # ---------------------------------------------------------------------------
-# Free-tier safety-floor recommendation fallback
+# Safety-floor recommendation fallback
 # ---------------------------------------------------------------------------
 #
 # Public Kiln's materials.json carries only the safety floor: thermal
@@ -779,7 +792,7 @@ def list_material_profiles() -> list[MaterialProfile]:
 # properties, design_limits beyond process floor, use_case_ratings,
 # agent_guidance paragraphs) ships in kiln-pro's overlay.
 #
-# When the overlay isn't loaded (free tier), the curated
+# When the overlay isn't loaded, the curated
 # ``recommend_material_for_design`` path is missing the
 # use_case_ratings + mechanical signals it relies on for fine-grained
 # scoring.  This fallback uses ONLY the safety-floor fields plus a
@@ -888,15 +901,16 @@ def _recommend_from_safety_floor(
 ) -> MaterialRecommendation:
     """Recommend a material using ONLY safety-floor fields.
 
-    Free-tier fallback for ``recommend_material_for_design`` when the
-    kiln-pro engineering overlay isn't loaded.  Scores materials
-    against thermal limits, chemical safety (UV/food/outgassing), and
-    a small set of public-domain DIY heuristics (heat / outdoor /
+    Fallback for ``recommend_material_for_design`` when the kiln-pro
+    engineering overlay isn't loaded.  Scores materials against
+    thermal limits, chemical safety (UV/food/outgassing), and a
+    small set of public-domain DIY heuristics (heat / outdoor /
     food / flexibility / sustained-load / cosmetic).
 
     Always runs the load-bearing detector and, when it trips,
     attaches the upgrade-nudge dict to the result's ``warnings`` list
-    so free users see the path to the engineering-grade analysis.
+    so callers without the overlay see the path to the engineering-
+    grade analysis.
 
     :param requirements_text: Natural-language description.
     :param materials: Safety-floor materials dict (from
@@ -1149,8 +1163,9 @@ def _recommend_from_safety_floor(
 
     if not scores:
         # Absolute fallback — e.g. flexibility required but no TPU in
-        # the dict.  Never raise on free tier; return PLA with the
-        # full warning set so the user knows we couldn't satisfy it.
+        # the dict.  Never raise when the overlay isn't loaded;
+        # return PLA with the full warning set so the user knows we
+        # couldn't satisfy it.
         pla_data = materials.get("pla")
         if pla_data is None:
             raise RuntimeError("PLA material profile not found in safety-floor knowledge base")
@@ -1198,7 +1213,8 @@ def _recommend_from_safety_floor(
     final_reasons = [prefix] + top_reasons[1:]
 
     # Always attach the upgrade nudge when the load detector tripped,
-    # so free users see the path to engineering-grade analysis.
+    # so callers without the overlay see the path to engineering-
+    # grade analysis.
     final_warnings = list(top_warnings)
     if verdict.is_load_bearing:
         final_warnings.append(_format_upgrade_nudge(verdict))
@@ -1274,16 +1290,16 @@ def recommend_material_for_design(
     """
     kb = _get_kb()
 
-    # Free-tier dispatch: when the kiln-pro engineering overlay isn't
-    # loaded, ``mechanical`` and ``use_case_ratings`` are empty across
-    # all materials.  The curated path below relies on those fields
-    # for fine-grained scoring; without them it produces degraded
-    # answers (e.g. recommends PLA for load-bearing because it can't
-    # see structural_load_bearing="poor").  Route those callers to
-    # the safety-floor fallback, which uses ONLY thermal / chemical /
-    # process-floor design_limits + a small set of public-domain DIY
-    # heuristics.  Probe a representative material (PLA — always
-    # present) for the overlay marker.
+    # No-overlay dispatch: when the kiln-pro engineering overlay
+    # isn't loaded, ``mechanical`` and ``use_case_ratings`` are empty
+    # across all materials.  The curated path below relies on those
+    # fields for fine-grained scoring; without them it produces
+    # degraded answers (e.g. recommends PLA for load-bearing because
+    # it can't see structural_load_bearing="poor").  Route those
+    # callers to the safety-floor fallback, which uses ONLY thermal
+    # / chemical / process-floor design_limits + a small set of
+    # public-domain DIY heuristics.  Probe a representative material
+    # (PLA — always present) for the overlay marker.
     sample = kb.materials.get("pla") or next(iter(kb.materials.values()), None)
     if sample is None or not sample.get("mechanical"):
         return _recommend_from_safety_floor(
@@ -1986,7 +2002,7 @@ def get_printer_design_profile(printer_id: str) -> PrinterDesignProfile | None:
         typical_tolerance_mm=data["typical_tolerance_mm"],
         max_print_speed_mm_s=data["max_print_speed_mm_s"],
         default_layer_heights_mm=data["default_layer_heights_mm"],
-        agent_notes=data["agent_notes"],
+        agent_notes=list(data.get("agent_notes", [])),
     )
 
 
@@ -2009,7 +2025,7 @@ def list_printer_profiles() -> list[PrinterDesignProfile]:
                 typical_tolerance_mm=data["typical_tolerance_mm"],
                 max_print_speed_mm_s=data["max_print_speed_mm_s"],
                 default_layer_heights_mm=data["default_layer_heights_mm"],
-                agent_notes=data["agent_notes"],
+                agent_notes=list(data.get("agent_notes", [])),
             )
         )
     return profiles

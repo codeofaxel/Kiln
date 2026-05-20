@@ -89,6 +89,25 @@ jobs:
       - name: Build kiln package
         run: cd kiln && python -m build
 
+      # Wheel-inventory gate.  Catches the "package-data glob silently
+      # drops a subdirectory" bug class — v0.3.3 shipped `data/*.json`
+      # (non-recursive) for 3+ years and dropped design_knowledge/,
+      # BOSL2/, MCAD/, and the A1 g-code wrappers from every PyPI
+      # release.  This gate exits 2 if the just-built wheel is missing
+      # any file the runtime depends on, blocking the upload before
+      # SBOM / signing / PyPI publish.  Audits the exact wheel that
+      # will be uploaded (--wheel), not a rebuild — gating on the
+      # signed artifact, not a maybe-different binary.  Same family as
+      # the kiln-pro audit_rls.py and check_doc_counts.py release gates.
+      - name: Verify wheel inventory
+        run: |
+          WHEEL=$(ls kiln/dist/*.whl | head -1)
+          if [ -z "$WHEEL" ]; then
+            echo "::error::No wheel found in kiln/dist/ — did the build step run?"
+            exit 1
+          fi
+          python3 scripts/audit_wheel_inventory.py --wheel "$WHEEL"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
