@@ -3,6 +3,13 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 
 const posts = [
   {
+    title: 'Kiln 1.1.2 + 1.1.3: recovery you can see, analysis you can trust',
+    url: '/blog/kiln-1-1-3',
+    datePublished: '2026-05-19',
+    description:
+      "Vision-detected mid-print failures drive auto-recovery on Pro. Hole-aware printability tells you when a hole is too small for your material and learns your printer's drift. Tall narrow towers get flagged before the print starts. Adhesion verdicts admit when they're uncertain. Saved design goals follow a print through monitoring, reprints, and version saves. And free-tier discovery tools find what you ask for.",
+  },
+  {
     title: 'Kiln 1.1.1: Tighter feedback loop',
     url: '/blog/kiln-1-1-1-tighter-feedback-loop',
     datePublished: '2026-05-13',
@@ -106,6 +113,45 @@ const blogSchema = [
       </header>
 
       <div class="posts">
+        <article class="post-card">
+          <div class="post-meta">May 19, 2026</div>
+          <h2><a href="/blog/kiln-1-1-3">Kiln 1.1.2 + 1.1.3: recovery you can see, analysis you can trust</a></h2>
+          <p>
+            Two releases in one. Vision-detected mid-print failures now drive auto-recovery on
+            Pro, hole-aware printability learns your printer&rsquo;s drift, and adhesion analysis
+            flags tall narrow towers before the print starts. Saved design goals carry through
+            reprints and version saves, and free-tier discovery tools return real results on
+            every install.
+          </p>
+          <div class="post-tags">
+            <span class="tag">release</span>
+            <span class="tag">v1.1.2</span>
+            <span class="tag">v1.1.3</span>
+            <span class="tag">recovery</span>
+            <span class="tag">printability</span>
+          </div>
+          <a href="/blog/kiln-1-1-3" class="read-more">Read the full post &rarr;</a>
+        </article>
+
+        <article class="post-card">
+          <div class="post-meta">May 13, 2026</div>
+          <h2><a href="/blog/kiln-1-1-1-tighter-feedback-loop">Kiln 1.1.1: Tighter feedback loop</a></h2>
+          <p>
+            A tighter loop between your AI agent and your 3D printer: clearer camera-monitoring
+            events, better in-print failure detection on Pro, and a <code>kiln health</code>
+            command that repairs its own broken paths after a Python reinstall. Plus a handful
+            of polish fixes across the agent and web surfaces.
+          </p>
+          <div class="post-tags">
+            <span class="tag">release</span>
+            <span class="tag">v1.1.1</span>
+            <span class="tag">vision</span>
+            <span class="tag">kiln-health</span>
+            <span class="tag">polish</span>
+          </div>
+          <a href="/blog/kiln-1-1-1-tighter-feedback-loop" class="read-more">Read the full post &rarr;</a>
+        </article>
+
         <article class="post-card">
           <div class="post-meta">May 6, 2026</div>
           <h2><a href="/blog/kiln-1-1-calibrated-to-your-printer">Kiln 1.1: Calibrated to your printer</a></h2>
