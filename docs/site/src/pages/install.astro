@@ -64,7 +64,7 @@ const installHowToSchema = {
 
 <BaseLayout
   title="Install Kiln — AI 3D Printing Infrastructure"
-  description="Install Kiln in three minutes on macOS, Linux, or WSL 2. Connect any MCP-capable AI agent (Claude Desktop, Claude Code, Codex) and ask it to make something."
+  description="Install Kiln in three minutes on macOS, Windows, Linux, or WSL 2. Connect any MCP-capable AI agent (Claude Desktop, Claude Code, Codex) and ask it to make something."
   current="install"
   keywords={[
     'install kiln',
@@ -94,12 +94,8 @@ const installHowToSchema = {
           <div class="step-number">1</div>
           <div class="step-content">
             <h3>Install Kiln</h3>
-            <p>Paste this to your AI agent, or run it in your terminal.</p>
-            <div class="code-block">
-              <button class="copy-btn" data-code="pip install kiln3d">Copy</button>
-              <code><span class="cmd">pip install kiln3d</span></code>
-            </div>
-            <p class="step-aside"><a href="#advanced-install">More install options &rarr;</a></p>
+            <p>Pick your platform &mdash; each tab has copy-paste commands.</p>
+            <InstallTabs />
           </div>
         </li>
         <li>
@@ -146,21 +142,6 @@ const installHowToSchema = {
           Or <a href="https://app.kiln3d.com/connect">sign in free &rarr;</a>
         </p>
       </div>
-    </div>
-  </section>
-
-  <!-- Advanced install — pipx, source, one-line installer kept
-       reachable for users who want them, but tucked into a
-       <details> so the happy path above stays tight.  Anchor link
-       from Step 1's "More install options" lands here. -->
-  <section id="advanced-install" class="advanced-section">
-    <div class="container">
-      <details class="advanced-install">
-        <summary>More install options &mdash; pipx, source, one-line installer</summary>
-        <div class="advanced-install-body">
-          <InstallTabs />
-        </div>
-      </details>
     </div>
   </section>
 
@@ -264,22 +245,6 @@ const installHowToSchema = {
     padding: 0;
     border: none;
   }
-  .step-aside {
-    margin-top: 14px !important;
-    font-size: 13px !important;
-  }
-  .step-aside a {
-    color: var(--text-muted);
-    text-decoration: none;
-    border-bottom: 1px dashed var(--border);
-    padding-bottom: 1px;
-    transition: color 0.15s, border-color 0.15s;
-  }
-  .step-aside a:hover {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-  }
-
   /* Example prompt (Step 3) — chat-bubble shape, accent left
      border, italic so the visitor parses it as "what you'd say to
      your AI" rather than as another code block. */
@@ -365,45 +330,6 @@ const installHowToSchema = {
   .pro-cta-signin a:hover {
     color: var(--accent);
     border-bottom-color: var(--accent);
-  }
-
-  /* Advanced install disclosure — preserves the legacy macOS /
-     Linux / WSL tabs (pipx, source, one-line installer) without
-     forcing visitors through three tabs of prerequisites before
-     Step 1. */
-  .advanced-section {
-    padding: 0 0 56px;
-  }
-  .advanced-install {
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--bg-card);
-    overflow: hidden;
-  }
-  .advanced-install summary {
-    padding: 16px 22px;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text);
-    cursor: pointer;
-    list-style: none;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .advanced-install summary::-webkit-details-marker { display: none; }
-  .advanced-install summary::after {
-    content: '+';
-    font-size: 18px;
-    color: var(--text-muted);
-    font-weight: 400;
-  }
-  .advanced-install[open] summary::after {
-    content: '\2212';
-  }
-  .advanced-install-body {
-    padding: 24px 22px 28px;
-    border-top: 1px solid var(--border);
   }
 
   /* Quiet FAQ link footnote — sits below the Pro CTA + advanced

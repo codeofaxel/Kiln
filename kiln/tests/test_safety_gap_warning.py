@@ -27,7 +27,7 @@ class TestWarningPresence:
         assert warn is not None
         assert warn["code"] == "PRINTER_MODEL_NOT_SET"
         assert warn["severity"] == "warning"
-        assert "DEGRADED" in warn["message"]
+        assert "unsafe" in warn["message"]
         assert "printer_model" in warn["remediation"]
 
     def test_returns_none_when_model_set(self):

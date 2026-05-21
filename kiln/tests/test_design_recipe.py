@@ -398,6 +398,12 @@ class TestCreateNewVersion:
 
     def test_fresh_timestamp(self, tmp_path):
         parent = _sample_recipe()
+        # Pin the parent to a known past timestamp.  Reading the wall
+        # clock twice in quick succession can return the identical
+        # value on platforms with coarse clock resolution (Windows),
+        # so a fresh ``create_new_version()`` timestamp must be
+        # verified against a deterministically older parent value.
+        parent.created = "2000-01-01T00:00:00+00:00"
         parent_path = save_recipe(parent, str(tmp_path))
         new = create_new_version(parent, parent_path)
         assert new.created != parent.created

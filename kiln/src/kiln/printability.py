@@ -1991,59 +1991,176 @@ def _analyze_bed_adhesion(
     )
 
 
-_BRIDGE_SUBSTITUTION_MAX_SPAN_MM = 30.0
-_BRIDGE_SUBSTITUTION_MAX_REGION_SPREAD_RATIO = 0.8
+# Slicers bridge a two-sided gap reliably only up to roughly this
+# span; a wider gap sags even when it is genuinely anchored on both
+# sides, so the bridge-substitution downgrade must not fire past it.
+_MAX_RELIABLE_BRIDGE_SPAN_MM = 30.0
+
+
+def _points_inside_mesh(
+    points: np.ndarray,
+    triangles: np.ndarray,
+) -> np.ndarray:
+    """Even-odd point-in-mesh test for a batch of points, ray cast
+    straight down.
+
+    Casts one near-vertical downward ray per point and counts forward
+    triangle crossings (Möller-Trumbore).  An odd count means the point
+    lies inside the solid the mesh bounds.
+
+    Even-odd parity is robust to ugly triangulation: a fan-triangulated
+    concave face whose triangles overlap and spill outside the polygon
+    still yields the correct parity, because the spill cancels.  A
+    per-triangle footprint or cross-section test does NOT — one large
+    face spans the very gap it bounds.
+
+    The downward direction matters: it counts only material *below* each
+    point, so an open top face coplanar with a probe point (an idealized
+    overhang slab resting on its supports) cannot corrupt the parity.
+    Parity stays approximate on meshes that are non-closed below the
+    probe plane; the caller uses the result as a conservative heuristic,
+    so that is acceptable.
+
+    ``points`` is ``(P, 3)``, ``triangles`` is ``(T, 3, 3)``.  Returns a
+    ``(P,)`` bool array.
+    """
+    P = points.shape[0]
+    T = triangles.shape[0]
+    if P == 0 or T == 0:
+        return np.zeros(P, dtype=bool)
+
+    # Near-vertical, cast downward, with a slight off-axis tilt.  Down
+    # excludes everything above the probe plane (the overhang surface
+    # and any top faces coplanar with it); the tilt avoids coplanar
+    # degeneracies against the axis-aligned faces typical of 3D models.
+    d = np.array([0.0511, 0.0337, -1.0], dtype=np.float64)
+
+    v0 = triangles[:, 0, :]                       # (T, 3)
+    e1 = triangles[:, 1, :] - v0                  # (T, 3)
+    e2 = triangles[:, 2, :] - v0                  # (T, 3)
+    h = np.cross(d, e2)                           # (T, 3)
+    a = np.einsum("tj,tj->t", e1, h)              # (T,)
+    parallel = np.abs(a) < 1e-9
+    inv_a = np.where(parallel, 0.0, 1.0 / np.where(parallel, 1.0, a))
+
+    crossings = np.zeros(P, dtype=np.int64)
+    chunk = max(1, 1_000_000 // T)                # bound (chunk, T) memory
+    for start in range(0, P, chunk):
+        pts = points[start:start + chunk]         # (C, 3)
+        s = pts[:, None, :] - v0[None, :, :]      # (C, T, 3)
+        u = np.einsum("ctj,tj->ct", s, h) * inv_a[None, :]
+        q = np.cross(s, e1[None, :, :])           # (C, T, 3)
+        v = np.einsum("ctj,j->ct", q, d) * inv_a[None, :]
+        t = np.einsum("ctj,tj->ct", q, e2) * inv_a[None, :]
+        hit = (
+            (~parallel[None, :])
+            & (u >= 0.0) & (u <= 1.0)
+            & (v >= 0.0) & (u + v <= 1.0)
+            & (t > 1e-7)
+        )
+        crossings[start:start + chunk] = hit.sum(axis=1)
+    return (crossings % 2) == 1
 
 
 def _likely_bridge_substituted(
-    support_regions: list[dict[str, float]],
-    bbox: dict[str, float] | None = None,
+    overhang_triangles: list[tuple[tuple[float, ...], ...]],
+    all_triangles: list[tuple[tuple[float, ...], ...]],
 ) -> bool:
-    """Heuristic for whether PrusaSlicer's auto-supports will choose to
-    bridge over the overhang instead of generating support material.
+    """Whether a near-horizontal overhang is a genuine spannable bridge
+    a slicer fills on its own — rather than a cantilever or island that
+    needs supports.
 
-    Slicers prefer bridging when ALL THREE of:
+    A bridge is anchored on TWO opposing sides with an open gap between
+    them (a tabletop between legs, a Pi-shape, a picture-frame interior).
+    A cantilever is anchored on ONE side — the overhang extends past its
+    support (a T-arm, an L) — and physically cannot be bridged: there is
+    no second anchor to pull the filament across.  An island is anchored
+    nowhere.  Only the true two-sided bridge can safely skip supports.
 
-    1. There IS at least one detected overhang (else nothing to
-       substitute).
-    2. The PART's short-axis bbox dimension is ≤30mm — the slicer
-       can find SOME orientation along which the bridge fits in its
-       reliable-bridging length.
-    3. The detected overhang REGIONS cluster within ≤80% of the
-       longer bbox axis — i.e. the overhang is a localized cavity
-       (a 4-corner-leg tabletop, a U-shape, a picture-frame interior)
-       NOT scattered across the whole footprint (multi-arm star,
-       spider, gear-on-post — those need supports under each arm).
+    Geometric test: probe a grid of points one probe-depth below the
+    overhang underside and classify each inside/outside the solid via
+    even-odd ray casting.  Per axis, the overhang bridges when solid
+    fills the band straddling BOTH footprint edges and the centre band
+    is open — the open centre is the gap the slicer bridges.  A central
+    post fills the centre, not the edges; a one-sided arm reaches one
+    edge only; a solid base fills everything (no gap); each fails.  An
+    axis whose span exceeds the reliable bridging length also fails — a
+    gap that wide sags even when it is truly two-sided.
 
-    Returns True when all three conditions hold. The user may still
-    want to FORCE supports for surface-quality reasons on a
-    show-surface underside; this flag is "the slicer will probably
-    bridge if left to its defaults," not "you shouldn't generate
-    supports here."
+    The probe band extends a margin past each footprint edge so an
+    anchor abutting the overhang from outside its footprint (the legs of
+    a Pi-shape touch the underside edges, not its interior) still
+    registers.
+
+    The caller still gates this behind a near-horizontal overhang check
+    before acting on it.
     """
-    if not support_regions:
-        return False
-    if bbox is None:
+    if not overhang_triangles or not all_triangles:
         return False
 
-    span_x = bbox.get("x_max", 0.0) - bbox.get("x_min", 0.0)
-    span_y = bbox.get("y_max", 0.0) - bbox.get("y_min", 0.0)
-    # Condition 2: short-axis bbox check
-    if not (0.0 < min(span_x, span_y) <= _BRIDGE_SUBSTITUTION_MAX_SPAN_MM):
+    oxs = [v[0] for tri in overhang_triangles for v in tri]
+    oys = [v[1] for tri in overhang_triangles for v in tri]
+    ox_min, ox_max = min(oxs), max(oxs)
+    oy_min, oy_max = min(oys), max(oys)
+    span_x, span_y = ox_max - ox_min, oy_max - oy_min
+    if span_x <= 1e-6 or span_y <= 1e-6:
         return False
 
-    # Condition 3: overhang-region clustering check. The support_regions
-    # carry centroid x/y per region; if they spread across most of the
-    # part, no single bridge can span them — the slicer will support
-    # each region individually.
-    xs = [r.get("x", 0.0) for r in support_regions if isinstance(r.get("x"), (int, float))]
-    ys = [r.get("y", 0.0) for r in support_regions if isinstance(r.get("y"), (int, float))]
-    if not xs or not ys:
-        # No centroid data — fall back to the bbox-only signal.
-        return True
-    region_span = max(max(xs) - min(xs), max(ys) - min(ys))
-    largest_part_span = max(span_x, span_y, 1e-9)
-    return (region_span / largest_part_span) <= _BRIDGE_SUBSTITUTION_MAX_REGION_SPREAD_RATIO
+    overhang_z = min(v[2] for tri in overhang_triangles for v in tri)
+    part_z_min = min(v[2] for tri in all_triangles for v in tri)
+    overhang_height = overhang_z - part_z_min
+    if overhang_height <= 1e-6:
+        return False  # overhang sits on the bed — nothing to bridge over
+
+    tris = np.asarray(all_triangles, dtype=np.float64)
+    if tris.ndim != 3 or tris.shape[1:] != (3, 3):
+        return False
+
+    # Probe plane: just below the overhang underside, where a real
+    # anchor (a wall rising to the overhang) is still solid.  A sub-mm
+    # jitter keeps probe points off the axis-aligned faces of the model.
+    depth = min(1.0, max(0.25, 0.05 * overhang_height))
+    probe_z = overhang_z - depth + 0.0117
+    if probe_z <= part_z_min:
+        return False  # overhang too close to the bed to probe under
+
+    # Margin past each footprint edge so an edge-abutting anchor registers.
+    margin = 3.0
+
+    def _axis_bridges(lo: float, hi: float, span: float, axis: int) -> bool:
+        if span > _MAX_RELIABLE_BRIDGE_SPAN_MM:
+            return False  # too wide — a true gap this long still sags
+        cross_lo, cross_hi = (oy_min, oy_max) if axis == 0 else (ox_min, ox_max)
+        cross_span = cross_hi - cross_lo
+        # ~1mm steps along the bridged axis; the cross axis is inset so
+        # every sample sits strictly inside the footprint, yet dense
+        # enough to catch an off-centre anchor (a corner leg).
+        n_main = max(9, min(80, int((span + 2 * margin)) + 1))
+        n_cross = max(3, min(20, int(cross_span) + 1))
+        main = np.linspace(lo - margin, hi + margin, n_main)
+        cross = np.linspace(
+            cross_lo + 0.05 * cross_span, cross_hi - 0.05 * cross_span, n_cross
+        )
+        mg, cg = np.meshgrid(main, cross, indexing="ij")
+        pts = np.empty((mg.size, 3), dtype=np.float64)
+        pts[:, axis] = mg.ravel() + 0.0131
+        pts[:, 1 - axis] = cg.ravel() + 0.0173
+        pts[:, 2] = probe_z
+        inside = _points_inside_mesh(pts, tris).reshape(mg.shape)
+        # A footprint edge is anchored if ANY cross-axis sample in its
+        # band is solid; the centre is open if NO sample there is.
+        col_solid = inside.any(axis=1)
+        centre = lo + span / 2.0
+        left_anchored = bool(col_solid[np.abs(main - lo) <= margin].any())
+        right_anchored = bool(col_solid[np.abs(main - hi) <= margin].any())
+        mid_band = np.abs(main - centre) <= span / 6.0
+        mid_open = mid_band.any() and not bool(col_solid[mid_band].any())
+        return left_anchored and right_anchored and mid_open
+
+    return (
+        _axis_bridges(ox_min, ox_max, span_x, axis=0)
+        or _axis_bridges(oy_min, oy_max, span_y, axis=1)
+    )
 
 
 def _analyze_supports(
@@ -2075,6 +2192,7 @@ def _analyze_supports(
 
     support_volume = 0.0
     support_regions: list[dict[str, float]] = []
+    overhang_tris: list[tuple[tuple[float, ...], ...]] = []
 
     for tri in triangles:
         if _is_bed_supported_triangle(tri, z_min, layer_height):
@@ -2096,6 +2214,7 @@ def _analyze_supports(
         # one ULP, so a strict `<` filter skipped real 45° slopes.
         if overhang_angle + 1e-9 < max_overhang_angle:
             continue
+        overhang_tris.append(tri)
 
         centroid = _triangle_centroid(tri[0], tri[1], tri[2])
         height = centroid[2] - z_min
@@ -2131,7 +2250,7 @@ def _analyze_supports(
     support_pct = (support_volume / model_volume * 100.0) if model_volume > 0 else 0.0
     support_pct = min(100.0, support_pct)
 
-    bridge_substituted = _likely_bridge_substituted(support_regions, bbox=bbox)
+    bridge_substituted = _likely_bridge_substituted(overhang_tris, triangles)
 
     return SupportAnalysis(
         estimated_support_volume_mm3=round(support_volume, 2),
@@ -3051,22 +3170,20 @@ def analyze_printability(
     )
 
     # Bridge-aware overhang verdict.  When _analyze_supports's
-    # ``likely_substituted_by_bridge`` heuristic flags the geometry as
-    # bridgeable (bbox short-axis ≤30mm AND overhang regions cluster
-    # within ≤80% of the longer bbox axis — the localized-cavity
-    # pattern that slicers reliably bridge) AND the overhang is
-    # horizontal (``max_overhang_angle`` ≥ 89° — bridging is
-    # fundamentally only applicable to near-flat overhangs), the
-    # user does not need supports for that overhang: the slicer will
-    # bridge it cleanly without intervention.
+    # ``likely_substituted_by_bridge`` test confirms the overhang is a
+    # genuine two-sided bridge — part material anchors it on opposite
+    # sides with a spannable gap between them — AND the overhang is
+    # horizontal (``max_overhang_angle`` ≥ 89° — bridging only applies
+    # to near-flat overhangs), the user does not need supports for it:
+    # the slicer will bridge it cleanly without intervention.
     #
-    # Flagging ``needs_supports=True`` in that case is a false
-    # positive that costs filament + post-processing on a print
-    # PrusaSlicer would have nailed.  Two independent gates
-    # (sophisticated bbox+clustering heuristic from
-    # ``_likely_bridge_substituted`` + the horizontal-overhang check)
-    # is conservative — any disagreement keeps the safer
-    # ``needs_supports=True`` verdict.
+    # Flagging ``needs_supports=True`` in that case is a false positive
+    # that costs filament + post-processing on a print PrusaSlicer
+    # would have nailed.  Two independent gates (the two-sided-anchor
+    # geometry test in ``_likely_bridge_substituted`` + the
+    # horizontal-overhang check) are conservative — a cantilever,
+    # anchored on one side and impossible to bridge, fails the geometry
+    # test and correctly keeps ``needs_supports=True``.
     #
     # Note: bridging.needs_supports_for_bridges is intentionally NOT a
     # gate here.  That field is derived from max triangle edge length,
@@ -3075,7 +3192,7 @@ def analyze_printability(
     # spannable axis-aligned width.  An 8x12mm bridge reports
     # max_bridge_length_mm = sqrt(208) ≈ 14.42, which trips the 10mm
     # universal-rule limit even though slicers comfortably bridge the
-    # 8mm short axis.  Main's bbox-short-axis heuristic in
+    # 8mm short axis.  The two-sided-anchor geometry test in
     # ``_likely_bridge_substituted`` is the better gate for this
     # judgment.
     #

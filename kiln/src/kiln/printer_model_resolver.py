@@ -98,8 +98,8 @@ def _read_printer_model_from_config() -> str | None:
             if model_str != model_str.lower() or get_build_volume(model_str) is None:
                 logger.warning(
                     "printer_model=%r in %s doesn't match any known printer "
-                    "in printer_intelligence.json.  Safety gates will "
-                    "soft-pass.  Keys are case-sensitive (bambu_a1, not "
+                    "in printer_intelligence.json.  Safety checks will be "
+                    "skipped.  Keys are case-sensitive (bambu_a1, not "
                     "bambu_A1).  Check the JSON file for valid values.",
                     model_str, _CONFIG_PATH,
                 )
@@ -111,11 +111,11 @@ def _read_printer_model_from_config() -> str | None:
     if ptype:
         logger.warning(
             "No `printer_model` set for the active %s printer in %s. "
-            "The safety stack (bed-fit, gcode bounds, temperature limits) "
-            "will SOFT-PASS — unsafe prints can reach the printer.  Ask "
-            "the user which printer model they have and add "
-            "`printer_model: <model>` under `printers.%s` in the config "
-            "file (e.g. bambu_a1, prusa_mk4, ender3).",
+            "Kiln can't check that prints fit the bed or stay within safe "
+            "temperatures — those checks are skipped, so an unsafe print "
+            "could reach the printer.  Ask the user which printer model "
+            "they have and add `printer_model: <model>` under `printers.%s` "
+            "in the config file (e.g. bambu_a1, prusa_mk4, ender3).",
             ptype, _CONFIG_PATH, active_printer,
         )
     return None

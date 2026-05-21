@@ -79,7 +79,12 @@ def test_make_scad_wrapper_stl(tmp_stl: Path):
         assert wrapper != str(tmp_stl)
         content = Path(wrapper).read_text()
         assert "import(" in content
-        assert str(tmp_stl) in content
+        # The path is embedded in an OpenSCAD string literal, so
+        # backslashes are escaped (``\`` -> ``\\``).  On POSIX the
+        # path has none and the escaped form equals the raw path;
+        # on Windows the check must use the escaped form.
+        escaped = str(tmp_stl).replace("\\", "\\\\")
+        assert escaped in content
     finally:
         os.unlink(wrapper)
 

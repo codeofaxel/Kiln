@@ -908,7 +908,12 @@ class TestAuth:
             "ok": False,
             "checks": [{"name": "api_status", "ok": False}],
         }
-        with patch("kiln.cli.main.save_printer", return_value=Path("/tmp/config.yaml")) as mock_save, \
+        # ``save_printer`` returns a ``Path``; the CLI stringifies it
+        # into the JSON payload.  Compare against the same Path
+        # stringified so the expectation matches on Windows too (where
+        # the separator is a backslash).
+        config_path = Path("/tmp/config.yaml")
+        with patch("kiln.cli.main.save_printer", return_value=config_path) as mock_save, \
              patch("kiln.cli.main.load_printer_config", return_value={
                  "type": "prusaconnect",
                  "host": "http://192.168.0.44",
@@ -928,7 +933,7 @@ class TestAuth:
         data = json.loads(result.output)
         assert data["status"] == "error"
         assert data["error"]["code"] == "PRUSA_DIAGNOSTICS_FAILED"
-        assert data["data"]["config_path"] == "/tmp/config.yaml"
+        assert data["data"]["config_path"] == str(config_path)
         assert mock_save.call_count == 1
 
 

@@ -567,8 +567,15 @@ class TestFilePermissions:
                     with mock.patch("kiln.credential_store.os.chmod") as mock_chmod:
                         # Let other os functions work normally.
                         store = CredentialStore(db_path=db_path)
-                        # chmod should have been called on the key file with 0o600.
-                        chmod_calls = [c for c in mock_chmod.call_args_list if key_path in str(c)]
+                        # chmod should have been called on the key file.
+                        # Inspect the recorded positional args directly
+                        # rather than the repr of the call object — on
+                        # Windows the repr double-escapes the backslashes
+                        # in the path, breaking a substring match.
+                        chmod_calls = [
+                            c for c in mock_chmod.call_args_list
+                            if c.args and c.args[0] == key_path
+                        ]
                         assert len(chmod_calls) >= 1
                         # Verify 0o600 was used for key file.
                         found_key_chmod = False

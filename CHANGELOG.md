@@ -3,6 +3,73 @@
 All notable changes to Kiln are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.1.4] - 2026-05-20
+
+Kiln runs cleanly on a stock Windows install now — no WSL and no
+manual environment tweaks.  The CLI stopped crashing on Windows'
+default console encoding, the MCP config points at the right
+executable, and OpenSCAD design generation handles Windows paths
+and encodings.  Beyond Windows: the overhang check stops
+green-lighting shapes that can't be bridged, the Bambu AMS Lite
+reports honestly, and safety messages drop their jargon.
+
+### Added
+
+- The `kiln3d.com/install` page has a native-Windows section —
+  Python setup, install, and agent connection — including a
+  copy-paste prompt that hands the whole setup to an AI agent.
+
+### Changed
+
+- **Safety and connection messages say what actually happens.**
+  Safety-gap warnings leaned on internal terms — "soft-pass",
+  "bed-fit gate", "g-code bounds check", "DEGRADED".  They now
+  describe the consequence to you instead.  The Bambu connection
+  errors got the same plain-language treatment, and a routine TLS
+  certificate-pinning log line dropped from a warning to debug so
+  it stops reading like a problem.
+
+### Fixed
+
+- **The CLI no longer crashes on Windows consoles.**  Windows
+  consoles default to a legacy code page (cp1252 on US installs)
+  that can't encode the check marks, arrows, and emoji Kiln
+  prints.  `kiln` now normalises stdout and stderr to UTF-8 at
+  startup, so `kiln --help`, `kiln doctor`, and every other
+  command render instead of aborting with a `UnicodeEncodeError`.
+  macOS and Linux are unaffected — their streams are already
+  UTF-8 and are left untouched.
+- **`kiln install-mcp` writes a launchable path on Windows.**  The
+  generated MCP config pointed at an extension-less `kiln` path;
+  it now resolves to `kiln.exe`, so agents that spawn the server
+  without a shell can find it.
+- **`kiln doctor` warning lines now show the check name.**  A
+  warning row printed only its detail without the label; it now
+  matches the pass and fail rows ("Openscad: not found …").
+- **OpenSCAD-based design generation runs on Windows.**  Kiln
+  writes a temporary `.scad` file for OpenSCAD to compile.  It was
+  written in the console's legacy encoding, so a non-ASCII
+  character in the model code aborted generation on Windows; the
+  file is now UTF-8.  STL paths embedded in generated code are
+  escaped so Windows backslashes survive, and a temp-file handle
+  that blocked cleanup on Windows is now released.
+- **Mesh validation fails clearly when the input file is
+  missing.**  A bad path used to crash deep in the auto-repair
+  step with a raw OS error (`WinError 3` on Windows); it now
+  reports `Mesh file not found: …` up front.
+- **`kiln ams` no longer shows a misleading "0% remaining".**  The
+  A1 and A1 mini's AMS Lite has no filament weight sensor or
+  humidity sensor, so Kiln reported "0% remaining" and a
+  placeholder humidity for every spool.  Kiln now recognises which
+  printer models lack those sensors and marks the reading as
+  unknown instead of inventing a number.
+- **The overhang verdict stops clearing shapes that can't be
+  bridged.**  `analyze_printability` could downgrade "needs
+  supports" to "no supports needed" for a cantilever or a floating
+  island it mistook for a slicer-bridgeable gap.  The check now
+  confirms the overhang is genuinely anchored on two opposing
+  sides, with an open span between them, before clearing it.
+
 ## [1.1.3] - 2026-05-19
 
 Adhesion catches tall narrow detach risk regardless of material,

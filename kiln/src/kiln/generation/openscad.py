@@ -273,10 +273,12 @@ class OpenSCADProvider(GenerationProvider):
         # Centralised security checks (size, dangerous ops, include whitelist).
         _check_scad_security(prompt)
 
-        # Write .scad source to a temp file.
+        # Write .scad source to a temp file.  OpenSCAD reads source as
+        # UTF-8; encode explicitly so non-ASCII characters survive on
+        # platforms whose default text encoding is not UTF-8 (Windows).
         scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_")
         try:
-            with os.fdopen(scad_fd, "w") as fh:
+            with os.fdopen(scad_fd, "w", encoding="utf-8") as fh:
                 fh.write(prompt)
 
             binary = self._require_binary()
@@ -455,10 +457,13 @@ class OpenSCADProvider(GenerationProvider):
         if ext == ".stl":
             # Wrap the STL in an OpenSCAD import statement.
             # Path is validated above — only model file extensions allowed.
-            scad_code = f'import("{src}");'
+            # Escape backslashes so a Windows path inside the OpenSCAD
+            # string literal is not mangled as escape sequences.
+            _escaped_src = str(src).replace("\\", "\\\\").replace('"', '\\"')
+            scad_code = f'import("{_escaped_src}");'
             scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_preview_")
             try:
-                with os.fdopen(scad_fd, "w") as fh:
+                with os.fdopen(scad_fd, "w", encoding="utf-8") as fh:
                     fh.write(scad_code)
                 return self._render_scad_to_png(
                     scad_path, output_path=output_path,
@@ -574,7 +579,10 @@ class OpenSCADProvider(GenerationProvider):
 
         scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_validate_")
         try:
-            with os.fdopen(scad_fd, "w") as fh:
+            # OpenSCAD reads source as UTF-8; encode explicitly so the
+            # write does not fail on non-ASCII characters under a
+            # non-UTF-8 default encoding (Windows).
+            with os.fdopen(scad_fd, "w", encoding="utf-8") as fh:
                 fh.write(code)
 
             # Use /dev/null as output — we only care about stderr
@@ -674,7 +682,9 @@ class OpenSCADProvider(GenerationProvider):
         scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_bool_")
         work_dir = tempfile.mkdtemp(prefix="kiln_bool_")
         try:
-            with os.fdopen(scad_fd, "w") as fh:
+            # Encode as UTF-8 — OpenSCAD's source encoding — so non-ASCII
+            # characters do not break the write on Windows.
+            with os.fdopen(scad_fd, "w", encoding="utf-8") as fh:
                 fh.write(scad_code)
 
             binary = self._require_binary()
@@ -859,7 +869,12 @@ def boolean_mesh_operation(
         logger.info("Boolean %s failed, attempting auto-repair on inputs...", operation)
         repaired_paths: list[str] = []
         for fp in file_paths:
-            repaired = tempfile.mkstemp(suffix=".stl", prefix="kiln_repaired_")[1]
+            # Close the descriptor mkstemp opens — a leaked open handle
+            # blocks os.unlink of this temp file on Windows.
+            _rep_fd, repaired = tempfile.mkstemp(
+                suffix=".stl", prefix="kiln_repaired_",
+            )
+            os.close(_rep_fd)
             shutil.copy2(fp, repaired)
             try:
                 repair_stl_advanced(repaired, close_holes=True)
@@ -876,9 +891,15 @@ def boolean_mesh_operation(
         except GenerationError:
             # 3. Python fallback for simple planar cuts
             fallback_used = True
-            _out = output_path or tempfile.mkstemp(
-                suffix=".stl", prefix="kiln_bool_fb_",
-            )[1]
+            if output_path:
+                _out = output_path
+            else:
+                # Close mkstemp's descriptor — a leaked open handle
+                # would block later deletion of this file on Windows.
+                _fb_fd, _out = tempfile.mkstemp(
+                    suffix=".stl", prefix="kiln_bool_fb_",
+                )
+                os.close(_fb_fd)
             result_path = _python_boolean_fallback(
                 operation, file_paths, _out,
             )
@@ -993,7 +1014,9 @@ def compose_from_primitives(
     # Compile directly — the generated code is validated above via _check_scad_security().
 
     scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_composed_")
-    with os.fdopen(scad_fd, "w") as fh:
+    # OpenSCAD reads source as UTF-8; encode explicitly so the write
+    # survives non-ASCII characters under a non-UTF-8 default encoding.
+    with os.fdopen(scad_fd, "w", encoding="utf-8") as fh:
         fh.write(scad_code)
 
     try:

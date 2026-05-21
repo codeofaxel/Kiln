@@ -171,9 +171,13 @@ class TestLogoutAndWhoami:
         auth_commands._write_tokens({"access_token": "abc"})
         path = auth_commands._tokens_path()
         assert path.exists()
-        # Lower 9 bits of st_mode should be 600 (user r/w, no group/other).
-        perms = os.stat(path).st_mode & 0o777
-        assert perms == 0o600, f"expected 0600 perms, got 0o{perms:o}"
+        # The 0600 bits are POSIX-only.  Windows has no group/other
+        # permission concept — os.chmod only toggles the read-only
+        # attribute — so ``st_mode & 0o777`` always reports 0o666 there.
+        # Assert the bits only where they are meaningful.
+        if os.name != "nt":
+            perms = os.stat(path).st_mode & 0o777
+            assert perms == 0o600, f"expected 0600 perms, got 0o{perms:o}"
 
 
 # =====================================================================

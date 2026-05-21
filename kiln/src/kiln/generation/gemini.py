@@ -1063,7 +1063,11 @@ class GeminiDeepThinkProvider(GenerationProvider):
 
         scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_gemini_")
         try:
-            with os.fdopen(scad_fd, "w") as fh:
+            # OpenSCAD reads source files as UTF-8; write explicitly so
+            # non-ASCII characters in the library or generated code
+            # (e.g. the comparison glyph in threshold comments) survive
+            # on platforms whose default text encoding is not UTF-8.
+            with os.fdopen(scad_fd, "w", encoding="utf-8") as fh:
                 fh.write(full_code)
 
             cmd = [self._openscad, "-o", out_path, scad_path]

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from kiln.fulfillment_profiles import (
     delete_shipping_profile,
     get_shipping_profile,
@@ -59,7 +61,10 @@ def test_profile_summary_redacts_contact_details_by_default(monkeypatch, tmp_pat
     assert "ada@example.com" not in profile["summary"]
     assert "555-0100" not in profile["summary"]
     assert "Austin" in profile["summary"]
-    assert profile_path.stat().st_mode & 0o777 == 0o600
+    # The 0600 mode bits are POSIX-only — fulfillment_profiles skips
+    # the chmod on Windows, where st_mode has no group/other concept.
+    if os.name != "nt":
+        assert profile_path.stat().st_mode & 0o777 == 0o600
 
 
 def test_shipping_summary_can_show_full_address_for_explicit_confirmation():

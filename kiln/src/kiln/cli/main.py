@@ -424,6 +424,7 @@ def _make_adapter(cfg: dict[str, Any]):
             host=host,
             access_code=cfg.get("access_code", ""),
             serial=cfg.get("serial", ""),
+            printer_model=cfg.get("printer_model") or None,
         )
     elif ptype == "elegoo":
         if ElegooAdapter is None:
@@ -1357,6 +1358,32 @@ def cli(ctx: click.Context, printer: str | None) -> None:
         logger.debug("DB not initialised yet — skipping startup check: %s", exc)
 
 
+def _ensure_utf8_streams() -> None:
+    """Normalise stdout/stderr to UTF-8 when they report another encoding.
+
+    The CLI prints non-ASCII status glyphs and box-drawing characters in
+    both its help text and command output.  Windows consoles default to a
+    legacy code page (cp1252 on US installs) whose codec cannot encode
+    them, so ``click.echo`` raises ``UnicodeEncodeError`` and the command
+    aborts before printing anything useful.
+
+    Streams that already report UTF-8 — every normal macOS and Linux
+    terminal — are left untouched, so this is a no-op outside the
+    legacy-code-page case it exists to fix.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        encoding = getattr(stream, "encoding", None)
+        if encoding and encoding.lower().replace("-", "") == "utf8":
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (OSError, ValueError):
+            pass
+
+
 # ---------------------------------------------------------------------------
 # discover
 # ---------------------------------------------------------------------------
@@ -1675,8 +1702,9 @@ def status(ctx: click.Context, json_mode: bool) -> None:
                             fg="yellow", bold=True,
                         ))
                         click.echo(
-                            "  Without it, the bed-fit gate, gcode bounds check, "
-                            "and temperature limits soft-pass."
+                            "  Until it's set, Kiln can't check that prints fit "
+                            "the bed or stay within safe temperatures — those "
+                            "checks are skipped."
                         )
                         if suggestion:
                             click.echo(click.style(
@@ -7462,9 +7490,9 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
                         fg="yellow", bold=True,
                     ))
                     click.echo(
-                        "    Without it, the bed-fit gate, gcode bounds check, "
-                        "and temperature\n    limits all soft-pass — unsafe prints "
-                        "can reach the printer."
+                        "    Until it's set, Kiln can't check that prints fit the\n"
+                        "    bed or stay within safe temperatures — those checks are\n"
+                        "    skipped, so an unsafe print could reach the printer."
                     )
                     if suggestion:
                         click.echo(click.style(
@@ -7513,8 +7541,9 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
                     ))
                 else:
                     click.echo(click.style(
-                        "    ⚠ printer_model NOT set.  Safety gates will soft-pass.\n"
-                        "      Run `kiln setup` for the interactive flow that asks for it.",
+                        "    ⚠ printer_model NOT set — Kiln can't check that prints\n"
+                        "      fit the bed or stay within safe temperatures.  Run\n"
+                        "      `kiln setup` for the interactive flow that asks for it.",
                         fg="yellow",
                     ))
                 click.echo("    Note: You may need to add an API key with 'kiln auth'.")
@@ -9253,13 +9282,12 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
         click.echo(_json.dumps({"status": "ok", "checks": checks}, indent=2))
     else:
         for c in checks:
+            label = c["name"].replace("_", " ").title()
             if c.get("warn"):
-                click.echo(f"  ⚠ {c['detail']}")
+                click.echo(f"  ⚠ {label}: {c['detail']}")
             elif c["ok"]:
-                label = c["name"].replace("_", " ").title()
                 click.echo(f"  ✓ {label}: {c['detail']}")
             else:
-                label = c["name"].replace("_", " ").title()
                 click.echo(f"  ✗ {label}: {c['detail']}")
 
         passed = sum(1 for c in checks if c["ok"])
@@ -10392,6 +10420,7 @@ def ams(ctx: click.Context, json_mode: bool) -> None:
             if not ams_units:
                 click.echo("No AMS units detected.")
             else:
+                untracked = False
                 for unit in ams_units:
                     click.echo(f"AMS #{unit.get('unit_id', unit.get('id', '?'))}:")
                     for tray in unit.get("trays", unit.get("tray", [])):
@@ -10399,8 +10428,21 @@ def ams(ctx: click.Context, json_mode: bool) -> None:
                         raw_color = tray.get("tray_color", tray.get("color", ""))
                         color = f"#{raw_color[:6]}" if isinstance(raw_color, str) and len(raw_color) >= 6 else (raw_color or "unknown")
                         material = tray.get("tray_type", tray.get("type", "unknown")) or "unknown"
-                        remaining = tray.get("remain", tray.get("remaining", "?"))
-                        click.echo(f"  Slot {slot}: {material} ({color}) — {remaining}% remaining")
+                        # `remaining_known` (set by the adapter) is False when
+                        # a spool has no RFID tag — Bambu's AMS has no scale, so
+                        # `remain` is only meaningful for tagged spools.
+                        remain = tray.get("remain", tray.get("remaining"))
+                        if tray.get("remaining_known") and isinstance(remain, (int, float)):
+                            level = f"{remain}% remaining"
+                        else:
+                            level = "remaining not reported"
+                            untracked = True
+                        click.echo(f"  Slot {slot}: {material} ({color}) — {level}")
+                if untracked:
+                    click.echo(
+                        "  Tip: remaining % is only known for spools with a "
+                        "Bambu RFID tag."
+                    )
             tray_now = result.get("tray_now")
             if tray_now and tray_now != "255":
                 click.echo(f"Active tray: {tray_now}")
@@ -11108,7 +11150,12 @@ register_spend_caps_cli(cli)
 
 
 def main() -> None:
-    """CLI entry point."""
+    """CLI entry point.
+
+    Forces stdout/stderr to UTF-8 before Click parses ``argv`` so help
+    text and status glyphs render on legacy-code-page Windows consoles.
+    """
+    _ensure_utf8_streams()
     cli()
 
 

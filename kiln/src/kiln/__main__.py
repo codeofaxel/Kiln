@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from kiln.cli.main import cli
+from kiln.cli.main import main
 
-cli()
+main()

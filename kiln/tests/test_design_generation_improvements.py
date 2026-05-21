@@ -5627,7 +5627,9 @@ class TestMergeStlTool:
         c1 = str(tmp_path / "c1.stl")
         _write_cube_stl(c1, 10.0)
         out_path = str(tmp_path / "merged.stl")
-        result = merge_stl(f'["{c1}"]', out_path)
+        # Build the JSON list with json.dumps so a Windows path's
+        # backslashes are escaped — an f-string would emit invalid JSON.
+        result = merge_stl(json.dumps([c1]), out_path)
         assert result["success"] is True
         assert result["total_triangles"] == 12
 

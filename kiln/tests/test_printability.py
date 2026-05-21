@@ -1064,9 +1064,9 @@ class TestBridgingAnalysis:
 
 def _make_short_bridge_triangles(span: float = 8.0, depth: float = 12.0) -> list[tuple]:
     """π-shape (two pillars + horizontal top); top underside is a
-    horizontal overhang.  ``span`` ≤ 10mm keeps the bridge below the
-    universal slicing limit; bbox short axis stays ≤ 30mm to match
-    main's _likely_bridge_substituted heuristic.
+    horizontal overhang the slicer bridges between the pillars.
+    ``span`` is the bridged gap width — under the reliable bridging
+    length for the bridge cases, over it for the wide-span case.
     """
     pillar_w = 3.0
     pillar_h = 15.0
@@ -1104,11 +1104,11 @@ def _make_short_bridge_triangles(span: float = 8.0, depth: float = 12.0) -> list
 
 class TestBridgeAwareOverhangVerdict:
     def test_short_bridge_downgrades_verdict(self, tmp_path):
-        """8mm horizontal bridge with no other overhangs.  bbox short
-        axis is 12mm (≤30mm gate passes); overhang regions cluster
-        within the bbox (clustering gate passes); overhang is 90°
-        horizontal (horizontal gate passes).  Two-gate correlator
-        downgrades needs_supports to False."""
+        """8mm horizontal bridge with no other overhangs.  The overhang
+        is anchored on two sides by the pillars (two-sided-anchor test
+        passes), the 8mm span is within the reliable bridging length,
+        and the overhang is 90° horizontal.  The verdict downgrades
+        needs_supports to False."""
         tris = _make_short_bridge_triangles(span=8.0)
         stl = tmp_path / "short_bridge.stl"
         with open(stl, "wb") as f:
@@ -1123,14 +1123,13 @@ class TestBridgeAwareOverhangVerdict:
             f"needs={report.overhangs.needs_supports}"
         )
 
-    def test_wide_bbox_disables_bridge_substitution(self, tmp_path):
-        """A π-shape stretched to 35mm wide in BOTH bbox axes —
-        bbox short axis (35mm) exceeds main's 30mm gate, so
-        _likely_bridge_substituted returns False.  Correlator must
-        NOT downgrade because the bbox-substitution heuristic
-        disagrees."""
-        # span 35 means each pillar is at ±17.5; bbox spans 41.5 in X.
-        # depth 35 makes bbox short axis 35 → above the 30mm gate.
+    def test_long_span_disables_bridge_substitution(self, tmp_path):
+        """A π-shape stretched to a 35mm horizontal span.  The overhang
+        is genuinely two-sided, but 35mm exceeds the reliable bridging
+        length — a gap that wide sags — so _likely_bridge_substituted
+        returns False and the verdict keeps needs_supports=True."""
+        # span 35 → the overhang underside spans 35mm in X, past the
+        # ~30mm reliable-bridge limit even though it IS two-sided.
         tris = _make_short_bridge_triangles(span=35.0, depth=35.0)
         stl = tmp_path / "wide_bridge.stl"
         with open(stl, "wb") as f:
@@ -1138,7 +1137,7 @@ class TestBridgeAwareOverhangVerdict:
         report = analyze_printability(str(stl), material="PLA")
         assert report.overhangs.max_overhang_angle >= 89.0
         assert not report.supports.likely_substituted_by_bridge, (
-            f"35mm bbox short axis must trip main's >30mm gate; "
+            f"35mm overhang span must exceed the reliable bridge length; "
             f"got likely_sub={report.supports.likely_substituted_by_bridge}"
         )
         assert report.overhangs.needs_supports

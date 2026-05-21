@@ -81,48 +81,87 @@ GEMINI_NO_PARTS_RESPONSE = {
 # ---------------------------------------------------------------------------
 
 
+def _write_fake_openscad(tmp_path, *, posix_body: str, batch_body: str) -> str:
+    """Write a fake ``openscad`` executable into ``tmp_path``.
+
+    ``subprocess.run`` cannot execute a bash script directly on
+    Windows (``[WinError 193]``); a ``.cmd`` batch file is the
+    cross-platform-equivalent stand-in there.  Returns the path the
+    provider should be pointed at.
+    """
+    if os.name == "nt":
+        fake_bin = tmp_path / "openscad.cmd"
+        fake_bin.write_text(batch_body)
+    else:
+        fake_bin = tmp_path / "openscad"
+        fake_bin.write_text(posix_body)
+        fake_bin.chmod(0o755)
+    return str(fake_bin)
+
+
 @pytest.fixture
 def mock_openscad(tmp_path):
     """Create a fake openscad binary that writes a dummy STL file."""
-    fake_bin = tmp_path / "openscad"
-    # Script: copy the output path from args and write dummy data
-    fake_bin.write_text(
-        '#!/bin/bash\n'
-        '# Fake OpenSCAD: write dummy STL bytes to the -o output file\n'
-        'while [ "$#" -gt 0 ]; do\n'
-        '  case "$1" in\n'
-        '    -o) shift; echo "FAKE_STL_DATA" > "$1" ;;\n'
-        '  esac\n'
-        '  shift\n'
-        'done\n'
+    return _write_fake_openscad(
+        tmp_path,
+        # Script: copy the output path from args and write dummy data.
+        posix_body=(
+            '#!/bin/bash\n'
+            '# Fake OpenSCAD: write dummy STL bytes to the -o output file\n'
+            'while [ "$#" -gt 0 ]; do\n'
+            '  case "$1" in\n'
+            '    -o) shift; echo "FAKE_STL_DATA" > "$1" ;;\n'
+            '  esac\n'
+            '  shift\n'
+            'done\n'
+        ),
+        # Batch equivalent: scan args for -o and write the next token.
+        batch_body=(
+            "@echo off\n"
+            ":loop\n"
+            'if "%~1"=="" goto :eof\n'
+            'if "%~1"=="-o" (\n'
+            '  echo FAKE_STL_DATA> "%~2"\n'
+            "  shift\n"
+            ")\n"
+            "shift\n"
+            "goto loop\n"
+        ),
     )
-    fake_bin.chmod(0o755)
-    return str(fake_bin)
 
 
 @pytest.fixture
 def failing_openscad(tmp_path):
     """Create a fake openscad binary that always fails."""
-    fake_bin = tmp_path / "openscad"
-    fake_bin.write_text(
-        '#!/bin/bash\n'
-        'echo "ERROR: syntax error" >&2\n'
-        'exit 1\n'
+    return _write_fake_openscad(
+        tmp_path,
+        posix_body=(
+            '#!/bin/bash\n'
+            'echo "ERROR: syntax error" >&2\n'
+            'exit 1\n'
+        ),
+        batch_body=(
+            "@echo off\n"
+            "echo ERROR: syntax error 1>&2\n"
+            "exit /b 1\n"
+        ),
     )
-    fake_bin.chmod(0o755)
-    return str(fake_bin)
 
 
 @pytest.fixture
 def empty_openscad(tmp_path):
     """Create a fake openscad binary that produces no output."""
-    fake_bin = tmp_path / "openscad"
-    fake_bin.write_text(
-        '#!/bin/bash\n'
-        '# Do nothing — produce no output file\n'
+    return _write_fake_openscad(
+        tmp_path,
+        posix_body=(
+            '#!/bin/bash\n'
+            '# Do nothing — produce no output file\n'
+        ),
+        batch_body=(
+            "@echo off\n"
+            "rem Do nothing - produce no output file\n"
+        ),
     )
-    fake_bin.chmod(0o755)
-    return str(fake_bin)
 
 
 @pytest.fixture

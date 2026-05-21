@@ -249,10 +249,16 @@ class TestGetRecordsByPrinter:
         assert len(results) == 3
 
     def test_sorted_newest_first(self, engine):
-        _make_record(engine, printer_id="p1")
+        r1 = _make_record(engine, printer_id="p1")
         r2 = _make_record(engine, printer_id="p1")
+        # Pin distinct started_at timestamps.  Two start_record() calls
+        # in quick succession can stamp the identical wall-clock time on
+        # platforms with coarse clock resolution (Windows), which makes
+        # the newest-first ordering a non-deterministic tie.
+        r1.started_at = "2024-01-01T00:00:00+00:00"
+        r2.started_at = "2024-01-01T00:00:01+00:00"
         results = engine.get_records_by_printer("p1")
-        # r2 created after r1, should appear first
+        # r2 is newer than r1, so it should appear first.
         assert results[0].part_id == r2.part_id
 
 

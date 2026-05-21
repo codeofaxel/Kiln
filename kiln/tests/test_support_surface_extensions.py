@@ -18,7 +18,6 @@ from kiln.printability import (
     SupportAnalysis,
     _analyze_supports,
     _likely_bridge_substituted,
-    _BRIDGE_SUBSTITUTION_MAX_SPAN_MM,
     analyze_printability,
 )
 
@@ -105,119 +104,86 @@ def _long_thin_overhang_stl(path: str):
 
 
 # ---------------------------------------------------------------------------
-# likely_substituted_by_bridge — the flag itself
+# _likely_bridge_substituted — two-sided-anchor geometry test
 # ---------------------------------------------------------------------------
 
 
-def test_bridge_substitution_helper_empty_regions_returns_false():
-    assert _likely_bridge_substituted([], bbox={"x_min": 0, "x_max": 50, "y_min": 0, "y_max": 50}) is False
-
-
-def test_bridge_substitution_helper_no_bbox_returns_false():
-    regions = [{"x": 0, "y": 0, "z": 20, "volume_mm3": 100.0}]
-    assert _likely_bridge_substituted(regions, bbox=None) is False
-
-
-def test_bridge_substitution_fires_on_small_footprint():
-    """Footprint dimension <= 30mm → bridge-substitution likely."""
-    regions = [{"x": 0, "y": 0, "z": 20, "volume_mm3": 100.0}]
-    bbox = {"x_min": 0, "x_max": 25, "y_min": 0, "y_max": 25, "z_min": 0, "z_max": 30}
-    assert _likely_bridge_substituted(regions, bbox=bbox) is True
-
-
-def test_bridge_substitution_does_not_fire_on_large_footprint():
-    """Footprint > 30mm on both axes → slicer can't bridge cleanly."""
-    regions = [{"x": 0, "y": 0, "z": 20, "volume_mm3": 100.0}]
-    bbox = {"x_min": 0, "x_max": 100, "y_min": 0, "y_max": 100, "z_min": 0, "z_max": 30}
-    assert _likely_bridge_substituted(regions, bbox=bbox) is False
-
-
-def test_bridge_substitution_uses_short_axis():
-    """When the part is long in X but short in Y, the slicer can bridge
-    across the short axis. The flag should fire."""
-    regions = [{"x": 0, "y": 0, "z": 20, "volume_mm3": 100.0}]
-    bbox = {"x_min": 0, "x_max": 100, "y_min": 0, "y_max": 20, "z_min": 0, "z_max": 30}
-    assert _likely_bridge_substituted(regions, bbox=bbox) is True
-
-
-def test_bridge_substitution_threshold_constant():
-    assert _BRIDGE_SUBSTITUTION_MAX_SPAN_MM == 30.0
-
-
-def test_bridge_substitution_rejects_scattered_overhang_regions():
-    """Multi-arm geometry (star, spider, plus-sign) has overhangs at
-    far corners of the bbox. Even when the bbox is small enough to
-    pass the short-axis check, scattered regions can't be replaced by
-    a single bridge — the slicer has to support each arm. The
-    clustering check rejects these."""
-    regions = [
-        {"x": -9.0, "y": -9.0, "z": 20.0, "volume_mm3": 100.0},
-        {"x": 9.0, "y": 9.0, "z": 20.0, "volume_mm3": 100.0},
+def _cuboid_tris(x0, y0, z0, dx, dy, dz):
+    """The 12 triangles of an axis-aligned box."""
+    x1, y1, z1 = x0 + dx, y0 + dy, z0 + dz
+    return [
+        ((x0, y0, z0), (x0, y1, z0), (x1, y1, z0)),
+        ((x0, y0, z0), (x1, y1, z0), (x1, y0, z0)),
+        ((x0, y0, z1), (x1, y0, z1), (x1, y1, z1)),
+        ((x0, y0, z1), (x1, y1, z1), (x0, y1, z1)),
+        ((x0, y0, z0), (x0, y0, z1), (x0, y1, z1)),
+        ((x0, y0, z0), (x0, y1, z1), (x0, y1, z0)),
+        ((x1, y0, z0), (x1, y1, z0), (x1, y1, z1)),
+        ((x1, y0, z0), (x1, y1, z1), (x1, y0, z1)),
+        ((x0, y0, z0), (x1, y0, z0), (x1, y0, z1)),
+        ((x0, y0, z0), (x1, y0, z1), (x0, y0, z1)),
+        ((x0, y1, z0), (x0, y1, z1), (x1, y1, z1)),
+        ((x0, y1, z0), (x1, y1, z1), (x1, y1, z0)),
     ]
-    bbox = {"x_min": -10, "x_max": 10, "y_min": -10, "y_max": 10,
-            "z_min": 0, "z_max": 30}
-    # Region span = 18mm, bbox max = 20mm → ratio 0.90 > 0.80 → False
-    assert _likely_bridge_substituted(regions, bbox=bbox) is False
 
 
-def test_bridge_substitution_accepts_clustered_overhang_regions():
-    """A part with overhangs clustered in one zone (a localized cavity)
-    IS a bridge candidate: the slicer can span the bridge in one go."""
-    regions = [
-        {"x": -3.0, "y": -3.0, "z": 20.0, "volume_mm3": 100.0},
-        {"x": 3.0, "y": 3.0, "z": 20.0, "volume_mm3": 100.0},
-    ]
-    bbox = {"x_min": -10, "x_max": 10, "y_min": -10, "y_max": 10,
-            "z_min": 0, "z_max": 30}
-    # Region span = 6mm, bbox max = 20mm → ratio 0.30 ≤ 0.80 → True
-    assert _likely_bridge_substituted(regions, bbox=bbox) is True
+# A flat overhang slab underside at z=10, footprint x in [0,30] y in [0,10].
+_OVERHANG_SLAB = [
+    ((0.0, 0.0, 10.0), (30.0, 0.0, 10.0), (30.0, 10.0, 10.0)),
+    ((0.0, 0.0, 10.0), (30.0, 10.0, 10.0), (0.0, 10.0, 10.0)),
+]
 
 
-def test_bridge_substitution_regions_without_centroid_fallback():
-    """Defensive: a region dict missing x/y (future schema change)
-    shouldn't break the heuristic — fall back to the bbox-only signal."""
-    regions = [{"z": 20.0, "volume_mm3": 100.0}]
-    bbox = {"x_min": 0, "x_max": 25, "y_min": 0, "y_max": 25,
-            "z_min": 0, "z_max": 30}
-    # No centroid data → fall back to bbox-only check (25 ≤ 30 → True)
-    assert _likely_bridge_substituted(regions, bbox=bbox) is True
+def test_bridge_substitution_empty_overhang_returns_false():
+    """No overhang triangles — nothing to bridge-substitute."""
+    assert _likely_bridge_substituted([], []) is False
+
+
+def test_bridge_substitution_island_returns_false():
+    """An overhang with no part material below it is a floating
+    island, not a bridge — it needs supports."""
+    assert _likely_bridge_substituted(_OVERHANG_SLAB, _OVERHANG_SLAB) is False
+
+
+def test_bridge_substitution_cantilever_returns_false():
+    """An overhang anchored on ONE side only — a cantilever — cannot
+    be bridged: there is no second anchor.  Returns False so the
+    verdict keeps 'needs supports'."""
+    column = _cuboid_tris(0.0, 0.0, 0.0, 5.0, 10.0, 10.0)
+    assert _likely_bridge_substituted(_OVERHANG_SLAB, _OVERHANG_SLAB + column) is False
+
+
+def test_bridge_substitution_central_post_returns_false():
+    """A central post (the cantilever-T pattern) anchors the middle,
+    not the ends — the overhang extends past it on both sides and
+    cannot be bridged."""
+    post = _cuboid_tris(12.5, 0.0, 0.0, 5.0, 10.0, 10.0)
+    assert _likely_bridge_substituted(_OVERHANG_SLAB, _OVERHANG_SLAB + post) is False
+
+
+def test_bridge_substitution_two_sided_bridge_returns_true():
+    """An overhang anchored on TWO opposing sides with a clear gap
+    between them — a genuine bridge the slicer fills on its own."""
+    left = _cuboid_tris(0.0, 0.0, 0.0, 5.0, 10.0, 10.0)
+    right = _cuboid_tris(25.0, 0.0, 0.0, 5.0, 10.0, 10.0)
+    all_tris = _OVERHANG_SLAB + left + right
+    assert _likely_bridge_substituted(_OVERHANG_SLAB, all_tris) is True
 
 
 # ---------------------------------------------------------------------------
-# _analyze_supports — bbox plumbing + clamp
+# _analyze_supports — bridge flag end-to-end
 # ---------------------------------------------------------------------------
 
 
-def test_supports_default_bbox_keeps_bridge_flag_false():
-    """No bbox supplied → can't tell if bridge-substitution likely →
-    flag stays False. Backwards-compatible default for old callers."""
+def test_supports_floating_overhang_keeps_bridge_flag_false():
+    """A bare floating overhang with nothing beneath it is not a
+    bridge — the flag stays False so the verdict keeps 'needs
+    supports'."""
     tris = [
-        # Single floating triangle far above z=0
         ((0.0, 0.0, 10.0), (5.0, 0.0, 10.0), (5.0, 5.0, 10.0)),
     ]
     result = _analyze_supports(tris, z_min=0.0)
     assert result.likely_substituted_by_bridge is False
-
-
-def test_supports_with_small_bbox_fires_bridge_flag():
-    """When the bbox is small AND there are overhangs detected,
-    the bridge-substitution flag should fire."""
-    # Two downward-facing triangles forming a horizontal overhang at z=20
-    # over a small footprint.
-    tris = [
-        ((0.0, 0.0, 20.0), (15.0, 0.0, 20.0), (15.0, 15.0, 20.0)),
-        ((0.0, 0.0, 20.0), (15.0, 15.0, 20.0), (0.0, 15.0, 20.0)),
-    ]
-    bbox = {"x_min": 0.0, "x_max": 15.0, "y_min": 0.0, "y_max": 15.0,
-            "z_min": 0.0, "z_max": 20.0}
-    result = _analyze_supports(
-        tris, z_min=0.0, bbox=bbox, normalize_winding=False
-    )
-    # Triangles point -Z because winding makes the normal -Z (CCW from below)
-    # If support_regions is empty, the helper returns False; only fires
-    # when there's at least one detected overhang.
-    if result.support_regions:
-        assert result.likely_substituted_by_bridge is True
 
 
 # ---------------------------------------------------------------------------

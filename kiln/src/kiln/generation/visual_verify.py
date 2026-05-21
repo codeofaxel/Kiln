@@ -133,7 +133,7 @@ class VisualVerifier:
         # render it.
         scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_verify_")
         try:
-            with os.fdopen(scad_fd, "w") as fh:
+            with os.fdopen(scad_fd, "w", encoding="utf-8") as fh:
                 # Use an import statement to load the STL inside OpenSCAD
                 escaped = stl_path.replace("\\", "\\\\").replace('"', '\\"')
                 fh.write(f'color("#AAAAAA") import("{escaped}");\n')
@@ -222,7 +222,7 @@ class VisualVerifier:
         # Build a temporary .scad wrapper once and reuse for all angles.
         scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_verify_")
         try:
-            with os.fdopen(scad_fd, "w") as fh:
+            with os.fdopen(scad_fd, "w", encoding="utf-8") as fh:
                 escaped = stl_path.replace("\\", "\\\\").replace('"', '\\"')
                 fh.write(f'color("#AAAAAA") import("{escaped}");\n')
 

@@ -228,10 +228,11 @@ class _UtilityToolsPlugin:
                 safety_profile_info["gates_active"] = _model is not None
                 if _model is None:
                     safety_profile_info["hint"] = (
-                        "printer_model is NOT configured. Safety gates (bed-fit, "
-                        "gcode bounds, temperature limits) will soft-pass — unsafe "
-                        "prints can reach the printer. Ask the user which printer "
-                        "they're using, then add `printer_model: <model>` under "
+                        "printer_model is NOT configured, so Kiln can't check "
+                        "that prints fit the bed or stay within safe temperatures "
+                        "— those checks are skipped and an unsafe print can reach "
+                        "the printer. Ask the user which printer they're using, "
+                        "then add `printer_model: <model>` under "
                         "`printers.<name>` in ~/.kiln/config.yaml (examples: "
                         "bambu_a1, bambu_x1c, prusa_mk4, prusa_mini, ender3, "
                         "creality_k1_max). "
@@ -432,9 +433,9 @@ class _UtilityToolsPlugin:
                     (
                         "kiln_health — check `safety_profile.gates_active`. "
                         "If false, printer_model is unset in ~/.kiln/config.yaml "
-                        "and the bed-fit / bounds / temperature safety gates "
-                        "are soft-passing.  Ask the user their printer model "
-                        "(e.g. bambu_a1, prusa_mk4) and add "
+                        "and Kiln can't check that prints fit the bed or stay "
+                        "within safe temperatures.  Ask the user their printer "
+                        "model (e.g. bambu_a1, prusa_mk4) and add "
                         "`printer_model: <value>` to the printer entry."
                     ),
                 ],

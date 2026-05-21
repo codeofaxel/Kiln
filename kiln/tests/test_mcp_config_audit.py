@@ -14,6 +14,8 @@ import os
 import stat
 from pathlib import Path
 
+import pytest
+
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -22,11 +24,39 @@ from pathlib import Path
 
 def _make_executable(path: Path) -> Path:
     """Create a small file at ``path`` and mark it executable.  Used
-    as the stand-in for a real ``kiln`` binary in the audit tests."""
+    as the stand-in for a real ``kiln`` binary in the audit tests.
+
+    On Windows there is no execute permission bit — ``os.access(...,
+    os.X_OK)`` answers ``True`` for any existing file — so the chmod
+    is a POSIX-only refinement.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("#!/bin/sh\necho stub\n")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return path
+
+
+def _toml_quote_path(path: Path) -> str:
+    """Render a filesystem path as a TOML basic-string literal.
+
+    A Windows path is full of backslashes, which are the TOML escape
+    character; writing one raw into a config string produces invalid
+    TOML (``C:\\Users`` reads ``\\U`` as a unicode escape).  Escaping
+    the backslashes keeps the fixture valid on every platform.
+    """
+    return json.dumps(str(path))
+
+
+def _set_home(monkeypatch, home: Path) -> None:
+    """Point ``Path.expanduser()`` at ``home`` on the current OS.
+
+    POSIX uses ``HOME``; Windows ignores ``HOME`` and resolves ``~``
+    from ``USERPROFILE`` (or ``HOMEDRIVE``+``HOMEPATH``).  Set whatever
+    the running platform actually consults so the test is OS-agnostic.
+    """
+    monkeypatch.setenv("HOME", str(home))
+    if os.name == "nt":
+        monkeypatch.setenv("USERPROFILE", str(home))
 
 
 def _redirect_client_paths(monkeypatch, *, desktop, code, codex) -> None:
@@ -75,6 +105,11 @@ class TestServerEntryCheck:
         assert "not found" in (result.detail or "")
         assert not result.is_ok
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="Windows has no execute permission bit; os.access(.., X_OK) "
+        "is True for any existing file, so 'not executable' is unreachable.",
+    )
     def test_non_executable_command_is_flagged(self, tmp_path):
         from kiln.cli.mcp_config_audit import (
             _check_server_entry,
@@ -113,7 +148,7 @@ class TestServerEntryCheck:
         false negative."""
         from kiln.cli.mcp_config_audit import _check_server_entry, STATUS_OK
 
-        monkeypatch.setenv("HOME", str(tmp_path))
+        _set_home(monkeypatch, tmp_path)
         binary = _make_executable(tmp_path / ".local" / "bin" / "kiln")
         assert binary.exists()
         result = _check_server_entry("kiln", {"command": "~/.local/bin/kiln"})
@@ -156,7 +191,8 @@ class TestClaudeJsonAudit:
         }}}))
         codex = tmp_path / "codex.toml"
         codex.write_text(
-            f'[mcp_servers.kiln]\ncommand = "{binary}"\nargs = ["serve"]\n',
+            f'[mcp_servers.kiln]\ncommand = {_toml_quote_path(binary)}\n'
+            'args = ["serve"]\n',
         )
         _redirect_client_paths(
             monkeypatch, desktop=desktop, code=code, codex=codex,
@@ -243,7 +279,8 @@ class TestCodexTomlAudit:
         binary = _make_executable(tmp_path / "kiln")
         codex = tmp_path / "codex.toml"
         codex.write_text(
-            f'[mcp_servers.kiln]\ncommand = "{binary}"\nargs = ["serve"]\n',
+            f'[mcp_servers.kiln]\ncommand = {_toml_quote_path(binary)}\n'
+            'args = ["serve"]\n',
         )
         _redirect_client_paths(
             monkeypatch, desktop=tmp_path / "x", code=tmp_path / "y", codex=codex,
@@ -261,7 +298,7 @@ class TestCodexTomlAudit:
 
         codex = tmp_path / "codex.toml"
         codex.write_text(
-            f'[mcp_servers.kiln]\ncommand = "{tmp_path / "nope"}"\n',
+            f'[mcp_servers.kiln]\ncommand = {_toml_quote_path(tmp_path / "nope")}\n',
         )
         _redirect_client_paths(
             monkeypatch, desktop=tmp_path / "x", code=tmp_path / "y", codex=codex,
@@ -562,7 +599,7 @@ class TestRepair:
             "# top-level comment\n"
             "\n"
             "[mcp_servers.kiln]\n"
-            f'command = "{broken}"  # was venv\n'
+            f'command = {_toml_quote_path(broken)}  # was venv\n'
             'args = ["serve"]\n'
             "\n"
             "[mcp_servers.other]\n"
@@ -589,7 +626,12 @@ class TestRepair:
         after = codex.read_text()
         # The kiln entry's ``command`` was rewritten; everything else
         # — comments, sibling table, args, blank lines — is preserved.
-        assert f'command = "{actions[0].new}"  # was venv\n' in after
+        # The path is compared in its TOML-escaped form so the check
+        # holds on Windows (backslashes are escaped in the file).
+        assert (
+            f'command = {_toml_quote_path(Path(actions[0].new))}  # was venv\n'
+            in after
+        )
         assert '[mcp_servers.other]\n' in after
         assert 'command = "/usr/bin/echo"\n' in after
         assert '[unrelated]\n' in after

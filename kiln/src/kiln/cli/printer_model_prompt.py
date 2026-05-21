@@ -111,13 +111,13 @@ def prompt_for_printer_model(
     default_hint = suggest_bambu_model(serial) if printer_type.lower() == "bambu" else None
 
     click.echo()
-    click.echo(click.style("  Printer model (activates the safety stack)", bold=True))
+    click.echo(click.style("  Printer model (turns on Kiln's safety checks)", bold=True))
     click.echo()
     click.echo(
         "  Kiln uses the printer_model to look up build volume, temperature\n"
-        "  limits, and mechanical constraints.  Without it, the bed-fit\n"
-        "  gate, gcode bounds check, and hotend/bed temp limits all\n"
-        "  soft-pass — unsafe prints can reach the printer."
+        "  limits, and mechanical constraints.  Without it, Kiln can't check\n"
+        "  that prints fit the bed or stay within safe temperatures — those\n"
+        "  checks are skipped, so an unsafe print could reach the printer."
     )
     if examples:
         click.echo()
@@ -136,7 +136,7 @@ def prompt_for_printer_model(
             )
         elif allow_skip:
             raw = click.prompt(
-                "  printer_model (press Enter to skip — safety gates will soft-pass)",
+                "  printer_model (press Enter to skip — leaves safety checks off)",
                 default="",
                 show_default=False,
             )
@@ -147,19 +147,19 @@ def prompt_for_printer_model(
             if allow_skip:
                 click.echo(click.style(
                     "  Skipped.  Add `printer_model: <value>` to "
-                    "~/.kiln/config.yaml later to activate safety gates.",
+                    "~/.kiln/config.yaml later to turn on safety checks.",
                     fg="yellow",
                 ))
                 return None
             click.echo(click.style(
-                "  printer_model is required — Kiln's safety stack needs it.",
+                "  printer_model is required — Kiln's safety checks need it.",
                 fg="yellow",
             ))
             continue
         if _validate_model_key(raw):
             click.echo(click.style(
                 f"  \u2713 {raw} found in printer_intelligence.json — "
-                f"safety stack will activate.",
+                f"safety checks will turn on.",
                 fg="green",
             ))
             return raw
@@ -179,8 +179,8 @@ def prompt_for_printer_model(
             ))
         if click.confirm("  Use this value anyway?", default=False):
             click.echo(click.style(
-                "  Recorded — but safety gates will soft-pass for this "
-                "unknown model.  Fix the value later to activate them.",
+                "  Recorded — but safety checks stay off for this unknown "
+                "model.  Fix the value later to turn them on.",
                 fg="yellow",
             ))
             return raw

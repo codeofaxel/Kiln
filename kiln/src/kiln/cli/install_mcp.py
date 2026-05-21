@@ -121,6 +121,27 @@ _KILN_SERVER_KEY = "kiln"
 _SERVER_ARGS = ["serve"]
 
 
+def _resolve_launcher_path(path: Path) -> Path:
+    """Return a launcher path that names a file which exists on disk.
+
+    On Windows a pip/pipx console script installs as ``kiln.exe``, but
+    the running process sees ``sys.argv[0]`` as the extension-less stem
+    (``...\\kiln``).  MCP clients spawn the server with no shell, so a
+    ``command`` that omits ``.exe`` fails with a spawn error.  When the
+    given path is not itself a file, append the first Windows executable
+    extension that resolves to a real file.
+
+    A no-op on POSIX, where executables carry no extension.
+    """
+    if os.name != "nt" or path.exists():
+        return path
+    for ext in (".exe", ".cmd", ".bat"):
+        candidate = path.with_name(path.name + ext)
+        if candidate.is_file():
+            return candidate
+    return path
+
+
 def _current_kiln_launch() -> tuple[str, list[str]]:
     """Return ``(command, prefix_args)`` for the kiln launch the MCP
     client should reproduce.
@@ -146,9 +167,10 @@ def _current_kiln_launch() -> tuple[str, list[str]]:
     executable = Path(sys.argv[0]).expanduser()
     if executable.name == "kiln":
         try:
-            return str(executable.resolve()), []
+            resolved = executable.resolve()
         except OSError:
-            return str(executable), []
+            resolved = executable
+        return str(_resolve_launcher_path(resolved)), []
     if executable.name == "__main__.py" and executable.parent.name == "kiln":
         return sys.executable, ["-m", "kiln"]
     if executable.parent != Path("."):

@@ -198,6 +198,13 @@ def run_validation_pipeline(
         validate_mesh,
     )
 
+    # Fail fast on a missing input with a clear, cross-platform
+    # message.  Without this the pipeline would crash deep inside the
+    # auto-repair copy step, surfacing an OS-specific error string
+    # (``No such file`` on POSIX, ``WinError 3`` on Windows).
+    if not Path(file_path).is_file():
+        raise FileNotFoundError(f"Mesh file not found: {file_path}")
+
     errors: list[str] = []
     warnings: list[str] = []
     recommendations: list[str] = []

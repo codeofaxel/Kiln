@@ -36,9 +36,13 @@ def tmp_kiln_env(tmp_path, monkeypatch):
     """Point Kiln's DB + decoration + community-cache dirs at a temp root."""
     monkeypatch.setenv("KILN_DB_PATH", str(tmp_path / "kiln.db"))
     monkeypatch.setenv("KILN_DECORATIONS_DIR", str(tmp_path / "decorations"))
-    # Route the community cache under the tmp HOME so nothing bleeds into
-    # the real ~/.kiln/community_cache/.
+    # Route the community cache under a tmp home so nothing bleeds into
+    # the real ~/.kiln/community_cache/.  ``Path.home()`` reads ``HOME``
+    # on POSIX but ``USERPROFILE`` on Windows — set both so the override
+    # takes effect regardless of platform.
     monkeypatch.setenv("HOME", str(tmp_path))
+    if os.name == "nt":
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
     # Reset the persistence singleton so the new DB path takes effect
     # for this test, then reset again on teardown to avoid leaking a
@@ -63,9 +67,12 @@ class TestWireA_LocalLoop:
         from kiln.persistence import get_db
 
         db = get_db()
-        for _ in range(4):
+        # Index the job_id — time.time_ns() may not advance between
+        # fast loop iterations on coarse-resolution clocks (Windows),
+        # which would collide the UNIQUE job_id constraint.
+        for i in range(4):
             db.save_print_outcome({
-                "job_id": f"job-{time.time_ns()}",
+                "job_id": f"job-{i}-{time.time_ns()}",
                 "printer_name": "test-bambu",
                 "file_name": "vase.3mf",
                 "material_type": "PLA",
@@ -87,9 +94,13 @@ class TestWireA_LocalLoop:
 
         db = get_db()
         # Recent printer instance failed repeatedly with adhesion loss.
-        for _ in range(5):
+        # Use the loop index for the job_id — time.time_ns() is not
+        # guaranteed to advance between fast iterations on platforms
+        # with coarse clock resolution (Windows), which would collide
+        # the UNIQUE job_id constraint.
+        for i in range(5):
             db.save_print_outcome({
-                "job_id": f"adh-{time.time_ns()}",
+                "job_id": f"adh-{i}-{time.time_ns()}",
                 "printer_name": "test-bambu",
                 "material_type": "PLA",
                 "outcome": "failed",

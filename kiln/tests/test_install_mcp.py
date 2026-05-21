@@ -22,6 +22,32 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+try:  # Python 3.11+ ships tomllib; 3.10 environments may use tomli.
+    import tomllib as _toml_parser  # type: ignore[no-redef]
+except ModuleNotFoundError:  # pragma: no cover - 3.10 fallback
+    import tomli as _toml_parser  # type: ignore[no-redef]
+
+
+def _load_toml(text: str) -> dict:
+    """Parse TOML text into a dict.
+
+    Used so assertions compare decoded values instead of serialized
+    text: a filesystem path serialized into a TOML string has its
+    backslashes escaped, which is correct but breaks raw substring
+    checks on Windows.
+    """
+    return _toml_parser.loads(text)
+
+
+def _extract_leading_json(output: str) -> dict:
+    """Parse the JSON snippet at the start of ``install-mcp --print``
+    output.  The snippet is followed by a blank line and explanatory
+    prose; ``json.JSONDecoder.raw_decode`` stops at the end of the
+    object so the trailing text is ignored.  Comparing the decoded
+    object keeps the assertions OS-agnostic — a path serialized into a
+    JSON string has its backslashes escaped on Windows."""
+    return json.JSONDecoder().raw_decode(output.lstrip())[0]
+
 
 def _write_session(home: Path) -> None:
     """Seed the ``~/.kiln/auth_tokens.json`` file the installer's
@@ -103,7 +129,8 @@ def test_install_mcp_print_snippet_uses_selected_command(tmp_path: Path) -> None
     )
 
     assert result.exit_code == 0, result.output
-    assert f'"command": "{kiln_bin}"' in result.output
+    snippet = _extract_leading_json(result.output)
+    assert snippet["mcpServers"]["kiln"]["command"] == str(kiln_bin)
     assert "It points at the Kiln executable" in result.output
 
 
@@ -196,8 +223,13 @@ def test_install_mcp_writes_codex_toml_config(tmp_path: Path, monkeypatch) -> No
     assert '[mcp_servers.docs]' in text
     assert '[features]' in text
     assert '[mcp_servers.kiln]' in text
-    assert f'command = "{kiln_bin}"' in text
-    assert 'args = ["serve"]' in text
+    # Compare the decoded TOML rather than serialized text: on Windows
+    # the path's backslashes are correctly escaped in the TOML string,
+    # so a raw-string substring check would spuriously fail.
+    parsed = _load_toml(text)
+    assert parsed["mcp_servers"]["kiln"]["command"] == str(kiln_bin)
+    assert parsed["mcp_servers"]["kiln"]["args"] == ["serve"]
+    assert "env" not in parsed["mcp_servers"]["kiln"]
     assert "[mcp_servers.kiln.env]" not in text
     assert "Codex" in result.output
     assert "fresh Codex session" in result.output
@@ -242,8 +274,11 @@ def test_install_mcp_preserves_python_module_launch_for_codex(
 
     assert result.exit_code == 0, result.output
     text = config_path.read_text(encoding="utf-8")
-    assert f'command = "{python}"' in text
-    assert 'args = ["-m", "kiln", "serve"]' in text
+    # Decode the TOML so the path comparison is OS-agnostic (Windows
+    # escapes backslashes in the serialized string).
+    kiln_entry = _load_toml(text)["mcp_servers"]["kiln"]
+    assert kiln_entry["command"] == str(python)
+    assert kiln_entry["args"] == ["-m", "kiln", "serve"]
     assert f"MCP command: {python} -m kiln serve" in result.output
 
 
@@ -270,12 +305,11 @@ def test_install_mcp_print_preserves_python_module_launch(
 
     assert result.exit_code == 0, result.output
     # The generic snippet is JSON; the prefix args show up inside the
-    # ``args`` list together with ``serve``.
-    assert f'"command": "{python}"' in result.output
-    assert '"args": [' in result.output
-    assert '"-m"' in result.output
-    assert '"kiln"' in result.output
-    assert '"serve"' in result.output
+    # ``args`` list together with ``serve``.  Compare the decoded
+    # object so the path check is OS-agnostic.
+    kiln_entry = _extract_leading_json(result.output)["mcpServers"]["kiln"]
+    assert kiln_entry["command"] == str(python)
+    assert kiln_entry["args"] == ["-m", "kiln", "serve"]
 
 
 # ---------------------------------------------------------------------------

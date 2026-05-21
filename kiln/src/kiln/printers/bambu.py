@@ -25,6 +25,7 @@ import hmac
 import json
 import logging
 import os
+import posixpath
 import shutil
 import socket
 import ssl
@@ -457,6 +458,7 @@ class BambuAdapter(PrinterAdapter):
         timeout: int = 10,
         tls_mode: str | None = None,
         tls_fingerprint: str | None = None,
+        printer_model: str | None = None,
     ) -> None:
         if not host:
             raise ValueError("host must not be empty")
@@ -468,6 +470,10 @@ class BambuAdapter(PrinterAdapter):
         self._host = host
         self._access_code = access_code
         self._serial = serial
+        # Configured printer model (e.g. "bambu_a1"), lower-cased.  Used
+        # to tell AMS Lite (A1 / A1 mini) from the full AMS — they differ
+        # in which fields carry real readings.  Empty when unset.
+        self._printer_model = (printer_model or "").strip().lower()
         self._timeout = timeout
         configured_tls_mode = (tls_mode or os.environ.get(_TLS_MODE_ENV, _DEFAULT_TLS_MODE)).strip().lower()
         if configured_tls_mode not in _VALID_TLS_MODES:
@@ -604,7 +610,7 @@ class BambuAdapter(PrinterAdapter):
 
             pins[host_key] = actual_fp
             self._save_pins(pins)
-            logger.warning(
+            logger.debug(
                 "Pinned Bambu TLS certificate for %s (SHA256=%s..., mode=pin).",
                 self._host,
                 actual_fp[:12],
@@ -756,14 +762,17 @@ class BambuAdapter(PrinterAdapter):
                     self._safe_stop_client(client)
                     self._backoff.record_failure()
                     raise PrinterError(
-                        f"MQTT connection to {self._host} timed out after "
-                        f"{self._timeout}s. Check network connectivity and access code.\n"
-                        "  Checklist:\n"
-                        "  1) Printer is powered on and on the same network\n"
-                        "  2) LAN Access Code is correct (printer → Settings → Network)\n"
-                        "  3) LAN Mode is enabled on the printer\n"
-                        "  4) Port 8883 is not blocked by a firewall\n"
-                        "  Try: kiln verify"
+                        f"Couldn't reach the printer at {self._host} — "
+                        f"no response within {self._timeout}s.\n"
+                        "  Most likely something else is already connected: "
+                        "Bambu printers allow only a few connections at "
+                        "once.  Close Bambu Studio, the Handy app, or "
+                        "another machine using the printer, then try "
+                        "again.\n"
+                        "  If that's not it: check the printer is powered "
+                        "on and on this network, LAN Mode is on, and the "
+                        "access code is current (printer screen → Settings "
+                        "→ Network)."
                     )
 
                 # Certificate policy check (pin/explicit fingerprint) after TLS handshake.
@@ -2308,7 +2317,10 @@ class BambuAdapter(PrinterAdapter):
             # the more common model) so the common upload→print flow
             # works correctly on all series.
             if file_name.startswith("/"):
-                path = os.path.normpath(file_name)
+                # This is a path on the printer's SD card — always
+                # POSIX-style.  Use posixpath so a Windows host does
+                # not rewrite the separators to backslashes.
+                path = posixpath.normpath(file_name)
                 if not (path.startswith("/sdcard/") or path.startswith("/cache/")):
                     raise PrinterError(f"File path must be under /sdcard/ or /cache/, got: {file_name!r}")
             else:
@@ -2741,6 +2753,11 @@ class BambuAdapter(PrinterAdapter):
         if not isinstance(ams_data, list):
             return result
 
+        # AMS Lite (A1 / A1 mini) has no humidity sensor — the firmware
+        # still reports a `humidity` field, but it's a fixed placeholder,
+        # not a measurement.  Flag it so callers don't present it as real.
+        humidity_known = self._printer_model not in ("bambu_a1", "bambu_a1_mini")
+
         for unit in ams_data:
             if not isinstance(unit, dict):
                 continue
@@ -2778,12 +2795,20 @@ class BambuAdapter(PrinterAdapter):
                     if raw_bed is not None:
                         with contextlib.suppress(TypeError, ValueError):
                             bed_t = int(raw_bed)
+                    # Bambu's AMS has no scale: a `remain` % is only real
+                    # when it comes from a spool's RFID tag.  AMS Lite and
+                    # non-RFID spools report tag_uid as all zeros — there
+                    # `remain` is a placeholder, so flag it as not known so
+                    # callers don't render it as "0% / empty".
+                    tag_uid = str(tray.get("tag_uid") or "").strip()
+                    remaining_known = bool(tag_uid) and set(tag_uid) != {"0"}
                     trays.append({
                         "slot": slot_id,
                         "tray_type": tray.get("tray_type", ""),
                         "tray_color": tray.get("tray_color", ""),
                         "remain": remain_int,
-                        "tag_uid": tray.get("tag_uid", ""),
+                        "remaining_known": remaining_known,
+                        "tag_uid": tag_uid,
                         "nozzle_temp_min": nozzle_min,
                         "nozzle_temp_max": nozzle_max,
                         "bed_temp": bed_t,
@@ -2792,6 +2817,7 @@ class BambuAdapter(PrinterAdapter):
             result["units"].append({
                 "unit_id": unit_id,
                 "humidity": humidity_int,
+                "humidity_known": humidity_known,
                 "trays": trays,
             })
 
@@ -2849,8 +2875,11 @@ class BambuAdapter(PrinterAdapter):
         except PrinterError:
             raise
 
-        # Sanitise path — only allow files under /sdcard/ or /cache/
-        safe_path = os.path.normpath(file_path)
+        # Sanitise path — only allow files under /sdcard/ or /cache/.
+        # The printer's SD card uses POSIX paths, so normalize with
+        # posixpath; os.path.normpath would mangle the separators to
+        # backslashes on a Windows host.
+        safe_path = posixpath.normpath(file_path)
         if not safe_path.startswith("/sdcard/") and not safe_path.startswith("/cache/"):
             raise PrinterError(f"File path must be under /sdcard/ or /cache/, got: {file_path!r}")
 
