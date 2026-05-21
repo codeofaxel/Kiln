@@ -2,7 +2,7 @@
 # Regenerate with: python3.12 -m venv /tmp/octoprint-cli-lock && /tmp/octoprint-cli-lock/bin/python -m pip install -e ".[dev]" && /tmp/octoprint-cli-lock/bin/python -m pip freeze | grep -v "^-e" | sort > requirements-lock.txt
 PyYAML==6.0.3
 Pygments==2.20.0
-certifi==2026.4.22
+certifi==2026.5.20
 charset-normalizer==3.4.7
 click==8.3.3
 coverage==7.13.5
