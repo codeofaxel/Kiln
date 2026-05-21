@@ -57,12 +57,13 @@ reports honestly, and safety messages drop their jargon.
   missing.**  A bad path used to crash deep in the auto-repair
   step with a raw OS error (`WinError 3` on Windows); it now
   reports `Mesh file not found: …` up front.
-- **`kiln ams` no longer shows a misleading "0% remaining".**  The
+- **AMS readings no longer show a misleading "0% remaining".**  The
   A1 and A1 mini's AMS Lite has no filament weight sensor or
   humidity sensor, so Kiln reported "0% remaining" and a
   placeholder humidity for every spool.  Kiln now recognises which
-  printer models lack those sensors and marks the reading as
-  unknown instead of inventing a number.
+  printer models lack those sensors and reports the level as
+  unknown — across `kiln ams`, `kiln materials --live`, and the
+  agent-facing tools — instead of inventing a number.
 - **The overhang verdict stops clearing shapes that can't be
   bridged.**  `analyze_printability` could downgrade "needs
   supports" to "no supports needed" for a cantilever or a floating
