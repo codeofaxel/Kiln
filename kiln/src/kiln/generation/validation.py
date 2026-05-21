@@ -5708,8 +5708,12 @@ def _cluster_circular_holes(
         m12 += ny * nz
         m22 += nz * nz
     n_inv = 1.0 / float(len(cluster))
-    m00 *= n_inv; m01 *= n_inv; m02 *= n_inv
-    m11 *= n_inv; m12 *= n_inv; m22 *= n_inv
+    m00 *= n_inv
+    m01 *= n_inv
+    m02 *= n_inv
+    m11 *= n_inv
+    m12 *= n_inv
+    m22 *= n_inv
     candidates = _all_eigvecs_3x3(m00, m01, m02, m11, m12, m22)
     if not candidates:
         return None
@@ -5881,7 +5885,7 @@ def _validate_cluster_against_axis(
 
     # Step 7: inward-normal check (rejects outward-facing pillars).
     inward_dot_sum = 0.0
-    for ti, (u, v) in zip(filtered, proj_uv):
+    for ti, (u, v) in zip(filtered, proj_uv, strict=True):
         n_vec = tri_normals[ti]
         du = u - c_u
         dv = v - c_v

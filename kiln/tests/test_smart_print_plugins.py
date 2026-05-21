@@ -211,6 +211,7 @@ class TestGetActiveMaterial:
                             "tray_type": "PLA",
                             "tray_color": "FF0000",
                             "remain": 78,
+                            "remaining_known": True,
                             "nozzle_temp_min": 190,
                             "nozzle_temp_max": 240,
                         }
@@ -226,6 +227,33 @@ class TestGetActiveMaterial:
         assert result["color"] == "FF0000"
         assert result["remaining_percent"] == 78
         assert result["nozzle_temp_range"] == [190, 240]
+
+    def test_ams_remaining_omitted_when_not_rfid_tracked(self, material_tools_fns):
+        """Untagged spool → remaining_percent dropped (placeholder remain)."""
+        fn = material_tools_fns["get_active_material"]
+        adapter = mock.MagicMock()
+        adapter.get_ams_status.return_value = {
+            "tray_now": "0",
+            "units": [
+                {
+                    "trays": [
+                        {
+                            "slot": 0,
+                            "tray_type": "PLA",
+                            "tray_color": "FF0000",
+                            "remain": 0,
+                            "remaining_known": False,
+                        }
+                    ]
+                }
+            ],
+        }
+        with mock.patch("kiln.server._get_adapter", return_value=adapter):
+            result = fn()
+        assert result["success"] is True
+        assert result["material"] == "PLA"
+        assert "remaining_percent" not in result
+        assert "% remaining" not in result["message"]
 
     def test_ams_empty_units_list_fallback(self, material_tools_fns):
         """AMS with empty units list → graceful fallback with source='ams_slot_N'."""

@@ -1812,9 +1812,11 @@ class TestBambuAdapterRTSPAuth:
 class TestBambuAdapterAMSStatus:
     """Tests for the get_ams_status method: tray queries, edge cases."""
 
-    def _adapter_with_ams(self, ams_data: list[dict[str, Any]]) -> BambuAdapter:
+    def _adapter_with_ams(
+        self, ams_data: list[dict[str, Any]], *, printer_model: str | None = None
+    ) -> BambuAdapter:
         """Create an adapter with pre-populated AMS data in the MQTT cache."""
-        adapter = _adapter()
+        adapter = _adapter(printer_model=printer_model)
         adapter._mqtt_connected.set()
         adapter._connected = True
         adapter._mqtt_client = mock.MagicMock()
@@ -1933,6 +1935,38 @@ class TestBambuAdapterAMSStatus:
         result = adapter.get_ams_status()
         assert len(result["units"]) == 1
         assert result["units"][0]["trays"] == []
+
+    def test_ams_status_remaining_known_tracks_tag_uid(self) -> None:
+        """`remain` is real only for an RFID-tagged spool — the AMS has
+        no scale — so `remaining_known` follows a non-zero tag_uid."""
+        adapter = self._adapter_with_ams([
+            {
+                "id": 0,
+                "humidity": 3,
+                "tray": [
+                    {"id": 0, "tray_type": "PLA", "tray_color": "FF0000FF", "remain": 85, "tag_uid": "abc123"},
+                    {"id": 1, "tray_type": "PLA", "tray_color": "00FF00FF", "remain": 0, "tag_uid": ""},
+                    {"id": 2, "tray_type": "PLA", "tray_color": "0000FFFF", "remain": 0, "tag_uid": "0000000000000000"},
+                ],
+            }
+        ])
+        trays = adapter.get_ams_status()["units"][0]["trays"]
+        assert trays[0]["remaining_known"] is True   # real RFID tag
+        assert trays[1]["remaining_known"] is False  # no tag
+        assert trays[2]["remaining_known"] is False  # all-zero placeholder tag
+
+    def test_ams_status_humidity_known_false_on_ams_lite(self) -> None:
+        """AMS Lite (A1 / A1 mini) has no humidity sensor, so its
+        `humidity` is a placeholder; `humidity_known` flags that."""
+        ams = [{"id": 0, "humidity": 3, "tray": [
+            {"id": 0, "tray_type": "PLA", "tray_color": "FF0000FF", "remain": 50, "tag_uid": ""},
+        ]}]
+        for model in ("bambu_a1", "bambu_a1_mini"):
+            adapter = self._adapter_with_ams(ams, printer_model=model)
+            assert adapter.get_ams_status()["units"][0]["humidity_known"] is False
+
+        full_ams = self._adapter_with_ams(ams, printer_model="bambu_x1c")
+        assert full_ams.get_ams_status()["units"][0]["humidity_known"] is True
 
     # ------------------------------------------------------------------
     # Dict-wrapper AMS format (A1 / AMS Lite)

@@ -26,6 +26,7 @@ manifest is an enrichment, never a correctness gate.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -74,10 +75,8 @@ def _atomic_write(path: Path, payload: str) -> None:
             fh.write(payload)
         os.replace(tmp, path)
     except Exception:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise
 
 

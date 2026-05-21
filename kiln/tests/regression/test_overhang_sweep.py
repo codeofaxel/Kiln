@@ -7,11 +7,8 @@ lives at ``/tmp/overhang_audit/`` in the maintainer's workspace and
 gets re-run when overhang-touching code changes substantially.
 
 Why this lives in tests/regression/ and not tests/test_printability.py:
-- Sweep tests are tier-aware and use parameterized geometries that
-  don't share the cube/triangle helpers in test_printability.py.
-- Marked ``@pytest.mark.slow`` so CI can elect to skip on every push
-  if the run gets bigger; today's 30 cases run in ~1s so the marker
-  is precautionary, not load-bearing.
+the sweep tests are tier-aware and use parameterized geometries that
+don't share the cube/triangle helpers in test_printability.py.
 
 Geometries are generated inline (no STL files on disk) — keeps the
 test self-contained and the diff reviewable.
@@ -224,7 +221,6 @@ _CASES: list[tuple[str, callable, str]] = [
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize("case_id,geom_fn,reality", _CASES)
 def test_overhang_sweep_individual(tmp_path, case_id, geom_fn, reality):
     """Per-case verdict snapshot — surfaces individual regressions.
@@ -255,7 +251,6 @@ def test_overhang_sweep_individual(tmp_path, case_id, geom_fn, reality):
         )
 
 
-@pytest.mark.slow
 def test_overhang_sweep_aggregate_catch_rate(tmp_path):
     """Aggregate catch rate on free-tier sweep must be >= 90%.
 
@@ -284,7 +279,6 @@ def test_overhang_sweep_aggregate_catch_rate(tmp_path):
     )
 
 
-@pytest.mark.slow
 def test_overhang_sweep_false_positive_ceiling(tmp_path):
     """Aggregate false-positive count on free-tier sweep must be <= 3.
 
@@ -313,7 +307,6 @@ def test_overhang_sweep_false_positive_ceiling(tmp_path):
     )
 
 
-@pytest.mark.slow
 def test_overhang_sweep_cantilever_zero_misses(tmp_path):
     """Cantilever regression guard — ZERO misses tolerated.
 

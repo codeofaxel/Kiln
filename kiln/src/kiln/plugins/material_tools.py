@@ -231,6 +231,10 @@ class _MaterialToolsPlugin:
             material: str = tray_data.get("tray_type", "unknown") or "unknown"
             color: str | None = tray_data.get("tray_color")
             remaining: int | None = tray_data.get("remain")
+            # `remain` is a real reading only for an RFID-tagged spool —
+            # the AMS has no scale.  AMS Lite and untagged spools report a
+            # placeholder; the adapter flags those as remaining_known=False.
+            remaining_known: bool = bool(tray_data.get("remaining_known"))
             nozzle_temp_min: int | None = tray_data.get("nozzle_temp_min")
             nozzle_temp_max: int | None = tray_data.get("nozzle_temp_max")
 
@@ -238,7 +242,7 @@ class _MaterialToolsPlugin:
             parts: list[str] = [f"Active material: {material}"]
             if color:
                 parts.append(f"color #{color}")
-            if remaining is not None:
+            if remaining is not None and remaining_known:
                 parts.append(f"{remaining}% remaining")
             parts.append(f"from AMS slot {slot_index}")
             message = f"{', '.join(parts)}."
@@ -253,7 +257,7 @@ class _MaterialToolsPlugin:
             }
             if color is not None:
                 result["color"] = color
-            if remaining is not None:
+            if remaining is not None and remaining_known:
                 result["remaining_percent"] = remaining
             if nozzle_temp_min is not None and nozzle_temp_max is not None:
                 result["nozzle_temp_range"] = [nozzle_temp_min, nozzle_temp_max]

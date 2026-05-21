@@ -12092,11 +12092,15 @@ def smart_reprint(
                                 if remain > best_remain:
                                     best_remain = remain
                                     best_slot = tray.get("slot", 0)
+                                    # `remain` is a real reading only for an
+                                    # RFID-tagged spool — AMS Lite reports a
+                                    # placeholder, flagged by the adapter.
+                                    remaining_known = bool(tray.get("remaining_known"))
                                     ams_slot_info = {
                                         "slot": best_slot,
                                         "tray_type": tray_type,
                                         "color": tray.get("tray_color", ""),
-                                        "remain_pct": remain,
+                                        "remain_pct": remain if remaining_known else None,
                                     }
 
                     if best_slot is not None:
@@ -12108,7 +12112,7 @@ def smart_reprint(
                                 "found": True,
                                 "slot": best_slot,
                                 "tray_type": ams_slot_info["tray_type"] if ams_slot_info else "",
-                                "remain_pct": best_remain,
+                                "remain_pct": ams_slot_info["remain_pct"] if ams_slot_info else None,
                             }
                         )
                     else:

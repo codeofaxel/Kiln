@@ -10,7 +10,7 @@ Short version:
 - Merges into existing configs — never overwrites unrelated entries.
 - Refuses to touch a config file it can't parse, rather than silently
   clobbering hand-edited JSON or TOML.
-- Requires a signed-in session (``kiln login`` or ``kiln pair <code>``)
+- Requires a signed-in session (``kiln signin`` or ``kiln pair <code>``)
   before writing anything — otherwise the installed config would put
   users on FREE tier and every pro-tool call would fail cold, training
   them to blame Kiln instead of the missing auth step.
@@ -472,7 +472,7 @@ def _uninstall_from(client: MCPClient) -> tuple[str, Path]:
 
 def _require_signed_in() -> None:
     """Raise a ClickException with actionable guidance if the user
-    hasn't signed in via ``kiln login`` or ``kiln pair``.
+    hasn't signed in via ``kiln signin`` or ``kiln pair``.
 
     Without a session on disk, the installed MCP server would start on
     FREE tier, every pro tool would fail with TIER_REQUIRED, and the
@@ -484,7 +484,7 @@ def _require_signed_in() -> None:
         raise click.ClickException(
             "You're not signed in yet.\n\n"
             "  Run one of:\n"
-            "    kiln login              # OAuth from this terminal\n"
+            "    kiln signin              # OAuth from this terminal\n"
             "    kiln pair <code>        # paste code from app.kiln3d.com\n\n"
             "  Then re-run `kiln install-mcp`."
         )
@@ -493,12 +493,12 @@ def _require_signed_in() -> None:
     except Exception as err:
         raise click.ClickException(
             f"{tokens_path} exists but isn't readable JSON.  "
-            "Delete the file and run `kiln login` again."
+            "Delete the file and run `kiln signin` again."
         ) from err
     if not str(data.get("access_token") or "").strip():
         raise click.ClickException(
             "Your session file has no access_token.  "
-            "Run `kiln login` or `kiln pair <code>` again."
+            "Run `kiln signin` or `kiln pair <code>` again."
         )
 
 
@@ -575,7 +575,7 @@ def install_mcp(
 ) -> None:
     """Auto-wire Kiln into supported MCP client configs.
 
-    After ``kiln login`` or ``kiln pair <code>``, run this to make your
+    After ``kiln signin`` or ``kiln pair <code>``, run this to make your
     AI agent see Kiln's tools.  Safely merges into existing configs —
     never clobbers sibling MCP servers.
 

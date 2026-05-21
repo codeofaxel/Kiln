@@ -1378,10 +1378,8 @@ def _ensure_utf8_streams() -> None:
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is None:
             continue
-        try:
+        with contextlib.suppress(OSError, ValueError):
             reconfigure(encoding="utf-8")
-        except (OSError, ValueError):
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -6592,6 +6590,10 @@ def material_show(ctx: click.Context, json_mode: bool, live: bool) -> None:
             for unit in ams_data["units"]:
                 unit_id = int(unit.get("unit_id", 0))
                 humidity = unit.get("humidity")
+                # The adapter flags humidity / remaining unknown on hardware
+                # that can't measure them (AMS Lite, untagged spools); drop
+                # the value rather than show a placeholder as a real reading.
+                humidity_known = bool(unit.get("humidity_known"))
                 for tray in unit.get("trays", []):
                     slot_num = unit_id * 4 + int(tray.get("slot", 0)) + 1  # 1-indexed
                     color_hex = tray.get("tray_color", "")
@@ -6599,19 +6601,24 @@ def material_show(ctx: click.Context, json_mode: bool, live: bool) -> None:
                     color_display = f"#{color_hex[:6]}" if len(color_hex) >= 6 else color_hex
                     tray_type = tray.get("tray_type", "")
                     remain = tray.get("remain")
+                    remaining_known = tray.get("remaining_known")
                     is_active = str(tray.get("slot", -1)) == str(tray_now)
                     entry = {
                         "slot": slot_num,
                         "type": tray_type,
                         "color": color_display,
                         "color_raw": color_hex,
-                        "remain_pct": remain,
+                        "remain_pct": (
+                            remain
+                            if remaining_known and isinstance(remain, (int, float))
+                            else None
+                        ),
                         "active": is_active,
                         "nozzle_temp_min": tray.get("nozzle_temp_min"),
                         "nozzle_temp_max": tray.get("nozzle_temp_max"),
                         "bed_temp": tray.get("bed_temp"),
                     }
-                    if humidity is not None:
+                    if humidity is not None and humidity_known:
                         entry["humidity_pct"] = humidity
                     slots.append(entry)
 
@@ -9441,7 +9448,7 @@ def upgrade(ctx: click.Context, key: str | None, session: str | None, json_mode:
             if info.tier == LicenseTier.FREE:
                 click.echo("\n  Upgrade to Pro for fleet management, job queue,")
                 click.echo("  analytics, and more.")
-                click.echo("\n  Already subscribed?  Run `kiln login` to sync this machine.")
+                click.echo("\n  Already subscribed?  Run `kiln signin` to sync this machine.")
                 click.echo("  New?                 https://kiln3d.com/pricing")
             else:
                 click.echo("\n  ✓ Active and valid.")

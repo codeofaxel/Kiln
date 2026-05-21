@@ -1351,7 +1351,7 @@ def _label_mesh_components(
             x = parent[x]
         return x
 
-    for a, b in zip(union_a.tolist(), union_b.tolist()):
+    for a, b in zip(union_a.tolist(), union_b.tolist(), strict=True):
         ra, rb = find(a), find(b)
         if ra != rb:
             parent[ra] = rb
@@ -2135,7 +2135,7 @@ def _likely_bridge_substituted(
         # ~1mm steps along the bridged axis; the cross axis is inset so
         # every sample sits strictly inside the footprint, yet dense
         # enough to catch an off-centre anchor (a corner leg).
-        n_main = max(9, min(80, int((span + 2 * margin)) + 1))
+        n_main = max(9, min(80, int(span + 2 * margin) + 1))
         n_cross = max(3, min(20, int(cross_span) + 1))
         main = np.linspace(lo - margin, hi + margin, n_main)
         cross = np.linspace(
