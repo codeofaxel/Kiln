@@ -28,10 +28,144 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+import subprocess
 import tempfile
 from typing import Any
 
 _logger = logging.getLogger(__name__)
+
+
+def _resolve_openscad_binary() -> str | None:
+    """Locate the OpenSCAD binary on the current host.
+
+    Same resolution order used by :mod:`kiln.generation.visual_verify`
+    and :mod:`kiln.generation.openscad`: prefer ``shutil.which``, fall
+    back to the macOS .app bundle's binary path so this works on
+    developer machines that don't have OpenSCAD on PATH.
+
+    :returns: Absolute path to the OpenSCAD binary, or ``None`` when
+        no binary can be found (caller should skip rendering rather
+        than fail).
+    """
+    found = shutil.which("openscad")
+    if found:
+        return found
+    mac_app = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"
+    if os.path.isfile(mac_app):
+        return mac_app
+    return None
+
+
+def _render_post_flip_preview(
+    decorated_stl: str,
+    flip_axis: str,
+    output_dir: str,
+    *,
+    filename: str = "flip_preview.png",
+) -> str | None:
+    """Render a PNG showing what the user sees AFTER physically flipping
+    the decorated object along its natural flip axis.
+
+    This is the mandatory verification preview for bottom-face
+    engravings — the human approval gate at the inspection-bundle
+    surface depends on seeing the post-flip orientation rather than
+    the print-orientation view (which hides the engraving on the
+    bottom face).
+
+    Implementation mirrors the canonical Kiln render pattern used by
+    :func:`kiln.generation.visual_verify.VisualVerifier.render_stl_to_png`,
+    :mod:`kiln.model_visualizer`, and :mod:`kiln.multicolor_3mf`:
+    write a tiny SCAD that ``import()``s the STL with a wrapping
+    transformation, call OpenSCAD with ``--imgsize 800,600
+    --colorscheme DeepOcean`` and a 3/4 camera, save the resulting
+    PNG to *output_dir* under *filename*.
+
+    :param decorated_stl: Path to the decorated STL (engine output).
+    :param flip_axis: ``"x"`` for an X-axis physical flip (natural
+        for wide-shallow objects) or ``"y"`` for Y-axis (natural for
+        tall-narrow objects).  Any other value renders the
+        unflipped 3/4 view as a defensive fallback.
+    :param output_dir: Directory to write the PNG into.  Created if
+        missing.
+    :param filename: Override the default ``flip_preview.png``
+        filename (e.g. when emitting per-line previews).
+    :returns: Absolute path to the PNG on success, or ``None`` when
+        OpenSCAD is unavailable / rendering fails.  Engine code path
+        treats ``None`` as "skip the preview but don't fail the
+        emboss" — the engraving STL is the load-bearing artifact;
+        the preview is the human-readable supplement.
+    """
+    if not os.path.isfile(decorated_stl):
+        _logger.debug(
+            "post-flip preview: decorated STL missing at %s; skipping",
+            decorated_stl,
+        )
+        return None
+
+    openscad = _resolve_openscad_binary()
+    if openscad is None:
+        _logger.debug(
+            "post-flip preview: no OpenSCAD binary found; skipping render "
+            "(caller proceeds without preview)"
+        )
+        return None
+
+    os.makedirs(output_dir, exist_ok=True)
+    png_path = os.path.join(output_dir, filename)
+    scad_path = os.path.join(output_dir, filename.replace(".png", ".scad"))
+
+    # Pre-rotate the imported STL by the user's natural physical
+    # flip.  Rendered top-down via the canonical 3/4 camera so the
+    # post-flip bottom face is what fills the frame.
+    if flip_axis == "x":
+        flip_clause = "rotate([180, 0, 0])"
+    elif flip_axis == "y":
+        flip_clause = "rotate([0, 180, 0])"
+    else:
+        flip_clause = ""
+
+    escaped_stl = decorated_stl.replace("\\", "\\\\").replace('"', '\\"')
+    scad_body = f'color("#AAAAAA") {flip_clause} import("{escaped_stl}");\n'
+    with open(scad_path, "w", encoding="utf-8") as fh:
+        fh.write(scad_body)
+
+    # ``--autocenter --viewall`` lets OpenSCAD frame the rotated STL
+    # without us having to know its bounding box ahead of time — the
+    # post-flip transformation moves the object off origin and a
+    # fixed camera distance crops the engraving out of frame.
+    cmd = [
+        openscad,
+        "--preview",
+        "-o", png_path,
+        "--imgsize=800,600",
+        "--colorscheme=DeepOcean",
+        "--autocenter",
+        "--viewall",
+        "--camera=0,0,0,55,0,25,200",
+        scad_path,
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=60,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        _logger.debug("post-flip preview: render subprocess failed: %s", exc)
+        return None
+
+    if result.returncode != 0 or not os.path.isfile(png_path):
+        stderr_tail = (result.stderr or "").strip()[:200]
+        _logger.debug(
+            "post-flip preview: OpenSCAD exit=%d stderr=%s",
+            result.returncode, stderr_tail,
+        )
+        return None
+    if os.path.getsize(png_path) == 0:
+        _logger.debug("post-flip preview: empty PNG produced; treating as failed")
+        return None
+
+    return png_path
 
 
 # FDM legibility floor — text smaller than this disappears into layer
@@ -489,6 +623,7 @@ def emboss_text_on_face(
     font_size_mm: float = 0.0,
     output_dir: str | None = None,
     output_stl: str | None = None,
+    emit_post_flip_preview: bool = True,
 ) -> str:
     """Apply a single line of text as emboss/deboss onto a face of an STL.
 
@@ -604,6 +739,32 @@ def emboss_text_on_face(
         raise RuntimeError(
             f"Emboss compilation failed for text {text!r}: "
             f"{compile_result.get('error', 'unknown error')}"
+        )
+
+    # 5. MANDATORY post-flip preview for bottom-face engravings.
+    # The engraving is invisible in the print-orientation view (it
+    # lives on the underside), so the inspection-bundle preview
+    # surface would mislead the human approver.  Render a separate
+    # PNG showing what the user sees AFTER the natural physical
+    # flip, save it alongside the STL.  Best-effort: render
+    # failures do not block the emboss — the STL is the load-
+    # bearing artifact.  Pattern mirrors
+    # :func:`kiln.generation.visual_verify.VisualVerifier.render_stl_to_png`.
+    #
+    # Suppressed by multi-line callers so the chained per-line emboss
+    # path doesn't render the preview once per line — the
+    # :func:`emboss_text_lines_on_face` wrapper does a single render
+    # against the final cumulative STL.
+    is_bottom_face = face.get("normal", [0, 0, 1])[2] < -0.9
+    if emit_post_flip_preview and is_bottom_face and output_dir:
+        flip_decision = select_bottom_face_flip(
+            face_width_mm=face.get("width_mm", 0.0),
+            face_height_mm=face.get("height_mm", 0.0),
+        )
+        _render_post_flip_preview(
+            decorated_stl=output_stl,
+            flip_axis=flip_decision["flip_axis"],
+            output_dir=output_dir,
         )
 
     return output_stl
@@ -810,7 +971,42 @@ def emboss_text_lines_on_face(
             output_stl=(
                 os.path.join(output_dir, f"line_{i}.stl") if output_dir else None
             ),
+            # Suppress per-line post-flip rendering — we render once
+            # below against the final cumulative STL.  Skipping
+            # intermediate renders saves ~1s per line of OpenSCAD time.
+            emit_post_flip_preview=False,
             **kwargs,
         )
+
+    # MANDATORY post-flip preview for bottom-face engravings — same
+    # contract as the single-line helper.  Done once against the
+    # final cumulative STL so the rendered PNG shows the COMPLETE
+    # multi-line layout, not just the first line.
+    if face_name == "bottom" or (
+        face_name is None
+        and current != body_stl
+        and output_dir
+    ):
+        # Resolve the actual face dict if we auto-detected, so the
+        # aspect-ratio decision uses the real face's geometry.
+        from kiln.surface_intelligence import (
+            find_largest_flat_face, find_named_face,
+        )
+        resolved_face = (
+            find_named_face(body_stl, face_name)
+            if face_name
+            else find_largest_flat_face(body_stl)
+        )
+        is_bottom_face = resolved_face.get("normal", [0, 0, 1])[2] < -0.9
+        if is_bottom_face and output_dir:
+            flip_decision = select_bottom_face_flip(
+                face_width_mm=resolved_face.get("width_mm", 0.0),
+                face_height_mm=resolved_face.get("height_mm", 0.0),
+            )
+            _render_post_flip_preview(
+                decorated_stl=current,
+                flip_axis=flip_decision["flip_axis"],
+                output_dir=output_dir,
+            )
 
     return current

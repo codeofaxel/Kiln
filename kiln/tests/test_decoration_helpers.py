@@ -470,3 +470,94 @@ def test_self_inspect_mirror_with_x_flip_fails():
 
     result = _self_inspect_flip_orientation("mirror([1, 0, 0])", "x")
     assert result["passed"] is False
+
+
+# ---------------------------------------------------------------------------
+# Mandatory post-flip preview rendering for bottom-face engravings.
+# ---------------------------------------------------------------------------
+
+
+@_NEEDS_OPENSCAD
+def test_bottom_face_emboss_emits_post_flip_preview(tmp_path):
+    """Single-line emboss on face_name='bottom' emits flip_preview.png."""
+    body_scad = tmp_path / "body.scad"
+    body_scad.write_text("$fn=80;\ncube([100, 60, 10]);\n")
+    body_stl = tmp_path / "body.stl"
+    subprocess.run(
+        ["openscad", "-o", str(body_stl), str(body_scad)],
+        check=True, capture_output=True,
+    )
+
+    from kiln.decoration_helpers import emboss_text_on_face
+
+    out_dir = tmp_path / "decorated"
+    emboss_text_on_face(
+        str(body_stl), "KILN",
+        face_name="bottom", mode="deboss",
+        depth_mm=1.2, nozzle_diameter_mm=0.4,
+        output_dir=str(out_dir),
+    )
+
+    flip_png = out_dir / "flip_preview.png"
+    assert flip_png.is_file(), "post-flip preview PNG must be emitted"
+    assert flip_png.stat().st_size > 0, "post-flip preview must be non-empty"
+
+
+@_NEEDS_OPENSCAD
+def test_top_face_emboss_does_not_emit_post_flip_preview(tmp_path):
+    """face_name='top' is a print-orientation face — no flip needed,
+    so no post-flip preview should be emitted (the standard
+    inspection-bundle preview already covers it)."""
+    body_scad = tmp_path / "body.scad"
+    body_scad.write_text("$fn=80;\ncube([100, 60, 10]);\n")
+    body_stl = tmp_path / "body.stl"
+    subprocess.run(
+        ["openscad", "-o", str(body_stl), str(body_scad)],
+        check=True, capture_output=True,
+    )
+
+    from kiln.decoration_helpers import emboss_text_on_face
+
+    out_dir = tmp_path / "decorated"
+    emboss_text_on_face(
+        str(body_stl), "KILN",
+        face_name="top", mode="emboss",
+        depth_mm=1.2, nozzle_diameter_mm=0.4,
+        output_dir=str(out_dir),
+    )
+
+    flip_png = out_dir / "flip_preview.png"
+    assert not flip_png.is_file(), (
+        "post-flip preview must NOT be emitted for top-face engravings"
+    )
+
+
+@_NEEDS_OPENSCAD
+def test_multiline_bottom_face_emits_single_post_flip_preview(tmp_path):
+    """Multi-line emboss renders ONE post-flip preview (against the
+    final cumulative STL) — not one per line."""
+    body_scad = tmp_path / "body.scad"
+    body_scad.write_text("$fn=80;\ncube([100, 60, 10]);\n")
+    body_stl = tmp_path / "body.stl"
+    subprocess.run(
+        ["openscad", "-o", str(body_stl), str(body_scad)],
+        check=True, capture_output=True,
+    )
+
+    from kiln.decoration_helpers import emboss_text_lines_on_face
+
+    out_dir = tmp_path / "decorated"
+    emboss_text_lines_on_face(
+        str(body_stl), ["KILN", "EST 2026"],
+        face_name="bottom", mode="deboss",
+        depth_mm=1.2, nozzle_diameter_mm=0.4,
+        output_dir=str(out_dir),
+    )
+
+    # Exactly one flip_preview.png — no per-line versions.
+    flip_png = out_dir / "flip_preview.png"
+    assert flip_png.is_file()
+    extra_flips = list(out_dir.glob("flip_preview*.png"))
+    assert len(extra_flips) == 1, (
+        f"expected one flip preview, got {[p.name for p in extra_flips]}"
+    )
