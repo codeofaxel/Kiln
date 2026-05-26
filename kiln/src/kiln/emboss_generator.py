@@ -472,6 +472,7 @@ def generate_emboss_scad(
     placement: str = "center",
     svg_id: str = "",
     svg_layer: str = "",
+    min_edge_margin_mm: float = 4.0,
 ) -> dict[str, Any]:
     """Generate an OpenSCAD ``.scad`` file for an emboss/deboss operation.
 
@@ -568,6 +569,29 @@ def generate_emboss_scad(
     else:
         target_w = face_w * scale
         target_h = face_h * scale
+
+    # Enforce an absolute minimum edge margin so text doesn't kiss the
+    # sides of the face on either small or large products.  The
+    # proportional ``scale`` alone produces inconsistent visual padding
+    # — a 100mm face at scale=0.85 has 7.5mm/side, which looks tight,
+    # while a 30mm pet tag at the same scale has 2.25mm/side, which
+    # looks broken.  Clamping ``target_w`` to ``face_w - 2 ×
+    # min_edge_margin_mm`` guarantees a comfortable margin regardless
+    # of face size.  Same for the vertical dimension.  Callers who
+    # explicitly want hug-the-wall text override
+    # ``min_edge_margin_mm=0`` (e.g. for license-plate frame band text
+    # where the design intent is edge-to-edge).
+    margin_clamped_w = max(face_w - 2.0 * min_edge_margin_mm, 1.0)
+    margin_clamped_h = max(face_h - 2.0 * min_edge_margin_mm, 1.0)
+    if target_w > margin_clamped_w:
+        warnings.append(
+            f"text width clamped from {target_w:.1f}mm to "
+            f"{margin_clamped_w:.1f}mm to preserve "
+            f"{min_edge_margin_mm:.1f}mm edge margin on a {face_w:.0f}mm-wide face"
+        )
+        target_w = margin_clamped_w
+    if target_h > margin_clamped_h:
+        target_h = margin_clamped_h
 
     # Compute the translation along the face normal for positioning
     # For deboss: start slightly above the surface, extrude inward

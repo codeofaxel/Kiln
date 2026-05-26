@@ -561,3 +561,134 @@ def test_multiline_bottom_face_emits_single_post_flip_preview(tmp_path):
     assert len(extra_flips) == 1, (
         f"expected one flip preview, got {[p.name for p in extra_flips]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Min-edge-margin clamp — text doesn't kiss the sides of small faces.
+# ---------------------------------------------------------------------------
+
+
+@_NEEDS_OPENSCAD
+def test_default_emboss_leaves_visible_edge_margin_on_100mm_face(tmp_path):
+    """On a 100mm-wide face, default scale=0.7 produces text occupying
+    ≤ 70mm width — leaves ≥ 15mm padding per side.  Tighter defaults
+    (e.g. 0.85) make characters hug the edge and visually appear to
+    "almost fall off" — addressed in the 2026-05-26 margin-default
+    correction."""
+    body_scad = tmp_path / "body.scad"
+    body_scad.write_text("$fn=80;\ncube([100, 60, 10]);\n")
+    body_stl = tmp_path / "body.stl"
+    subprocess.run(
+        ["openscad", "-o", str(body_stl), str(body_scad)],
+        check=True, capture_output=True,
+    )
+
+    from kiln.decoration_helpers import emboss_text_on_face
+
+    out_dir = tmp_path / "decorated"
+    emboss_text_on_face(
+        str(body_stl), "KILN",
+        face_name="top", mode="emboss",
+        depth_mm=1.2, nozzle_diameter_mm=0.4,
+        output_dir=str(out_dir),
+    )
+
+    # Auto-sizing happens inside generate_emboss_scad and is recorded
+    # in the generated SCAD's text(size=...) attribute.  Verify the
+    # chosen font size, multiplied by the char-width factor (0.6 per
+    # the engine's convention), leaves ≥ 12mm padding per side.
+    scad_files = list(out_dir.glob("*.scad"))
+    assert scad_files, "no SCAD was generated"
+    import re
+    sizes = []
+    for sf in scad_files:
+        m = re.search(r"size=(?P<n>[\d.]+)", sf.read_text())
+        if m:
+            sizes.append(float(m.group("n")))
+    font_size = max(sizes)
+    text_width_mm = len("KILN") * font_size * 0.6
+    padding_per_side_mm = (100 - text_width_mm) / 2
+    assert padding_per_side_mm >= 12.0, (
+        f"text width {text_width_mm:.1f}mm leaves only "
+        f"{padding_per_side_mm:.1f}mm per side on a 100mm face — "
+        f"should be ≥ 12mm to avoid the 'almost falling off' look."
+    )
+
+
+@_NEEDS_OPENSCAD
+def test_min_edge_margin_binds_on_small_face(tmp_path):
+    """A 30mm pet-tag-sized face triggers the absolute min-edge-margin
+    clamp: scale=0.7 alone would give 21mm wide text with 4.5mm
+    padding per side, but the 4mm min-margin clamp pulls it to 22mm
+    available width (30 - 8 = 22mm), text fills that with the engine's
+    auto-sizer.  Verifies the clamp is at least 3mm per side (slightly
+    less than the 4mm constant to allow for the 0.6 char-width
+    approximation slack)."""
+    body_scad = tmp_path / "body.scad"
+    body_scad.write_text("$fn=80;\ncube([30, 20, 10]);\n")
+    body_stl = tmp_path / "body.stl"
+    subprocess.run(
+        ["openscad", "-o", str(body_stl), str(body_scad)],
+        check=True, capture_output=True,
+    )
+
+    from kiln.decoration_helpers import emboss_text_on_face
+
+    out_dir = tmp_path / "decorated"
+    emboss_text_on_face(
+        str(body_stl), "ABCD",
+        face_name="top", mode="emboss",
+        depth_mm=1.2, nozzle_diameter_mm=0.4,
+        output_dir=str(out_dir),
+    )
+
+    scad_files = list(out_dir.glob("*.scad"))
+    import re
+    sizes = []
+    for sf in scad_files:
+        m = re.search(r"size=(?P<n>[\d.]+)", sf.read_text())
+        if m:
+            sizes.append(float(m.group("n")))
+    font_size = max(sizes)
+    text_width_mm = len("ABCD") * font_size * 0.6
+    padding_per_side_mm = (30 - text_width_mm) / 2
+    assert padding_per_side_mm >= 3.0, (
+        f"on a 30mm face, padding {padding_per_side_mm:.1f}mm per side "
+        f"is below the floor — min_edge_margin_mm clamp didn't bind."
+    )
+
+
+@_NEEDS_OPENSCAD
+def test_zero_min_edge_margin_allows_hug_the_wall_text(tmp_path):
+    """Callers who explicitly want edge-to-edge text (license-plate
+    frame bands, etc.) override ``min_edge_margin_mm=0.0`` and get
+    the proportional-only behavior."""
+    body_scad = tmp_path / "body.scad"
+    body_scad.write_text("$fn=80;\ncube([100, 30, 10]);\n")
+    body_stl = tmp_path / "body.stl"
+    subprocess.run(
+        ["openscad", "-o", str(body_stl), str(body_scad)],
+        check=True, capture_output=True,
+    )
+
+    from kiln.emboss_generator import compile_embossed_model, generate_emboss_scad
+    from kiln.surface_intelligence import find_named_face
+
+    face = find_named_face(str(body_stl), "top")
+    out_dir = tmp_path / "decorated"
+    out_dir.mkdir()
+    result = generate_emboss_scad(
+        model_path=str(body_stl),
+        content_info={"type": "openscad_text", "text": "EDGE-TO-EDGE"},
+        face=face,
+        output_dir=str(out_dir),
+        depth_mm=1.2,
+        mode="emboss",
+        scale=0.95,  # caller asked for tight fit
+        min_edge_margin_mm=0.0,  # explicitly opt out of the clamp
+    )
+    # No clamp warning should have fired (the override means the user
+    # accepted the consequences).
+    assert not any(
+        "edge margin" in w for w in result.get("warnings", [])
+    ), f"unexpected margin warning: {result.get('warnings')}"
