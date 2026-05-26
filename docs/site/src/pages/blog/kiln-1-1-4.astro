@@ -1,0 +1,50 @@
+---
+import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
+
+const contentHtml = `
+<p><strong>Kiln 1.1.4 brings native Windows support.</strong> The CLI, <code>kiln install-mcp</code>, and OpenSCAD-based design generation all run on a stock Windows machine &mdash; no WSL, no manual workarounds. The new Windows walkthrough on the <a href="/install">install page</a> even includes a copy-paste prompt for handing the whole setup to an AI agent. Beyond Windows: sharper overhang verdicts (cantilevers and floating islands no longer get wrongly cleared of supports), honest filament readings on the Bambu A1 and A1 mini&rsquo;s AMS Lite, and safety messages in plain language.</p>
+
+<h2>Native Windows support</h2>
+
+<p>Kiln runs on a stock Windows install. The CLI handles a default Windows terminal&rsquo;s encoding, so <code>kiln --help</code>, <code>kiln doctor</code>, and every other command render instead of aborting. <code>kiln install-mcp</code> writes a launchable path that agents can spawn directly. OpenSCAD design generation handles Windows file paths and non-ASCII characters in your models.</p>
+
+<p><strong>The install page has a Windows walkthrough.</strong> <a href="/install">kiln3d.com/install</a> now has a Windows tab covering Python setup through agent connection. It also offers a copy-paste prompt you can hand to an AI agent with terminal access (Claude Code, Codex, or similar) &mdash; paste it and watch the agent install Python, Kiln, the MCP wiring, and run <code>kiln doctor</code> to verify everything works.</p>
+
+<h2>Sharper overhang verdicts</h2>
+
+<p>Kiln&rsquo;s overhang check decides whether your print needs supports. v1.1.4 makes it stricter on the cases it used to over-clear. A cantilever (a one-sided arm), a floating island, or a shape with overhangs that extend past their post no longer get cleared as &ldquo;no supports needed.&rdquo; The check confirms the overhang is genuinely anchored on two opposing sides, with a real open gap between them, before clearing the supports flag.</p>
+
+<p><strong>Why it matters.</strong> A cantilever reported as &ldquo;bridgeable&rdquo; usually fails mid-print &mdash; with nothing on the far side to anchor to, the overhang droops into open space. The fix uses a real geometric test &mdash; probing points under the overhang and ray-casting downward to check for anchors &mdash; instead of the bounding-box heuristic it replaced. The test that catches this class of bug now runs on every test pass, so a future change can&rsquo;t quietly bring it back.</p>
+
+<h2>Honest AMS Lite filament readings</h2>
+
+<p>The Bambu A1 and A1 mini&rsquo;s AMS Lite reports a filament-remaining percentage, but the hardware has no weight sensor &mdash; the number is a placeholder, not a measurement. Same for humidity: AMS Lite has no humidity sensor either. v1.1.4 recognises which printer models lack those sensors and reports the level as &ldquo;unknown&rdquo; instead of passing the placeholder through. &ldquo;Low filament&rdquo; now means low.</p>
+
+<p>The fix applies system-wide &mdash; across <code>kiln ams</code>, <code>kiln materials --live</code>, and the AMS-aware MCP tools your AI agent uses.</p>
+
+<h2>Plain-language safety and connection messages</h2>
+
+<p>Kiln&rsquo;s safety warnings used to lean on internal terms &mdash; &ldquo;soft-pass&rdquo;, &ldquo;gate&rdquo;, &ldquo;DEGRADED&rdquo; &mdash; that meant nothing to a user. They now describe the consequence for your print. Bambu connection errors got the same treatment: instead of a long technical checklist, you get one plain explanation and the most common cause (ex: Bambu Studio or the Handy app holding the printer&rsquo;s connection slot). <code>kiln doctor</code> warnings now label the check they&rsquo;re about, and pointing Kiln at a missing model file reports &ldquo;Mesh file not found&rdquo; up front instead of crashing deep in the auto-repair step.</p>
+
+<p>Full release notes: <a href="https://github.com/codeofaxel/Kiln/blob/main/CHANGELOG.md">CHANGELOG.md</a>.</p>
+
+<h2>Upgrading</h2>
+
+<ul>
+  <li><strong>Already running Kiln?</strong> Run <code>pip install --upgrade kiln3d</code> and you&rsquo;re on 1.1.4.</li>
+  <li><strong>New to Kiln?</strong> Run <code>pip install kiln3d</code>, then follow the <a href="/install">install guide</a> to connect it to your AI client (Claude Desktop, Claude Code, Codex, or any other MCP-compatible client).</li>
+  <li><strong>On Windows?</strong> Pick the Windows tab on the <a href="/install">install page</a> &mdash; or paste the agent-install prompt and let your AI agent set up Python, Kiln, and the MCP wiring for you.</li>
+</ul>
+
+<p style="text-align: center; margin-top: 40px;"><a href="/install" class="btn">Get Kiln &rarr;</a></p>
+`;
+---
+
+<BlogPostLayout
+  title="Kiln 1.1.4: native support for Windows machines, and sharper overhang checks"
+  description="Kiln 1.1.4 brings Kiln to Windows — and adds a paste-to-your-AI prompt that handles Python, install, and MCP wiring for you. The overhang check is sharper: cantilevers and floating islands correctly keep the supports flag. Bambu A1 and A1 mini AMS Lite readings are honest. Safety messages drop their jargon."
+  date="May 21, 2026"
+  tags={["release", "v1.1.4", "windows", "overhangs", "ams", "supports"]}
+>
+  <Fragment set:html={contentHtml} />
+</BlogPostLayout>

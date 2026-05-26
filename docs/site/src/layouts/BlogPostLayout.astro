@@ -207,7 +207,7 @@ const modifiedIso =
     color: var(--text-muted);
   }
 
-  .post-body :global(a) {
+  .post-body :global(a:not(.btn)) {
     color: var(--accent);
     text-decoration: underline;
     text-decoration-color: rgba(255, 107, 43, 0.3);
@@ -215,7 +215,7 @@ const modifiedIso =
     transition: text-decoration-color 0.15s;
   }
 
-  .post-body :global(a:hover) {
+  .post-body :global(a:not(.btn):hover) {
     text-decoration-color: var(--accent);
   }
 
