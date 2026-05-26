@@ -109,7 +109,7 @@ def test_emboss_text_lines_hierarchy_primary_larger_than_secondary(tmp_path):
         ["Josh Beckham", "CEO"],
         face_name="top",
         mode="deboss",
-        depth_mm=1.0,
+        depth_mm=1.2,  # at the 0.4mm-nozzle legibility floor
         line_scale=0.7,
         output_dir=str(out_dir),
     )
@@ -229,3 +229,152 @@ def test_emboss_text_on_face_emits_inner_translate_for_tilted_face(tmp_path):
         f"got {translate_count} — local-frame path may have regressed.\n"
         f"SCAD:\n{content}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Depth legibility floor — printer-nozzle-aware enforcement.
+# ---------------------------------------------------------------------------
+
+
+def _make_cube_stl(stl_path: Path, *, side_mm: float) -> Path:
+    """Build a simple cube STL via OpenSCAD as a test fixture host.
+
+    Used by the depth-floor tests below — needs a real STL with a
+    detectable "top" face but doesn't care about geometry beyond that.
+    """
+    scad = stl_path.with_suffix(".scad")
+    scad.write_text(f"$fn=80;\ncube([{side_mm}, {side_mm}, 10]);\n")
+    subprocess.run(
+        ["openscad", "-o", str(stl_path), str(scad)],
+        check=True, capture_output=True,
+    )
+    return stl_path
+
+
+def test_depth_legibility_floor_default_nozzle_matches_a1_empirical():
+    """Default 0.4mm nozzle floor is 1.2mm (matches kiln-pro CLAUDE.md
+    empirical floor for the Bambu A1)."""
+    from kiln.decoration_helpers import _depth_legibility_floor_mm
+
+    assert _depth_legibility_floor_mm(0.4) == pytest.approx(1.2)
+
+
+def test_depth_legibility_floor_scales_with_nozzle_diameter():
+    """3x rule: a 0.6mm Prusa MK4 nozzle bumps the floor to 1.8mm,
+    a 0.25mm precision nozzle drops it to 0.75mm."""
+    from kiln.decoration_helpers import _depth_legibility_floor_mm
+
+    assert _depth_legibility_floor_mm(0.6) == pytest.approx(1.8)
+    assert _depth_legibility_floor_mm(0.25) == pytest.approx(0.75)
+    assert _depth_legibility_floor_mm(0.8) == pytest.approx(2.4)
+
+
+def test_emboss_below_floor_raises_with_actionable_payload(tmp_path):
+    """Sub-floor depth raises DepthBelowLegibilityFloor carrying the
+    requested + floor + nozzle so the caller can hand the user a
+    specific fix."""
+    from kiln.decoration_helpers import (
+        DepthBelowLegibilityFloor,
+        emboss_text_on_face,
+    )
+
+    # Real body STL — a 50mm cube via OpenSCAD avoids fixture coupling.
+    body_stl = _make_cube_stl(tmp_path / "cube.stl", side_mm=50.0)
+    out_dir = tmp_path / "decorated"
+
+    with pytest.raises(DepthBelowLegibilityFloor) as excinfo:
+        emboss_text_on_face(
+            str(body_stl),
+            "TINY",
+            face_name="top",
+            mode="deboss",
+            depth_mm=0.5,  # below the 1.2mm floor on a 0.4mm nozzle
+            nozzle_diameter_mm=0.4,
+            output_dir=str(out_dir),
+        )
+
+    err = excinfo.value
+    assert err.requested_mm == 0.5
+    assert err.floor_mm == pytest.approx(1.2)
+    assert err.nozzle_diameter_mm == 0.4
+
+
+def test_emboss_below_floor_on_larger_nozzle_raises(tmp_path):
+    """1.2mm depth is fine on a 0.4mm nozzle but BELOW the 1.8mm floor
+    on a 0.6mm Prusa MK4 nozzle — caller passing the wrong nozzle
+    diameter mustn't ship a smeared print."""
+    from kiln.decoration_helpers import (
+        DepthBelowLegibilityFloor,
+        emboss_text_on_face,
+    )
+
+    body_stl = _make_cube_stl(tmp_path / "cube.stl", side_mm=50.0)
+    out_dir = tmp_path / "decorated"
+
+    with pytest.raises(DepthBelowLegibilityFloor):
+        emboss_text_on_face(
+            str(body_stl),
+            "OK_ON_A1",
+            face_name="top",
+            mode="deboss",
+            depth_mm=1.2,
+            nozzle_diameter_mm=0.6,  # bumps floor to 1.8
+            output_dir=str(out_dir),
+        )
+
+
+def test_emboss_depth_none_uses_floor_silently(tmp_path):
+    """``depth_mm=None`` is the most common caller intent ("make it
+    just legible") — engine picks the printer-specific floor without
+    raising."""
+    from kiln.decoration_helpers import emboss_text_on_face
+
+    body_stl = _make_cube_stl(tmp_path / "cube.stl", side_mm=50.0)
+    out_dir = tmp_path / "decorated"
+
+    final_stl = emboss_text_on_face(
+        str(body_stl),
+        "OK",
+        face_name="top",
+        mode="deboss",
+        depth_mm=None,
+        nozzle_diameter_mm=0.4,
+        output_dir=str(out_dir),
+    )
+    assert os.path.isfile(final_stl)
+    # The generated SCAD's linear_extrude(height=...) should reflect
+    # at least the floor depth (1.2mm), not the prior 0.8mm legacy
+    # default.  Engine may add a small (≤0.2mm) buffer above the depth
+    # for clean deboss cut intersections — assert ≥ floor and ≤ floor
+    # + tolerance.
+    scad = next(iter(out_dir.glob("*.scad"))).read_text()
+    import re
+    m = re.search(r"linear_extrude\s*\(\s*height\s*=\s*([\d.]+)", scad)
+    assert m, f"Could not find linear_extrude height in SCAD: {scad}"
+    height = float(m.group(1))
+    assert 1.2 <= height <= 1.4, (
+        f"Expected height in [1.2, 1.4] (floor + buffer), got {height}"
+    )
+
+
+def test_emboss_text_lines_below_floor_raises(tmp_path):
+    """Multi-line path enforces the same floor — the floor check
+    happens once at the top, not re-checked per line."""
+    from kiln.decoration_helpers import (
+        DepthBelowLegibilityFloor,
+        emboss_text_lines_on_face,
+    )
+
+    body_stl = _make_cube_stl(tmp_path / "cube.stl", side_mm=50.0)
+    out_dir = tmp_path / "decorated"
+
+    with pytest.raises(DepthBelowLegibilityFloor):
+        emboss_text_lines_on_face(
+            str(body_stl),
+            ["NAME", "TITLE"],
+            face_name="top",
+            mode="deboss",
+            depth_mm=0.8,  # below 1.2mm floor
+            nozzle_diameter_mm=0.4,
+            output_dir=str(out_dir),
+        )

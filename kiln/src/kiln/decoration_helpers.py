@@ -41,6 +41,65 @@ _logger = logging.getLogger(__name__)
 _FDM_TEXT_LEGIBILITY_FLOOR_MM = 4.0
 
 
+# Emboss/deboss depth legibility floor — the carving needs at least
+# ~3x the nozzle diameter of vertical structure for the engraving to
+# read at arm's-length.  Calibrated against the 1.2mm A1 (0.4mm
+# nozzle) empirical floor documented in kiln-pro CLAUDE.md; at 3x
+# this extrapolates to 1.8mm on a 0.6mm Prusa MK4 nozzle and 0.75mm
+# on a 0.25mm precision nozzle.  Used by :func:`emboss_text_on_face`
+# and :func:`emboss_text_lines_on_face` to refuse depth values that
+# would render as illegible smears on the user's printer.
+_DEPTH_LEGIBILITY_FLOOR_MULTIPLIER = 3.0
+
+
+def _depth_legibility_floor_mm(nozzle_diameter_mm: float) -> float:
+    """Minimum ``depth_mm`` for emboss/deboss text to read at arm's length.
+
+    Returns ``nozzle_diameter_mm × 3``.  Anything below this is a
+    legibility risk — the carving walls don't have enough vertical
+    structure to survive shrinkage, sag, and layer-line interference.
+
+    Calibrated against the Bambu A1 (0.4mm nozzle → 1.2mm floor) per
+    the empirical floor in kiln-pro CLAUDE.md.
+
+    :param nozzle_diameter_mm: The active printer's nozzle diameter.
+    :returns: Floor depth in millimetres.
+    """
+    return nozzle_diameter_mm * _DEPTH_LEGIBILITY_FLOOR_MULTIPLIER
+
+
+class DepthBelowLegibilityFloor(ValueError):
+    """Raised when the requested emboss/deboss depth is below the
+    printer-specific legibility floor.
+
+    Carries ``.floor_mm``, ``.requested_mm``, and ``.nozzle_diameter_mm``
+    so the catching tool can hand the user an actionable suggestion
+    (e.g. "use depth_mm >= 1.8 on a 0.6mm nozzle") without re-deriving
+    the floor.
+
+    Per kiln-pro CLAUDE.md "ship-readiness" rule: refuse to produce a
+    preview / SCAD / STL of text that will print as an illegible smear.
+    A clear actionable error beats a "preview-of-broken" output.
+    """
+
+    def __init__(
+        self,
+        *,
+        requested_mm: float,
+        floor_mm: float,
+        nozzle_diameter_mm: float,
+    ) -> None:
+        self.requested_mm = requested_mm
+        self.floor_mm = floor_mm
+        self.nozzle_diameter_mm = nozzle_diameter_mm
+        super().__init__(
+            f"emboss depth {requested_mm:.2f}mm is below the "
+            f"legibility floor {floor_mm:.2f}mm for a "
+            f"{nozzle_diameter_mm:.2f}mm nozzle "
+            f"({_DEPTH_LEGIBILITY_FLOOR_MULTIPLIER}x rule)"
+        )
+
+
 class TextDoesNotFitError(ValueError):
     """Raised when text cannot fit a target strip even at the legibility floor.
 
@@ -201,7 +260,8 @@ def emboss_text_on_face(
     *,
     face_name: str | None = None,
     mode: str = "emboss",
-    depth_mm: float = 0.8,
+    depth_mm: float | None = None,
+    nozzle_diameter_mm: float = 0.4,
     scale: float = 0.85,
     offset_x_mm: float = 0.0,
     offset_y_mm: float = 0.0,
@@ -227,7 +287,17 @@ def emboss_text_on_face(
         ``"back"`` / ``"left"`` / ``"right"`` to target a cardinal face.
         ``None`` means auto-detect the largest flat face.
     :param mode: ``"emboss"`` (raised) or ``"deboss"`` (recessed).
-    :param depth_mm: Depth of the emboss/deboss in mm.
+    :param depth_mm: Depth of the emboss/deboss in mm.  ``None``
+        (default) means the helper uses the printer-specific
+        legibility floor (``nozzle_diameter_mm × 3``) — caller intent
+        is "make it just legible."  Pass an explicit value greater
+        than the floor for a deeper engraving (e.g. premium
+        nameplates).  Values BELOW the floor raise
+        :class:`DepthBelowLegibilityFloor`.
+    :param nozzle_diameter_mm: The active printer's nozzle diameter
+        in mm.  Default 0.4 matches the Bambu A1 / most consumer
+        printers.  A 0.6mm Prusa MK4 nozzle bumps the floor to
+        1.8mm; a 0.25mm precision nozzle drops it to 0.75mm.
     :param scale: Fraction of the face the text spans (0.0–1.0).
         Engine auto-sizes the font so the text fits at this scale.
     :param offset_x_mm: Horizontal offset from face centre in mm.
@@ -244,6 +314,8 @@ def emboss_text_on_face(
     :returns: Absolute path to the new STL with text applied.
     :raises FileNotFoundError: If *body_stl* doesn't exist.
     :raises ValueError: If face detection fails.
+    :raises DepthBelowLegibilityFloor: If *depth_mm* is below
+        ``nozzle_diameter_mm × 3``.
     :raises RuntimeError: If OpenSCAD compilation fails.
     """
     from kiln.emboss_generator import compile_embossed_model, generate_emboss_scad
@@ -251,6 +323,21 @@ def emboss_text_on_face(
 
     if not os.path.isfile(body_stl):
         raise FileNotFoundError(f"Host STL not found: {body_stl}")
+
+    # 0. Resolve depth against the printer-specific legibility floor.
+    # ``depth_mm=None`` means "use the floor as the depth" — the most
+    # common caller intent ("just make it legible on my printer").
+    # Explicit depths below the floor raise; depths at-or-above the
+    # floor pass through unchanged.
+    floor_mm = _depth_legibility_floor_mm(nozzle_diameter_mm)
+    if depth_mm is None:
+        depth_mm = floor_mm
+    elif depth_mm < floor_mm - 1e-6:  # 1µm tolerance for float quirks
+        raise DepthBelowLegibilityFloor(
+            requested_mm=depth_mm,
+            floor_mm=floor_mm,
+            nozzle_diameter_mm=nozzle_diameter_mm,
+        )
 
     # 1. Detect target face
     if face_name:
@@ -308,7 +395,8 @@ def emboss_text_lines_on_face(
     *,
     face_name: str | None = None,
     mode: str = "emboss",
-    depth_mm: float = 0.8,
+    depth_mm: float | None = None,
+    nozzle_diameter_mm: float = 0.4,
     line_scale: float = 0.85,
     line_spacing_mm: float = 0.0,
     output_dir: str | None = None,
@@ -331,13 +419,37 @@ def emboss_text_lines_on_face(
     For per-line scale customisation pass ``hierarchy=[1.0, 0.6, 0.4]``
     or call :func:`emboss_text_on_face` directly per line.
 
+    :param depth_mm: Depth of the emboss/deboss in mm.  ``None``
+        (default) uses the printer-specific legibility floor
+        (``nozzle_diameter_mm × 3``) — caller intent is "make it just
+        legible."  Explicit depths BELOW the floor raise
+        :class:`DepthBelowLegibilityFloor`.  Pass an explicit value
+        above the floor for a deeper engraving.
+    :param nozzle_diameter_mm: Active printer's nozzle diameter in mm.
+        Default 0.4 matches the Bambu A1 / most consumer printers.
     :param hierarchy: Per-line size multipliers relative to *line_scale*.
         Defaults to ``[1.0]`` for 1 line, ``[1.0, 0.7]`` for 2 lines,
         ``[1.0, 0.7, 0.5]`` for 3+ lines (recursive 0.7^i ratio).
     :returns: Final STL path with all lines applied.
+    :raises DepthBelowLegibilityFloor: If *depth_mm* is below
+        ``nozzle_diameter_mm × 3``.
     """
     if not lines:
         return body_stl
+
+    # Resolve depth against the printer-specific legibility floor —
+    # same contract as :func:`emboss_text_on_face`.  Done once at the
+    # top so all per-line calls share the same depth and the same
+    # error path.
+    floor_mm = _depth_legibility_floor_mm(nozzle_diameter_mm)
+    if depth_mm is None:
+        depth_mm = floor_mm
+    elif depth_mm < floor_mm - 1e-6:  # 1µm tolerance for float quirks
+        raise DepthBelowLegibilityFloor(
+            requested_mm=depth_mm,
+            floor_mm=floor_mm,
+            nozzle_diameter_mm=nozzle_diameter_mm,
+        )
 
     n = len(lines)
 
@@ -470,6 +582,7 @@ def emboss_text_lines_on_face(
             face_name=face_name,
             mode=mode,
             depth_mm=depth_mm,
+            nozzle_diameter_mm=nozzle_diameter_mm,
             scale=line_scale,
             offset_y_mm=offset,
             font_size_mm=per_line_sizes[i],
