@@ -378,3 +378,95 @@ def test_emboss_text_lines_below_floor_raises(tmp_path):
             nozzle_diameter_mm=0.4,
             output_dir=str(out_dir),
         )
+
+
+# ---------------------------------------------------------------------------
+# Aspect-ratio-aware flip-axis selection for bottom-face engravings.
+# ---------------------------------------------------------------------------
+
+
+def test_flip_selection_wide_face_picks_rotate():
+    """A 130×80 face (soap dish / coaster) gets rotate([180,0,0]) and
+    axis="x" — the natural flip is around the long X axis."""
+    from kiln.decoration_helpers import select_bottom_face_flip
+
+    verdict = select_bottom_face_flip(face_width_mm=130, face_height_mm=80)
+    assert verdict["transformation"] == "rotate([180, 0, 0])"
+    assert verdict["flip_axis"] == "x"
+    assert verdict["confidence"] == "high"
+    assert verdict["self_inspection"]["passed"] is True
+
+
+def test_flip_selection_tall_face_picks_mirror():
+    """A 60×120 face (bookmark / pet-tag-on-vertical-strap) gets
+    mirror([1,0,0]) and axis="y" — natural flip is around long Y axis."""
+    from kiln.decoration_helpers import select_bottom_face_flip
+
+    verdict = select_bottom_face_flip(face_width_mm=60, face_height_mm=120)
+    assert verdict["transformation"] == "mirror([1, 0, 0])"
+    assert verdict["flip_axis"] == "y"
+    assert verdict["confidence"] == "high"
+    assert verdict["self_inspection"]["passed"] is True
+
+
+def test_flip_selection_square_face_defaults_to_rotate():
+    """A square-ish face (aspect ratio < 1.2) defaults to rotate —
+    handedness preservation for script fonts / asymmetric logos.
+    Confidence drops to medium because either transformation would
+    read correctly."""
+    from kiln.decoration_helpers import select_bottom_face_flip
+
+    verdict = select_bottom_face_flip(face_width_mm=80, face_height_mm=85)
+    assert verdict["transformation"] == "rotate([180, 0, 0])"
+    assert verdict["flip_axis"] == "x"
+    assert verdict["confidence"] == "medium"
+
+
+def test_flip_selection_rationale_carries_face_dimensions():
+    """The rationale string surfaces the face dimensions so callers
+    can include them in agent logs without re-deriving."""
+    from kiln.decoration_helpers import select_bottom_face_flip
+
+    verdict = select_bottom_face_flip(face_width_mm=130, face_height_mm=80)
+    assert "130" in verdict["rationale"]
+    assert "80" in verdict["rationale"]
+    assert "X axis" in verdict["rationale"]
+
+
+def test_self_inspect_rotate_with_x_flip_passes():
+    """rotate([180,0,0]) pre-transform + user X-axis physical flip
+    leaves text in left-to-right reading order."""
+    from kiln.decoration_helpers import _self_inspect_flip_orientation
+
+    result = _self_inspect_flip_orientation("rotate([180, 0, 0])", "x")
+    assert result["passed"] is True
+
+
+def test_self_inspect_mirror_with_y_flip_passes():
+    """mirror([1,0,0]) pre-transform + user Y-axis physical flip
+    leaves text in left-to-right reading order."""
+    from kiln.decoration_helpers import _self_inspect_flip_orientation
+
+    result = _self_inspect_flip_orientation("mirror([1, 0, 0])", "y")
+    assert result["passed"] is True
+
+
+def test_self_inspect_rotate_with_y_flip_fails():
+    """rotate pre-transform + Y-axis user flip = text appears reversed.
+    Self-inspection catches the mismatch."""
+    from kiln.decoration_helpers import _self_inspect_flip_orientation
+
+    result = _self_inspect_flip_orientation("rotate([180, 0, 0])", "y")
+    assert result["passed"] is False
+    assert "reversed" in result["detail"]
+
+
+def test_self_inspect_mirror_with_x_flip_fails():
+    """mirror pre-transform + X-axis user flip = text appears reversed.
+    This is the exact failure mode the swarm refactor inadvertently
+    fixed — sub-face inspections for soap_dish / jewelry_tray / ashtray
+    all sit in this category before the refactor."""
+    from kiln.decoration_helpers import _self_inspect_flip_orientation
+
+    result = _self_inspect_flip_orientation("mirror([1, 0, 0])", "x")
+    assert result["passed"] is False

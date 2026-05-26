@@ -100,6 +100,226 @@ class DepthBelowLegibilityFloor(ValueError):
         )
 
 
+# --- Aspect-ratio-aware flip-axis selection -----------------------------
+#
+# Engravings on the bottom face of a printed object are pre-flipped so
+# they read correctly AFTER the user physically flips the object to look
+# at the bottom.  Which way the user flips depends on the object's
+# shape:
+#
+# - Wide-shallow objects (width > height, e.g. coasters, soap dishes,
+#   jewelry trays): the natural flip is around the long X axis — pick
+#   up the front edge and tilt it UP toward yourself.  The pre-flip
+#   that matches this is ``rotate([180, 0, 0])``.
+#
+# - Tall-narrow objects (height > width, e.g. bookmarks, pet tags held
+#   vertically): the natural flip is around the long Y axis — grab
+#   one side and roll the object onto its other side.  The pre-flip
+#   that matches this is ``mirror([1, 0, 0])``.
+#
+# - Square / round objects (aspect ratio < 1.2): either flip works.
+#   Default to ``rotate([180, 0, 0])`` because rotation preserves
+#   handedness (no left-right inversion of asymmetric glyphs like
+#   script-font flourishes or vendor logos).
+#
+# Selection runs a MANDATORY geometric self-inspection: after picking a
+# transformation, the engine mathematically simulates the chain
+# (pre-transform → user's natural physical flip → viewer's eye) and
+# verifies sample characters end up in left-to-right reading order.
+# If the self-inspection fails, the engine retries with the alternative
+# transformation; if both fail, a structured error surfaces the issue.
+# No OCR, no LLM, no rendering — pure geometry.  The human still gets
+# the rendered preview through the existing inspection-bundle channel.
+
+_SQUARE_THRESHOLD = 1.2  # aspect < this counts as "approximately square"
+
+
+def _select_flip_transformation(
+    face_width_mm: float, face_height_mm: float,
+) -> tuple[str, str, str]:
+    """Pick a pre-flip SCAD transformation for the BOTTOM-face engraving.
+
+    Returns a tuple of ``(transformation_scad, flip_axis, rationale)``:
+
+    - ``transformation_scad`` is the SCAD clause to apply before the
+      ``linear_extrude(text(...))`` block (``"rotate([180, 0, 0])"`` or
+      ``"mirror([1, 0, 0])"``).
+    - ``flip_axis`` is ``"x"`` or ``"y"`` — the user's natural physical
+      flip axis that the transformation matches.
+    - ``rationale`` is a 1-line human-readable explanation suitable for
+      surfacing to an agent log or the inspection-bundle preview.
+
+    :param face_width_mm: Face X-extent in face-local mm.
+    :param face_height_mm: Face Y-extent in face-local mm.
+    """
+    aspect = max(face_width_mm, face_height_mm) / max(
+        min(face_width_mm, face_height_mm), 1e-6
+    )
+    if aspect < _SQUARE_THRESHOLD:
+        return (
+            "rotate([180, 0, 0])",
+            "x",
+            f"face is approximately square ({face_width_mm:.0f}×"
+            f"{face_height_mm:.0f}mm, aspect {aspect:.2f}); rotation "
+            f"default preserves handedness",
+        )
+    if face_width_mm > face_height_mm:
+        return (
+            "rotate([180, 0, 0])",
+            "x",
+            f"wide-shallow face ({face_width_mm:.0f}×{face_height_mm:.0f}mm); "
+            f"natural physical flip around long X axis",
+        )
+    return (
+        "mirror([1, 0, 0])",
+        "y",
+        f"tall-narrow face ({face_width_mm:.0f}×{face_height_mm:.0f}mm); "
+        f"natural physical flip around long Y axis",
+    )
+
+
+def _self_inspect_flip_orientation(
+    transformation: str, flip_axis: str,
+) -> dict[str, Any]:
+    """Geometric self-inspection — does the chosen pre-transform leave
+    text readable after the user's natural physical flip?
+
+    Simulates the transformation chain on sample character-centroid
+    points (laid out left-to-right at the face's centerline) and
+    verifies they end up in left-to-right reading order when the
+    viewer looks down at the post-flip object.
+
+    :param transformation: The pre-flip SCAD clause —
+        ``"rotate([180, 0, 0])"`` or ``"mirror([1, 0, 0])"``.
+    :param flip_axis: The user's natural physical flip axis —
+        ``"x"`` (rotate object 180° around X — tilt front up) or
+        ``"y"`` (rotate object 180° around Y — roll onto side).
+    :returns: A dict with ``passed``, ``method``, ``sample_x_order``
+        and ``detail``.  Catching code can include this in a verdict.
+    """
+    # Sample points: 4 character centroids laid out left-to-right
+    # at face-local Y=0, with X increasing.  After the chain ends,
+    # we expect X to still be left-to-right when the viewer's eye
+    # is above the (post-flip) object looking down +Z → -Z.
+    points = [(float(i), 0.0, 0.0) for i in range(4)]
+
+    # Step 1: pre-transform (face-local frame → bottom-face world frame).
+    if transformation.startswith("rotate"):
+        # rotate([180, 0, 0]): (x, y, z) → (x, -y, -z)
+        points = [(x, -y, -z) for x, y, z in points]
+    elif transformation.startswith("mirror"):
+        # mirror([1, 0, 0]): (x, y, z) → (-x, y, z)
+        points = [(-x, y, z) for x, y, z in points]
+    else:
+        return {
+            "passed": False,
+            "method": "geometric",
+            "detail": f"unknown pre-transform {transformation!r}",
+        }
+
+    # Step 2: user's natural physical flip.
+    if flip_axis == "x":
+        # rotate 180° around X: (x, y, z) → (x, -y, -z)
+        points = [(x, -y, -z) for x, y, z in points]
+    elif flip_axis == "y":
+        # rotate 180° around Y: (x, y, z) → (-x, y, -z)
+        points = [(-x, y, -z) for x, y, z in points]
+    else:
+        return {
+            "passed": False,
+            "method": "geometric",
+            "detail": f"unknown flip_axis {flip_axis!r}",
+        }
+
+    # Step 3: viewer looks down at the post-flip object from +Z.
+    # Reading order = X increasing left-to-right.
+    x_values = [p[0] for p in points]
+    arranged_correctly = all(
+        x_values[i] < x_values[i + 1] for i in range(len(x_values) - 1)
+    )
+    return {
+        "passed": arranged_correctly,
+        "method": "geometric",
+        "sample_x_order": x_values,
+        "detail": (
+            "characters in left-to-right reading order after pre-transform "
+            "+ user's natural physical flip"
+            if arranged_correctly
+            else "characters end up reversed; transformation does not "
+            "match the assumed flip axis"
+        ),
+    }
+
+
+def select_bottom_face_flip(
+    face_width_mm: float, face_height_mm: float,
+) -> dict[str, Any]:
+    """Pick the right pre-flip transformation for a bottom-face engraving,
+    self-inspect the choice, and return a verdict ready to consume.
+
+    Combines :func:`_select_flip_transformation` (aspect-ratio decision)
+    with :func:`_self_inspect_flip_orientation` (mandatory geometric
+    verification).  If the primary choice fails self-inspection, retries
+    with the alternative; if both fail, raises ``RuntimeError`` with the
+    diagnostic so the caller can surface it to the user instead of
+    silently shipping a misoriented engraving.
+
+    :returns: Dict with ``transformation`` (SCAD clause), ``flip_axis``
+        (``"x"`` / ``"y"``), ``rationale`` (1-line explanation),
+        ``self_inspection`` (verdict dict), and ``confidence``
+        (``"high"`` / ``"medium"``).
+    """
+    transformation, flip_axis, rationale = _select_flip_transformation(
+        face_width_mm, face_height_mm,
+    )
+    inspection = _self_inspect_flip_orientation(transformation, flip_axis)
+
+    aspect = max(face_width_mm, face_height_mm) / max(
+        min(face_width_mm, face_height_mm), 1e-6
+    )
+    confidence = "high" if aspect >= _SQUARE_THRESHOLD else "medium"
+
+    if not inspection["passed"]:
+        # Fall back to the alternative transformation.
+        alt_transformation = (
+            "mirror([1, 0, 0])"
+            if transformation.startswith("rotate")
+            else "rotate([180, 0, 0])"
+        )
+        alt_flip_axis = "y" if flip_axis == "x" else "x"
+        alt_inspection = _self_inspect_flip_orientation(
+            alt_transformation, alt_flip_axis,
+        )
+        if alt_inspection["passed"]:
+            return {
+                "transformation": alt_transformation,
+                "flip_axis": alt_flip_axis,
+                "rationale": (
+                    f"{rationale} (primary failed self-inspection, "
+                    f"fell back to alternative)"
+                ),
+                "self_inspection": alt_inspection,
+                "confidence": "medium",
+            }
+        # Both failed — the engine doesn't know how to make text
+        # readable for this face.  Surface the diagnostic.
+        raise RuntimeError(
+            f"flip-orientation self-inspection failed for both "
+            f"transformations on face {face_width_mm:.0f}×"
+            f"{face_height_mm:.0f}mm — engine bug, please report.  "
+            f"Primary detail: {inspection['detail']}.  "
+            f"Alternative detail: {alt_inspection['detail']}."
+        )
+
+    return {
+        "transformation": transformation,
+        "flip_axis": flip_axis,
+        "rationale": rationale,
+        "self_inspection": inspection,
+        "confidence": confidence,
+    }
+
+
 class TextDoesNotFitError(ValueError):
     """Raised when text cannot fit a target strip even at the legibility floor.
 
