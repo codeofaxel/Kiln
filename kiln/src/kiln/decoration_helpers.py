@@ -711,6 +711,29 @@ def emboss_text_on_face(
         slug = "".join(c if c.isalnum() else "_" for c in text)[:24]
         output_stl = os.path.join(output_dir, f"with_{slug}.stl")
 
+    # 2b. Smart-flip selection for bottom-face engravings.  The engine
+    # always emits a face-aligning rotation (``rotate([180, 0, 0])``
+    # for the bottom face); for tall-narrow faces where the user's
+    # natural physical flip is around the long Y axis, we additionally
+    # inject ``mirror([1, 0, 0])`` between the rotation and the text
+    # extrude so the engraving reads correctly after that flip.  See
+    # :func:`select_bottom_face_flip` for the aspect-ratio decision +
+    # mandatory geometric self-inspection.
+    is_bottom_face = face.get("normal", [0, 0, 1])[2] < -0.9
+    additional_pre_text_transform = ""
+    if is_bottom_face:
+        flip_decision = select_bottom_face_flip(
+            face_width_mm=face.get("width_mm", 0.0),
+            face_height_mm=face.get("height_mm", 0.0),
+        )
+        if flip_decision["transformation"] == "mirror([1, 0, 0])":
+            # Engine's outer rotation handles the face alignment; the
+            # mirror is the SUPPLEMENT that flips text for the long-Y
+            # physical flip.  ``select_bottom_face_flip`` only returns
+            # this for genuinely tall-narrow faces — wide-shallow + near-
+            # square stay on the engine's default (no mirror).
+            additional_pre_text_transform = "mirror([1, 0, 0])"
+
     # 3. Build the emboss SCAD via the engine — this handles
     # face-normal-aware rotation, auto-text-sizing to fit the face,
     # and the linear_extrude depth correctly.
@@ -731,6 +754,7 @@ def emboss_text_on_face(
         scale=scale,
         offset_x_mm=offset_x_mm,
         offset_y_mm=offset_y_mm,
+        additional_pre_text_transform=additional_pre_text_transform,
     )
 
     # 4. Compile to STL

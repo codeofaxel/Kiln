@@ -692,3 +692,110 @@ def test_zero_min_edge_margin_allows_hug_the_wall_text(tmp_path):
     assert not any(
         "edge margin" in w for w in result.get("warnings", [])
     ), f"unexpected margin warning: {result.get('warnings')}"
+
+
+# ---------------------------------------------------------------------------
+# SCAD-injection wiring — smart flip applied to actual engine output.
+# ---------------------------------------------------------------------------
+
+
+@_NEEDS_OPENSCAD
+def test_wide_shallow_bottom_face_emits_no_extra_mirror(tmp_path):
+    """Wide-shallow bottom face (100×60mm) → helper picks rotate;
+    engine's default rotation handles it; no extra mirror in SCAD."""
+    body_scad = tmp_path / "body.scad"
+    body_scad.write_text("$fn=80;\ncube([100, 60, 10]);\n")
+    body_stl = tmp_path / "body.stl"
+    subprocess.run(
+        ["openscad", "-o", str(body_stl), str(body_scad)],
+        check=True, capture_output=True,
+    )
+
+    from kiln.decoration_helpers import emboss_text_on_face
+
+    out_dir = tmp_path / "decorated"
+    emboss_text_on_face(
+        str(body_stl), "KILN",
+        face_name="bottom", mode="deboss",
+        depth_mm=1.2, nozzle_diameter_mm=0.4,
+        output_dir=str(out_dir),
+    )
+
+    # Filter out the flip_preview.scad helper — we want the emboss SCAD.
+    scad_files = [
+        p for p in out_dir.glob("*.scad")
+        if not p.name.startswith("flip_preview")
+    ]
+    assert scad_files
+    scad_content = scad_files[0].read_text()
+    # Engine emits its standard rotate for face alignment.
+    assert "rotate([180, 0, 0])" in scad_content
+    # No supplemental mirror — wide-shallow uses the engine default.
+    assert "mirror([1, 0, 0])" not in scad_content
+
+
+@_NEEDS_OPENSCAD
+def test_tall_narrow_bottom_face_emits_supplemental_mirror(tmp_path):
+    """Tall-narrow bottom face (60×120mm) → helper picks mirror;
+    engine emits rotate AND mirror together so text reads correctly
+    after the user's Y-axis natural flip."""
+    body_scad = tmp_path / "body.scad"
+    body_scad.write_text("$fn=80;\ncube([60, 120, 10]);\n")
+    body_stl = tmp_path / "body.stl"
+    subprocess.run(
+        ["openscad", "-o", str(body_stl), str(body_scad)],
+        check=True, capture_output=True,
+    )
+
+    from kiln.decoration_helpers import emboss_text_on_face
+
+    out_dir = tmp_path / "decorated"
+    emboss_text_on_face(
+        str(body_stl), "KILN",
+        face_name="bottom", mode="deboss",
+        depth_mm=1.2, nozzle_diameter_mm=0.4,
+        output_dir=str(out_dir),
+    )
+
+    scad_files = [
+        p for p in out_dir.glob("*.scad")
+        if not p.name.startswith("flip_preview")
+    ]
+    assert scad_files
+    scad_content = scad_files[0].read_text()
+    # Engine still emits face-aligning rotation.
+    assert "rotate([180, 0, 0])" in scad_content
+    # AND the supplemental mirror for the long-Y physical flip.
+    assert "mirror([1, 0, 0])" in scad_content
+
+
+@_NEEDS_OPENSCAD
+def test_top_face_never_emits_supplemental_mirror(tmp_path):
+    """face_name='top' is a print-orientation face — no flip-readable
+    contract, no supplemental mirror.  Engine's standard pipeline
+    runs unchanged."""
+    body_scad = tmp_path / "body.scad"
+    body_scad.write_text("$fn=80;\ncube([60, 120, 10]);\n")
+    body_stl = tmp_path / "body.stl"
+    subprocess.run(
+        ["openscad", "-o", str(body_stl), str(body_scad)],
+        check=True, capture_output=True,
+    )
+
+    from kiln.decoration_helpers import emboss_text_on_face
+
+    out_dir = tmp_path / "decorated"
+    emboss_text_on_face(
+        str(body_stl), "KILN",
+        face_name="top", mode="emboss",
+        depth_mm=1.2, nozzle_diameter_mm=0.4,
+        output_dir=str(out_dir),
+    )
+
+    scad_files = [
+        p for p in out_dir.glob("*.scad")
+        if not p.name.startswith("flip_preview")
+    ]
+    assert scad_files
+    scad_content = scad_files[0].read_text()
+    assert "mirror([1, 0, 0])" not in scad_content
