@@ -617,6 +617,7 @@ def emboss_text_on_face(
     depth_mm: float | None = None,
     nozzle_diameter_mm: float = 0.4,
     scale: float = 0.7,
+    min_edge_margin_mm: float = 4.0,
     offset_x_mm: float = 0.0,
     offset_y_mm: float = 0.0,
     font: str = "Liberation Sans:style=Bold",
@@ -754,6 +755,7 @@ def emboss_text_on_face(
         scale=scale,
         offset_x_mm=offset_x_mm,
         offset_y_mm=offset_y_mm,
+        min_edge_margin_mm=min_edge_margin_mm,
         additional_pre_text_transform=additional_pre_text_transform,
     )
 
@@ -803,6 +805,7 @@ def emboss_text_lines_on_face(
     depth_mm: float | None = None,
     nozzle_diameter_mm: float = 0.4,
     line_scale: float = 0.7,
+    min_edge_margin_mm: float = 4.0,
     line_spacing_mm: float = 0.0,
     output_dir: str | None = None,
     hierarchy: list[float] | None = None,
@@ -989,6 +992,7 @@ def emboss_text_lines_on_face(
             depth_mm=depth_mm,
             nozzle_diameter_mm=nozzle_diameter_mm,
             scale=line_scale,
+            min_edge_margin_mm=min_edge_margin_mm,
             offset_y_mm=offset,
             font_size_mm=per_line_sizes[i],
             output_dir=output_dir,
