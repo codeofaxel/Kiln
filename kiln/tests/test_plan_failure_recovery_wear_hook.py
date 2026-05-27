@@ -154,8 +154,13 @@ class TestPlanFailureRecoveryWearHook:
 
         assert result["success"] is True
         assert result["nozzle_wear_hypothesis"] == hypothesis_payload
+        # ``build_wear_hypothesis`` is called with the classified
+        # drift_kind alongside printer_id.  The default fixture's
+        # failure report carries no flow/dimensional keywords so the
+        # classifier resolves to "unknown" (single-scalar wear path).
         fake_module.build_wear_hypothesis.assert_called_once_with(
             printer_id="bambu_a1",
+            drift_kind="unknown",
         )
 
     @patch("kiln.server._check_auth", return_value=None)

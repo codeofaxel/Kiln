@@ -2,7 +2,7 @@
 
 When Prusa Link's ``/api/v1/status`` reports a transition into an
 ATTENTION / ERROR state whose message text implicates the filament
-path (jam, runout, MMU error, blocked extruder), the PrusaConnect
+path (jam, runout, MMU error, blocked extruder), the Prusa Link
 adapter feeds that signal into kiln-pro's
 ``record_extrusion_event`` so the wear cross-check can correlate
 flow signals against gram-count wear estimates.
@@ -30,9 +30,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kiln.printers.prusaconnect import (
+from kiln.printers.prusalink import (
     _ANOMALY_STATES,
-    PrusaConnectAdapter,
+    PrusaLinkAdapter,
     _classify_flow_anomaly,
 )
 
@@ -213,8 +213,8 @@ class TestClassifyFlowAnomaly:
 # ---------------------------------------------------------------------------
 
 
-def _adapter() -> PrusaConnectAdapter:
-    return PrusaConnectAdapter(host="http://prusa.local", api_key="t", retries=1)
+def _adapter() -> PrusaLinkAdapter:
+    return PrusaLinkAdapter(host="http://prusa.local", api_key="t", retries=1)
 
 
 def _status_payload(state: str, message: str | None = None) -> dict[str, Any]:
@@ -245,7 +245,7 @@ class TestAdapterWireTransitions:
         kwargs = recorder.call_args.kwargs
         assert kwargs.get("event_type") == "filament_jam"
         assert kwargs.get("severity") == "high"
-        assert kwargs.get("printer_id") == "prusaconnect"
+        assert kwargs.get("printer_id") == "prusalink"
 
     def test_does_not_fire_on_steady_state_attention(self, monkeypatch):
         recorder = _install_fake_recorder(monkeypatch)
