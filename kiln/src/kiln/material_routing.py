@@ -360,6 +360,54 @@ def _default_settings(mat: MaterialProperties) -> dict[str, Any]:
     }
 
 
+def _format_nozzle_context_line(
+    summary: dict[str, Any] | None,
+) -> str:
+    """Format a one-sentence nozzle context line for the reasoning string.
+
+    The line names the active nozzle material, diameter, provenance,
+    approximate grams-through, and an optional low-confidence hedge.
+    Capped at ~150 chars.  Returns an empty string when ``summary`` is
+    ``None`` or missing required fields so the caller can append
+    unconditionally.
+
+    Example output:
+        "Nozzle context: brass nozzle (0.4mm, provenance: bambu_mqtt, ~120g through). Settings tuned accordingly."
+    """
+    if not summary or not isinstance(summary, dict):
+        return ""
+    material = summary.get("material")
+    if not material:
+        return ""
+
+    parts: list[str] = []
+    diameter = summary.get("diameter_mm")
+    if isinstance(diameter, (int, float)) and diameter > 0:
+        parts.append(f"{float(diameter):g}mm")
+    provenance = summary.get("provenance")
+    if provenance:
+        parts.append(f"provenance: {provenance}")
+    grams = summary.get("grams_through")
+    if isinstance(grams, (int, float)) and grams > 0:
+        if grams >= 1000:
+            parts.append(f"~{grams / 1000:.1f}kg through")
+        else:
+            parts.append(f"~{int(round(grams))}g through")
+
+    detail = f" ({', '.join(parts)})" if parts else ""
+    line = (
+        f"Nozzle context: {material} nozzle{detail}. "
+        f"Settings tuned accordingly."
+    )
+    if summary.get("trusted_for_verdicts") is False:
+        line = (
+            f"Nozzle context: {material} nozzle{detail} "
+            f"(low confidence — replace if you've swapped without updating Kiln)."
+        )
+    # Defensive cap so a future bridge change can't blow the line up.
+    return line if len(line) <= 200 else line[:197] + "..."
+
+
 def recommend_material(
     intent: str,
     *,
@@ -382,13 +430,25 @@ def recommend_material(
         for historical success rates.
     :param printer_id: Optional active-printer identifier.  When supplied
         AND kiln-pro is installed, the function consults the printer's
-        nozzle state via ``_pro_nozzle_bridge``.  If the top
-        recommendation is an abrasive material (CF / GF / wood / metal
-        fill) AND the active nozzle is brass, the reasoning gains a
-        prepended advisory line warning of the short brass lifetime
-        (e.g. "PETG-CF on brass burns through ~360 g before
-        catastrophic tip wear").  Free-tier installs without kiln-pro
-        silently skip this enrichment — reasoning is unchanged.
+        nozzle state via ``_pro_nozzle_bridge``.  Two enrichments fire,
+        independently and silently when kiln-pro is absent:
+
+        1. **Abrasive escalation.** If the top recommendation is an
+           abrasive material (CF / GF / wood / metal fill) AND the
+           active nozzle is brass, the reasoning gains a prepended
+           advisory line warning of the short brass lifetime (e.g.
+           "PETG-CF on brass burns through ~360 g before catastrophic
+           tip wear").
+
+        2. **Nozzle context.** Regardless of abrasive-ness, a single
+           sentence is appended to the reasoning naming the active
+           nozzle material, diameter, provenance, and approximate
+           grams-through, so the caller sees which nozzle the
+           recommendation was computed against.  An untrusted-state
+           hedge is appended when ``trusted_for_verdicts`` is False.
+
+        Free-tier installs without kiln-pro silently skip both
+        enrichments — reasoning is unchanged.
     """
     mapping = parse_intent(intent)
     candidates = list(_MATERIALS.values())
@@ -499,12 +559,13 @@ def recommend_material(
             }
         )
 
-    # Nozzle compatibility overlay — when the caller supplied a
-    # printer_id AND kiln-pro is installed, consult the bridge for
-    # abrasive escalation against the top pick's material.  Surfaces
-    # as a prepended advisory in the reasoning string (no dataclass
-    # change to preserve the existing return shape for callers that
-    # parse it).
+    # Nozzle overlays — when the caller supplied a printer_id AND
+    # kiln-pro is installed, consult the bridge for (a) abrasive
+    # escalation against the top pick (prepended NOZZLE ADVISORY) and
+    # (b) a one-sentence nozzle-context line (appended after the
+    # reasoning).  Both surface as reasoning-string mutations to
+    # preserve the existing return shape for callers that parse it.
+    # Free-tier installs without kiln-pro silently skip both wires.
     if printer_id:
         try:
             from kiln import _pro_nozzle_bridge
@@ -522,9 +583,16 @@ def recommend_material(
                     f"NOZZLE ADVISORY: {_nozzle_advisory.get('user_warning', '')} "
                     f"\n\n{reasoning}"
                 )
+
+            _nozzle_summary = _pro_nozzle_bridge.consult_nozzle_summary(
+                printer_id,
+            )
+            _nozzle_line = _format_nozzle_context_line(_nozzle_summary)
+            if _nozzle_line:
+                reasoning = f"{reasoning} | {_nozzle_line}"
         except Exception:
             logger.debug(
-                "Nozzle abrasive overlay skipped", exc_info=True,
+                "Nozzle overlay skipped", exc_info=True,
             )
 
     return MaterialRecommendation(
