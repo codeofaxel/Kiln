@@ -105,6 +105,131 @@ def _flatten_files(entries: list[dict[str, Any]], prefix: str = "") -> list[dict
 
 
 # ---------------------------------------------------------------------------
+# Flow-anomaly classification (kiln-pro wear cross-check)
+# ---------------------------------------------------------------------------
+#
+# OctoPrint exposes flow / extrusion anomalies through three surfaces:
+#
+#   1. The SockJS ``event`` stream.  ``FilamentChange`` fires when the
+#      firmware emits an M600 (filament-out) or an explicit pause for
+#      filament swap; ``Error`` fires on firmware-reported errors with
+#      a free-text ``payload.error`` string.
+#   2. The ``/api/printer`` REST response — ``state.flags.error`` and
+#      ``state.flags.filament_change`` boolean transitions mirror the
+#      events above and are visible to the polling code path.
+#   3. Plugin-emitted events.  Filament-out / under-extrusion plugins
+#      (``Filament Sensor (Reloaded)``, ``SpoolManager``, custom under-
+#      extrusion detectors) emit ``plugin_<name>_<event>`` messages
+#      under the same ``event`` stream.
+#
+# Classification policy:
+#
+#   * ``FilamentChange`` and ``state.flags.filament_change`` transitions
+#     → ``("filament_jam", "high")``.  Strictly speaking this is filament-
+#     out / runout, but the wear cross-check treats both jam and
+#     runout-while-printing as filament-path failures — the nozzle's
+#     ability to keep flow is what we're scoring.
+#   * ``Error`` with an extruder / filament keyword in the payload
+#     → ``("under_extrusion", "medium")``.  Generic ``Error`` without a
+#     filament hint is intentionally NOT classified — too broad, would
+#     poison the wear-rate signal with thermal-runaway and SD-card errors.
+#   * ``plugin_*_filament_not_present`` and ``plugin_*_filament_runout``
+#     → ``("filament_jam", "high")``.
+#   * ``plugin_*_under_extrusion`` / ``plugin_*_underextrusion_detected``
+#     → ``("under_extrusion", "medium")``.  Severity stays ``"medium"``
+#     for plugin signals — they're heuristic, not ground truth.
+#
+# Conservatism is the right call: false positives on flow-anomaly
+# tagging poison the wear-rate signal more than missed positives.
+
+# Event names (case-sensitive — OctoPrint events are CamelCase) that map
+# directly to a flow-anomaly classification.  ``Error`` is handled
+# separately because it requires a payload keyword check.
+_FLOW_ANOMALY_EVENT_MAP: dict[str, tuple[str, str]] = {
+    "FilamentChange": ("filament_jam", "high"),
+}
+
+# State-flag transitions (REST ``state.flags`` keys) that map to a
+# flow-anomaly classification when they flip from False to True.
+_FLOW_ANOMALY_FLAG_MAP: dict[str, tuple[str, str]] = {
+    "filament_change": ("filament_jam", "high"),
+}
+
+# Substrings (lowercased) that, when present in a generic ``Error`` event
+# payload, escalate the error to a flow-anomaly under-extrusion signal.
+_FLOW_ANOMALY_ERROR_KEYWORDS: tuple[str, ...] = (
+    "filament",
+    "extruder",
+    "extrusion",
+    "feed",
+    "jam",
+    "runout",
+)
+
+# Plugin event-name substrings (lowercased) that map to flow anomalies.
+# OctoPrint plugin events are prefixed ``plugin_<plugin_id>_<event>``.
+_FLOW_ANOMALY_PLUGIN_PATTERNS: tuple[tuple[str, str, str], ...] = (
+    # (substring, event_type, severity)
+    ("filament_not_present", "filament_jam", "high"),
+    ("filament_runout", "filament_jam", "high"),
+    ("filamentsensor", "filament_jam", "high"),
+    ("under_extrusion", "under_extrusion", "medium"),
+    ("underextrusion", "under_extrusion", "medium"),
+)
+
+
+def _classify_flow_anomaly(
+    event_name: str,
+    payload: dict[str, Any] | None = None,
+) -> tuple[str, str] | None:
+    """Return ``(event_type, severity)`` for an OctoPrint anomaly event.
+
+    Returns ``None`` when *event_name* doesn't match a known flow-anomaly
+    signature.  The caller uses this to decide whether to feed the kiln-
+    pro nozzle wear cross-check via ``record_extrusion_event``.
+
+    Args:
+        event_name: OctoPrint event name (``"FilamentChange"``, ``"Error"``,
+            ``"plugin_filamentsensorreloaded_filament_not_present"``, ...)
+            or a synthetic name ``"flag:<flag_name>"`` for REST state-flag
+            transitions (e.g. ``"flag:filament_change"``).
+        payload: Optional event payload — used to inspect ``Error`` events
+            for filament-path keywords.
+    """
+    if not event_name:
+        return None
+
+    # Direct event-name match (case-sensitive — OctoPrint events are CamelCase).
+    if event_name in _FLOW_ANOMALY_EVENT_MAP:
+        return _FLOW_ANOMALY_EVENT_MAP[event_name]
+
+    # Synthetic ``flag:<name>`` from the REST polling path.
+    if event_name.startswith("flag:"):
+        flag_name = event_name[len("flag:") :]
+        return _FLOW_ANOMALY_FLAG_MAP.get(flag_name)
+
+    # Generic ``Error`` event — only escalate when the payload mentions
+    # the filament path.  Naked ``Error`` is intentionally ignored.
+    if event_name == "Error":
+        if not isinstance(payload, dict):
+            return None
+        error_text = str(payload.get("error", "")).lower()
+        if any(kw in error_text for kw in _FLOW_ANOMALY_ERROR_KEYWORDS):
+            return ("under_extrusion", "medium")
+        return None
+
+    # Plugin-emitted events: ``plugin_<id>_<event>`` is the convention.
+    if event_name.startswith("plugin_"):
+        lowered = event_name.lower()
+        for substr, event_type, severity in _FLOW_ANOMALY_PLUGIN_PATTERNS:
+            if substr in lowered:
+                return (event_type, severity)
+        return None
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # SockJS push monitor
 # ---------------------------------------------------------------------------
 
@@ -133,6 +258,11 @@ class OctoPrintSockJSMonitor:
         api_key: OctoPrint API key used for the SockJS auth handshake.
         on_state_update: Optional callback fired on every ``current``
             message.  Receives the parsed message dict.
+        on_event: Optional callback fired on every ``event`` message
+            (``FilamentChange``, ``Error``, ``plugin_*``, ...).  Receives
+            ``(event_name, payload_dict)``.  Used by
+            :class:`OctoPrintAdapter` to feed flow-anomaly signals into
+            the kiln-pro nozzle wear cross-check.
     """
 
     def __init__(
@@ -141,10 +271,12 @@ class OctoPrintSockJSMonitor:
         api_key: str,
         *,
         on_state_update: Callable[[dict[str, Any]], None] | None = None,
+        on_event: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self._host: str = host.rstrip("/")
         self._api_key: str = api_key
         self._on_state_update = on_state_update
+        self._on_event = on_event
 
         # Shared state cache -- written by the WS thread, read by the adapter.
         self._cache: dict[str, Any] = {}
@@ -284,6 +416,22 @@ class OctoPrintSockJSMonitor:
                     except Exception:
                         logger.debug("on_state_update callback error", exc_info=True)
 
+        # ``event`` messages: {"event": {"type": "FilamentChange", "payload": {...}}}
+        # OctoPrint also wraps plugin-emitted events the same way; the
+        # ``type`` field carries the ``plugin_<id>_<event>`` name.
+        if "event" in data and self._on_event is not None:
+            event_obj = data["event"]
+            if isinstance(event_obj, dict):
+                event_name = event_obj.get("type") or event_obj.get("event") or ""
+                payload = event_obj.get("payload") or {}
+                if not isinstance(payload, dict):
+                    payload = {}
+                if isinstance(event_name, str) and event_name:
+                    try:
+                        self._on_event(event_name, payload)
+                    except Exception:
+                        logger.debug("on_event callback error", exc_info=True)
+
     def _on_error(self, ws: Any, error: Any) -> None:
         logger.debug("OctoPrint SockJS error: %s", error)
 
@@ -356,6 +504,13 @@ class OctoPrintAdapter(PrinterAdapter):
 
         # Push monitoring (SockJS) -- disabled by default.
         self._sockjs_monitor: OctoPrintSockJSMonitor | None = None
+
+        # Prior state-flag snapshot — used by ``get_state`` to detect
+        # ``error`` / ``filament_change`` transitions and feed the kiln-pro
+        # nozzle wear cross-check.  Initialised to an empty dict so the
+        # FIRST poll never fires a transition (we don't know the prior).
+        self._prev_flow_flags: dict[str, bool] = {}
+
         if _push_monitoring_enabled():
             self.enable_push_monitoring()
 
@@ -396,6 +551,8 @@ class OctoPrintAdapter(PrinterAdapter):
         self._sockjs_monitor = OctoPrintSockJSMonitor(
             self._host,
             self._api_key,
+            on_state_update=self._handle_push_state,
+            on_event=self._handle_push_event,
         )
         self._sockjs_monitor.start()
 
@@ -585,6 +742,15 @@ class OctoPrintAdapter(PrinterAdapter):
 
         status = _map_flags_to_status(flags)
 
+        # Flow-anomaly cross-check (REST polling path).  Detect transitions
+        # of the ``filament_change`` flag (False → True) and feed the
+        # signal into the kiln-pro nozzle wear cross-check.  ``error`` is
+        # intentionally NOT auto-tagged: OctoPrint's ``state.flags.error``
+        # is a catch-all that fires on connection drops, SD-card errors,
+        # and thermal runaways — too broad to call a flow anomaly without
+        # the ``Error`` event payload (which the push path captures).
+        self._check_flow_flag_transitions(flags)
+
         # Chamber (optional — requires OctoPrint plugin or firmware support).
         chamber = temps.get("chamber", {}) if isinstance(temps, dict) else {}
 
@@ -634,6 +800,13 @@ class OctoPrintAdapter(PrinterAdapter):
 
         status = _map_flags_to_status(flags)
 
+        # Flow-anomaly cross-check (push path).  Same transition logic as
+        # the REST path — the ``current`` message's ``state.flags`` mirror
+        # the REST shape exactly.  Explicit ``Error`` / ``FilamentChange``
+        # events come through the ``on_event`` callback for richer payload
+        # inspection; this catches the flag transitions for completeness.
+        self._check_flow_flag_transitions(flags)
+
         return PrinterState(
             connected=True,
             state=status,
@@ -644,6 +817,93 @@ class OctoPrintAdapter(PrinterAdapter):
             chamber_temp_actual=chamber.get("actual") if isinstance(chamber, dict) else None,
             chamber_temp_target=chamber.get("target") if isinstance(chamber, dict) else None,
         )
+
+    # ------------------------------------------------------------------
+    # Flow-anomaly cross-check (kiln-pro nozzle wear)
+    # ------------------------------------------------------------------
+
+    def _fire_extrusion_event(self, event_type: str, severity: str) -> None:
+        """Feed a flow-anomaly signal into kiln-pro's nozzle wear cross-check.
+
+        Wrapped in ``try/except ImportError`` so free-tier installs without
+        kiln-pro silently skip the wire.  A broad ``Exception`` catch keeps
+        the SockJS / REST hot path alive if the kiln-pro recorder raises
+        (signature drift, transient storage failure, ...).
+        """
+        try:
+            from kiln_pro.nozzle_intelligence.sensor_signal import (
+                record_extrusion_event,
+            )
+
+            record_extrusion_event(
+                printer_id=self.name,
+                event_type=event_type,
+                severity=severity,
+            )
+        except ImportError:
+            # Free tier — kiln-pro nozzle module not installed.
+            # Drop the signal silently.
+            pass
+        except Exception as exc:  # pragma: no cover
+            logger.debug(
+                "Flow-anomaly cross-check raised (non-fatal): %s",
+                exc,
+            )
+
+    def _check_flow_flag_transitions(self, flags: dict[str, Any]) -> None:
+        """Detect ``state.flags`` transitions that should fire a flow-anomaly.
+
+        Compares *flags* against ``self._prev_flow_flags`` and fires the
+        cross-check on each False → True transition for a known flow flag
+        (currently ``filament_change``).  Updates ``_prev_flow_flags`` for
+        the next call.
+
+        Called from both the REST polling path (``get_state``) and the
+        push-cache path (``_state_from_push_cache``); transitions seen
+        once won't re-fire until the flag drops False and comes back.
+        """
+        for flag_name in _FLOW_ANOMALY_FLAG_MAP:
+            current = bool(flags.get(flag_name, False))
+            previous = bool(self._prev_flow_flags.get(flag_name, False))
+            if current and not previous:
+                classification = _classify_flow_anomaly(f"flag:{flag_name}")
+                if classification is not None:
+                    event_type, severity = classification
+                    self._fire_extrusion_event(event_type, severity)
+            self._prev_flow_flags[flag_name] = current
+
+    def _handle_push_state(self, current: dict[str, Any]) -> None:
+        """SockJS ``current``-message callback.
+
+        Mirrors the flag-transition logic from the REST polling path so
+        users who enable push monitoring don't lose the cross-check.
+        ``state.flags`` in the push payload matches the REST shape.
+        """
+        try:
+            state_obj = current.get("state", {})
+            flags = state_obj.get("flags", {}) if isinstance(state_obj, dict) else {}
+            if isinstance(flags, dict):
+                self._check_flow_flag_transitions(flags)
+        except Exception:
+            logger.debug("flow-flag transition check failed (non-fatal)", exc_info=True)
+
+    def _handle_push_event(self, event_name: str, payload: dict[str, Any]) -> None:
+        """SockJS ``event``-message callback.
+
+        Classifies the event via :func:`_classify_flow_anomaly` and fires
+        the kiln-pro wear cross-check when the event represents a flow
+        anomaly.  Generic events (``PrintStarted``, ``Connected``, ...)
+        return ``None`` from the classifier and are dropped.
+        """
+        classification = _classify_flow_anomaly(event_name, payload)
+        if classification is None:
+            return
+        event_type, severity = classification
+        self._fire_extrusion_event(event_type, severity)
+
+    # ------------------------------------------------------------------
+    # PrinterAdapter -- job query
+    # ------------------------------------------------------------------
 
     def get_job(self) -> JobProgress:
         """Retrieve progress info for the active (or last) print job.
