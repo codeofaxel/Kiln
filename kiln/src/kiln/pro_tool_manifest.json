@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-05-19T23:33:32.053387+00:00",
-  "tool_count": 304,
+  "generated": "2026-05-27T19:44:15.217068+00:00",
+  "tool_count": 319,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -5069,6 +5069,30 @@
             ],
             "default": null,
             "title": "Mesh Path"
+          },
+          "vision_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Vision Confidence"
+          },
+          "predicted_adhesion_risk": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Predicted Adhesion Risk"
           }
         },
         "required": [
@@ -7671,6 +7695,30 @@
       }
     },
     {
+      "name": "abrasive_escalation",
+      "description": "Pro+ \u2014 escalates the abrasive-filament warning by nozzle.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "material",
+          "printer_id"
+        ],
+        "title": "abrasive_escalationArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "add_feature_during_print",
       "description": "Slice a new mesh at pause_z and resume printing it (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -7934,6 +7982,35 @@
       }
     },
     {
+      "name": "auto_detect_nozzle",
+      "description": "Parse a raw printer payload into a NozzleState.",
+      "tier": "free",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "brand": {
+            "title": "Brand",
+            "type": "string"
+          },
+          "raw_payload": {
+            "title": "Raw Payload",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id",
+          "brand",
+          "raw_payload"
+        ],
+        "title": "auto_detect_nozzleArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "auto_recover",
       "description": "Recover a failed print in one guided operation.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -8061,6 +8138,40 @@
           "auto_recover_id"
         ],
         "title": "cancel_auto_recoverArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "check_nozzle_capacity_for_print",
+      "description": "Pre-print check \u2014 will the nozzle survive this print's wear cost?\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "planned_grams": {
+            "title": "Planned Grams",
+            "type": "number"
+          },
+          "filament_material": {
+            "default": "",
+            "title": "Filament Material",
+            "type": "string"
+          },
+          "printer_model": {
+            "default": "",
+            "title": "Printer Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id",
+          "planned_grams"
+        ],
+        "title": "check_nozzle_capacity_for_printArguments",
         "type": "object"
       }
     },
@@ -8484,6 +8595,42 @@
       }
     },
     {
+      "name": "food_safety_for_printer",
+      "description": "Pro+ \u2014 combined material + nozzle food-safety verdict.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "product_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Product Type"
+          }
+        },
+        "required": [
+          "material",
+          "printer_id"
+        ],
+        "title": "food_safety_for_printerArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "generate_recovery_gcode",
       "description": "Generate a resume-from-layer G-code file for a failed print (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -8573,6 +8720,35 @@
       }
     },
     {
+      "name": "get_community_wear_baseline",
+      "description": "Cross-tenant community wear baseline for a cohort.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "filament_material": {
+            "title": "Filament Material",
+            "type": "string"
+          },
+          "nozzle_material": {
+            "title": "Nozzle Material",
+            "type": "string"
+          },
+          "printer_model": {
+            "title": "Printer Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "filament_material",
+          "nozzle_material",
+          "printer_model"
+        ],
+        "title": "get_community_wear_baselineArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "get_maintenance_prediction",
       "description": "Predict when maintenance is likely needed for a printer.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -8631,6 +8807,52 @@
           "material"
         ],
         "title": "get_material_warningsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_my_nozzle_wear_patterns",
+      "description": "Pro+ \u2014 your personal nozzle wear-rate matrix vs the population.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "limit": {
+            "default": 200,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "get_my_nozzle_wear_patternsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_nozzle_state",
+      "description": "Return the recorded nozzle state for a printer.",
+      "tier": "free",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "printer_model": {
+            "default": "",
+            "title": "Printer Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id"
+        ],
+        "title": "get_nozzle_stateArguments",
         "type": "object"
       }
     },
@@ -8817,6 +9039,28 @@
       }
     },
     {
+      "name": "get_telemetry_preferences",
+      "description": "Return the per-category telemetry disclosure + opt-out state.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {},
+        "title": "get_telemetry_preferencesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_nozzle_states",
+      "description": "List every printer with a recorded nozzle state.",
+      "tier": "free",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {},
+        "title": "list_nozzle_statesArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "list_printer_profiles",
       "description": "List canonical tier-aware printer profiles.",
       "tier": "free",
@@ -8824,6 +9068,85 @@
       "parameters": {
         "properties": {},
         "title": "list_printer_profilesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "nozzle_drift_attribution",
+      "description": "Pro+ \u2014 attribute observed drift OR a failure hypothesis to nozzle wear.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "drift_magnitude_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Drift Magnitude Mm"
+          },
+          "percent_used": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Percent Used"
+          },
+          "recent_filament_class": {
+            "default": "standard",
+            "title": "Recent Filament Class",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id"
+        ],
+        "title": "nozzle_drift_attributionArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "nozzle_wear_status",
+      "description": "Pro+ \u2014 accumulated wear status for a printer's nozzle.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "recent_filament": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Recent Filament"
+          }
+        },
+        "required": [
+          "printer_id"
+        ],
+        "title": "nozzle_wear_statusArguments",
         "type": "object"
       }
     },
@@ -9286,6 +9609,11 @@
             "default": "",
             "title": "File Hash",
             "type": "string"
+          },
+          "grams_used": {
+            "default": 0,
+            "title": "Grams Used",
+            "type": "number"
           }
         },
         "required": [
@@ -9293,6 +9621,103 @@
           "material"
         ],
         "title": "record_completed_printArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_extrusion_event",
+      "description": "Pro+ \u2014 record a sensor-side extrusion-deviation event.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "event_type": {
+            "default": "under_extrusion",
+            "title": "Event Type",
+            "type": "string"
+          },
+          "severity": {
+            "default": "medium",
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id"
+        ],
+        "title": "record_extrusion_eventArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_nozzle_replacement",
+      "description": "Pro+ \u2014 record a nozzle replacement event with the WHY.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "new_material": {
+            "title": "New Material",
+            "type": "string"
+          },
+          "new_diameter_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "New Diameter Mm"
+          },
+          "install_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Install Date"
+          },
+          "reason_detail": {
+            "default": "",
+            "title": "Reason Detail",
+            "type": "string"
+          },
+          "filament_material": {
+            "default": "",
+            "title": "Filament Material",
+            "type": "string"
+          },
+          "printer_model": {
+            "default": "",
+            "title": "Printer Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id",
+          "reason",
+          "new_material"
+        ],
+        "title": "record_nozzle_replacementArguments",
         "type": "object"
       }
     },
@@ -9428,6 +9853,102 @@
           "sessions"
         ],
         "title": "revert_mid_print_fleetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_nozzle_state",
+      "description": "Record a user-entered nozzle state for a printer.",
+      "tier": "free",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Material"
+          },
+          "diameter_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Diameter Mm"
+          },
+          "install_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Install Date"
+          },
+          "grams_through": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Grams Through"
+          }
+        },
+        "required": [
+          "printer_id"
+        ],
+        "title": "set_nozzle_stateArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_telemetry_preference",
+      "description": "Set the opt-out / acknowledged state for a telemetry category.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "opted_out": {
+            "default": false,
+            "title": "Opted Out",
+            "type": "boolean"
+          },
+          "acknowledge": {
+            "default": false,
+            "title": "Acknowledge",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "category"
+        ],
+        "title": "set_telemetry_preferenceArguments",
         "type": "object"
       }
     },
@@ -10051,11 +10572,6 @@
             "title": "Mount Hole Inset Top Mm",
             "type": "number"
           },
-          "text_depth_mm": {
-            "default": 1.0,
-            "title": "Text Depth Mm",
-            "type": "number"
-          },
           "text_size_mm": {
             "default": 0.0,
             "title": "Text Size Mm",
@@ -10388,6 +10904,11 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
           }
         },
         "title": "generate_pet_bowlArguments",
@@ -10458,6 +10979,11 @@
           "brief_id": {
             "default": "",
             "title": "Brief Id",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
             "type": "string"
           }
         },
