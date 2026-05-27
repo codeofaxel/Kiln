@@ -366,6 +366,7 @@ def recommend_material(
     printer_capabilities: dict[str, Any] | None = None,
     budget_usd: float | None = None,
     model_fingerprint: dict[str, Any] | None = None,
+    printer_id: str = "",
 ) -> MaterialRecommendation:
     """Recommend a material based on user intent and constraints.
 
@@ -379,6 +380,15 @@ def recommend_material(
     :param budget_usd: Optional max budget per kg in USD.
     :param model_fingerprint: Optional fingerprint dict to check Print DNA
         for historical success rates.
+    :param printer_id: Optional active-printer identifier.  When supplied
+        AND kiln-pro is installed, the function consults the printer's
+        nozzle state via ``_pro_nozzle_bridge``.  If the top
+        recommendation is an abrasive material (CF / GF / wood / metal
+        fill) AND the active nozzle is brass, the reasoning gains a
+        prepended advisory line warning of the short brass lifetime
+        (e.g. "PETG-CF on brass burns through ~360 g before
+        catastrophic tip wear").  Free-tier installs without kiln-pro
+        silently skip this enrichment — reasoning is unchanged.
     """
     mapping = parse_intent(intent)
     candidates = list(_MATERIALS.values())
@@ -488,6 +498,34 @@ def recommend_material(
                 "settings": _default_settings(alt_mat),
             }
         )
+
+    # Nozzle compatibility overlay — when the caller supplied a
+    # printer_id AND kiln-pro is installed, consult the bridge for
+    # abrasive escalation against the top pick's material.  Surfaces
+    # as a prepended advisory in the reasoning string (no dataclass
+    # change to preserve the existing return shape for callers that
+    # parse it).
+    if printer_id:
+        try:
+            from kiln import _pro_nozzle_bridge
+
+            _filament = top_mat.name
+            _nozzle_advisory = _pro_nozzle_bridge.consult_abrasive_escalation(
+                filament_material=_filament,
+                printer_id=printer_id,
+            )
+            if (
+                _nozzle_advisory is not None
+                and _nozzle_advisory.get("escalation_reason") == "abrasive_brass"
+            ):
+                reasoning = (
+                    f"NOZZLE ADVISORY: {_nozzle_advisory.get('user_warning', '')} "
+                    f"\n\n{reasoning}"
+                )
+        except Exception:
+            logger.debug(
+                "Nozzle abrasive overlay skipped", exc_info=True,
+            )
 
     return MaterialRecommendation(
         material=top_mat,
