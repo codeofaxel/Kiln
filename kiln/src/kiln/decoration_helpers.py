@@ -20,8 +20,8 @@ so every caller gets the correct path with one function call.
 
 These helpers are the **single supported path** for adding decoration
 to a custom-generated STL.  Hand-rolling ``linear_extrude(text(...))``
-SCAD inline is an antipattern — see kiln-pro CLAUDE.md
-"Custom product decoration — route through the emboss engine".
+SCAD inline is an antipattern — every custom product decoration
+must route through the emboss engine instead.
 """
 
 from __future__ import annotations
@@ -193,7 +193,7 @@ _FDM_TEXT_LEGIBILITY_FLOOR_MM = 4.0
 # Emboss/deboss depth legibility floor — the carving needs at least
 # ~3x the nozzle diameter of vertical structure for the engraving to
 # read at arm's-length.  Calibrated against the 1.2mm A1 (0.4mm
-# nozzle) empirical floor documented in kiln-pro CLAUDE.md; at 3x
+# nozzle) empirical floor calibrated from print testing; at 3x
 # this extrapolates to 1.8mm on a 0.6mm Prusa MK4 nozzle and 0.75mm
 # on a 0.25mm precision nozzle.  Used by :func:`emboss_text_on_face`
 # and :func:`emboss_text_lines_on_face` to refuse depth values that
@@ -208,8 +208,8 @@ def _depth_legibility_floor_mm(nozzle_diameter_mm: float) -> float:
     legibility risk — the carving walls don't have enough vertical
     structure to survive shrinkage, sag, and layer-line interference.
 
-    Calibrated against the Bambu A1 (0.4mm nozzle → 1.2mm floor) per
-    the empirical floor in kiln-pro CLAUDE.md.
+    Calibrated against the Bambu A1 (0.4mm nozzle → 1.2mm floor)
+    per empirical print testing.
 
     :param nozzle_diameter_mm: The active printer's nozzle diameter.
     :returns: Floor depth in millimetres.
@@ -226,9 +226,9 @@ class DepthBelowLegibilityFloor(ValueError):
     (e.g. "use depth_mm >= 1.8 on a 0.6mm nozzle") without re-deriving
     the floor.
 
-    Per kiln-pro CLAUDE.md "ship-readiness" rule: refuse to produce a
-    preview / SCAD / STL of text that will print as an illegible smear.
-    A clear actionable error beats a "preview-of-broken" output.
+    Ship-readiness rule: refuse to produce a preview / SCAD / STL of
+    text that will print as an illegible smear.  A clear actionable
+    error beats a "preview-of-broken" output.
 
     Example:
 
@@ -508,11 +508,11 @@ class TextDoesNotFitError(ValueError):
     surface the specific reason and the suggested fixes to the user
     without re-deriving them.
 
-    Per kiln-pro CLAUDE.md "ship-readiness" rule: a tool must not
-    produce a preview / SCAD / STL of text that won't be readable,
-    because the user trusts the preview.  Hand the user a clear
-    actionable error instead — that's the difference between a
-    professional product and a "preview-of-broken" toy.
+    Ship-readiness rule: a tool must not produce a preview / SCAD /
+    STL of text that won't be readable, because the user trusts the
+    preview.  Hand the user a clear actionable error instead — that's
+    the difference between a professional product and a
+    "preview-of-broken" toy.
     """
 
     def __init__(self, verdict: dict[str, Any]) -> None:

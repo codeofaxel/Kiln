@@ -252,8 +252,8 @@ def _make_cube_stl(stl_path: Path, *, side_mm: float) -> Path:
 
 
 def test_depth_legibility_floor_default_nozzle_matches_a1_empirical():
-    """Default 0.4mm nozzle floor is 1.2mm (matches kiln-pro CLAUDE.md
-    empirical floor for the Bambu A1)."""
+    """Default 0.4mm nozzle floor is 1.2mm (matches the empirical
+    floor for the Bambu A1)."""
     from kiln.decoration_helpers import _depth_legibility_floor_mm
 
     assert _depth_legibility_floor_mm(0.4) == pytest.approx(1.2)
