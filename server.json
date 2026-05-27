@@ -31,7 +31,7 @@
         },
         {
           "name": "KILN_PRINTER_TYPE",
-          "description": "Printer type: octoprint, moonraker, creality, bambu, prusaconnect, elegoo, or serial",
+          "description": "Printer type: octoprint, moonraker, creality, bambu, prusalink, elegoo, or serial",
           "isRequired": false,
           "isSecret": false
         }

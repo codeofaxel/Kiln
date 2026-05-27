@@ -166,7 +166,7 @@ Before installing Kiln, you need your printer's LAN details (Ethernet or Wi-Fi):
 
 | Printer | Type | What You Need |
 |---------|------|---------------|
-| **Prusa MK4/XL/Mini+** | `prusaconnect` | IP address + API key (both in Settings > Network > PrusaLink on the printer's LCD) |
+| **Prusa MK4/XL/Mini+** | `prusalink` | IP address + API key (both in Settings > Network > PrusaLink on the printer's LCD) |
 | **OctoPrint** (any printer) | `octoprint` | OctoPrint URL + API key (Settings > API in OctoPrint web UI) |
 | **Klipper/Moonraker** | `moonraker` | Moonraker URL (usually `http://<ip>:7125`) |
 | **Creality SPARKX/K1/K2/Hi/Ender V4/V3 KE** | `creality` | Printer IP + `printer_model` (e.g. `creality_k1_max`); Kiln probes local Moonraker ports |
@@ -193,7 +193,7 @@ kiln discover
 # Add your printer (pick your type from the Prerequisites table)
 kiln auth --name my-printer --host http://octopi.local --type octoprint --api-key YOUR_KEY
 # Other printer types:
-# kiln auth --name prusa --host http://192.168.1.100 --type prusaconnect --api-key YOUR_KEY
+# kiln auth --name prusa --host http://192.168.1.100 --type prusalink --api-key YOUR_KEY
 # kiln auth --name klipper --host http://192.168.1.100:7125 --type moonraker
 # kiln auth --name bambu --host 192.168.1.100 --type bambu --access-code LAN_CODE --serial SERIAL
 # If discovery misses your printer (common on WSL/VLANs), connect directly by IP with kiln auth.
@@ -238,7 +238,7 @@ curl http://<printer-ip>:7125/server/info               # Creality K1/K2/Hi when
 curl -H "X-Api-Key: YOUR_KEY" http://<printer-ip>/api/v1/status   # Prusa Link
 
 # 4. Register directly by IP (no discovery required)
-kiln auth --name my-printer --host http://<printer-ip> --type prusaconnect --api-key YOUR_KEY
+kiln auth --name my-printer --host http://<printer-ip> --type prusalink --api-key YOUR_KEY
 ```
 
 ### Linux / WSL 2
@@ -320,7 +320,7 @@ curl -H "X-Api-Key: YOUR_KEY" http://192.168.1.100/api/v1/status       # Prusa L
 
 # 3. Register the printer with Kiln (pick your type)
 kiln auth --name my-printer --host http://192.168.1.100:7125 --type moonraker
-# kiln auth --name prusa --host http://192.168.1.100 --type prusaconnect --api-key YOUR_KEY
+# kiln auth --name prusa --host http://192.168.1.100 --type prusalink --api-key YOUR_KEY
 # kiln auth --name bambu --host 192.168.1.100 --type bambu --access-code LAN_CODE --serial SERIAL
 
 # 4. Check printer status
@@ -440,7 +440,7 @@ kiln serve
 export KILN_PRINTER_HOST=http://192.168.1.100    # Your printer's IP or hostname
 export KILN_PRINTER_API_KEY=your_api_key          # API key (OctoPrint/Moonraker/Creality/Prusa Link)
 export KILN_PRINTER_MODEL=creality_k1_max         # Optional safety/profile key
-export KILN_PRINTER_TYPE=prusaconnect             # octoprint | moonraker | bambu | prusaconnect | elegoo | serial
+export KILN_PRINTER_TYPE=prusalink                # octoprint | moonraker | bambu | prusalink | elegoo | serial
 kiln serve
 ```
 
@@ -474,14 +474,14 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
       "env": {
         "KILN_PRINTER_HOST": "http://192.168.1.100",
         "KILN_PRINTER_API_KEY": "your_key",
-        "KILN_PRINTER_TYPE": "prusaconnect"
+        "KILN_PRINTER_TYPE": "prusalink"
       }
     }
   }
 }
 ```
 
-> **Tip:** Replace `KILN_PRINTER_TYPE` with your backend: `octoprint`, `moonraker`, `bambu`, `prusaconnect`, `elegoo`, or `serial`. Or skip env vars entirely if you've already run `kiln setup`.
+> **Tip:** Replace `KILN_PRINTER_TYPE` with your backend: `octoprint`, `moonraker`, `bambu`, `prusalink`, `elegoo`, or `serial`. Or skip env vars entirely if you've already run `kiln setup`.
 
 ### Multi-Model Support (OpenRouter / Any LLM)
 
@@ -885,7 +885,7 @@ The legacy `network_*` CLI commands and MCP tool aliases were deprecated in `v0.
 | **Moonraker** | Stable | Klipper-based printers (Voron, Ratrig, etc.) |
 | **Creality** | Stable when Moonraker is reachable | SPARKX i7, K1/K1 Max/K1C/K1 SE, K2/K2 Pro/K2 Plus/K2 SE, Creality Hi, Ender-3 V4/V3 KE, Ender-5 Max, CR-10 SE via local Moonraker. Older Marlin Creality printers use `serial` or `octoprint`. |
 | **Bambu** | Stable | Bambu Lab X1C, P1S, A1 (via LAN MQTT) |
-| **Prusa Link** | Stable | Prusa MK4, XL, Mini+ (local REST API — type: `prusaconnect`) |
+| **Prusa Link** | Stable | Prusa MK4, XL, Mini+ (local REST API — type: `prusalink`) |
 | **Elegoo** | Stable | Centauri Carbon, Saturn, Mars series (via LAN WebSocket/SDCP). Neptune 4/OrangeStorm Giga use Moonraker. |
 | **Direct USB** | Stable | Any Marlin-based printer over USB (Ender 3, Prusa MK3, CR-10, etc.). No OctoPrint or Klipper needed — just a USB cable. Type: `serial`. |
 

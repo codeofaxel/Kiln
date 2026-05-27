@@ -3,6 +3,18 @@
 All notable changes to Kiln are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Changed
+
+- **Renamed the Prusa adapter to `prusalink`.**  The adapter talks to
+  the local Prusa Link HTTP API (`/api/v1/status` with `X-Api-Key`
+  auth), not Prusa Connect's cloud service, so the registry key,
+  module name, and class now reflect that.  `kiln auth --type prusalink`
+  replaces `--type prusaconnect`.  No back-compat alias was added —
+  update any saved config that pins `type: prusaconnect` to
+  `type: prusalink`.
+
 ## [1.1.4] - 2026-05-20
 
 Native Windows support — install Kiln, connect your AI agent, and

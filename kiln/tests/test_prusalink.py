@@ -1,4 +1,4 @@
-"""Tests for kiln.printers.prusaconnect — Prusa Link adapter."""
+"""Tests for kiln.printers.prusalink — Prusa Link adapter."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from kiln.printers.base import (
     PrinterError,
     PrinterStatus,
 )
-from kiln.printers.prusaconnect import (
-    PrusaConnectAdapter,
+from kiln.printers.prusalink import (
+    PrusaLinkAdapter,
     _safe_get,
 )
 
@@ -39,11 +39,11 @@ def _mock_response(
     return resp
 
 
-def _adapter(**kwargs) -> PrusaConnectAdapter:
+def _adapter(**kwargs) -> PrusaLinkAdapter:
     """Create an adapter with sensible defaults."""
     defaults = {"host": "http://prusa.local", "api_key": "test-key", "retries": 1}
     defaults.update(kwargs)
-    return PrusaConnectAdapter(**defaults)
+    return PrusaLinkAdapter(**defaults)
 
 
 # ---------------------------------------------------------------------------
@@ -54,18 +54,18 @@ def _adapter(**kwargs) -> PrusaConnectAdapter:
 class TestConstructor:
     def test_empty_host_raises(self):
         with pytest.raises(ValueError, match="host must not be empty"):
-            PrusaConnectAdapter(host="")
+            PrusaLinkAdapter(host="")
 
     def test_strips_trailing_slash(self):
-        a = PrusaConnectAdapter(host="http://prusa.local/")
+        a = PrusaLinkAdapter(host="http://prusa.local/")
         assert a._host == "http://prusa.local"
 
     def test_api_key_set_in_session(self):
-        a = PrusaConnectAdapter(host="http://prusa.local", api_key="abc123")
+        a = PrusaLinkAdapter(host="http://prusa.local", api_key="abc123")
         assert a._session.headers.get("X-Api-Key") == "abc123"
 
     def test_no_api_key(self):
-        a = PrusaConnectAdapter(host="http://prusa.local")
+        a = PrusaLinkAdapter(host="http://prusa.local")
         assert "X-Api-Key" not in a._session.headers
 
 
@@ -76,7 +76,7 @@ class TestConstructor:
 
 class TestProperties:
     def test_name(self):
-        assert _adapter().name == "prusaconnect"
+        assert _adapter().name == "prusalink"
 
     def test_capabilities(self):
         caps = _adapter().capabilities
@@ -557,12 +557,12 @@ class TestSnapshot:
 
 class TestRetryLogic:
     def test_retries_on_502(self):
-        a = PrusaConnectAdapter(host="http://prusa.local", retries=2)
+        a = PrusaLinkAdapter(host="http://prusa.local", retries=2)
         bad_resp = _mock_response(status_code=502, ok=False)
         good_resp = _mock_response(json_data={"printer": {"state": "IDLE"}, "job": {}})
 
         with patch.object(a._session, "request", side_effect=[bad_resp, good_resp]):
-            with patch("kiln.printers.prusaconnect.time.sleep"):
+            with patch("kiln.printers.prusalink.time.sleep"):
                 state = a.get_state()
 
         assert state.state == PrinterStatus.IDLE
@@ -590,5 +590,5 @@ class TestHelpers:
 
     def test_repr(self):
         a = _adapter()
-        assert "PrusaConnectAdapter" in repr(a)
+        assert "PrusaLinkAdapter" in repr(a)
         assert "prusa.local" in repr(a)

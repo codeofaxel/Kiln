@@ -882,7 +882,7 @@ class TestAuth:
         }
         with patch("kiln.cli.main.save_printer", return_value=Path("/tmp/config.yaml")) as mock_save, \
              patch("kiln.cli.main.load_printer_config", return_value={
-                 "type": "prusaconnect",
+                 "type": "prusalink",
                  "host": "http://192.168.0.44",
                  "api_key": "abc123",
              }), \
@@ -891,7 +891,7 @@ class TestAuth:
                 "auth",
                 "--name", "prusa-mini",
                 "--host", "http://192.168.0.44",
-                "--type", "prusaconnect",
+                "--type", "prusalink",
                 "--api-key", "abc123",
                 "--json",
             ])
@@ -915,7 +915,7 @@ class TestAuth:
         config_path = Path("/tmp/config.yaml")
         with patch("kiln.cli.main.save_printer", return_value=config_path) as mock_save, \
              patch("kiln.cli.main.load_printer_config", return_value={
-                 "type": "prusaconnect",
+                 "type": "prusalink",
                  "host": "http://192.168.0.44",
                  "api_key": "abc123",
              }), \
@@ -924,7 +924,7 @@ class TestAuth:
                 "auth",
                 "--name", "prusa-mini",
                 "--host", "http://192.168.0.44",
-                "--type", "prusaconnect",
+                "--type", "prusalink",
                 "--api-key", "abc123",
                 "--json",
             ])
@@ -956,7 +956,7 @@ class TestPrusaProfileDetection:
         ctx.obj = {"printer": "prusa-mini"}
 
         with patch("kiln.cli.main.load_printer_config", return_value={
-            "type": "prusaconnect",
+            "type": "prusalink",
             "host": "http://192.168.0.44",
             "api_key": "abc123",
         }), patch("kiln.cli.main._make_adapter", return_value=adapter):
@@ -975,7 +975,7 @@ class TestPrusaProfileDetection:
 class TestDoctorPrusa:
     def test_doctor_prusa_json_success(self, runner):
         with patch("kiln.cli.main.load_printer_config", return_value={
-            "type": "prusaconnect",
+            "type": "prusalink",
             "host": "http://192.168.0.44",
             "api_key": "abc123",
         }), patch("kiln.cli.main._run_prusa_diagnostics", return_value={

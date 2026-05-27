@@ -82,7 +82,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 | **OctoPrint** | Stable | Any OctoPrint-connected printer (Prusa, Ender, custom) |
 | **Moonraker** | Stable | Klipper-based printers (Voron, Ratrig, etc.) |
 | **Bambu Lab** | Stable | X1C, P1S, A1 (via LAN MQTT + FTPS) |
-| **Prusa Link** | Stable | MK4, XL, Mini+ (local REST API — type: `prusaconnect`) |
+| **Prusa Link** | Stable | MK4, XL, Mini+ (local REST API — type: `prusalink`) |
 
 ## Features
 

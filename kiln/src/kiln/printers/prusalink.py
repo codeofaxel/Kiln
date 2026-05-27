@@ -78,7 +78,7 @@ def _safe_get(data: Any, *keys: str, default: Any = None) -> Any:
 # ---------------------------------------------------------------------------
 
 
-class PrusaConnectAdapter(PrinterAdapter):
+class PrusaLinkAdapter(PrinterAdapter):
     """Concrete :class:`PrinterAdapter` backed by the Prusa Link HTTP API.
 
     Args:
@@ -117,7 +117,7 @@ class PrusaConnectAdapter(PrinterAdapter):
     @property
     def name(self) -> str:  # noqa: D401
         """Human-readable identifier for this adapter."""
-        return "prusaconnect"
+        return "prusalink"
 
     @property
     def capabilities(self) -> PrinterCapabilities:
@@ -178,7 +178,7 @@ class PrusaConnectAdapter(PrinterAdapter):
                             f"Your API key is invalid or missing. Find the correct key in "
                             f"Settings > Network > PrusaLink on your printer's LCD, then update "
                             f"with: kiln auth --name <name> --host {self._host} "
-                            f"--type prusaconnect --api-key <YOUR_KEY>",
+                            f"--type prusalink --api-key <YOUR_KEY>",
                         )
                     if response.status_code == 403:
                         endpoint_hint = (
@@ -745,4 +745,4 @@ class PrusaConnectAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def __repr__(self) -> str:
-        return f"<PrusaConnectAdapter host={self._host!r}>"
+        return f"<PrusaLinkAdapter host={self._host!r}>"

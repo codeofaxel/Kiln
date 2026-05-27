@@ -15,7 +15,7 @@ Environment variables
 ``KILN_PRINTER_TYPE``
     Printer backend type.  Supported values: ``"octoprint"``,
     ``"moonraker"``, ``"creality"``, ``"bambu"``, ``"elegoo"``,
-    ``"prusaconnect"``, and ``"serial"``.
+    ``"prusalink"``, and ``"serial"``.
     Defaults to ``"octoprint"``.
 ``KILN_PRINTER_PORT``
     Serial port path for USB printers (required when ``KILN_PRINTER_TYPE``
@@ -291,7 +291,7 @@ from kiln.printers import (
     PrinterAdapter,
     PrinterError,
     PrinterStatus,
-    PrusaConnectAdapter,
+    PrusaLinkAdapter,
     SerialPrinterAdapter,
 )
 from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
@@ -952,8 +952,8 @@ def _get_adapter() -> PrinterAdapter:
             )
         mainboard_id = os.environ.get("KILN_PRINTER_MAINBOARD_ID", "")
         _adapter = ElegooAdapter(host=host, mainboard_id=mainboard_id)
-    elif printer_type == "prusaconnect":
-        _adapter = PrusaConnectAdapter(host=host, api_key=api_key or None)
+    elif printer_type == "prusalink":
+        _adapter = PrusaLinkAdapter(host=host, api_key=api_key or None)
     elif printer_type == "serial":
         port = os.environ.get("KILN_PRINTER_PORT", "")
         if not port:
@@ -966,7 +966,7 @@ def _get_adapter() -> PrinterAdapter:
     else:
         raise RuntimeError(
             f"Unsupported printer type: {printer_type!r}.  "
-            f"Supported types are 'octoprint', 'moonraker', 'creality', 'bambu', 'elegoo', 'prusaconnect', and 'serial'."
+            f"Supported types are 'octoprint', 'moonraker', 'creality', 'bambu', 'elegoo', 'prusalink', and 'serial'."
         )
 
     # Propagate safety profile to adapter for defense-in-depth temp limits.
@@ -1182,8 +1182,8 @@ def _build_adapter_from_config_entry(name: str, entry: dict[str, Any]) -> Printe
             )
         mainboard_id = str(entry.get("mainboard_id") or os.environ.get("KILN_PRINTER_MAINBOARD_ID", ""))
         adapter = ElegooAdapter(host=host, mainboard_id=mainboard_id)
-    elif printer_type == "prusaconnect":
-        adapter = PrusaConnectAdapter(host=host, api_key=api_key or None)
+    elif printer_type == "prusalink":
+        adapter = PrusaLinkAdapter(host=host, api_key=api_key or None)
     elif printer_type == "serial":
         port = str(entry.get("port") or os.environ.get("KILN_PRINTER_PORT", ""))
         if not port:
@@ -4333,7 +4333,7 @@ def cancel_print(
         # a printer that was already idle).  Uses the adapter's split
         # ``set_tool_temp`` / ``set_bed_temp`` methods — present on every
         # adapter subclass (base, bambu, octoprint, moonraker, creality,
-        # serial, elegoo, prusaconnect).  Chamber temp (rare) is sent as raw
+        # serial, elegoo, prusalink).  Chamber temp (rare) is sent as raw
         # M141 G-code since most adapters don't expose a chamber setter.
         restored: dict[str, float] | None = None
         chamber_restored: float | None = None
@@ -6307,7 +6307,7 @@ def register_printer(
     Args:
         name: Unique human-readable name (e.g. "voron-350", "bambu-x1c").
         printer_type: Backend type -- "octoprint", "moonraker", "bambu",
-            "creality", "elegoo", "prusaconnect", or "serial".
+            "creality", "elegoo", "prusalink", or "serial".
         host: Base URL or IP address of the printer.  For serial printers,
             this is the port path (e.g. "/dev/ttyUSB0", "COM3").
         api_key: API key (required for OctoPrint and Bambu, optional for
@@ -6421,8 +6421,8 @@ def register_printer(
                 host=host,
                 mainboard_id=serial or "",
             )
-        elif printer_type == "prusaconnect":
-            adapter = PrusaConnectAdapter(host=host, api_key=api_key or None)
+        elif printer_type == "prusalink":
+            adapter = PrusaLinkAdapter(host=host, api_key=api_key or None)
         elif printer_type == "serial":
             # For serial printers, 'host' is the serial port path (e.g.
             # /dev/ttyUSB0) and 'api_key' is unused.
@@ -6431,7 +6431,7 @@ def register_printer(
         else:
             return _error_dict(
                 f"Unsupported printer_type: {printer_type!r}. "
-                "Supported: 'octoprint', 'moonraker', 'creality', 'bambu', 'elegoo', 'prusaconnect', 'serial'.",
+                "Supported: 'octoprint', 'moonraker', 'creality', 'bambu', 'elegoo', 'prusalink', 'serial'.",
                 code="INVALID_ARGS",
             )
 
@@ -8740,7 +8740,7 @@ def fleet_workflow() -> str:
     return (
         "To manage a fleet of printers:\n\n"
         "1. Call `fleet_status` to see all registered printers and their states\n"
-        "2. Use `register_printer` to add new printers (octoprint, moonraker, creality, bambu, elegoo, prusaconnect, or serial)\n"
+        "2. Use `register_printer` to add new printers (octoprint, moonraker, creality, bambu, elegoo, prusalink, or serial)\n"
         "3. Submit jobs with `submit_job` — the scheduler auto-dispatches to idle printers\n"
         "4. Monitor via `queue_summary` and `job_status`\n"
         "5. Check `recent_events` for lifecycle updates\n\n"
