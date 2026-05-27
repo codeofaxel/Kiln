@@ -40,7 +40,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing)) add Git-for-3D ver
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
 - **No printer? No problem** — Outsource jobs to Craftcloud's 150+ manufacturing services through the hosted proxy, or use direct mode with your own provider credentials.
-- **AI-native** — 800 MCP capabilities and 221 CLI commands built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — 801 MCP capabilities and 221 CLI commands built for AI agents. Not a web UI with an API bolted on.
 - **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print.
 - **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command.
 - **Manuals included** — Multi-part prints can generate printable PDF assembly manuals with Bill of Materials, isometric step renders, mating arrows, and pause-and-check verification gates. (Pro)
@@ -499,7 +499,7 @@ kiln signin
 kiln pair KLN-ABCD-EFGH
 ```
 
-Tool tiers automatically match model capability: **essential** (16 tools) for smaller models, **standard** (61 tools) for mid-range, **full** (133 tools) for stronger models. All 793 tools are available via MCP (`kiln serve`).
+Tool tiers automatically match model capability: **essential** (16 tools) for smaller models, **standard** (61 tools) for mid-range, **full** (133 tools) for stronger models. All 794 tools are available via MCP (`kiln serve`).
 
 ### OctoPrint CLI
 
@@ -518,7 +518,7 @@ octoprint-cli print myfile.gcode --confirm
 
 ## MCP Tools (Selected)
 
-The Kiln MCP server (`kiln serve`) exposes **792 tools** to agents, plus prompts and resources for **800 total MCP capabilities**. Key tools are listed below — MCP clients can use `get_skill_manifest` and ToolSearch-style discovery to browse the complete catalog.
+The Kiln MCP server (`kiln serve`) exposes **794 tools** to agents, plus prompts and resources for **801 total MCP capabilities**. Key tools are listed below — MCP clients can use `get_skill_manifest` and ToolSearch-style discovery to browse the complete catalog.
 
 | Tool | Description |
 |------|-------------|
