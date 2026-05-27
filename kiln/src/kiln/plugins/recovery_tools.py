@@ -749,7 +749,39 @@ class _RecoveryToolsPlugin:
                     printer_capabilities=printer_capabilities,
                     safety_profile=safety_profile,
                 )
-                return {"success": True, "plan": plan.to_dict()}
+                response: dict[str, Any] = {"success": True, "plan": plan.to_dict()}
+
+                # kiln-pro contributing-factor hypothesis: when the
+                # printer's recorded nozzle is past its planning
+                # window AND drift attribution puts >= 30% of the
+                # deviation on wear, surface a structured
+                # ``nozzle_wear_hypothesis`` block alongside the
+                # plan so the user sees wear as a likely
+                # co-contributor to the failure being recovered
+                # from.  Free tier (no kiln-pro installed) falls
+                # through silently via the ImportError branch.
+                # Best-effort — any failure in the wear pipeline
+                # is swallowed so the recovery plan still ships.
+                # See kiln3d.com for the Pro+ tier that enables
+                # this signal.
+                try:
+                    from kiln_pro.recovery.nozzle_wear_hypothesis import (
+                        build_wear_hypothesis,
+                    )
+
+                    hypothesis = build_wear_hypothesis(
+                        printer_id=failure.printer_name,
+                    )
+                    if hypothesis is not None:
+                        response["nozzle_wear_hypothesis"] = hypothesis
+                except ImportError:
+                    pass  # kiln-pro not installed — free tier
+                except Exception as exc:
+                    _logger.debug(
+                        "nozzle_wear_hypothesis failed (non-fatal): %s", exc,
+                    )
+
+                return response
             except Exception as exc:
                 _logger.exception("Unexpected error in plan_failure_recovery")
                 return _srv._error_dict(
