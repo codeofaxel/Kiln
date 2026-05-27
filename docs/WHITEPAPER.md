@@ -32,7 +32,7 @@ Kiln solves the entire pipeline:
 
 4. **Unified Adapter Layer.** A single `PrinterAdapter` abstract interface normalizes OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, and Direct USB/Serial printer control into consistent Python dataclasses. Adding a new backend requires implementing the adapter contract; all upstream consumers work automatically.
 
-5. **Agent-Native Interface.** <!-- KILN_MCP_TOOL_COUNT:OLD --> 809 typed MCP tools and <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 816 total MCP capabilities make Kiln a first-class control layer for any MCP-compatible agent. <!-- KILN_CLI_COUNT:OLD --> 221 CLI commands with `--json` flags cover the same surface for scripting.
+5. **Agent-Native Interface.** <!-- KILN_MCP_TOOL_COUNT:OLD --> 808 typed MCP tools and <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 815 total MCP capabilities make Kiln a first-class control layer for any MCP-compatible agent. <!-- KILN_CLI_COUNT:OLD --> 221 CLI commands with `--json` flags cover the same surface for scripting.
 
 6. **Safety-First Design.** Pre-flight checks, preview-confirmed print starts, G-code validation, temperature limits, and confirmation gates are enforced at the protocol layer. 44 named safety profiles define hardware-specific limits. An agent cannot bypass safety checks even if instructed to.
 
