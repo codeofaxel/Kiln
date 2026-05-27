@@ -4,7 +4,7 @@ When Prusa Link's ``/api/v1/status`` reports a transition into an
 ATTENTION / ERROR state whose message text implicates the filament
 path (jam, runout, MMU error, blocked extruder), the Prusa Link
 adapter feeds that signal into kiln-pro's
-``record_extrusion_event`` so the wear cross-check can correlate
+``record_extrusion_event_for_printer`` so the wear cross-check can correlate
 flow signals against gram-count wear estimates.
 
 Tests cover:
@@ -39,7 +39,7 @@ from kiln.printers.prusalink import (
 
 # ---------------------------------------------------------------------------
 # Helpers — synthesize a fake kiln-pro nozzle module so the wire's
-# `from kiln_pro.nozzle_intelligence.sensor_signal import record_extrusion_event`
+# `from kiln_pro.nozzle_intelligence.sensor_signal import record_extrusion_event_for_printer`
 # resolves to a MagicMock during tests.  Without this, the wire's
 # try/except ImportError catches every call site and the wire-firing
 # assertions can't see the call.
@@ -49,7 +49,7 @@ from kiln.printers.prusalink import (
 def _install_fake_recorder(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """Inject a fake kiln_pro.nozzle_intelligence.sensor_signal module.
 
-    Returns a MagicMock standing in for ``record_extrusion_event``.
+    Returns a MagicMock standing in for ``record_extrusion_event_for_printer``.
     Call assertions on the returned mock to verify the wire fired.
     """
     recorder = MagicMock()
@@ -58,7 +58,7 @@ def _install_fake_recorder(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     # so ``from a.b.c import d`` walks the tree without ImportError.
     fake_nozzle = types.ModuleType("kiln_pro.nozzle_intelligence")
     fake_sensor = types.ModuleType("kiln_pro.nozzle_intelligence.sensor_signal")
-    fake_sensor.record_extrusion_event = recorder
+    fake_sensor.record_extrusion_event_for_printer = recorder
     fake_nozzle.sensor_signal = fake_sensor
 
     # If kiln_pro itself is importable, attach our fake nozzle module
@@ -241,7 +241,7 @@ class TestAdapterWireTransitions:
             adapter.get_state()
             adapter.get_state()
 
-        assert recorder.called, "expected record_extrusion_event to fire on transition"
+        assert recorder.called, "expected record_extrusion_event_for_printer to fire on transition"
         kwargs = recorder.call_args.kwargs
         assert kwargs.get("event_type") == "filament_jam"
         assert kwargs.get("severity") == "high"
@@ -418,7 +418,7 @@ class TestImportErrorSafety:
         # bubble past the wire's `except ImportError`.
         try:
             from kiln_pro.nozzle_intelligence.sensor_signal import (  # noqa: F401
-                record_extrusion_event,
+                record_extrusion_event_for_printer,
             )
         except ImportError:
             pass  # expected on free-tier installs

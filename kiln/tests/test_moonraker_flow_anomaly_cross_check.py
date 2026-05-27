@@ -5,7 +5,7 @@ field over Moonraker's JSON-RPC ``notify_status_update`` push channel.
 When ``state`` transitions to ``"error"`` with a message that names a
 filament / extruder issue (filament_switch_sensor or
 filament_motion_sensor runout, extruder shutdown), the Moonraker
-adapter feeds that signal into kiln-pro's ``record_extrusion_event``
+adapter feeds that signal into kiln-pro's ``record_extrusion_event_for_printer``
 so the wear cross-check can correlate flow signals against gram-count
 wear estimates.
 
@@ -169,7 +169,7 @@ class TestMonitorDedup:
         assert monitor._printer_name == "moonraker"
 
     def test_first_anomaly_fires_then_repeat_is_skipped(self, monkeypatch):
-        # Verify the wire only invokes record_extrusion_event ONCE per
+        # Verify the wire only invokes record_extrusion_event_for_printer ONCE per
         # unique (state, message) pair.  This is the central de-dupe
         # contract — Klipper repeats the same status in every push
         # while the printer sits on an error.
@@ -185,7 +185,7 @@ class TestMonitorDedup:
         fake_mod = types.ModuleType(
             "kiln_pro.nozzle_intelligence.sensor_signal"
         )
-        fake_mod.record_extrusion_event = _fake_record
+        fake_mod.record_extrusion_event_for_printer = _fake_record
         fake_parent = types.ModuleType("kiln_pro.nozzle_intelligence")
         fake_root = types.ModuleType("kiln_pro")
         monkeypatch.setitem(sys.modules, "kiln_pro", fake_root)
@@ -234,7 +234,7 @@ class TestMonitorDedup:
         fake_mod = types.ModuleType(
             "kiln_pro.nozzle_intelligence.sensor_signal"
         )
-        fake_mod.record_extrusion_event = _fake_record
+        fake_mod.record_extrusion_event_for_printer = _fake_record
         fake_parent = types.ModuleType("kiln_pro.nozzle_intelligence")
         fake_root = types.ModuleType("kiln_pro")
         monkeypatch.setitem(sys.modules, "kiln_pro", fake_root)

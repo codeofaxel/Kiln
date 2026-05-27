@@ -3,7 +3,7 @@
 When Bambu's MQTT push_status carries an HMS error code in the
 flow-anomaly bucket (extruder feed failure, filament broken at
 extruder, AMS jam, etc.), the bambu adapter feeds that signal into
-kiln-pro's ``record_extrusion_event`` so the wear cross-check can
+kiln-pro's ``record_extrusion_event_for_printer`` so the wear cross-check can
 correlate flow signals against gram-count wear estimates.
 
 Tests cover:
@@ -109,5 +109,5 @@ class TestImportErrorSafety:
         # try/except in the wire guards against.
         with pytest.raises((ImportError, AttributeError, TypeError)):
             from kiln_pro.nozzle_intelligence.sensor_signal import (
-                record_extrusion_event,  # noqa: F401
+                record_extrusion_event_for_printer,  # noqa: F401
             )

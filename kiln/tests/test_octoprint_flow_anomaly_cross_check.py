@@ -4,7 +4,7 @@ When OctoPrint reports a flow / extrusion anomaly (``FilamentChange``
 event, ``Error`` event whose payload mentions the filament path,
 filament-sensor / under-extrusion plugin events, or a ``state.flags.
 filament_change`` transition from the REST poll), the OctoPrint
-adapter feeds the signal into kiln-pro's ``record_extrusion_event``
+adapter feeds the signal into kiln-pro's ``record_extrusion_event_for_printer``
 so the nozzle wear cross-check can correlate flow signals against
 gram-count wear estimates.
 
@@ -251,7 +251,7 @@ class TestFireExtrusionEvent:
         ):
             adapter._fire_extrusion_event("filament_jam", "high")
 
-        mock_module.record_extrusion_event.assert_called_once_with(
+        mock_module.record_extrusion_event_for_printer.assert_called_once_with(
             printer_id="octoprint",
             event_type="filament_jam",
             severity="high",
@@ -275,7 +275,7 @@ class TestFireExtrusionEvent:
         # REST hot path.
         adapter = _make_adapter()
         mock_module = MagicMock()
-        mock_module.record_extrusion_event.side_effect = RuntimeError("boom")
+        mock_module.record_extrusion_event_for_printer.side_effect = RuntimeError("boom")
         with patch.dict(
             sys.modules,
             {"kiln_pro.nozzle_intelligence.sensor_signal": mock_module},
@@ -301,7 +301,7 @@ class TestFlagTransitionWire:
         # observation already sees the flag set, the firmware was
         # already in the anomalous state and the wear-tracker should
         # know.  Verify the recorder was called.
-        mock_module.record_extrusion_event.assert_called_once_with(
+        mock_module.record_extrusion_event_for_printer.assert_called_once_with(
             printer_id="octoprint",
             event_type="filament_jam",
             severity="high",
@@ -316,11 +316,11 @@ class TestFlagTransitionWire:
         ):
             # Establish baseline at False.
             adapter._check_flow_flag_transitions({"filament_change": False})
-            mock_module.record_extrusion_event.assert_not_called()
+            mock_module.record_extrusion_event_for_printer.assert_not_called()
 
             # Transition False → True fires.
             adapter._check_flow_flag_transitions({"filament_change": True})
-            mock_module.record_extrusion_event.assert_called_once()
+            mock_module.record_extrusion_event_for_printer.assert_called_once()
 
     def test_sustained_true_does_not_refire(self) -> None:
         # If the flag stays True across polls, the wire fires once.
@@ -335,7 +335,7 @@ class TestFlagTransitionWire:
             adapter._check_flow_flag_transitions({"filament_change": True})
             adapter._check_flow_flag_transitions({"filament_change": True})
 
-            assert mock_module.record_extrusion_event.call_count == 1
+            assert mock_module.record_extrusion_event_for_printer.call_count == 1
 
     def test_true_to_false_to_true_refires(self) -> None:
         # A clean transition cycle SHOULD fire again — separate incident.
@@ -350,7 +350,7 @@ class TestFlagTransitionWire:
             adapter._check_flow_flag_transitions({"filament_change": False})
             adapter._check_flow_flag_transitions({"filament_change": True})
 
-            assert mock_module.record_extrusion_event.call_count == 2
+            assert mock_module.record_extrusion_event_for_printer.call_count == 2
 
     def test_error_flag_does_not_fire(self) -> None:
         # ``state.flags.error`` is intentionally NOT classified as a
@@ -363,7 +363,7 @@ class TestFlagTransitionWire:
         ):
             adapter._check_flow_flag_transitions({"error": False})
             adapter._check_flow_flag_transitions({"error": True})
-            mock_module.record_extrusion_event.assert_not_called()
+            mock_module.record_extrusion_event_for_printer.assert_not_called()
 
 
 class TestPushEventWire:
@@ -376,7 +376,7 @@ class TestPushEventWire:
         ):
             adapter._handle_push_event("FilamentChange", {})
 
-        mock_module.record_extrusion_event.assert_called_once_with(
+        mock_module.record_extrusion_event_for_printer.assert_called_once_with(
             printer_id="octoprint",
             event_type="filament_jam",
             severity="high",
@@ -394,7 +394,7 @@ class TestPushEventWire:
                 {"error": "Filament jam detected at extruder"},
             )
 
-        mock_module.record_extrusion_event.assert_called_once_with(
+        mock_module.record_extrusion_event_for_printer.assert_called_once_with(
             printer_id="octoprint",
             event_type="under_extrusion",
             severity="medium",
@@ -411,7 +411,7 @@ class TestPushEventWire:
             adapter._handle_push_event("PrintDone", {})
             adapter._handle_push_event("Connected", {})
 
-        mock_module.record_extrusion_event.assert_not_called()
+        mock_module.record_extrusion_event_for_printer.assert_not_called()
 
     def test_plugin_filament_runout_event_fires(self) -> None:
         adapter = _make_adapter()
@@ -425,8 +425,8 @@ class TestPushEventWire:
                 {},
             )
 
-        assert mock_module.record_extrusion_event.call_count == 1
-        kwargs = mock_module.record_extrusion_event.call_args.kwargs
+        assert mock_module.record_extrusion_event_for_printer.call_count == 1
+        kwargs = mock_module.record_extrusion_event_for_printer.call_args.kwargs
         assert kwargs["event_type"] == "filament_jam"
         assert kwargs["severity"] == "high"
 
@@ -447,7 +447,7 @@ class TestPushStateCallback:
                 {"state": {"flags": {"filament_change": True}}}
             )
 
-        mock_module.record_extrusion_event.assert_called_once()
+        mock_module.record_extrusion_event_for_printer.assert_called_once()
 
     def test_handle_push_state_tolerates_missing_keys(self) -> None:
         # Malformed / partial pushes must not crash the callback.
@@ -468,7 +468,7 @@ class TestImportErrorSafety:
     """When kiln-pro nozzle module is absent, the wire is silent.
 
     This is the free-tier path — the adapter must keep working even
-    though ``record_extrusion_event`` is never reachable.
+    though ``record_extrusion_event_for_printer`` is never reachable.
     """
 
     def test_wire_swallows_import_error_via_sentinel(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -488,7 +488,7 @@ class TestImportErrorSafety:
         # thing the try/except in the wire guards against).
         with pytest.raises((ImportError, AttributeError, TypeError)):
             from kiln_pro.nozzle_intelligence.sensor_signal import (  # noqa: F401
-                record_extrusion_event,
+                record_extrusion_event_for_printer,
             )
 
     def test_push_event_callback_safe_without_kiln_pro(self, monkeypatch: pytest.MonkeyPatch) -> None:

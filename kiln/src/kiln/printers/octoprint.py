@@ -832,10 +832,10 @@ class OctoPrintAdapter(PrinterAdapter):
         """
         try:
             from kiln_pro.nozzle_intelligence.sensor_signal import (
-                record_extrusion_event,
+                record_extrusion_event_for_printer,
             )
 
-            record_extrusion_event(
+            record_extrusion_event_for_printer(
                 printer_id=self.name,
                 event_type=event_type,
                 severity=severity,
