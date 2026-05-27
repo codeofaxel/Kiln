@@ -33,6 +33,21 @@ import subprocess
 import tempfile
 from typing import Any
 
+# Public surface — what callers (kiln-pro plugins, REST API, agents)
+# import.  Anything not listed here is internal helper and may move
+# between minor versions.
+__all__ = [
+    # Errors
+    "DepthBelowLegibilityFloor",
+    "TextDoesNotFitError",
+    # Verdict + decision helpers
+    "fit_text_to_strip",
+    "select_bottom_face_flip",
+    # Primary emboss entry points
+    "emboss_text_on_face",
+    "emboss_text_lines_on_face",
+]
+
 _logger = logging.getLogger(__name__)
 
 
@@ -214,6 +229,21 @@ class DepthBelowLegibilityFloor(ValueError):
     Per kiln-pro CLAUDE.md "ship-readiness" rule: refuse to produce a
     preview / SCAD / STL of text that will print as an illegible smear.
     A clear actionable error beats a "preview-of-broken" output.
+
+    Example:
+
+        try:
+            emboss_text_on_face(
+                stl, "KILN", depth_mm=0.6, nozzle_diameter_mm=0.4,
+            )
+        except DepthBelowLegibilityFloor as err:
+            user_msg = (
+                f"Engraving depth {err.requested_mm:.1f}mm is below "
+                f"your printer's legibility floor "
+                f"({err.floor_mm:.1f}mm for a "
+                f"{err.nozzle_diameter_mm:.2f}mm nozzle).  "
+                f"Try depth_mm={err.floor_mm:.1f} or deeper."
+            )
     """
 
     def __init__(
@@ -402,6 +432,23 @@ def select_bottom_face_flip(
         (``"x"`` / ``"y"``), ``rationale`` (1-line explanation),
         ``self_inspection`` (verdict dict), and ``confidence``
         (``"high"`` / ``"medium"``).
+
+    Example:
+
+        # 100mm-wide coaster: wide-shallow → X-axis natural flip
+        verdict = select_bottom_face_flip(
+            face_width_mm=100.0, face_height_mm=60.0,
+        )
+        assert verdict["transformation"] == "rotate([180, 0, 0])"
+        assert verdict["flip_axis"] == "x"
+        assert verdict["confidence"] == "high"
+
+        # 60×120mm bookmark: tall-narrow → Y-axis natural flip
+        verdict = select_bottom_face_flip(
+            face_width_mm=60.0, face_height_mm=120.0,
+        )
+        assert verdict["transformation"] == "mirror([1, 0, 0])"
+        assert verdict["flip_axis"] == "y"
     """
     transformation, flip_axis, rationale = _select_flip_transformation(
         face_width_mm, face_height_mm,
