@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-05-27T19:04:08.953611+00:00",
-  "tool_count": 320,
+  "generated": "2026-05-27T19:44:15.217068+00:00",
+  "tool_count": 319,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -9073,7 +9073,7 @@
     },
     {
       "name": "nozzle_drift_attribution",
-      "description": "Pro+ \u2014 estimate the wear-attributable share of a MEASURED drift.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Pro+ \u2014 attribute observed drift OR a failure hypothesis to nozzle wear.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -9082,59 +9082,40 @@
             "title": "Printer Id",
             "type": "string"
           },
-          "drift_magnitude": {
-            "title": "Drift Magnitude",
-            "type": "number"
-          },
-          "recent_filament": {
+          "drift_magnitude_mm": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "number"
               },
               {
                 "type": "null"
               }
             ],
             "default": null,
-            "title": "Recent Filament"
-          }
-        },
-        "required": [
-          "printer_id",
-          "drift_magnitude"
-        ],
-        "title": "nozzle_drift_attributionArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "nozzle_wear_contribution",
-      "description": "Pro+ \u2014 score how plausibly wear contributed to a failure.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "printer_id": {
-            "title": "Printer Id",
+            "title": "Drift Magnitude Mm"
+          },
+          "percent_used": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Percent Used"
+          },
+          "recent_filament_class": {
+            "default": "standard",
+            "title": "Recent Filament Class",
             "type": "string"
-          },
-          "recent_filament": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Recent Filament"
           }
         },
         "required": [
           "printer_id"
         ],
-        "title": "nozzle_wear_contributionArguments",
+        "title": "nozzle_drift_attributionArguments",
         "type": "object"
       }
     },
