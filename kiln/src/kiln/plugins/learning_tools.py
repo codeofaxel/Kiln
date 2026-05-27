@@ -594,6 +594,23 @@ def recommend_settings(
             result["rationale"] = list(cal_rationale)
         if cal_used is not None:
             result["calibration_used"] = cal_used
+
+        # Nozzle context overlay — when kiln-pro is installed AND
+        # the printer has a known/factory nozzle state, attach a
+        # nozzle block so downstream agents see "this printer's
+        # nozzle is brass" and tailor warnings (e.g. don't suggest
+        # CF filaments on brass).  Free-tier installs silently skip.
+        if printer_name:
+            try:
+                from kiln import _pro_nozzle_bridge
+                _nozzle = _pro_nozzle_bridge.consult_nozzle_summary(
+                    printer_name,
+                )
+                if _nozzle is not None:
+                    result["nozzle"] = _nozzle
+            except Exception as exc:
+                _logger.debug("Nozzle context overlay skipped: %s", exc)
+
         return result
     except Exception as exc:
         _logger.exception("Unexpected error in recommend_settings")

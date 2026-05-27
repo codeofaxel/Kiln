@@ -213,6 +213,59 @@ def _is_nozzle_clump_error(error_code: int) -> bool:
     hex_code = f"{error_code:08X}"
     return any(hex_code.startswith(prefix) for prefix in _NOZZLE_CLUMP_ERROR_PREFIXES)
 
+
+# HMS prefixes for flow / extrusion anomalies that should feed the
+# kiln-pro nozzle wear cross-check.  Distinct from nozzle clumping
+# (above) — clumping is a first-layer probe artifact, these are
+# mid-print extrusion signals that correlate with bore widening /
+# tip wear / filament-path friction.
+#
+# Source: Bambu Lab HMS wiki (wiki.bambulab.com/en/x1/troubleshooting/hms)
+# plus cross-reference with the community-maintained code list at
+# github.com/Doridian/BambuStudio/wiki/HMS-codes.  Conservatism is
+# the right call here — false positives on flow-anomaly tagging
+# poison the wear-rate signal more than missed positives.
+_FLOW_ANOMALY_ERROR_PREFIXES: tuple[str, ...] = (
+    "03008003",   # Filament feeding abnormal (P1/X1) — extruder can't pull
+    "03008005",   # Filament broken at extruder
+    "03001900",   # Tangled filament at extruder feed (cross-talks with 03001A00 nozzle wrap)
+    "05000B00",   # Filament stuck/jam reported by AMS
+    "05000900",   # Extrusion failure (P1 series) — broad bucket
+)
+
+# Severity mapping for flow-anomaly codes.  Used when the wire
+# fires record_extrusion_event so the wear cross-check weights
+# strong signals (broken filament, stuck) over weak ones (general
+# extrusion failure, which could be intermittent).
+_FLOW_ANOMALY_SEVERITY: dict[str, str] = {
+    "03008003": "medium",
+    "03008005": "high",
+    "03001900": "medium",
+    "05000B00": "high",
+    "05000900": "low",
+}
+
+
+def _classify_flow_anomaly(error_code: int) -> tuple[str, str] | None:
+    """Return (event_type, severity) for a flow-anomaly HMS code.
+
+    Returns ``None`` when the code doesn't match a known flow-anomaly
+    prefix.  Caller uses this to decide whether to feed the kiln-pro
+    nozzle wear cross-check via ``record_extrusion_event``.
+    """
+    if not error_code:
+        return None
+    hex_code = f"{error_code:08X}"
+    for prefix in _FLOW_ANOMALY_ERROR_PREFIXES:
+        if hex_code.startswith(prefix):
+            event_type = (
+                "filament_jam" if prefix in ("03008005", "05000B00")
+                else "under_extrusion"
+            )
+            severity = _FLOW_ANOMALY_SEVERITY.get(prefix, "medium")
+            return event_type, severity
+    return None
+
 # Bambu LED node names.
 _VALID_LED_NODES: frozenset[str] = frozenset({"chamber_light", "work_light"})
 _VALID_LED_MODES: frozenset[str] = frozenset({"on", "off", "flashing"})
@@ -1014,6 +1067,46 @@ class BambuAdapter(PrinterAdapter):
                     logger.debug(
                         "auto-record hook raised (non-fatal): %s", exc,
                     )
+
+            # Flow-anomaly cross-check — when the merged push_status
+            # carries an HMS code that the firmware classifies as a
+            # flow / extrusion issue, feed the signal into the
+            # kiln-pro nozzle wear cross-check.  Lets the wear-tracking
+            # subsystem learn that this nozzle threw a flow signal
+            # mid-print (cross-references with the gram-count wear
+            # estimate; sustained flow signals on a nozzle whose
+            # gram-count says "fresh" are a hint the gram count is
+            # wrong, the filament path has friction, or the bore is
+            # widening faster than population).
+            #
+            # The wire is intentionally idempotent: every status
+            # message that carries the same HMS code re-fires the
+            # event.  The kiln-pro recorder de-dupes by (printer, code,
+            # time-bucket) so a steady-state error doesn't flood the
+            # event log.  Free-tier installs without kiln-pro silently
+            # skip via try/except ImportError.
+            if print_error_for_hook:
+                _flow = _classify_flow_anomaly(print_error_for_hook)
+                if _flow is not None:
+                    _event_type, _severity = _flow
+                    try:
+                        from kiln_pro.nozzle_intelligence.sensor_signal import (
+                            record_extrusion_event,
+                        )
+                        record_extrusion_event(
+                            printer_id=self.name,
+                            event_type=_event_type,
+                            severity=_severity,
+                        )
+                    except ImportError:
+                        # Free tier — kiln-pro nozzle module not
+                        # installed.  Drop the signal silently.
+                        pass
+                    except Exception as exc:  # pragma: no cover
+                        logger.debug(
+                            "Flow-anomaly cross-check raised (non-fatal): %s",
+                            exc,
+                        )
 
     def _publish_command(
         self,

@@ -5862,6 +5862,43 @@ def preflight_check(
             except Exception as exc:
                 logger.debug("Brand filament compat check skipped: %s", exc)
 
+        # -- Nozzle capacity check (advisory) ------------------------------
+        # When kiln-pro is installed and the active printer has a
+        # confirmed nozzle state, project the planned print against the
+        # nozzle's lifetime envelope.  Free-tier installs without
+        # kiln-pro silently skip this check (bridge.available() returns
+        # False).  When the verdict surfaces, it joins the checks list
+        # as advisory — never blocks ready=True on its own.  The user
+        # decides whether to swap the nozzle or proceed.
+        try:
+            from kiln import _pro_nozzle_bridge
+
+            _planned_grams = 0.0
+            if file_result is not None:
+                _planned_grams = float(file_result.get("filament_grams") or 0)
+            _printer_id = ""
+            if _get_registry().count > 0:
+                _names = _get_registry().list_names()
+                if _names:
+                    _printer_id = _names[0]
+            if _printer_id and _planned_grams > 0:
+                _nozzle_verdict = _pro_nozzle_bridge.consult_capacity(
+                    printer_id=_printer_id,
+                    planned_grams=_planned_grams,
+                    filament_material=expected_material or "",
+                )
+                if _nozzle_verdict is not None and _nozzle_verdict.get("status") not in (None, "unknown_baseline", "unknown_nozzle", "invalid_input"):
+                    checks.append(
+                        {
+                            "name": "nozzle_capacity",
+                            "passed": _nozzle_verdict["status"] != "exceeded_p90",
+                            "message": _nozzle_verdict.get("narrative", ""),
+                            "advisory": True,
+                        }
+                    )
+        except Exception as exc:
+            logger.debug("Nozzle capacity check skipped: %s", exc)
+
         # -- Summary -------------------------------------------------------
         ready = all(c["passed"] for c in checks)
         summary = (
