@@ -100,7 +100,7 @@ class _RecoveryToolsPlugin:
                 except Exception:
                     _logger.debug("Failed to record failure (non-fatal)")
 
-                return {
+                response: dict[str, Any] = {
                     "success": True,
                     "analysis": analysis.to_dict(),
                     "message": (
@@ -109,6 +109,36 @@ class _RecoveryToolsPlugin:
                         f"Recommended action: {analysis.recovery_plan.action.value}."
                     ),
                 }
+
+                # kiln-pro contributing-factor hypothesis: when the
+                # printer's recorded nozzle is past its planning
+                # window AND drift attribution puts >= 30% of the
+                # deviation on wear, surface a structured
+                # ``nozzle_wear_hypothesis`` block so the user sees
+                # wear as a likely co-contributor.  Free tier (no
+                # kiln-pro installed) falls through silently via the
+                # ImportError branch.  Best-effort — any failure in
+                # the wear pipeline is swallowed so the primary
+                # classification still ships.  See kiln3d.com for
+                # the Pro+ tier that enables this signal.
+                try:
+                    from kiln_pro.recovery.nozzle_wear_hypothesis import (
+                        build_wear_hypothesis,
+                    )
+
+                    hypothesis = build_wear_hypothesis(
+                        printer_id=printer_name,
+                    )
+                    if hypothesis is not None:
+                        response["nozzle_wear_hypothesis"] = hypothesis
+                except ImportError:
+                    pass  # kiln-pro not installed — free tier
+                except Exception as exc:
+                    _logger.debug(
+                        "nozzle_wear_hypothesis failed (non-fatal): %s", exc,
+                    )
+
+                return response
             except Exception as exc:
                 _logger.exception("Unexpected error in analyze_print_failure_smart")
                 return _srv._error_dict(
