@@ -23,6 +23,7 @@ class TestGetStarted:
         result = get_started()
         expected_keys = {
             "success",
+            "update",
             "overview",
             "tool_discovery",
             "quick_start",

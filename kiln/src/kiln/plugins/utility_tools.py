@@ -241,9 +241,18 @@ class _UtilityToolsPlugin:
             except Exception as exc:
                 safety_profile_info["hint"] = f"resolver error: {exc}"
 
+            # Non-blocking update nudge — cached PyPI check, None when current.
+            try:
+                from kiln.version_check import check_for_update
+
+                update_info = check_for_update()
+            except Exception:  # noqa: BLE001
+                update_info = None
+
             return {
                 "success": True,
                 "version": kiln.__version__,
+                "update": update_info,
                 "uptime_seconds": int(uptime_secs),
                 "uptime_human": f"{hours}h {mins}m {secs}s",
                 "printers_registered": _srv._get_registry().count,
@@ -370,8 +379,17 @@ class _UtilityToolsPlugin:
             else:
                 _quick_start = _quick_start_base
 
+            # Non-blocking update nudge — cached PyPI check, None when current.
+            try:
+                from kiln.version_check import check_for_update
+
+                _update_info = check_for_update()
+            except Exception:  # noqa: BLE001
+                _update_info = None
+
             return {
                 "success": True,
+                "update": _update_info,
                 "overview": (
                     f"Kiln is agent infrastructure for 3D printing. This session "
                     f"has {live_tool_count} MCP tools ({live_capability_count} "

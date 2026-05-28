@@ -3,6 +3,14 @@
 All notable changes to Kiln are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.1.5.2] - 2026-05-28
+
+### Added
+
+- **Kiln tells you when there's a new version** — whether you're
+  working through an AI assistant or on the command line — and
+  `kiln self-update` does the upgrade for you.
+
 ## [1.1.5.1] - 2026-05-28
 
 ### Fixed

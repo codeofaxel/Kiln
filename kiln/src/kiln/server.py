@@ -625,6 +625,22 @@ def _build_instructions() -> str:
         "slice files, and manage print jobs through these tools.",
     ]
 
+    # --- Update nudge (non-blocking; reads the cached PyPI check) ---
+    # A new-version notice an agent reads on connect, so it can pass the
+    # heads-up to the user.  Wrapped defensively: a nudge must never break
+    # the instructions build.
+    try:
+        from kiln.version_check import update_banner_line
+
+        _update_line = update_banner_line()
+        if _update_line:
+            parts.append(
+                f"UPDATE AVAILABLE: {_update_line} "
+                "Mention this to the user so they can upgrade when convenient."
+            )
+    except Exception:  # noqa: BLE001 -- nudge is best-effort, never fatal
+        pass
+
     # --- Fresh install: first-time setup guidance ---
     if is_fresh:
         parts.append(
@@ -11136,6 +11152,16 @@ def main() -> None:
 
     # Set up log rotation and sensitive data scrubbing.
     _configure_log_rotation()
+
+    # Kick a non-blocking PyPI update check so a "new version available"
+    # nudge can surface in the instructions + get_started/kiln_health this
+    # session.  Daemon thread; warms ~/.kiln/update_check.json and exits.
+    try:
+        from kiln.version_check import kick_background_check
+
+        kick_background_check()
+    except Exception:  # noqa: BLE001 -- never block startup on the nudge
+        pass
 
     # Loud, unmissable banner telling the user which config source the
     # server is actually using.  The scenario we want to rule out: a

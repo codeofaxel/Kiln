@@ -1357,6 +1357,21 @@ def cli(ctx: click.Context, printer: str | None) -> None:
     except Exception as exc:
         logger.debug("DB not initialised yet — skipping startup check: %s", exc)
 
+    # Kick a non-blocking PyPI update check, then soft-nag if a newer Kiln
+    # is out.  Same discipline as the terms nag: stderr, interactive
+    # terminals only (never in piped/agent output), and never fatal.  The
+    # banner reads a cached result — the kick warms it for next time.
+    try:
+        from kiln.version_check import kick_background_check, update_banner_line
+
+        kick_background_check()
+        if sys.stderr.isatty() and ctx.invoked_subcommand not in ("self-update", None):
+            line = update_banner_line()
+            if line:
+                click.echo(click.style(f"  {line}", fg="yellow"), err=True)
+    except Exception as exc:
+        logger.debug("Update check skipped: %s", exc)
+
 
 def _ensure_utf8_streams() -> None:
     """Normalise stdout/stderr to UTF-8 when they report another encoding.
@@ -1380,6 +1395,46 @@ def _ensure_utf8_streams() -> None:
             continue
         with contextlib.suppress(OSError, ValueError):
             reconfigure(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# self-update  (distinct from `upgrade`, which manages the Pro subscription)
+# ---------------------------------------------------------------------------
+
+
+@cli.command(name="self-update")
+@click.option("--yes", "-y", is_flag=True, help="Skip the confirmation prompt.")
+@click.option("--dry-run", is_flag=True, help="Print the upgrade command without running it.")
+def self_update(yes: bool, dry_run: bool) -> None:
+    """Update the Kiln software to the latest published version.
+
+    Runs ``pip install --upgrade kiln3d`` in the current interpreter.
+    Kiln never updates itself automatically — this is the explicit path
+    for when you want it done for you.  (To change your subscription
+    tier, use ``kiln upgrade`` instead.)
+    """
+    import subprocess
+
+    from kiln import __version__ as current
+    from kiln.version_check import PACKAGE_NAME, latest_version
+
+    latest = latest_version()
+    if latest:
+        click.echo(f"Installed: {current}    Latest on PyPI: {latest}")
+        if latest == current:
+            click.echo("You're already on the latest version.")
+    else:
+        click.echo(f"Installed: {current}    (couldn't reach PyPI to check the latest)")
+
+    cmd = [sys.executable, "-m", "pip", "install", "--upgrade", PACKAGE_NAME]
+    printable = " ".join(cmd)
+    if dry_run:
+        click.echo(f"Would run: {printable}")
+        return
+    if not yes and not click.confirm(f"Run '{printable}'?", default=True):
+        click.echo("Cancelled.")
+        return
+    raise SystemExit(subprocess.call(cmd))
 
 
 # ---------------------------------------------------------------------------
