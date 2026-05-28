@@ -5,44 +5,68 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+Engravings get smarter — depth that matches your nozzle, the right
+flip-axis picked for you, a sanity check that catches text which would
+print backwards, and an auto preview of the finished face.  Plus:
+nozzle wear becomes something Kiln watches across every print, every
+printer, every recommendation — heads-up before you print on a worn
+nozzle, failure analysis and recovery plans that consider wear, and
+material recommendations that flag bad nozzle/filament combos up
+front.
+
 ### Added
 
-- **Pre-print nozzle advisory.**  `start_print` checks the active
-  nozzle's wear posture and surfaces a heads-up when the nozzle is
-  overdue or close to it.  Warns, doesn't block — your call.
-- **Flow-anomaly detection on Moonraker, OctoPrint, Elegoo, and
-  PrusaLink.**  Every extrusion sample now feeds the per-machine
-  wear model.  Previously only Bambu had this wired, so wear only
-  learned from Bambu prints; now it learns from every supported
-  adapter.
-- **`analyze_print_failure_smart` adds nozzle wear to its hypothesis
-  set.**  When the failure shape matches wear (fine-detail loss,
-  gradual under-extrusion, layer adhesion drop) and the wear posture
-  is consistent, the verdict surfaces it alongside the other
-  candidates instead of always pinning on bed adhesion or
-  temperature.
-- **`recommend_material` consults the nozzle summary.**  Abrasive
-  filaments paired with a brass nozzle, soft filaments paired with
-  a hardened nozzle that's chewed up — both get a warning in the
-  recommendation reason.
-- **`plan_failure_recovery` considers wear when the symptoms fit.**
-  The recovery plan factors the wear hypothesis when it's a
-  credible candidate, so the recommended retry isn't "same nozzle,
-  lower temp, try again" when "replace nozzle" is the real fix.
-- **`predict_print_failure_risk` reads nozzle wear.**  New
-  `printer_id` parameter folds the current wear bucket into the
-  risk score with a wear-specific reason line when wear drives the
-  score.
+- **Engraving depth matches your nozzle.**  Smaller nozzles get
+  shallower carves, larger nozzles deeper ones, so the engraving
+  always survives the first layer instead of vanishing into the
+  squish.  Asking for depth below the floor for your nozzle now
+  fails loudly with a clear error.
+- **Bottom-face flip picked automatically** based on the face
+  shape — so the engraving reads correctly when you flip the
+  printed part over.
+- **Catches mirror-reversed text before you slice.**  A pure-math
+  sanity check on every bottom-face engraving — if any transform
+  in the pipeline would print the text backwards, the call fails
+  with a fixable error instead of silently engraving backwards.
+- **Auto preview of the finished engraving.**  Render shows what
+  the underside will look like after the part comes off the bed.
+- **Engraved text doesn't kiss the edges anymore.**  Default width
+  tightened and a margin clamp added so "KILN" on a coaster sits
+  comfortably inside the rim instead of hitting it.
+- **Heads-up before you print on a worn nozzle** *(Kiln Pro)*.
+  When the active nozzle is past (or close to) its replacement
+  window — based on how much filament has run through it — Kiln
+  warns at print time.  Warns, doesn't block.
+- **Every supported printer feeds the wear model on every print**
+  *(Kiln Pro)* — Moonraker, OctoPrint, Elegoo, and PrusaLink join
+  Bambu on that path.
+- **Failure analysis considers nozzle wear** *(Kiln Pro)*.  When
+  the failure symptoms line up with what a worn nozzle would
+  cause, wear surfaces as a candidate instead of always pinning
+  on bed adhesion or temperature.
+- **Material recommendations factor your nozzle** *(Kiln Pro)*.
+  Asking for an abrasive filament (carbon-fiber,
+  glow-in-the-dark, glass-filled) on a brass nozzle now warns up
+  front; asking for soft filament on a chewed-up hardened nozzle
+  also warns.
+- **Recovery plans suggest "replace the nozzle" when that's the
+  real fix** *(Kiln Pro)* — instead of defaulting to "same
+  nozzle, lower temp, try again" when the part actually needs a
+  fresh tip.
+- **Failure-risk predictions know about your nozzle** *(Kiln Pro)*.
+  The risk score knows whether the active nozzle is fresh,
+  mid-life, or overdue, and says so when wear is what's driving
+  the verdict.
 
 ### Changed
 
-- **Renamed the Prusa adapter to `prusalink`.**  The adapter talks to
-  the local Prusa Link HTTP API (`/api/v1/status` with `X-Api-Key`
-  auth), not Prusa Connect's cloud service, so the registry key,
-  module name, and class now reflect that.  `kiln auth --type prusalink`
-  replaces `--type prusaconnect`.  No back-compat alias was added —
-  update any saved config that pins `type: prusaconnect` to
-  `type: prusalink`.
+- **Renamed the Prusa adapter to `prusalink`.**  Update saved
+  configs that pin `type: prusaconnect`.  No back-compat alias.
+
+### Compatibility
+
+- Pair with `kiln-pro >= 1.1.5` — product cards inherit the new
+  engraving engine, nozzle-aware verdicts, and federation opt-in.
 
 ## [1.1.4] - 2026-05-20
 
