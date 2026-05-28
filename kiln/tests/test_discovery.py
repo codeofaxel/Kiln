@@ -477,6 +477,7 @@ class TestDiscoverPrinters:
         )
 
         with patch("kiln.discovery._try_mdns", return_value=[mdns_printer]) as mock_mdns, \
+             patch("kiln.discovery._try_ssdp", return_value=[]), \
              patch("kiln.discovery._try_http_probe", return_value=[http_printer]) as mock_http, \
              patch("kiln.discovery._detect_subnet", return_value="192.168.1"):
             results = discover_printers(timeout=5.0)
@@ -534,6 +535,7 @@ class TestDiscoverPrinters:
             discovery_method="http_probe",
         )
         with patch("kiln.discovery._try_mdns", side_effect=RuntimeError("boom")), \
+             patch("kiln.discovery._try_ssdp", return_value=[]), \
              patch("kiln.discovery._try_http_probe", return_value=[http_printer]), \
              patch("kiln.discovery._detect_subnet", return_value="192.168.1"):
             results = discover_printers(timeout=5.0)
@@ -634,6 +636,7 @@ class TestDeduplication:
             discovery_method="http_probe", api_available=True, name="OctoPrint",
         )
         with patch("kiln.discovery._try_mdns", return_value=[printer_mdns]), \
+             patch("kiln.discovery._try_ssdp", return_value=[]), \
              patch("kiln.discovery._try_http_probe", return_value=[printer_http]), \
              patch("kiln.discovery._detect_subnet", return_value="192.168.1"):
             results = discover_printers(timeout=5.0)
@@ -657,28 +660,37 @@ class TestTimeoutHandling:
     def test_short_timeout_still_returns(self):
         """Even with a very short timeout, the function returns without error."""
         with patch("kiln.discovery._try_mdns", return_value=[]), \
+             patch("kiln.discovery._try_ssdp", return_value=[]), \
              patch("kiln.discovery._try_http_probe", return_value=[]), \
              patch("kiln.discovery._detect_subnet", return_value="192.168.1"):
             results = discover_printers(timeout=0.001)
         assert isinstance(results, list)
 
-    def test_timeout_skips_later_methods(self):
-        """If deadline passes during first method, later methods are skipped."""
+    def test_slow_method_does_not_block_others(self):
+        """Methods run concurrently: a slow method never starves the others.
+
+        Discovery dispatches each method on its own thread, so a slow
+        mDNS sweep cannot prevent the SSDP listen or HTTP probe from
+        running and contributing results — the opposite of the old
+        sequential behavior where a slow first method ate the budget.
+        """
         def slow_mdns(timeout: float) -> list:
-            # Simulate slow mDNS that uses up the entire timeout
+            time.sleep(0.2)
             return []
 
+        http_hit = DiscoveredPrinter(
+            host="192.168.1.30", port=80, printer_type="octoprint",
+            name="probe", discovery_method="http_probe", api_available=True,
+        )
         with patch("kiln.discovery._try_mdns", side_effect=slow_mdns), \
-             patch("kiln.discovery._try_http_probe") as mock_http, \
-             patch("kiln.discovery._detect_subnet", return_value="192.168.1"), \
-             patch("kiln.discovery.time.monotonic") as mock_monotonic:
-            # First call: start time. Second call: within deadline.
-            # Third call (before http_probe): past deadline.
-            mock_monotonic.side_effect = [0.0, 0.0, 100.0]
+             patch("kiln.discovery._try_ssdp", return_value=[]) as mock_ssdp, \
+             patch("kiln.discovery._try_http_probe", return_value=[http_hit]) as mock_http, \
+             patch("kiln.discovery._detect_subnet", return_value="192.168.1"):
             results = discover_printers(timeout=5.0)
 
-        mock_http.assert_not_called()
-        assert results == []
+        mock_http.assert_called_once()
+        mock_ssdp.assert_called_once()
+        assert any(p.host == "192.168.1.30" for p in results)
 
     def test_probe_host_timeout_parameter_respected(self):
         """probe_host passes the timeout to requests."""
