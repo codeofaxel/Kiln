@@ -19,12 +19,6 @@ In a single conversation, an agent can design a part, slice it, queue it on the 
 pip install kiln3d
 ```
 
-Then add Kiln to any MCP client. Open source for local printing.
-
-<p align="center">
-  <strong>Describe it or draw it. Kiln makes it real.</strong>
-</p>
-
 <p align="center">
   <img src="docs/site/public/demo/ash-coaster.jpg" alt="A 3D-printed coaster with a relief portrait of a French bulldog and the name ASH along the bottom edge, held in a hand" width="640">
 </p>
@@ -34,9 +28,179 @@ Then add Kiln to any MCP client. Open source for local printing.
   <a href="https://kiln3d.com#demo">Watch the demo →</a>
 </p>
 
+## Quick Start
+
+Three steps. Then ask your AI to make something.
+
+**1. Install**
+
+```bash
+pip install kiln3d
+```
+
+**2. Connect your AI** — paste this into Claude Desktop, Claude Code, Codex, or any MCP-capable agent:
+
+```json
+{
+  "mcpServers": {
+    "kiln": {
+      "command": "python3",
+      "args": ["-m", "kiln", "serve"]
+    }
+  }
+}
+```
+
+**3. Ask** — paste a sentence like this into your agent. Kiln does the rest:
+
+> I have a Bambu A1, make me a coaster with my dog's photo on it
+
+That's the whole happy path. The agent invokes Kiln's tools to design, slice, and print — you don't touch a CLI. Full walkthrough at **[kiln3d.com/install](https://kiln3d.com/install)**.
+
+<details>
+<summary><strong>Prefer to drive it yourself? (CLI tour)</strong></summary>
+
+```bash
+# Discover printers on your network (mDNS + HTTP probe)
+kiln discover
+
+# Add your printer (see the printer table under "Supported Printers")
+kiln auth --name my-printer --host http://octopi.local --type octoprint --api-key YOUR_KEY
+# Other types:
+# kiln auth --name prusa  --host http://192.168.1.100      --type prusalink --api-key YOUR_KEY
+# kiln auth --name klipper --host http://192.168.1.100:7125 --type moonraker
+# kiln auth --name bambu  --host 192.168.1.100             --type bambu --access-code LAN_CODE --serial SERIAL
+
+kiln status                       # Printer state + job progress
+kiln upload model.gcode           # Upload a file
+kiln print model.gcode            # Start printing
+kiln slice model.stl --print-after  # Slice an STL and print in one step
+kiln print *.gcode --queue        # Batch print
+kiln wait                         # Monitor a running print
+kiln snapshot --save photo.jpg    # Webcam snapshot
+kiln history --status completed   # Print history
+
+# Every command supports --json for agent consumption
+kiln status --json
+```
+
+Global option: `--printer <name>` targets a specific printer per command. The full command reference is in [Project Docs](docs/PROJECT_DOCS.md).
+</details>
+
+<details>
+<summary><strong>Connect a specific agent (Claude Code, Claude Desktop, env vars)</strong></summary>
+
+**Claude Code** — add to `.claude/settings.json` (project) or `~/.claude/settings.json` (global):
+
+```json
+{
+  "mcpServers": {
+    "kiln": { "command": "kiln", "args": ["serve"] }
+  }
+}
+```
+
+Claude Code uses your `~/.kiln/config.yaml` for printer credentials (set via `kiln setup` or `kiln auth`). No env vars needed if a printer is already configured.
+
+**Claude Desktop** — add to `~/.config/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "kiln": {
+      "command": "python3",
+      "args": ["-m", "kiln", "serve"],
+      "env": {
+        "KILN_PRINTER_HOST": "http://192.168.1.100",
+        "KILN_PRINTER_API_KEY": "your_key",
+        "KILN_PRINTER_TYPE": "prusalink"
+      }
+    }
+  }
+}
+```
+
+Set `KILN_PRINTER_TYPE` to your backend: `octoprint`, `moonraker`, `bambu`, `prusalink`, `elegoo`, or `serial` — or skip env vars entirely if you've run `kiln setup`.
+
+**Any other LLM (OpenRouter)** — Kiln works with any model that supports OpenAI-compatible function calling, not just Claude:
+
+```bash
+export KILN_OPENROUTER_KEY=sk-or-...
+kiln agent --model openai/gpt-4o
+kiln agent --model meta-llama/llama-3.1-70b-instruct --tier essential
+```
+
+Tool tiers auto-match model capability: **essential** (16 tools) for smaller models, **standard** (61 tools) for mid-range, **full** (133 tools) for stronger models. All 808 tools are available over MCP via `kiln serve`.
+</details>
+
+<details>
+<summary><strong>Platform &amp; printer setup notes (Linux/WSL 2, Ethernet-only, Bambu)</strong></summary>
+
+### Prerequisites by printer type
+
+| Printer | `--type` | What you need |
+|---------|----------|---------------|
+| **Prusa MK4/XL/Mini+** | `prusalink` | IP + API key (Settings › Network › PrusaLink on the LCD) |
+| **OctoPrint** (any printer) | `octoprint` | OctoPrint URL + API key (Settings › API) |
+| **Klipper/Moonraker** | `moonraker` | Moonraker URL (usually `http://<ip>:7125`) |
+| **Creality K1/K2/Hi/Ender V4/V3 KE** | `creality` | IP + `printer_model` (e.g. `creality_k1_max`); probes local Moonraker ports |
+| **Bambu Lab** | `bambu` | IP + LAN access code + serial number (all on the LCD) |
+| **Elegoo** (SDCP) | `elegoo` | IP only — no auth. Neptune 4 / OrangeStorm Giga use `moonraker`. |
+| **Direct USB** (Marlin) | `serial` | USB cable only — no network. Ender 3, Prusa MK3, CR-10, any Marlin/RepRap printer. |
+
+Kiln only needs IP reachability on your LAN. Ethernet-only printers are fully supported.
+
+**Optional tools:** [PrusaSlicer](https://www.prusa3d.com/prusaslicer/) or OrcaSlicer for slicing STL → G-code (`brew install --cask prusaslicer`); [OpenSCAD](https://openscad.org/) for local text-to-3D generation (`brew install openscad`); set `KILN_GEMINI_API_KEY` to enable Gemini-generated geometry.
+
+### Linux / WSL 2
+
+`pipx` installs Kiln into its own isolated environment and puts `kiln` on your PATH. (The pip package is `kiln3d`; the CLI command is `kiln`.)
+
+```bash
+sudo apt install pipx && pipx ensurepath
+git clone https://github.com/codeofaxel/Kiln.git && cd Kiln
+pipx install ./kiln
+sudo apt install prusa-slicer openscad   # optional: slicing + generation
+kiln verify
+
+# Update / uninstall
+git pull && pipx install --force ./kiln
+pipx uninstall kiln3d
+```
+
+**WSL 2 networking:** WSL 2 uses NAT, so mDNS discovery (`kiln discover`) won't see printers on your home network. Connect directly by IP instead (same as Ethernet-only setups).
+
+### Ethernet-only printers (no Wi-Fi)
+
+Kiln works the same over Ethernet and Wi-Fi — it talks to printer APIs over LAN IP. Verify the printer endpoint responds, then register by IP:
+
+```bash
+curl http://<ip>/api/version                              # OctoPrint
+curl http://<ip>:7125/server/info                         # Moonraker / Creality (local Moonraker)
+curl -H "X-Api-Key: YOUR_KEY" http://<ip>/api/v1/status   # Prusa Link
+# Bambu uses MQTT — ensure port 8883 is reachable:  nc -zv <ip> 8883
+
+kiln auth --name my-printer --host http://<ip> --type prusalink --api-key YOUR_KEY
+```
+
+If PrusaSlicer isn't on your PATH: `export KILN_SLICER_PATH=/path/to/prusa-slicer`.
+
+### Bambu TLS &amp; webcam
+
+Kiln pins the printer certificate (TOFU) on first connection in `~/.kiln/bambu_tls_pins.json`. Overrides:
+
+```bash
+export KILN_BAMBU_TLS_MODE=ca         # strict CA/hostname (usually fails on stock self-signed printers)
+export KILN_BAMBU_TLS_MODE=insecure   # legacy, no validation — trusted LANs only
+export KILN_BAMBU_TLS_FINGERPRINT=0123abcd...   # explicit SHA-256 pin
+```
+
+Webcam capture is model-dependent: **A1, A1 Mini, P1P, P1S** serve frames over TLS+JPEG (no extra software). The **X1 series** (X1C, X1E) serves RTSPS, which Kiln relays via `ffmpeg` — so on an X1, both snapshots *and* the live stream need `ffmpeg` (`brew install ffmpeg` / `sudo apt install ffmpeg`). `can_snapshot` is reported `True` for every Bambu model; on an X1 without `ffmpeg`, the attempt surfaces a clear model-specific error rather than failing silently.
+</details>
+
 Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing)) add Git-for-3D versioning, product templates, assembly manuals, fleet workflows, SSO + SCIM, ERP webhooks, and long-term audit logs.
 
-### Why Kiln?
+## Why Kiln?
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
 - **No printer? No problem** — Outsource jobs to Craftcloud's 150+ manufacturing services through the hosted proxy, or use direct mode with your own provider credentials.
@@ -50,6 +214,18 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing)) add Git-for-3D ver
 - **Prints don't fail silently** — Cross-printer learning, automatic failure recovery, closed-loop AI generation feedback (failed prints auto-improve future generations), preflight safety checks on every job.
 - **Search → Slice → Print** — Search and download 3D models from MyMiniFactory and Cults3D (search only), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
 - **Safety at scale** — 44 named per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
+
+## Supported Printers
+
+| Backend | Status | Printers |
+|---------|--------|----------|
+| **OctoPrint** | Stable | Any OctoPrint-connected printer (Prusa, Ender, custom) |
+| **Moonraker** | Stable | Klipper-based printers (Voron, Ratrig, etc.) |
+| **Creality** | Stable when Moonraker is reachable | SPARKX i7, K1/K1 Max/K1C/K1 SE, K2/K2 Pro/K2 Plus/K2 SE, Creality Hi, Ender-3 V4/V3 KE, Ender-5 Max, CR-10 SE via local Moonraker. Older Marlin Creality printers use `serial` or `octoprint`. |
+| **Bambu** | Stable | Bambu Lab X1C, P1S, A1 (via LAN MQTT) |
+| **Prusa Link** | Stable | Prusa MK4, XL, Mini+ (local REST API — type: `prusalink`) |
+| **Elegoo** | Stable | Centauri Carbon, Saturn, Mars series (via LAN WebSocket/SDCP). Neptune 4 / OrangeStorm Giga use Moonraker. |
+| **Direct USB** | Stable | Any Marlin-based printer over USB (Ender 3, Prusa MK3, CR-10, etc.). No OctoPrint or Klipper needed — just a USB cable. Type: `serial`. |
 
 ## Architecture
 
@@ -74,7 +250,6 @@ graph TD
 
     D --> I["MyMiniFactory"]
     D --> J["Cults3D"]
-    D --> H["Thingiverse (deprecated)"]
 
     V --> V1["Branches"]
     V --> V2["Signed Releases"]
@@ -92,7 +267,6 @@ graph TD
     style E4 fill:#2d2d44,stroke:#e94560,color:#fff
     style E5 fill:#2d2d44,stroke:#e94560,color:#fff
     style F1 fill:#2d2d44,stroke:#27ae60,color:#fff
-    style H fill:#2d2d44,stroke:#533483,color:#fff
     style I fill:#2d2d44,stroke:#533483,color:#fff
     style J fill:#2d2d44,stroke:#533483,color:#fff
     style V1 fill:#2d2d44,stroke:#f59e42,color:#fff
@@ -100,7 +274,7 @@ graph TD
     style V3 fill:#2d2d44,stroke:#f59e42,color:#fff
 ```
 
-Kiln connects AI agents to **OctoPrint**, **Moonraker** (Klipper), **Creality** (Moonraker-backed), **Bambu Lab**, **Prusa Link**, and **Elegoo** printers. Agents can also outsource jobs through **Craftcloud** fulfillment, and search models on **MyMiniFactory**, **Cults3D** (search only), and **Thingiverse**. On Pro and up, the design store itself is versioned — branches, signed releases, and cross-machine cloud sync are first-class outputs of the system, not a side database.
+Agents can also outsource jobs through **Craftcloud** fulfillment and search models on **MyMiniFactory** and **Cults3D** (search only). On Pro and up, the design store itself is versioned — branches, signed releases, and cross-machine cloud sync are first-class outputs of the system, not a side database.
 
 ## Git for 3D
 
@@ -151,747 +325,23 @@ flowchart TD
 
 Patent pending across semantic mesh merge, outcome-correlated branching, and signed-release-with-physical-provenance.
 
-## Packages
-
-This monorepo contains two packages:
-
-| Package | Description | Entry Point |
-|---------|-------------|-------------|
-| **kiln** | CLI + MCP server for multi-printer control (OctoPrint, Moonraker, Creality, Bambu, Prusa Link, Elegoo, Direct USB) | `kiln` or `python -m kiln` |
-| **octoprint-cli** | Lightweight standalone CLI for OctoPrint-only setups | `octoprint-cli` |
-
-## Prerequisites
-
-Before installing Kiln, you need your printer's LAN details (Ethernet or Wi-Fi):
-
-| Printer | Type | What You Need |
-|---------|------|---------------|
-| **Prusa MK4/XL/Mini+** | `prusalink` | IP address + API key (both in Settings > Network > PrusaLink on the printer's LCD) |
-| **OctoPrint** (any printer) | `octoprint` | OctoPrint URL + API key (Settings > API in OctoPrint web UI) |
-| **Klipper/Moonraker** | `moonraker` | Moonraker URL (usually `http://<ip>:7125`) |
-| **Creality SPARKX/K1/K2/Hi/Ender V4/V3 KE** | `creality` | Printer IP + `printer_model` (e.g. `creality_k1_max`); Kiln probes local Moonraker ports |
-| **Bambu Lab** | `bambu` | IP address + LAN access code + serial number (all on the printer's LCD) |
-| **Elegoo** (SDCP printers) | `elegoo` | IP address only — no authentication required. For Neptune 4/OrangeStorm Giga, use `moonraker` instead. |
-| **Direct USB** (Marlin) | `serial` | USB cable only — no network, no OctoPrint, no Klipper. Works with Ender 3, Prusa MK3, CR-10, any Marlin/RepRapFirmware printer. |
-
-Kiln only needs IP reachability on your local LAN. Ethernet-only printers are fully supported. Direct USB printers just need a USB cable — no network at all.
-
-**Optional:** Install [PrusaSlicer](https://www.prusa3d.com/prusaslicer/) or OrcaSlicer to slice STL files directly from Kiln (`brew install --cask prusaslicer` on macOS).
-
-**Optional:** Install [OpenSCAD](https://openscad.org/) for AI model generation via Gemini Deep Think (`brew install openscad` on macOS). Gemini Deep Think can generate 3D-printable models from text descriptions — OpenSCAD compiles the generated geometry to STL. Set `KILN_GEMINI_API_KEY` to enable.
-
-## Quick Start
-
-### Kiln CLI
-
-```bash
-pip install kiln3d
-
-# Discover printers on your network (mDNS + HTTP probe)
-kiln discover
-
-# Add your printer (pick your type from the Prerequisites table)
-kiln auth --name my-printer --host http://octopi.local --type octoprint --api-key YOUR_KEY
-# Other printer types:
-# kiln auth --name prusa --host http://192.168.1.100 --type prusalink --api-key YOUR_KEY
-# kiln auth --name klipper --host http://192.168.1.100:7125 --type moonraker
-# kiln auth --name bambu --host 192.168.1.100 --type bambu --access-code LAN_CODE --serial SERIAL
-# If discovery misses your printer (common on WSL/VLANs), connect directly by IP with kiln auth.
-
-# Check printer status
-kiln status
-
-# Upload and print a file
-kiln upload model.gcode
-kiln print model.gcode
-
-# Slice an STL and print in one step
-kiln slice model.stl --print-after
-
-# Batch print multiple files
-kiln print *.gcode --queue
-
-# Monitor a running print
-kiln wait
-
-# Take a webcam snapshot
-kiln snapshot --save photo.jpg
-
-# View print history
-kiln history --status completed
-
-# All commands support --json for agent consumption
-kiln status --json
-```
-
-### Ethernet-Only Printers (No Wi-Fi)
-
-Kiln works the same over Ethernet and Wi-Fi because it talks to printer APIs over LAN IP.
-
-```bash
-# 1. Connect printer and host to the same router/switch
-# 2. Find printer IP from the printer UI or your router DHCP client list
-# 3. Verify the printer endpoint responds:
-curl http://<printer-ip>/api/version                    # OctoPrint
-curl http://<printer-ip>:7125/server/info               # Moonraker
-curl http://<printer-ip>:7125/server/info               # Creality K1/K2/Hi when local Moonraker is reachable
-curl -H "X-Api-Key: YOUR_KEY" http://<printer-ip>/api/v1/status   # Prusa Link
-
-# 4. Register directly by IP (no discovery required)
-kiln auth --name my-printer --host http://<printer-ip> --type prusalink --api-key YOUR_KEY
-```
-
-### Linux / WSL 2
-
-Kiln runs natively on Linux and Ubuntu under WSL 2.
-
-#### Option 1: pipx (recommended)
-
-`pipx` installs Kiln into its own isolated environment and puts the `kiln`
-command on your PATH — works from any directory, no virtualenv to manage.
-
-> **Note:** The pip package name is **`kiln3d`** (not `kiln`). This matters
-> for `pipx uninstall`, `pip show`, etc. The CLI command is still `kiln`.
-
-```bash
-# One-time: install pipx
-sudo apt install pipx
-pipx ensurepath   # adds ~/.local/bin to PATH (restart your shell after)
-
-# Clone and install
-git clone https://github.com/codeofaxel/Kiln.git
-cd Kiln
-pipx install ./kiln
-
-# System dependencies (optional but recommended)
-sudo apt install prusa-slicer   # Required for slicing STL → G-code
-sudo apt install openscad        # Required only for text-to-3D generation
-
-# Verify
-kiln verify
-```
-
-#### Uninstall / Update
-
-```bash
-# Uninstall (package name is kiln3d, not kiln)
-pipx uninstall kiln3d
-
-# Update to latest version (if installed from a git clone)
-cd Kiln
-git pull
-pipx install --force ./kiln
-
-# Check what pipx has installed (useful for troubleshooting)
-pipx list
-```
-
-#### Option 2: virtualenv
-
-If you prefer a manual virtualenv:
-
-```bash
-python3 -m venv ~/.kiln-venv
-source ~/.kiln-venv/bin/activate
-
-git clone https://github.com/codeofaxel/Kiln.git
-cd Kiln
-pip install -e ./kiln            # includes all printer backends (OctoPrint, Moonraker, Creality, Bambu, Prusa Link, Elegoo)
-
-kiln verify
-```
-
-> **Tip:** Add `source ~/.kiln-venv/bin/activate` to your `~/.bashrc` so
-> the `kiln` command is always available when you open a terminal.
-
-**WSL 2 networking note:** WSL 2 uses a virtual network (NAT), so mDNS printer
-discovery (`kiln discover`) will not find printers on your home network. Instead,
-connect directly by IP (same flow for Ethernet-only printers):
-
-```bash
-# 1. Find your printer's IP (check your router or the printer's LCD/web UI)
-# 2. Verify connectivity from WSL
-curl http://192.168.1.100:7125/server/info                              # Moonraker (Klipper)
-curl http://192.168.1.100:7125/server/info                              # Creality K1/K2/Hi local Moonraker path
-curl http://192.168.1.100/api/version                                   # OctoPrint
-curl -H "X-Api-Key: YOUR_KEY" http://192.168.1.100/api/v1/status       # Prusa Link
-# Bambu printers use MQTT — just ensure port 8883 is reachable:
-# nc -zv 192.168.1.100 8883
-
-# 3. Register the printer with Kiln (pick your type)
-kiln auth --name my-printer --host http://192.168.1.100:7125 --type moonraker
-# kiln auth --name prusa --host http://192.168.1.100 --type prusalink --api-key YOUR_KEY
-# kiln auth --name bambu --host 192.168.1.100 --type bambu --access-code LAN_CODE --serial SERIAL
-
-# 4. Check printer status
-kiln status
-```
-
-If PrusaSlicer is not in your PATH, set it explicitly:
-```bash
-export KILN_SLICER_PATH=/path/to/prusa-slicer
-```
-
-**Bambu TLS security defaults:** Kiln now uses certificate pinning (`pin` mode) for Bambu by default.
-On first successful connection, the printer certificate fingerprint is pinned (TOFU) in
-`~/.kiln/bambu_tls_pins.json`. Advanced overrides:
-
-```bash
-# Strict CA/hostname validation (usually fails on stock self-signed printers)
-export KILN_BAMBU_TLS_MODE=ca
-
-# Legacy behavior (no certificate validation) - use only on trusted LANs
-export KILN_BAMBU_TLS_MODE=insecure
-
-# Optional explicit pin (SHA-256 fingerprint, hex with or without colons)
-export KILN_BAMBU_TLS_FINGERPRINT=0123abcd...
-```
-
-**Bambu webcam capture is model-dependent.** The **A1, A1 Mini, P1P, and P1S** serve camera frames over a TLS+JPEG path that needs no extra software. The **X1 series** (X1C, X1E) serves its camera over RTSPS, which Kiln relays using `ffmpeg` — so on an X1, both snapshots *and* the continuous stream need `ffmpeg` installed:
-```bash
-# macOS
-brew install ffmpeg
-
-# Ubuntu/Debian
-sudo apt install ffmpeg
-```
-`can_snapshot` is reported `True` for every Bambu model so any agent can attempt a snapshot; on an X1 without `ffmpeg`, the attempt surfaces a clear model-specific `PrinterError` rather than failing silently.
-
-### CLI Commands
-
-```
-kiln discover                              # Scan LAN for printers (mDNS + HTTP probe)
-kiln auth --name N --host H --type T       # Save printer credentials
-kiln doctor-prusa [--json]                 # Prusa Link diagnostics (endpoints + storage roots)
-kiln status [--json]                       # Printer state + job progress
-kiln files [--json]                        # List files on printer
-kiln upload <file> [--json]                # Upload G-code file
-kiln print <files>... [--queue] [--json]   # Start printing (supports batch + queue)
-kiln cancel [--json]                       # Cancel current print
-kiln pause [--json]                        # Pause current print
-kiln resume [--json]                       # Resume paused print
-kiln emergency-stop [--printer N|--all]    # Trip emergency stop latch (single printer or fleet)
-kiln emergency-status [--printer N|--all]  # Inspect emergency latch/interlock state
-kiln emergency-clear --ack-note "..."      # Acknowledge and clear emergency latch
-kiln temp [--tool N] [--bed N] [--json]    # Get/set temperatures
-kiln gcode <cmds>... [--json]              # Send raw G-code
-kiln printers [--json]                     # List saved printers
-kiln use <name>                            # Switch active printer
-kiln remove <name>                         # Remove a saved printer
-kiln preflight [--material MAT] [--json]   # Pre-print safety checks
-kiln slice <file> [--print-after] [--json] # Slice STL/3MF to G-code (material-aware temps + smart supports)
-kiln snapshot [--save PATH] [--json]       # Capture webcam snapshot
-kiln wait [--timeout N] [--json]           # Wait for print to finish
-kiln history [--status S] [--json]         # View past prints
-kiln order materials [--json]              # List fulfillment materials
-kiln order quote <file> -m MAT [--json]   # Get manufacturing quote
-kiln order place <quote_id> [--json]      # Place a fulfillment order
-kiln order status <order_id> [--json]     # Track order status
-kiln order cancel <order_id> [--json]     # Cancel an order
-kiln cost <file> [--material PLA] [--json]    # Estimate print cost
-kiln material set|show|spools|add-spool       # Material tracking
-kiln level [--status] [--trigger] [--json]    # Bed leveling triggers
-kiln stream [--port 8081] [--stop] [--json]   # Webcam MJPEG proxy
-kiln sync status|now|configure                # Cloud sync
-kiln local-first [--apply] [--write-env]     # Local-first profile for edge/AGX deployments (backs up cloud sync config before disabling)
-kiln ingest watch --dir ~/incoming [--auto-queue] [--once] [--state-file ~/.kiln/ingest_service/watch_state.json] [--min-stable-seconds N]
-kiln ingest service install --dir ~/incoming [--auto-queue]  # Install opt-in background watcher config (detect-only by default)
-kiln ingest service start|stop|status                           # Run and manage watcher as a background service
-kiln plugins list|info                        # Plugin management
-kiln install-mcp                              # Install Kiln into supported MCP clients
-kiln uninstall-mcp                            # Remove Kiln from supported MCP clients
-kiln preview model.stl                        # Render a visual preview before slicing/printing
-kiln validate model.stl                       # Check a model for print readiness
-kiln repair model.stl                         # Repair common mesh defects
-kiln generate "a phone stand" --provider meshy --json   # Generate 3D model from text (meshy/tripo3d/stability/gemini/openscad)
-kiln generate-and-print "a phone stand" --provider gemini --material PLA   # One-command generate -> preview -> slice -> upload
-kiln generate-status <job_id> --json                    # Check generation status
-kiln generate-download <job_id> -o ./models --json      # Download generated model
-kiln assembly-manual --assembly assembly.json --out ./assembly_manual  # Generate a printable assembly manual (Pro)
-kiln firmware status --json                # Check for firmware updates
-kiln firmware update [--component klipper] # Apply firmware updates
-kiln firmware rollback <component>         # Roll back firmware
-kiln fleet route --material PLA [--file model.gcode] --json   # Mixed-fleet printer recommendation
-kiln partner connect --name N --location L # Connect provider account/listing (integration preview)
-kiln partner find --material PLA           # Find provider capacity by material/location
-kiln partner submit URL --material PLA     # Submit job through a connected provider integration
-kiln partner status <job_id>               # Check provider-managed job status
-kiln partner list                          # List connected provider capacity listings
-kiln partner sync <id> --available         # Sync provider capacity availability
-# Legacy alias (deprecated in v0.2.0, removal target v0.4.0):
-# kiln network register|find|submit|status|list|update
-kiln setup                                 # Interactive printer setup wizard
-kiln serve                                 # Start MCP server
-kiln rest [--port 8420] [--tier full] [--auth-token TOKEN]  # Start kiln-pro REST API server when installed
-kiln agent [--model openai/gpt-4o]         # Interactive agent REPL (any LLM)
-```
-
-The REST API server is provided by kiln-pro. Public Kiln also knows how to proxy tier-gated pro tool calls through the hosted Kiln REST API when the machine is paired.
-
-Global option: `--printer <name>` to target a specific printer per-command.
-
-### MCP Server
-
-```bash
-# Start the MCP server (uses printer from ~/.kiln/config.yaml)
-kiln serve
-
-# Or override with environment variables
-export KILN_PRINTER_HOST=http://192.168.1.100    # Your printer's IP or hostname
-export KILN_PRINTER_API_KEY=your_api_key          # API key (OctoPrint/Moonraker/Creality/Prusa Link)
-export KILN_PRINTER_MODEL=creality_k1_max         # Optional safety/profile key
-export KILN_PRINTER_TYPE=prusalink                # octoprint | moonraker | bambu | prusalink | elegoo | serial
-kiln serve
-```
-
-#### Claude Code Integration
-
-Add to your project's `.claude/settings.json` (or global `~/.claude/settings.json`):
-
-```json
-{
-  "mcpServers": {
-    "kiln": {
-      "command": "kiln",
-      "args": ["serve"]
-    }
-  }
-}
-```
-
-> **Note:** Claude Code uses your `~/.kiln/config.yaml` for printer credentials (set up via `kiln setup` or `kiln auth`). No env vars needed if you've already configured a printer.
-
-#### Claude Desktop Integration
-
-Add to `~/.config/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "kiln": {
-      "command": "python3",
-      "args": ["-m", "kiln", "serve"],
-      "env": {
-        "KILN_PRINTER_HOST": "http://192.168.1.100",
-        "KILN_PRINTER_API_KEY": "your_key",
-        "KILN_PRINTER_TYPE": "prusalink"
-      }
-    }
-  }
-}
-```
-
-> **Tip:** Replace `KILN_PRINTER_TYPE` with your backend: `octoprint`, `moonraker`, `bambu`, `prusalink`, `elegoo`, or `serial`. Or skip env vars entirely if you've already run `kiln setup`.
-
-### Multi-Model Support (OpenRouter / Any LLM)
-
-Kiln works with **any** LLM that supports OpenAI-compatible function calling — not just Claude.
-
-```bash
-# Interactive agent REPL with any model via OpenRouter
-export KILN_OPENROUTER_KEY=sk-or-...
-kiln agent --model openai/gpt-4o
-kiln agent --model anthropic/claude-sonnet-4
-kiln agent --model meta-llama/llama-3.1-70b-instruct --tier essential
-
-# Hosted/pro REST calls are available when the machine is paired
-kiln signin
-kiln pair KLN-ABCD-EFGH
-```
-
-Tool tiers automatically match model capability: **essential** (16 tools) for smaller models, **standard** (61 tools) for mid-range, **full** (133 tools) for stronger models. All 808 tools are available via MCP (`kiln serve`).
-
-### OctoPrint CLI
-
-```bash
-# Install
-pip install -e ./octoprint-cli
-
-# Initialize config
-octoprint-cli init --host http://octopi.local --api-key YOUR_KEY
-
-# Use
-octoprint-cli status
-octoprint-cli files
-octoprint-cli print myfile.gcode --confirm
-```
-
-## MCP Tools (Selected)
-
-The Kiln MCP server (`kiln serve`) exposes **808 tools** to agents, plus prompts and resources for **815 total MCP capabilities**. Key tools are listed below — MCP clients can use `get_skill_manifest` and ToolSearch-style discovery to browse the complete catalog.
-
-| Tool | Description |
-|------|-------------|
-| `printer_status` | Get printer state, temperatures, job progress |
-| `printer_files` | List available G-code files |
-| `upload_file` | Upload a local G-code file to the printer |
-| `start_print` | Start printing a file |
-| `cancel_print` | Cancel the active print job |
-| `pause_print` | Pause the active print |
-| `resume_print` | Resume a paused print |
-| `emergency_stop` | Trigger emergency stop latch for one or all printers |
-| `emergency_status` | Read emergency latch/interlock status |
-| `clear_emergency_stop` | Acknowledge and clear emergency latch |
-| `emergency_trip_input` | Secure external-input trigger (button/PLC bridge) |
-| `set_temperature` | Set hotend and/or bed temperature |
-| `preflight_check` | Run safety checks before printing |
-| `send_gcode` | Send raw G-code commands |
-| `validate_gcode` | Validate G-code without sending |
-| `fleet_status` | Get status of all registered printers |
-| `register_printer` | Add a printer to the fleet |
-| `submit_job` | Submit a print job to the queue |
-| `job_status` | Check status of a queued job |
-| `queue_summary` | Overview of the job queue |
-| `cancel_job` | Cancel a queued or running job |
-| `recent_events` | Get recent events from the event bus |
-| `kiln_health` | System health check (version, uptime, modules) |
-| `register_webhook` | Register a webhook for event notifications |
-| `list_webhooks` | List all registered webhooks |
-| `delete_webhook` | Remove a webhook endpoint |
-| `search_all_models` | Search configured model marketplaces simultaneously |
-| `marketplace_info` | Show connected marketplaces and setup hints |
-| `search_models` | Search a single marketplace for 3D models |
-| `model_details` | Get details for a marketplace model |
-| `model_files` | List files for a marketplace model |
-| `download_model` | Download a model file from a marketplace |
-| `download_and_upload` | Download from any marketplace and upload to printer in one step |
-| `browse_models` | Browse popular/newest/featured models |
-| `list_model_categories` | List marketplace categories |
-| `list_plate_objects` | List individual objects on each plate of a .gcode.3mf file |
-| `extract_plate_object` | Extract G-code for a single object from a multi-object .gcode.3mf |
-| `print_plate_object` | Extract a single object and print it (extract → upload → print) |
-| `resolve_model_source` | Identify where a .3mf file came from (MakerWorld, etc.) |
-| `slice_model` | Slice an STL/3MF file to G-code |
-| `find_slicer` | Detect installed slicer (PrusaSlicer/OrcaSlicer) |
-| `slice_and_print` | Slice a model then upload and print in one step (auto-detects AMS material, auto-injects brim/raft) |
-| `slice_and_estimate` | Dry-run slice: time, filament, printability, and adhesion estimates without printing |
-| `analyze_printability` | Deep printability analysis: overhangs, thin walls, bridging, adhesion, support volume (score 0-100) |
-| `auto_orient_model` | Find optimal print orientation by scoring rotations for adhesion/supports/overhangs |
-| `estimate_supports` | Estimate support volume and whether supports are needed |
-| `recommend_adhesion_settings` | Recommend brim/raft settings based on geometry + material + printer type |
-| `diagnose_print_failure_live` | Real-time failure diagnosis from printer state + model geometry + printer intelligence |
-| `retry_print_with_fix` | Diagnose a failure, apply slicer overrides, re-slice, and reprint in one step |
-| `get_active_material` | Get the currently loaded AMS filament (type, color, remaining) |
-| `check_print_health` | Single-shot health check: temp drift, errors, progress assessment |
-| `monitor_print` | Standardized print monitoring report (progress, temps, speed, camera snapshot, auto-comments) |
-| `multi_copy_print` | Print multiple copies arranged on one plate (PrusaSlicer `--duplicate` or STL mesh duplication fallback) |
-| `printer_snapshot` | Capture a webcam snapshot from the printer |
-| `fulfillment_materials` | List materials from external print services (Craftcloud) |
-| `fulfillment_quote` | Get a manufacturing quote for a 3D model |
-| `save_shipping_profile` | Save a local shipping/contact profile after explicit consent |
-| `list_shipping_profiles` | List saved local shipping profiles |
-| `delete_shipping_profile` | Delete a saved local shipping profile |
-| `issue_shipping_confirmation_token` | Confirm reviewed shipping/contact details before ordering |
-| `fulfillment_order` | Place an order after preview and shipping confirmation |
-| `fulfillment_order_status` | Track a fulfillment order |
-| `fulfillment_cancel` | Cancel a fulfillment order |
-| `estimate_cost` | Estimate print cost from G-code file |
-| `list_materials` | List available material profiles |
-| `set_material` | Set loaded material on a printer |
-| `get_material` | Get loaded material for a printer |
-| `check_material_match` | Verify material matches expected |
-| `list_spools` | List spool inventory |
-| `add_spool` | Add a spool to inventory |
-| `remove_spool` | Remove a spool from inventory |
-| `get_material_properties` | Get full material property sheet (thermal, mechanical, chemical, design limits) |
-| `compare_materials` | Side-by-side comparison of two materials across all properties |
-| `suggest_material` | Recommend materials based on requirements (strength, flexibility, heat resistance, etc.) |
-| `build_material_overrides` | Generate slicer overrides for a material+printer combination |
-| `reprint_with_material` | Reprint an existing model in a different material with auto-generated overrides |
-| `smart_reprint` | Intelligent reprint: finds file, detects AMS slot, switches material, and prints |
-| `multi_material_print` | Print multiple objects in different materials/colors on one build plate |
-| `bed_level_status` | Get bed leveling status for a printer |
-| `trigger_bed_level` | Trigger bed leveling on a printer |
-| `set_leveling_policy` | Configure auto-leveling policy |
-| `webcam_stream` | Start/stop/status MJPEG stream proxy |
-| `cloud_sync_status` | Get cloud sync status |
-| `cloud_sync_now` | Trigger immediate sync |
-| `cloud_sync_configure` | Configure cloud sync settings |
-| `list_plugins` | List installed plugins |
-| `plugin_info` | Get details for a specific plugin |
-| `await_print_completion` | Poll until a print job finishes (completed/failed/cancelled/timeout) |
-| `compare_print_options` | Side-by-side local vs. fulfillment cost comparison |
-| `analyze_print_failure` | Diagnose a failed print job with causes and recommendations |
-| `validate_print_quality` | Post-print quality assessment with snapshot and event analysis |
-| `generate_model` | Generate a 3D model from text (Meshy, Tripo3D, Stability AI, Gemini Deep Think, or OpenSCAD) |
-| `generate_original_design` | Closed-loop original design generation: printer-aware prompt -> generate -> audit -> corrective retry |
-| `generation_status` | Check the status of a model generation job |
-| `download_generated_model` | Download a completed generated model with mesh validation |
-| `await_generation` | Wait for a generation job to complete (polling) |
-| `generate_and_print` | Full pipeline: generate -> validate -> slice -> upload -> print |
-| `validate_generated_mesh` | Validate an STL/OBJ mesh for printing readiness |
-| `firmware_status` | Check for available firmware updates on the printer |
-| `update_firmware` | Start a firmware update (all or specific component) |
-| `rollback_firmware` | Roll back a firmware component to its previous version |
-| `print_history` | Get recent print history with success/failure tracking |
-| `printer_stats` | Aggregate stats for a printer (total prints, success rate, avg duration) |
-| `annotate_print` | Add notes to a completed print record |
-| `save_agent_note` | Save a persistent note/preference that survives across sessions |
-| `get_agent_context` | Retrieve all stored agent memory for context |
-| `delete_agent_note` | Remove a stored note or preference |
-| `list_safety_profiles` | List all bundled printer safety profiles (44 named models plus default/generic profiles) |
-| `get_safety_profile` | Get temperature/feedrate/flow limits for a specific printer |
-| `validate_gcode_safe` | Validate G-code against printer-specific safety limits |
-| `list_slicer_profiles` | List all bundled slicer profiles with recommended settings |
-| `get_slicer_profile` | Get full slicer settings (speeds, retraction, temps) for a printer |
-| `get_printer_intelligence` | Firmware quirks, material compatibility, calibration guidance |
-| `get_material_recommendation` | Recommended hotend/bed/fan settings for a material on a printer |
-| `troubleshoot_printer` | Diagnose printer issues from known failure modes database |
-| `list_print_pipelines` | List available pre-validated pipelines (quick_print, calibrate, benchmark) |
-| `run_quick_print` | Full pipeline: slice → validate → upload → print in one shot |
-| `run_calibrate` | Home → bed level → calibration guidance pipeline |
-| `run_benchmark` | Slice → upload → stats report (manual start) |
-| `monitor_print_vision` | Capture snapshot + printer state + phase hints; agent's vision model analyzes for defects |
-| `watch_print` | Poll printer with periodic snapshots; returns batch for agent vision review |
-| `record_print_outcome` | Record print quality outcome with safety-validated settings |
-| `get_printer_insights` | Query cross-printer learning: success rates, failure breakdown, material stats |
-| `suggest_printer_for_job` | Rank printers by historical success for a file/material combination |
-| `recommend_settings` | Recommend print settings (temps, speed, slicer profile) from historical successes |
-| `connect_provider_account` | Connect a local listing to a partner provider integration *(as integrations launch)* |
-| `sync_provider_capacity` | Sync provider availability/capacity for a connected listing *(as integrations launch)* |
-| `list_provider_capacity` | List capacity/listings from connected provider integrations *(as integrations launch)* |
-| `find_provider_capacity` | Search connected provider capacity by material/location *(as integrations launch)* |
-| `submit_provider_job` | Submit a print job through a connected provider integration *(as integrations launch)* |
-| `provider_job_status` | Check status of a provider-managed job *(as integrations launch)* |
-| `billing_status` | Get billing status, fee policy, and payment methods |
-| `billing_summary` | Aggregated billing summary |
-| `billing_history` | Recent billing charges and payment outcomes |
-| `billing_setup_url` | Get URL to link a payment method (Stripe) |
-| `safety_audit` | Audit safety compliance across jobs |
-| `safety_settings` | Get current safety and auto-print settings |
-| `safety_status` | Comprehensive safety status check |
-| `delete_file` | Delete a file from the printer |
-| `cache_model` | Cache a downloaded model locally for reuse |
-| `search_cached_models` | Search cached models by name, source, or tags |
-| `list_cached_models` | List all cached models with metadata |
-| `get_cached_model` | Get details and local path for a cached model |
-| `delete_cached_model` | Remove a model from the local cache |
-| `backup_database` | Create a timestamped backup of the Kiln SQLite database |
-| `verify_audit_integrity` | Verify integrity of the audit log (hash chain validation) |
-| `clean_agent_memory` | Prune stale or expired agent memory entries |
-| `list_trusted_printers` | List printers in the trust store with verification status |
-| `trust_printer` | Add a printer to the trust store (fingerprint + TLS pinning) |
-| `untrust_printer` | Remove a printer from the trust store |
-| `pipeline_status` | Get real-time status of a running pipeline |
-| `pipeline_pause` | Pause a running pipeline at the current step boundary |
-| `pipeline_resume` | Resume a paused pipeline |
-| `pipeline_abort` | Abort a running or paused pipeline |
-| `pipeline_retry_step` | Retry the failed step in a pipeline |
-| `consumer_onboarding` | Step-by-step guide for users without a 3D printer |
-| `validate_shipping_address` | Validate and normalize a shipping address |
-| `suggest_material_for_order` | Suggest material for fulfillment orders by use case (decorative, functional, outdoor, etc.) |
-| `estimate_price` | Instant price estimate before requesting a full quote |
-| `estimate_timeline` | Order-to-delivery timeline with per-stage breakdown |
-| `fulfillment_compare_providers` | Side-by-side quotes from all fulfillment providers |
-| `fulfillment_filter_materials` | Search/filter materials by technology, color, price |
-| `fulfillment_batch_quote` | Quote multiple parts in one operation (assemblies) |
-| `fulfillment_provider_health` | Health status of all fulfillment providers |
-| `fulfillment_order_history` | View past orders for status review or reorder |
-| `fulfillment_reorder` | Look up past order details for easy reordering |
-| `fulfillment_insurance_options` | Shipping insurance/protection options with pricing |
-| `supported_shipping_countries` | List countries supported for fulfillment shipping |
-| `export_audit_trail` | Export audit trail as JSON/CSV with date range, tool, action, and session filters (Enterprise) |
-| `lock_safety_profile` | Admin-lock a safety profile to prevent agent modifications (Enterprise) |
-| `unlock_safety_profile` | Unlock a previously locked safety profile (Enterprise) |
-| `manage_team_member` | Add, remove, or update team member roles (admin/engineer/operator) (Enterprise) |
-| `printer_usage_summary` | Per-printer usage summary for overage billing (Enterprise) |
-| `uptime_report` | Rolling uptime metrics (1h/24h/7d/30d) with SLA tracking (Enterprise) |
-| `encryption_status` | Check G-code encryption status and key configuration (Enterprise) |
-| `report_printer_overage` | Report printer overage billing details (Enterprise) |
-| `configure_sso` | Configure SSO provider (OIDC/SAML) with IdP settings (Enterprise) |
-| `sso_login_url` | Generate SSO login URL for OIDC/SAML authentication (Enterprise) |
-| `sso_exchange_code` | Exchange authorization code for session token via SSO (Enterprise) |
-| `sso_status` | Check SSO configuration and provider status (Enterprise) |
-| `rotate_encryption_key` | Re-encrypt all G-code files with a new key (Enterprise) |
-| `database_status` | Check database backend (SQLite/PostgreSQL) health and config (Enterprise) |
-| `list_fleet_sites` | List all physical sites in the fleet with printer counts (Enterprise) |
-| `fleet_status_by_site` | Fleet status grouped by physical site (Enterprise) |
-| `update_printer_site` | Assign a printer to a physical site/location (Enterprise) |
-| `create_project` | Create a client project for cost allocation (Enterprise) |
-| `log_project_cost` | Log a cost entry (material, printer time, labor, etc.) against a project (Enterprise) |
-| `project_cost_summary` | Aggregate cost summary with budget tracking for a project (Enterprise) |
-| `client_cost_report` | Cross-project cost report for a client (Enterprise) |
-| `analyze_design_requirements` | Functional-requirements analysis (materials, patterns, constraints). For the user-facing saved-goal flow that drives the audit + post-print review, use `design_session` (kiln-pro). |
-| `build_generation_prompt` | Turn a natural-language idea into a printer-aware, design-constrained generation prompt |
-| `audit_original_design` | Harsh original-design audit: brief + validation + printability + diagnostics + feedback |
-| `get_material_design_profile` | Full engineering properties for a 3D printing material |
-| `list_design_materials` | List all available materials with summary properties |
-| `recommend_design_material` | Recommend the best material for a design task |
-| `estimate_structural_load` | Estimate safe structural load for a cantilevered section |
-| `check_material_environment` | Check whether a material is compatible with an environment |
-| `get_printer_design_capabilities` | Get the design capability profile for a printer |
-| `list_printer_design_profiles` | List all known printer design capability profiles |
-| `get_design_template_info` | Get detailed design rules for a functional template (snap-fit, living hinge, etc.) |
-| `list_design_templates_catalog` | List all available design templates with descriptions |
-| `find_design_templates` | Find design templates that apply to a specific use case |
-| `match_design_requirements` | Identify which functional requirements apply to a design task |
-| `validate_design_for_requirements` | Validate a 3D model against functional design requirements |
-| `troubleshoot_print_issue` | Diagnose a 3D printing problem by material and symptom |
-| `check_printer_material_compatibility` | Check if a specific printer can handle a material |
-| `get_post_processing_guide` | Post-processing techniques for finishing a 3D printed part |
-| `check_multi_material_pairing` | Check if two materials can be co-printed in dual extrusion |
-| `get_print_diagnostic` | Comprehensive print diagnostic combining multiple knowledge sources |
-
-### Adaptive Slicing
-
-| Tool | Description |
-|------|-------------|
-| `generate_adaptive_slicing_plan` | Analyze geometry and generate per-region layer height optimization |
-| `quick_adaptive_plan` | All-in-one analyze + plan for adaptive slicing |
-| `export_adaptive_slicer_config` | Export adaptive plan to PrusaSlicer, OrcaSlicer, or Cura format |
-| `estimate_adaptive_time_savings` | Estimate time savings vs uniform layer height |
-
-### Decoration & Textures
-
-| Tool | Description |
-|------|-------------|
-| `decorate_surface` | Apply QR codes, photos, logos, text, or SVGs to any model face (emboss or deboss) |
-| `apply_procedural_texture` | Apply procedural textures (tiger stripe, marble, camo, wood, honeycomb, etc.) to a model |
-| `preview_texture_2d` | Fast 2D texture preview before 3D application |
-| `apply_image_texture` | Apply a photographic or image-based texture with cylinder detection |
-| `save_decoration` | Save a proven decoration (photo, SVG, QR, text) for reuse across models |
-| `list_decorations` | List saved decorations |
-| `iterate_decoration` | Iterate a decoration version with adjustments |
-
-### Product Templates (Pro)
-
-| Tool | Description |
-|------|-------------|
-| `generate_coaster` | Generate a coaster with optional QR, logo, photo, or text decoration |
-| `generate_keychain` | Generate a keychain (rectangle/circle/oval/heart) with front decoration |
-| `generate_ornament` | Generate a hanging ornament (disc/star) with front/back decoration |
-| `generate_pet_tag` | Generate a pet ID tag with name text and optional QR |
-| `generate_jewelry_tray` | Generate a jewelry tray with dividers and decoration |
-| `generate_ashtray` | Generate an ashtray with rim notches and interior/exterior decoration |
-| `generate_wall_plaque` | Generate a wall plaque with photo emboss (coin/posterize pipeline) |
-| `generate_pet_bowl` | Generate a pet bowl with exterior decoration |
-| `generate_bookmark` | Generate a bookmark with page clip and decoration |
-| `generate_fridge_magnet` | Generate a fridge magnet with front decoration and rear magnet recess |
-
-### Mid-Print Modification & Resume (Pro)
-
-| Tool | Description |
-|------|-------------|
-| `plan_mid_print_decoration` | Plan a decoration injection on a paused print |
-| `apply_mid_print_decoration_plan` | Execute a planned mid-print decoration with atomic revert |
-| `resume_interrupted_print` | One-call resume from the exact layer a print stopped — works on any FDM printer |
-| `analyze_mid_print_impact` | Analyze the structural impact of a proposed mid-print modification |
-| `preview_mid_print_session` | Preview what a mid-print modification will look like before committing |
-
-### Design Provenance & Learning (Pro)
-
-| Tool | Description |
-|------|-------------|
-| `save_design_version` | Save a design version with parametric source and provenance metadata |
-| `get_design_version` | Retrieve a design version with its full ancestry chain |
-| `diff_design_versions` | Geometric diff between two design versions |
-| `check_design_regression` | Detect if a design change caused a regression in print success |
-| `record_design_version_outcome` | Record a print outcome against a specific design version |
-| `get_proven_recipe` | Query provenance history for the best-performing parameters |
-| `get_regression_alerts` | Get active regression alerts for designs that stopped printing well |
-| `get_adaptive_plan_summary` | Human-readable summary of an adaptive slicing plan |
-
-### G-code Interception
-
-| Tool | Description |
-|------|-------------|
-| `start_gcode_interception` | Begin intercepting G-code commands sent to a printer |
-| `stop_gcode_interception` | Stop G-code interception |
-| `add_interception_rule` | Add a rule to modify, block, or log specific G-code commands |
-| `remove_interception_rule` | Remove an interception rule |
-| `intercept_gcode_command` | Manually intercept and modify a specific G-code command |
-| `get_interception_status` | Check current interception session status |
-| `get_interception_history` | View history of intercepted commands |
-| `list_interception_sessions` | List all interception sessions |
-| `load_safety_interception_rules` | Load predefined safety rules for interception |
-| `update_interception_telemetry` | Update telemetry for an interception session |
-
-### Print Recovery & Failure Analysis
-
-| Tool | Description |
-|------|-------------|
-| `analyze_print_failure_smart` | Automated root cause analysis of a print failure |
-| `get_recovery_plan` | Get recovery options for a specific failure type |
-| `start_print_recovery` | Begin a guided print recovery session |
-| `confirm_print_recovery` | Confirm a recovery step has been completed |
-| `complete_print_recovery` | Mark a recovery session as complete |
-| `plan_print_recovery` | Plan recovery from checkpoint (printer_name + job_id) |
-| `plan_failure_recovery` | Plan recovery from detected failure (failure_id) |
-| `cancel_print_recovery` | Cancel an in-progress recovery session |
-| `get_recovery_session_status` | Check status of a recovery session |
-| `get_recovery_statistics` | View historical recovery success rates |
-| `retry_print_with_fix` | Re-slice with corrections and reprint |
-| `detect_print_failure` | Detect if a print has failed |
-| `diagnose_print_failure_live` | Real-time failure diagnosis during printing |
-| `predict_print_failure` | Pre-print failure risk prediction |
-| `save_print_checkpoint` | Save mid-print state for potential recovery |
-| `firmware_resume_print` | Resume after power loss via firmware recovery |
-| `failure_history` | View history of failures and resolutions |
-
-### QR Code & Product Generation (Pro Tier)
-
-| Tool | Description |
-|------|-------------|
-| `add_qr_to_product` | Embed a QR code onto a product surface |
-| `print_qr_product` | Generate and print a QR-coded product in one step |
-| `generate_coaster` | Generate a printable coaster with optional decoration |
-| `generate_keychain` | Generate a printable keychain |
-| `generate_bookmark` | Generate a printable bookmark |
-| `generate_fridge_magnet` | Generate a printable fridge magnet |
-| `generate_ornament` | Generate a printable ornament |
-| `generate_pet_tag` | Generate a printable pet tag |
-| `generate_pet_bowl` | Generate a printable pet bowl |
-| `generate_jewelry_tray` | Generate a printable jewelry tray |
-| `generate_ashtray` | Generate a printable ashtray |
-| `generate_wall_plaque` | Generate a printable wall plaque |
-| `batch_generate_products` | Bulk-generate multiple products from templates |
-| `generate_decorated_product` | Generate a decorated product in one step |
-
-### Warping Analysis (Pro Tier)
-
-| Tool | Description |
-|------|-------------|
-| `analyze_warping_risk` | Physics-based warping risk analysis using thermal simulation |
-
-### Plate Optimization (Pro Tier)
-
-| Tool | Description |
-|------|-------------|
-| `arrange_parts_on_plate` | Arrange multiple parts on a build plate with MaxRects bin-packing |
-| `auto_arrange_parts_on_plate` | Auto-arrange with rotation and multi-plate fallback |
-
-### Print Learning (Pro Tier)
-
-| Tool | Description |
-|------|-------------|
-| `record_completed_print` | Record print outcome for the learning engine |
-| `get_print_learning_summary` | View learned insights for a printer/material combo |
-| `get_optimal_settings` | Get auto-tuned settings based on print history |
-| `get_material_success_rates` | Success rates by material across the fleet |
-| `get_maintenance_prediction` | Predict maintenance needs from failure patterns |
-| `get_material_warnings` | Get warnings for materials with high failure rates |
-| `get_auto_tuned_settings` | Get automatically tuned slicer settings |
-| `get_print_confidence` | Confidence score for a print succeeding |
-
-### Provider Tools
-
-The legacy `network_*` CLI commands and MCP tool aliases were deprecated in `v0.2.0` and have been removed. Use the canonical provider integration tools instead: `connect_provider_account`, `sync_provider_capacity`, `list_provider_capacity`, `find_provider_capacity`, `submit_provider_job`, `provider_job_status`.
-
-## Supported Printers
-
-| Backend | Status | Printers |
-|---------|--------|----------|
-| **OctoPrint** | Stable | Any OctoPrint-connected printer (Prusa, Ender, custom) |
-| **Moonraker** | Stable | Klipper-based printers (Voron, Ratrig, etc.) |
-| **Creality** | Stable when Moonraker is reachable | SPARKX i7, K1/K1 Max/K1C/K1 SE, K2/K2 Pro/K2 Plus/K2 SE, Creality Hi, Ender-3 V4/V3 KE, Ender-5 Max, CR-10 SE via local Moonraker. Older Marlin Creality printers use `serial` or `octoprint`. |
-| **Bambu** | Stable | Bambu Lab X1C, P1S, A1 (via LAN MQTT) |
-| **Prusa Link** | Stable | Prusa MK4, XL, Mini+ (local REST API — type: `prusalink`) |
-| **Elegoo** | Stable | Centauri Carbon, Saturn, Mars series (via LAN WebSocket/SDCP). Neptune 4/OrangeStorm Giga use Moonraker. |
-| **Direct USB** | Stable | Any Marlin-based printer over USB (Ender 3, Prusa MK3, CR-10, etc.). No OctoPrint or Klipper needed — just a USB cable. Type: `serial`. |
-
-## MCP Resources
-
-The server also exposes read-only resources that agents can use for context:
+## What Agents Can Do
+
+The Kiln MCP server (`kiln serve`) exposes **808 tools** to agents, plus prompts and resources for **815 total MCP capabilities**. Rather than list them all here, agents browse the live catalog with `get_skill_manifest` and ToolSearch-style discovery. A representative slice:
+
+| Theme | Example tools |
+|-------|---------------|
+| **Control** | `printer_status` · `start_print` · `monitor_print` · `pause_print` · `cancel_print` · `emergency_stop` · `send_gcode` (validated) |
+| **Make** | `generate_model` (text → 3D) · `slice_and_print` · `analyze_printability` · `auto_orient_model` · `decorate_surface` (QR/photo/logo/texture) |
+| **Find &amp; outsource** | `search_all_models` · `download_and_upload` · `fulfillment_quote` · `fulfillment_order` |
+| **Recover &amp; learn** | `retry_print_with_fix` · `resume_interrupted_print` (Pro) · `predict_print_failure` · `get_printer_insights` · `diagnose_print_failure_live` |
+| **Versioning** (Pro+) | `save_design_version` · `diff_design_versions` · `get_proven_recipe` · `check_design_regression` |
+| **Fleet &amp; safety** | `fleet_status` · `submit_job` · `preflight_check` · `list_safety_profiles` · `validate_gcode_safe` |
+
+The complete tool catalog, grouped by subsystem, lives in **[Project Docs](docs/PROJECT_DOCS.md)**.
+
+<details>
+<summary>MCP resources (read-only context for agents)</summary>
 
 | Resource URI | Description |
 |---|---|
@@ -901,8 +351,104 @@ The server also exposes read-only resources that agents can use for context:
 | `kiln://queue` | Job queue summary and recent jobs |
 | `kiln://queue/{job_id}` | Detail for a specific job |
 | `kiln://events` | Recent events (last 50) |
+</details>
 
-## Modules
+## Capabilities
+
+**Search → download → print.** Kiln searches MyMiniFactory and Cults3D (search only) in one call via `search_all_models`, downloads where supported, and uploads straight to a printer — a full design-to-print loop with no human in the middle. *(Thingiverse is supported but deprecated since its Feb 2026 acquisition by MyMiniFactory; prefer MMF.)* Marketplace access uses free API keys (`KILN_MMF_API_KEY`, `KILN_CULTS3D_USERNAME` + `KILN_CULTS3D_API_KEY`).
+
+**AI model generation.** Set any provider key and it's available instantly — `KILN_MESHY_API_KEY`, `KILN_TRIPO3D_API_KEY`, `KILN_STABILITY_API_KEY`, `KILN_GEMINI_API_KEY` — or use local OpenSCAD with no key. Generated meshes are auto-validated for printability (manifold, triangle count, bounding box) before printing. `kiln generate` renders a 3-view preview by default.
+
+**Slicing.** Wraps PrusaSlicer and OrcaSlicer for headless slicing; auto-detects installed slicers on PATH, macOS app bundles, or via `KILN_SLICER_PATH`. Supports STL, 3MF, STEP, OBJ, AMF with material-aware temps and smart supports.
+
+**Fulfillment (no printer required).** Print through Craftcloud's network — quote, validate address, confirm, order, track — or run alongside your own printers for overflow and specialty materials. Normal users go through the hosted proxy (credentials stay server-side, spend limits enforced); operators can use direct mode with `KILN_FULFILLMENT_PROVIDER=craftcloud` + `KILN_CRAFTCLOUD_API_KEY`.
+
+**Decoration &amp; textures.** Emboss or deboss QR codes, photos, logos, text, and SVGs onto any model face, or apply procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) with a single tool call.
+
+## Pricing
+
+All local printing is **free forever** — status, file management, slicing, fleet control, and printing to your own printers cost nothing. Kiln charges a **5% orchestration fee** on orders placed through external manufacturing services (first 3/month free, $0.25 min / $200 max per order), shown transparently in every quote.
+
+| Tier | Price | Headline |
+|------|-------|----------|
+| **Free** | $0 | Unlimited local printing, slicing, marketplace search, safety profiles, one printer, design intelligence, linear design history. |
+| **Pro** | $49/mo | Git-for-3D branching/signed releases, product templates, procedural textures, mid-print modification, print resume, failure recovery, assembly manuals, solo cloud sync. |
+| **Business** | $199/mo | Commercial use, 3 printers + 3 seats, fleet management, cross-printer learning, QR generation, team pull requests, approval gates, fulfillment, webhooks. |
+| **Enterprise** | Contact us | Large fleets, SSO/SCIM, RBAC, audit trail, encrypted G-code at rest, white-label manuals, 99.9% SLA, on-prem/VPC. |
+
+Full comparison at **[kiln3d.com/pricing](https://kiln3d.com/pricing)**. Run `kiln upgrade` to activate a license key. For provider-routed orders, the provider remains merchant of record; Kiln acts as orchestration infrastructure.
+
+## Safety
+
+Kiln is safety-first infrastructure for controlling physical machines:
+
+- **Pre-flight checks** validate printer state, temperatures, and files before every print
+- **G-code validation** blocks dangerous commands (firmware reset, unsafe temperatures)
+- **Temperature limits** enforce safe maximums (300 °C hotend, 130 °C bed)
+- **Confirmation required** for destructive operations (cancel, raw G-code)
+- **Optional authentication** with scope-based API keys for multi-user setups
+- **Structured errors** ensure agents always know when something fails
+
+## Packages
+
+This monorepo contains two packages:
+
+| Package | Description | Entry point |
+|---------|-------------|-------------|
+| **kiln** | CLI + MCP server for multi-printer control (OctoPrint, Moonraker, Creality, Bambu, Prusa Link, Elegoo, Direct USB) | `kiln` or `python -m kiln` |
+| **octoprint-cli** | Lightweight standalone CLI for OctoPrint-only setups | `octoprint-cli` |
+
+## Development
+
+```bash
+# Create a virtualenv first (required on modern Ubuntu/Debian/WSL)
+python3 -m venv .venv && source .venv/bin/activate
+
+pip install -e "./kiln[dev]"
+pip install -e "./octoprint-cli[dev]"
+
+cd kiln && python3 -m pytest tests/ -v
+cd ../octoprint-cli && python3 -m pytest tests/ -v
+```
+
+<details>
+<summary><strong>Configuration reference (auth, webhooks, discovery, plugins)</strong></summary>
+
+### Authentication (optional)
+
+Optional API-key auth for MCP tools, disabled by default. Scopes: `read`, `write`, `admin`. Read-only tools never require auth.
+
+```bash
+export KILN_AUTH_ENABLED=1
+export KILN_AUTH_KEY=your_secret_key
+export KILN_MCP_AUTH_TOKEN=your_secret_key   # clients provide their key here
+```
+
+### Webhooks
+
+Register HTTP endpoints for real-time event notifications:
+
+```
+register_webhook(url="https://example.com/hook", events=["job.completed", "print.failed"])
+```
+
+Payloads are signed with HMAC-SHA256 when a secret is provided. Redirects are blocked by default (`KILN_WEBHOOK_ALLOW_REDIRECTS=0`); when enabled, each hop is SSRF-validated and HTTPS→HTTP downgrade is blocked.
+
+### Printer discovery
+
+```bash
+kiln discover   # mDNS/Bonjour + HTTP subnet probing
+```
+
+Finds OctoPrint, Moonraker/Creality, Bambu, Elegoo, and Prusa Link printers. If discovery returns nothing, register directly by IP with `kiln auth`.
+
+### Third-party plugins
+
+Entry-point plugins are **default-deny** in production (`KILN_PLUGIN_POLICY=strict`). Allow specific plugins with `KILN_ALLOWED_PLUGINS=my_plugin,other_plugin`, or set `KILN_PLUGIN_POLICY=permissive` for temporary migration compatibility.
+</details>
+
+<details>
+<summary><strong>Modules (for contributors)</strong></summary>
 
 | Module | Description |
 |---|---|
@@ -920,7 +466,6 @@ The server also exposes read-only resources that agents can use for context:
 | `discovery.py` | Network printer discovery (mDNS + HTTP probe) |
 | `generation/` | Text-to-model generation providers (Meshy, Tripo3D, Stability AI, Gemini Deep Think, OpenSCAD) with auto-discovery, mesh validation, and printability analysis |
 | `consumer.py` | Consumer workflow for non-printer users (address validation, material recommendations, timeline/price estimation, onboarding) |
-| `plugins/fulfillment_tools.py` | External manufacturing fulfillment tools (Craftcloud) |
 | `cost_estimator.py` | Print cost estimation from G-code analysis |
 | `materials.py` | Multi-material and spool tracking |
 | `material_catalog.py` | Material brand catalog, properties, and purchase-link metadata |
@@ -953,284 +498,8 @@ The server also exposes read-only resources that agents can use for context:
 | `cli/` | Click CLI with <!-- KILN_CLI_COUNT:OLD --> 221 commands and JSON output |
 | `deploy/` | Kubernetes manifests and Helm chart for on-prem Enterprise deployment |
 
-kiln-pro (https://kiln3d.com) extends public Kiln with paid-tier REST serving, billing, licensing, SSO, RBAC, G-code encryption, uptime reporting, team administration, and project-cost workflows. Public Kiln exposes only the interface/proxy surface for those capabilities; the private implementation stays in kiln-pro.
-
-## Authentication (Optional)
-
-Kiln supports optional API key authentication for MCP tools. Disabled by default.
-
-```bash
-# Enable auth
-export KILN_AUTH_ENABLED=1
-export KILN_AUTH_KEY=your_secret_key
-
-# Clients provide their key via
-export KILN_MCP_AUTH_TOKEN=your_secret_key
-```
-
-Scopes: `read`, `write`, `admin`. Read-only tools (status, list) never require auth.
-
-## Webhooks
-
-Register HTTP endpoints to receive real-time event notifications:
-
-```
-register_webhook(url="https://example.com/hook", events=["job.completed", "print.failed"])
-```
-
-Payloads are signed with HMAC-SHA256 when a secret is provided.
-
-Security defaults:
-- Webhook redirects are blocked by default (`KILN_WEBHOOK_ALLOW_REDIRECTS=0`).
-- If redirects are enabled, each hop is SSRF-validated and HTTPS→HTTP downgrade is blocked.
-
-## Printer Discovery
-
-Kiln can automatically find printers on your local network:
-
-```bash
-kiln discover
-```
-
-Discovery uses mDNS/Bonjour and HTTP subnet probing to find OctoPrint, Moonraker/Creality, Bambu, Elegoo, and Prusa Link printers.
-If discovery returns no results, register printers directly by IP with `kiln auth` (works for both Ethernet and Wi-Fi LAN setups).
-
-## Third-Party Plugins
-
-Third-party entry-point plugins are **default-deny** in production (`KILN_PLUGIN_POLICY=strict`).
-Allow only specific plugins with:
-
-```bash
-export KILN_ALLOWED_PLUGINS=my_plugin,other_plugin
-```
-
-For temporary migration compatibility, permissive mode can be enabled:
-
-```bash
-export KILN_PLUGIN_POLICY=permissive
-```
-
-## Model Marketplaces
-
-Kiln includes adapters for discovering 3D models and downloading them where direct downloads are supported:
-
-| Marketplace | Status | Features |
-|---|---|---|
-| **MyMiniFactory** | Stable | Search, details, download. *Primary marketplace — recommended for new integrations.* |
-| **Cults3D** | Stable | Search, details (metadata-only — no direct download; provides URLs for manual download) |
-| **Thingiverse** | Deprecated | Search, browse, download, categories. *Acquired by MyMiniFactory (Feb 2026). API may be sunset; prefer MyMiniFactory.* |
-
-Marketplace features require free API keys. Get yours and set the environment variables:
-
-| Marketplace | Get your API key | Environment variable(s) |
-|---|---|---|
-| **MyMiniFactory** (recommended) | [Developer Settings](https://myminifactory.com/settings/developer) | `KILN_MMF_API_KEY` |
-| **Cults3D** (search only) | [API Keys](https://cults3d.com/en/api/keys) | `KILN_CULTS3D_USERNAME` + `KILN_CULTS3D_API_KEY` |
-| **Thingiverse** (deprecated) | [Create App](https://www.thingiverse.com/apps/create) | `KILN_THINGIVERSE_TOKEN` |
-
-```bash
-export KILN_MMF_API_KEY=your_key               # MyMiniFactory (recommended)
-export KILN_CULTS3D_USERNAME=your_username      # Cults3D
-export KILN_CULTS3D_API_KEY=your_key            # Cults3D
-export KILN_THINGIVERSE_TOKEN=your_token       # Thingiverse (deprecated)
-```
-
-All configured marketplaces are searched simultaneously via `search_all_models`. Agents can inspect details, download files when direct downloads are supported, and upload downloaded models directly to a printer — enabling a full design-to-print workflow without human intervention.
-
-## AI Model Generation
-
-Kiln's universal generation adapter auto-discovers text-to-3D providers from environment variables. Set any of the following and the provider is available instantly:
-
-```bash
-export KILN_MESHY_API_KEY=your_key         # Meshy — cloud text-to-3D
-export KILN_TRIPO3D_API_KEY=your_key       # Tripo3D — high-quality cloud text-to-3D
-export KILN_STABILITY_API_KEY=your_key     # Stability AI — synchronous 3D generation
-export KILN_GEMINI_API_KEY=your_key        # Gemini Deep Think — AI-reasoned text/sketch-to-3D
-```
-
-OpenSCAD is also available for local parametric generation (no API key needed — just install the `openscad` binary).
-
-| Provider | Type | Async | Output Formats |
-|---|---|---|---|
-| **Meshy** | Cloud | Yes | STL, OBJ, GLB |
-| **Tripo3D** | Cloud | Yes | STL, OBJ, GLB |
-| **Stability AI** | Cloud | No (synchronous) | GLB |
-| **Gemini Deep Think** | Cloud + Local | No (synchronous) | STL |
-| **OpenSCAD** | Local | No (synchronous) | STL |
-
-Generated models are automatically validated for printability (manifold check, triangle count, bounding box dimensions) before printing. The registry pattern means new providers can be added in under 100 lines.
-`kiln generate` and `kiln generate-and-print` now render a 3-view preview (isometric/dimetric/trimetric) by default; use `--no-preview` to disable.
-The MCP provider list reports every supported backend and whether its API key is configured, so agents can reason about the real generation surface instead of a partial subset.
-
-## Slicer Integration
-
-Kiln wraps PrusaSlicer and OrcaSlicer for headless slicing. Auto-detects installed slicers on PATH, macOS app bundles, or via `KILN_SLICER_PATH`.
-
-```bash
-# Slice an STL to G-code
-kiln slice model.stl
-
-# Slice and immediately print
-kiln slice model.stl --print-after
-
-# Smart supports (auto = minimal buildplate-only only when needed)
-kiln slice model.stl --support-mode auto
-
-# Override material defaults when needed
-kiln slice model.stl --material PETG
-
-# Supported formats: STL, 3MF, STEP, OBJ, AMF
-```
-
-## Webcam Snapshots
-
-Capture point-in-time images from printer webcams for monitoring and quality checks:
-
-```bash
-# Save snapshot to file
-kiln snapshot --save photo.jpg
-
-# Get base64-encoded snapshot (for agents)
-kiln snapshot --json
-```
-
-Supported on OctoPrint, Moonraker, Creality when exposed by Moonraker, Bambu, Prusa Link, and Elegoo (requires `ffmpeg` for RTSP capture on RTSP backends — see install note above). Agents use the `printer_snapshot` MCP tool.
-
-## Fulfillment Services
-
-Print through external manufacturing services — **no 3D printer required**, or use alongside your own printers for overflow, specialty materials, or production runs. Kiln handles the entire workflow from idea to delivered product:
-
-```bash
-# Get material recommendations for your use case
-kiln order recommend functional --budget budget
-
-# Instant price estimate (no API call needed)
-kiln order estimate FDM --x 80 --y 60 --z 40
-
-# Estimate delivery timeline
-kiln order timeline SLA --country US
-
-# List available materials (FDM, SLA, SLS, MJF, etc.)
-kiln order materials
-
-# Get a quote for a model
-kiln order quote model.stl --material pla-white --quantity 2
-
-# Validate your shipping address
-kiln order validate-address --street "123 Main St" --city Austin --state TX --postal-code 78701 --country US
-
-# View shipping insurance options
-kiln order insurance 45.00
-
-# Preview and confirm before placing the order
-kiln preview model.stl
-kiln order place q-abc123 --shipping std --preview-file model.stl --confirm-preview --confirm-shipping \
-  --first-name Ada --last-name Lovelace --email ada@example.com --phone 555-0100 \
-  --street "123 Main St" --city Austin --state TX --postal-code 78701 --country US
-
-# Track order status
-kiln order status o-def456
-
-# View order history
-kiln order history
-
-# List supported shipping countries
-kiln order countries
-```
-
-Configure your fulfillment provider:
-
-```bash
-# Normal users: leave provider unset and use the hosted Kiln proxy.
-# Craftcloud credentials stay server-side; quota and spend limits are enforced there.
-
-# Operators/developers only: direct Craftcloud mode with your own Craftcloud key.
-export KILN_FULFILLMENT_PROVIDER=craftcloud
-export KILN_CRAFTCLOUD_API_KEY=your_key
-
-# Optional: WebSocket price polling (recommended by Craftcloud, requires pip install websockets msgpack)
-export KILN_CRAFTCLOUD_USE_WEBSOCKET=1
-
-# Craftcloud staging (for testing)
-export KILN_CRAFTCLOUD_BASE_URL=https://api-stg.craftcloud3d.com
-
-# Optional: explicitly select a provider
-export KILN_FULFILLMENT_PROVIDER=craftcloud
-```
-
-Agents use the consumer workflow MCP tools: `consumer_onboarding` for guided setup, `suggest_material_for_order` for material selection, `estimate_price` / `estimate_timeline` for quick estimates, `fulfillment_compare_providers` for cross-provider quotes, `fulfillment_batch_quote` for multi-part assemblies, and `fulfillment_order_history` / `fulfillment_reorder` for repeat orders.
-
-## Development
-
-```bash
-# Create a virtualenv first (required on modern Ubuntu/Debian/WSL)
-python3 -m venv .venv && source .venv/bin/activate
-
-# Install both packages in dev mode
-pip install -e "./kiln[dev]"
-pip install -e "./octoprint-cli[dev]"
-
-# Run tests
-cd kiln && python3 -m pytest tests/ -v
-cd ../octoprint-cli && python3 -m pytest tests/ -v
-```
-
-## Revenue Model
-
-All local printing is **free forever** — status checks, file management, slicing, fleet control, and printing to your own printers costs nothing.
-
-Kiln charges a **5% orchestration fee** on orders placed through external manufacturing services (`kiln order` / fulfillment MCP tools), with:
-
-- First 3 outsourced orders per month **free**
-- $0.25 minimum / $200 maximum per-order cap
-
-The fee is shown transparently in every quote before you commit.
-
-For provider-routed orders, the provider remains merchant of record and support owner. Kiln acts as orchestration infrastructure.
-
-### Licensing Tiers
-
-| Tier | Price | What You Get |
-|------|-------|-------------|
-| **Free** | $0 | Unlimited local printing, slicing, marketplace search, safety profiles, 10-job queue, one printer, personal/non-commercial use, design intelligence, printability analysis, and local linear design history. |
-| **Pro** | $49/mo | Everything in Free + one-printer personal use, unlimited queue depth, unlimited assembly parts, auto-generated assembly manuals, Git-for-3D branch/merge/cherry-pick/signed releases, solo cloud sync, product templates, procedural textures, unlimited non-QR decorations, mid-print modification, failure recovery, print resume, design provenance, manual speed control, and print learning. Annual: $39/mo ($468/yr). |
-| **Business** | $199/mo | Everything in Pro + commercial use, 3 printers, 3 team seats, multi-printer fleet management, cross-printer learning, co-branded and multilingual assembly manuals, QR code generation, layer-scheduled speed adjustments, team pull requests, approval gates, federated design sharing, unlimited fulfillment orders, material compliance tracking, priority support, custom safety profiles, and webhooks. Annual: $159/mo ($1,908/yr). |
-| **Enterprise** | Contact us | Everything in Business + large fleets, unlimited team seats, SSO (SAML/OIDC) + SCIM, RBAC, full audit trail with long-term retention, lockable safety profiles, encrypted G-code at rest, white-label manuals, buyer-side authenticity verification, 99.9% uptime SLA, dedicated CSM, on-prem/VPC deployment, custom integrations, and procurement terms. |
-
-Run `kiln upgrade` to activate a license key.
-
-## Safety
-
-Kiln is safety-first infrastructure for controlling physical machines:
-
-- **Pre-flight checks** validate printer state, temperatures, and files before every print
-- **G-code validation** blocks dangerous commands (firmware reset, unsafe temperatures)
-- **Temperature limits** enforce safe maximums (300C hotend, 130C bed)
-- **Confirmation required** for destructive operations (cancel, raw G-code)
-- **Optional authentication** with scope-based API keys for multi-user setups
-- **Structured errors** ensure agents always know when something fails
-
-## Brand Assets
-
-Logo files live in [`docs/assets/`](docs/assets/):
-
-| File | Use |
-|------|-----|
-| `kiln-banner-1280x640.svg` | GitHub / social media banner |
-| `kiln-logo-dark.svg` | Primary mark + wordmark (dark bg) |
-| `kiln-logo-light.svg` | Mark + wordmark (light bg) |
-| `kiln-horizontal-dark.svg` | Horizontal lockup (dark bg) |
-| `kiln-horizontal-light.svg` | Horizontal lockup (light bg) |
-| `kiln-logo-dark-notext.svg` | Mark only (dark bg) |
-| `kiln-favicon-256.svg` | Favicon / app icon |
-| `kiln-logo-transparent.svg` | Transparent bg (for dark UIs) |
-| `kiln-logo-transparent-dark.svg` | Transparent bg (for light UIs) |
-| `kiln-pfp-1024.svg` | Social media profile picture with subtle glow (1024×1024) |
-| `kiln-pfp-1024-flat.svg` | Social media profile picture, no glow (1024×1024) |
-| `wallpapers/kiln-wallpaper-iphone-*.svg` | iPhone wallpapers (15, 15 Pro/Max, 16, 16 Pro/Max, 17, 17 Air, 17 Pro/Max) |
-| `wallpapers/kiln-wallpaper-macbook-*.svg` | MacBook wallpapers (Air 13/15, Pro 14/16) |
-
-All files are vector SVG — scale to any size.
+kiln-pro ([kiln3d.com](https://kiln3d.com)) extends public Kiln with paid-tier REST serving, billing, licensing, SSO, RBAC, G-code encryption, uptime reporting, team administration, and project-cost workflows. Public Kiln exposes only the interface/proxy surface for those capabilities; the private implementation stays in kiln-pro.
+</details>
 
 ## Documentation
 
@@ -1240,6 +509,24 @@ All files are vector SVG — scale to any size.
 | [Whitepaper](docs/WHITEPAPER.md) | Full technical architecture and protocol design |
 | [Project Docs](docs/PROJECT_DOCS.md) | Complete reference (CLI, MCP tools, adapters, config) |
 
+<details>
+<summary>Brand assets</summary>
+
+Logo files live in [`docs/assets/`](docs/assets/) — all vector SVG, scale to any size.
+
+| File | Use |
+|------|-----|
+| `kiln-banner-1280x640.svg` | GitHub / social media banner |
+| `kiln-logo-dark.svg` / `kiln-logo-light.svg` | Primary mark + wordmark (dark / light bg) |
+| `kiln-horizontal-dark.svg` / `kiln-horizontal-light.svg` | Horizontal lockup (dark / light bg) |
+| `kiln-logo-dark-notext.svg` | Mark only (dark bg) |
+| `kiln-favicon-256.svg` | Favicon / app icon |
+| `kiln-logo-transparent.svg` / `kiln-logo-transparent-dark.svg` | Transparent bg (for dark / light UIs) |
+| `kiln-pfp-1024.svg` / `kiln-pfp-1024-flat.svg` | Social profile picture, with / without glow (1024×1024) |
+| `wallpapers/kiln-wallpaper-iphone-*.svg` | iPhone wallpapers |
+| `wallpapers/kiln-wallpaper-macbook-*.svg` | MacBook wallpapers |
+</details>
+
 ## Support Development
 
 Kiln is free, open-source software. If you find it useful, consider sending a tip:
@@ -1247,16 +534,11 @@ Kiln is free, open-source software. If you find it useful, consider sending a ti
 - **Solana:** `kiln3d.sol`
 - **Ethereum:** `kiln3d.eth`
 
-## Positioning Clarification
+## Positioning
 
 > **Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align with existing intent; no strategy change. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and external provider/network adapters as integrations are available.
 
-### Non-goals
-
-- Operating a first-party decentralized manufacturing marketplace/network
-- Replacing partner supply-side networks
-- Owning provider marketplaces instead of integrating with them
-- Acting as merchant of record for provider-routed manufacturing orders
+**Non-goals:** operating a first-party decentralized manufacturing marketplace/network; replacing partner supply-side networks; owning provider marketplaces instead of integrating with them; acting as merchant of record for provider-routed manufacturing orders.
 
 ## License
 
