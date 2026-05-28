@@ -8,14 +8,14 @@
 
 ### Overview
 
-Kiln is the intelligence layer between idea and physical object. It provides a unified interface for AI agents to design, validate, and manufacture 3D-printed parts — controlling local printers, searching third-party model marketplaces (Thingiverse, MyMiniFactory, Cults3D), and routing jobs to fulfillment providers (Craftcloud) — all through the Model Context Protocol (MCP) or a <!-- KILN_CLI_COUNT:OLD --> 221-command CLI.
+Kiln is the intelligence layer between idea and physical object. It provides a unified interface for AI agents to design, validate, and manufacture 3D-printed parts — controlling local printers, searching third-party model marketplaces (MyMiniFactory, Cults3D), and routing jobs to fulfillment providers (Craftcloud) — all through the Model Context Protocol (MCP) or a <!-- KILN_CLI_COUNT:OLD --> 221-command CLI.
 
 **Clarification:** Kiln does **not** operate its own marketplace or manufacturing network. It integrates with third-party marketplaces for model discovery and third-party fulfillment providers for outsourced manufacturing. Kiln is orchestration and agent infrastructure, not a supply-side platform.
 
 **Three ways to get to a print:**
 
 - **🖨️ Your printers.** Control OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, or Direct USB/Serial machines on your LAN — or remotely via Bambu Cloud when configured.
-- **🌐 Third-party model search.** Search external model repositories such as MyMiniFactory, Cults3D, and Thingiverse, then download where the provider permits, slice, and print.
+- **🌐 Third-party model search.** Search external model repositories such as MyMiniFactory and Cults3D, then download where the provider permits, slice, and print. (Thingiverse is supported but deprecated following its 2026 acquisition by MyMiniFactory.)
 - **🏭 Fulfillment providers.** Route jobs to third-party fulfillment services like Craftcloud, or through connected provider APIs for overflow and specialty materials.
 
 All three modes use the same MCP tools and CLI commands.
@@ -40,7 +40,7 @@ All three modes use the same MCP tools and CLI commands.
 |---|---|---|---|
 | OctoPrint | HTTP REST | Any OctoPrint-connected printer | Stable |
 | Moonraker | HTTP REST | Klipper-based (Voron, RatRig, etc.) | Stable |
-| Creality | HTTP REST via Moonraker | K1/K2/Hi/Ender V3 KE-class printers when local Moonraker is reachable; older Marlin Creality machines use OctoPrint or Direct USB | Stable when Moonraker is reachable |
+| Creality | HTTP REST via Moonraker | SPARKX i7, K1/K1 Max/K1C/K1 SE, K2/K2 Pro/K2 Plus/K2 SE, Creality Hi, Ender-3 V4/V3 KE, Ender-5 Max, CR-10 SE when local Moonraker is reachable; older Marlin Creality machines use OctoPrint or Direct USB | Stable when Moonraker is reachable |
 | Bambu Lab | MQTT/LAN | X1C, P1S, A1 | Stable |
 | Prusa Link | HTTP REST | MK4, XL, Mini+ | Stable |
 | Elegoo | WebSocket/SDCP | Centauri Carbon, Saturn, Mars series. Neptune 4/OrangeStorm Giga use Moonraker. | Stable |
@@ -483,7 +483,7 @@ See [Cost Estimation](#cost-estimation) below for the full tool set including `s
 | Tool | Input | Output |
 |---|---|---|
 | `estimate_cost` | `file_path`, `material`, `electricity_rate`, `printer_wattage` | Filament cost + electricity cost + total |
-| `list_materials` | — | 9 material profiles with densities and costs |
+| `list_materials` | — | 25 material profiles (45 brand-specific filament profiles) with densities and costs |
 
 #### Material Tracking
 
@@ -660,7 +660,7 @@ Pure-Python mesh operations — no external mesh libraries required. Operates di
 | `predict_print_failure` | `file_path`, thresholds | Risk score (0-100), verdict, per-failure details (thin walls, bridges, overhangs, top-heavy) |
 | `simplify_mesh_model` | `file_path`, `target_ratio`, `output_path` | Vertex-clustering decimation — reduce triangle count while preserving shape |
 | `mesh_quality_scorecard` | `file_path` | Multi-factor quality score: printability (35%), structural (25%), efficiency (20%), quality (20%). Letter grade A-F |
-| `estimate_material_cost` | `file_path`, `material`, `infill_pct`, `wall_layers` | Filament weight (g), length (m), cost ($) for 9 materials |
+| `estimate_material_cost` | `file_path`, `material`, `infill_pct`, `wall_layers` | Filament weight (g), length (m), cost ($) for 25 materials |
 | `remove_mesh_floating_regions` | `file_path`, `output_path`, `keep_largest` | Detect and remove disconnected geometry (fragments, support pillars) |
 | `check_print_readiness` | `file_path`, `auto_fix`, bed dimensions | Single-call readiness gate: manifold, overhangs, build volume, degenerates. Optional auto-repair |
 | `mirror_mesh_model` | `file_path`, `axis`, `output_path` | Mirror (reflect) mesh along X/Y/Z axis with correct winding order |
@@ -832,7 +832,7 @@ Public Kiln owns the assembly JSON contract: parts, positions, materials, mating
 
 #### Cost Estimation
 
-G-code and 3MF cost analysis. Parses extrusion totals, calculates filament weight and cost from a 9-material database (PLA, PETG, ABS, TPU, ASA, Nylon, PC, PVA, HIPS), and optionally includes electricity cost from slicer-embedded time estimates. For 3MF files (including Bambu `.gcode.3mf`), extracts slicer metadata directly from the archive.
+G-code and 3MF cost analysis. Parses extrusion totals, calculates filament weight and cost from a 25-material database, and optionally includes electricity cost from slicer-embedded time estimates. For 3MF files (including Bambu `.gcode.3mf`), extracts slicer metadata directly from the archive.
 
 | Tool | Input | Output |
 |---|---|---|
@@ -913,9 +913,11 @@ Constraint-aware design reasoning — agents query material properties, design t
 
 | Tool | Description |
 |---|---|
-| `apply_procedural_texture` | Apply a named procedural texture (tiger_stripe, marble, lava, ocean, wood, etc.) to a mesh surface |
-| `list_procedural_textures` | List all available procedural texture types and their presets |
-| `preview_texture_2d` | Render a 2D preview of a procedural texture before applying |
+| `apply_procedural_texture` | Apply a named procedural texture (tiger stripe, marble, camo, wood, honeycomb, lava, etc.) to any model for multicolor FDM printing |
+| `list_procedural_textures` | List all available procedural texture presets with descriptions |
+| `preview_texture_2d` | Fast 2D preview of a texture before 3D application |
+| `apply_image_texture` | Apply a photographic or image-based texture with cylinder detection |
+| `apply_geometric_texture` | Apply geometric tile patterns (snakeskin, bamboo, carbon fiber) |
 | `save_custom_palette` | Save a custom color palette for procedural textures |
 | `list_custom_palettes` | List saved custom palettes |
 | `delete_custom_palette` | Delete a saved custom palette |
@@ -978,16 +980,6 @@ Constraint-aware design reasoning — agents query material properties, design t
 | `log_project_cost` | `project_id`, `category`, `amount`, `description` | Cost entry confirmation |
 | `project_cost_summary` | `project_id` | Aggregate costs with category breakdown and budget tracking |
 | `client_cost_report` | `client` | Cross-project cost aggregation for a client |
-
-#### Procedural Textures (Pro Tier)
-
-| Tool | Description |
-|---|---|
-| `apply_procedural_texture` | Apply a procedural texture (tiger stripe, marble, camo, wood, honeycomb, lava, etc.) to any model for multicolor FDM printing |
-| `list_procedural_textures` | List all available procedural texture presets with descriptions |
-| `preview_texture_2d` | Fast 2D preview of a texture before 3D application |
-| `apply_image_texture` | Apply a photographic or image-based texture with cylinder detection |
-| `apply_geometric_texture` | Apply geometric tile patterns (snakeskin, bamboo, carbon fiber) |
 
 #### Mid-Print Modification & Resume (Pro Tier)
 
@@ -1432,11 +1424,9 @@ deploy/                  # On-prem Enterprise deployment
 octoprint-cli/           # Auxiliary OctoPrint-only CLI package
 
 docs/
-    WHITEPAPER.md
-    LITEPAPER.md
     PROJECT_DOCS.md
     THREAT_MODEL.md
-    site/                # Astro docs site; whitepaper/litepaper/project docs render from these markdown files
+    site/                # Astro docs site; project docs render from this markdown
 ```
 
 The private kiln-pro companion repo extends the public surface through `kiln_pro.bridge`, `kiln_pro.generate_manifest`, and `kiln_pro.rest_api`. Its feature directories include paid-tier plugins, assembly manuals, design versioning, recovery intelligence, cloud sync, enterprise identity/compliance, billing/spend caps, fulfillment proxying, and the web workshop. Public Kiln should depend only on the bridge, generated manifest, and documented response contracts.

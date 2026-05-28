@@ -6,13 +6,11 @@ const { current = '' } = Astro.props;
 const productPages = ['install', 'features', 'use-cases', 'farms', 'integrations', 'boundary'];
 const productActive = productPages.includes(current);
 
-// ``Docs`` is a plain link, not a dropdown.  Whitepaper / Litepaper
-// / FAQ live on the docs page's left sidebar under a "Reading"
-// block — one canonical URL per document, no chrome competing for
-// the visitor's first click.  The active styling still highlights
-// when the visitor is on any of those reading pages, so the header
-// doesn't lie about where they are.
-const docsPages = ['docs', 'whitepaper', 'litepaper', 'faq'];
+// ``Docs`` is a plain link, not a dropdown.  The FAQ lives on the
+// docs page's left sidebar under a "Reading" block.  The active
+// styling still highlights when the visitor is on the docs or FAQ
+// page, so the header doesn't lie about where they are.
+const docsPages = ['docs', 'faq'];
 const docsActive = docsPages.includes(current);
 ---
 

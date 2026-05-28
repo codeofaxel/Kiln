@@ -16,16 +16,13 @@ const { sections } = Astro.props;
   <nav class="sidebar-nav" aria-label="Documentation sections">
     {/*
       Reading block — sits above the auto-generated section list so the
-      long-form pieces (whitepaper / litepaper / FAQ) don't live only in
-      the footer.  The project docs page is the canonical docs hub; this
-      is where a visitor lands with "tell me more" energy and should
-      find every other doc without going back to the nav.
+      FAQ doesn't live only in the footer.  The project docs page is the
+      canonical docs hub; this is where a visitor lands with "tell me
+      more" energy and should find the FAQ without going back to the nav.
     */}
     <div class="reading-block">
       <div class="reading-label">Reading</div>
       <ul>
-        <li><a href="/whitepaper">Whitepaper</a></li>
-        <li><a href="/litepaper">Litepaper</a></li>
         <li><a href="/faq">FAQ</a></li>
       </ul>
     </div>

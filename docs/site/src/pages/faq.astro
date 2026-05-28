@@ -29,7 +29,7 @@ const sections: Section[] = [
       },
       {
         q: "How is Kiln different from decentralized manufacturing networks/providers?",
-        a: "Kiln is orchestration infrastructure for agents — it does not operate its own marketplace or manufacturing network. Instead, Kiln searches third-party model marketplaces (Thingiverse, MyMiniFactory, Cults3D) and routes fulfillment orders to third-party providers (like Craftcloud). The provider remains merchant of record for any outsourced orders. See the <a href='/boundary'>product boundary page</a> for a direct comparison."
+        a: "Kiln is orchestration infrastructure for agents — it does not operate its own marketplace or manufacturing network. Instead, Kiln searches third-party model marketplaces (MyMiniFactory, Cults3D) and routes fulfillment orders to third-party providers (like Craftcloud). The provider remains merchant of record for any outsourced orders. See the <a href='/boundary'>product boundary page</a> for a direct comparison."
       },
       {
         q: "Is Kiln free?",
@@ -59,11 +59,11 @@ const sections: Section[] = [
       },
       {
         q: "What is MCP? Do I need to understand it?",
-        a: "MCP (Model Context Protocol) is an open standard for connecting AI agents to external tools and data sources. You don't need to understand MCP internals to use Kiln — just configure your AI agent to connect to the Kiln MCP server. If you're building custom agents, the <a href='/whitepaper'>whitepaper</a> covers the protocol details."
+        a: "MCP (Model Context Protocol) is an open standard for connecting AI agents to external tools and data sources. You don't need to understand MCP internals to use Kiln — just configure your AI agent to connect to the Kiln MCP server. If you're building custom agents, the <a href='/docs'>docs</a> cover the integration details."
       },
       {
         q: "Can I use Kiln without AI, just as a CLI or API?",
-        a: "Yes. Kiln includes a full command-line interface with 215 commands and a REST API. You can manage printers, queue jobs, slice files, and run print operations entirely from the terminal or your own scripts — no AI agent required."
+        a: "Yes. Kiln includes a full command-line interface with 221 commands and a REST API. You can manage printers, queue jobs, slice files, and run print operations entirely from the terminal or your own scripts — no AI agent required."
       },
       {
         q: "Can I version-control my 3D designs in Kiln?",
@@ -115,7 +115,7 @@ const sections: Section[] = [
       },
       {
         q: "What safety guardrails are in place?",
-        a: "Kiln enforces multiple layers: per-printer temperature and speed limits from a validated safety profile database, G-code command validation that blocks unsafe operations, real-time G-code interception for in-flight filtering, mandatory pre-flight checks before every print, and structured error handling that never silently fails. The <a href='/whitepaper'>whitepaper</a> covers the full safety architecture."
+        a: "Kiln enforces multiple layers: per-printer temperature and speed limits from a validated safety profile database, G-code command validation that blocks unsafe operations, real-time G-code interception for in-flight filtering, mandatory pre-flight checks before every print, and structured error handling that never silently fails."
       },
       {
         q: "Does Kiln send my data to the cloud?",
@@ -209,10 +209,6 @@ const sections: Section[] = [
     title: "Technical",
     id: "technical",
     items: [
-      {
-        q: "What's the difference between the litepaper and whitepaper?",
-        a: "The <a href='/litepaper'>litepaper</a> is a non-technical overview — it explains what Kiln does, why it exists, and who it's for, without diving into implementation details. The <a href='/whitepaper'>whitepaper</a> is the full technical document covering protocol design, architecture, adapter interfaces, safety models, and system internals."
-      },
       {
         q: "What language is Kiln written in?",
         a: "Python. Kiln is distributed as two pip-installable packages: <code>kiln3d</code> (the MCP server) and <code>octoprint-cli</code> (standalone CLI tool). Both use modern Python with full type hints, dataclasses, and async support."

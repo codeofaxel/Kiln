@@ -91,7 +91,6 @@ Multi-printer registry with job queue, priority scheduling, cross-printer learni
 - GitHub: https://github.com/codeofaxel/Kiln
 - PyPI: https://pypi.org/project/kiln3d/
 - Documentation: https://kiln3d.com/docs
-- Whitepaper: https://kiln3d.com/whitepaper
 - Install guide: https://kiln3d.com/install
 
 ## Quick Start

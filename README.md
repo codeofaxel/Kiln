@@ -505,8 +505,6 @@ kiln-pro ([kiln3d.com](https://kiln3d.com)) extends public Kiln with paid-tier R
 
 | Document | Description |
 |----------|-------------|
-| [Litepaper](docs/LITEPAPER.md) | Quick overview for non-technical readers |
-| [Whitepaper](docs/WHITEPAPER.md) | Full technical architecture and protocol design |
 | [Project Docs](docs/PROJECT_DOCS.md) | Complete reference (CLI, MCP tools, adapters, config) |
 
 <details>
