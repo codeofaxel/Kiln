@@ -85,7 +85,7 @@ try:
     from kiln.billing_alerts import BillingAlertManager
 except ImportError:
     BillingAlertManager = None  # Available in kiln-pro
-from kiln.cli.config import _validate_printer_url, save_printer
+from kiln.cli.config import _normalize_printer_type, _validate_printer_url, save_printer
 from kiln.cloud_sync import CloudSyncManager, SyncConfig
 from kiln.cost_estimator import CostEstimator
 from kiln.events import Event, EventBus, EventType
@@ -356,7 +356,7 @@ logger = logging.getLogger(__name__)
 
 _PRINTER_HOST: str = os.environ.get("KILN_PRINTER_HOST", "")
 _PRINTER_API_KEY: str = os.environ.get("KILN_PRINTER_API_KEY", "")
-_PRINTER_TYPE: str = os.environ.get("KILN_PRINTER_TYPE", "octoprint")
+_PRINTER_TYPE: str = _normalize_printer_type(os.environ.get("KILN_PRINTER_TYPE", "octoprint"))
 _PRINTER_SERIAL: str = os.environ.get("KILN_PRINTER_SERIAL", "")
 _PRINTER_MODEL: str = os.environ.get("KILN_PRINTER_MODEL", "")
 
@@ -486,7 +486,7 @@ def _reload_env_config() -> None:
 
     _PRINTER_HOST = os.environ.get("KILN_PRINTER_HOST", "")
     _PRINTER_API_KEY = os.environ.get("KILN_PRINTER_API_KEY", "")
-    _PRINTER_TYPE = os.environ.get("KILN_PRINTER_TYPE", "octoprint")
+    _PRINTER_TYPE = _normalize_printer_type(os.environ.get("KILN_PRINTER_TYPE", "octoprint"))
     _PRINTER_SERIAL = os.environ.get("KILN_PRINTER_SERIAL", "")
     _PRINTER_MODEL = os.environ.get("KILN_PRINTER_MODEL", "")
 

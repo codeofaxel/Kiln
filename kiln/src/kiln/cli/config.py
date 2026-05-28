@@ -26,6 +26,34 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+
+# Renamed printer-type aliases.  ``prusaconnect`` was renamed to
+# ``prusalink`` in Kiln 1.1.5; saved configs that still pin the old name
+# keep working — we normalize on read and warn once so users can update
+# at their leisure instead of hitting "unsupported printer type".
+_LEGACY_PRINTER_TYPE_ALIASES = {"prusaconnect": "prusalink"}
+_warned_legacy_printer_types: set[str] = set()
+
+
+def _normalize_printer_type(ptype: str) -> str:
+    """Map a renamed/legacy printer-type string to its current name.
+
+    Returns *ptype* unchanged when it isn't a known legacy alias.
+    """
+    canonical = _LEGACY_PRINTER_TYPE_ALIASES.get(ptype)
+    if canonical is None:
+        return ptype
+    if ptype not in _warned_legacy_printer_types:
+        _warned_legacy_printer_types.add(ptype)
+        logger.warning(
+            "Printer type %r was renamed to %r in Kiln 1.1.5; using %r. "
+            "Update your config's `type:` to silence this notice.",
+            ptype,
+            canonical,
+            canonical,
+        )
+    return canonical
+
 # Valid top-level keys in the config file.  Used for schema validation.
 _KNOWN_KEYS: set[str] = {
     "printers",
@@ -271,7 +299,7 @@ def load_printer_config(
     # --- Env var fast path ------------------------------------------------
     env_host = os.environ.get("KILN_PRINTER_HOST", "")
     if env_host:
-        ptype = os.environ.get("KILN_PRINTER_TYPE", "octoprint")
+        ptype = _normalize_printer_type(os.environ.get("KILN_PRINTER_TYPE", "octoprint"))
         return {
             "type": ptype,
             "host": _normalize_host(env_host, ptype),
@@ -320,6 +348,7 @@ def load_printer_config(
     cfg = dict(printers[name])
     cfg.setdefault("timeout", settings.get("timeout", 30))
     cfg.setdefault("retries", settings.get("retries", 3))
+    cfg["type"] = _normalize_printer_type(str(cfg.get("type", "octoprint")))
     cfg["host"] = _normalize_host(str(cfg.get("host", "")), str(cfg.get("type", "octoprint")))
     return cfg
 
@@ -475,7 +504,7 @@ def validate_printer_config(cfg: dict[str, Any]) -> tuple[bool, str | None]:
 
     Returns ``(True, None)`` or ``(False, error_message)``.
     """
-    ptype = cfg.get("type", "")
+    ptype = _normalize_printer_type(cfg.get("type", ""))
     if ptype not in ("octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink", "serial"):
         return False, f"Unknown printer type: {ptype!r}"
 

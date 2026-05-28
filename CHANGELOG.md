@@ -3,6 +3,17 @@
 All notable changes to Kiln are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.1.5.1] - 2026-05-28
+
+### Fixed
+
+- **Saved `prusaconnect` printer configs keep working.** The Prusa
+  adapter was renamed to `prusalink` in 1.1.5 with no alias, so existing
+  configs pinning `type: prusaconnect` failed with "unsupported printer
+  type." Kiln now auto-detects the old name and uses `prusalink`,
+  logging a one-time notice to update your config — no manual edit
+  required.
+
 ## [1.1.5] - 2026-05-27
 
 Engravings get smarter — depth that matches your nozzle, the right
