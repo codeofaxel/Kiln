@@ -3,6 +3,19 @@
 All notable changes to Kiln are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- **Bambu Lab printers now appear in network discovery.** A scan
+  picks them up automatically, instead of every Bambu having to be
+  added by hand.
+
+### Fixed
+
+- **Kiln-generated models slice reliably.** Some models Kiln built
+  could fail to open in the slicer; they now load and slice every time.
+
 ## [1.1.5.2] - 2026-05-28
 
 ### Added
