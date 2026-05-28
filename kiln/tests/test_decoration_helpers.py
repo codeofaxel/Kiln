@@ -269,6 +269,7 @@ def test_depth_legibility_floor_scales_with_nozzle_diameter():
     assert _depth_legibility_floor_mm(0.8) == pytest.approx(2.4)
 
 
+@_NEEDS_OPENSCAD
 def test_emboss_below_floor_raises_with_actionable_payload(tmp_path):
     """Sub-floor depth raises DepthBelowLegibilityFloor carrying the
     requested + floor + nozzle so the caller can hand the user a
@@ -299,6 +300,7 @@ def test_emboss_below_floor_raises_with_actionable_payload(tmp_path):
     assert err.nozzle_diameter_mm == 0.4
 
 
+@_NEEDS_OPENSCAD
 def test_emboss_below_floor_on_larger_nozzle_raises(tmp_path):
     """1.2mm depth is fine on a 0.4mm nozzle but BELOW the 1.8mm floor
     on a 0.6mm Prusa MK4 nozzle — caller passing the wrong nozzle
@@ -323,6 +325,7 @@ def test_emboss_below_floor_on_larger_nozzle_raises(tmp_path):
         )
 
 
+@_NEEDS_OPENSCAD
 def test_emboss_depth_none_uses_floor_silently(tmp_path):
     """``depth_mm=None`` is the most common caller intent ("make it
     just legible") — engine picks the printer-specific floor without
@@ -357,6 +360,7 @@ def test_emboss_depth_none_uses_floor_silently(tmp_path):
     )
 
 
+@_NEEDS_OPENSCAD
 def test_emboss_text_lines_below_floor_raises(tmp_path):
     """Multi-line path enforces the same floor — the floor check
     happens once at the top, not re-checked per line."""
