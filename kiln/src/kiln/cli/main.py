@@ -401,7 +401,7 @@ def _make_adapter(cfg: dict[str, Any]):
         ElegooAdapter,
         MoonrakerAdapter,
         OctoPrintAdapter,
-        PrusaConnectAdapter,
+        PrusaLinkAdapter,
     )
 
     ptype = cfg.get("type", "octoprint")
@@ -433,8 +433,8 @@ def _make_adapter(cfg: dict[str, Any]):
                 "Install it with: uv pip install 'kiln3d[elegoo]' or pip install websocket-client"
             )
         return ElegooAdapter(host=host, mainboard_id=cfg.get("serial") or "")
-    elif ptype == "prusaconnect":
-        return PrusaConnectAdapter(
+    elif ptype == "prusalink":
+        return PrusaLinkAdapter(
             host=host,
             api_key=cfg.get("api_key") or None,
         )
@@ -984,7 +984,7 @@ def _autodetect_printer_profile_id(ctx: click.Context) -> str | None:
             return mapped
 
     ptype = str(cfg.get("type", "")).strip().lower()
-    if ptype != "prusaconnect":
+    if ptype != "prusalink":
         return None
 
     # Prusa Link usually exposes printer identity under /api/v1/info,
@@ -1021,12 +1021,12 @@ def _run_prusa_diagnostics(cfg: dict[str, Any]) -> dict[str, Any]:
         "ok": False,
     }
 
-    if str(cfg.get("type", "")).lower() != "prusaconnect":
+    if str(cfg.get("type", "")).lower() != "prusalink":
         checks.append(
             {
                 "name": "backend",
                 "ok": False,
-                "detail": "Active printer is not type 'prusaconnect'.",
+                "detail": "Active printer is not type 'prusalink'.",
             }
         )
         return summary
@@ -1460,7 +1460,7 @@ def discover(timeout: float, subnet: str | None, methods: tuple, json_mode: bool
     "--type",
     "printer_type",
     required=True,
-    type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusaconnect"]),
+    type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink"]),
     help="Printer backend type.",
 )
 @click.option("--api-key", default=None, help="API key (OctoPrint/Moonraker/Creality/Prusa Link).")
@@ -1492,7 +1492,7 @@ def auth(
         prusa_diagnostics: dict[str, Any] | None = None
         creality_diagnostics: dict[str, Any] | None = None
         saved_host = host
-        if printer_type == "prusaconnect":
+        if printer_type == "prusalink":
             try:
                 cfg = load_printer_config(name)
                 prusa_diagnostics = _run_prusa_diagnostics(cfg)
@@ -1542,7 +1542,7 @@ def auth(
         if creality_diagnostics is not None:
             data["diagnostics"] = creality_diagnostics
 
-        if printer_type == "prusaconnect" and prusa_diagnostics is not None and not prusa_diagnostics.get("ok", False):
+        if printer_type == "prusalink" and prusa_diagnostics is not None and not prusa_diagnostics.get("ok", False):
             checks = prusa_diagnostics.get("checks", [])
             failed_checks = [
                 c.get("name", "unknown")
@@ -7041,7 +7041,7 @@ _PRINTER_TYPE_LABELS = {
     "creality": "Creality (Klipper/Moonraker)",
     "bambu": "Bambu Lab",
     "elegoo": "Elegoo (SDCP)",
-    "prusaconnect": "Prusa Link",
+    "prusalink": "Prusa Link",
 }
 
 
@@ -7166,7 +7166,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         if printer_type == "unknown":
             printer_type = click.prompt(
                 "  Printer type could not be auto-detected. Select type",
-                type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusaconnect"]),
+                type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink"]),
             )
         suggested_name = (selected.name or printer_type).lower().replace(" ", "-").replace(".", "-")
     else:
@@ -7189,7 +7189,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                 click.echo("  Could not auto-detect printer type.")
                 printer_type = click.prompt(
                     "  Select printer type",
-                    type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusaconnect"]),
+                    type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink"]),
                 )
                 suggested_name = printer_type
         except Exception as exc:
@@ -7197,7 +7197,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
             click.echo("  Probe failed. Enter type manually.")
             printer_type = click.prompt(
                 "  Select printer type",
-                type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusaconnect"]),
+                type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink"]),
             )
             suggested_name = printer_type
 
@@ -7211,7 +7211,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     access_code = None
     serial = None
 
-    if printer_type in ("octoprint", "moonraker", "creality", "prusaconnect"):
+    if printer_type in ("octoprint", "moonraker", "creality", "prusalink"):
         api_key = click.prompt(
             f"  API key for {_PRINTER_TYPE_LABELS.get(printer_type, printer_type)}",
             default="",
@@ -8692,10 +8692,10 @@ def doctor_prusa(ctx: click.Context, json_mode: bool) -> None:
         click.echo(format_error(str(exc), code="CONFIG_ERROR", json_mode=json_mode))
         sys.exit(1)
 
-    if str(cfg.get("type", "")).strip().lower() != "prusaconnect":
+    if str(cfg.get("type", "")).strip().lower() != "prusalink":
         click.echo(
             format_error(
-                "Active printer is not Prusa Link. Set one with --printer or run: kiln auth --type prusaconnect ...",
+                "Active printer is not Prusa Link. Set one with --printer or run: kiln auth --type prusalink ...",
                 code="WRONG_PRINTER_TYPE",
                 json_mode=json_mode,
             )
@@ -8938,7 +8938,7 @@ def _deep_network_diagnostics(host: str, printer_cfg: dict) -> list[dict]:
             (80, "HTTP"),
             (4408, "Moonraker/Fluidd alternate"),
         ],
-        "prusaconnect": [
+        "prusalink": [
             (80, "HTTP"),
             (443, "HTTPS"),
         ],
@@ -9147,7 +9147,7 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
                 )
 
         # Prusa-specific diagnostics for first-run clarity.
-        if str(printer_cfg.get("type", "")).strip().lower() == "prusaconnect":
+        if str(printer_cfg.get("type", "")).strip().lower() == "prusalink":
             try:
                 prusa_diag = _run_prusa_diagnostics(printer_cfg)
                 checks.append(

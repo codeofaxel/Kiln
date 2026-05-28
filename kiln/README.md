@@ -82,11 +82,11 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 | **OctoPrint** | Stable | Any OctoPrint-connected printer (Prusa, Ender, custom) |
 | **Moonraker** | Stable | Klipper-based printers (Voron, Ratrig, etc.) |
 | **Bambu Lab** | Stable | X1C, P1S, A1 (via LAN MQTT + FTPS) |
-| **Prusa Link** | Stable | MK4, XL, Mini+ (local REST API — type: `prusaconnect`) |
+| **Prusa Link** | Stable | MK4, XL, Mini+ (local REST API — type: `prusalink`) |
 
 ## Features
 
-- **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 800 MCP capabilities** for design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, fleet management, and fulfillment
+- **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 815 MCP capabilities** for design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, fleet management, and fulfillment
 - **<!-- KILN_CLI_COUNT:OLD --> 221 CLI commands** with `--json` output for agent consumption
 - **Multi-printer fleet** management with job queue and background scheduler
 - **Model marketplaces** — search/download from MyMiniFactory, Cults3D (Thingiverse deprecated — acquired by MMF, Feb 2026)

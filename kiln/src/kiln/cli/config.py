@@ -81,7 +81,7 @@ def _validate_printer_url(url: str, *, printer_type: str = "octoprint") -> tuple
 
     :param url: Raw printer URL or hostname.
     :param printer_type: Backend type (``"octoprint"``, ``"moonraker"``,
-        ``"creality"``, ``"bambu"``, ``"prusaconnect"``).
+        ``"creality"``, ``"bambu"``, ``"prusalink"``).
     :returns: ``(cleaned_url, warnings)`` where *warnings* is a list of
         human-readable strings (empty if everything looks good).
     """
@@ -302,7 +302,7 @@ def load_printer_config(
                 "No printers configured. Run 'kiln setup' for guided network discovery and setup, "
                 "or add one manually with:\n"
                 "  kiln auth --name my-printer --host <IP_OR_HOSTNAME> --type <TYPE> --api-key <KEY>\n"
-                "Supported types: octoprint, moonraker, creality, bambu, elegoo, prusaconnect, serial"
+                "Supported types: octoprint, moonraker, creality, bambu, elegoo, prusalink, serial"
             )
         else:
             raise ValueError(
@@ -369,7 +369,7 @@ def save_printer(
         # Elegoo SDCP uses no auth; optional mainboard_id for identification.
         if serial:
             entry["mainboard_id"] = serial
-    elif printer_type == "prusaconnect":
+    elif printer_type == "prusalink":
         if api_key:
             entry["api_key"] = api_key
         if printer_model:
@@ -476,7 +476,7 @@ def validate_printer_config(cfg: dict[str, Any]) -> tuple[bool, str | None]:
     Returns ``(True, None)`` or ``(False, error_message)``.
     """
     ptype = cfg.get("type", "")
-    if ptype not in ("octoprint", "moonraker", "creality", "bambu", "elegoo", "prusaconnect", "serial"):
+    if ptype not in ("octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink", "serial"):
         return False, f"Unknown printer type: {ptype!r}"
 
     host = cfg.get("host", "")

@@ -214,7 +214,7 @@ class TestProbeHost:
         assert port80_octo == []
 
     @responses.activate
-    def test_prusaconnect_found_port_80(self):
+    def test_prusalink_found_port_80(self):
         """PrusaLink printer detected on port 80 via /api/v1/status."""
         responses.add(
             responses.GET,
@@ -226,17 +226,17 @@ class TestProbeHost:
             status=200,
         )
         results = probe_host("192.168.1.77", timeout=1.0)
-        prusa = [r for r in results if r.printer_type == "prusaconnect"]
+        prusa = [r for r in results if r.printer_type == "prusalink"]
         assert len(prusa) >= 1
         p = prusa[0]
         assert p.host == "192.168.1.77"
         assert p.port == 80
-        assert p.printer_type == "prusaconnect"
+        assert p.printer_type == "prusalink"
         assert p.api_available is True
         assert p.discovery_method == "manual"
 
     @responses.activate
-    def test_prusaconnect_found_port_8080(self):
+    def test_prusalink_found_port_8080(self):
         """PrusaLink printer detected on alternate port 8080."""
         responses.add(
             responses.GET,
@@ -248,7 +248,7 @@ class TestProbeHost:
             status=200,
         )
         results = probe_host("192.168.1.77", timeout=1.0)
-        prusa = [r for r in results if r.printer_type == "prusaconnect" and r.port == 8080]
+        prusa = [r for r in results if r.printer_type == "prusalink" and r.port == 8080]
         assert len(prusa) == 1
         assert prusa[0].api_available is True
 
@@ -417,7 +417,7 @@ class TestTryHttpProbe:
         assert results == []
 
     @responses.activate
-    def test_finds_prusaconnect_on_subnet(self):
+    def test_finds_prusalink_on_subnet(self):
         """Discovers a PrusaLink printer on the subnet."""
         responses.add(
             responses.GET,
@@ -429,7 +429,7 @@ class TestTryHttpProbe:
             status=200,
         )
         results = _try_http_probe("192.168.1", timeout=10.0)
-        prusa = [r for r in results if r.printer_type == "prusaconnect"]
+        prusa = [r for r in results if r.printer_type == "prusalink"]
         assert len(prusa) >= 1
         p = prusa[0]
         assert p.host == "192.168.1.77"

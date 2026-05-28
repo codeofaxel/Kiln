@@ -211,7 +211,7 @@ kiln doctor-creality --host 192.168.1.55 --model k1_max
 kiln auth --name k1max --host 192.168.1.55 --type creality --printer-model k1_max
 
 # Prusa Link
-kiln auth --name prusa-mini --host http://192.168.1.44 --type prusaconnect --api-key YOUR_KEY
+kiln auth --name prusa-mini --host http://192.168.1.44 --type prusalink --api-key YOUR_KEY
 
 # Bambu Lab
 kiln auth --name x1c --host 192.168.1.100 --type bambu --access-code 12345678 --serial 01P00A000000001
@@ -235,7 +235,7 @@ curl http://192.168.1.55:7125/server/info               # Creality when local Mo
 curl http://192.168.1.60/api/version                    # OctoPrint
 
 # Register directly by IP (no discovery required):
-kiln auth --name printer --host http://192.168.1.44 --type prusaconnect --api-key YOUR_KEY
+kiln auth --name printer --host http://192.168.1.44 --type prusalink --api-key YOUR_KEY
 ```
 
 ### First Print
@@ -281,7 +281,7 @@ Save printer credentials to `~/.kiln/config.yaml`.
 |---|---|---|
 | `--name` | Yes | Friendly name for this printer |
 | `--host` | Yes | Printer URL (e.g., `http://octopi.local`) |
-| `--type` | Yes | Backend: `octoprint`, `moonraker`, `creality`, `bambu`, `prusaconnect`, `elegoo`, `serial` |
+| `--type` | Yes | Backend: `octoprint`, `moonraker`, `creality`, `bambu`, `prusalink`, `elegoo`, `serial` |
 | `--api-key` | OctoPrint, Moonraker/Creality, Prusa Link | API key when the backend requires one |
 | `--access-code` | Bambu | Bambu Lab access code |
 | `--serial` | Bambu, Elegoo optional | Bambu Lab serial number or SDCP mainboard identifier |
@@ -395,7 +395,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 793 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 800 total MCP capabilities**. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
+Kiln exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 808 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 815 total MCP capabilities**. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
 
 kiln-pro tools are discoverable through the public `pro_tool_manifest.json` even when kiln-pro is not installed locally. Free-tier callers receive structured `TIER_REQUIRED` responses with the required tier and pricing URL; paired machines can proxy eligible paid-tier tool calls through the hosted Kiln REST endpoint so the paid code stays server-side.
 
@@ -1108,7 +1108,7 @@ Communicates via Prusa Link REST API (`/api/v1/`). Requires a Prusa Link API key
 
 **Configuration:**
 ```yaml
-type: prusaconnect
+type: prusalink
 host: http://prusa-mk4.local
 api_key: YOUR_KEY
 ```
@@ -1402,7 +1402,7 @@ kiln/src/kiln/
         octoprint.py
         moonraker.py
         bambu.py
-        prusaconnect.py
+        prusalink.py
         elegoo.py
         serial_adapter.py
     marketplaces/

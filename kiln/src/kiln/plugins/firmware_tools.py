@@ -55,7 +55,7 @@ class _FirmwareToolsPlugin:
             an update is available.
 
             Not all printer backends support firmware updates.  Bambu and
-            PrusaConnect printers will return an ``UNSUPPORTED`` error.
+            Prusa Link printers will return an ``UNSUPPORTED`` error.
             """
             try:
                 adapter = _srv._get_adapter()

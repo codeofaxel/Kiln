@@ -46,7 +46,7 @@ printers:
   # Prusa Link ──────────────────────────────────────────────
   # API key: Settings > Network > PrusaLink on the printer's LCD.
   prusa_mk4:
-    type: prusaconnect
+    type: prusalink
     host: http://192.168.1.80
     api_key: your-prusa-link-api-key
 
@@ -62,7 +62,7 @@ settings:
 # Environment variable overrides (not in this file):
 #
 #   KILN_PRINTER_HOST     — Printer URL
-#   KILN_PRINTER_TYPE     — octoprint / moonraker / creality / bambu / prusaconnect
+#   KILN_PRINTER_TYPE     — octoprint / moonraker / creality / bambu / prusalink
 #   KILN_PRINTER_API_KEY  — API key or access code
 #   KILN_PRINTER_MODEL    — safety/profile key, e.g. creality_k1_max
 #

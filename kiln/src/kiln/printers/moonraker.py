@@ -115,6 +115,82 @@ def _map_moonraker_state(state_string: str, print_state: str | None = None) -> P
     return _STATE_MAP.get(state_string, PrinterStatus.UNKNOWN)
 
 
+# Substrings (lowercased) that, when present in ``print_stats.message``
+# alongside a ``state == "error"``, indicate the print stopped because
+# of a flow / extrusion issue rather than a general firmware fault.
+# Conservative on purpose: a false-positive flow-anomaly tag poisons the
+# kiln-pro nozzle wear cross-check more than a missed positive does.
+#
+# Sources:
+#   * Klipper ``filament_switch_sensor`` and ``filament_motion_sensor``
+#     emit ``"Filament Sensor <name>: Runout"`` style messages via
+#     ``pause_resume`` when the sensor trips
+#     (klipper/klippy/extras/filament_switch_sensor.py,
+#      klipper/klippy/extras/filament_motion_sensor.py).
+#   * Klipper ``print_stats`` records the trigger string in
+#     ``print_stats.message`` (klipper/klippy/extras/print_stats.py)
+#     which Moonraker surfaces over the JSON-RPC subscription.
+#
+# Substrings are matched case-insensitively after ``.lower()``.  The
+# "filament" + "runout"/"jam" combination is the conservative bar —
+# a bare "error" state without one of these keywords is treated as
+# unknown and DOES NOT fire the wear cross-check.
+_FLOW_ANOMALY_JAM_SUBSTRINGS: tuple[str, ...] = (
+    "filament sensor",  # Klipper runout / motion sensor trip
+    "filament runout",  # Some configs spell it explicitly
+    "runout detected",
+    "filament jam",
+    "filament stuck",
+)
+
+_FLOW_ANOMALY_UNDER_EXTRUSION_SUBSTRINGS: tuple[str, ...] = (
+    "under extrusion",
+    "under-extrusion",
+    "extruder shutdown",  # Klipper extruder failure
+    "extruder not",       # "Extruder not ready" / "Extruder not heating"
+    "no trigger on extruder",  # filament_motion_sensor wording
+)
+
+
+def _classify_flow_anomaly(
+    print_state: str | None,
+    message: str | None,
+) -> tuple[str, str] | None:
+    """Return (event_type, severity) for a Moonraker/Klipper flow signal.
+
+    Inspects ``print_stats.state`` together with ``print_stats.message``
+    (both fields are exposed by Moonraker's
+    ``GET /printer/objects/query?print_stats`` and over the JSON-RPC
+    ``notify_status_update`` push channel).  Returns ``None`` when the
+    state isn't an error OR the message doesn't carry a flow-related
+    substring — a generic error without a filament hint is too broad
+    to feed into the wear cross-check, so we drop it.
+
+    Classification:
+      * Filament runout / sensor trip / jam → ``("filament_jam", "high")``
+      * Extruder shutdown / under-extrusion → ``("under_extrusion", "medium")``
+      * Anything else → ``None``
+
+    Args:
+        print_state: The ``print_stats.state`` field, lowercase one of
+            ``printing|paused|complete|error|cancelled|standby``.
+        message: The ``print_stats.message`` field; Klipper writes the
+            shutdown reason here when state transitions to ``error``.
+    """
+    if print_state != "error":
+        return None
+    if not message or not isinstance(message, str):
+        return None
+    msg_lower = message.lower()
+    for substring in _FLOW_ANOMALY_JAM_SUBSTRINGS:
+        if substring in msg_lower:
+            return "filament_jam", "high"
+    for substring in _FLOW_ANOMALY_UNDER_EXTRUSION_SUBSTRINGS:
+        if substring in msg_lower:
+            return "under_extrusion", "medium"
+    return None
+
+
 # ---------------------------------------------------------------------------
 # WebSocket push monitor
 # ---------------------------------------------------------------------------
@@ -156,9 +232,18 @@ class MoonrakerWebSocketMonitor:
         host: str,
         *,
         on_state_update: Callable[[dict[str, Any]], None] | None = None,
+        printer_name: str = "moonraker",
     ) -> None:
         self._host: str = host.rstrip("/")
         self._on_state_update = on_state_update
+        self._printer_name: str = printer_name
+
+        # Last-fired flow-anomaly key (state, message) so we don't
+        # re-fire the kiln-pro wear cross-check on every push for a
+        # stuck error state.  The recorder de-dupes by time bucket too,
+        # but skipping the import + cross-process call on every status
+        # tick is cheaper.
+        self._last_flow_anomaly_key: tuple[str, str] | None = None
 
         # Shared state cache -- written by the WS thread, read by the adapter.
         self._cache: dict[str, Any] = {}
@@ -303,6 +388,7 @@ class MoonrakerWebSocketMonitor:
                 status = params[0]
                 with self._cache_lock:
                     self._cache.update(status)
+                self._maybe_record_flow_anomaly(status)
                 if self._on_state_update:
                     try:
                         self._on_state_update(status)
@@ -317,6 +403,68 @@ class MoonrakerWebSocketMonitor:
             if isinstance(status, dict):
                 with self._cache_lock:
                     self._cache.update(status)
+
+    def _maybe_record_flow_anomaly(self, status: dict[str, Any]) -> None:
+        """Feed flow / extrusion signals into the kiln-pro wear cross-check.
+
+        When Klipper's ``print_stats`` reports an ``error`` state with a
+        message that names a filament / extruder issue (filament-sensor
+        runout, extruder shutdown, under-extrusion), call kiln-pro's
+        ``record_extrusion_event`` so the nozzle wear estimator learns
+        from real-print flow failures alongside gram counts.
+
+        Free-tier installs (no kiln-pro) silently skip via the
+        ``ImportError`` guard — the adapter remains free-tier-functional.
+
+        De-duplication: each (state, message) pair fires once per
+        WebSocket session.  Klipper repeats the same status in every
+        subsequent ``notify_status_update`` while the printer is stuck
+        on the error; without the de-dupe the cross-check would see N
+        repeated events per stuck print.
+        """
+        print_stats = status.get("print_stats")
+        if not isinstance(print_stats, dict):
+            return
+        state = print_stats.get("state")
+        message = print_stats.get("message")
+        if not isinstance(state, str):
+            return
+
+        classification = _classify_flow_anomaly(state, message)
+        if classification is None:
+            # State recovered or never matched — clear the dedupe key
+            # so the next genuine anomaly fires.
+            if state != "error":
+                self._last_flow_anomaly_key = None
+            return
+
+        # De-dupe by (state, message) — same payload, same printer, skip.
+        msg_key = message if isinstance(message, str) else ""
+        key = (state, msg_key)
+        if self._last_flow_anomaly_key == key:
+            return
+        self._last_flow_anomaly_key = key
+
+        event_type, severity = classification
+        try:
+            from kiln_pro.nozzle_intelligence.sensor_signal import (
+                record_extrusion_event_for_printer,
+            )
+            record_extrusion_event_for_printer(
+                printer_id=self._printer_name,
+                event_type=event_type,
+                severity=severity,
+            )
+        except ImportError:
+            # Free tier — kiln-pro nozzle module not installed.  Drop
+            # the signal silently so the public adapter stays
+            # free-tier-functional.
+            pass
+        except Exception as exc:  # pragma: no cover
+            logger.debug(
+                "Flow-anomaly cross-check raised (non-fatal): %s",
+                exc,
+            )
 
     def _on_error(self, ws: Any, error: Any) -> None:
         logger.debug("Moonraker WS error: %s", error)
@@ -428,7 +576,10 @@ class MoonrakerAdapter(PrinterAdapter):
         """
         if self._ws_monitor is not None:
             return
-        self._ws_monitor = MoonrakerWebSocketMonitor(self._host)
+        self._ws_monitor = MoonrakerWebSocketMonitor(
+            self._host,
+            printer_name=self.name,
+        )
         self._ws_monitor.start()
 
     def disable_push_monitoring(self) -> None:

@@ -15,7 +15,7 @@ Environment variables
 ``KILN_PRINTER_TYPE``
     Printer backend type.  Supported values: ``"octoprint"``,
     ``"moonraker"``, ``"creality"``, ``"bambu"``, ``"elegoo"``,
-    ``"prusaconnect"``, and ``"serial"``.
+    ``"prusalink"``, and ``"serial"``.
     Defaults to ``"octoprint"``.
 ``KILN_PRINTER_PORT``
     Serial port path for USB printers (required when ``KILN_PRINTER_TYPE``
@@ -291,7 +291,7 @@ from kiln.printers import (
     PrinterAdapter,
     PrinterError,
     PrinterStatus,
-    PrusaConnectAdapter,
+    PrusaLinkAdapter,
     SerialPrinterAdapter,
 )
 from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
@@ -952,8 +952,8 @@ def _get_adapter() -> PrinterAdapter:
             )
         mainboard_id = os.environ.get("KILN_PRINTER_MAINBOARD_ID", "")
         _adapter = ElegooAdapter(host=host, mainboard_id=mainboard_id)
-    elif printer_type == "prusaconnect":
-        _adapter = PrusaConnectAdapter(host=host, api_key=api_key or None)
+    elif printer_type == "prusalink":
+        _adapter = PrusaLinkAdapter(host=host, api_key=api_key or None)
     elif printer_type == "serial":
         port = os.environ.get("KILN_PRINTER_PORT", "")
         if not port:
@@ -966,7 +966,7 @@ def _get_adapter() -> PrinterAdapter:
     else:
         raise RuntimeError(
             f"Unsupported printer type: {printer_type!r}.  "
-            f"Supported types are 'octoprint', 'moonraker', 'creality', 'bambu', 'elegoo', 'prusaconnect', and 'serial'."
+            f"Supported types are 'octoprint', 'moonraker', 'creality', 'bambu', 'elegoo', 'prusalink', and 'serial'."
         )
 
     # Propagate safety profile to adapter for defense-in-depth temp limits.
@@ -1182,8 +1182,8 @@ def _build_adapter_from_config_entry(name: str, entry: dict[str, Any]) -> Printe
             )
         mainboard_id = str(entry.get("mainboard_id") or os.environ.get("KILN_PRINTER_MAINBOARD_ID", ""))
         adapter = ElegooAdapter(host=host, mainboard_id=mainboard_id)
-    elif printer_type == "prusaconnect":
-        adapter = PrusaConnectAdapter(host=host, api_key=api_key or None)
+    elif printer_type == "prusalink":
+        adapter = PrusaLinkAdapter(host=host, api_key=api_key or None)
     elif printer_type == "serial":
         port = str(entry.get("port") or os.environ.get("KILN_PRINTER_PORT", ""))
         if not port:
@@ -4121,6 +4121,125 @@ def start_print(
             print_kwargs["bed_type"] = bed_type
         if plate_number != 1:
             print_kwargs["plate_number"] = plate_number
+
+        # -- Independent nozzle capacity check -----------------------------
+        # Consult kiln-pro's nozzle wear model for the active printer
+        # against the planned print's filament weight.  Free-tier
+        # installs without kiln-pro silently skip via the bridge's
+        # available() guard.
+        #
+        # Why run this here separately from preflight: preflight's
+        # nozzle check only fires when planned_grams > 0, and
+        # preflight's planned_grams source (local file_result) is only
+        # populated for local file_path inputs.  start_print works with
+        # a remote file_name, so we look up filament_used_mm directly
+        # from the adapter's file listing.  This also keeps the
+        # consultation alive when KILN_SKIP_PREFLIGHT bypasses the
+        # full preflight gate.
+        #
+        # Verdict handling:
+        # - exceeded_p90 -> refuse the print unless
+        #   KILN_SKIP_NOZZLE_CHECK=1 (matches KILN_SKIP_PREFLIGHT's
+        #   override convention).
+        # - approaching / exceeded_p50 -> advisory only, attached to
+        #   the success response under "nozzle_advisory" so the agent
+        #   can surface it without blocking.
+        # - unknown_* or absent -> silent skip.
+        nozzle_advisory: dict[str, Any] | None = None
+        try:
+            from kiln import _pro_nozzle_bridge
+
+            if _pro_nozzle_bridge.available():
+                _printer_id = ""
+                if _get_registry().count > 0:
+                    _names = _get_registry().list_names()
+                    if _names:
+                        _printer_id = _names[0]
+
+                _planned_grams = 0.0
+                _filament_material = ""
+                try:
+                    _files_for_nozzle = adapter.list_files()
+                    for _pf in _files_for_nozzle:
+                        if (
+                            _pf.name.lower() == file_name.lower()
+                            or _pf.path.lower() == file_name.lower()
+                        ):
+                            if _pf.filament_used_mm:
+                                import math as _m
+
+                                # 1.75 mm filament, PLA density
+                                # 0.00124 g/mm^3 — same baseline used
+                                # in slice_and_print's gcode metadata
+                                # parser (see _filament_weight_g logic).
+                                _vol_mm3 = (
+                                    _m.pi
+                                    * (1.75 / 2) ** 2
+                                    * _pf.filament_used_mm
+                                )
+                                _planned_grams = _vol_mm3 * 0.00124
+                            if _pf.material:
+                                _filament_material = _pf.material
+                            break
+                except Exception:
+                    pass
+
+                if _printer_id and _planned_grams > 0:
+                    _nozzle_verdict = _pro_nozzle_bridge.consult_capacity(
+                        printer_id=_printer_id,
+                        planned_grams=_planned_grams,
+                        filament_material=_filament_material,
+                    )
+                    if _nozzle_verdict is not None:
+                        _nz_status = _nozzle_verdict.get("status")
+                        if _nz_status == "exceeded_p90":
+                            _skip_nozzle = os.environ.get(
+                                "KILN_SKIP_NOZZLE_CHECK", ""
+                            ).strip() in ("1", "true", "yes")
+                            if not _skip_nozzle:
+                                _audit(
+                                    "start_print",
+                                    "nozzle_capacity_blocked",
+                                    details={
+                                        "file": file_name,
+                                        "status": _nz_status,
+                                        "narrative": _nozzle_verdict.get(
+                                            "narrative", ""
+                                        ),
+                                    },
+                                )
+                                return _error_dict(
+                                    "Nozzle wear exceeds population p90: "
+                                    f"{_nozzle_verdict.get('narrative', 'nozzle capacity exceeded')}. "
+                                    "Replace the nozzle before starting "
+                                    "this print, or set "
+                                    "KILN_SKIP_NOZZLE_CHECK=1 to override.",
+                                    code="NOZZLE_CAPACITY_EXCEEDED",
+                                )
+                            logger.warning(
+                                "KILN_SKIP_NOZZLE_CHECK is set — proceeding "
+                                "with start_print(%s) despite exceeded_p90 "
+                                "wear: %s",
+                                file_name,
+                                _nozzle_verdict.get("narrative", ""),
+                            )
+                        if _nz_status in (
+                            "approaching",
+                            "exceeded_p50",
+                            "exceeded_p90",
+                        ):
+                            nozzle_advisory = {
+                                "status": _nz_status,
+                                "narrative": _nozzle_verdict.get(
+                                    "narrative", ""
+                                ),
+                                "percent_used": _nozzle_verdict.get(
+                                    "percent_used"
+                                ),
+                            }
+        except Exception as exc:
+            logger.debug("Nozzle capacity check skipped: %s", exc)
+
         result = adapter.start_print(file_name, **print_kwargs)
         _get_heater_watchdog().notify_print_started()
 
@@ -4184,6 +4303,8 @@ def start_print(
             out["resume_3mf_detected"] = True
         if reasserted is not None:
             out["preheat_reasserted"] = reasserted
+        if nozzle_advisory is not None:
+            out["nozzle_advisory"] = nozzle_advisory
         return out
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(
@@ -4333,7 +4454,7 @@ def cancel_print(
         # a printer that was already idle).  Uses the adapter's split
         # ``set_tool_temp`` / ``set_bed_temp`` methods — present on every
         # adapter subclass (base, bambu, octoprint, moonraker, creality,
-        # serial, elegoo, prusaconnect).  Chamber temp (rare) is sent as raw
+        # serial, elegoo, prusalink).  Chamber temp (rare) is sent as raw
         # M141 G-code since most adapters don't expose a chamber setter.
         restored: dict[str, float] | None = None
         chamber_restored: float | None = None
@@ -5862,6 +5983,43 @@ def preflight_check(
             except Exception as exc:
                 logger.debug("Brand filament compat check skipped: %s", exc)
 
+        # -- Nozzle capacity check (advisory) ------------------------------
+        # When kiln-pro is installed and the active printer has a
+        # confirmed nozzle state, project the planned print against the
+        # nozzle's lifetime envelope.  Free-tier installs without
+        # kiln-pro silently skip this check (bridge.available() returns
+        # False).  When the verdict surfaces, it joins the checks list
+        # as advisory — never blocks ready=True on its own.  The user
+        # decides whether to swap the nozzle or proceed.
+        try:
+            from kiln import _pro_nozzle_bridge
+
+            _planned_grams = 0.0
+            if file_result is not None:
+                _planned_grams = float(file_result.get("filament_grams") or 0)
+            _printer_id = ""
+            if _get_registry().count > 0:
+                _names = _get_registry().list_names()
+                if _names:
+                    _printer_id = _names[0]
+            if _printer_id and _planned_grams > 0:
+                _nozzle_verdict = _pro_nozzle_bridge.consult_capacity(
+                    printer_id=_printer_id,
+                    planned_grams=_planned_grams,
+                    filament_material=expected_material or "",
+                )
+                if _nozzle_verdict is not None and _nozzle_verdict.get("status") not in (None, "unknown_baseline", "unknown_nozzle", "invalid_input"):
+                    checks.append(
+                        {
+                            "name": "nozzle_capacity",
+                            "passed": _nozzle_verdict["status"] != "exceeded_p90",
+                            "message": _nozzle_verdict.get("narrative", ""),
+                            "advisory": True,
+                        }
+                    )
+        except Exception as exc:
+            logger.debug("Nozzle capacity check skipped: %s", exc)
+
         # -- Summary -------------------------------------------------------
         ready = all(c["passed"] for c in checks)
         summary = (
@@ -6307,7 +6465,7 @@ def register_printer(
     Args:
         name: Unique human-readable name (e.g. "voron-350", "bambu-x1c").
         printer_type: Backend type -- "octoprint", "moonraker", "bambu",
-            "creality", "elegoo", "prusaconnect", or "serial".
+            "creality", "elegoo", "prusalink", or "serial".
         host: Base URL or IP address of the printer.  For serial printers,
             this is the port path (e.g. "/dev/ttyUSB0", "COM3").
         api_key: API key (required for OctoPrint and Bambu, optional for
@@ -6421,8 +6579,8 @@ def register_printer(
                 host=host,
                 mainboard_id=serial or "",
             )
-        elif printer_type == "prusaconnect":
-            adapter = PrusaConnectAdapter(host=host, api_key=api_key or None)
+        elif printer_type == "prusalink":
+            adapter = PrusaLinkAdapter(host=host, api_key=api_key or None)
         elif printer_type == "serial":
             # For serial printers, 'host' is the serial port path (e.g.
             # /dev/ttyUSB0) and 'api_key' is unused.
@@ -6431,7 +6589,7 @@ def register_printer(
         else:
             return _error_dict(
                 f"Unsupported printer_type: {printer_type!r}. "
-                "Supported: 'octoprint', 'moonraker', 'creality', 'bambu', 'elegoo', 'prusaconnect', 'serial'.",
+                "Supported: 'octoprint', 'moonraker', 'creality', 'bambu', 'elegoo', 'prusalink', 'serial'.",
                 code="INVALID_ARGS",
             )
 
@@ -8740,7 +8898,7 @@ def fleet_workflow() -> str:
     return (
         "To manage a fleet of printers:\n\n"
         "1. Call `fleet_status` to see all registered printers and their states\n"
-        "2. Use `register_printer` to add new printers (octoprint, moonraker, creality, bambu, elegoo, prusaconnect, or serial)\n"
+        "2. Use `register_printer` to add new printers (octoprint, moonraker, creality, bambu, elegoo, prusalink, or serial)\n"
         "3. Submit jobs with `submit_job` — the scheduler auto-dispatches to idle printers\n"
         "4. Monitor via `queue_summary` and `job_status`\n"
         "5. Check `recent_events` for lifecycle updates\n\n"

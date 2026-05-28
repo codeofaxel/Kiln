@@ -59,6 +59,131 @@ _STATE_MAP: dict[str, PrinterStatus] = {
 
 
 # ---------------------------------------------------------------------------
+# Flow-anomaly classification
+# ---------------------------------------------------------------------------
+
+# Prusa Link state strings that indicate the printer is in a
+# user-intervention or fault posture.  Used by the flow-anomaly
+# cross-check to recognize transitions INTO an anomaly window so the
+# kiln-pro wear-tracking subsystem can correlate flow signals against
+# gram-count wear estimates.
+#
+# Source: Prusa Link Web API (`/api/v1/status`).  The `printer.state`
+# enum carries values like "IDLE", "PRINTING", "PAUSED", "FINISHED",
+# "ATTENTION", "ERROR".  ATTENTION on MK4 / XL / MMU3 commonly
+# correlates with filament-feeding issues (jam, runout, MMU error);
+# ERROR is broader and only counts when the accompanying message
+# carries a filament hint.
+_ANOMALY_STATES: frozenset[str] = frozenset({"ATTENTION", "ERROR"})
+
+# Substrings inside the printer's status / error message that point at
+# the filament path.  Conservatism is the right call — false positives
+# on flow-anomaly tagging poison the wear-rate signal more than missed
+# positives.  We only fire for messages whose text clearly implicates
+# filament feeding; bed-leveling / first-layer-calibration / user-pause
+# messages are deliberately omitted.
+_FILAMENT_MESSAGE_HINTS: tuple[str, ...] = (
+    "filament",       # generic — covers "filament jam", "no filament", etc.
+    "runout",         # "runout sensor triggered", "filament runout"
+    "no_filament",    # MK3-era state flag string
+    "no filament",
+    "mmu",            # MMU3 error states are virtually always filament-path
+    "extruder",       # "blocked extruder", "extruder fault"
+    "jam",            # explicit jam wording
+    "feed",           # "feeding abnormal", "feed error"
+    "clog",
+)
+
+# Strings that look filament-adjacent but are NOT flow anomalies — used
+# to suppress false positives when the message text happens to mention
+# one of the hints above in an unrelated context.
+_FILAMENT_HINT_SUPPRESSORS: tuple[str, ...] = (
+    "bed leveling",
+    "first layer",
+    "calibration",
+    "user pause",
+    "user-paused",
+    "front panel",
+)
+
+
+def _classify_flow_anomaly(
+    prusalink_state: str,
+    message: str = "",
+) -> tuple[str, str] | None:
+    """Return (event_type, severity) for a Prusa Link state transition.
+
+    Args:
+        prusalink_state: The raw ``printer.state`` enum value reported
+            by ``/api/v1/status`` (e.g. ``"ATTENTION"``, ``"ERROR"``,
+            ``"IDLE"``).  Case-sensitive — Prusa Link emits upper-case.
+        message: Optional human-readable status / error text from
+            ``printer.status_printer.message``, ``printer.error.text``,
+            or equivalent surface.  Used to disambiguate generic
+            ATTENTION / ERROR states; without filament-related text,
+            an ATTENTION state is treated as "not a flow anomaly" and
+            ``None`` is returned.
+
+    Returns:
+        ``None`` when the state isn't a flow anomaly (IDLE, BUSY,
+        PRINTING, PAUSED, FINISHED, READY, STOPPED), when the state is
+        ATTENTION / ERROR but the message doesn't mention the filament
+        path, or when a suppressor substring (bed leveling, first
+        layer, calibration, user pause) is present.
+
+        Otherwise:
+          * ``("filament_jam", "high")`` — explicit runout / jam /
+            no-filament message text, or any MMU error.  Mirrors the
+            Bambu wire's "high" severity bucket for hard stoppages.
+          * ``("under_extrusion", "medium")`` — ATTENTION state with a
+            generic filament / extruder / feed hint that doesn't
+            escalate to a hard jam.
+
+        Generic ERROR states without a filament hint never fire.
+    """
+    if not prusalink_state:
+        return None
+
+    state_upper = prusalink_state.strip().upper()
+    if state_upper not in _ANOMALY_STATES:
+        return None
+
+    message_lower = (message or "").lower()
+
+    # Suppress false positives where the message text mentions a
+    # filament hint as part of an unrelated workflow (e.g. "first
+    # layer calibration: insert filament").
+    for suppressor in _FILAMENT_HINT_SUPPRESSORS:
+        if suppressor in message_lower:
+            return None
+
+    # Hard-jam signals — runout sensor fire, explicit "no filament" or
+    # "jam" text, MMU error window.  All escalate to high severity.
+    if any(
+        hint in message_lower
+        for hint in ("runout", "no filament", "no_filament", "jam", "clog", "mmu")
+    ):
+        return "filament_jam", "high"
+
+    # Generic ATTENTION + filament-path hint — under-extrusion bucket.
+    # ERROR without a filament hint already returned None above; ERROR
+    # with a clear filament word also falls through to here.
+    if state_upper == "ATTENTION":
+        if any(hint in message_lower for hint in _FILAMENT_MESSAGE_HINTS):
+            return "under_extrusion", "medium"
+        # ATTENTION without context is too generic to attribute to
+        # flow — could be user-pause, door open, filament-load prompt.
+        return None
+
+    # ERROR with a filament hint — treat as under_extrusion medium.
+    # ERROR without is already None.
+    if any(hint in message_lower for hint in _FILAMENT_MESSAGE_HINTS):
+        return "under_extrusion", "medium"
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -78,7 +203,7 @@ def _safe_get(data: Any, *keys: str, default: Any = None) -> Any:
 # ---------------------------------------------------------------------------
 
 
-class PrusaConnectAdapter(PrinterAdapter):
+class PrusaLinkAdapter(PrinterAdapter):
     """Concrete :class:`PrinterAdapter` backed by the Prusa Link HTTP API.
 
     Args:
@@ -112,12 +237,19 @@ class PrusaConnectAdapter(PrinterAdapter):
         if self._api_key:
             self._session.headers.update({"X-Api-Key": self._api_key})
 
+        # Last raw Prusa Link state string observed by get_state().  The
+        # flow-anomaly cross-check fires only on a TRANSITION into an
+        # anomaly state, not on every poll while the printer sits in
+        # ATTENTION; a steady-state error would otherwise flood the
+        # kiln-pro wear-signal log every poll cycle.
+        self._prior_state: str | None = None
+
     # -- PrinterAdapter identity properties ---------------------------------
 
     @property
     def name(self) -> str:  # noqa: D401
         """Human-readable identifier for this adapter."""
-        return "prusaconnect"
+        return "prusalink"
 
     @property
     def capabilities(self) -> PrinterCapabilities:
@@ -178,7 +310,7 @@ class PrusaConnectAdapter(PrinterAdapter):
                             f"Your API key is invalid or missing. Find the correct key in "
                             f"Settings > Network > PrusaLink on your printer's LCD, then update "
                             f"with: kiln auth --name <name> --host {self._host} "
-                            f"--type prusaconnect --api-key <YOUR_KEY>",
+                            f"--type prusalink --api-key <YOUR_KEY>",
                         )
                     if response.status_code == 403:
                         endpoint_hint = (
@@ -373,6 +505,22 @@ class PrusaConnectAdapter(PrinterAdapter):
         chamber_actual = printer.get("temp_chamber") if isinstance(printer, dict) else None
         chamber_target = printer.get("target_chamber") if isinstance(printer, dict) else None
 
+        # Flow-anomaly cross-check — fire on TRANSITION INTO ATTENTION /
+        # ERROR (with a filament-path message hint) so the kiln-pro
+        # nozzle wear-tracking subsystem can correlate flow signals
+        # against the gram-count wear estimate.  Sustained flow signals
+        # on a nozzle whose gram-count says "fresh" are a hint that
+        # either the gram count is wrong, the filament path has
+        # friction, or the bore is widening faster than population
+        # estimates predict.
+        #
+        # Transition-only firing — _prior_state guards against
+        # steady-state ATTENTION flooding the wear-signal log every
+        # poll cycle.  Free-tier installs without kiln-pro silently
+        # skip via try/except ImportError.
+        self._maybe_fire_flow_anomaly(prior=self._prior_state, current=state_str, printer=printer)
+        self._prior_state = state_str
+
         return PrinterState(
             connected=True,
             state=mapped_status,
@@ -383,6 +531,80 @@ class PrusaConnectAdapter(PrinterAdapter):
             chamber_temp_actual=chamber_actual,
             chamber_temp_target=chamber_target,
         )
+
+    # ------------------------------------------------------------------
+    # Internal -- flow anomaly cross-check
+    # ------------------------------------------------------------------
+
+    def _maybe_fire_flow_anomaly(
+        self,
+        *,
+        prior: str | None,
+        current: str,
+        printer: Any,
+    ) -> None:
+        """Feed a transition-into-anomaly state to the kiln-pro wear cross-check.
+
+        Only fires when *current* is a flow-anomaly state, *prior* was
+        not (or was unknown), and the printer's status / error message
+        text implicates the filament path.  Steady-state anomalies
+        (same anomaly state across two consecutive polls) are skipped
+        so the wear-signal log isn't flooded.
+
+        Silent on missing kiln-pro (free tier); silent on any
+        unexpected error inside the recorder so a flow-anomaly signal
+        never breaks the status-poll happy path.
+        """
+        current_upper = (current or "").strip().upper()
+        prior_upper = (prior or "").strip().upper()
+
+        # Suppress steady-state and non-transition cases.
+        if current_upper not in _ANOMALY_STATES:
+            return
+        if prior_upper in _ANOMALY_STATES:
+            return
+
+        # Pull the message text from whichever surface the firmware
+        # populated.  Prusa Link doesn't standardize this across MK4 /
+        # XL / MMU3 firmwares — try the common locations and join
+        # whatever we find so the classifier sees the union.
+        message_parts: list[str] = []
+        if isinstance(printer, dict):
+            for key in ("message", "status_printer", "error", "warning"):
+                raw = printer.get(key)
+                if isinstance(raw, str):
+                    message_parts.append(raw)
+                elif isinstance(raw, dict):
+                    for sub_key in ("message", "text", "description"):
+                        sub = raw.get(sub_key)
+                        if isinstance(sub, str):
+                            message_parts.append(sub)
+        message = " | ".join(part for part in message_parts if part)
+
+        classification = _classify_flow_anomaly(current_upper, message)
+        if classification is None:
+            return
+
+        event_type, severity = classification
+        try:
+            from kiln_pro.nozzle_intelligence.sensor_signal import (
+                record_extrusion_event_for_printer,
+            )
+
+            record_extrusion_event_for_printer(
+                printer_id=self.name,
+                event_type=event_type,
+                severity=severity,
+            )
+        except ImportError:
+            # Free tier — kiln-pro nozzle module not installed.  Drop
+            # the signal silently.
+            pass
+        except Exception as exc:  # pragma: no cover
+            logger.debug(
+                "Flow-anomaly cross-check raised (non-fatal): %s",
+                exc,
+            )
 
     def get_job(self) -> JobProgress:
         """Retrieve progress info for the active print job.
@@ -745,4 +967,4 @@ class PrusaConnectAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def __repr__(self) -> str:
-        return f"<PrusaConnectAdapter host={self._host!r}>"
+        return f"<PrusaLinkAdapter host={self._host!r}>"

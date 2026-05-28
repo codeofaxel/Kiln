@@ -40,7 +40,7 @@ class DiscoveredPrinter:
 
     host: str
     port: int
-    printer_type: str  # "octoprint", "moonraker", "bambu", "elegoo", "prusaconnect", "unknown"
+    printer_type: str  # "octoprint", "moonraker", "bambu", "elegoo", "prusalink", "unknown"
     name: str = ""
     version: str = ""
     api_available: bool = False
@@ -60,8 +60,8 @@ _PROBE_TARGETS = [
     (7125, "/server/info", "klippy_state", "moonraker"),
     (80, "/server/info", "klippy_state", "moonraker"),
     (4408, "/server/info", "klippy_state", "moonraker"),  # Elegoo Neptune 4 / OrangeStorm Giga Fluidd port
-    (80, "/api/v1/status", "printer", "prusaconnect"),  # PrusaLink on default port
-    (8080, "/api/v1/status", "printer", "prusaconnect"),  # PrusaLink alternate port
+    (80, "/api/v1/status", "printer", "prusalink"),  # PrusaLink on default port
+    (8080, "/api/v1/status", "printer", "prusalink"),  # PrusaLink alternate port
     (8883, None, None, "bambu"),  # Bambu MQTT port (no HTTP probe)
     (3030, None, None, "elegoo"),  # Elegoo SDCP WebSocket port (no HTTP probe)
 ]
@@ -178,7 +178,7 @@ def probe_host(host: str, timeout: float = 3.0) -> list[DiscoveredPrinter]:
                         version = data.get("server", "")
                     elif printer_type == "moonraker":
                         version = data.get("klippy_state", "")
-                    elif printer_type == "prusaconnect":
+                    elif printer_type == "prusalink":
                         printer_data = data.get("printer", {})
                         name = printer_data.get("state", "PrusaLink")
                         version = ""
@@ -194,7 +194,7 @@ def probe_host(host: str, timeout: float = 3.0) -> list[DiscoveredPrinter]:
                             discovery_method="manual",
                         )
                     )
-            elif resp.status_code == 401 and printer_type == "prusaconnect":
+            elif resp.status_code == 401 and printer_type == "prusalink":
                 # Prusa Link requires auth — 401 still means it's there
                 results.append(
                     DiscoveredPrinter(
@@ -300,7 +300,7 @@ def _try_http_probe(subnet: str, timeout: float) -> list[DiscoveredPrinter]:
                             version = data.get("server", "")
                         elif printer_type == "moonraker":
                             version = data.get("klippy_state", "")
-                        elif printer_type == "prusaconnect":
+                        elif printer_type == "prusalink":
                             printer_data = data.get("printer", {})
                             name = printer_data.get("state", "PrusaLink")
                             version = ""
@@ -316,7 +316,7 @@ def _try_http_probe(subnet: str, timeout: float) -> list[DiscoveredPrinter]:
                                 discovery_method="http_probe",
                             )
                         )
-                elif resp.status_code == 401 and printer_type == "prusaconnect":
+                elif resp.status_code == 401 and printer_type == "prusalink":
                     # Prusa Link requires auth — 401 still means it's there
                     found.append(
                         DiscoveredPrinter(

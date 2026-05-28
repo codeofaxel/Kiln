@@ -98,6 +98,66 @@ _PRINT_STATUS_MAP: dict[int, PrinterStatus] = {
     20: PrinterStatus.BUSY,      # resuming
 }
 
+# SDCP_PRINT_CAUSE_* codes that should feed the kiln-pro nozzle
+# wear cross-check.  These appear on the wire as the integer
+# ``ErrorStatusReason`` field in SDCP V3 status / history messages
+# on Centauri Carbon FDM printers (and successors that share the
+# cbd-tech firmware family).  Source: OpenCentauri SDCP v3 reference
+# at github.com/OpenCentauri/OpenCentauri/blob/main/docs/software/api.md
+# — see "Status.PrintInfo / HistoryDetailList[].ErrorStatusReason".
+#
+# Conservative selection: only codes that the firmware itself
+# attributes to filament-path behaviour (jam, runout).  Generic
+# print-error codes (move-abnormal, home-failed, bed-adhesion,
+# temp-error) are NOT flow signals and feeding them into the
+# wear cross-check would poison the gram-count correlation.
+_FLOW_ANOMALY_CAUSE_CODES: tuple[int, ...] = (
+    3,   # SDCP_PRINT_CAUSE_FILAMENT_RUNOUT — feed exhausted / out
+    6,   # SDCP_PRINT_CAUSE_FILAMENT_JAM    — feed blocked / clogged
+)
+
+# Severity mapping for flow-anomaly cause codes.  Used when the
+# wire fires record_extrusion_event so the wear cross-check
+# weights strong signals (jam = head can't feed at all) over
+# weaker ones (runout = spool empty, mechanically distinct from
+# nozzle bore widening but still a flow interruption worth
+# logging).
+_FLOW_ANOMALY_SEVERITY: dict[int, str] = {
+    3: "medium",  # runout — spool-side, but flow is interrupted
+    6: "high",    # jam — strong indicator of nozzle / path failure
+}
+
+
+def _classify_flow_anomaly(cause_code: int | None) -> tuple[str, str] | None:
+    """Return ``(event_type, severity)`` for an Elegoo SDCP cause code.
+
+    Maps the SDCP ``ErrorStatusReason`` integer (a.k.a.
+    ``SDCP_PRINT_CAUSE_*``) into the kiln-pro
+    :func:`record_extrusion_event` parameter shape.  Returns
+    ``None`` for healthy / unrelated codes so callers can fall
+    through without firing the wire.
+
+    Args:
+        cause_code: Integer ``ErrorStatusReason`` from a Centauri
+            Carbon SDCP V3 status push.  ``0`` and ``None`` are
+            both treated as "no anomaly."
+
+    Returns:
+        ``("filament_jam", "high")`` for code 6,
+        ``("under_extrusion", "medium")`` for code 3,
+        ``None`` for any other code (including unrelated errors
+        like ``LEVEL_FAILED`` or ``HOME_FAILED`` that aren't flow
+        signals).
+    """
+    if not cause_code:
+        return None
+    if cause_code not in _FLOW_ANOMALY_CAUSE_CODES:
+        return None
+    event_type = "filament_jam" if cause_code == 6 else "under_extrusion"
+    severity = _FLOW_ANOMALY_SEVERITY.get(cause_code, "medium")
+    return event_type, severity
+
+
 # Backoff parameters for WebSocket reconnection.
 _BACKOFF_INITIAL_DELAY: float = 1.0
 _BACKOFF_MULTIPLIER: float = 2.0
@@ -430,6 +490,51 @@ class ElegooAdapter(PrinterAdapter):
         if mainboard and not self._mainboard_id:
             self._mainboard_id = str(mainboard)
             logger.info("Auto-discovered Elegoo mainboard ID: %s", self._mainboard_id)
+
+        # Flow-anomaly cross-check — when the SDCP push carries an
+        # ``ErrorStatusReason`` that the firmware classifies as a
+        # filament-path failure (jam or runout), feed the signal
+        # into the kiln-pro nozzle wear cross-check.  Lets the
+        # wear-tracking subsystem learn that this nozzle threw a
+        # flow signal mid-print; sustained signals on a nozzle
+        # whose gram-count says "fresh" are a hint the gram count
+        # is wrong, the filament path has friction, or the bore is
+        # widening faster than population.
+        #
+        # The cause code can ride in any of the nested sections
+        # the firmware uses (Data, Status, PrintInfo, etc.) and we
+        # already mirrored them into _last_status above — so we
+        # read the merged cache instead of re-walking the message.
+        # Free-tier installs without kiln-pro silently skip via
+        # try/except ImportError.
+        with self._state_lock:
+            cause_code = self._last_status.get("ErrorStatusReason")
+        if isinstance(cause_code, (int, str)):
+            try:
+                code_int = int(cause_code)
+            except (TypeError, ValueError):
+                code_int = 0
+            flow = _classify_flow_anomaly(code_int)
+            if flow is not None:
+                event_type, severity = flow
+                try:
+                    from kiln_pro.nozzle_intelligence.sensor_signal import (
+                        record_extrusion_event_for_printer,
+                    )
+                    record_extrusion_event_for_printer(
+                        printer_id=self.name,
+                        event_type=event_type,
+                        severity=severity,
+                    )
+                except ImportError:
+                    # Free tier — kiln-pro nozzle module not
+                    # installed.  Drop the signal silently.
+                    pass
+                except Exception as exc:  # pragma: no cover
+                    logger.debug(
+                        "Flow-anomaly cross-check raised (non-fatal): %s",
+                        exc,
+                    )
 
     def _discover_mainboard_id(self) -> None:
         """Attempt to discover the mainboard ID via get-attributes command."""

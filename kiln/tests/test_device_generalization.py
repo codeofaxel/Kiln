@@ -174,7 +174,7 @@ class TestBackwardCompatibility:
         a = BambuAdapter(host="192.168.1.1", access_code="12345678", serial="01P00A000000001")
         assert a.name == "bambu"
 
-    def test_prusaconnect_instantiates(self):
-        from kiln.printers.prusaconnect import PrusaConnectAdapter
-        a = PrusaConnectAdapter(host="http://test")
-        assert a.name == "prusaconnect"
+    def test_prusalink_instantiates(self):
+        from kiln.printers.prusalink import PrusaLinkAdapter
+        a = PrusaLinkAdapter(host="http://test")
+        assert a.name == "prusalink"

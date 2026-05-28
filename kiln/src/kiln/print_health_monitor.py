@@ -1910,9 +1910,16 @@ class PrintHealthMonitor:
             if not history:
                 return
             current = history[-1]
+            # ``session.printer_name`` is the stable registry key
+            # matching ``NozzleState.printer_id``; passing it lets the
+            # Pro+ predictor consult lifetime nozzle wear and add a
+            # bounded ``nozzle_wear`` signal.  Free-tier callers (no
+            # nozzle store reachable) see no behavioural change — the
+            # predictor falls through silently when consultation fails.
             assessment = predict_risk(
                 telemetry=current,
                 telemetry_history=history,
+                printer_id=session.printer_name,
             )
         except Exception as exc:  # pragma: no cover — defensive
             logger.debug(

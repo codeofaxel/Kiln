@@ -3,6 +3,47 @@
 All notable changes to Kiln are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- **Pre-print nozzle advisory.**  `start_print` checks the active
+  nozzle's wear posture and surfaces a heads-up when the nozzle is
+  overdue or close to it.  Warns, doesn't block — your call.
+- **Flow-anomaly detection on Moonraker, OctoPrint, Elegoo, and
+  PrusaLink.**  Every extrusion sample now feeds the per-machine
+  wear model.  Previously only Bambu had this wired, so wear only
+  learned from Bambu prints; now it learns from every supported
+  adapter.
+- **`analyze_print_failure_smart` adds nozzle wear to its hypothesis
+  set.**  When the failure shape matches wear (fine-detail loss,
+  gradual under-extrusion, layer adhesion drop) and the wear posture
+  is consistent, the verdict surfaces it alongside the other
+  candidates instead of always pinning on bed adhesion or
+  temperature.
+- **`recommend_material` consults the nozzle summary.**  Abrasive
+  filaments paired with a brass nozzle, soft filaments paired with
+  a hardened nozzle that's chewed up — both get a warning in the
+  recommendation reason.
+- **`plan_failure_recovery` considers wear when the symptoms fit.**
+  The recovery plan factors the wear hypothesis when it's a
+  credible candidate, so the recommended retry isn't "same nozzle,
+  lower temp, try again" when "replace nozzle" is the real fix.
+- **`predict_print_failure_risk` reads nozzle wear.**  New
+  `printer_id` parameter folds the current wear bucket into the
+  risk score with a wear-specific reason line when wear drives the
+  score.
+
+### Changed
+
+- **Renamed the Prusa adapter to `prusalink`.**  The adapter talks to
+  the local Prusa Link HTTP API (`/api/v1/status` with `X-Api-Key`
+  auth), not Prusa Connect's cloud service, so the registry key,
+  module name, and class now reflect that.  `kiln auth --type prusalink`
+  replaces `--type prusaconnect`.  No back-compat alias was added —
+  update any saved config that pins `type: prusaconnect` to
+  `type: prusalink`.
+
 ## [1.1.4] - 2026-05-20
 
 Native Windows support — install Kiln, connect your AI agent, and

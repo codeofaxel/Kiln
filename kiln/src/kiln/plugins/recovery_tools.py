@@ -16,6 +16,64 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 
+# Keyword sets used by ``_classify_drift_kind_from_failure`` to map a
+# failure context to a ``drift_kind`` value for the kiln-pro wear
+# hypothesis.  Kept at module scope so the hooks below share one
+# canonical vocabulary — adding a synonym in either set immediately
+# benefits both ``analyze_print_failure_smart`` and
+# ``plan_failure_recovery``.
+_DIMENSIONAL_DRIFT_KEYWORDS = (
+    "first layer thickness",
+    "first-layer thickness",
+    "dimension",
+    "dimensional",
+    "geometry",
+    "geometric",
+    "small text",
+    "fine detail",
+    "fine-detail",
+)
+_FLOW_DRIFT_KEYWORDS = (
+    "under-extrusion",
+    "under extrusion",
+    "underextrusion",
+    "layer adhesion",
+    "layer-adhesion",
+    "clog",
+    "clogged",
+    "starved",
+    "no extrusion",
+)
+
+
+def _classify_drift_kind_from_failure(
+    failure_message: str | None,
+    analysis: Any | None = None,
+) -> str:
+    """Map a free-form failure context to a ``drift_kind`` value.
+
+    The kiln-pro wear hypothesis routes its per-component attribution
+    on ``drift_kind`` — ``"dimensional"`` weights tip wear (matching
+    geometric symptoms like first-layer thickness drift or fine-detail
+    loss), ``"flow"`` weights bore wear (matching extrusion-rate
+    symptoms like under-extrusion or layer-adhesion failures), and
+    ``"unknown"`` falls back to single-scalar wear.
+
+    This classifier looks at both the failure message and the
+    classified analysis text for known keyword cues.  Flow keywords
+    take precedence over dimensional keywords because flow symptoms
+    are typically more specific signals (under-extrusion implicates
+    the bore directly), while dimensional symptoms (which can also
+    stem from belt tension or frame settling) are weaker tip cues.
+    """
+    msg = ((failure_message or "") + " " + str(analysis or "")).lower()
+    if any(k in msg for k in _FLOW_DRIFT_KEYWORDS):
+        return "flow"
+    if any(k in msg for k in _DIMENSIONAL_DRIFT_KEYWORDS):
+        return "dimensional"
+    return "unknown"
+
+
 class _RecoveryToolsPlugin:
     """Failure recovery, job splitting, generation feedback, and AI-driven recovery tools.
 
@@ -100,7 +158,7 @@ class _RecoveryToolsPlugin:
                 except Exception:
                     _logger.debug("Failed to record failure (non-fatal)")
 
-                return {
+                response: dict[str, Any] = {
                     "success": True,
                     "analysis": analysis.to_dict(),
                     "message": (
@@ -109,6 +167,41 @@ class _RecoveryToolsPlugin:
                         f"Recommended action: {analysis.recovery_plan.action.value}."
                     ),
                 }
+
+                # kiln-pro contributing-factor hypothesis: when the
+                # printer's recorded nozzle is past its planning
+                # window AND drift attribution puts >= 30% of the
+                # deviation on wear, surface a structured
+                # ``nozzle_wear_hypothesis`` block so the user sees
+                # wear as a likely co-contributor.  Free tier (no
+                # kiln-pro installed) falls through silently via the
+                # ImportError branch.  Best-effort — any failure in
+                # the wear pipeline is swallowed so the primary
+                # classification still ships.  See kiln3d.com for
+                # the Pro+ tier that enables this signal.
+                try:
+                    from kiln_pro.recovery.nozzle_wear_hypothesis import (
+                        build_wear_hypothesis,
+                    )
+
+                    drift_kind = _classify_drift_kind_from_failure(
+                        failure_message=error_message,
+                        analysis=analysis,
+                    )
+                    hypothesis = build_wear_hypothesis(
+                        printer_id=printer_name,
+                        drift_kind=drift_kind,
+                    )
+                    if hypothesis is not None:
+                        response["nozzle_wear_hypothesis"] = hypothesis
+                except ImportError:
+                    pass  # kiln-pro not installed — free tier
+                except Exception as exc:
+                    _logger.debug(
+                        "nozzle_wear_hypothesis failed (non-fatal): %s", exc,
+                    )
+
+                return response
             except Exception as exc:
                 _logger.exception("Unexpected error in analyze_print_failure_smart")
                 return _srv._error_dict(
@@ -719,7 +812,54 @@ class _RecoveryToolsPlugin:
                     printer_capabilities=printer_capabilities,
                     safety_profile=safety_profile,
                 )
-                return {"success": True, "plan": plan.to_dict()}
+                response: dict[str, Any] = {"success": True, "plan": plan.to_dict()}
+
+                # kiln-pro contributing-factor hypothesis: when the
+                # printer's recorded nozzle is past its planning
+                # window AND drift attribution puts >= 30% of the
+                # deviation on wear, surface a structured
+                # ``nozzle_wear_hypothesis`` block alongside the
+                # plan so the user sees wear as a likely
+                # co-contributor to the failure being recovered
+                # from.  Free tier (no kiln-pro installed) falls
+                # through silently via the ImportError branch.
+                # Best-effort — any failure in the wear pipeline
+                # is swallowed so the recovery plan still ships.
+                # See kiln3d.com for the Pro+ tier that enables
+                # this signal.
+                try:
+                    from kiln_pro.recovery.nozzle_wear_hypothesis import (
+                        build_wear_hypothesis,
+                    )
+
+                    # ``FailureReport`` carries the failure context as
+                    # ``probable_cause`` plus an ``evidence`` list.
+                    # Stitch both into one string the classifier can
+                    # scan for keyword cues.
+                    failure_text = " ".join(
+                        [
+                            getattr(failure, "probable_cause", "") or "",
+                            *(getattr(failure, "evidence", []) or []),
+                        ]
+                    )
+                    drift_kind = _classify_drift_kind_from_failure(
+                        failure_message=failure_text,
+                        analysis=failure,
+                    )
+                    hypothesis = build_wear_hypothesis(
+                        printer_id=failure.printer_name,
+                        drift_kind=drift_kind,
+                    )
+                    if hypothesis is not None:
+                        response["nozzle_wear_hypothesis"] = hypothesis
+                except ImportError:
+                    pass  # kiln-pro not installed — free tier
+                except Exception as exc:
+                    _logger.debug(
+                        "nozzle_wear_hypothesis failed (non-fatal): %s", exc,
+                    )
+
+                return response
             except Exception as exc:
                 _logger.exception("Unexpected error in plan_failure_recovery")
                 return _srv._error_dict(

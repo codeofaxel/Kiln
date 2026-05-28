@@ -1207,6 +1207,37 @@ class _SlicerToolsPlugin:
                     if auto_manual is not None:
                         resp["assembly_manual"] = auto_manual
 
+                # Nozzle capacity advisory — when kiln-pro is installed
+                # AND the slice produced a filament-grams estimate, run
+                # the wear-envelope projection and attach an advisory
+                # block.  Sibling of the preflight_check wire — slice_and_print
+                # is the entry point users hit when bypassing preflight.
+                # Free tier silently skips.
+                try:
+                    from kiln import _pro_nozzle_bridge
+
+                    _planned_grams = 0.0
+                    _slicer_estimate = resp.get("filament_grams") or resp.get("filament_weight_g")
+                    if _slicer_estimate:
+                        _planned_grams = float(_slicer_estimate)
+                    _printer_for_nozzle = printer_name or printer_id or ""
+                    if _printer_for_nozzle and _planned_grams > 0:
+                        _nozzle_verdict = _pro_nozzle_bridge.consult_capacity(
+                            printer_id=_printer_for_nozzle,
+                            planned_grams=_planned_grams,
+                            filament_material=material or "",
+                        )
+                        if _nozzle_verdict is not None and _nozzle_verdict.get("status") in (
+                            "exceeded_p50", "exceeded_p90", "approaching",
+                        ):
+                            resp["nozzle_capacity_advisory"] = {
+                                "status": _nozzle_verdict["status"],
+                                "narrative": _nozzle_verdict.get("narrative", ""),
+                                "advisory": True,
+                            }
+                except Exception:
+                    pass  # Nozzle bridge unavailable — silently skip.
+
                 return resp
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
