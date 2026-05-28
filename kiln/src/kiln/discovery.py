@@ -15,6 +15,7 @@ import concurrent.futures
 import logging
 import platform
 import socket
+import struct
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -43,6 +44,7 @@ class DiscoveredPrinter:
     printer_type: str  # "octoprint", "moonraker", "bambu", "elegoo", "prusalink", "unknown"
     name: str = ""
     version: str = ""
+    serial: str = ""
     api_available: bool = False
     discovered_at: float = field(default_factory=time.time)
     discovery_method: str = ""  # "mdns", "http_probe", "manual"
@@ -75,7 +77,7 @@ _MDNS_SERVICES = [
 
 
 def discover_printers(
-    timeout: float = 5.0,
+    timeout: float = 12.0,
     subnet: str | None = None,
     methods: list[str] | None = None,
 ) -> list[DiscoveredPrinter]:
@@ -92,7 +94,7 @@ def discover_printers(
         List of discovered printers, deduplicated by host+port.
     """
     if methods is None:
-        methods = ["mdns", "http_probe"]
+        methods = ["mdns", "ssdp", "http_probe"]
 
     if _is_wsl():
         if subnet is None:
@@ -109,27 +111,33 @@ def discover_printers(
             )
 
     all_printers: list[DiscoveredPrinter] = []
-    deadline = time.monotonic() + timeout
 
-    for method in methods:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            logger.debug("Discovery timeout reached, skipping remaining methods")
-            break
+    def _run_method(method: str) -> list[DiscoveredPrinter]:
+        if method == "mdns":
+            return _try_mdns(timeout=timeout)
+        if method == "ssdp":
+            return _try_ssdp(timeout=timeout)
+        if method == "http_probe":
+            scan_subnet = subnet or _detect_subnet()
+            if scan_subnet is None:
+                logger.warning("Could not detect subnet for HTTP probe; skipping")
+                return []
+            return _try_http_probe(scan_subnet, timeout=timeout)
+        logger.warning("Unknown discovery method: %s", method)
+        return []
 
-        try:
-            if method == "mdns":
-                all_printers.extend(_try_mdns(timeout=remaining))
-            elif method == "http_probe":
-                scan_subnet = subnet or _detect_subnet()
-                if scan_subnet is None:
-                    logger.warning("Could not detect subnet for HTTP probe; skipping")
-                    continue
-                all_printers.extend(_try_http_probe(scan_subnet, timeout=remaining))
-            else:
-                logger.warning("Unknown discovery method: %s", method)
-        except Exception:
-            logger.exception("Discovery method '%s' failed", method)
+    # Run the strategies concurrently — each gets the full timeout window.
+    # SSDP (Bambu) must passively listen ~10 s for the printer's periodic
+    # broadcast; a shared sequential deadline would starve mDNS + the subnet
+    # scan, so they run in parallel and the results are merged.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(methods))) as executor:
+        future_to_method = {executor.submit(_run_method, m): m for m in methods}
+        done, _ = concurrent.futures.wait(future_to_method, timeout=timeout + 5)
+        for future in done:
+            try:
+                all_printers.extend(future.result())
+            except Exception:
+                logger.exception("Discovery method '%s' failed", future_to_method[future])
 
     deduped = _deduplicate(all_printers)
     _annotate_trust(deduped)
@@ -267,6 +275,78 @@ def _try_mdns(timeout: float) -> list[DiscoveredPrinter]:
         time.sleep(min(timeout, 5.0))
     finally:
         zc.close()
+
+    return results
+
+
+def _parse_ssdp_headers(text: str) -> dict[str, str]:
+    """Parse an SSDP / HTTP-style message into a lowercased header dict."""
+    headers: dict[str, str] = {}
+    for line in text.splitlines()[1:]:  # skip the "NOTIFY * HTTP/1.1" request line
+        key, sep, value = line.partition(":")
+        if sep:
+            headers[key.strip().lower()] = value.strip()
+    return headers
+
+
+def _try_ssdp(timeout: float) -> list[DiscoveredPrinter]:
+    """Discover Bambu Lab printers via their SSDP broadcast (UDP 2021).
+
+    Bambu printers in LAN / Developer Mode broadcast an SSDP ``NOTIFY``
+    to ``239.255.255.250:2021`` carrying the device IP (``Location``),
+    serial (``USN``), model and name.  They answer neither the mDNS
+    service types we browse nor a TCP/HTTP port scan (the MQTT port is
+    filtered to raw connects), so SSDP is the only reliable LAN
+    discovery path — it is what Bambu Studio itself uses.
+    """
+    mcast_group = "239.255.255.250"
+    ssdp_port = 2021
+    results: list[DiscoveredPrinter] = []
+    seen_hosts: set[str] = set()
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("", ssdp_port))
+        try:
+            mreq = struct.pack("4sl", socket.inet_aton(mcast_group), socket.INADDR_ANY)
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        except OSError:
+            logger.debug("SSDP multicast join failed; listening for broadcasts only")
+
+        # Bambu re-broadcasts its NOTIFY roughly every 10 s and ignores
+        # active M-SEARCH, so the window must exceed one broadcast interval.
+        deadline = time.monotonic() + min(timeout, 12.0)
+        while time.monotonic() < deadline:
+            sock.settimeout(max(0.2, deadline - time.monotonic()))
+            try:
+                data, addr = sock.recvfrom(2048)
+            except (TimeoutError, OSError):
+                break
+            text = data.decode("utf-8", "replace")
+            if "bambulab" not in text.lower():
+                continue
+            headers = _parse_ssdp_headers(text)
+            host = headers.get("location") or addr[0]
+            if host in seen_hosts:
+                continue
+            seen_hosts.add(host)
+            results.append(
+                DiscoveredPrinter(
+                    host=host,
+                    port=8883,
+                    printer_type="bambu",
+                    name=headers.get("devname.bambu.com", ""),
+                    version=headers.get("devversion.bambu.com", ""),
+                    serial=headers.get("usn", ""),
+                    api_available=True,
+                    discovery_method="ssdp",
+                )
+            )
+    except OSError:
+        logger.debug("SSDP discovery failed", exc_info=True)
+    finally:
+        sock.close()
 
     return results
 
