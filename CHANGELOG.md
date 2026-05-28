@@ -33,30 +33,27 @@ front.
 - **Engraved text doesn't kiss the edges anymore.**  Default width
   tightened and a margin clamp added so "KILN" on a coaster sits
   comfortably inside the rim instead of hitting it.
-- **Heads-up before you print on a worn nozzle** *(Kiln Pro)*.
-  When the active nozzle is past (or close to) its replacement
-  window — based on how much filament has run through it — Kiln
-  warns at print time.  Warns, doesn't block.
+- **Heads-up if a print would wear your nozzle out** *(Kiln Pro)*.
+  Before a print starts, Kiln checks whether finishing this job
+  would push the nozzle past its wear limit, and warns if so.
+  Warns, doesn't block — your call.
 - **Every supported printer feeds the wear model on every print**
-  *(Kiln Pro)* — Moonraker, OctoPrint, Elegoo, and PrusaLink join
-  Bambu on that path.
+  *(Kiln Pro)*.  Bambu, Moonraker, OctoPrint, Elegoo, and
+  PrusaLink all report extrusion anomalies to the wear model.
 - **Failure analysis considers nozzle wear** *(Kiln Pro)*.  When
   the failure symptoms line up with what a worn nozzle would
   cause, wear surfaces as a candidate instead of always pinning
   on bed adhesion or temperature.
 - **Material recommendations factor your nozzle** *(Kiln Pro)*.
-  Asking for an abrasive filament (carbon-fiber,
-  glow-in-the-dark, glass-filled) on a brass nozzle now warns up
-  front; asking for soft filament on a chewed-up hardened nozzle
-  also warns.
+  Asking for an abrasive filament (carbon-fiber, glass-fiber,
+  wood-fill, or metal-fill) on a brass nozzle now warns up
+  front — brass wears out fast on abrasives.  Stainless gets a
+  milder caution; hardened steel is the right pairing and stays
+  quiet.
 - **Recovery plans suggest "replace the nozzle" when that's the
   real fix** *(Kiln Pro)* — instead of defaulting to "same
   nozzle, lower temp, try again" when the part actually needs a
   fresh tip.
-- **Failure-risk predictions know about your nozzle** *(Kiln Pro)*.
-  The risk score knows whether the active nozzle is fresh,
-  mid-life, or overdue, and says so when wear is what's driving
-  the verdict.
 
 ### Changed
 
