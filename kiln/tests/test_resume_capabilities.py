@@ -15,7 +15,7 @@ import pytest
 
 from kiln.resume_capabilities import ResumeCapability, ResumeCapabilityRegistry
 
-_ALL_ADAPTERS = ("octoprint", "moonraker", "bambu", "prusa_connect", "serial")
+_ALL_ADAPTERS = ("octoprint", "moonraker", "bambu", "prusalink", "serial")
 
 _ALL_FAILURE_TYPES = (
     "filament_runout",
@@ -231,8 +231,8 @@ class TestSupportsUnattended:
     def test_bambu_supports_unattended(self, registry):
         assert registry.supports_unattended("bambu") is True
 
-    def test_prusa_connect_supports_unattended(self, registry):
-        assert registry.supports_unattended("prusa_connect") is True
+    def test_prusalink_supports_unattended(self, registry):
+        assert registry.supports_unattended("prusalink") is True
 
     def test_serial_supports_unattended(self, registry):
         assert registry.supports_unattended("serial") is True

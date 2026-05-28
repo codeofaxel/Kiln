@@ -79,7 +79,7 @@ _RECOVERY_PLANS: dict[str, dict[str, list[str]]] = {
             "Pause print and wait for reload",
             "Resume print",
         ],
-        "prusa_connect": [
+        "prusalink": [
             "MMU detects runout",
             "Pause print via Prusa Link API",
             "Fire webhook alert with job context",
@@ -115,7 +115,7 @@ _RECOVERY_PLANS: dict[str, dict[str, list[str]]] = {
             "Printer auto-resumes from saved state",
             "Kiln re-syncs job tracking on reconnect",
         ],
-        "prusa_connect": [
+        "prusalink": [
             "Prusa firmware saves position via M413 to EEPROM",
             "Wait for power restore",
             "Prusa Link reconnects",
@@ -152,7 +152,7 @@ _RECOVERY_PLANS: dict[str, dict[str, list[str]]] = {
             "Re-sync state on reconnect",
             "Fire webhook alert if reconnect fails",
         ],
-        "prusa_connect": [
+        "prusalink": [
             "Detect API heartbeat timeout",
             "Attempt reconnect with exponential backoff (3 retries)",
             "Print continues on printer (autonomous operation)",
@@ -189,7 +189,7 @@ _RECOVERY_PLANS: dict[str, dict[str, list[str]]] = {
             "Fire critical webhook alert",
             "Mark printer as error — requires physical inspection",
         ],
-        "prusa_connect": [
+        "prusalink": [
             "Prusa firmware thermal protection kills heaters",
             "Prusa Link reports error state",
             "Kiln logs critical event",
@@ -223,7 +223,7 @@ _RECOVERY_PLANS: dict[str, dict[str, list[str]]] = {
             "Fire webhook alert",
             "Wait for human inspection decision",
         ],
-        "prusa_connect": [
+        "prusalink": [
             "Detect temperature anomaly (bed temp drop without target change)",
             "Pause print via Prusa Link API",
             "Fire webhook alert with thermal data snapshot",
@@ -242,7 +242,7 @@ _RECOVERY_PLANS: dict[str, dict[str, list[str]]] = {
 # Registry
 # ---------------------------------------------------------------------------
 
-_KNOWN_ADAPTERS = ("octoprint", "moonraker", "bambu", "prusa_connect", "serial")
+_KNOWN_ADAPTERS = ("octoprint", "moonraker", "bambu", "prusalink", "serial")
 
 
 class ResumeCapabilityRegistry:
@@ -310,8 +310,8 @@ class ResumeCapabilityRegistry:
                     "Print continues autonomously during network outage",
                 ],
             ),
-            "prusa_connect": ResumeCapability(
-                adapter_type="prusa_connect",
+            "prusalink": ResumeCapability(
+                adapter_type="prusalink",
                 supports_pause_resume=True,
                 supports_firmware_recovery=True,
                 supports_z_offset_resume=True,

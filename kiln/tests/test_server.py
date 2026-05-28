@@ -1706,7 +1706,7 @@ class TestRegisterPrinter:
 
         result = register_printer(
             name="unknown",
-            printer_type="prusa_connect",
+            printer_type="nonexistent_printer_type",
             host="http://prusa.local",
         )
         assert result["success"] is False
