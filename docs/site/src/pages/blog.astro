@@ -1,71 +1,110 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 
+// Single source of truth for the blog index. To add a post: drop ONE entry
+// here (newest first). The cards below and the JSON-LD schema both render
+// from this array via .map(), so a post can never get half-listed again.
+// `excerpt` is the card blurb (HTML allowed); the schema description is
+// derived from it (tags stripped, common entities decoded).
 const posts = [
+  {
+    title: 'Kiln 1.1.5: engravings that read right, and nozzle-wear awareness on Pro',
+    url: '/blog/kiln-1-1-5',
+    date: 'May 28, 2026',
+    datePublished: '2026-05-28',
+    excerpt: `Engraving text into your prints just works now: the carve depth matches your nozzle, the right flip is picked for you, a check catches text that would print backwards before you slice, and you get an auto preview of the finished face. On Kiln Pro, Kiln keeps an eye on each printer&rsquo;s nozzle wear and factors it into failure analysis, material recommendations, and recovery.`,
+    tags: ['release', 'v1.1.5', 'engraving', 'nozzle-wear', 'prusa'],
+  },
+  {
+    title: 'Kiln 1.1.4: native support for Windows machines, and sharper overhang checks',
+    url: '/blog/kiln-1-1-4',
+    date: 'May 21, 2026',
+    datePublished: '2026-05-21',
+    excerpt: `Kiln now runs on a stock Windows machine &mdash; CLI, install, and OpenSCAD design generation &mdash; with a copy-paste prompt that hands the whole setup to an AI agent. Plus sharper overhang verdicts (cantilevers and floating islands correctly keep their supports flag), honest AMS Lite filament readings on the Bambu A1 and A1 mini, and safety messages in plain language.`,
+    tags: ['release', 'v1.1.4', 'windows', 'overhangs', 'ams', 'supports'],
+  },
   {
     title: 'Kiln 1.1.2 + 1.1.3: recovery you can see, analysis you can trust',
     url: '/blog/kiln-1-1-3',
+    date: 'May 19, 2026',
     datePublished: '2026-05-19',
-    description:
-      "Vision-detected mid-print failures drive auto-recovery on Pro. Hole-aware printability tells you when a hole is too small for your material and learns your printer's drift. Tall narrow towers get flagged before the print starts. Adhesion verdicts admit when they're uncertain. Saved design goals follow a print through monitoring, reprints, and version saves. And free-tier discovery tools find what you ask for.",
+    excerpt: `Two releases in one. Vision-detected mid-print failures now drive auto-recovery on Pro, hole-aware printability learns your printer&rsquo;s drift, and adhesion analysis flags tall narrow towers before the print starts. Saved design goals carry through reprints and version saves, and free-tier discovery tools return real results on every install.`,
+    tags: ['release', 'v1.1.2', 'v1.1.3', 'recovery', 'printability'],
   },
   {
     title: 'Kiln 1.1.1: Tighter feedback loop',
     url: '/blog/kiln-1-1-1-tighter-feedback-loop',
+    date: 'May 13, 2026',
     datePublished: '2026-05-13',
-    description:
-      'Cheaper status signals from your printer to the AI agent running it, better in-print failure detection on Pro, a kiln health command that fixes its own broken paths after a Python reinstall, and a handful of polish fixes across the agent and web surfaces.',
+    excerpt: `A tighter loop between your AI agent and your 3D printer: clearer camera-monitoring events, better in-print failure detection on Pro, and a <code>kiln health</code> command that repairs its own broken paths after a Python reinstall. Plus a handful of polish fixes across the agent and web surfaces.`,
+    tags: ['release', 'v1.1.1', 'vision', 'kiln-health', 'polish'],
   },
   {
     title: 'Kiln 1.1: Calibrated to your printer',
     url: '/blog/kiln-1-1-calibrated-to-your-printer',
+    date: 'May 6, 2026',
     datePublished: '2026-05-06',
-    description:
-      'Per-printer calibration grounding (slicer-profile import + continuous learning + freshness gating + provenance), a rebuilt design template library with a dedicated tablet stand, and a tier diagnostic that just answers the question when an AI agent\'s user asks "what plan am I on?"',
+    excerpt: `Per-printer calibration grounding &mdash; Kiln reads your existing OrcaSlicer / Bambu Studio / PrusaSlicer profile and uses it on every slice, then keeps learning from every print (Pro). Plus a dedicated <code>tablet_stand</code> template (iPads tip backward when stuck on phone-stand bases), engineering depth on all 18 design templates with the formulas baked in, and a tier diagnostic that just answers "what plan am I on?"`,
+    tags: ['release', 'v1.1', 'calibration', 'design-templates', 'tier-diagnostic'],
   },
   {
     title: 'Kiln 1.0: The Agent-Native Manufacturing Layer',
     url: '/blog/kiln-1-0-agent-native-manufacturing-layer',
+    date: 'April 29, 2026',
     datePublished: '2026-04-29',
-    description:
-      'Kiln 1.0 ships a larger MCP and CLI surface, Git-for-3D workflows, recovery, decoration, assembly manuals, and a repository-style web workshop for physical objects.',
+    excerpt: `Kiln 1.0 is real infrastructure, not an experiment: Git-for-3D workflows, recovery, decoration, assembly manuals, and a repository-style web workshop for physical objects &mdash; one interface for OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link.`,
+    tags: ['release', 'mcp', 'cli', 'v1.0'],
   },
   {
     title: 'Kiln is Now One Install Away from Any AI Agent',
     url: '/blog/one-install-away',
+    date: 'February 20, 2026',
     datePublished: '2026-02-20',
-    description:
-      'Kiln v0.2.1 ships to PyPI, ClawHub, and the MCP Registry with 273 tools for 3D printer control.',
+    excerpt: `Kiln ships to PyPI, ClawHub, and the MCP Registry simultaneously &mdash; one command to install for 3D printer control. <code>pip install kiln3d</code>, <code>clawhub install kiln</code>, or search "kiln" in your MCP client. All three paths, same destination.`,
+    tags: ['release', 'pypi', 'mcp', 'clawhub'],
   },
   {
     title: 'Think → Print → Earn: 12 New Subsystems Ship Today',
     url: '/blog/think-print-earn',
+    date: 'February 19, 2026',
     datePublished: '2026-02-19',
-    description:
-      'New generation, printability, marketplace, and revenue tooling expands Kiln from model creation to monetization.',
+    excerpt: `Kiln now covers the entire loop &mdash; from AI-generated 3D models to validated prints to marketplace revenue. Generation registry, printability analysis, auto-orientation, marketplace publishing with print certificates, revenue tracking, intelligent failure recovery, and more.`,
+    tags: ['features', 'generation', 'marketplace', 'revenue'],
   },
   {
     title: 'Craftcloud Integration Is Live',
     url: '/blog/craftcloud-live',
+    date: 'February 18, 2026',
     datePublished: '2026-02-18',
-    description:
-      "Kiln now supports outsourced 3D printing through Craftcloud's network of providers.",
+    excerpt: `Kiln now supports outsourced 3D printing through Craftcloud's network of print services &mdash; FDM, SLA, SLS, MJF, and metal. Your AI agent can get quotes and place orders through the hosted fulfillment path or direct mode with your own provider credentials.`,
+    tags: ['integration', 'fulfillment', 'craftcloud'],
   },
   {
     title: 'Our First Real Prints: Two Users, Two Printers, Zero Manual Steps',
     url: '/blog/first-real-prints',
+    date: 'February 18, 2026',
     datePublished: '2026-02-18',
-    description:
-      'Real-world demo showing end-to-end AI-agent prints on Bambu Lab and Prusa hardware.',
+    excerpt: `Two users printed coasters end-to-end with AI agents &mdash; different agents, different printer brands (Bambu Lab A1 Mini and Prusa Mini), no human intervention. Here's what happened, with video.`,
+    tags: ['demo', 'real hardware', 'community'],
   },
   {
     title: 'Introducing Kiln: Let AI Agents Run Your 3D Printers',
     url: '/blog/introducing-kiln',
+    date: 'February 17, 2026',
     datePublished: '2026-02-17',
-    description:
-      'Launch post covering Kiln architecture, supported printer ecosystems, and safety model.',
+    excerpt: `Open-source infrastructure that lets AI agents safely control 3D printers. It's free, it runs locally, and it's available right now &mdash; one interface for OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link, with safety profiles built in.`,
+    tags: ['launch', 'open source', 'v0.1.0'],
   },
 ];
+
+// Derive a clean plain-text description for JSON-LD from the card excerpt.
+const schemaDescription = (excerpt) =>
+  excerpt
+    .replace(/&mdash;/g, '—')
+    .replace(/&rsquo;/g, '’')
+    .replace(/&ldquo;/g, '“')
+    .replace(/&rdquo;/g, '”')
+    .replace(/<[^>]+>/g, '');
 
 const blogSchema = [
   {
@@ -77,7 +116,7 @@ const blogSchema = [
       headline: post.title,
       url: `https://kiln3d.com${post.url}`,
       datePublished: post.datePublished,
-      description: post.description,
+      description: schemaDescription(post.excerpt),
     })),
   },
   {
@@ -113,165 +152,17 @@ const blogSchema = [
       </header>
 
       <div class="posts">
-        <article class="post-card">
-          <div class="post-meta">May 19, 2026</div>
-          <h2><a href="/blog/kiln-1-1-3">Kiln 1.1.2 + 1.1.3: recovery you can see, analysis you can trust</a></h2>
-          <p>
-            Two releases in one. Vision-detected mid-print failures now drive auto-recovery on
-            Pro, hole-aware printability learns your printer&rsquo;s drift, and adhesion analysis
-            flags tall narrow towers before the print starts. Saved design goals carry through
-            reprints and version saves, and free-tier discovery tools return real results on
-            every install.
-          </p>
-          <div class="post-tags">
-            <span class="tag">release</span>
-            <span class="tag">v1.1.2</span>
-            <span class="tag">v1.1.3</span>
-            <span class="tag">recovery</span>
-            <span class="tag">printability</span>
-          </div>
-          <a href="/blog/kiln-1-1-3" class="read-more">Read the full post &rarr;</a>
-        </article>
-
-        <article class="post-card">
-          <div class="post-meta">May 13, 2026</div>
-          <h2><a href="/blog/kiln-1-1-1-tighter-feedback-loop">Kiln 1.1.1: Tighter feedback loop</a></h2>
-          <p>
-            A tighter loop between your AI agent and your 3D printer: clearer camera-monitoring
-            events, better in-print failure detection on Pro, and a <code>kiln health</code>
-            command that repairs its own broken paths after a Python reinstall. Plus a handful
-            of polish fixes across the agent and web surfaces.
-          </p>
-          <div class="post-tags">
-            <span class="tag">release</span>
-            <span class="tag">v1.1.1</span>
-            <span class="tag">vision</span>
-            <span class="tag">kiln-health</span>
-            <span class="tag">polish</span>
-          </div>
-          <a href="/blog/kiln-1-1-1-tighter-feedback-loop" class="read-more">Read the full post &rarr;</a>
-        </article>
-
-        <article class="post-card">
-          <div class="post-meta">May 6, 2026</div>
-          <h2><a href="/blog/kiln-1-1-calibrated-to-your-printer">Kiln 1.1: Calibrated to your printer</a></h2>
-          <p>
-            Per-printer calibration grounding — Kiln reads your existing OrcaSlicer / Bambu Studio /
-            PrusaSlicer profile and uses it on every slice, then keeps learning from every print
-            (Pro). Plus a dedicated <code>tablet_stand</code> template (iPads tip backward when
-            stuck on phone-stand bases), engineering depth on all 18 design templates with the
-            formulas baked in, and a tier diagnostic that just answers "what plan am I on?"
-          </p>
-          <div class="post-tags">
-            <span class="tag">release</span>
-            <span class="tag">v1.1</span>
-            <span class="tag">calibration</span>
-            <span class="tag">design-templates</span>
-            <span class="tag">tier-diagnostic</span>
-          </div>
-          <a href="/blog/kiln-1-1-calibrated-to-your-printer" class="read-more">Read the full post &rarr;</a>
-        </article>
-
-        <article class="post-card">
-          <div class="post-meta">April 29, 2026</div>
-          <h2><a href="/blog/kiln-1-0-agent-native-manufacturing-layer">Kiln 1.0: The Agent-Native Manufacturing Layer</a></h2>
-          <p>
-            Kiln 1.0 is real infrastructure, not an experiment: 756 MCP tools, 763 total MCP
-            capabilities, 215 CLI commands, Git-for-3D workflows, recovery, decoration, assembly
-            manuals, and a repository-style web workshop for physical objects.
-          </p>
-          <div class="post-tags">
-            <span class="tag">release</span>
-            <span class="tag">mcp</span>
-            <span class="tag">cli</span>
-            <span class="tag">v1.0</span>
-          </div>
-          <a href="/blog/kiln-1-0-agent-native-manufacturing-layer" class="read-more">Read the full post &rarr;</a>
-        </article>
-
-        <article class="post-card">
-          <div class="post-meta">February 20, 2026</div>
-          <h2><a href="/blog/one-install-away">Kiln is Now One Install Away from Any AI Agent</a></h2>
-          <p>
-            Kiln v0.2.1 ships to PyPI, ClawHub, and the MCP Registry simultaneously &mdash; 273 tools for
-            3D printer control, one command to install. pip install kiln3d. clawhub install kiln.
-            Search "kiln" in your MCP client. All three paths, same destination.
-          </p>
-          <div class="post-tags">
-            <span class="tag">release</span>
-            <span class="tag">pypi</span>
-            <span class="tag">mcp</span>
-            <span class="tag">clawhub</span>
-          </div>
-          <a href="/blog/one-install-away" class="read-more">Read the full post &rarr;</a>
-        </article>
-
-        <article class="post-card">
-          <div class="post-meta">February 19, 2026</div>
-          <h2><a href="/blog/think-print-earn">Think &rarr; Print &rarr; Earn: 12 New Subsystems Ship Today</a></h2>
-          <p>
-            Kiln now covers the entire loop &mdash; from AI-generated 3D models to validated prints to marketplace
-            revenue. 12 new subsystems, 413 new tests, zero compromises. Generation registry, printability analysis,
-            auto-orientation, marketplace publishing with print certificates, revenue tracking with orchestration fees,
-            intelligent failure recovery, and more.
-          </p>
-          <div class="post-tags">
-            <span class="tag">features</span>
-            <span class="tag">generation</span>
-            <span class="tag">marketplace</span>
-            <span class="tag">revenue</span>
-          </div>
-          <a href="/blog/think-print-earn" class="read-more">Read the full post &rarr;</a>
-        </article>
-
-        <article class="post-card">
-          <div class="post-meta">February 18, 2026</div>
-          <h2><a href="/blog/craftcloud-live">Craftcloud Integration Is Live</a></h2>
-          <p>
-            Kiln now supports outsourced 3D printing through Craftcloud's network of 150+ print services &mdash;
-            FDM, SLA, SLS, MJF, and metal. Your AI agent can get quotes and place orders through the hosted
-            fulfillment path or direct mode with your own provider credentials.
-          </p>
-          <div class="post-tags">
-            <span class="tag">integration</span>
-            <span class="tag">fulfillment</span>
-            <span class="tag">craftcloud</span>
-          </div>
-          <a href="/blog/craftcloud-live" class="read-more">Read the full post &rarr;</a>
-        </article>
-
-        <article class="post-card">
-          <div class="post-meta">February 18, 2026</div>
-          <h2><a href="/blog/first-real-prints">Our First Real Prints: Two Users, Two Printers, Zero Manual Steps</a></h2>
-          <p>
-            Chris and Dillon used AI agents to print coasters end-to-end &mdash; different agents (Wren and Clawdence),
-            different printer brands (Bambu Lab A1 Mini and Prusa Mini), no human intervention. Here's what happened,
-            with video.
-          </p>
-          <div class="post-tags">
-            <span class="tag">demo</span>
-            <span class="tag">real hardware</span>
-            <span class="tag">community</span>
-          </div>
-          <a href="/blog/first-real-prints" class="read-more">Read the full post &rarr;</a>
-        </article>
-
-        <article class="post-card">
-          <div class="post-meta">February 17, 2026</div>
-          <h2><a href="/blog/introducing-kiln">Introducing Kiln: Let AI Agents Run Your 3D Printers</a></h2>
-          <p>
-            Today I'm releasing Kiln &mdash; open-source infrastructure that lets AI agents safely
-            control 3D printers. It's free, it runs locally, and it's available right now. One interface
-            for OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link with 197 MCP tools, 88 CLI commands,
-            and safety profiles for 30 printer models.
-          </p>
-          <div class="post-tags">
-            <span class="tag">launch</span>
-            <span class="tag">open source</span>
-            <span class="tag">v0.1.0</span>
-          </div>
-          <a href="/blog/introducing-kiln" class="read-more">Read the full post &rarr;</a>
-        </article>
+        {posts.map((post) => (
+          <article class="post-card">
+            <div class="post-meta">{post.date}</div>
+            <h2><a href={post.url}>{post.title}</a></h2>
+            <p set:html={post.excerpt} />
+            <div class="post-tags">
+              {post.tags.map((tag) => <span class="tag">{tag}</span>)}
+            </div>
+            <a href={post.url} class="read-more">Read the full post &rarr;</a>
+          </article>
+        ))}
       </div>
 
       <div class="blog-cta">
