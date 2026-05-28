@@ -1065,7 +1065,8 @@ def emboss_text_lines_on_face(
         # Resolve the actual face dict if we auto-detected, so the
         # aspect-ratio decision uses the real face's geometry.
         from kiln.surface_intelligence import (
-            find_largest_flat_face, find_named_face,
+            find_largest_flat_face,
+            find_named_face,
         )
         resolved_face = (
             find_named_face(body_stl, face_name)

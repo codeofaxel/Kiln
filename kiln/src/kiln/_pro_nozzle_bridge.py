@@ -63,6 +63,7 @@ def consult_capacity(
     if not printer_id or not isinstance(printer_id, str):
         return None
     try:
+        from kiln_pro.data_overlays import load_overlay
         from kiln_pro.nozzle_intelligence.capacity import (
             compute_print_capacity_for_nozzle,
             resolve_capacity_baseline,
@@ -71,7 +72,6 @@ def consult_capacity(
             resolve_backend,
             resolve_state_or_factory_default,
         )
-        from kiln_pro.data_overlays import load_overlay
     except ImportError:
         return None
 

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-05-27T19:44:15.217068+00:00",
+  "generated": "2026-05-28T06:30:16.803591+00:00",
   "tool_count": 319,
   "categories": {
     "product_generators": {
@@ -9110,6 +9110,11 @@
             "default": "standard",
             "title": "Recent Filament Class",
             "type": "string"
+          },
+          "drift_kind": {
+            "default": "unknown",
+            "title": "Drift Kind",
+            "type": "string"
           }
         },
         "required": [
@@ -9442,6 +9447,18 @@
             ],
             "default": null,
             "title": "Job Info"
+          },
+          "printer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Id"
           }
         },
         "required": [
@@ -9710,6 +9727,18 @@
             "default": "",
             "title": "Printer Model",
             "type": "string"
+          },
+          "failure_subtype": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Failure Subtype"
           }
         },
         "required": [
