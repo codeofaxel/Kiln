@@ -100,6 +100,10 @@ const sections: Section[] = [
         a: "Kiln auto-detects PrusaSlicer and OrcaSlicer on your <code>PATH</code> and in standard macOS app bundle locations. If yours is installed somewhere unusual, point at it explicitly:<br><code>export KILN_SLICER_PATH=/path/to/prusa-slicer</code>"
       },
       {
+        q: "How do I update Kiln?",
+        a: "Kiln tells you when a new version is out — through your AI assistant or in the CLI — so you won't miss one. To upgrade, run <code>kiln self-update</code> (or <code>pip install --upgrade kiln3d</code>). Kiln never updates itself automatically, and you can turn the check off with <code>KILN_NO_UPDATE_CHECK=1</code>."
+      },
+      {
         q: "How do I uninstall Kiln?",
         a: "If you used pipx: <code>pipx uninstall kiln3d</code><br>If you used pip: <code>pip uninstall kiln3d</code><br>If you used the one-line installer: <code>~/.kiln/src/install.sh --uninstall</code>"
       },
