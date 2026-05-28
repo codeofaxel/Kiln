@@ -966,7 +966,7 @@ Constraint-aware design reasoning — agents query material properties, design t
 | `printer_usage_summary` | — | Per-printer usage counts and overage billing details |
 | `uptime_report` | — | Rolling uptime metrics (1h/24h/7d/30d) with SLA compliance |
 | `encryption_status` | — | G-code encryption status and key configuration |
-| `report_printer_overage` | — | Printer overage billing breakdown (20 included, $15/mo each additional) |
+| `report_printer_overage` | — | Printer overage billing breakdown (50 included, $15/mo each additional) |
 | `configure_sso` | `provider_type` (oidc/saml), IdP settings | SSO configuration confirmation |
 | `sso_login_url` | `provider_type` | Authorization URL for SSO login |
 | `sso_exchange_code` | `code`, `state` | Session token |
