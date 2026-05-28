@@ -3,7 +3,7 @@
 All notable changes to Kiln are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [1.1.5] - 2026-05-27
 
 Engravings get smarter — depth that matches your nozzle, the right
 flip-axis picked for you, a sanity check that catches text which would
