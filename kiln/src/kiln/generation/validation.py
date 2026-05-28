@@ -485,7 +485,10 @@ def _write_binary_stl(
     """Write triangles to a binary STL file.
 
     Each triangle is a tuple of three ``(x, y, z)`` vertex tuples.
-    A zero normal is written for every facet (slicers recompute normals).
+    A real unit facet normal (computed from vertex winding) is written for
+    every facet.  PrusaSlicer's binary-STL loader rejects an all-zero-normal
+    mesh ("Loading of a model file failed"), so we cannot rely on the old
+    "slicers recompute from winding" assumption.
     """
     with open(output_path, "wb") as fh:
         # 80-byte header — Kiln attribution stamp.
@@ -495,8 +498,21 @@ def _write_binary_stl(
         fh.write(struct.pack("<I", len(triangles)))
 
         for tri in triangles:
-            # Normal (0, 0, 0) — slicers will recompute.
-            fh.write(struct.pack("<3f", 0.0, 0.0, 0.0))
+            # Facet normal from vertex winding (right-hand rule): n = (b-a) x (c-a).
+            # We write a real unit normal instead of (0, 0, 0) because
+            # PrusaSlicer's binary-STL loader rejects an all-zero-normal mesh
+            # ("Loading of a model file failed") — even though many slicers
+            # would recompute it from winding.
+            ax, ay, az = tri[0][0], tri[0][1], tri[0][2]
+            bx, by, bz = tri[1][0], tri[1][1], tri[1][2]
+            cx, cy, cz = tri[2][0], tri[2][1], tri[2][2]
+            nx = (by - ay) * (cz - az) - (bz - az) * (cy - ay)
+            ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az)
+            nz = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+            length = (nx * nx + ny * ny + nz * nz) ** 0.5
+            if length > 0.0:
+                nx, ny, nz = nx / length, ny / length, nz / length
+            fh.write(struct.pack("<3f", nx, ny, nz))
             # Three vertices.
             for v in tri:
                 fh.write(struct.pack("<3f", v[0], v[1], v[2]))
