@@ -446,7 +446,19 @@ def _write_stl(path: str | Path, triangles: list[tuple[tuple[float, ...], ...]])
         f.write(b"\x00" * 80)  # header
         f.write(struct.pack("<I", len(triangles)))
         for tri in triangles:
-            f.write(struct.pack("<fff", 0.0, 0.0, 0.0))  # normal placeholder
+            # Facet normal from vertex winding (right-hand rule): n = (b-a) x (c-a).
+            # A real unit normal, not (0,0,0): PrusaSlicer's binary-STL loader
+            # rejects an all-zero-normal mesh ("Loading of a model file failed").
+            ax, ay, az = tri[0][0], tri[0][1], tri[0][2]
+            bx, by, bz = tri[1][0], tri[1][1], tri[1][2]
+            cx, cy, cz = tri[2][0], tri[2][1], tri[2][2]
+            nx = (by - ay) * (cz - az) - (bz - az) * (cy - ay)
+            ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az)
+            nz = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+            length = (nx * nx + ny * ny + nz * nz) ** 0.5
+            if length > 0.0:
+                nx, ny, nz = nx / length, ny / length, nz / length
+            f.write(struct.pack("<fff", nx, ny, nz))
             for v in tri:
                 f.write(struct.pack("<fff", v[0], v[1], v[2]))
             f.write(struct.pack("<H", 0))  # attribute byte count
