@@ -15,6 +15,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   loaded tray (matching your material when you name one) instead of
   guessing, and reports the tray it used. Applies to quick prints and
   reslices alike.
+- **Community learning is now reliable end to end.** If your machine is
+  offline when a print finishes, the anonymous outcome is saved and sent
+  automatically once you're back online — it's no longer lost on a hiccup.
+  And every print you monitor now contributes its result automatically,
+  with no extra step.
 
 ### Fixed
 
