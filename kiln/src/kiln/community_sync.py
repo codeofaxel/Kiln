@@ -31,7 +31,7 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 _SUPABASE_URL = "https://nomzokpscfshjjzezplr.supabase.co"
-_SUPABASE_ANON_KEY = "sb_publishable_ZCJyEL0qeveSwgqv7dry3A_YI26Yw6S"
+_SUPABASE_ANON_KEY = "sb_publishable_ZCJyEL0qeveSwgqv7dry3A_YI26Yw6S"  # PLACEHOLDER: RLS-gated publishable key, safe in client code
 
 # Pull-side cache: community aggregates rarely change within an hour,
 # and network hops on every generation would be a silent performance
@@ -70,12 +70,19 @@ def community_sharing_enabled() -> bool:
 community_opt_in_enabled = community_sharing_enabled
 
 
-def sync_community_print(record: dict[str, Any]) -> bool:
+def sync_community_print(record: dict[str, Any], send_id: str | None = None) -> bool:
     """Send a single community print record to Supabase.
 
     :param record: Dict with keys matching the ``community_prints`` table
         (geometric_signature, printer_model, material, settings_hash,
         settings, outcome, quality_grade, failure_mode, print_time_seconds).
+    :param send_id: Optional random, per-contribution idempotency token (set
+        by the durable outbox).  When present, the insert upserts on the
+        ``send_id`` unique index with ``resolution=ignore-duplicates`` so a
+        crash-replayed row is a server-side no-op instead of a duplicate row.
+        It is random per contribution (not a user/install identifier), so it
+        carries no cross-row linkability.  When absent (or before the
+        federation column ships), the call is a plain insert.
     :returns: True if successfully sent, False otherwise.
     """
     if not community_opt_in_enabled():
@@ -86,7 +93,7 @@ def sync_community_print(record: dict[str, Any]) -> bool:
         import urllib.request
 
         insert_url = f"{_SUPABASE_URL}/rest/v1/community_prints"
-        payload = json.dumps({
+        body: dict[str, Any] = {
             "geometric_signature": record.get("geometric_signature", ""),
             "printer_model": record.get("printer_model", ""),
             "material": record.get("material", ""),
@@ -96,7 +103,13 @@ def sync_community_print(record: dict[str, Any]) -> bool:
             "quality_grade": record.get("quality_grade"),
             "failure_mode": record.get("failure_mode"),
             "print_time_seconds": record.get("print_time_seconds"),
-        }).encode()
+        }
+        prefer = "return=minimal"
+        if send_id:
+            body["send_id"] = send_id
+            insert_url = f"{insert_url}?on_conflict=send_id"
+            prefer = "return=minimal,resolution=ignore-duplicates"
+        payload = json.dumps(body).encode()
 
         req = urllib.request.Request(
             insert_url,
@@ -105,7 +118,7 @@ def sync_community_print(record: dict[str, Any]) -> bool:
                 "Content-Type": "application/json",
                 "apikey": _SUPABASE_ANON_KEY,
                 "Authorization": f"Bearer {_SUPABASE_ANON_KEY}",
-                "Prefer": "return=minimal",
+                "Prefer": prefer,
             },
             method="POST",
         )
