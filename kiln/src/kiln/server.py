@@ -11528,6 +11528,23 @@ def main() -> None:
     from kiln.parent_watchdog import start_parent_watchdog
     start_parent_watchdog()
 
+    # Community-contribution self-heal: flush any contributions a previous
+    # session queued but couldn't send (offline / crash).  Silent,
+    # opt-in-gated, best-effort on a daemon thread so it never delays boot
+    # or blocks on the network — the durability half of "opt in once, then
+    # it just works."
+    try:
+        from kiln.community_sync import community_opt_in_enabled
+        if community_opt_in_enabled():
+            from kiln import community_outbox
+            threading.Thread(
+                target=community_outbox.drain,
+                daemon=True,
+                name="kiln-community-outbox-startup-drain",
+            ).start()
+    except Exception:
+        logger.debug("community outbox startup drain skipped", exc_info=True)
+
     mcp.run()
 
 
