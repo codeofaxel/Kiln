@@ -25,6 +25,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Kiln-generated models slice reliably.** Some models Kiln built
   could fail to open in the slicer; they now load and slice every time.
+- **No more lost results when several Kiln sessions run at once.** When
+  more than one Kiln session shares the same machine, a busy moment could
+  drop a just-finished write — a completed-print outcome or an anonymous
+  community contribution — with no warning. Kiln now waits its turn and
+  retries, so the write lands.
 
 ## [1.1.5.2] - 2026-05-28
 
