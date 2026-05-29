@@ -375,6 +375,9 @@ def quick_print(
     profile_path: str | None = None,
     slicer_path: str | None = None,
     pause_after_step: int | None = None,
+    material: str | None = None,
+    use_ams: bool | None = None,
+    ams_mapping: list[int] | None = None,
     skip_validation: bool = False,
 ) -> PipelineResult:
     """Validate → slice → preflight → upload → start print in one call.
@@ -667,12 +670,59 @@ def quick_print(
                     message="Cannot start print (missing adapter or file name)",
                     duration_seconds=time.time() - step_start,
                 )
-            adapter.start_print(remote_name)
+            # Resolve AMS routing through the shared resolver so the A1
+            # tray_now="255" quirk can't silently route to the external
+            # spool when trays are loaded.  Mirrors slice_and_print + the
+            # start_print MCP tool.  Lazy import avoids a server<->pipelines
+            # import cycle (R1).  Non-Bambu adapters return use_ams=False
+            # and we leave the kwarg ABSENT so the Bambu adapter's own
+            # single-filament auto-route safety net still governs (R3).
+            from kiln.server import _resolve_use_ams
+
+            start_kwargs: dict[str, Any] = {}
+            ams_decision = _resolve_use_ams(
+                "auto" if use_ams is None else use_ams,
+                ams_mapping,
+                adapter,
+                material=material,
+            )
+            ams_warnings = list(ams_decision.get("warnings") or [])
+            ams_selection = None
+            if ams_decision.get("use_ams"):
+                start_kwargs["use_ams"] = True
+                resolved_mapping = (
+                    ams_mapping
+                    if ams_mapping is not None
+                    else ams_decision.get("ams_mapping")
+                )
+                if resolved_mapping is not None:
+                    start_kwargs["ams_mapping"] = resolved_mapping
+                ams_selection = ams_decision.get("selection")
+            elif use_ams is False:
+                # Caller EXPLICITLY opted out of AMS — forward use_ams=False
+                # so the adapter's single-filament auto-route can't silently
+                # re-enable AMS.  (Auto-resolved "no AMS" leaves the kwarg
+                # absent on purpose — that's the R3 safety net.)
+                start_kwargs["use_ams"] = False
+
+            adapter.start_print(remote_name, **start_kwargs)
+
+            step_data: dict[str, Any] = {"file_name": remote_name}
+            if ams_selection is not None:
+                step_data["ams_selection"] = ams_selection
+            if ams_warnings:
+                step_data["ams_warnings"] = ams_warnings
+            msg = f"Print started: {remote_name}"
+            if ams_selection is not None:
+                msg += (
+                    f" (AMS slot {ams_selection['slot']} — "
+                    f"{ams_selection['type']})"
+                )
             return PipelineStep(
                 name="start_print",
                 success=True,
-                message=f"Print started: {remote_name}",
-                data={"file_name": remote_name},
+                message=msg,
+                data=step_data,
                 duration_seconds=time.time() - step_start,
             )
         except Exception as exc:
@@ -720,6 +770,7 @@ def reslice_and_print(
     slicer_path: str | None = None,
     extra_args: list[str] | None = None,
     pause_after_step: int | None = None,
+    material: str | None = None,
     use_ams: bool | None = None,
     ams_mapping: list[int] | None = None,
     skip_validation: bool = False,
@@ -1068,18 +1119,55 @@ def reslice_and_print(
             if local_3mf:
                 start_kwargs["local_file_path"] = local_3mf
 
-            # Pass AMS parameters if provided by the caller.
-            if use_ams is not None:
-                start_kwargs["use_ams"] = use_ams
-            if ams_mapping is not None:
-                start_kwargs["ams_mapping"] = ams_mapping
+            ams_selection = None
+            ams_warnings: list[str] = []
+            if local_3mf or use_ams is not None or ams_mapping is not None:
+                # Explicit caller routing, or a 3MF plate that carries its own
+                # filament map: preserve the established behavior exactly.
+                # Caller-given kwargs pass straight through; 3MFs defer to the
+                # adapter's multi-material auto-detect + single-filament
+                # auto-route, which peek the loaded-tray list and so already
+                # handle the A1 tray_now="255" quirk and multi-filament plates.
+                # Injecting the resolver's single-tray pick here would override
+                # a multi-material mapping — so we don't.
+                if use_ams is not None:
+                    start_kwargs["use_ams"] = use_ams
+                if ams_mapping is not None:
+                    start_kwargs["ams_mapping"] = ams_mapping
+            else:
+                # Fully-auto raw-gcode reslice: route through the shared
+                # resolver for the 255 fix + material-aware tray match +
+                # selection record (parity with quick_print).  Lazy import
+                # avoids the server<->pipelines cycle (R1).
+                from kiln.server import _resolve_use_ams
+
+                ams_decision = _resolve_use_ams(
+                    "auto", None, adapter, material=material
+                )
+                ams_warnings = list(ams_decision.get("warnings") or [])
+                if ams_decision.get("use_ams"):
+                    start_kwargs["use_ams"] = True
+                    if ams_decision.get("ams_mapping") is not None:
+                        start_kwargs["ams_mapping"] = ams_decision["ams_mapping"]
+                    ams_selection = ams_decision.get("selection")
 
             adapter.start_print(remote_name, **start_kwargs)
+            step_data: dict[str, Any] = {"file_name": remote_name}
+            if ams_selection is not None:
+                step_data["ams_selection"] = ams_selection
+            if ams_warnings:
+                step_data["ams_warnings"] = ams_warnings
+            msg = f"Print started: {remote_name}"
+            if ams_selection is not None:
+                msg += (
+                    f" (AMS slot {ams_selection['slot']} — "
+                    f"{ams_selection['type']})"
+                )
             return PipelineStep(
                 name="start_print",
                 success=True,
-                message=f"Print started: {remote_name}",
-                data={"file_name": remote_name},
+                message=msg,
+                data=step_data,
                 duration_seconds=time.time() - step_start,
             )
         except Exception as exc:

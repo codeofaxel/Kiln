@@ -3688,6 +3688,31 @@ def delete_file(file_path: str) -> dict:
         return _error_dict(f"Unexpected error in delete_file: {exc}", code="INTERNAL_ERROR")
 
 
+def _ams_selection_record(
+    slot: int,
+    tray_type: str,
+    ams_info: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a human-readable AMS selection record ``{slot, type, color}``.
+
+    ``color`` is looked up from the (already-fetched) ``ams_info`` by slot
+    so callers can render "AMS slot 1 — black PLA" without another MQTT
+    round-trip.  Returns ``color=""`` when the tray reports no color.
+    """
+    color = ""
+    for unit in ams_info.get("units", []):
+        for tray in unit.get("trays", []):
+            try:
+                if int(tray.get("slot", -1)) == int(slot):
+                    color = str(tray.get("tray_color", "") or "")
+                    break
+            except (TypeError, ValueError):
+                continue
+        if color:
+            break
+    return {"slot": int(slot), "type": tray_type, "color": color}
+
+
 def _resolve_use_ams(
     use_ams: str | bool,
     ams_mapping: list[int] | None,
@@ -3879,10 +3904,16 @@ def _resolve_use_ams(
     if ams_mapping is None:
         auto_mapping = [chosen["slot"]]  # already coerced to int above
 
+    # Human-readable selection record so callers can surface
+    # "printing from AMS slot 1 — black PLA" without re-querying.
+    # Recovered from ams_info because loaded_trays kept only slot+type.
+    selection = _ams_selection_record(chosen["slot"], chosen["tray_type"], ams_info)
+
     return {
         "use_ams": True,
         "ams_mapping": auto_mapping,
         "warnings": warnings_out,
+        "selection": selection,
     }
 
 
@@ -10401,6 +10432,9 @@ def run_quick_print(
     printer_name: str | None = None,
     printer_id: str | None = None,
     profile_path: str | None = None,
+    material: str | None = None,
+    use_ams: str | None = None,
+    ams_mapping: str | None = None,
     skip_validation: bool = False,
 ) -> dict:
     """Full print pipeline: validate + slice + safety-check + upload + print (recommended one-shot tool).
@@ -10423,22 +10457,71 @@ def run_quick_print(
         printer_id: Printer model ID for auto-profile selection
             (e.g. ``"ender3"``, ``"bambu_x1c"``, ``"klipper_generic"``).
         profile_path: Explicit slicer profile. Overrides printer_id auto-selection.
+        material: Filament material hint (e.g. ``"PLA"``).  When set, AMS
+            auto-routing prefers a loaded tray whose type matches.
+        use_ams: AMS feeding mode (Bambu): ``"auto"`` (default — detect and
+            route to a loaded tray), ``"true"``, or ``"false"``.
+        ams_mapping: Explicit AMS slot mapping as a JSON array string,
+            e.g. ``"[0]"`` or ``"[0, 2]"``.  Overrides auto-selection.
         skip_validation: Bypass the mesh-level pre-print validation step.
             Defaults to False — designs are pre-tested for printability
             before they reach the printer.  Use True for already-validated
             inputs or pre-sliced 3MFs the validator can't introspect.
+
+    On Bambu AMS printers the response carries ``ams_selection``
+    (``{slot, type, color}``) naming the tray actually used — routing is
+    never silent.
     """
     if err := _check_auth("print"):
         return err
     try:
+        parsed_ams_mapping: list[int] | None = None
+        if ams_mapping:
+            import json as _json_ams
+            try:
+                parsed_ams_mapping = _json_ams.loads(ams_mapping)
+            except _json_ams.JSONDecodeError as exc:
+                return _error_dict(
+                    f"Invalid JSON in ams_mapping: {exc}",
+                    code="VALIDATION_ERROR",
+                )
+            if not isinstance(parsed_ams_mapping, list):
+                return _error_dict(
+                    "ams_mapping must be a JSON array of integers (e.g. [0, 2])",
+                    code="VALIDATION_ERROR",
+                )
+
+        # Tri-state use_ams: "auto"/None -> None (pipeline auto-resolves),
+        # "true"/"false" -> bool.
+        resolved_use_ams: bool | None = None
+        if use_ams is not None:
+            _v = str(use_ams).strip().lower()
+            if _v in ("true", "1", "yes"):
+                resolved_use_ams = True
+            elif _v in ("false", "0", "no"):
+                resolved_use_ams = False
+
         result = _pipeline_quick_print(
             model_path=model_path,
             printer_name=printer_name,
             printer_id=printer_id,
             profile_path=profile_path,
+            material=material,
+            use_ams=resolved_use_ams,
+            ams_mapping=parsed_ams_mapping,
             skip_validation=skip_validation,
         )
-        return {"success": result.success, **result.to_dict()}
+        resp = {"success": result.success, **result.to_dict()}
+        # Hoist the AMS selection from the start_print step to the top
+        # level so callers can say "AMS slot 1 — black PLA".  Never silent.
+        for _step in result.steps:
+            if _step.name == "start_print" and _step.data:
+                if "ams_selection" in _step.data:
+                    resp["ams_selection"] = _step.data["ams_selection"]
+                if "ams_warnings" in _step.data:
+                    resp["ams_warnings"] = _step.data["ams_warnings"]
+                break
+        return resp
     except Exception as exc:
         logger.exception("Unexpected error in run_quick_print")
         return _error_dict(f"Unexpected error in run_quick_print: {exc}", code="INTERNAL_ERROR")
@@ -10452,6 +10535,7 @@ def run_reslice_and_print(
     overrides: str | None = None,
     profile_path: str | None = None,
     slicer_path: str | None = None,
+    material: str | None = None,
     use_ams: bool | None = None,
     ams_mapping: str | None = None,
     skip_validation: bool = False,
@@ -10484,6 +10568,10 @@ def run_reslice_and_print(
         overrides: JSON string of PrusaSlicer INI key-value pairs to override.
         profile_path: Explicit slicer profile. Overrides printer_id auto-selection.
         slicer_path: Explicit path to the slicer binary.
+        material: Filament material hint (e.g. ``"PLA"``).  For fully-auto
+            raw-gcode reslices, AMS routing prefers a loaded tray of this
+            material.  (3MF plates carry their own filament map, so routing
+            defers to the adapter there.)
         use_ams: Enable AMS filament feeding (Bambu printers). If omitted,
             auto-detected from 3MF metadata.
         ams_mapping: JSON string of AMS slot indices (e.g. ``"[0, 2]"``).
@@ -10560,11 +10648,21 @@ def run_reslice_and_print(
             overrides=parsed_overrides,
             profile_path=profile_path,
             slicer_path=slicer_path,
+            material=material,
             use_ams=use_ams,
             ams_mapping=parsed_ams_mapping,
             skip_validation=skip_validation,
         )
-        return {"success": result.success, **result.to_dict()}
+        resp = {"success": result.success, **result.to_dict()}
+        # Surface the AMS tray selection (parity with run_quick_print).
+        for _step in result.steps:
+            if _step.name == "start_print" and _step.data:
+                if "ams_selection" in _step.data:
+                    resp["ams_selection"] = _step.data["ams_selection"]
+                if "ams_warnings" in _step.data:
+                    resp["ams_warnings"] = _step.data["ams_warnings"]
+                break
+        return resp
     except Exception as exc:
         logger.exception("Unexpected error in run_reslice_and_print")
         return _error_dict(f"Unexpected error in run_reslice_and_print: {exc}", code="INTERNAL_ERROR")

@@ -119,6 +119,9 @@ class TestRunQuickPrint:
             printer_name=None,
             printer_id=None,
             profile_path=None,
+            material=None,
+            use_ams=None,
+            ams_mapping=None,
             skip_validation=False,
         )
 
@@ -139,6 +142,9 @@ class TestRunQuickPrint:
             printer_name="my_printer",
             printer_id="ender3",
             profile_path="/tmp/profile.ini",
+            material=None,
+            use_ams=None,
+            ams_mapping=None,
             skip_validation=False,
         )
 
@@ -154,6 +160,9 @@ class TestRunQuickPrint:
             printer_name=None,
             printer_id=None,
             profile_path=None,
+            material=None,
+            use_ams=None,
+            ams_mapping=None,
             skip_validation=True,
         )
 
@@ -185,6 +194,67 @@ class TestRunQuickPrint:
 
         assert result["success"] is False
         assert result["error"]["code"] == "AUTH_ERROR"
+
+    @patch("kiln.server._pipeline_quick_print")
+    def test_ams_mapping_json_parsed(self, mock_pipeline):
+        from kiln.server import run_quick_print
+
+        mock_pipeline.return_value = _ok_result()
+        run_quick_print(model_path="/tmp/test.stl", ams_mapping="[0, 2]")
+
+        assert mock_pipeline.call_args.kwargs["ams_mapping"] == [0, 2]
+
+    @patch("kiln.server._pipeline_quick_print")
+    def test_ams_mapping_bad_json_rejected(self, mock_pipeline):
+        from kiln.server import run_quick_print
+
+        result = run_quick_print(model_path="/tmp/test.stl", ams_mapping="not json")
+
+        assert result["success"] is False
+        assert result["error"]["code"] == "VALIDATION_ERROR"
+        mock_pipeline.assert_not_called()
+
+    @patch("kiln.server._pipeline_quick_print")
+    def test_ams_mapping_non_list_rejected(self, mock_pipeline):
+        from kiln.server import run_quick_print
+
+        result = run_quick_print(model_path="/tmp/test.stl", ams_mapping='{"a": 1}')
+
+        assert result["success"] is False
+        assert result["error"]["code"] == "VALIDATION_ERROR"
+        mock_pipeline.assert_not_called()
+
+    @patch("kiln.server._pipeline_quick_print")
+    def test_use_ams_tristate_normalized(self, mock_pipeline):
+        from kiln.server import run_quick_print
+
+        for raw, expected in (("true", True), ("false", False), ("auto", None)):
+            mock_pipeline.reset_mock()
+            mock_pipeline.return_value = _ok_result()
+            run_quick_print(model_path="/tmp/test.stl", use_ams=raw)
+            assert mock_pipeline.call_args.kwargs["use_ams"] is expected
+
+    @patch("kiln.server._pipeline_quick_print")
+    def test_ams_selection_hoisted_to_top_level(self, mock_pipeline):
+        from kiln.server import run_quick_print
+
+        sel = {"slot": 1, "type": "PLA", "color": "161616FF"}
+        mock_pipeline.return_value = PipelineResult(
+            pipeline="quick_print",
+            success=True,
+            message="ok",
+            steps=[
+                PipelineStep(name="slice", success=True, message="ok"),
+                PipelineStep(
+                    name="start_print", success=True, message="ok",
+                    data={"file_name": "x.gcode.3mf", "ams_selection": sel},
+                ),
+            ],
+            total_duration_seconds=1.0,
+        )
+        result = run_quick_print(model_path="/tmp/test.stl")
+
+        assert result["ams_selection"] == sel
 
 
 # ---------------------------------------------------------------------------

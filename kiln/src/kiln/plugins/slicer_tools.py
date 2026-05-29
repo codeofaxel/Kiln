@@ -871,6 +871,14 @@ class _SlicerToolsPlugin:
                             )
 
                 # --- Auto-material from AMS if not specified ---
+                # A1 / AMS Lite keeps tray_now="255" even with trays
+                # loaded, so the old tray_now-only path silently no-opped.
+                # Prefer the active tray when tray_now names a real slot;
+                # otherwise fall back to the first LOADED tray (non-empty
+                # tray_type) so the adhesion/validation material hint is
+                # populated on A1 hardware too.  (Routing is handled
+                # separately by _resolve_use_ams below — this only sets the
+                # material string.)
                 if material is None:
                     try:
                         if printer_name:
@@ -879,17 +887,34 @@ class _SlicerToolsPlugin:
                             _adapter = _srv._get_adapter()
                         if hasattr(_adapter, "get_ams_status"):
                             ams = _adapter.get_ams_status()
-                            tray_now = ams.get("tray_now", "255")
-                            if tray_now != "255":
-                                slot_idx = int(tray_now)
-                                for unit in ams.get("units", []):
-                                    for tray in unit.get("trays", []):
-                                        if tray.get("slot") == slot_idx and tray.get("tray_type"):
-                                            material = tray["tray_type"]
-                                            _logger.debug("Auto-detected material from AMS: %s", material)
-                                            break
-                                    if material:
+                            tray_now = str(ams.get("tray_now", "255"))
+                            active_slot: int | None = None
+                            if tray_now not in ("255", ""):
+                                try:
+                                    active_slot = int(tray_now)
+                                except (TypeError, ValueError):
+                                    active_slot = None
+                            first_loaded_type: str | None = None
+                            for unit in ams.get("units", []):
+                                for tray in unit.get("trays", []):
+                                    ttype = str(tray.get("tray_type", "") or "").strip()
+                                    if not ttype:
+                                        continue
+                                    try:
+                                        tslot = int(tray.get("slot", -1))
+                                    except (TypeError, ValueError):
+                                        continue
+                                    if active_slot is not None and tslot == active_slot:
+                                        material = ttype
                                         break
+                                    if first_loaded_type is None:
+                                        first_loaded_type = ttype
+                                if material:
+                                    break
+                            if material is None and first_loaded_type is not None:
+                                material = first_loaded_type
+                            if material:
+                                _logger.debug("Auto-detected material from AMS: %s", material)
                     except Exception:
                         _logger.debug("AMS material auto-detection failed", exc_info=True)
 

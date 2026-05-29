@@ -3924,3 +3924,81 @@ class TestResolveUseAms:
         result = _resolve_use_ams("auto", None, adapter)
         assert result["use_ams"] is True
         assert result["ams_mapping"] == [2]
+
+    def test_auto_routes_despite_tray_now_255(self):
+        """A1/AMS Lite reports tray_now='255' even with trays loaded; auto
+        must still route to AMS.  This is the headline regression."""
+        from kiln.server import _resolve_use_ams
+
+        adapter = MagicMock()
+        adapter.get_ams_status.return_value = {
+            "tray_now": "255",
+            "ams_exist_bits": "1",
+            "tray_exist_bits": "f",
+            "units": [
+                {
+                    "unit_id": 0,
+                    "trays": [
+                        {"slot": 0, "tray_type": "PLA", "tray_color": "161616FF", "remain": 0},
+                    ],
+                }
+            ],
+        }
+        result = _resolve_use_ams("auto", None, adapter)
+        assert result["use_ams"] is True
+        assert result["ams_mapping"] == [0]
+        assert result["selection"] == {"slot": 0, "type": "PLA", "color": "161616FF"}
+
+    def test_selection_record_includes_color(self):
+        """The positive branch returns a {slot, type, color} selection record."""
+        from kiln.server import _resolve_use_ams
+
+        adapter = MagicMock()
+        adapter.get_ams_status.return_value = {
+            "units": [
+                {"unit_id": 0, "trays": [
+                    {"slot": 0, "tray_type": "PLA", "tray_color": "FF0000FF", "remain": 80},
+                ]}
+            ]
+        }
+        result = _resolve_use_ams("auto", None, adapter)
+        assert result["selection"] == {"slot": 0, "type": "PLA", "color": "FF0000FF"}
+
+    def test_selection_material_matched_tray(self):
+        """A material hint routes to the matching tray; selection reflects it."""
+        from kiln.server import _resolve_use_ams
+
+        adapter = MagicMock()
+        adapter.get_ams_status.return_value = {
+            "units": [
+                {"unit_id": 0, "trays": [
+                    {"slot": 0, "tray_type": "PLA", "tray_color": "FFFFFFFF", "remain": 80},
+                    {"slot": 1, "tray_type": "PETG", "tray_color": "00FF00FF", "remain": 60},
+                ]}
+            ]
+        }
+        result = _resolve_use_ams("auto", None, adapter, material="PETG")
+        assert result["ams_mapping"] == [1]
+        assert result["selection"]["slot"] == 1
+        assert result["selection"]["type"] == "PETG"
+
+    def test_selection_absent_when_no_ams(self):
+        """Non-AMS routes carry no selection record (callers use .get)."""
+        from kiln.server import _resolve_use_ams
+
+        adapter = MagicMock()
+        adapter.get_ams_status.return_value = {"units": []}
+        result = _resolve_use_ams("auto", None, adapter)
+        assert result["use_ams"] is False
+        assert result.get("selection") is None
+
+    def test_selection_color_empty_when_absent(self):
+        """color defaults to '' when the tray reports none."""
+        from kiln.server import _resolve_use_ams
+
+        adapter = MagicMock()
+        adapter.get_ams_status.return_value = {
+            "units": [{"unit_id": 0, "trays": [{"slot": 0, "tray_type": "PLA", "remain": 50}]}]
+        }
+        result = _resolve_use_ams("auto", None, adapter)
+        assert result["selection"] == {"slot": 0, "type": "PLA", "color": ""}
