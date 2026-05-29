@@ -733,8 +733,18 @@ class BambuAdapter(PrinterAdapter):
             client.disconnect()
         except Exception:
             logger.debug("MQTT client disconnect call failed", exc_info=True)
+        def _quiet_loop_stop() -> None:
+            # Catch inside the daemon thread: an exception escaping the thread
+            # target becomes an unraisable thread exception (noisy in prod, and
+            # it trips pytest's threadexception plugin).  A failed/abandoned
+            # stop is already best-effort here, so log and move on.
+            try:
+                client.loop_stop()
+            except Exception:
+                logger.debug("MQTT loop_stop raised in stopper thread", exc_info=True)
+
         try:
-            stopper = threading.Thread(target=client.loop_stop, daemon=True)
+            stopper = threading.Thread(target=_quiet_loop_stop, daemon=True)
             stopper.start()
             stopper.join(timeout=self._timeout)
             if stopper.is_alive():
