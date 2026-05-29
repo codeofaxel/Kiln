@@ -717,3 +717,78 @@ class TestAuditHmacKey:
             assert key1 != hashlib.sha256(db_path.encode("utf-8")).digest()
         finally:
             instance.close()
+
+
+# ---------------------------------------------------------------------------
+# Write-lock resilience (SQLite BUSY/LOCKED retry)
+# ---------------------------------------------------------------------------
+
+
+class TestWriteLockResilience:
+    """Transient 'database is locked' errors must be retried, not dropped —
+    otherwise a contended community-contribution write is silently lost."""
+
+    def test_is_sqlite_locked_detection(self):
+        from kiln.persistence import _is_sqlite_locked
+
+        assert _is_sqlite_locked(sqlite3.OperationalError("database is locked"))
+        assert _is_sqlite_locked(sqlite3.OperationalError("database is busy"))
+        assert not _is_sqlite_locked(sqlite3.OperationalError("no such table: x"))
+
+    def test_retry_succeeds_after_transient_lock(self):
+        from kiln.persistence import _retry_on_locked
+
+        calls = {"n": 0}
+
+        def flaky():
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise sqlite3.OperationalError("database is locked")
+            return "ok"
+
+        with mock.patch("kiln.persistence.time.sleep"):
+            result = _retry_on_locked(flaky)
+
+        assert result == "ok"
+        assert calls["n"] == 3
+
+    def test_retry_gives_up_and_raises_after_max_attempts(self):
+        from kiln.persistence import _SQLITE_LOCK_RETRY_ATTEMPTS, _retry_on_locked
+
+        calls = {"n": 0}
+
+        def always_locked():
+            calls["n"] += 1
+            raise sqlite3.OperationalError("database is locked")
+
+        with mock.patch("kiln.persistence.time.sleep"), \
+             pytest.raises(sqlite3.OperationalError, match="locked"):
+            _retry_on_locked(always_locked)
+
+        assert calls["n"] == _SQLITE_LOCK_RETRY_ATTEMPTS
+
+    def test_non_lock_error_is_not_retried(self):
+        from kiln.persistence import _retry_on_locked
+
+        calls = {"n": 0}
+
+        def bad_sql():
+            calls["n"] += 1
+            raise sqlite3.OperationalError("no such table: foo")
+
+        with mock.patch("kiln.persistence.time.sleep") as slept, \
+             pytest.raises(sqlite3.OperationalError, match="no such table"):
+            _retry_on_locked(bad_sql)
+
+        assert calls["n"] == 1
+        slept.assert_not_called()
+
+    def test_busy_timeout_raised_to_10s(self, tmp_path):
+        from kiln.persistence import SQLiteBackend
+
+        backend = SQLiteBackend(str(tmp_path / "bt.db"))
+        try:
+            (value,) = backend.execute("PRAGMA busy_timeout").fetchone()
+            assert value == 10000
+        finally:
+            backend.close()

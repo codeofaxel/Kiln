@@ -34,7 +34,7 @@ import stat
 import sys
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -112,12 +112,44 @@ class StorageBackend(Protocol):
         ...
 
 
+# SQLite serialises writers: under multiple concurrent Kiln sessions
+# sharing ~/.kiln, a write can outlast ``busy_timeout`` and surface as
+# ``sqlite3.OperationalError: database is locked``.  Dropping the write
+# loses data — e.g. a completed-print outcome or a community contribution.
+# A BUSY/LOCKED error means the statement never applied, so retrying with
+# backoff is safe and lets the write land once the lock clears.
+_SQLITE_LOCK_RETRY_ATTEMPTS = 4
+_SQLITE_LOCK_RETRY_BASE_S = 0.1
+_SQLITE_LOCK_RETRY_MAX_S = 1.0
+
+
+def _is_sqlite_locked(exc: sqlite3.OperationalError) -> bool:
+    """True for the transient 'database is locked' / 'database is busy' errors."""
+    msg = str(exc).lower()
+    return "database is locked" in msg or "database is busy" in msg
+
+
+def _retry_on_locked(operation: Callable[[], Any]) -> Any:
+    """Run ``operation``; retry a transient SQLite lock with exponential
+    backoff.  Non-lock ``OperationalError``\\s propagate immediately."""
+    delay = _SQLITE_LOCK_RETRY_BASE_S
+    for attempt in range(_SQLITE_LOCK_RETRY_ATTEMPTS):
+        try:
+            return operation()
+        except sqlite3.OperationalError as exc:
+            if not _is_sqlite_locked(exc) or attempt == _SQLITE_LOCK_RETRY_ATTEMPTS - 1:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, _SQLITE_LOCK_RETRY_MAX_S)
+
+
 class SQLiteBackend:
     """Default :class:`StorageBackend` implementation backed by ``sqlite3``.
 
     Wraps a ``sqlite3.Connection`` and exposes only the methods required by
     the :class:`StorageBackend` protocol.  Construction mirrors the original
-    ``KilnDB`` setup (WAL mode, busy timeout, Row factory).
+    ``KilnDB`` setup (WAL mode, busy timeout, Row factory).  Write methods
+    retry on transient lock contention via :func:`_retry_on_locked`.
     """
 
     def __init__(self, db_path: str) -> None:
@@ -127,21 +159,26 @@ class SQLiteBackend:
         )
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA busy_timeout=5000")
+        # 10s of in-SQLite waiting before it raises; _retry_on_locked adds
+        # application-level retries on top so a contended write is never
+        # silently dropped (the failure mode that loses community data).
+        self._conn.execute("PRAGMA busy_timeout=10000")
 
     # -- StorageBackend interface ------------------------------------------
 
     def execute(self, sql: str, parameters: _SqlParams = (), /) -> sqlite3.Cursor:
-        return self._conn.execute(sql, parameters)
+        return _retry_on_locked(lambda: self._conn.execute(sql, parameters))
 
     def executemany(self, sql: str, seq_of_parameters: Sequence[_SqlParams], /) -> sqlite3.Cursor:
-        return self._conn.executemany(sql, seq_of_parameters)
+        return _retry_on_locked(lambda: self._conn.executemany(sql, seq_of_parameters))
 
     def executescript(self, sql_script: str, /) -> sqlite3.Cursor:
+        # Not retried: scripts run multiple statements (schema/migrations at
+        # startup, low contention) where a mid-script retry could re-apply.
         return self._conn.executescript(sql_script)
 
     def commit(self) -> None:
-        self._conn.commit()
+        _retry_on_locked(self._conn.commit)
 
     def close(self) -> None:
         self._conn.close()
