@@ -1121,24 +1121,40 @@ def reslice_and_print(
 
             ams_selection = None
             ams_warnings: list[str] = []
-            if local_3mf or use_ams is not None or ams_mapping is not None:
-                # Explicit caller routing, or a 3MF plate that carries its own
-                # filament map: preserve the established behavior exactly.
-                # Caller-given kwargs pass straight through; 3MFs defer to the
-                # adapter's multi-material auto-detect + single-filament
-                # auto-route, which peek the loaded-tray list and so already
-                # handle the A1 tray_now="255" quirk and multi-filament plates.
-                # Injecting the resolver's single-tray pick here would override
-                # a multi-material mapping — so we don't.
+            # A 3MF plate carries its own filament map.  Multi-material (or
+            # unreadable) plates MUST defer to the adapter's auto-detect so we
+            # never override a multi-color mapping; a confidently
+            # single-material plate is safe to route through the resolver (one
+            # filament, one tray) and so earns the same material-match +
+            # selection record as quick_print.
+            defer_multi_material_3mf = False
+            if local_3mf:
+                defer_multi_material_3mf = True  # fail-safe default
+                _count_fn = getattr(adapter, "filament_count_3mf", None)
+                if _count_fn is not None:
+                    try:
+                        _n = _count_fn(local_3mf)
+                        if _n is not None and _n <= 1:
+                            defer_multi_material_3mf = False
+                    except Exception:
+                        pass  # unreadable → stays deferred
+
+            if use_ams is not None or ams_mapping is not None:
+                # Explicit caller routing — pass straight through.
                 if use_ams is not None:
                     start_kwargs["use_ams"] = use_ams
                 if ams_mapping is not None:
                     start_kwargs["ams_mapping"] = ams_mapping
+            elif defer_multi_material_3mf:
+                # Multi-material (or unreadable) 3MF — defer to the adapter's
+                # multi-material auto-detect + single-filament auto-route,
+                # which peek the loaded-tray list and so handle the 255 quirk.
+                pass
             else:
-                # Fully-auto raw-gcode reslice: route through the shared
-                # resolver for the 255 fix + material-aware tray match +
-                # selection record (parity with quick_print).  Lazy import
-                # avoids the server<->pipelines cycle (R1).
+                # Raw gcode OR confidently single-material 3MF — route through
+                # the shared resolver for the 255 fix + material-aware tray
+                # match + selection record (parity with quick_print).  Lazy
+                # import avoids the server<->pipelines cycle (R1).
                 from kiln.server import _resolve_use_ams
 
                 ams_decision = _resolve_use_ams(

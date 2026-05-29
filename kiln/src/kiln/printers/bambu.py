@@ -1986,6 +1986,27 @@ class BambuAdapter(PrinterAdapter):
         return mapping
 
     @staticmethod
+    def filament_count_3mf(file_path: str, plate_number: int = 1) -> int | None:
+        """Number of filaments a 3MF plate declares, or ``None`` if the
+        plate metadata can't be read.
+
+        Used to decide single- vs multi-material print routing.  Callers
+        MUST treat ``None`` as "unknown — assume multi-material" so an
+        unreadable plate is never mis-routed through a single-tray path
+        (which would override a real multi-color mapping).
+        """
+        meta = BambuAdapter._read_3mf_plate_meta(file_path, plate_number)
+        if meta is None:
+            return None
+        colors = meta.get("filament_colors")
+        if isinstance(colors, list):
+            return len(colors)
+        ids = meta.get("filament_ids")
+        if isinstance(ids, list):
+            return len(ids)
+        return None
+
+    @staticmethod
     def _detect_3mf_printer_model(
         file_path: str,
         *,

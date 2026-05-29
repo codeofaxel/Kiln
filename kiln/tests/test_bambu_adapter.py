@@ -2376,6 +2376,44 @@ class TestBuildAmsMappingFrom3mf:
         # mapping[2]=0 → filament 2 (white) → AMS tray 0 (white) ✓
 
 
+class TestFilamentCount3mf:
+    """Tests for filament_count_3mf: the single- vs multi-material gate that
+    decides whether a reslice routes through the resolver or defers to the
+    adapter's multi-material auto-detect."""
+
+    def _make_3mf(
+        self, tmp_path: Any, *,
+        filament_colors: list[str] | None = None,
+        filament_ids: list[int] | None = None,
+    ) -> str:
+        import zipfile
+        meta: dict[str, Any] = {}
+        if filament_colors is not None:
+            meta["filament_colors"] = filament_colors
+        if filament_ids is not None:
+            meta["filament_ids"] = filament_ids
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr("Metadata/plate_1.json", json.dumps(meta))
+        return str(threemf)
+
+    def test_single_material_returns_one(self, tmp_path: Any) -> None:
+        path = self._make_3mf(tmp_path, filament_colors=["#000000"])
+        assert BambuAdapter.filament_count_3mf(path) == 1
+
+    def test_multi_material_returns_count(self, tmp_path: Any) -> None:
+        path = self._make_3mf(tmp_path, filament_colors=["#000000", "#FFFFFF"])
+        assert BambuAdapter.filament_count_3mf(path) == 2
+
+    def test_unreadable_returns_none(self) -> None:
+        # Fail-safe: callers treat None as "assume multi-material → defer".
+        assert BambuAdapter.filament_count_3mf("/nonexistent.3mf") is None
+
+    def test_counts_filament_ids_when_no_colors(self, tmp_path: Any) -> None:
+        path = self._make_3mf(tmp_path, filament_ids=[0, 2])
+        assert BambuAdapter.filament_count_3mf(path) == 2
+
+
 # ---------------------------------------------------------------------------
 # AMS color mismatch check tests
 # ---------------------------------------------------------------------------
