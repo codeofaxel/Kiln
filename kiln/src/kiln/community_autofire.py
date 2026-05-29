@@ -31,8 +31,13 @@ def geometric_signature_for(printer_file_name: str | None) -> str:
     """Resolve a printed file to its geometric signature.
 
     Pipeline: printer file name → upload manifest → local source path →
-    :func:`fingerprint_model`.  Returns ``""`` on any failure (no manifest
-    entry, missing source, non-STL/unparseable file) so callers skip the
+    :func:`fingerprint_model` (STL fast path).  A non-STL source (e.g. a
+    ``.3mf`` from Bambu Studio / a multi-color project) is loaded via trimesh
+    and round-tripped through the same STL path, so a 3MF and an STL of the
+    same model hash IDENTICALLY (the signature is triangle/vertex/area/volume
+    based — it survives the round-trip and is invariant under the build-plate
+    transform).  Returns ``""`` on any failure (no manifest entry, missing
+    source, unparseable/unsupported file, trimesh absent) so callers skip the
     contribution rather than substitute a file hash.
     """
     if not printer_file_name or printer_file_name == "N/A":
@@ -45,9 +50,55 @@ def geometric_signature_for(printer_file_name: str | None) -> str:
             return ""
         from kiln.print_dna import fingerprint_model
 
-        return fingerprint_model(source_path).geometric_signature or ""
+        try:
+            # STL fast path — keep the exact native signature so existing
+            # community data stays comparable.
+            return fingerprint_model(source_path).geometric_signature or ""
+        except Exception:
+            # Not a parseable STL (e.g. .3mf): load the mesh and round-trip it
+            # through the STL path so the signature matches the STL twin.
+            return _signature_via_mesh_load(source_path)
     except Exception:
         logger.debug("geometric signature unavailable (best-effort)", exc_info=True)
+        return ""
+
+
+def _signature_via_mesh_load(source_path: str) -> str:
+    """Fingerprint a non-STL mesh (3MF / OBJ / PLY / …) by loading it with
+    trimesh and round-tripping through the STL path, so its
+    ``geometric_signature`` matches the STL of the same model.
+
+    Fail-safe: returns ``""`` on any failure — trimesh absent (optional dep),
+    corrupt/unsupported file, or no geometry — so the caller skips rather than
+    contributing a garbage signature.  trimesh applies the build-plate
+    transform on load; the signature is rigid-invariant, so a plated 3MF still
+    matches its as-designed STL (only a genuine scale difference diverges,
+    which is correct — it prints differently).
+    """
+    import os as _os
+    import tempfile
+
+    try:
+        import trimesh  # optional dep; absent → skip (no worse than before A5)
+    except Exception:
+        return ""
+    try:
+        from kiln.print_dna import fingerprint_model
+
+        mesh = trimesh.load(source_path, force="mesh")
+        faces = getattr(mesh, "faces", None)
+        if faces is None or len(faces) == 0:
+            return ""
+        stl_bytes = mesh.export(file_type="stl")
+        fd, tmp = tempfile.mkstemp(suffix=".stl")
+        try:
+            with _os.fdopen(fd, "wb") as fh:
+                fh.write(stl_bytes)
+            return fingerprint_model(tmp).geometric_signature or ""
+        finally:
+            _os.unlink(tmp)
+    except Exception:
+        logger.debug("mesh-load signature unavailable (best-effort)", exc_info=True)
         return ""
 
 

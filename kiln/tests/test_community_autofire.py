@@ -12,6 +12,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest import mock
 
+import pytest
+
 # --------------------------------------------------------------------------
 # geometric_signature_for
 # --------------------------------------------------------------------------
@@ -207,3 +209,98 @@ def test_await_print_completion_auto_contributes_on_idle(monkeypatch):
     assert kw["outcome"] == "completed"
     assert kw["printer_file_name"] == "plate.gcode"
     assert kw["printer_model"] == "Bambu A1"
+
+
+# --------------------------------------------------------------------------
+# 3MF source support — a non-STL source is round-tripped through the STL path
+# so a 3MF and an STL of the same model hash IDENTICALLY (they must aggregate
+# together).  trimesh is an optional dep; the consistency tests skip without
+# it, but the fail-safe tests confirm graceful degradation when it is absent.
+# --------------------------------------------------------------------------
+
+
+def test_3mf_signature_matches_stl_twin(tmp_path):
+    """The core A5 guarantee: a 3MF of a model hashes identically to its STL."""
+    trimesh = pytest.importorskip("trimesh")
+    from kiln import community_autofire as ca
+    from kiln.print_dna import fingerprint_model
+
+    mesh = trimesh.creation.box(extents=(20, 30, 12))
+    stl = tmp_path / "m.stl"
+    stl.write_bytes(mesh.export(file_type="stl"))
+    tmf = tmp_path / "m.3mf"
+    tmf.write_bytes(mesh.export(file_type="3mf"))
+
+    sig_stl = fingerprint_model(str(stl)).geometric_signature
+    sig_3mf = ca._signature_via_mesh_load(str(tmf))
+    assert sig_stl and sig_3mf == sig_stl
+
+
+def test_geometric_signature_for_routes_3mf_through_mesh_load(tmp_path):
+    """End-to-end: geometric_signature_for on a .3mf source yields the same
+    signature as the STL twin (STL via native path, 3MF via mesh-load)."""
+    trimesh = pytest.importorskip("trimesh")
+    from kiln import community_autofire as ca
+
+    mesh = trimesh.creation.icosphere(subdivisions=2, radius=11)
+    stl = tmp_path / "m.stl"
+    stl.write_bytes(mesh.export(file_type="stl"))
+    tmf = tmp_path / "m.3mf"
+    tmf.write_bytes(mesh.export(file_type="3mf"))
+
+    with mock.patch("kiln.upload_manifest.resolve_source_path", return_value=str(stl)):
+        sig_stl = ca.geometric_signature_for("plate.gcode")
+    with mock.patch("kiln.upload_manifest.resolve_source_path", return_value=str(tmf)):
+        sig_3mf = ca.geometric_signature_for("plate.gcode")
+    assert sig_stl and sig_3mf == sig_stl
+
+
+def test_rigid_transformed_3mf_still_matches(tmp_path):
+    """A plated (translated + rotated) 3MF still matches the as-designed STL —
+    the signature is rigid-invariant, so build-plate placement doesn't fork it."""
+    trimesh = pytest.importorskip("trimesh")
+    from kiln import community_autofire as ca
+    from kiln.print_dna import fingerprint_model
+
+    mesh = trimesh.creation.box(extents=(18, 24, 9))
+    stl = tmp_path / "m.stl"
+    stl.write_bytes(mesh.export(file_type="stl"))
+    sig_stl = fingerprint_model(str(stl)).geometric_signature
+
+    placed = mesh.copy()
+    rot = trimesh.transformations.rotation_matrix(0.7, [0.0, 0.0, 1.0])
+    trans = trimesh.transformations.translation_matrix([120.0, -40.0, 6.0])
+    placed.apply_transform(trans @ rot)
+    tmf = tmp_path / "placed.3mf"
+    tmf.write_bytes(placed.export(file_type="3mf"))
+
+    assert ca._signature_via_mesh_load(str(tmf)) == sig_stl
+
+
+def test_corrupt_3mf_skips(tmp_path):
+    """A corrupt / non-mesh 3MF is a fail-safe skip ("") — never a garbage sig."""
+    from kiln import community_autofire as ca
+
+    bad = tmp_path / "bad.3mf"
+    bad.write_bytes(b"PK\x03\x04 not a real 3mf payload")
+    assert ca._signature_via_mesh_load(str(bad)) == ""
+
+
+def test_mesh_load_skips_when_trimesh_absent(tmp_path, monkeypatch):
+    """If trimesh isn't installed the 3MF path skips gracefully (no worse than
+    pre-A5), rather than raising."""
+    import builtins
+
+    from kiln import community_autofire as ca
+
+    real_import = builtins.__import__
+
+    def _no_trimesh(name, *args, **kwargs):
+        if name == "trimesh":
+            raise ImportError("trimesh not installed (simulated)")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _no_trimesh)
+    tmf = tmp_path / "x.3mf"
+    tmf.write_bytes(b"PK\x03\x04 anything")
+    assert ca._signature_via_mesh_load(str(tmf)) == ""
