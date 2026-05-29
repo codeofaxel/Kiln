@@ -308,7 +308,7 @@ def record_print_outcome(
             from kiln.community_sync import community_opt_in_enabled
 
             if community_opt_in_enabled() and file_hash:
-                from kiln.community_sync import sync_community_print_async
+                from kiln import community_outbox
 
                 resolved_model: str | None = None
                 try:
@@ -326,19 +326,27 @@ def record_print_outcome(
                     "excellent": "A", "good": "B",
                     "acceptable": "C", "poor": "D",
                 }
-                sync_community_print_async({
-                    "geometric_signature": file_hash,
-                    "printer_model": resolved_model or printer_name or "unknown",
-                    "material": material_type or "unknown",
-                    "settings_hash": _hl.sha256(
-                        _js.dumps(settings or {}, sort_keys=True).encode(),
-                    ).hexdigest()[:16],
-                    "settings": settings,
-                    "outcome": outcome,
-                    "quality_grade": _grade_map.get(quality_grade or "", "B"),
-                    "failure_mode": failure_mode,
-                    "print_time_seconds": 0,
-                })
+                # Route through the durable outbox: persist locally first,
+                # then flush in the background.  A failed send (offline / crash
+                # / lock) is retried by a later drain instead of silently
+                # dropped — the old fire-and-forget thread lost the
+                # contribution on any hiccup.  Idempotent per outcome.
+                community_outbox.contribute(
+                    f"po:{job_id}:{file_hash}",
+                    {
+                        "geometric_signature": file_hash,
+                        "printer_model": resolved_model or printer_name or "unknown",
+                        "material": material_type or "unknown",
+                        "settings_hash": _hl.sha256(
+                            _js.dumps(settings or {}, sort_keys=True).encode(),
+                        ).hexdigest()[:16],
+                        "settings": settings,
+                        "outcome": outcome,
+                        "quality_grade": _grade_map.get(quality_grade or "", "B"),
+                        "failure_mode": failure_mode,
+                        "print_time_seconds": 0,
+                    },
+                )
         except Exception:
             pass  # Never let community sync block outcome recording
 
