@@ -223,6 +223,37 @@ class _PrintWatcher:
                 )
             except Exception as exc:
                 _logger.debug("Failed to publish print terminal event: %s", exc)
+        # Silent community auto-contribution on a real terminal outcome:
+        # geometry-signature keyed, opt-in gated, non-quality outcomes
+        # (paused/cancelling/stalled) skipped by the helper.  Best-effort —
+        # never affects the watch result.
+        try:
+            from kiln import community_autofire
+
+            file_name = printer_model = material = job_id = None
+            print_time = None
+            try:
+                jd = self._adapter.get_job().to_dict()
+                file_name = jd.get("file_name")
+                material = jd.get("material") or (jd.get("settings") or {}).get("material")
+                print_time = jd.get("print_time_seconds")
+                job_id = jd.get("job_id")
+            except Exception:
+                _logger.debug("watch auto-contribute: job fetch skipped", exc_info=True)
+            try:
+                printer_model = getattr(self._adapter.get_printer_info(), "model", None)
+            except Exception:
+                _logger.debug("watch auto-contribute: printer model skipped", exc_info=True)
+            community_autofire.auto_contribute_completion(
+                outcome=result.get("outcome", ""),
+                printer_file_name=file_name,
+                job_id=job_id,
+                printer_model=printer_model,
+                material=material,
+                print_time_seconds=print_time,
+            )
+        except Exception:
+            _logger.debug("watch auto-contribute skipped (best-effort)", exc_info=True)
 
     def _run(self) -> None:
         """Main monitoring loop — runs in a background thread."""

@@ -341,10 +341,16 @@ class _IntelligenceToolsPlugin:
 
                 contribute_print(record)
 
-                # Sync to Supabase if community opt-in is enabled
+                # Durable federation: enqueue locally first, flush in the
+                # background, retry a failed send on a later drain — never a
+                # silent drop (the old fire-and-forget thread lost it on any
+                # hiccup).  Idempotent per contribution.
                 try:
-                    from kiln.community_sync import sync_community_print_async
-                    sync_community_print_async(record.to_dict())
+                    from kiln import community_outbox
+                    community_outbox.contribute(
+                        f"cp:{geometric_signature}:{record.timestamp}",
+                        record.to_dict(),
+                    )
                 except Exception:
                     pass  # Never let sync failure affect local contribution
 

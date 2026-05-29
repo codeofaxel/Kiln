@@ -8419,25 +8419,57 @@ def await_print_completion(
     # try to derive one from the currently-printing file's intent
     # sidecar (via the upload manifest) — design call from the
     # original B10 review.  Best-effort throughout.
-    effective_brief_id = brief_id
-    if not effective_brief_id:
+    # Resolve the print context once at entry — stable for the poll loop, and
+    # reused both for brief auto-derive and for the silent community
+    # auto-contribution fired on a terminal outcome.
+    file_name_at_entry: str | None = None
+    printer_model_at_entry: str | None = None
+    material_at_entry: str | None = None
+    try:
+        adapter = _get_adapter()
+        jd_at_entry = adapter.get_job().to_dict()
+        file_name_at_entry = jd_at_entry.get("file_name")
+        material_at_entry = jd_at_entry.get("material") or (
+            jd_at_entry.get("settings") or {}
+        ).get("material")
         try:
-            adapter = _get_adapter()
-            job_at_entry = adapter.get_job()
-            jd_at_entry = job_at_entry.to_dict()
-            file_name_at_entry = jd_at_entry.get("file_name")
-            effective_brief_id = _auto_derive_brief_id(file_name_at_entry)
+            printer_model_at_entry = getattr(adapter.get_printer_info(), "model", None)
         except Exception:
             logger.debug(
-                "await_print_completion: brief auto-derive skipped (best-effort)",
-                exc_info=True,
+                "await_print_completion: printer model lookup skipped", exc_info=True
             )
+    except Exception:
+        logger.debug(
+            "await_print_completion: entry context fetch skipped (best-effort)",
+            exc_info=True,
+        )
+    effective_brief_id = brief_id or _auto_derive_brief_id(file_name_at_entry)
     _goal_ctx = _resolve_brief_context(effective_brief_id)
 
     def _attach_goal(result: dict) -> dict:
-        """Add the design_goal block to a terminal-state result dict."""
+        """Add the design_goal block to a terminal-state result, and silently
+        contribute the outcome to the community pool.  Both are best-effort;
+        the auto-contribution is opt-in-gated and skips non-quality outcomes
+        (timeout/cancelled) inside the helper."""
         if _goal_ctx is not None:
             result["design_goal"] = _goal_ctx
+        try:
+            from kiln import community_autofire
+
+            jd = result.get("job") or {}
+            community_autofire.auto_contribute_completion(
+                outcome=result.get("outcome", ""),
+                printer_file_name=file_name_at_entry,
+                job_id=job_id,
+                printer_model=printer_model_at_entry,
+                material=material_at_entry or jd.get("material"),
+                print_time_seconds=jd.get("print_time_seconds"),
+            )
+        except Exception:
+            logger.debug(
+                "await_print_completion: auto-contribute skipped (best-effort)",
+                exc_info=True,
+            )
         return result
 
     while True:
@@ -11527,6 +11559,23 @@ def main() -> None:
     # rationale + the ``KILN_DISABLE_ORPHAN_WATCHDOG`` escape hatch.
     from kiln.parent_watchdog import start_parent_watchdog
     start_parent_watchdog()
+
+    # Community-contribution self-heal: flush any contributions a previous
+    # session queued but couldn't send (offline / crash).  Silent,
+    # opt-in-gated, best-effort on a daemon thread so it never delays boot
+    # or blocks on the network — the durability half of "opt in once, then
+    # it just works."
+    try:
+        from kiln.community_sync import community_opt_in_enabled
+        if community_opt_in_enabled():
+            from kiln import community_outbox
+            threading.Thread(
+                target=community_outbox._safe_drain,
+                daemon=True,
+                name="kiln-community-outbox-startup-drain",
+            ).start()
+    except Exception:
+        logger.debug("community outbox startup drain skipped", exc_info=True)
 
     mcp.run()
 
