@@ -1,0 +1,52 @@
+---
+import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
+
+const contentHtml = `
+<p><strong>Kiln 1.1.6 is about less setup and fewer lost results.</strong> Your Bambu printers now turn up in a network scan instead of being added by hand, prints automatically go to the right AMS spool (and tell you which one), and the anonymous learning that makes Kiln smarter never gets lost when the network drops. On Kiln Pro, cloud sync turns on with a single plain-language ask, and multi-part models you import get their own parts manual.</p>
+
+<h2>Your printers show up on their own</h2>
+
+<p><strong>Bambu Lab printers now appear in network discovery.</strong> Run a scan and Kiln finds them on your network &mdash; no more adding each printer by hand.</p>
+
+<p><strong>And prints go to the right AMS spool, automatically.</strong> On a Bambu with an AMS, Kiln now loads the correct tray &mdash; matching your material when you name one &mdash; instead of guessing, and tells you exactly which tray it used.</p>
+
+<h2>Community learning that&rsquo;s automatic &mdash; and never dropped</h2>
+
+<p><strong>Every print you monitor now teaches Kiln, with no extra step.</strong> When a monitored print finishes, its anonymous outcome contributes automatically.</p>
+
+<p><strong>And a dropped connection never loses it.</strong> If you&rsquo;re offline when a print finishes, the result is saved on your machine and sent the moment you&rsquo;re back. On Kiln Pro, the same goes for the recovery and nozzle-wear data you choose to share. Your files and personal details never leave your machine &mdash; only anonymous, pooled results contribute.</p>
+
+<h2>Turn on cloud sync just by asking <em>(Kiln Pro)</em></h2>
+
+<p><strong>Cloud sync now turns on in one step.</strong> Already signed in? Just say it in plain language &mdash; &ldquo;turn on cloud sync,&rdquo; &ldquo;back up my designs,&rdquo; however you&rsquo;d put it &mdash; and Kiln Pro sets it up using the account you&rsquo;re already signed in with. Nothing to copy-paste: no addresses or keys to track down. Your designs, print history, material preferences, and printer profiles follow you across devices. (Running your own cloud? You can still connect sync to it manually.)</p>
+
+<h2>Imported multi-part models get a manual too <em>(Kiln Pro)</em></h2>
+
+<p><strong>Bring in a multi-piece STL and Kiln Pro builds it a manual.</strong> You get an honest parts list and an exploded view for the model &mdash; not invented assembly steps. Designs you build as Kiln assemblies still get the full guided, step-by-step manual.</p>
+
+<h2>Smaller fixes that add up</h2>
+
+<p><strong>Plus a few reliability wins.</strong> Models Kiln builds now open and slice in your slicer every time. Running several Kiln sessions on one computer no longer risks a busy moment losing a just-finished result. And on Kiln Pro, your cloud sign-in is never saved insecurely &mdash; on a device without secure storage, you&rsquo;ll simply sign in again next launch.</p>
+
+<p>Full release notes: <a href="https://github.com/codeofaxel/Kiln/blob/main/CHANGELOG.md">CHANGELOG.md</a>.</p>
+
+<h2>Upgrading</h2>
+
+<ul>
+  <li><strong>Already running Kiln?</strong> Run <code>pip install --upgrade kiln3d</code> and you&rsquo;re on 1.1.6.</li>
+  <li><strong>On Kiln Pro?</strong> Upgrade to 1.1.6 too, so shared learning stays reliable.</li>
+  <li><strong>New to Kiln?</strong> Run <code>pip install kiln3d</code>, then follow the <a href="/install">install guide</a> to connect it to your AI client (Claude Desktop, Claude Code, Codex, or any other MCP-compatible client).</li>
+</ul>
+
+<p style="text-align: center; margin-top: 40px;"><a href="/install" class="btn">Get Kiln &rarr;</a></p>
+`;
+---
+
+<BlogPostLayout
+  title="Kiln 1.1.6: printers that show up on their own, and cloud sync that turns on by asking"
+  description="Kiln 1.1.6 cuts the setup: Bambu printers show up in a network scan, prints go to the right AMS spool automatically, and the anonymous learning that sharpens Kiln never gets lost when the network drops. On Kiln Pro, turn on cloud sync just by asking, and imported multi-part models get their own parts manual."
+  date="May 29, 2026"
+  tags={["release", "v1.1.6", "printer-discovery", "ams", "community-learning", "cloud-sync"]}
+>
+  <Fragment set:html={contentHtml} />
+</BlogPostLayout>
