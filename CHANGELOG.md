@@ -10,6 +10,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Bambu Lab printers now appear in network discovery.** A scan
   picks them up automatically, instead of every Bambu having to be
   added by hand.
+- **Prints route to the right AMS spool — and tell you which one.** On
+  Bambu printers with an AMS, the everyday print now picks the correct
+  loaded tray (matching your material when you name one) instead of
+  guessing, and reports the tray it used. Applies to quick prints and
+  reslices alike.
 
 ### Fixed
 
