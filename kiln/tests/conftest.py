@@ -754,3 +754,38 @@ def _bypass_license_tier(monkeypatch, tmp_path):
         )
     except (ImportError, AttributeError):
         pass  # Licensing not available; stub requires_tier in server.py handles it
+
+
+@pytest.fixture(autouse=True)
+def _bypass_openscad_runnable_probe(request, monkeypatch):
+    """Default the OpenSCAD runnable probe to 'OK' for the whole suite.
+
+    ``kiln.generation.openscad._find_openscad`` calls
+    ``kiln.emboss_generator._probe_openscad_runs`` to reject binaries
+    that exist + are executable but can't run on this host (e.g.,
+    x86_64 OpenSCAD on Apple Silicon without Rosetta — surfaces as
+    EBADARCH).  The probe spawns ``openscad --version`` and rejects
+    binaries whose output doesn't contain ``OpenSCAD``.  Test stubs
+    that write a bare ``#!/bin/sh\\n`` script would fail that check.
+
+    Tests that specifically exercise the probe's own behaviour
+    (mocking subprocess.run to feed it crafted outputs) opt out with:
+
+        @pytest.mark.use_real_openscad_probe
+        class TestFindOpenscadProbe: ...
+
+    Tests that want a specific probe verdict from inside
+    ``_find_openscad`` (e.g., the EBADARCH path) can still override
+    inline with ``patch("kiln.emboss_generator._probe_openscad_runs",
+    return_value=(False, "Bad CPU type"))``.
+    """
+    if "use_real_openscad_probe" in request.keywords:
+        return
+    try:
+        import kiln.emboss_generator  # noqa: F401 — ensure module loads
+        monkeypatch.setattr(
+            "kiln.emboss_generator._probe_openscad_runs",
+            lambda _path: (True, None),
+        )
+    except (ImportError, AttributeError):
+        pass  # emboss_generator absent; nothing to bypass

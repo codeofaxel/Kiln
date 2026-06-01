@@ -97,6 +97,7 @@ norecursedirs = ["src/kiln/data"]
 markers = [
     "live: requires a real OctoPrint instance (deselect with '-m \"not live\"')",
     "slow: opt-in regression sweep (deselect with '-m \"not slow\"', include with '-m slow')",
+    "use_real_openscad_probe: opt out of the conftest probe stub so the real _probe_openscad_runs runs against a mocked subprocess",
 ]
 
 [tool.ruff]

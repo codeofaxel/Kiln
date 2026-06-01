@@ -4824,6 +4824,7 @@ class TestGatekeeperDetection:
             patch("glob.glob", return_value=[str(fake_binary)]),
             patch("os.path.isfile", return_value=True),
             patch("os.access", return_value=True),
+            patch("kiln.emboss_generator._probe_openscad_runs", return_value=(True, None)),
         ):
             result = _find_openscad()
             assert result == str(fake_binary)

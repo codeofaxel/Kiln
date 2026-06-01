@@ -148,6 +148,18 @@ _MACOS_APP_PATH = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD" if sys.pl
 # Versioned installs (e.g., OpenSCAD-2021.01.app)
 _MACOS_VERSIONED_PATTERN = "/Applications/OpenSCAD-*.app/Contents/MacOS/OpenSCAD" if sys.platform == "darwin" else ""
 
+# Install / repair hint surfaced in error messages.  Names the ARM-native
+# `openscad@snapshot` cask and the Rosetta fallback so a fresh Apple
+# Silicon Mac without Rosetta installed gets actionable guidance instead
+# of the OS's "Bad CPU type in executable" puke.
+_OPENSCAD_INSTALL_HINT = (
+    "Install or repair OpenSCAD:\n"
+    "  macOS:  brew install --cask openscad@snapshot   "
+    "(ARM-native; or 'softwareupdate --install-rosetta --agree-to-license')\n"
+    "  Linux:  sudo snap install openscad --edge       (or: apt install openscad)\n"
+    "  Windows: https://openscad.org/downloads"
+)
+
 
 def _find_openscad(explicit_path: str | None = None) -> str:
     """Locate the OpenSCAD binary.
@@ -159,35 +171,80 @@ def _find_openscad(explicit_path: str | None = None) -> str:
         Absolute path to the OpenSCAD binary.
 
     Raises:
-        GenerationError: If no binary is found.
+        GenerationError: If no binary is found, or if every candidate
+            exists but can't execute (e.g., x86_64 binary on Apple
+            Silicon without Rosetta).
     """
+    # Lazy-import the cached probe from emboss_generator so the OS's
+    # EBADARCH (`Bad CPU type in executable`) surfaces as a clean
+    # GenerationError with an install hint instead of bubbling out of
+    # the first subprocess that actually tries to compile.
+    try:
+        from kiln.emboss_generator import _probe_openscad_runs as _probe
+    except Exception:  # pragma: no cover -- emboss_generator import is stable
+        _probe = None  # type: ignore[assignment]
+
+    attempted: list[tuple[str, str]] = []
+
+    def _accept(candidate: str) -> str | None:
+        """Return *candidate* if it actually runs; else record reason."""
+        if _probe is None:
+            return candidate
+        ok, reason = _probe(candidate)
+        if ok:
+            return candidate
+        attempted.append((candidate, reason or "openscad --version failed"))
+        return None
+
     if explicit_path:
-        if os.path.isfile(explicit_path) and os.access(explicit_path, os.X_OK):
-            return explicit_path
+        if not os.path.isfile(explicit_path) or not os.access(explicit_path, os.X_OK):
+            raise GenerationError(
+                f"OpenSCAD binary not found at {explicit_path}",
+                code="OPENSCAD_NOT_FOUND",
+            )
+        result = _accept(explicit_path)
+        if result:
+            return result
+        # Path exists + is executable but the probe rejected it.
+        # Surface the OS's reason and the install hint together so
+        # the operator can act without grepping the stack.
+        reason = attempted[-1][1] if attempted else "openscad --version failed"
         raise GenerationError(
-            f"OpenSCAD binary not found at {explicit_path}",
-            code="OPENSCAD_NOT_FOUND",
+            f"OpenSCAD binary at {explicit_path} cannot execute:\n"
+            f"  {reason}\n"
+            f"{_OPENSCAD_INSTALL_HINT}",
+            code="OPENSCAD_NOT_RUNNABLE",
         )
 
     # Check PATH.
     which = shutil.which("openscad")
     if which:
-        return which
+        result = _accept(which)
+        if result:
+            return result
 
     # Check macOS application bundle.
     if _MACOS_APP_PATH and os.path.isfile(_MACOS_APP_PATH) and os.access(_MACOS_APP_PATH, os.X_OK):
-        return _MACOS_APP_PATH
+        result = _accept(_MACOS_APP_PATH)
+        if result:
+            return result
 
     # Check versioned macOS app bundles (e.g., OpenSCAD-2021.01.app).
     if _MACOS_VERSIONED_PATTERN:
         import glob as _glob
 
         matches = sorted(_glob.glob(_MACOS_VERSIONED_PATTERN), reverse=True)
+        any_executable = False
         for match in matches:
             if os.path.isfile(match) and os.access(match, os.X_OK):
-                return match
-        # If versioned app exists but isn't executable, likely Gatekeeper
-        if matches:
+                any_executable = True
+                result = _accept(match)
+                if result:
+                    return result
+        # If versioned apps exist but NONE were executable, it's Gatekeeper
+        # — not an arch problem.  The probe-failure path below covers the
+        # "executable but won't run" arch case.
+        if matches and not any_executable:
             app_path = matches[0].split("/Contents/")[0]
             raise GenerationError(
                 f"OpenSCAD found at {app_path} but cannot execute.\n"
@@ -197,12 +254,18 @@ def _find_openscad(explicit_path: str | None = None) -> str:
                 code="OPENSCAD_QUARANTINED",
             )
 
+    if attempted:
+        attempted_msg = "\n".join(f"  - {path} -> {reason}" for path, reason in attempted)
+        raise GenerationError(
+            f"OpenSCAD found on this machine but no candidate could execute:\n"
+            f"{attempted_msg}\n\n"
+            f"{_OPENSCAD_INSTALL_HINT}",
+            code="OPENSCAD_NOT_RUNNABLE",
+        )
+
     raise GenerationError(
-        "OpenSCAD not found. Install it:\n"
-        "  Linux/WSL: apt install openscad\n"
-        "  macOS: brew install openscad\n"
-        "  Or download from https://openscad.org\n"
-        "Or set the binary path explicitly.",
+        f"OpenSCAD not found.\n{_OPENSCAD_INSTALL_HINT}\n"
+        f"Or set the binary path explicitly.",
         code="OPENSCAD_NOT_FOUND",
     )
 

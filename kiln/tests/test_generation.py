@@ -611,8 +611,36 @@ class TestOpenSCADProvider:
             with patch("kiln.generation.openscad.shutil.which", return_value=None):
                 with patch("kiln.generation.openscad.os.path.isfile", return_value=True):
                     with patch("kiln.generation.openscad.os.access", return_value=True):
-                        result = _find_openscad()
+                        with patch("kiln.emboss_generator._probe_openscad_runs", return_value=(True, None)):
+                            result = _find_openscad()
         assert result == macos_path
+
+    def test_find_openscad_arm_probe_rejects_unrunnable_binary(self, tmp_path):
+        """Apple-Silicon-without-Rosetta path: candidate exists + is
+        executable but `openscad --version` returns EBADARCH.  Should
+        surface a GenerationError with the install hint (incl. Rosetta
+        guidance) instead of bubbling "Bad CPU type in executable" out
+        of a later subprocess.
+        """
+        fake_bin = tmp_path / "openscad"
+        fake_bin.write_text("#!/bin/sh\nexit 0\n")
+        fake_bin.chmod(0o755)
+
+        with patch("kiln.generation.openscad.shutil.which", return_value=str(fake_bin)):
+            with patch("kiln.generation.openscad._MACOS_APP_PATH", ""):
+                with patch("kiln.generation.openscad._MACOS_VERSIONED_PATTERN", ""):
+                    with patch(
+                        "kiln.emboss_generator._probe_openscad_runs",
+                        return_value=(False, "Bad CPU type in executable"),
+                    ):
+                        with pytest.raises(GenerationError) as exc_info:
+                            _find_openscad()
+
+        msg = str(exc_info.value)
+        assert "Bad CPU type" in msg
+        assert "brew install --cask openscad@snapshot" in msg
+        assert "softwareupdate --install-rosetta" in msg
+        assert exc_info.value.code == "OPENSCAD_NOT_RUNNABLE"
 
 
 # ---------------------------------------------------------------------------

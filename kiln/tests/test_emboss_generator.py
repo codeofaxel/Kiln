@@ -420,6 +420,7 @@ class TestCgalBackendEnvVar:
 # Tests: _find_openscad probes executable compatibility before returning
 # ---------------------------------------------------------------------------
 
+@pytest.mark.use_real_openscad_probe
 class TestFindOpenscadProbe:
     """_find_openscad skips binaries that exist but cannot execute."""
 
