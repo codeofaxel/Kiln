@@ -1119,6 +1119,49 @@
       "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge (default 400mm\u00b3). Source: BambuStudio fdm_machine_common.json + X1C 0.4 nozzle.json."
     }
   },
+  "bambu_x1e": {
+    "display_name": "Bambu Lab X1E",
+    "slicer": "prusaslicer",
+    "notes": "Enclosed CoreXY, enterprise variant. Factory hardened-steel nozzle. Active heated chamber (40-60C). 320C hotend ceiling vs 300C on the X1C. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode; Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence. Without these, extrusion silently fails.",
+    "settings": {
+      "layer_height": "0.2",
+      "first_layer_height": "0.2",
+      "perimeters": "3",
+      "top_solid_layers": "4",
+      "bottom_solid_layers": "4",
+      "fill_density": "15%",
+      "fill_pattern": "gyroid",
+      "infill_speed": "250",
+      "perimeter_speed": "200",
+      "external_perimeter_speed": "150",
+      "first_layer_speed": "50",
+      "travel_speed": "400",
+      "nozzle_diameter": "0.4",
+      "filament_diameter": "1.75",
+      "temperature": "220",
+      "first_layer_temperature": "220",
+      "bed_temperature": "65",
+      "first_layer_bed_temperature": "65",
+      "fan_always_on": "1",
+      "min_fan_speed": "30",
+      "max_fan_speed": "100",
+      "disable_fan_first_layers": "1",
+      "use_relative_e_distances": "1",
+      "start_gcode": "",
+      "end_gcode": "",
+      "retract_length": "0.8",
+      "retract_speed": "30",
+      "retract_lift": "0.2",
+      "bed_shape": "0x0,256x0,256x256,0x256",
+      "max_print_height": "256",
+      "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 97,
+      "tool_changer": "ams",
+      "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge (default 400mm\u00b3). Source: BambuStudio fdm_machine_common.json + X1C 0.4 nozzle.json."
+    }
+  },
   "bambu_p1s": {
     "display_name": "Bambu Lab P1S",
     "slicer": "prusaslicer",

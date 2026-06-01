@@ -424,6 +424,21 @@
     ],
     "notes": "Enclosed CoreXY. Hardened nozzle. AMS multi-material. LiDAR first-layer inspection."
   },
+  "bambu_x1e": {
+    "display_name": "Bambu Lab X1E",
+    "max_hotend_temp": 320.0,
+    "max_bed_temp": 120.0,
+    "max_chamber_temp": 60.0,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 32.0,
+    "build_volume": [
+      256,
+      256,
+      256
+    ],
+    "notes": "Enclosed CoreXY, enterprise variant. Active heated chamber (40-60C). Factory hardened-steel nozzle (abrasive-ready out of the box). Full AMS multi-material. LiDAR + AI first-layer inspection. 320C hotend ceiling (vs 300C X1C) for PPS/PPA at the top of their window."
+  },
   "bambu_p1s": {
     "display_name": "Bambu Lab P1S",
     "max_hotend_temp": 300.0,

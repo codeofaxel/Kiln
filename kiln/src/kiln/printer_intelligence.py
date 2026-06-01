@@ -377,6 +377,14 @@ _SPEED_CAPABILITIES: dict[str, dict[str, Any]] = {
         "quality_factor": 0.80,
         "slicer_time_factor": 0.45,
     },
+    "bambu_x1e": {
+        # X1E shares the X1C CoreXY motion platform; same speed/accel envelope.
+        "max_speed": 300,
+        "max_accel": 12000,
+        "input_shaping": True,
+        "quality_factor": 0.80,
+        "slicer_time_factor": 0.45,
+    },
     "bambu_p1s": {
         "max_speed": 300,
         "max_accel": 12000,
