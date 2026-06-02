@@ -384,6 +384,16 @@ _SPEED_CAPABILITIES: dict[str, dict[str, Any]] = {
         "quality_factor": 0.78,
         "slicer_time_factor": 0.48,
     },
+    "bambu_p2s": {
+        # P2S shares the enclosed CoreXY P-series platform; PMSM servo
+        # extruder rates higher but the conservative quality envelope
+        # mirrors the P1S until field data justifies tuning it up.
+        "max_speed": 300,
+        "max_accel": 12000,
+        "input_shaping": True,
+        "quality_factor": 0.78,
+        "slicer_time_factor": 0.48,
+    },
     "bambu_p1p": {
         "max_speed": 300,
         "max_accel": 10000,

@@ -7646,6 +7646,8 @@ def _map_printer_hint_to_profile_id(raw: str | None) -> str | None:
         return "bambu_a1"
     if "x1c" in hint or "x1_carbon" in hint_compact or ("bambu" in hint and "x1" in hint):
         return "bambu_x1c"
+    if "p2s" in hint:
+        return "bambu_p2s"
     if "p1s" in hint or ("bambu" in hint and "p1" in hint and "s" in hint):
         return "bambu_p1s"
     if "p1p" in hint or ("bambu" in hint and "p1" in hint):
