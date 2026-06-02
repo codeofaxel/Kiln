@@ -33,19 +33,21 @@ import click
 
 logger = logging.getLogger(__name__)
 
-# Bambu serial-number prefix → model.  CORRECTED 2026-06-01 against Bambu's
-# official find-sn wiki (wiki.bambulab.com/en/general/find-sn), corroborated
-# by the community serial-number-decoder forum thread (owner-populated from
-# real devices) and an adversarially-verified research pass — four independent
-# derivations, unanimous.  The prior table was unsourced and wrong on 5 of 6
-# entries (it mapped 01S→x1e, 00M→p1s, 094→a1_mini, 03919→x1c, 00W→p1p — all
-# incorrect per Bambu's own scheme).  Real Bambu prefixes are 3 chars; the old
-# 5-char "03919" was the tell of a guess.
+# Bambu serial-number prefix → model.  Verified 2026-06-01 against Bambu's
+# OFFICIAL find-sn wiki (wiki.bambulab.com/en/general/find-sn), page read
+# directly.  The prior table was unsourced and wrong on 5 of 6 entries — most
+# dangerously it mapped 094→a1_mini when 094 is actually the H2D, and
+# 01S→x1e when 01S is the P1P.  All Bambu prefixes are 3 chars.
+#
+# Full official table (only the models Kiln has profiles for are mapped below;
+# the rest are recorded for when those models are added — see
+# kiln_pro device intelligence):
+#   039 A1 · 030 A1 mini · 01P P1S · 01S P1P · 00M X1C · 03W X1E · 22E P2S
+#   094 H2D · 239 H2D Pro · 093 H2S · 31B H2C · 20P X2D
 #
 # This is only the PRE-CONNECTION suggestion shown at CLI setup.  Authoritative
 # runtime model detection uses the MQTT product_name (see the Bambu adapter
 # model-map in printers/bambu.py), which self-corrects on connect.
-# All prefixes below are 3 chars and mutually non-overlapping.
 _BAMBU_PREFIX_SUGGESTIONS: dict[str, str] = {
     "039": "bambu_a1",
     "030": "bambu_a1_mini",
