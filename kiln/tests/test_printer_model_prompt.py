@@ -19,12 +19,26 @@ class TestSuggestBambuModel:
     def test_a1_serial_prefix(self):
         assert suggest_bambu_model("03900D5C2513213") == "bambu_a1"
 
-    def test_x1c_longer_prefix_wins(self):
-        # 03919 matches both "039" (A1) and "03919" (X1C); longer wins.
-        assert suggest_bambu_model("03919ABC123") == "bambu_x1c"
+    # Serial prefixes corrected 2026-06-01 against Bambu's official find-sn
+    # wiki (the prior table was unsourced and wrong on 5 of 6 entries).
+    # All Bambu prefixes are 3 chars and mutually non-overlapping.
+    def test_x1c_prefix(self):
+        assert suggest_bambu_model("00M0ABC123") == "bambu_x1c"
 
     def test_a1_mini_prefix(self):
-        assert suggest_bambu_model("094XYZ") == "bambu_a1_mini"
+        assert suggest_bambu_model("030XYZ") == "bambu_a1_mini"
+
+    def test_p1s_prefix(self):
+        assert suggest_bambu_model("01P0ABC") == "bambu_p1s"
+
+    def test_p1p_prefix(self):
+        assert suggest_bambu_model("01S0ABC") == "bambu_p1p"
+
+    def test_x1e_prefix(self):
+        assert suggest_bambu_model("03W0ABC") == "bambu_x1e"
+
+    def test_p2s_prefix(self):
+        assert suggest_bambu_model("22E0ABC") == "bambu_p2s"
 
     def test_unknown_serial_returns_none(self):
         assert suggest_bambu_model("XYZZZZ_future_model") is None
