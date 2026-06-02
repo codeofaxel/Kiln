@@ -79,6 +79,35 @@ def test_fires_failed_with_unknown_hms_falls_back_to_other(mock_record):
     assert kwargs["failure_mode"] == "other"
 
 
+def test_fires_failed_servo_overload_maps_to_mechanical(mock_record):
+    # HMS 0300-0900 (P2S servo extruder overload / clog) -> mechanical, not
+    # the generic "other" bucket.  Narrow: a different 0300 code stays "other".
+    result = hook.fire_terminal_state_hook(
+        prev_state="running",
+        new_state="failed",
+        print_error_code=0x03_00_09_00,
+        printer_name="bambu-p2s",
+        job_id="job-p2s",
+    )
+    assert result is not None
+    kwargs = mock_record.call_args.kwargs
+    assert kwargs["outcome"] == "failed"
+    assert kwargs["failure_mode"] == "mechanical"
+
+
+def test_fires_failed_other_0300_code_stays_other(mock_record):
+    # A non-servo 0300-family code is NOT swept into "mechanical".
+    result = hook.fire_terminal_state_hook(
+        prev_state="running",
+        new_state="failed",
+        print_error_code=0x03_00_8014,
+        printer_name="bambu-a1",
+        job_id="job-clump",
+    )
+    assert result is not None
+    assert mock_record.call_args.kwargs["failure_mode"] == "other"
+
+
 def test_fires_cancelled_when_cancel_intent_registered(mock_record):
     hook.register_cancel_intent("bambu-a1")
     result = hook.fire_terminal_state_hook(

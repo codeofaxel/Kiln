@@ -211,6 +211,13 @@ def _infer_outcome(
             return ("failed", "adhesion")
         if family == 0x05:
             return ("failed", "mechanical")
+        # Specific extruder / servo-overload code (HMS 0300-0900-...): a
+        # P2S-class closed-loop servo extruder faults here where a stepper
+        # would silently skip.  Narrow attr-prefix match (not the whole 0300
+        # family) keeps the blast radius minimal and mirrors the adapter's
+        # _classify_flow_anomaly attr-prefix convention.
+        if f"{code:08X}".startswith("03000900"):
+            return ("failed", "mechanical")
         return ("failed", "other")
     if state in _FINISH_STATES:
         return ("success", None)
