@@ -1205,6 +1205,49 @@
       "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge. Same AMS as X1C. Source: BambuStudio P1S 0.4 nozzle.json."
     }
   },
+  "bambu_p2s": {
+    "display_name": "Bambu Lab P2S",
+    "slicer": "prusaslicer",
+    "notes": "Enclosed CoreXY, PMSM servo direct drive. Factory hardened-steel nozzle (abrasive-ready). AMS 2 Pro multi-material. 600 mm/s toolhead. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode; Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence.",
+    "settings": {
+      "layer_height": "0.2",
+      "first_layer_height": "0.2",
+      "perimeters": "3",
+      "top_solid_layers": "4",
+      "bottom_solid_layers": "4",
+      "fill_density": "15%",
+      "fill_pattern": "gyroid",
+      "infill_speed": "250",
+      "perimeter_speed": "200",
+      "external_perimeter_speed": "150",
+      "first_layer_speed": "50",
+      "travel_speed": "400",
+      "nozzle_diameter": "0.4",
+      "filament_diameter": "1.75",
+      "temperature": "220",
+      "first_layer_temperature": "220",
+      "bed_temperature": "65",
+      "first_layer_bed_temperature": "65",
+      "fan_always_on": "1",
+      "min_fan_speed": "30",
+      "max_fan_speed": "100",
+      "disable_fan_first_layers": "1",
+      "use_relative_e_distances": "1",
+      "start_gcode": "",
+      "end_gcode": "",
+      "retract_length": "0.8",
+      "retract_speed": "30",
+      "retract_lift": "0.2",
+      "bed_shape": "0x0,256x0,256x256,0x256",
+      "max_print_height": "256",
+      "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 97,
+      "tool_changer": "ams",
+      "tool_change_notes": "AMS 2 Pro: same mechanical tool-change envelope as the X1C/P1S AMS (28s unload + 29s load + ~40s purge). Multi-unit + active-dryer addressing is a separate adapter follow-on."
+    }
+  },
   "bambu_a1": {
     "display_name": "Bambu Lab A1",
     "slicer": "prusaslicer",

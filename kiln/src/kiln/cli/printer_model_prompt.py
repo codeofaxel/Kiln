@@ -33,15 +33,27 @@ import click
 
 logger = logging.getLogger(__name__)
 
-# Bambu serial prefix → model (deterministic from Bambu's SKU scheme).
-# Match longest prefix first so "03919" (X1C) wins over "039" (A1).
+# Bambu serial-number prefix → model.  CORRECTED 2026-06-01 against Bambu's
+# official find-sn wiki (wiki.bambulab.com/en/general/find-sn), corroborated
+# by the community serial-number-decoder forum thread (owner-populated from
+# real devices) and an adversarially-verified research pass — four independent
+# derivations, unanimous.  The prior table was unsourced and wrong on 5 of 6
+# entries (it mapped 01S→x1e, 00M→p1s, 094→a1_mini, 03919→x1c, 00W→p1p — all
+# incorrect per Bambu's own scheme).  Real Bambu prefixes are 3 chars; the old
+# 5-char "03919" was the tell of a guess.
+#
+# This is only the PRE-CONNECTION suggestion shown at CLI setup.  Authoritative
+# runtime model detection uses the MQTT product_name (see the Bambu adapter
+# model-map in printers/bambu.py), which self-corrects on connect.
+# All prefixes below are 3 chars and mutually non-overlapping.
 _BAMBU_PREFIX_SUGGESTIONS: dict[str, str] = {
-    "03919": "bambu_x1c",
-    "039":   "bambu_a1",
-    "094":   "bambu_a1_mini",
-    "00M":   "bambu_p1s",
-    "00W":   "bambu_p1p",
-    "01S":   "bambu_x1e",
+    "039": "bambu_a1",
+    "030": "bambu_a1_mini",
+    "01P": "bambu_p1s",
+    "01S": "bambu_p1p",
+    "00M": "bambu_x1c",
+    "03W": "bambu_x1e",
+    "22E": "bambu_p2s",
 }
 
 # Top-N common models per backend type, shown as examples in the prompt.

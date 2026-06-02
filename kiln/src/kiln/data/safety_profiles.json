@@ -454,6 +454,21 @@
     ],
     "notes": "Enclosed CoreXY. Same hotend as X1C without LiDAR."
   },
+  "bambu_p2s": {
+    "display_name": "Bambu Lab P2S",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 110.0,
+    "max_chamber_temp": 60.0,
+    "max_feedrate": 36000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 32.0,
+    "build_volume": [
+      256,
+      256,
+      256
+    ],
+    "notes": "Enclosed CoreXY, PMSM servo direct drive. All-metal hardened-steel hotend (abrasive-ready). AMS 2 Pro multi-material. Passive chamber (no active heater, ~50C); ceiling matches the enclosed P-series. 600 mm/s toolhead = feedrate 36000 (vs 30000 on P1S). Bed 110C, hotend 300C."
+  },
   "bambu_p1p": {
     "display_name": "Bambu Lab P1P",
     "max_hotend_temp": 300.0,

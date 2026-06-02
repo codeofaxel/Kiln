@@ -290,6 +290,7 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
     "Bambu Lab X1 Carbon": "x1c",
     "Bambu Lab X1E": "x1e",
     "Bambu Lab P1S": "p1s",
+    "Bambu Lab P2S": "p2s",
     "Bambu Lab P1P": "p1p",
     # Serial number prefixes (first 3 chars of Bambu serial)
     "030": "a1_mini",

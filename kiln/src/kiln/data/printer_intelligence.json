@@ -1718,6 +1718,59 @@
     "max_bed_temp": 100,
     "has_input_shaping": true
   },
+  "bambu_p2s": {
+    "display_name": "Bambu Lab P2S",
+    "firmware": "bambu",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 220,
+        "bed": 55,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 245,
+        "bed": 80,
+        "fan": 40
+      },
+      "ABS": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 30
+      },
+      "ASA": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 30
+      },
+      "TPU": {
+        "hotend": 230,
+        "bed": 50,
+        "fan": 50
+      },
+      "PA-CF": {
+        "hotend": 280,
+        "bed": 100,
+        "fan": 30
+      },
+      "PC": {
+        "hotend": 270,
+        "bed": 110,
+        "fan": 0
+      }
+    },
+    "build_volume_mm": [
+      256,
+      256,
+      256
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 110,
+    "has_input_shaping": true
+  },
   "bambu_a1": {
     "display_name": "Bambu Lab A1",
     "firmware": "bambu",
