@@ -563,6 +563,7 @@ class BambuAdapter(PrinterAdapter):
         # Static per session; cached on first sight.  Lets get_ams_status
         # resolve AMS unit type (e.g. "ams_f1/0") which print.ams.ams[] omits.
         self._fw_modules: list[Any] = []
+        self._fw_modules_requested = False  # one get_version request per session
 
         # State cache -- updated by MQTT messages.
         self._state_lock = threading.Lock()
@@ -2944,7 +2945,8 @@ class BambuAdapter(PrinterAdapter):
         # module name ("ams_f1/0" = AMS Lite unit 0, "n3f/N" = AMS 2 Pro,
         # "n3s/N" = AMS HT, "ams/N" = AMS).  Fetch the module list once
         # (cached); prefix interpretation lives downstream, not here.
-        if not self._fw_modules:
+        if not self._fw_modules and not self._fw_modules_requested:
+            self._fw_modules_requested = True
             with contextlib.suppress(Exception):
                 self._publish_command(
                     {"info": {"sequence_id": self._next_seq(), "command": "get_version"}}
