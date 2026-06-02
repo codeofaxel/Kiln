@@ -14,6 +14,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   printers with an AMS 2 Pro or AMS HT, Kiln can now run a drying cycle (start
   or stop it) and show how damp the filament is, how much drying time is left,
   and the dryer's settings.
+- **Kiln now tailors part designs to whatever printer you own.** When you ask it
+  to design something, it factors in your machine's real build size, supported
+  materials, and temperature limits — for every printer Kiln supports now, not
+  just the popular flagships.
 
 ### Fixed
 
