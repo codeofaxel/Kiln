@@ -3,6 +3,14 @@
 All notable changes to Kiln are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- **Two more Bambu Lab printers supported: the X1E and the P2S.** Kiln
+  recognizes either on connect — right temperature limits, build volume,
+  per-material settings, and a tuned slicer profile, no manual setup.
+
 ## [1.1.6] - 2026-05-29
 
 ### Added
