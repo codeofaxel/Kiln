@@ -2719,6 +2719,31 @@ class BambuAdapter(PrinterAdapter):
         )
         return True
 
+    def publish_print_command(
+        self, command: str, params: dict[str, Any] | None = None
+    ) -> bool:
+        """Publish a ``print``-category MQTT command to the printer.
+
+        A thin escape hatch for ``print`` commands this adapter does not
+        wrap with a dedicated method.  Builds the standard
+        ``{"print": {"sequence_id", "command", ...}}`` envelope and
+        publishes it fire-and-forget (QoS 0), like every other command.
+
+        Args:
+            command: The ``print`` command name (e.g. ``"print_option"``).
+            params: Extra command fields merged into the envelope.
+
+        Returns:
+            ``True`` once the command is published.
+        """
+        payload: dict[str, Any] = {
+            "print": {"sequence_id": self._next_seq(), "command": str(command)}
+        }
+        if params:
+            payload["print"].update(params)
+        self._publish_command(payload)
+        return True
+
     # ------------------------------------------------------------------
     # Bambu-specific: LED control
     # ------------------------------------------------------------------
