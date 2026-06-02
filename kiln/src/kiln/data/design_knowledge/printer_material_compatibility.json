@@ -945,6 +945,240 @@
       ]
     }
   },
+  "bambu_x1e": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_cf": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "cf_petg": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "abs": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "asa": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "cf_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pet_cf": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pla_matte": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_hf": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_tough": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_95a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_85a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pvb": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "pp_build_surface",
+        "dry_box"
+      ]
+    }
+  },
+  "bambu_p2s": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_cf": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "cf_petg": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "abs": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "asa": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "cf_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pet_cf": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pla_matte": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_hf": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_tough": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_95a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_85a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pvb": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "pp_build_surface",
+        "dry_box"
+      ]
+    }
+  },
   "cr10": {
     "pla": {
       "status": "compatible",
