@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-05-28T06:30:16.803591+00:00",
+  "generated": "2026-06-02T07:09:17.797652+00:00",
   "tool_count": 319,
   "categories": {
     "product_generators": {
@@ -7247,6 +7247,16 @@
           "blind_or_through": {
             "default": "through",
             "title": "Blind Or Through",
+            "type": "string"
+          },
+          "hole_purpose": {
+            "default": "clearance",
+            "title": "Hole Purpose",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
             "type": "string"
           }
         },
