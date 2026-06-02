@@ -42,6 +42,12 @@ _BAMBU_PREFIX_SUGGESTIONS: dict[str, str] = {
     "00M":   "bambu_p1s",
     "00W":   "bambu_p1p",
     "01S":   "bambu_x1e",
+    # P2S serial prefix verified against Bambu's official find-sn wiki
+    # (2026-06).  NOTE: the other prefixes above predate that check and
+    # may be mismapped per the same wiki — see tasks.md "serial-prefix
+    # table may be WRONG" before trusting them.  22E is additive (no
+    # collision) so it is safe to land now.
+    "22E":   "bambu_p2s",
 }
 
 # Top-N common models per backend type, shown as examples in the prompt.
