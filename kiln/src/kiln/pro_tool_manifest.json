@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-06-02T17:52:24.386478+00:00",
+  "generated": "2026-06-02T21:10:11.382400+00:00",
   "tool_count": 320,
   "categories": {
     "product_generators": {
@@ -125,8 +125,8 @@
     },
     {
       "name": "ams_filament_drying",
-      "description": "Start or stop an AMS 2 Pro / AMS HT active dry cycle (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Start or stop an AMS 2 Pro / AMS HT active dry cycle.",
+      "tier": "free",
       "category": "ams_control",
       "parameters": {
         "properties": {
