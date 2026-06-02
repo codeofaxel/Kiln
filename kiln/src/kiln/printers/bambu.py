@@ -559,6 +559,10 @@ class BambuAdapter(PrinterAdapter):
         # MQTT topic names.
         self._topic_report = f"device/{serial}/report"
         self._topic_request = f"device/{serial}/request"
+        # Firmware module list from the get_version reply (info.module).
+        # Static per session; cached on first sight.  Lets get_ams_status
+        # resolve AMS unit type (e.g. "ams_f1/0") which print.ams.ams[] omits.
+        self._fw_modules: list[Any] = []
 
         # State cache -- updated by MQTT messages.
         self._state_lock = threading.Lock()
@@ -993,6 +997,13 @@ class BambuAdapter(PrinterAdapter):
             payload = json.loads(msg.payload)
         except (json.JSONDecodeError, UnicodeDecodeError):
             return
+
+        # Cache the firmware module list from a get_version reply.  Static
+        # per session; used by get_ams_status to resolve AMS unit type.
+        info_data = payload.get("info")
+        if isinstance(info_data, dict) and isinstance(info_data.get("module"), list) and info_data["module"]:
+            with self._state_lock:
+                self._fw_modules = info_data["module"]
 
         # Merge print status fields into our cache.
         # A1/A1 mini may send command as "push_status" or "PUSH_STATUS".
@@ -2929,6 +2940,25 @@ class BambuAdapter(PrinterAdapter):
         # not a measurement.  Flag it so callers don't present it as real.
         humidity_known = self._printer_model not in ("bambu_a1", "bambu_a1_mini")
 
+        # AMS unit TYPE isn't in print.ams.ams[]; it's encoded in the firmware
+        # module name ("ams_f1/0" = AMS Lite unit 0, "n3f/N" = AMS 2 Pro,
+        # "n3s/N" = AMS HT, "ams/N" = AMS).  Fetch the module list once
+        # (cached); prefix interpretation lives downstream, not here.
+        if not self._fw_modules:
+            with contextlib.suppress(Exception):
+                self._publish_command(
+                    {"info": {"sequence_id": self._next_seq(), "command": "get_version"}}
+                )
+                time.sleep(min(1.5, self._timeout / 2))
+        module_by_unit: dict[int, str] = {}
+        for mod in self._fw_modules or []:
+            if not isinstance(mod, dict):
+                continue
+            name = str(mod.get("name", ""))
+            head, sep, idx = name.partition("/")
+            if sep and idx.isdigit() and head in ("ams_f1", "n3f", "n3s", "ams"):
+                module_by_unit[int(idx)] = name
+
         for unit in ams_data:
             if not isinstance(unit, dict):
                 continue
@@ -3012,6 +3042,11 @@ class BambuAdapter(PrinterAdapter):
                 unit_out["dry_time"] = dry_time_int
             if isinstance(dry_setting, dict):
                 unit_out["dry_setting"] = dry_setting
+            if module_by_unit:
+                with contextlib.suppress(TypeError, ValueError):
+                    mn = module_by_unit.get(int(unit_id))
+                    if mn:
+                        unit_out["module_name"] = mn
             result["units"].append(unit_out)
 
         return result
