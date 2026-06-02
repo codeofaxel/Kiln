@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-06-02T07:09:17.797652+00:00",
+  "generated": "2026-06-02T19:31:34.660594+00:00",
   "tool_count": 319,
   "categories": {
     "product_generators": {
@@ -645,6 +645,11 @@
             ],
             "default": null,
             "title": "Step Overrides"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
           },
           "brief_id": {
             "default": "",
@@ -7284,6 +7289,26 @@
           "substrate": {
             "default": "plastic_print",
             "title": "Substrate",
+            "type": "string"
+          },
+          "fastener_size": {
+            "default": "",
+            "title": "Fastener Size",
+            "type": "string"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "print_axis": {
+            "default": "",
+            "title": "Print Axis",
             "type": "string"
           }
         },
