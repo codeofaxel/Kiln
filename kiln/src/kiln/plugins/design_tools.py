@@ -505,7 +505,7 @@ class _DesignToolsPlugin:
             """Get the design capability profile for a printer.
 
             Args:
-                printer_id: Printer profile ID (e.g. "bambu_x1c", "voron_2_4").
+                printer_id: Printer profile ID (e.g. "bambu_x1c", "voron_2").
             """
             from kiln.design_intelligence import (
                 get_printer_design_profile,

@@ -1981,54 +1981,143 @@ def check_environment_compatibility(
     )
 
 
-def get_printer_design_profile(printer_id: str) -> PrinterDesignProfile | None:
-    """Get design capabilities for a specific printer."""
-    kb = _get_kb()
-    printer_key = printer_id.lower()
-    data = kb.printers.get(printer_key)
-    if data is None:
-        return None
+# Map a printer_id prefix to its manufacturer for intel-derived profiles.
+# Order matters: more specific prefixes first.
+_MANUFACTURER_PREFIXES: list[tuple[str, str]] = [
+    ("bambu_", "Bambu Lab"),
+    ("elegoo_", "Elegoo"),
+    ("prusa_", "Prusa Research"),
+    ("voron_", "Voron"),
+    ("anker", "AnkerMake"),
+    ("artillery", "Artillery"),
+    ("flashforge", "FlashForge"),
+    ("qidi", "QIDI"),
+    ("ratrig", "RatRig"),
+    ("sovol", "Sovol"),
+    ("creality_hi", "Creality"),
+    ("cr10", "Creality"),
+    ("ender", "Creality"),
+    ("k1", "Creality"),
+    ("k2", "Creality"),
+    ("sparkx", "SparkX"),
+    ("klipper_generic", "Generic"),
+]
+
+
+def _derive_manufacturer(printer_id: str, display_name: str) -> str:
+    pid = printer_id.lower()
+    for prefix, mfr in _MANUFACTURER_PREFIXES:
+        if pid.startswith(prefix):
+            return mfr
+    return display_name.split()[0] if display_name.strip() else "Unknown"
+
+
+# Fallback estimates for printers without a curated printer_profiles.json
+# record. Input-shaping machines (CoreXY / modern fast bedslingers) get a
+# tighter tolerance and higher default speed than open-loop bedslingers.
+# Curated records override all of these where a hand-tuned value exists.
+_DERIVED_SPEED_WITH_IS_MM_S = 250
+_DERIVED_SPEED_DEFAULT_MM_S = 150
+_DERIVED_TOLERANCE_WITH_IS_MM = 0.15
+_DERIVED_TOLERANCE_DEFAULT_MM = 0.2
+_DERIVED_LAYER_HEIGHTS_MM = [0.08, 0.12, 0.16, 0.2, 0.28]  # standard 0.4mm-nozzle ladder
+
+
+def _design_profile_from_intel(
+    printer_id: str, raw: dict[str, Any]
+) -> PrinterDesignProfile:
+    """Synthesize a design-capability profile from a printer_intelligence
+    entry, for printers without a hand-curated ``printer_profiles.json``
+    record.  Fields the spec sheet doesn't carry (tolerance, layer-height
+    ladder) use standard 0.4mm-nozzle FDM defaults; max speed is read from
+    the curated speed table when present, else estimated from input-shaping.
+    """
+    from kiln.printer_intelligence import _SPEED_CAPABILITIES
+
+    bv = raw.get("build_volume_mm") or [0, 0, 0]
+    if isinstance(bv, dict):
+        build = {"x": int(bv.get("x", 0)), "y": int(bv.get("y", 0)), "z": int(bv.get("z", 0))}
+    else:
+        build = {"x": int(bv[0]), "y": int(bv[1]), "z": int(bv[2])} if len(bv) >= 3 else {"x": 0, "y": 0, "z": 0}
+
+    has_is = bool(raw.get("has_input_shaping"))
+    caps = _SPEED_CAPABILITIES.get(printer_id)
+    max_speed = (
+        int(caps["max_speed"]) if caps and caps.get("max_speed")
+        else (_DERIVED_SPEED_WITH_IS_MM_S if has_is else _DERIVED_SPEED_DEFAULT_MM_S)
+    )
+    materials = sorted({str(m).lower() for m in (raw.get("materials") or {})})
 
     return PrinterDesignProfile(
-        printer_id=printer_key,
-        display_name=data["display_name"],
-        manufacturer=data["manufacturer"],
-        build_volume_mm=data["build_volume_mm"],
-        max_hotend_temp_c=data["max_hotend_temp_c"],
-        max_bed_temp_c=data["max_bed_temp_c"],
-        has_enclosure=data["has_enclosure"],
-        has_direct_drive=data["has_direct_drive"],
-        supported_materials=data["supported_materials"],
-        typical_tolerance_mm=data["typical_tolerance_mm"],
-        max_print_speed_mm_s=data["max_print_speed_mm_s"],
-        default_layer_heights_mm=data["default_layer_heights_mm"],
-        agent_notes=list(data.get("agent_notes", [])),
+        printer_id=printer_id,
+        display_name=raw.get("display_name", printer_id),
+        manufacturer=_derive_manufacturer(printer_id, raw.get("display_name", "")),
+        build_volume_mm=build,
+        max_hotend_temp_c=int(raw.get("max_hotend_temp", 0)),
+        max_bed_temp_c=int(raw.get("max_bed_temp", 0)),
+        has_enclosure=bool(raw.get("has_enclosure")),
+        has_direct_drive=raw.get("extruder_type") == "direct_drive",
+        supported_materials=materials,
+        typical_tolerance_mm=_DERIVED_TOLERANCE_WITH_IS_MM if has_is else _DERIVED_TOLERANCE_DEFAULT_MM,
+        max_print_speed_mm_s=max_speed,
+        default_layer_heights_mm=list(_DERIVED_LAYER_HEIGHTS_MM),
+        agent_notes=[],
     )
 
 
-def list_printer_profiles() -> list[PrinterDesignProfile]:
-    """List all known printer profiles."""
-    kb = _get_kb()
-    profiles = []
-    for printer_id, data in sorted(kb.printers.items()):
-        profiles.append(
-            PrinterDesignProfile(
-                printer_id=printer_id,
-                display_name=data["display_name"],
-                manufacturer=data["manufacturer"],
-                build_volume_mm=data["build_volume_mm"],
-                max_hotend_temp_c=data["max_hotend_temp_c"],
-                max_bed_temp_c=data["max_bed_temp_c"],
-                has_enclosure=data["has_enclosure"],
-                has_direct_drive=data["has_direct_drive"],
-                supported_materials=data["supported_materials"],
-                typical_tolerance_mm=data["typical_tolerance_mm"],
-                max_print_speed_mm_s=data["max_print_speed_mm_s"],
-                default_layer_heights_mm=data["default_layer_heights_mm"],
-                agent_notes=list(data.get("agent_notes", [])),
-            )
+def _all_design_profiles() -> dict[str, PrinterDesignProfile]:
+    """Build the full design-capability map: an entry for every printer
+    Kiln supports.  ``printer_intelligence.json`` (the canonical supported-
+    printer set) is the base; a curated ``printer_profiles.json`` record,
+    when present, overrides the intel-derived one (hand-tuned specs + the
+    kiln-pro ``agent_notes`` overlay).  This keeps the design tools in sync
+    with the rest of the system instead of stranding ~80% of supported
+    printers behind an "Unknown printer" error.
+    """
+    from kiln import printer_intelligence as _pi
+
+    _pi._load_raw()
+    profiles: dict[str, PrinterDesignProfile] = {}
+    for pid, raw in _pi._raw_cache.items():
+        if pid == "default":  # sentinel fallback, not a real model
+            continue
+        profiles[pid] = _design_profile_from_intel(pid, raw)
+
+    # Curated records win on their own id (richer + carry agent_notes).
+    for cid, data in _get_kb().printers.items():
+        profiles[cid] = PrinterDesignProfile(
+            printer_id=cid,
+            display_name=data["display_name"],
+            manufacturer=data["manufacturer"],
+            build_volume_mm=data["build_volume_mm"],
+            max_hotend_temp_c=data["max_hotend_temp_c"],
+            max_bed_temp_c=data["max_bed_temp_c"],
+            has_enclosure=data["has_enclosure"],
+            has_direct_drive=data["has_direct_drive"],
+            supported_materials=data["supported_materials"],
+            typical_tolerance_mm=data["typical_tolerance_mm"],
+            max_print_speed_mm_s=data["max_print_speed_mm_s"],
+            default_layer_heights_mm=data["default_layer_heights_mm"],
+            agent_notes=list(data.get("agent_notes", [])),
         )
     return profiles
+
+
+def get_printer_design_profile(printer_id: str) -> PrinterDesignProfile | None:
+    """Get design capabilities for a specific printer.
+
+    Covers every supported printer: a curated ``printer_profiles.json``
+    record when one exists, otherwise a profile derived from
+    ``printer_intelligence.json``.  Returns ``None`` only for genuinely
+    unknown printer ids.
+    """
+    return _all_design_profiles().get(printer_id.lower())
+
+
+def list_printer_profiles() -> list[PrinterDesignProfile]:
+    """List design profiles for every supported printer (curated where
+    available, otherwise derived from printer_intelligence)."""
+    return [profile for _, profile in sorted(_all_design_profiles().items())]
 
 
 # ---------------------------------------------------------------------------

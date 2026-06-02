@@ -655,7 +655,7 @@ class TestPrinterProfiles:
         assert len(profiles) >= 9
         ids = {p.printer_id for p in profiles}
         assert "bambu_x1c" in ids
-        assert "voron_2_4" in ids
+        assert "voron_2" in ids
         assert "prusa_mk4" in ids
 
     @requires_printer_profiles_overlay
@@ -663,22 +663,22 @@ class TestPrinterProfiles:
         enclosed = [p for p in list_printer_profiles() if p.has_enclosure]
         ids = {p.printer_id for p in enclosed}
         assert "bambu_x1c" in ids
-        assert "voron_2_4" in ids
-        assert "prusa_mini_plus" not in ids
+        assert "voron_2" in ids
+        assert "prusa_mini" not in ids
 
     @requires_printer_profiles_overlay
     def test_filter_supported_materials(self):
         nylon_capable = [p.printer_id for p in list_printer_profiles() if "nylon" in p.supported_materials]
         assert "bambu_x1c" in nylon_capable
-        assert "voron_2_4" in nylon_capable
-        assert "prusa_mini_plus" not in nylon_capable
+        assert "voron_2" in nylon_capable
+        assert "prusa_mini" not in nylon_capable
 
     @requires_printer_profiles_overlay
     def test_polycarbonate_support_subset(self):
         pc_capable = [p.printer_id for p in list_printer_profiles() if "polycarbonate" in p.supported_materials]
         assert "bambu_x1c" in pc_capable
-        assert "voron_2_4" in pc_capable
-        assert "ender_3_v2" not in pc_capable
+        assert "voron_2" in pc_capable
+        assert "ender3_v2" not in pc_capable
 
     @requires_printer_profiles_overlay
     def test_default_layer_heights_present(self):
@@ -688,8 +688,8 @@ class TestPrinterProfiles:
 
     @requires_printer_profiles_overlay
     def test_direct_drive_capability_differs_between_enders(self):
-        v2 = get_printer_design_profile("ender_3_v2")
-        s1 = get_printer_design_profile("ender_3_s1")
+        v2 = get_printer_design_profile("ender3_v2")
+        s1 = get_printer_design_profile("ender3_s1")
         assert v2 is not None
         assert s1 is not None
         assert v2.has_direct_drive is False
@@ -703,6 +703,45 @@ class TestPrinterProfiles:
         assert data["printer_id"] == "bambu_a1"
         assert "supported_materials" in data
         assert isinstance(data["agent_notes"], list)
+
+
+class TestIntelDerivedDesignProfiles:
+    """Every supported printer gets a design profile, derived from
+    printer_intelligence when no curated printer_profiles.json record
+    exists. Regression guard for the gap where ~36 supported printers
+    returned "Unknown printer"."""
+
+    def test_derive_manufacturer_from_prefix(self):
+        from kiln.design_intelligence import _derive_manufacturer
+        assert _derive_manufacturer("bambu_x1e", "Bambu Lab X1E") == "Bambu Lab"
+        assert _derive_manufacturer("ender3_v2", "Creality Ender 3 V2") == "Creality"
+        assert _derive_manufacturer("voron_2", "Voron 2.4 / Trident") == "Voron"
+        # Unknown prefix falls back to the first display-name token.
+        assert _derive_manufacturer("mystery_9000", "Acme Rocket") == "Acme"
+
+    def test_profile_derived_from_intelligence(self):
+        from kiln import printer_intelligence as pi
+        from kiln.design_intelligence import _design_profile_from_intel
+        pi._load_raw()
+        raw = pi._raw_cache["ender3"]
+        prof = _design_profile_from_intel("ender3", raw)
+        assert prof.printer_id == "ender3"
+        assert prof.manufacturer == "Creality"
+        assert {"x", "y", "z"} <= set(prof.build_volume_mm)
+        assert prof.supported_materials == sorted(m.lower() for m in raw["materials"])
+        assert prof.default_layer_heights_mm  # non-empty layer ladder
+        assert prof.agent_notes == []  # curated notes come from the pro overlay
+
+    def test_every_supported_printer_has_a_profile(self):
+        from kiln import printer_intelligence as pi
+        from kiln.design_intelligence import get_printer_design_profile
+        pi._load_raw()
+        for pid in pi._raw_cache:
+            if pid == "default":
+                continue
+            assert get_printer_design_profile(pid) is not None, (
+                f"{pid} is in printer_intelligence but has no design profile"
+            )
 
 
 # ---------------------------------------------------------------------------
