@@ -3969,7 +3969,8 @@ def start_print(
             probing (Bambu only).  Default ``True``.  Set ``False`` to
             bypass HMS 0300-8014 errors on models that trigger false
             positives (thin first-layer geometry, certain grip/case models).
-            Disables the eddy-current sensor probe at layers 4/11/20.
+            Disables the A1/A1-mini eddy-current clump probe (first after
+            the layer-3 walls, then once per ~8 g of filament; A1 series only).
         bed_type: Bed surface type (Bambu only).  Default ``"auto"``.
         plate_number: Plate index in multi-plate 3MF files (Bambu only).
             Default ``1``.

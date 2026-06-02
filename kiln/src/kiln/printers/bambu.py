@@ -191,19 +191,31 @@ _KNOWN_PRINT_ERRORS: dict[int, str] = {
 # These are NOT the lidar first-layer inspection (which uses 0C00 prefix).
 # The full HMS code is 0300-xxxx; the ``print_error`` decimal varies per
 # firmware version, so we match on the descriptive prefix pattern.
-# See: wiki.bambulab.com/en/a1-mini/troubleshooting/hmscode/0300_1A00_0002_0001
+# Error-code page: wiki.bambulab.com/en/a1-mini/troubleshooting/hmscode/0300_1A00_0002_0001
+# Probe schedule + behaviour: wiki.bambulab.com/en "A1 Series Nozzle Clumping
+# Detection" — the authoritative source for WHEN it probes.  A1 / A1 mini only.
 _NOZZLE_CLUMP_ERROR_PREFIXES: tuple[str, ...] = (
     "03008014",   # Nozzle clumping detection by probing (A1 series)
     "03001A00",   # Nozzle wrapped in filament / plate placement
     "03001800",   # Nozzle clumping calibration failure
 )
 
+# The probe cadence is MASS-based, not fixed layers (the old "layers 4/11/20"
+# was one print's 8 g-cadence mistaken for a rule).  Single-sourced here so the
+# user message and the docstrings below stay in sync.  A1 / A1 mini only.
+_NOZZLE_CLUMP_SCHEDULE = (
+    "first probe after the first object's walls on layer 3, then once per "
+    "~8 g of filament consumed"
+)
+
 _NOZZLE_CLUMP_MESSAGE = (
-    "Nozzle clumping / blob detection triggered (HMS 0300-xxxx). "
-    "This is often a false positive on models with thin first-layer geometry "
-    "(grips, cases, bezels). FIX: Retry with nozzle_clog_detect=False to "
-    "bypass the eddy-current probe at layers 4/11/20. "
-    "CLI: kiln print <file> --no-nozzle-check. "
+    "Nozzle clumping / blob detection paused the print (HMS 0300-xxxx). "
+    "On the A1 / A1 mini the printer taps the nozzle just off the bed to feel "
+    "for a melted blob (" + _NOZZLE_CLUMP_SCHEDULE + ").  This is often a false "
+    "positive on thin or flat first-layer geometry (grips, cases, bezels) or an "
+    "unseated build plate.  FIX: clear any gunk on the nozzle tip and resume, or "
+    "retry with nozzle_clog_detect=False to skip the probe.  "
+    "CLI: kiln print <file> --no-nozzle-check.  "
     "MCP: start_print(file, nozzle_clog_detect=False)."
 )
 
@@ -1159,17 +1171,22 @@ class BambuAdapter(PrinterAdapter):
         1. ``print_option`` with ``nozzle_blob_detect: false`` — disables
            the general nozzle blob detection.
         2. ``xcam_control_set`` with ``module_name: "clump_detector"`` —
-           disables the eddy-current probing at layers 4/11/20 and
-           prevents ``print_halt`` on detection.
+           disables the eddy-current clump probe and prevents
+           ``print_halt`` on detection.
+
+        On the A1 / A1 mini the probe runs the first probe after the first
+        object's walls on layer 3, then once per ~8 g of filament consumed
+        (mass-cadenced, not fixed layers).  It auto-disables under the
+        slicer's Print-by-object and Spiral-vase modes and needs firmware
+        >= 01.02.00.00.  A1 / A1 mini only — the X1/P1 use LiDAR/AI instead.
 
         These commands must be sent **before** the ``project_file``
         command to take effect for the upcoming print.
 
-        Note: The A1's nozzle clumping detection is also hardcoded into
-        the timelapse G-code section at layer 3.  For complete bypass,
-        users should also edit the slicer's machine G-code to remove
-        or skip the timelapse probing (change ``{if layer_num == 2}``
-        to ``{if layer_num == 20000}``).
+        Note: the layer-3 seed probe is also hardcoded into the timelapse
+        G-code section.  For complete bypass, users should also edit the
+        slicer's machine G-code to skip the timelapse probing (change
+        ``{if layer_num == 2}`` to ``{if layer_num == 20000}``).
         """
         logger.info("Disabling nozzle clumping / blob detection for this print")
         self._publish_command(
@@ -2254,12 +2271,13 @@ class BambuAdapter(PrinterAdapter):
                 * ``layer_inspect`` (bool): Enable first-layer inspection
                   (lidar visual scan).  Default ``False``.
                 * ``nozzle_clog_detect`` (bool): Enable nozzle clumping /
-                  blob detection by probing (eddy current sensor check at
-                  layers 4, 11, 20).  Default ``True``.  Set to ``False``
-                  to bypass HMS 0300-8014 errors that trigger on models
-                  with thin first-layer geometry.  This sends both a
-                  ``print_option`` and ``xcam_control_set`` command to
-                  disable the check before starting the print.
+                  blob detection — the A1 / A1 mini eddy-current probe that
+                  taps the nozzle just off the bed (first after the layer-3
+                  walls, then once per ~8 g of filament; A1 series only).
+                  Default ``True``.  Set to ``False`` to bypass HMS
+                  0300-8014 false positives on thin first-layer geometry.
+                  This sends both a ``print_option`` and ``xcam_control_set``
+                  command to disable the check before starting the print.
                 * ``bed_type`` (str): Bed surface type.  Default ``"auto"``.
                 * ``plate_number`` (int): Plate index in multi-plate 3MF.
                   Default ``1``.
