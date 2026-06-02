@@ -2736,12 +2736,12 @@ class BambuAdapter(PrinterAdapter):
         Returns:
             ``True`` once the command is published.
         """
-        payload: dict[str, Any] = {
-            "print": {"sequence_id": self._next_seq(), "command": str(command)}
-        }
-        if params:
-            payload["print"].update(params)
-        self._publish_command(payload)
+        inner: dict[str, Any] = dict(params or {})
+        # command + sequence_id are authoritative: set them last so a
+        # caller-supplied params dict can never override them.
+        inner["sequence_id"] = self._next_seq()
+        inner["command"] = str(command)
+        self._publish_command({"print": inner})
         return True
 
     # ------------------------------------------------------------------
