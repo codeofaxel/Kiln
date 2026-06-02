@@ -243,6 +243,8 @@ _FLOW_ANOMALY_ERROR_PREFIXES: tuple[str, ...] = (
     "03001900",   # Tangled filament at extruder feed (cross-talks with 03001A00 nozzle wrap)
     "05000B00",   # Filament stuck/jam reported by AMS
     "05000900",   # Extrusion failure (P1 series) — broad bucket
+    "03000900",   # Extruder motor overload / clog / filament stuck (P2S servo);
+                  # a closed-loop servo faults here where a stepper skips
 )
 
 # Severity mapping for flow-anomaly codes.  Used when the wire
@@ -255,6 +257,7 @@ _FLOW_ANOMALY_SEVERITY: dict[str, str] = {
     "03001900": "medium",
     "05000B00": "high",
     "05000900": "low",
+    "03000900": "high",
 }
 
 
@@ -271,7 +274,7 @@ def _classify_flow_anomaly(error_code: int) -> tuple[str, str] | None:
     for prefix in _FLOW_ANOMALY_ERROR_PREFIXES:
         if hex_code.startswith(prefix):
             event_type = (
-                "filament_jam" if prefix in ("03008005", "05000B00")
+                "filament_jam" if prefix in ("03008005", "05000B00", "03000900")
                 else "under_extrusion"
             )
             severity = _FLOW_ANOMALY_SEVERITY.get(prefix, "medium")
