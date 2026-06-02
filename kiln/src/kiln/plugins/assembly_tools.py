@@ -168,7 +168,11 @@ class _AssemblyToolsPlugin:
                 return {"success": False, "error": str(exc)}
 
         @mcp.tool()
-        def validate_assembly(assembly_json: str) -> dict:
+        def validate_assembly(
+            assembly_json: str,
+            *,
+            printer_id: str | None = None,
+        ) -> dict:
             """Validate an assembly for correctness and printability.
 
             Runs clearance checks and joint validations on the assembly,
@@ -176,13 +180,22 @@ class _AssemblyToolsPlugin:
 
             Args:
                 assembly_json: JSON string of the current assembly state.
+                printer_id: Optional printer identifier (e.g.
+                    ``"bambu_a1"``).  When supplied AND kiln-pro is
+                    installed, each joint that drives a screw into a
+                    printed part gains a ``screw_hole`` block with the
+                    compensated hole diameter, thread engagement,
+                    install-torque ceiling, and lead-in chamfer
+                    (Bambu-calibrated on Bambu X1/P1/A1 + PLA/PETG; a
+                    generic starting point otherwise).  Omit it to keep
+                    the historic behaviour.
             """
             try:
                 from kiln.assembly import Assembly
                 from kiln.assembly import validate_assembly as _validate
 
                 assembly = Assembly.from_dict(json.loads(assembly_json))
-                validated = _validate(assembly)
+                validated = _validate(assembly, printer_id=printer_id)
                 return {"success": True, "data": validated.to_dict()}
             except json.JSONDecodeError as exc:
                 return {"success": False, "error": f"Invalid assembly JSON: {exc}"}

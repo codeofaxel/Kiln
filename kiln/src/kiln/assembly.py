@@ -225,6 +225,13 @@ class JointValidation:
     issues: list[str] = field(default_factory=list)
     design_rules_checked: list[str] = field(default_factory=list)
     recommendations: list[str] = field(default_factory=list)
+    screw_hole: dict[str, Any] | None = None
+    """Compensated self-threading hole detail when this joint drives a
+    screw INTO a printed part AND kiln-pro is available (the engine lives
+    there; see https://kiln3d.com).  Carries both hole diameters,
+    thread engagement, install-torque ceiling, and lead-in chamfer.
+    ``None`` for through-bolts into metal/wood, non-fastened joints, or
+    when kiln-pro isn't installed (free tier degrades silently)."""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -584,8 +591,18 @@ def check_all_clearances(
 def validate_joint(
     interface: MatingInterface,
     parts: dict[str, AssemblyPart] | list[AssemblyPart],
+    *,
+    printer_id: str | None = None,
 ) -> JointValidation:
-    """Validate a single mating interface against design rules."""
+    """Validate a single mating interface against design rules.
+
+    When ``printer_id`` is supplied AND kiln-pro is installed AND the
+    interface drives a screw into a printed part, the result also carries
+    a ``screw_hole`` block with the compensated self-threading hole
+    (diameter, engagement, torque, chamfer) — Bambu-calibrated on a
+    Bambu X1/P1/A1 + PLA/PETG, otherwise a generic starting point.  Free
+    tier (no kiln-pro) degrades silently to ``screw_hole=None``.
+    """
     jtype = interface.joint_type
     issues: list[str] = []
     rules_checked: list[str] = []
@@ -724,6 +741,17 @@ def validate_joint(
                     "Consider a better-suited material."
                 )
 
+    # kiln-pro screw-hole intelligence: when this joint drives a screw
+    # INTO a printed part, attach the compensated self-threading hole
+    # (diameter, engagement, torque, chamfer).  Lazy pro lookup — absent
+    # kiln-pro (free tier) this is None and nothing else changes.
+    screw_hole = _screw_hole_detail_for_joint(
+        getattr(interface, "fastener_spec", None), mat_a, printer_id,
+    )
+    if screw_hole is not None:
+        rules_checked.append("compensated_screw_hole")
+        recommendations.append(_screw_hole_recommendation(screw_hole))
+
     valid = len(issues) == 0
 
     return JointValidation(
@@ -732,20 +760,27 @@ def validate_joint(
         issues=issues,
         design_rules_checked=rules_checked,
         recommendations=recommendations,
+        screw_hole=screw_hole,
     )
 
 
-def validate_assembly(assembly: Assembly) -> Assembly:
+def validate_assembly(
+    assembly: Assembly, *, printer_id: str | None = None,
+) -> Assembly:
     """Run all clearance checks and joint validations.
 
     Sets ``overall_valid`` to ``False`` if any overlap is detected or
     any joint validation fails.  Returns the mutated assembly.
+
+    ``printer_id`` (when supplied AND kiln-pro is installed) lets each
+    screwed-into-plastic joint carry a compensated ``screw_hole`` block;
+    omit it / free tier and the historic behaviour is unchanged.
     """
     check_all_clearances(assembly)
 
     joint_validations: list[JointValidation] = []
     for iface in assembly.interfaces:
-        jv = validate_joint(iface, assembly.parts)
+        jv = validate_joint(iface, assembly.parts, printer_id=printer_id)
         joint_validations.append(jv)
     assembly.joint_validations = joint_validations
 
@@ -991,3 +1026,64 @@ def _calibration_view_for_clearance(
         )
 
     return verdict_block, narrow_factor, str(tier)
+
+
+def _screw_hole_detail_for_joint(
+    fastener_spec: Any,
+    material: str,
+    printer_id: str | None,
+) -> dict[str, Any] | None:
+    """Compensated self-threading hole for a screw driven into a printed
+    part, via kiln-pro's resolver.
+
+    Returns ``None`` when there's no fastener, when the screw passes
+    through into a non-printed substrate (a clearance hole, not a
+    self-threading one), or when kiln-pro isn't installed — the free
+    tier degrades silently.  Lazy-imports ``kiln_pro`` so public Kiln
+    keeps working without the pro package (mirrors
+    :func:`_calibration_view_for_clearance`).
+    """
+    if fastener_spec is None:
+        return None
+    try:
+        from kiln_pro.fasteners_intelligence import (  # type: ignore[import-not-found]
+            resolve_threaded_joint,
+        )
+    except ImportError:
+        return None
+    try:
+        joint = resolve_threaded_joint(
+            fastener_size=str(getattr(fastener_spec, "size", "") or ""),
+            into_substrate=getattr(fastener_spec, "surface_type", None),
+            family=getattr(fastener_spec, "family", None),
+            material=material,
+            printer_id=printer_id,
+        )
+    except Exception:
+        return None
+    return joint.to_dict() if joint is not None else None
+
+
+def _screw_hole_recommendation(detail: dict[str, Any]) -> str:
+    """Factual one-line screw-hole callout from a resolver detail dict."""
+    size = detail.get("fastener_size", "screw")
+    h = detail.get("hole_diameter_horizontal_mm")
+    v = detail.get("hole_diameter_vertical_mm")
+    eng = detail.get("engagement_length_mm")
+    torque = detail.get("install_torque_nm")
+    if detail.get("tier") == "bambu_calibrated":
+        bits: list[str] = []
+        if h is not None and v is not None:
+            bits.append(f"{h} mm horizontal / {v} mm vertical hole")
+        if eng is not None:
+            bits.append(f"{eng} mm thread engagement")
+        if torque is not None:
+            bits.append(f"{torque} N·m install-torque ceiling")
+        bits.append("45° lead-in chamfer")
+        return f"{size} self-threading hole (calibrated): " + ", ".join(bits) + "."
+    start = f"~{h} mm" if h is not None else "near the screw pitch diameter"
+    return (
+        f"{size} self-threading hole: start {start}, verify on a test print, "
+        f"45° lead-in chamfer (generic starting point — the calibrated "
+        f"table covers Bambu X1/P1/A1 + PLA/PETG)."
+    )
