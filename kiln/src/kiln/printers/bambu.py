@@ -2935,6 +2935,21 @@ class BambuAdapter(PrinterAdapter):
             if humidity is not None:
                 with contextlib.suppress(TypeError, ValueError):
                     humidity_int = int(humidity)
+            # AMS 2 Pro / AMS HT active-drying telemetry (absent on AMS /
+            # AMS Lite, which have no dryer).  Raw passthrough only — the
+            # interpretation (true-% vs legacy index, the duration:0 sentinel)
+            # lives downstream, not here.
+            humidity_raw_int: int | None = None
+            raw_h = unit.get("humidity_raw")
+            if raw_h is not None:
+                with contextlib.suppress(TypeError, ValueError):
+                    humidity_raw_int = int(raw_h)
+            dry_time_int: int | None = None
+            raw_dt = unit.get("dry_time")
+            if raw_dt is not None:
+                with contextlib.suppress(TypeError, ValueError):
+                    dry_time_int = int(raw_dt)
+            dry_setting = unit.get("dry_setting")
 
             trays: list[dict[str, Any]] = []
             raw_trays = unit.get("tray")
@@ -2982,12 +2997,19 @@ class BambuAdapter(PrinterAdapter):
                         "bed_temp": bed_t,
                     })
 
-            result["units"].append({
+            unit_out: dict[str, Any] = {
                 "unit_id": unit_id,
                 "humidity": humidity_int,
                 "humidity_known": humidity_known,
                 "trays": trays,
-            })
+            }
+            if humidity_raw_int is not None:
+                unit_out["humidity_raw"] = humidity_raw_int
+            if dry_time_int is not None:
+                unit_out["dry_time"] = dry_time_int
+            if isinstance(dry_setting, dict):
+                unit_out["dry_setting"] = dry_setting
+            result["units"].append(unit_out)
 
         return result
 
