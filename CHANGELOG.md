@@ -11,6 +11,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   recognizes either on connect — right temperature limits, build volume,
   per-material settings, and a tuned slicer profile, no manual setup.
 
+### Fixed
+
+- **Clearer message when a Bambu A1 nozzle-blob check pauses a print** — it now tells you what to do.
+
 ## [1.1.6] - 2026-05-29
 
 ### Added
