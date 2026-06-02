@@ -1870,6 +1870,42 @@ class TestBambuAdapterAMSStatus:
         assert t3["tray_type"] == ""
         assert t3["remain"] is None
 
+    def test_ams_status_surfaces_module_name_from_get_version(self) -> None:
+        # AMS unit type isn't in print.ams.ams[]; it's resolved downstream from
+        # the firmware module name.  Pre-seed the module cache so the method
+        # surfaces module_name without a live get_version round-trip.
+        adapter = self._adapter_with_ams([
+            {"id": 0, "humidity": 3, "tray": [
+                {"id": 0, "tray_type": "PLA", "tray_color": "FF0000FF"},
+            ]},
+        ])
+        adapter._fw_modules = [{"name": "ota"}, {"name": "ams_f1/0"}]
+        unit = adapter.get_ams_status()["units"][0]
+        assert unit["module_name"] == "ams_f1/0"
+
+    def test_ams_status_drying_telemetry_passthrough(self) -> None:
+        adapter = self._adapter_with_ams([
+            {"id": 0, "humidity": 2, "humidity_raw": 18, "dry_time": 120,
+             "dry_setting": {"dry_temperature": 55, "dry_duration": 480},
+             "tray": [{"id": 0, "tray_type": "PETG", "tray_color": "00FF00FF"}]},
+        ])
+        adapter._fw_modules = [{"name": "n3f/0"}]
+        unit = adapter.get_ams_status()["units"][0]
+        assert unit["module_name"] == "n3f/0"
+        assert unit["humidity_raw"] == 18
+        assert unit["dry_time"] == 120
+        assert unit["dry_setting"] == {"dry_temperature": 55, "dry_duration": 480}
+
+    def test_ams_status_no_module_name_when_modules_absent(self) -> None:
+        # Older adapter with no get_version cache -> module_name absent (graceful).
+        adapter = self._adapter_with_ams([
+            {"id": 0, "tray": [{"id": 0, "tray_type": "PLA"}]},
+        ])
+        adapter._fw_modules = []
+        adapter._fw_modules_requested = True  # skip the live get_version fetch
+        unit = adapter.get_ams_status()["units"][0]
+        assert "module_name" not in unit
+
     def test_ams_status_no_ams_attached(self) -> None:
         adapter = _adapter()
         adapter._mqtt_connected.set()
