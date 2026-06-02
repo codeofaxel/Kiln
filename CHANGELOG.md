@@ -10,10 +10,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Two more Bambu Lab printers supported: the X1E and the P2S.** Kiln
   recognizes either on connect — right temperature limits, build volume,
   per-material settings, and a tuned slicer profile, no manual setup.
+- **Start, stop, and check your AMS dryer — free for everyone.** On Bambu
+  printers with an AMS 2 Pro or AMS HT, Kiln can now run a drying cycle (start
+  or stop it) and show how damp the filament is, how much drying time is left,
+  and the dryer's settings.
 
 ### Fixed
 
 - **Clearer message when a Bambu A1 nozzle-blob check pauses a print** — it now tells you what to do.
+- **A jammed-extruder error now shows the real reason.** When a Bambu printer
+  reports an extruder overload or clog, Kiln records it as a mechanical failure
+  in your print history instead of an unlabeled error.
 
 ## [1.1.6] - 2026-05-29
 
