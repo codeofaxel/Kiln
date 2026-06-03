@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-06-02T22:07:56.481403+00:00",
-  "tool_count": 320,
+  "generated": "2026-06-03T01:24:51.768586+00:00",
+  "tool_count": 321,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -81,7 +81,7 @@
     },
     "engineering_intelligence": {
       "label": "Engineering Intelligence",
-      "pitch": "Curated industry-standard fastener, hole, and joint data \u2014 ANSI/ISO specs, FDM-aware clearance recommendations, heat-set insert sizing, joint-strategy decision tree.  Pro+ engineering reference for any design that drills a hole or threads a fastener."
+      "pitch": "Curated, datasheet-cited Pro+ reference data for parts you have to trust \u2014 fastener, hole, and joint specs (ANSI/ISO, FDM-aware clearances, heat-set insert sizing, joint-strategy decision tree) plus material-drying intelligence: a per-material, source-traced dry-or-print verdict that reads your loaded filament and live AMS humidity and hands you a safe, ceiling-clamped recipe in plain English."
     },
     "design_inspection": {
       "label": "Design Inspection",
@@ -7268,6 +7268,62 @@
           "product_query"
         ],
         "title": "design_hole_for_productArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "drying_advisor",
+      "description": "Is this spool ready to print -- and if not, exactly how to dry it?\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_name": {
+            "default": "",
+            "title": "Printer Name",
+            "type": "string"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          },
+          "ams_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ams Id"
+          },
+          "slot": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Slot"
+          },
+          "mode": {
+            "default": "verdict",
+            "title": "Mode",
+            "type": "string"
+          },
+          "show_math": {
+            "default": false,
+            "title": "Show Math",
+            "type": "boolean"
+          }
+        },
+        "title": "drying_advisorArguments",
         "type": "object"
       }
     },
