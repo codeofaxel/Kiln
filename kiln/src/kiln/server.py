@@ -5752,6 +5752,34 @@ def preflight_check(
                 except Exception as exc:
                     logger.debug("Failed to check material compatibility via intelligence DB: %s", exc)
 
+        # -- Moisture advisory (non-blocking) ------------------------------
+        # Hygroscopic materials print rough/weak when the spool is wet.  This
+        # is an advisory nudge, never a block — the user owns the call.  The
+        # drying_advisor tool (kiln-pro, https://kiln3d.com) gives the safe
+        # per-material drying recipe.
+        if expected_material:
+            _hygroscopic = (
+                "nylon", "pa6", "pa11", "pa12", "paht", "pa-",
+                "pva", "tpu", "tpe", "pc", "polycarbonate",
+                "pet-cf", "petg-cf", "-cf", "-gf", "carbon", "glass",
+                "pps", "ppa", "peek", "pekk", "pvb", "bvoh",
+            )
+            if any(tok in expected_material.lower() for tok in _hygroscopic):
+                checks.append(
+                    {
+                        "name": "filament_moisture",
+                        "passed": True,
+                        "advisory": True,
+                        "message": (
+                            f"{expected_material.upper()} readily absorbs moisture. "
+                            "If the spool has been open or stored in humid air, a wet "
+                            "spool prints rough/weak — consider drying first. "
+                            "drying_advisor (kiln-pro) gives the safe temp and time "
+                            "for your material."
+                        ),
+                    }
+                )
+
         # -- Outcome history advisory (learning database) ------------------
         # Query past outcomes for this printer + material combo to warn
         # about historically problematic combinations.  Advisory only —
