@@ -409,6 +409,18 @@ class EmergencyCoordinator:
                 exc,
             )
 
+        # Belt-and-suspenders: an emergency also darkens this printer's AMS
+        # dryer(s), scope-matched to the printer stop.  Best-effort and never
+        # fatal — a dryer-stop failure must not block the printer E-stop record.
+        # A routine cancel_print never reaches this path and leaves the dryer
+        # running.
+        try:
+            actions = list(actions) + self._halt_ams_drying(printer_id)
+        except Exception:
+            logger.debug(
+                "emergency: AMS dryer halt failed for %s", printer_id, exc_info=True
+            )
+
         record = EmergencyRecord(
             printer_id=printer_id,
             success=error is None,
@@ -793,6 +805,91 @@ class EmergencyCoordinator:
             )
 
         return gcode, actions
+
+    def _halt_ams_drying(self, printer_id: str) -> list[str]:
+        """Send a drying-STOP to every AMS unit on a printer (best-effort).
+
+        A real emergency leaves the whole physical unit dark, so an emergency
+        stop also halts active AMS drying — scope-matched to the printer stop.
+        A single-printer stop halts only that printer's dryers;
+        :meth:`emergency_stop_all` loops per printer and so halts every dryer.
+        Routine stops (``cancel_print``) never reach this path and leave the
+        dryer running.
+
+        A drying STOP carries no temperature, so it needs none of the
+        start-time guards.  Works without kiln-pro installed (builds the
+        minimal stop command here) or via the kiln-pro builder when present.
+        Never raises — returns the actions performed (for the stop record).
+        """
+        try:
+            from kiln.server import _registry as registry
+        except ImportError:
+            from kiln.registry import PrinterRegistry
+
+            registry = PrinterRegistry()
+
+        try:
+            adapter = registry.get(printer_id)
+        except Exception:
+            return []
+
+        # Active AMS drying is a Bambu feature; other adapters have no dryer.
+        if not hasattr(adapter, "publish_print_command") or not hasattr(
+            adapter, "get_ams_status"
+        ):
+            return []
+
+        try:
+            status = adapter.get_ams_status()
+        except Exception:
+            logger.debug(
+                "emergency: get_ams_status failed for %s", printer_id, exc_info=True
+            )
+            return []
+
+        units = status.get("units", []) if isinstance(status, dict) else []
+        actions: list[str] = []
+        for unit in units:
+            if not isinstance(unit, dict):
+                continue
+            try:
+                unit_id = int(unit.get("unit_id", unit.get("ams_id", 0)))
+            except (TypeError, ValueError):
+                continue
+            try:
+                adapter.publish_print_command(
+                    "ams_filament_drying", self._build_ams_stop_command(unit_id)
+                )
+                actions.append(f"ams_drying_halted:{unit_id}")
+                logger.warning(
+                    "EMERGENCY: halted AMS %s drying on %s", unit_id, printer_id
+                )
+            except Exception:
+                logger.debug(
+                    "emergency: failed to halt AMS %s drying on %s",
+                    unit_id,
+                    printer_id,
+                    exc_info=True,
+                )
+        return actions
+
+    @staticmethod
+    def _build_ams_stop_command(unit_id: int) -> dict[str, Any]:
+        """Build the AMS drying-STOP command.
+
+        Uses the kiln-pro builder when installed (validation parity), else the
+        minimal public-side dict — a STOP carries no temperature and needs none
+        of the start-time guards.
+        """
+        try:
+            from kiln_pro.device_intelligence.bambu_ams import (
+                DRY_MODE_STOP,
+                build_ams_drying_command,
+            )
+
+            return build_ams_drying_command(ams_id=int(unit_id), mode=DRY_MODE_STOP)
+        except Exception:
+            return {"ams_id": int(unit_id), "mode": 0, "duration": 0}
 
     def _emit_event(
         self,
