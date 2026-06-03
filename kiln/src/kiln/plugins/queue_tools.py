@@ -2,7 +2,7 @@
 
 Extracts the job queue MCP tools from server.py into a focused plugin
 module.  Provides submit_job, job_status, queue_summary, cancel_job,
-and job_history tools.
+cancel_queued_jobs, and job_history tools.
 
 Discovered and registered automatically by
 :func:`~kiln.plugin_loader.register_all_plugins`.
@@ -16,6 +16,10 @@ from typing import Any
 from kiln.events import Event, EventType
 
 _logger = logging.getLogger(__name__)
+
+# A bulk queue clear must see every queued job, not the default 100-row
+# page that list_jobs returns — ask for an effectively-unbounded page.
+_ALL_QUEUED_JOBS = 1_000_000
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +239,125 @@ def cancel_job(job_id: str) -> dict:
         return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
+def cancel_queued_jobs(
+    printer_name: str | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Cancel ALL queued print jobs at once.
+
+    The bulk companion to ``cancel_job`` (which cancels one job by id).
+    Cancels every job currently in the QUEUED state — clear a backed-up
+    queue in one call instead of cancelling one job at a time.
+
+    - ``printer_name``: limit the sweep to one printer's queued jobs; omit
+      to clear every queued job.
+    - ``dry_run=True``: preview exactly which jobs WOULD be cancelled and
+      change nothing.  Run this first when clearing a large queue.
+
+    Safety: this never cancels a running print.  Only jobs still in the
+    QUEUED state are cancelled; each job's status is re-checked immediately
+    before cancelling, so a job that has already started printing (or
+    finished, or was cancelled elsewhere) is skipped rather than
+    interrupted.  Use ``cancel_print`` to stop the job that is actually
+    running.  Each cancel emits the same ``JOB_CANCELLED`` event as
+    ``cancel_job``.
+
+    Returns ``{success, dry_run, count, cancelled, skipped, message}`` —
+    ``count`` always equals ``len(cancelled)``; ``skipped`` is a list of
+    ``{job_id, reason}`` for jobs that were not cancelled.
+    """
+    import kiln.server as _srv
+    from kiln.queue import JobStatus
+
+    if err := _srv._check_auth("queue"):
+        return err
+
+    # Snapshot the queued jobs.  The scheduler's own filter scopes to one
+    # printer when asked; the high limit defeats the default 100-row page so
+    # a long backlog is seen in full.
+    try:
+        targets = _srv._queue.list_jobs(
+            status=JobStatus.QUEUED,
+            printer_name=printer_name,
+            limit=_ALL_QUEUED_JOBS,
+        )
+    except Exception as exc:
+        _logger.exception("Unexpected error in cancel_queued_jobs (queue read)")
+        return _srv._error_dict(
+            f"Could not read the print queue: {exc}", code="INTERNAL_ERROR"
+        )
+
+    scope = f" on {printer_name}" if printer_name else ""
+
+    if dry_run:
+        return {
+            "success": True,
+            "dry_run": True,
+            "count": len(targets),
+            "cancelled": [j.id for j in targets],
+            "skipped": [],
+            "message": (
+                f"{len(targets)} queued job(s) would be cancelled{scope} "
+                "— dry run, nothing changed."
+                if targets
+                else f"No queued jobs to cancel{scope} — dry run."
+            ),
+        }
+
+    cancelled: list[str] = []
+    skipped: list[dict[str, str]] = []
+    for job in targets:
+        # Re-check live status right before cancelling: a job that raced
+        # QUEUED -> STARTING/PRINTING since the snapshot must NOT be
+        # cancelled (cancel() accepts a running job and would kill the live
+        # print).  Skip anything no longer QUEUED.
+        try:
+            live = _srv._queue.get_job(job.id)
+        except Exception:
+            skipped.append({"job_id": job.id, "reason": "no longer in the queue"})
+            continue
+        if live.status != JobStatus.QUEUED:
+            skipped.append(
+                {
+                    "job_id": job.id,
+                    "reason": f"no longer queued (status: {live.status.name})",
+                }
+            )
+            continue
+        try:
+            _srv._queue.cancel(job.id)
+            cancelled.append(job.id)
+            _srv._event_bus.publish(
+                Event(
+                    type=EventType.JOB_CANCELLED,
+                    data={"job_id": job.id, "bulk": True},
+                    source="mcp",
+                )
+            )
+        except Exception as exc:
+            skipped.append(
+                {"job_id": job.id, "reason": f"could not be cancelled: {exc}"}
+            )
+
+    if not targets:
+        message = f"No queued jobs to cancel{scope}."
+    else:
+        message = f"Cancelled {len(cancelled)} queued job(s){scope}."
+        if skipped:
+            message += (
+                f" {len(skipped)} skipped (already started or no longer queued)."
+            )
+
+    return {
+        "success": True,
+        "dry_run": False,
+        "count": len(cancelled),
+        "cancelled": cancelled,
+        "skipped": skipped,
+        "message": message,
+    }
+
+
 def _job_history(limit: int = 20, status: str | None = None) -> dict:
     """Get history of completed, failed, and cancelled print jobs.
 
@@ -297,7 +420,7 @@ class _QueueToolsPlugin:
 
     @property
     def description(self) -> str:
-        return "Print job queue management tools (submit, status, cancel, history)"
+        return "Print job queue management tools (submit, status, cancel, bulk-cancel, history)"
 
     def register(self, mcp: Any) -> None:
         """Register queue/job tools with the MCP server."""
@@ -306,6 +429,7 @@ class _QueueToolsPlugin:
         mcp.tool()(job_status)
         mcp.tool()(queue_summary)
         mcp.tool()(cancel_job)
+        mcp.tool()(cancel_queued_jobs)
 
         @mcp.tool()
         def job_history(limit: int = 20, status: str | None = None) -> dict:
