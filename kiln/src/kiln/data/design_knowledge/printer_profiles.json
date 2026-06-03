@@ -183,6 +183,33 @@
       0.28
     ]
   },
+  "bambu_a2l": {
+    "display_name": "Bambu Lab A2L",
+    "manufacturer": "Bambu Lab",
+    "build_volume_mm": {
+      "x": 330,
+      "y": 320,
+      "z": 325
+    },
+    "max_hotend_temp_c": 300,
+    "max_bed_temp_c": 80,
+    "has_enclosure": false,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "pla",
+      "petg",
+      "tpu"
+    ],
+    "typical_tolerance_mm": 0.12,
+    "max_print_speed_mm_s": 500,
+    "default_layer_heights_mm": [
+      0.08,
+      0.12,
+      0.16,
+      0.2,
+      0.28
+    ]
+  },
   "prusa_mk4": {
     "display_name": "Prusa MK4",
     "manufacturer": "Prusa Research",

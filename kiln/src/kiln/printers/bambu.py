@@ -302,6 +302,7 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
     # Human-readable names (from slicer config / XML metadata)
     "Bambu Lab A1 mini": "a1_mini",
     "Bambu Lab A1": "a1",
+    "Bambu Lab A2L": "a2l",
     "Bambu Lab X1 Carbon": "x1c",
     "Bambu Lab X1E": "x1e",
     "Bambu Lab P1S": "p1s",

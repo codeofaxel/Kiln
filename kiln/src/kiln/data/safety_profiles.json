@@ -514,6 +514,21 @@
     ],
     "notes": "Open-frame bed-slinger. All-metal hotend. AMS Lite compatible."
   },
+  "bambu_a2l": {
+    "display_name": "Bambu Lab A2L",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 80.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 20000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 28.0,
+    "build_volume": [
+      330,
+      320,
+      325
+    ],
+    "notes": "Open-frame large-format bed-slinger (330x320x325). PMSM closed-loop servo extruder. Stainless-steel nozzle (NOT hardened) - fit hardened for carbon-fibre. 80C bed cap blocks ABS/ASA/PA/PC. No heated chamber, no LiDAR/AI camera. 2.4GHz Wi-Fi only."
+  },
   "voron_0": {
     "display_name": "Voron 0 / 0.2",
     "max_hotend_temp": 300.0,

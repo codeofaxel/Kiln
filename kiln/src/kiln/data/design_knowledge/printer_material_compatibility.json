@@ -427,6 +427,133 @@
       ]
     }
   },
+  "bambu_a2l": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs": {
+      "status": "not_compatible",
+      "upgrades_needed": []
+    },
+    "asa": {
+      "status": "not_compatible",
+      "upgrades_needed": []
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ]
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ]
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "polycarbonate": {
+      "status": "not_compatible",
+      "upgrades_needed": []
+    },
+    "pc_abs": {
+      "status": "not_compatible",
+      "upgrades_needed": []
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ]
+    },
+    "pla_matte": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_hf": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_tough": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_95a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_85a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pvb": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_build_surface",
+        "dry_box"
+      ]
+    }
+  },
   "bambu_a1_mini": {
     "pla": {
       "status": "compatible",

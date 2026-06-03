@@ -1833,6 +1833,73 @@
     "max_hotend_temp": 300,
     "has_input_shaping": true
   },
+  "bambu_a2l": {
+    "display_name": "Bambu Lab A2L",
+    "firmware": "bambu",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "build_volume_mm": [
+      330,
+      320,
+      325
+    ],
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": 10000,
+    "max_nozzle_temp": 300,
+    "max_bed_temp": 80,
+    "nozzle_options": [
+      "0.2mm SS",
+      "0.4mm SS (default)",
+      "0.6mm SS",
+      "0.8mm SS",
+      "0.4mm hardened steel (recommended for CF)"
+    ],
+    "ams_type": "ams_lite",
+    "ams_slots": 4,
+    "camera": "1080p low-fps timelapse (no AI)",
+    "wifi": "2.4GHz only",
+    "materials": {
+      "PLA": {
+        "hotend": 220,
+        "bed": 55,
+        "fan": 100
+      },
+      "PLA+": {
+        "hotend": 220,
+        "bed": 60,
+        "fan": 100
+      },
+      "PLA-CF": {
+        "hotend": 230,
+        "bed": 55,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 70,
+        "fan": 40
+      },
+      "PETG-CF": {
+        "hotend": 250,
+        "bed": 70,
+        "fan": 40
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50
+      },
+      "PVA": {
+        "hotend": 215,
+        "bed": 60,
+        "fan": 50
+      }
+    },
+    "max_hotend_temp": 300,
+    "has_input_shaping": true
+  },
   "voron_2": {
     "display_name": "Voron 2.4 / Trident",
     "firmware": "klipper",
