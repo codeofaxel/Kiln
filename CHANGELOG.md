@@ -7,6 +7,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Clear your whole print queue in one go — free for everyone.** A new bulk
+  cancel empties a backed-up queue (or just one printer's jobs) in a single
+  step, with a preview so you can see exactly what'll be cancelled before you
+  commit. It never touches a print that's already running — only jobs still
+  waiting in line.
 - **Two more Bambu Lab printers supported: the X1E and the P2S.** Kiln
   recognizes either on connect — right temperature limits, build volume,
   per-material settings, and a tuned slicer profile, no manual setup.
