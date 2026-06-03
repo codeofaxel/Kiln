@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-06-03T01:24:51.768586+00:00",
-  "tool_count": 321,
+  "generated": "2026-06-03T06:19:02.954828+00:00",
+  "tool_count": 323,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -47,6 +47,10 @@
       "label": "Speed Control",
       "pitch": "Real-time printer speed control, scheduling, and fleet-wide adjustments."
     },
+    "queue_management": {
+      "label": "Print Queue",
+      "pitch": "Manage a backed-up print queue at scale \u2014 cancel every queued job in one call, scoped to one printer or the whole fleet, with a dry-run preview before anything changes."
+    },
     "ams_control": {
       "label": "AMS Control",
       "pitch": "Start and stop active filament drying on AMS 2 Pro / AMS HT units, with safe temperature and duration guards."
@@ -90,6 +94,10 @@
     "design_session": {
       "label": "Design Sessions",
       "pitch": "Conversational entry-point \u2014 describe what you want to make in plain English, answer a few quick questions if Kiln needs them, then produce an STL that comes with a report of which design checks it passes."
+    },
+    "support": {
+      "label": "Support & Feedback",
+      "pitch": "Report a bug or share feedback from inside an agent chat. Free for everyone \u2014 server-side moderation, prompt-injection sanitisation, and rate-limiting keep the queue clean before anything reaches the team."
     }
   },
   "tools": [
@@ -11898,6 +11906,35 @@
       }
     },
     {
+      "name": "cancel_queued_jobs",
+      "description": "Cancel ALL queued print jobs at once (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "queue_management",
+      "parameters": {
+        "properties": {
+          "printer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Name"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          }
+        },
+        "title": "cancel_queued_jobsArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "cancel_speed_schedule",
       "description": "Cancel the active speed schedule (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -12001,6 +12038,48 @@
           "schedule"
         ],
         "title": "set_speed_scheduleArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "report_issue",
+      "description": "Report a bug or share feedback about Kiln.",
+      "tier": "free",
+      "category": "support",
+      "parameters": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "category": {
+            "default": "other",
+            "title": "Category",
+            "type": "string"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Context"
+          },
+          "contact_ok": {
+            "default": false,
+            "title": "Contact Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "description"
+        ],
+        "title": "report_issueArguments",
         "type": "object"
       }
     },
