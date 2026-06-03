@@ -299,6 +299,8 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
     "BL-P001": "p1s",
     "BBL-P1S": "p1s",
     "BBL-P1P": "p1p",
+    # model_id code (BambuStudio resources/printers/N9.json + MQTT report)
+    "N9": "a2l",
     # Human-readable names (from slicer config / XML metadata)
     "Bambu Lab A1 mini": "a1_mini",
     "Bambu Lab A1": "a1",
@@ -313,6 +315,7 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
     "039": "a1",
     "01S": "x1c",
     "01P": "p1s",
+    "26A": "a2l",
 }
 
 
