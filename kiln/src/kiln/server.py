@@ -8786,6 +8786,36 @@ def analyze_print_failure(job_id: str) -> dict:
                 causes.append("Late-print failure — possibly cooling or overhang issue")
                 recommendations.append("Review slicer support settings for the model")
 
+        # Wet-filament check: moisture in the spool causes popping, stringing,
+        # rough surfaces, and weak layers.  Uses the kiln-pro fingerprint when
+        # installed (https://kiln3d.com), else a lightweight in-tree heuristic;
+        # either way points at the Pro drying advisor for the safe recipe.
+        _wet_terms = (
+            "popping", "crackling", "stringing", "oozing", "bubbles", "steam",
+            "rough surface", "weak layer", "delamination", "moisture", "wet",
+            "humid", "damp",
+        )
+        haystack = " ".join([error.lower(), *(s.lower() for s in symptoms)])
+        wet = any(term in haystack for term in _wet_terms)
+        try:
+            from kiln_pro.recovery.incident import classify_wet_filament
+
+            wet = wet or classify_wet_filament(haystack)
+        except ImportError:
+            pass
+        if wet:
+            causes.append(
+                "Possible wet/moist filament — popping, stringing, rough surfaces, "
+                "and weak layers are classic moisture symptoms."
+            )
+            recommendations.append(
+                "If you see stringing, popping, or weak/rough layers, the filament "
+                "may be wet. drying_advisor (kiln-pro, https://kiln3d.com) gives the "
+                "safe drying temperature and time for your exact material before a "
+                "reprint — drying protects future prints but can't restore strength "
+                "already lost in the failed part."
+            )
+
         # Default if no specific analysis
         if not symptoms:
             symptoms.append("No detailed event data available for this job")
