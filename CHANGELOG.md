@@ -18,6 +18,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   to design something, it factors in your machine's real build size, supported
   materials, and temperature limits — for every printer Kiln supports now, not
   just the popular flagships.
+- **Kiln spots wet filament after a failed print.** If a failure looks like
+  moisture (popping, stringing, weak layers), Kiln names it as a likely cause —
+  works for any printer, any material.
+- **A heads-up before you print a moisture-prone filament.** A gentle nudge for
+  nylons, polycarbonates, CF/GF blends, supports, and other thirsty materials —
+  works for any printer; never blocks the print.
+
+### Changed
+
+- **Emergency stop also turns off the AMS dryer (Bambu).** On Bambu printers
+  with an AMS 2 Pro or AMS HT, an emergency stop also halts that printer's
+  dryer — one printer or the whole fleet, matching whatever you stopped.
+  Routine cancels leave the dryer running. Other printers are unaffected.
 
 ### Fixed
 
