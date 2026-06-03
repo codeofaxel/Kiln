@@ -40,6 +40,9 @@ class TestSuggestBambuModel:
     def test_p2s_prefix(self):
         assert suggest_bambu_model("22E0ABC") == "bambu_p2s"
 
+    def test_a2l_prefix(self):
+        assert suggest_bambu_model("26A0ABC") == "bambu_a2l"
+
     def test_unknown_serial_returns_none(self):
         assert suggest_bambu_model("XYZZZZ_future_model") is None
 

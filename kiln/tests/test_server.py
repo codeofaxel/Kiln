@@ -2840,6 +2840,35 @@ class TestWrapGcodeAs3mf:
 # ---------------------------------------------------------------------------
 
 
+class TestMapPrinterHintToProfileId:
+    """Direct unit tests for the slice-profile hint resolver.
+
+    Regression guard: every Bambu model Kiln ships a slicer profile for
+    must resolve from a free-form hint, including the canonical id.  The
+    A2L previously fell through to None (no branch) even though its
+    profile shipped — this pins it and the siblings against re-breakage.
+    """
+
+    def test_a2l_hints_resolve(self):
+        from kiln.server import _map_printer_hint_to_profile_id as m
+
+        assert m("bambu_a2l") == "bambu_a2l"
+        assert m("a2l") == "bambu_a2l"
+        assert m("A2L") == "bambu_a2l"
+        assert m("A2L Combo") == "bambu_a2l"
+        assert m("Bambu Lab A2L") == "bambu_a2l"
+
+    def test_a2l_does_not_shadow_siblings(self):
+        from kiln.server import _map_printer_hint_to_profile_id as m
+
+        # "a2l" shares no substring with the a1 / x1 / p1 branches,
+        # so adding it must not perturb their resolution.
+        assert m("a1") == "bambu_a1"
+        assert m("bambu_a1") == "bambu_a1"
+        assert m("p2s") == "bambu_p2s"
+        assert m("x1e") == "bambu_x1e"
+
+
 class TestResliceWithOverrides:
     """Tests for the reslice_with_overrides MCP tool.
 

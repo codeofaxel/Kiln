@@ -7689,6 +7689,8 @@ def _map_printer_hint_to_profile_id(raw: str | None) -> str | None:
         return "bambu_a1_mini"
     if hint in {"bambu_a1", "a1", "a1_combo"} or ("bambu" in hint and "a1" in hint):
         return "bambu_a1"
+    if "a2l" in hint:
+        return "bambu_a2l"
     if "x1e" in hint or "x1e" in hint_compact:
         return "bambu_x1e"
     if "x1c" in hint or "x1_carbon" in hint_compact or ("bambu" in hint and "x1" in hint):

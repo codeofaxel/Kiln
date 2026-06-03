@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 # Full official table (only the models Kiln has profiles for are mapped below;
 # the rest are recorded for when those models are added — see
 # kiln_pro device intelligence):
-#   039 A1 · 030 A1 mini · 01P P1S · 01S P1P · 00M X1C · 03W X1E · 22E P2S
+#   039 A1 · 030 A1 mini · 01P P1S · 01S P1P · 00M X1C · 03W X1E · 22E P2S · 26A A2L
 #   094 H2D · 239 H2D Pro · 093 H2S · 31B H2C · 20P X2D
 #
 # This is only the PRE-CONNECTION suggestion shown at CLI setup.  Authoritative
@@ -56,6 +56,7 @@ _BAMBU_PREFIX_SUGGESTIONS: dict[str, str] = {
     "00M": "bambu_x1c",
     "03W": "bambu_x1e",
     "22E": "bambu_p2s",
+    "26A": "bambu_a2l",
 }
 
 # Top-N common models per backend type, shown as examples in the prompt.
