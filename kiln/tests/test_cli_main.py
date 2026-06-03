@@ -1590,6 +1590,80 @@ class TestQueueCLI:
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
 
+    def test_queue_clear_all(self, runner):
+        """kiln queue clear cancels every queued job and reports the count."""
+        mock_result = {
+            "success": True,
+            "dry_run": False,
+            "count": 3,
+            "cancelled": ["job-a", "job-b", "job-c"],
+            "skipped": [],
+            "message": "Cancelled 3 queued job(s).",
+        }
+        with patch(
+            "kiln.plugins.queue_tools.cancel_queued_jobs", return_value=mock_result
+        ) as mock_clear:
+            result = runner.invoke(cli, ["queue", "clear"])
+        assert result.exit_code == 0
+        # No --printer => sweep every queued job; not a dry run.
+        mock_clear.assert_called_once_with(printer_name=None, dry_run=False)
+        assert "3 queued job(s) cancelled" in result.output
+
+    def test_queue_clear_dry_run_changes_nothing(self, runner):
+        """kiln queue clear --dry-run previews and cancels nothing."""
+        mock_result = {
+            "success": True,
+            "dry_run": True,
+            "count": 2,
+            "cancelled": ["job-a", "job-b"],
+            "skipped": [],
+            "message": "2 queued job(s) would be cancelled — dry run, nothing changed.",
+        }
+        with patch(
+            "kiln.plugins.queue_tools.cancel_queued_jobs", return_value=mock_result
+        ) as mock_clear:
+            result = runner.invoke(cli, ["queue", "clear", "--dry-run"])
+        assert result.exit_code == 0
+        mock_clear.assert_called_once_with(printer_name=None, dry_run=True)
+        assert "would be cancelled" in result.output
+
+    def test_queue_clear_scopes_to_printer(self, runner):
+        """kiln queue clear --printer scopes the sweep to one printer."""
+        mock_result = {
+            "success": True,
+            "dry_run": False,
+            "count": 1,
+            "cancelled": ["job-on-voron"],
+            "skipped": [],
+            "message": "Cancelled 1 queued job(s) on voron-350.",
+        }
+        with patch(
+            "kiln.plugins.queue_tools.cancel_queued_jobs", return_value=mock_result
+        ) as mock_clear:
+            result = runner.invoke(cli, ["queue", "clear", "--printer", "voron-350"])
+        assert result.exit_code == 0
+        mock_clear.assert_called_once_with(printer_name="voron-350", dry_run=False)
+        assert "voron-350" in result.output
+
+    def test_queue_clear_json(self, runner):
+        """kiln queue clear --json emits the raw result under the data envelope."""
+        mock_result = {
+            "success": True,
+            "dry_run": False,
+            "count": 2,
+            "cancelled": ["job-a", "job-b"],
+            "skipped": [{"job_id": "job-c", "reason": "no longer queued (status: PRINTING)"}],
+            "message": "Cancelled 2 queued job(s). 1 skipped (already started or no longer queued).",
+        }
+        with patch("kiln.plugins.queue_tools.cancel_queued_jobs", return_value=mock_result):
+            result = runner.invoke(cli, ["queue", "clear", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["status"] == "success"
+        assert data["data"]["count"] == 2
+        assert data["data"]["cancelled"] == ["job-a", "job-b"]
+        assert data["data"]["skipped"][0]["job_id"] == "job-c"
+
     def test_queue_cancel_json(self, runner):
         """kiln queue cancel --json returns valid JSON."""
         mock_result = {

@@ -5109,6 +5109,62 @@ def queue_cancel_cmd(job_id: str, json_mode: bool) -> None:
         sys.exit(1)
 
 
+@queue.command("clear")
+@click.option("--printer", "-p", default=None, help="Only clear jobs queued for this printer.")
+@click.option("--dry-run", is_flag=True, help="Preview which jobs would be cancelled without cancelling any.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def queue_clear_cmd(printer: str | None, dry_run: bool, json_mode: bool) -> None:
+    """Cancel all queued jobs at once (bulk sibling of 'kiln queue cancel').
+
+    Clears every job in the QUEUED state immediately. Pass --printer to scope
+    the sweep to one printer, or --dry-run to preview what would be cancelled
+    without changing anything. A running print is never cancelled.
+    """
+    try:
+        from kiln.plugins.queue_tools import cancel_queued_jobs as _cancel_queued_jobs
+
+        result = _cancel_queued_jobs(printer_name=printer, dry_run=dry_run)
+        if not result.get("success"):
+            click.echo(
+                format_error(
+                    result.get("error", "Unknown error"),
+                    code=result.get("code", "ERROR"),
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+
+        if json_mode:
+            click.echo(format_response("success", data=result, json_mode=True))
+            return
+
+        click.echo(result["message"])
+        cancelled = result.get("count", 0)
+        skipped = result.get("skipped", [])
+        verb = "would be cancelled" if result.get("dry_run") else "cancelled"
+        summary = f"{cancelled} queued job(s) {verb}"
+        if skipped:
+            summary += f", {len(skipped)} skipped"
+        summary += "."
+        click.echo(summary)
+    except ValueError as exc:
+        click.echo(
+            format_error(
+                f"Failed to clear the queue: {exc}",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Failed to clear the queue: {exc}",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+
 # ---------------------------------------------------------------------------
 # ingest (watch-folder handoff)
 # ---------------------------------------------------------------------------
