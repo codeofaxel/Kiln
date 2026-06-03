@@ -315,7 +315,7 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
     "039": "a1",
     "01S": "x1c",
     "01P": "p1s",
-    "26A": "a2l",
+    "26A": "a2l",  # source: wiki.bambulab.com/en/general/find-sn
 }
 
 
