@@ -1688,6 +1688,27 @@ _stream_proxy: MJPEGProxy | None = None
 _cloud_sync: CloudSyncManager | None = None
 
 
+# Materials that readily absorb moisture from the air.  A loaded filament whose
+# type matches any of these tokens (case-insensitive substring) is treated as
+# physically plausible for a wet-filament failure or pre-print drying nudge;
+# anything else is non-hygroscopic and a wet-filament finding requires stronger
+# symptom evidence.  Shared by preflight_check and analyze_print_failure.
+_HYGROSCOPIC_MATERIAL_HINTS: tuple[str, ...] = (
+    "nylon", "pa6", "pa11", "pa12", "paht", "pa-",
+    "pva", "tpu", "tpe", "pc", "polycarbonate",
+    "pet-cf", "petg-cf", "-cf", "-gf", "carbon", "glass",
+    "pps", "ppa", "peek", "pekk", "pvb", "bvoh",
+)
+
+# Wet-filament keyword bar: a non-hygroscopic material needs at least this many
+# distinct symptom keywords (popping/stringing/oozing/etc.) in the failure text
+# before wet filament is added to the possible-causes list.  Hygroscopic
+# materials trip the flag on a single symptom because moisture is physically
+# plausible there; an explicit moisture mention ("wet", "humid", "damp",
+# "moisture") always trips the flag regardless.
+_WET_MIN_HITS: int = 2
+
+
 def _get_cloud_sync() -> CloudSyncManager | None:
     """Return the current cloud sync manager (may be None if not configured)."""
     return _cloud_sync
@@ -5757,28 +5778,23 @@ def preflight_check(
         # is an advisory nudge, never a block — the user owns the call.  The
         # drying_advisor tool (kiln-pro, https://kiln3d.com) gives the safe
         # per-material drying recipe.
-        if expected_material:
-            _hygroscopic = (
-                "nylon", "pa6", "pa11", "pa12", "paht", "pa-",
-                "pva", "tpu", "tpe", "pc", "polycarbonate",
-                "pet-cf", "petg-cf", "-cf", "-gf", "carbon", "glass",
-                "pps", "ppa", "peek", "pekk", "pvb", "bvoh",
+        if expected_material and any(
+            tok in expected_material.lower() for tok in _HYGROSCOPIC_MATERIAL_HINTS
+        ):
+            checks.append(
+                {
+                    "name": "filament_moisture",
+                    "passed": True,
+                    "advisory": True,
+                    "message": (
+                        f"{expected_material.upper()} readily absorbs moisture. "
+                        "If the spool has been open or stored in humid air, a wet "
+                        "spool prints rough/weak — consider drying first. "
+                        "drying_advisor (kiln-pro) gives the safe temp and time "
+                        "for your material."
+                    ),
+                }
             )
-            if any(tok in expected_material.lower() for tok in _hygroscopic):
-                checks.append(
-                    {
-                        "name": "filament_moisture",
-                        "passed": True,
-                        "advisory": True,
-                        "message": (
-                            f"{expected_material.upper()} readily absorbs moisture. "
-                            "If the spool has been open or stored in humid air, a wet "
-                            "spool prints rough/weak — consider drying first. "
-                            "drying_advisor (kiln-pro) gives the safe temp and time "
-                            "for your material."
-                        ),
-                    }
-                )
 
         # -- Outcome history advisory (learning database) ------------------
         # Query past outcomes for this printer + material combo to warn
@@ -8818,19 +8834,46 @@ def analyze_print_failure(job_id: str) -> dict:
         # rough surfaces, and weak layers.  Uses the kiln-pro fingerprint when
         # installed (https://kiln3d.com), else a lightweight in-tree heuristic;
         # either way points at the Pro drying advisor for the safe recipe.
-        _wet_terms = (
+        # Symptom keywords that point at moisture but each has other plausible
+        # causes (stringing -> retraction, oozing -> temperature, etc.) — a
+        # single hit is circumstantial, multiple hits are corroborating.
+        _wet_symptom_terms = (
             "popping", "crackling", "stringing", "oozing", "bubbles", "steam",
-            "rough surface", "weak layer", "delamination", "moisture", "wet",
-            "humid", "damp",
+            "rough surface", "weak layer", "delamination",
         )
+        # Explicit mentions that name moisture directly — these trip the flag
+        # on a single hit regardless of material, because the user (or another
+        # tool in the pipeline) has already named the cause.
+        _wet_explicit_terms = ("moisture", "wet", "humid", "damp")
         haystack = " ".join([error.lower(), *(s.lower() for s in symptoms)])
-        wet = any(term in haystack for term in _wet_terms)
-        try:
-            from kiln_pro.recovery.incident import classify_wet_filament
+        symptom_hits = sum(1 for t in _wet_symptom_terms if t in haystack)
+        explicit_mention = any(t in haystack for t in _wet_explicit_terms)
 
-            wet = wet or classify_wet_filament(haystack)
-        except ImportError:
+        # Best-effort: read the printer's currently-loaded material to gate the
+        # symptom bar.  May differ from what was loaded during the failed print
+        # (the user could have swapped since); treated as a hint, not a fact.
+        loaded_material: str | None = None
+        try:
+            loaded = _get_material_tracker().get_material(job.printer_name)
+            if loaded is not None and loaded.material_type:
+                loaded_material = loaded.material_type.lower()
+        except Exception:  # noqa: BLE001 — tracker access must never break analysis
             pass
+        hygroscopic = bool(loaded_material and any(
+            tok in loaded_material for tok in _HYGROSCOPIC_MATERIAL_HINTS
+        ))
+
+        # Hybrid rule (panel-approved):
+        #   - explicit moisture mention -> flag (always)
+        #   - hygroscopic material -> 1 symptom suffices (moisture is the
+        #     physically plausible default for these filaments)
+        #   - non-hygroscopic / unknown material -> _WET_MIN_HITS (=2)
+        #     distinct symptoms required (single keyword is too noisy)
+        wet = explicit_mention or (
+            (hygroscopic and symptom_hits >= 1)
+            or symptom_hits >= _WET_MIN_HITS
+        )
+
         if wet:
             causes.append(
                 "Possible wet/moist filament — popping, stringing, rough surfaces, "
