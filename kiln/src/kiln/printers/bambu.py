@@ -299,8 +299,9 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
     "BL-P001": "p1s",
     "BBL-P1S": "p1s",
     "BBL-P1P": "p1p",
-    # model_id code (BambuStudio resources/printers/N9.json + MQTT report)
+    # model_id codes (BambuStudio resources/printers/N*.json + MQTT report)
     "N9": "a2l",
+    "N7": "p2s",
     # Human-readable names (from slicer config / XML metadata)
     "Bambu Lab A1 mini": "a1_mini",
     "Bambu Lab A1": "a1",
@@ -310,12 +311,16 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
     "Bambu Lab P1S": "p1s",
     "Bambu Lab P2S": "p2s",
     "Bambu Lab P1P": "p1p",
-    # Serial number prefixes (first 3 chars of Bambu serial)
+    # Serial number prefixes (first 3 chars of Bambu serial).
+    # All verified against wiki.bambulab.com/en/general/find-sn (2026-06).
     "030": "a1_mini",
     "039": "a1",
-    "01S": "x1c",
+    "00M": "x1c",
+    "03W": "x1e",
     "01P": "p1s",
-    "26A": "a2l",  # source: wiki.bambulab.com/en/general/find-sn
+    "01S": "p1p",  # FIX: was wrongly mapped to "x1c". 01S is P1P; X1C is 00M.
+    "22E": "p2s",
+    "26A": "a2l",
 }
 
 
