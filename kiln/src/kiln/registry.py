@@ -244,11 +244,19 @@ class PrinterRegistry:
             meta = metadata_snapshot.get(name)
             return meta.site if meta else ""
 
+        def _model_for(adapter: PrinterAdapter) -> str | None:
+            # Raw model string (e.g. "bambu_a1") so clients can resolve a
+            # display label and build volume. Not every adapter tracks one.
+            m = getattr(adapter, "printer_model", None) or getattr(adapter, "_printer_model", None)
+            m = (m or "").strip()
+            return m or None
+
         def _query(name: str, adapter: PrinterAdapter) -> dict:
             state = adapter.get_state()
             return {
                 "name": name,
                 "backend": adapter.name,
+                "model": _model_for(adapter),
                 "site": _site_for(name),
                 "connected": state.connected,
                 "state": state.state.value,
@@ -263,6 +271,7 @@ class PrinterRegistry:
             return {
                 "name": name,
                 "backend": adapter.name,
+                "model": _model_for(adapter),
                 "site": _site_for(name),
                 "connected": False,
                 "state": PrinterStatus.OFFLINE.value,

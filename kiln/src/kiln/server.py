@@ -1190,7 +1190,10 @@ def _build_adapter_from_config_entry(name: str, entry: dict[str, Any]) -> Printe
             raise RuntimeError(f"Config entry {name!r} (Bambu) is missing 'access_code'.")
         if not serial:
             raise RuntimeError(f"Config entry {name!r} (Bambu) is missing 'serial'.")
-        adapter = BambuAdapter(host=host, access_code=api_key, serial=serial)
+        adapter = BambuAdapter(
+            host=host, access_code=api_key, serial=serial,
+            printer_model=printer_model or None,
+        )
     elif printer_type == "elegoo":
         if ElegooAdapter is None:
             raise RuntimeError(
