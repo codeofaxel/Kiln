@@ -483,9 +483,7 @@ def load_bearing_signal(
         return True
     if is_engineering_material(material):
         return True
-    if joint_type and joint_type.strip().lower() in _STRUCTURAL_JOINT_TYPES:
-        return True
-    return False
+    return bool(joint_type and joint_type.strip().lower() in _STRUCTURAL_JOINT_TYPES)
 
 
 def attach_load_bearing_nudge(

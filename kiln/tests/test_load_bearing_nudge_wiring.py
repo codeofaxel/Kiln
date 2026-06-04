@@ -18,15 +18,12 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from kiln.load_bearing_detector import (
     _LOW_LOAD_THRESHOLD_N,
     attach_load_bearing_nudge,
     is_engineering_material,
     load_bearing_signal,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers — capture the registered tool functions off a fake MCP
