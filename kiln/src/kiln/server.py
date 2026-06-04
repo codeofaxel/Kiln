@@ -861,6 +861,26 @@ _current_mcp_request_context: ContextVar[Any | None] = ContextVar(
 )
 
 
+def _record_local_tool_call(name: str) -> None:
+    """Best-effort: feed the on-device usage ledger after a tool call.
+
+    With kiln-pro installed, ``pro_features.record_local_tool_call``
+    tallies the call in ``~/.kiln`` and, when the user is signed in,
+    syncs it to their ``/stats`` dashboard so local agent work counts —
+    not just web-app activity.  Free installs have no kiln-pro, so this
+    is a silent no-op (free-tier local-stats sync is a separate follow
+    up).  NEVER raises: a stats hook must never break a tool call.
+    """
+    try:
+        from kiln_pro.bridge import pro_features
+    except Exception:
+        return
+    try:
+        pro_features.record_local_tool_call(name)
+    except Exception:
+        pass
+
+
 def _install_mcp_request_context_capture() -> None:
     """Capture current MCP request context so auth can read per-request metadata."""
     tool_mgr = mcp._tool_manager
@@ -878,12 +898,17 @@ def _install_mcp_request_context_capture() -> None:
     ):
         token = _current_mcp_request_context.set(context)
         try:
-            return await original_call_tool(
+            result = await original_call_tool(
                 name,
                 arguments,
                 context=context,
                 convert_result=convert_result,
             )
+            # Best-effort usage tally — only after a call that returned
+            # (a tool that raised is not counted); cannot affect the
+            # result and cannot raise.
+            _record_local_tool_call(name)
+            return result
         finally:
             _current_mcp_request_context.reset(token)
 
