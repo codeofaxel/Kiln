@@ -18,6 +18,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Bambu Lab A2L support.** Kiln recognizes the A2L on connect and at
   setup — temperature limits, build volume, per-material settings, and a
   tuned slicer profile, no manual setup.
+- **Bambu Lab H2S support.** Kiln recognizes the enclosed H2S on connect and
+  at setup — temperature limits, build volume, per-material settings across
+  its full engineering-material range (ABS/ASA/PC/PA/CF), and a tuned slicer
+  profile, no manual setup.
 - **Start, stop, and check your AMS dryer — free for everyone.** On Bambu
   printers with an AMS 2 Pro or AMS HT, Kiln can now run a drying cycle (start
   or stop it) and show how damp the filament is, how much drying time is left,
