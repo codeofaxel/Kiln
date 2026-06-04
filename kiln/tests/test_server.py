@@ -2868,6 +2868,25 @@ class TestMapPrinterHintToProfileId:
         assert m("p2s") == "bambu_p2s"
         assert m("x1e") == "bambu_x1e"
 
+    def test_h2s_hints_resolve(self):
+        from kiln.server import _map_printer_hint_to_profile_id as m
+
+        assert m("bambu_h2s") == "bambu_h2s"
+        assert m("h2s") == "bambu_h2s"
+        assert m("H2S") == "bambu_h2s"
+        assert m("Bambu Lab H2S") == "bambu_h2s"
+
+    def test_h2s_does_not_shadow_siblings(self):
+        from kiln.server import _map_printer_hint_to_profile_id as m
+
+        # "h2s" shares no substring with the a1 / x1 / p1 / p2s / a2l
+        # branches, so adding it must not perturb their resolution.
+        assert m("a1") == "bambu_a1"
+        assert m("p1s") == "bambu_p1s"
+        assert m("p2s") == "bambu_p2s"
+        assert m("a2l") == "bambu_a2l"
+        assert m("x1e") == "bambu_x1e"
+
 
 class TestResliceWithOverrides:
     """Tests for the reslice_with_overrides MCP tool.

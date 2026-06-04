@@ -402,6 +402,17 @@ _SPEED_CAPABILITIES: dict[str, dict[str, Any]] = {
         "quality_factor": 0.78,
         "slicer_time_factor": 0.48,
     },
+    "bambu_h2s": {
+        # H2-series enclosed CoreXY.  BambuStudio reports a higher hardware
+        # ceiling (1000 mm/s, 20000 mm/s2) than the P/X CoreXY platform, but
+        # the quality envelope stays conservative — mirroring the enclosed
+        # P2S/X1 rows — until field data justifies tuning it up.
+        "max_speed": 300,
+        "max_accel": 12000,
+        "input_shaping": True,
+        "quality_factor": 0.78,
+        "slicer_time_factor": 0.48,
+    },
     "bambu_p1p": {
         "max_speed": 300,
         "max_accel": 10000,

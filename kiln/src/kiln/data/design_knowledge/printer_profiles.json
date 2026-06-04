@@ -210,6 +210,37 @@
       0.28
     ]
   },
+  "bambu_h2s": {
+    "display_name": "Bambu Lab H2S",
+    "manufacturer": "Bambu Lab",
+    "build_volume_mm": {
+      "x": 340,
+      "y": 320,
+      "z": 340
+    },
+    "max_hotend_temp_c": 350,
+    "max_bed_temp_c": 120,
+    "has_enclosure": true,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "pla",
+      "petg",
+      "abs",
+      "tpu",
+      "asa",
+      "nylon",
+      "polycarbonate"
+    ],
+    "typical_tolerance_mm": 0.1,
+    "max_print_speed_mm_s": 1000,
+    "default_layer_heights_mm": [
+      0.08,
+      0.12,
+      0.16,
+      0.2,
+      0.28
+    ]
+  },
   "prusa_mk4": {
     "display_name": "Prusa MK4",
     "manufacturer": "Prusa Research",

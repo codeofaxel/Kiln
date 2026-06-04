@@ -529,6 +529,21 @@
     ],
     "notes": "Open-frame large-format bed-slinger (330x320x325). PMSM closed-loop servo extruder. Stainless-steel nozzle (NOT hardened) - fit hardened for carbon-fibre. 80C bed cap blocks ABS/ASA/PA/PC. No heated chamber, no LiDAR/AI camera. 2.4GHz Wi-Fi only."
   },
+  "bambu_h2s": {
+    "display_name": "Bambu Lab H2S",
+    "max_hotend_temp": 350.0,
+    "max_bed_temp": 120.0,
+    "max_chamber_temp": 65.0,
+    "max_feedrate": 60000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 32.0,
+    "build_volume": [
+      340,
+      320,
+      340
+    ],
+    "notes": "Enclosed CoreXY, direct drive. All-metal hardened-steel factory hotend (abrasive-ready out of the box). Active heated chamber to 65C (engages ~40C) with a 120C bed and 350C hotend - the full engineering-material envelope (ABS/ASA/PC/PA/CF). AMS 2 Pro multi-material via the AMS Hub. 1000 mm/s toolhead = feedrate 60000. Volumetric-flow ceiling 32 mm3/s is conservative pending field data on the high-flow hotend. AI chamber monitoring + physical clump detector; no LiDAR first-layer inspection."
+  },
   "voron_0": {
     "display_name": "Voron 0 / 0.2",
     "max_hotend_temp": 300.0,

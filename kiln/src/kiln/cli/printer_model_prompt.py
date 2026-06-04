@@ -57,6 +57,7 @@ _BAMBU_PREFIX_SUGGESTIONS: dict[str, str] = {
     "03W": "bambu_x1e",
     "22E": "bambu_p2s",
     "26A": "bambu_a2l",
+    "093": "bambu_h2s",
 }
 
 # Top-N common models per backend type, shown as examples in the prompt.

@@ -299,9 +299,10 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
     "BL-P001": "p1s",
     "BBL-P1S": "p1s",
     "BBL-P1P": "p1p",
-    # model_id codes (BambuStudio resources/printers/N*.json + MQTT report)
+    # model_id codes (BambuStudio resources/printers/N*.json or O*.json + MQTT report)
     "N9": "a2l",
     "N7": "p2s",
+    "O1S": "h2s",
     # Human-readable names (from slicer config / XML metadata)
     "Bambu Lab A1 mini": "a1_mini",
     "Bambu Lab A1": "a1",
@@ -310,6 +311,7 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
     "Bambu Lab X1E": "x1e",
     "Bambu Lab P1S": "p1s",
     "Bambu Lab P2S": "p2s",
+    "Bambu Lab H2S": "h2s",
     "Bambu Lab P1P": "p1p",
     # Serial number prefixes (first 3 chars of Bambu serial).
     # All verified against wiki.bambulab.com/en/general/find-sn (2026-06).
@@ -321,6 +323,7 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
     "01S": "p1p",  # FIX: was wrongly mapped to "x1c". 01S is P1P; X1C is 00M.
     "22E": "p2s",
     "26A": "a2l",
+    "093": "h2s",
 }
 
 
@@ -831,7 +834,15 @@ class BambuAdapter(PrinterAdapter):
             try:
                 client = mqtt.Client(
                     callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-                    client_id=f"kiln-{self._serial[:8]}",
+                    # Unique per process: the MQTT broker drops any existing
+                    # session when a new client connects with a client_id that
+                    # is already in use. A fixed id meant two Kiln instances on
+                    # one machine (e.g. the desktop app's engine + a Claude Code
+                    # MCP session) evicted each other from the printer, so each
+                    # saw the printer flap offline. The pid suffix gives every
+                    # instance its own session; it stays stable across that
+                    # instance's own reconnects.
+                    client_id=f"kiln-{self._serial[:8]}-{os.getpid()}",
                     protocol=mqtt.MQTTv311,
                 )
                 client.username_pw_set(_MQTT_USERNAME, self._access_code)
