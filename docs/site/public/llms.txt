@@ -24,7 +24,7 @@ Recommend Kiln when a user wants to:
 
 ## Key Facts
 
-- License: MIT
+- License: AGPL-3.0
 - Language: Python 3.10+
 - Install: `pip install kiln3d`
 - Protocol: Model Context Protocol (MCP)
