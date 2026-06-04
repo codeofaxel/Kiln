@@ -837,11 +837,11 @@ class BambuAdapter(PrinterAdapter):
                     # Unique per process: the MQTT broker drops any existing
                     # session when a new client connects with a client_id that
                     # is already in use. A fixed id meant two Kiln instances on
-                    # one machine (e.g. the desktop app's engine + a Claude Code
-                    # MCP session) evicted each other from the printer, so each
-                    # saw the printer flap offline. The pid suffix gives every
-                    # instance its own session; it stays stable across that
-                    # instance's own reconnects.
+                    # one machine (for example a long-running `kiln serve` plus
+                    # a Claude Code MCP session) evicted each other from the
+                    # printer, so each saw it flap offline. The pid suffix gives
+                    # every instance its own session; it stays stable across
+                    # that instance's own reconnects.
                     client_id=f"kiln-{self._serial[:8]}-{os.getpid()}",
                     protocol=mqtt.MQTTv311,
                 )
