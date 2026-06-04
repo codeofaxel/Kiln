@@ -78,9 +78,15 @@ def test_no_screw_hole_when_helper_returns_none(monkeypatch):
     assert jv.to_dict()["screw_hole"] is None
 
 
-def test_real_helper_degrades_to_none_without_pro_resolver():
-    # Genuine graceful path: kiln-pro's resolver isn't importable here
-    # until kiln-pro ships it, so the helper catches ImportError -> None.
+def test_real_helper_degrades_to_none_without_pro_resolver(monkeypatch):
+    # Genuine graceful path: force the kiln-pro resolver import to FAIL so
+    # this exercises the real ImportError fallback whether or not kiln-pro
+    # is installed.  In the combined dev/CI env kiln-pro IS importable, so
+    # without this hermetic guard the helper resolves real detail and the
+    # no-pro contract goes untested (the assertion would see a dict, not None).
+    import sys
+
+    monkeypatch.setitem(sys.modules, "kiln_pro.fasteners_intelligence", None)
     spec = FastenerSpec(
         size="M3", family="metric_machine_screw", surface_type="printed",
     )
