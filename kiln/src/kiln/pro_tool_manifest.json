@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-06-03T16:12:58.774027+00:00",
+  "generated": "2026-06-03T23:25:05.044265+00:00",
   "tool_count": 322,
   "categories": {
     "product_generators": {
@@ -5547,7 +5547,7 @@
     },
     {
       "name": "review_design_pull_request",
-      "description": "Approve, request changes, or reject a proposed design change.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Comment on, approve, request changes, or reject a design change.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -5557,6 +5557,7 @@
             "type": "string"
           },
           "decision": {
+            "default": "COMMENT",
             "title": "Decision",
             "type": "string"
           },
@@ -5579,8 +5580,7 @@
           }
         },
         "required": [
-          "pr_id",
-          "decision"
+          "pr_id"
         ],
         "title": "review_design_pull_requestArguments",
         "type": "object"
