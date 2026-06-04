@@ -22,22 +22,6 @@ from kiln.parent_watchdog import start_parent_watchdog
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _wait_for(condition, timeout: float = 2.0, poll: float = 0.02) -> bool:
-    """Poll ``condition()`` until truthy or timeout.  Returns the
-    final result so tests can assert on it directly."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if condition():
-            return True
-        time.sleep(poll)
-    return condition()
-
-
-# ---------------------------------------------------------------------------
 # Disabled / no-op cases
 # ---------------------------------------------------------------------------
 
@@ -87,7 +71,7 @@ class TestOrphanDetection:
             interval_s=0.05,
             on_orphaned=orphaned.set,
         )
-        assert _wait_for(orphaned.is_set, timeout=2.0)
+        assert orphaned.wait(timeout=10.0)
 
     def test_keeps_running_when_parent_alive(self, monkeypatch):
         """Steady state — same parent every poll → never exits."""
@@ -165,10 +149,11 @@ class TestConfiguration:
 
         monkeypatch.setattr("kiln.parent_watchdog.os.getppid", fake_getppid)
         start_parent_watchdog(on_orphaned=orphaned.set)
-        # If the env override took effect (~50ms), this fires within
-        # a few hundred ms; if it didn't (default 30s), this test
-        # would hang on the wait_for default.
-        assert _wait_for(orphaned.is_set, timeout=2.0)
+        # If the env override took effect (~50ms), the event is set
+        # within a few hundred ms and ``wait`` returns immediately; if
+        # it didn't (default 30s interval), the event never fires
+        # inside the 10s bound and the assert fails.
+        assert orphaned.wait(timeout=10.0)
 
     def test_garbage_env_interval_falls_back_to_default(self, monkeypatch):
         """A garbage env value must not crash the process at
