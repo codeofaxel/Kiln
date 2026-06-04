@@ -1,0 +1,64 @@
+---
+import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
+
+const contentHtml = `
+<p><strong>Kiln 1.1.7 is a big release.</strong> You can now dry your filament straight from Kiln, clear a backed-up print queue in one step, report a bug without leaving the app, and get warned when a print fails because the filament got damp. On Kiln Pro, Kiln tells you exactly how to dry any spool, sizes the holes so screwed-together parts actually hold, and lets you review design changes right in Kiln&rsquo;s web app. Kiln 1.1.7 also supports four new Bambu Lab printers, including the brand-new A2L.</p>
+
+<h2>Dry your filament without leaving Kiln</h2>
+
+<p>3D-printing filament quietly soaks up moisture from the air, and damp filament prints badly. Some of Bambu&rsquo;s multi-spool filament hubs (the AMS 2 Pro and the AMS HT) have a built-in dryer to deal with that. Kiln can now run it for you, free for everyone: start or stop a drying cycle, and check how damp the filament is, how much drying time is left, and what it&rsquo;s set to. Safety checks stop you from running it hotter than the hub can handle, and hitting emergency-stop now switches the dryer off too.</p>
+
+<h2>Know exactly how to dry each spool <em>(Kiln Pro)</em></h2>
+
+<p>Running the dryer is one thing; knowing the right setting is another. Every material needs its own temperature and time, and some materials don&rsquo;t need drying at all. Upgrade to Pro tier or higher and Kiln does that part for you. Ask &ldquo;is this spool ready to print?&rdquo; and you get a one-sentence answer: go ahead, or the exact temperature and time to dry it first. It covers 38 filaments, every number taken straight from the manufacturer&rsquo;s own spec sheet, and on a dryer-equipped hub, one tap starts it at those settings.</p>
+
+<h2>Kiln notices wet filament</h2>
+
+<p>When a print comes out stringy, speckled with little pops, or weak and crumbly, the real cause is often damp filament, and it&rsquo;s easy to blame the printer instead. Kiln now recognizes those signs and tells you moisture is the likely culprit, so you can dry the spool before wasting another print. It works on any printer, with any material. And before you load a material that&rsquo;s especially thirsty (such as nylon, polycarbonate, or the carbon- and glass-fibre blends), Kiln gives you a quick heads up. It never blocks the print; it just warns you.</p>
+
+<h2>Clear a backed-up queue in one step</h2>
+
+<p>When prints pile up waiting to run, cancelling them one at a time is tedious. Kiln can now clear the whole queue (or just one printer&rsquo;s jobs) in a single step, and it shows you exactly what&rsquo;s about to be cancelled first, so there are no surprises. Anything that&rsquo;s already printing is left untouched.</p>
+
+<h2>Report a problem, right from Kiln</h2>
+
+<p>Hit a bug, or have an idea? You can now send it to us without leaving Kiln. Just describe it, and Kiln passes it along. Reports are anonymous unless you choose to share your contact, the urgent ones reach us right away, and if something you flagged gets fixed, we let you know.</p>
+
+<h2>Designs that fit your printer</h2>
+
+<p>When you ask Kiln to design a part, it now tailors the result to every printer model Kiln supports, not just the popular flagships. The part comes out sized for your build area (the space your printer can print inside) and built for a material your machine can handle.</p>
+
+<h2>Screw holes that actually hold <em>(Kiln Pro)</em></h2>
+
+<p>When you design parts that screw together, the holes have to be just right: too loose and the screw spins, too tight and it splits the part. Upgrade to Pro tier or higher and Kiln sizes those holes so the screw grips properly, then writes the exact size into your assembly instructions along with a plain step like &ldquo;tighten until it&rsquo;s snug, then stop.&rdquo; It&rsquo;s dialed in for Bambu&rsquo;s PLA and PETG filaments; other setups get a sensible starting point to test.</p>
+
+<h2>Better design reviews in the web app <em>(Kiln Pro)</em></h2>
+
+<p>If your team works on designs together, Kiln Pro lets you propose changes and review each other&rsquo;s. New in 1.1.7: you can do that review right in Kiln&rsquo;s web app at <strong>app.kiln3d.com</strong>. Leave a comment to talk it through, not just approve or reject, and every comment shows the teammate&rsquo;s name instead of a cryptic account ID.</p>
+
+<h2>Smaller fixes that add up</h2>
+
+<p>A few smaller ones, too. One Bambu model (the P1P) could be mistaken for another (the X1C), now sorted. A jammed feeder now shows up clearly as a mechanical problem instead of a vague error. When a Bambu A1 pauses a print because it suspects a glob of filament has built up on the nozzle, Kiln now tells you what it found and what to do. Assembly instructions give cleaner screw guidance. And a couple of rough edges in the web app and the engineering reports got smoothed out.</p>
+
+<p>Full release notes: <a href="https://github.com/codeofaxel/Kiln/blob/main/CHANGELOG.md">CHANGELOG.md</a>.</p>
+
+<h2>Upgrading</h2>
+
+<ul>
+  <li><strong>Already use Kiln?</strong> Run <code>pip install --upgrade kiln3d</code> to move to 1.1.7.</li>
+  <li><strong>On Kiln Pro?</strong> Upgrade to 1.1.7 too, so the drying and printer features line up.</li>
+  <li><strong>New here?</strong> Run <code>pip install kiln3d</code>, then follow the <a href="/install">install guide</a> to connect Kiln to your AI assistant: Claude Desktop, Claude Code, Codex, or any other compatible AI client.</li>
+</ul>
+
+<p style="text-align: center; margin-top: 40px;"><a href="/install" class="btn">Get Kiln &rarr;</a></p>
+`;
+---
+
+<BlogPostLayout
+  title="Kiln 1.1.7: dry your filament right from Kiln, and clear a backed-up queue in one step"
+  description="Kiln 1.1.7: dry your filament straight from your printer's hub, clear a backed-up queue in one step, report a bug in a sentence, and get warned when a print fails because the filament got damp. On Kiln Pro: the exact way to dry any spool, screw holes that hold, and design reviews in the web app. Plus four new Bambu printers."
+  date="June 4, 2026"
+  tags={["release", "v1.1.7", "ams-drying", "wet-filament", "queue", "report-issue"]}
+>
+  <Fragment set:html={contentHtml} />
+</BlogPostLayout>
