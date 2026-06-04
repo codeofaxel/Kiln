@@ -28,6 +28,10 @@ pip install kiln3d
   <a href="https://kiln3d.com#demo">Watch the demo →</a>
 </p>
 
+<p align="center">
+  <sub>Kiln's built in the open. If it made your printing more fun, or just saved you a headache, a ⭐ on the repo helps the next maker find it.</sub>
+</p>
+
 ## Quick Start
 
 Three steps. Then ask your AI to make something.
