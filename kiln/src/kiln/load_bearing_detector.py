@@ -445,3 +445,87 @@ def _build_upgrade_recommendation(trip_reasons: list[str]) -> dict[str, Any]:
             ],
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Structured-input nudge wiring
+# ---------------------------------------------------------------------------
+# Free-tier tools that take structured arguments (not free text) can't run
+# the prose heuristic, so they decide via an explicit signal and attach the
+# same upgrade nudge.  A press-fit or threaded joint carries mechanical load;
+# clearance / snap / glued / magnetic / loose joints do not on their own.
+_STRUCTURAL_JOINT_TYPES: frozenset[str] = frozenset({"press_fit", "threaded"})
+
+
+def is_engineering_material(material: str | None) -> bool:
+    """True when ``material`` names an engineering-grade filament."""
+    if not material:
+        return False
+    text = material.lower()
+    return any(
+        re.search(rf"\b{re.escape(kw)}\b", text) for kw in _ENGINEERING_MATERIALS
+    )
+
+
+def load_bearing_signal(
+    *,
+    material: str | None = None,
+    joint_type: str | None = None,
+    applied_load_n: float | None = None,
+) -> bool:
+    """True when a structured request carries a load-bearing signal.
+
+    For tools that take structured inputs instead of free text: an
+    engineering-grade material, a structural joint (press-fit / threaded),
+    or an explicit applied load at/above the low threshold.
+    """
+    if applied_load_n is not None and applied_load_n >= _LOW_LOAD_THRESHOLD_N:
+        return True
+    if is_engineering_material(material):
+        return True
+    if joint_type and joint_type.strip().lower() in _STRUCTURAL_JOINT_TYPES:
+        return True
+    return False
+
+
+def attach_load_bearing_nudge(
+    response: dict[str, Any],
+    *,
+    force: bool = False,
+    material: str | None = None,
+    joint_type: str | None = None,
+    applied_load_n: float | None = None,
+) -> dict[str, Any]:
+    """Attach the heuristic-grade upgrade nudge to a free-tier tool response.
+
+    Adds an ``upgrade_recommendation`` block plus a one-line
+    ``load_bearing_note`` string when the part is load-bearing — always when
+    ``force`` is set (the tool is definitionally structural, e.g.
+    ``estimate_structural_load``), otherwise when :func:`load_bearing_signal`
+    fires.  No-op on error responses and when no signal is present, so
+    cosmetic calls stay clean.  Mutates and returns ``response``.
+    """
+    if not isinstance(response, dict) or response.get("success") is False:
+        return response
+    if not (
+        force
+        or load_bearing_signal(
+            material=material,
+            joint_type=joint_type,
+            applied_load_n=applied_load_n,
+        )
+    ):
+        return response
+    reasons: list[str] = []
+    if force:
+        reasons.append("load-bearing context")
+    if is_engineering_material(material):
+        reasons.append(f"engineering-grade material '{material}'")
+    if joint_type and joint_type.strip().lower() in _STRUCTURAL_JOINT_TYPES:
+        reasons.append(f"structural joint '{joint_type}'")
+    if applied_load_n is not None and applied_load_n >= _LOW_LOAD_THRESHOLD_N:
+        reasons.append(f"applied load {applied_load_n:.1f} N")
+    nudge = _build_upgrade_recommendation(reasons)
+    response["upgrade_recommendation"] = nudge
+    response["load_bearing_note"] = nudge["warning"]
+    return response

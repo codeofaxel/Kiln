@@ -466,7 +466,11 @@ class _DesignToolsPlugin:
                     }
                 result = estimate.to_dict()
                 result["success"] = True
-                return result
+                # estimate_structural_load is definitionally a load-bearing
+                # question — always surface the heuristic-grade upgrade nudge.
+                from kiln.load_bearing_detector import attach_load_bearing_nudge
+
+                return attach_load_bearing_nudge(result, force=True)
             except Exception as exc:
                 _logger.error("Load estimation failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}

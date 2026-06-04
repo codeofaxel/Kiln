@@ -196,7 +196,29 @@ class _AssemblyToolsPlugin:
 
                 assembly = Assembly.from_dict(json.loads(assembly_json))
                 validated = _validate(assembly, printer_id=printer_id)
-                return {"success": True, "data": validated.to_dict()}
+                response = {"success": True, "data": validated.to_dict()}
+                # Surface the heuristic-grade upgrade nudge when the assembly
+                # carries a load-bearing signal: an engineering-grade material,
+                # a structural joint (press-fit / threaded), or a screw driven
+                # into a printed part.
+                from kiln.load_bearing_detector import (
+                    attach_load_bearing_nudge,
+                    load_bearing_signal,
+                )
+
+                structural = any(
+                    load_bearing_signal(material=p.material) for p in assembly.parts
+                ) or any(
+                    load_bearing_signal(joint_type=i.joint_type)
+                    or (
+                        i.fastener_spec is not None
+                        and getattr(i.fastener_spec, "surface_type", None) == "printed"
+                    )
+                    for i in assembly.interfaces
+                )
+                if structural:
+                    attach_load_bearing_nudge(response, force=True)
+                return response
             except json.JSONDecodeError as exc:
                 return {"success": False, "error": f"Invalid assembly JSON: {exc}"}
             except Exception as exc:
@@ -309,7 +331,21 @@ class _AssemblyToolsPlugin:
                     material_b,
                     printer_id=printer_id,
                 )
-                return {"success": True, "data": result}
+                response = {"success": True, "data": result}
+                # Nudge toward engineering-grade math when the pairing carries
+                # a load-bearing signal (engineering material or a structural
+                # joint); stay silent on cosmetic PLA clearance / snap fits.
+                from kiln.load_bearing_detector import (
+                    attach_load_bearing_nudge,
+                    is_engineering_material,
+                )
+
+                eng_mat = (
+                    material_a if is_engineering_material(material_a) else material_b
+                )
+                return attach_load_bearing_nudge(
+                    response, material=eng_mat, joint_type=joint_type,
+                )
             except Exception as exc:
                 _logger.exception("Unexpected error in get_joint_recommendation")
                 return {"success": False, "error": str(exc)}
