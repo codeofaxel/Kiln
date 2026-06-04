@@ -1,0 +1,37 @@
+---
+import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
+
+const contentHtml = `
+<p><strong>Bambu Lab launched the A2L on June 1. Kiln supports it now.</strong> Connect the A2L, point your AI agent at it, and the machine is already dialed in: ready to design, slice, and print, with no setup on your end. We shipped that support within three days of the launch, not months.</p>
+
+<h2>Why week-one support matters</h2>
+
+<p>A new printer is most exciting the week you unbox it, and most frustrating when your tools haven&rsquo;t caught up. When Kiln knows a machine from day one, your AI agent treats the A2L like one it has run for months: it designs to fit the machine, prints safely, and steps in to recover when something goes wrong, all without you feeding it a spec sheet. That is what infrastructure is for. The new thing just works.</p>
+
+<h2>Built for the A2L&rsquo;s bigger bed</h2>
+
+<p>The A2L offers a larger build area, for the prints you used to have to split into pieces. Ask Kiln to design something for it and the result is sized to that bigger bed from the start. Kiln knows the A2L&rsquo;s build area, so it makes the design fit, or splits a too-big model into printable parts with an assembly guide. It knows every supported printer&rsquo;s bed by heart.</p>
+
+<h2>Three more new Bambu printers, same release</h2>
+
+<p>The A2L did not arrive alone. Kiln 1.1.7 also added the X1E, the P2S, and the enclosed H2S, each recognized the moment you connect it. Everything in that release is here: <a href="/blog/kiln-1-1-7">Kiln 1.1.7 &rarr;</a>.</p>
+
+<h2>Get Kiln on your A2L</h2>
+
+<ul>
+  <li><strong>New to Kiln?</strong> Run <code>pip install kiln3d</code>, then follow the <a href="/install">install guide</a> to connect it to your AI assistant: Claude Desktop, Claude Code, Codex, or any other compatible AI client.</li>
+  <li><strong>Already on Kiln?</strong> Run <code>pip install --upgrade kiln3d</code> and the A2L is there.</li>
+</ul>
+
+<p style="text-align: center; margin-top: 40px;"><a href="/install" class="btn">Get Kiln &rarr;</a></p>
+`;
+---
+
+<BlogPostLayout
+  title="Kiln supports the Bambu A2L, 3 days after launch"
+  description="Bambu launched the A2L on June 1. Kiln added support within 3 days, so the moment you connect it your AI agent already knows the machine: ready to design, slice, and print, with no setup on your end. Three more new Bambu printers landed the same week: the X1E, P2S, and the enclosed H2S."
+  date="June 4, 2026"
+  tags={["bambu", "a2l", "printer-support"]}
+>
+  <Fragment set:html={contentHtml} />
+</BlogPostLayout>
