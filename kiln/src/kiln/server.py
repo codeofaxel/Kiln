@@ -864,19 +864,35 @@ _current_mcp_request_context: ContextVar[Any | None] = ContextVar(
 def _record_local_tool_call(name: str) -> None:
     """Best-effort: feed the on-device usage ledger after a tool call.
 
-    With kiln-pro installed, ``pro_features.record_local_tool_call``
-    tallies the call in ``~/.kiln`` and, when the user is signed in,
-    syncs it to their ``/stats`` dashboard so local agent work counts —
-    not just web-app activity.  Free installs have no kiln-pro, so this
-    is a silent no-op (free-tier local-stats sync is a separate follow
-    up).  NEVER raises: a stats hook must never break a tool call.
+    Exactly one recorder fires per machine, so local agent work counts on
+    the user's ``/stats`` dashboard — not just web-app activity — without
+    double-counting:
+
+    * kiln-pro installed → ``pro_features.record_local_tool_call`` tallies
+      the call in ``~/.kiln`` and syncs it when the user is signed in.
+    * free install (no kiln-pro) → the public ``usage_ledger`` records the
+      call locally and flushes to ``/api/me/stats/record`` when the user
+      is signed in via ``python3 -m kiln signin``.
+
+    NEVER raises: a stats hook must never break a tool call.
     """
     try:
         from kiln_pro.bridge import pro_features
     except Exception:
+        pro_features = None
+    if pro_features is not None:
+        # kiln-pro owns recording on this machine; do NOT also run the
+        # public ledger below or the same call would be counted twice.
+        try:
+            pro_features.record_local_tool_call(name)
+        except Exception:
+            pass
         return
     try:
-        pro_features.record_local_tool_call(name)
+        from kiln import usage_ledger
+
+        usage_ledger.record(name)
+        usage_ledger.maybe_flush()
     except Exception:
         pass
 
