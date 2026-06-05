@@ -3,6 +3,14 @@
 All notable changes to Kiln are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- **Your local tool calls now count on your stats.** When you're signed in, the
+  CLI and agent work Kiln does on your own machine shows up on your /stats
+  dashboard, not just activity from the web app.
+
 ## [1.1.7] - 2026-06-03
 
 ### Added
