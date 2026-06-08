@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-06-03T23:25:05.044265+00:00",
-  "tool_count": 322,
+  "generated": "2026-06-08T23:58:48.254230+00:00",
+  "tool_count": 325,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -7332,6 +7332,30 @@
       }
     },
     {
+      "name": "get_adhesive_profile",
+      "description": "Look up one adhesive's cited spec -- cure schedule, service temp, what it bonds.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "show_math": {
+            "default": false,
+            "title": "Show Math",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "get_adhesive_profileArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "lookup_fastener",
       "description": "Get the full spec for a screw, bolt, or threaded fastener.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -7347,6 +7371,90 @@
           "name"
         ],
         "title": "lookup_fastenerArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "recommend_adhesive",
+      "description": "Which adhesive joins these two printed plastics \u2014 ranked, with prep + cure schedule.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "material_a": {
+            "title": "Material A",
+            "type": "string"
+          },
+          "material_b": {
+            "default": "",
+            "title": "Material B",
+            "type": "string"
+          },
+          "temperature_exposure": {
+            "default": "indoor",
+            "title": "Temperature Exposure",
+            "type": "string"
+          },
+          "water_exposure": {
+            "default": "",
+            "title": "Water Exposure",
+            "type": "string"
+          },
+          "uv_exposure": {
+            "default": false,
+            "title": "Uv Exposure",
+            "type": "boolean"
+          },
+          "food_contact": {
+            "default": false,
+            "title": "Food Contact",
+            "type": "boolean"
+          },
+          "vacuum_outgassing": {
+            "default": false,
+            "title": "Vacuum Outgassing",
+            "type": "boolean"
+          },
+          "biocompatible": {
+            "default": false,
+            "title": "Biocompatible",
+            "type": "boolean"
+          },
+          "flexible": {
+            "default": false,
+            "title": "Flexible",
+            "type": "boolean"
+          },
+          "load_bearing": {
+            "default": false,
+            "title": "Load Bearing",
+            "type": "boolean"
+          },
+          "reusable": {
+            "default": false,
+            "title": "Reusable",
+            "type": "boolean"
+          },
+          "cure_time_available": {
+            "default": "any",
+            "title": "Cure Time Available",
+            "type": "string"
+          },
+          "heat_available": {
+            "default": false,
+            "title": "Heat Available",
+            "type": "boolean"
+          },
+          "show_math": {
+            "default": false,
+            "title": "Show Math",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "material_a"
+        ],
+        "title": "recommend_adhesiveArguments",
         "type": "object"
       }
     },
@@ -7466,6 +7574,65 @@
           }
         },
         "title": "recommend_joint_strategyArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_bond_outcome",
+      "description": "Record whether a glued joint held or failed \u2014 so Kiln learns over time.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "material_a": {
+            "title": "Material A",
+            "type": "string"
+          },
+          "adhesive": {
+            "title": "Adhesive",
+            "type": "string"
+          },
+          "result": {
+            "title": "Result",
+            "type": "string"
+          },
+          "material_b": {
+            "default": "",
+            "title": "Material B",
+            "type": "string"
+          },
+          "environment": {
+            "default": "",
+            "title": "Environment",
+            "type": "string"
+          },
+          "failure_mode": {
+            "default": "",
+            "title": "Failure Mode",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "default",
+            "title": "Printer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "material_a",
+          "adhesive",
+          "result"
+        ],
+        "title": "record_bond_outcomeArguments",
         "type": "object"
       }
     },
