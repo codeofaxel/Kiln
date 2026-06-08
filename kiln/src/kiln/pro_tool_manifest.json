@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-06-03T23:25:05.044265+00:00",
+  "generated": "2026-06-08T23:54:37.965519+00:00",
   "tool_count": 322,
   "categories": {
     "product_generators": {
@@ -4632,6 +4632,18 @@
             ],
             "default": null,
             "title": "Merged By"
+          },
+          "pr_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pr Id"
           }
         },
         "required": [
