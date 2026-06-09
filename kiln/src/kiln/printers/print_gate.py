@@ -170,6 +170,52 @@ def _suggestions(fit_code: str | None, temp_code: str | None) -> list[str]:
     return out
 
 
+def _maybe_enrich_block(
+    verdict: dict[str, Any],
+    *,
+    job_path: str | None = None,
+    printer_id: str | None = None,
+    material_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Pro+ enrichment for a blocked verdict — "here's exactly how to fix it".
+
+    Lazy-imports kiln-pro's pre-print-fix engine, mirroring the
+    degrade-to-None bridge pattern the slicer calibration overlay uses
+    (``_maybe_overlay_calibration``).  Strictly ADDITIVE: it returns a NEW
+    enrichment object (the printer's real usable envelope + an optimal split
+    plan + a material swap) or ``None``; it never reads or changes the
+    verdict's ``blocked`` / ``code`` / ``suggestions``.
+
+    Free tier (kiln-pro absent, or its Pro+ check denies) -> ``None``.  Never
+    raises -> a kiln-pro hiccup can never make the gate block more, so the
+    never-false-block guarantee is untouched.  Pro tier lives entirely in
+    kiln-pro; this public hook only knows "call it, attach what comes back."
+    """
+    try:
+        from kiln_pro.print_fix.engine import enrich_block
+    except Exception:  # noqa: BLE001
+        # The enrichment is OPTIONAL.  Catch EVERYTHING, not just ImportError:
+        # kiln-pro may be absent (free tier — the common case), OR its engine
+        # module may fail to import for some other reason (broken module-level
+        # init, a failed transitive dependency, a partially-initialized
+        # circular import surfacing as AttributeError).  A non-ImportError that
+        # escaped here would propagate out of the gate and, via start_print's
+        # broad ``except Exception``, fail the never-false-block gate OPEN —
+        # letting a genuinely-impossible print through.  So a broken kiln-pro
+        # must degrade to "no enrichment", never to "no gate".
+        return None
+    try:
+        return enrich_block(
+            verdict,
+            job_path=job_path,
+            printer_id=printer_id,
+            material_id=material_id,
+        )
+    except Exception:  # noqa: BLE001 — enrichment must NEVER break the gate
+        _logger.debug("print_gate: enrichment hook failed; degrading to None", exc_info=True)
+        return None
+
+
 def evaluate_pre_print_gate(
     job_path: str | None,
     printer_id: str | None,
@@ -219,7 +265,7 @@ def evaluate_pre_print_gate(
             "fit": fit_detail,
         }
 
-    return {
+    block = {
         "ok": False,
         "blocked": True,
         "code": code,
@@ -233,6 +279,12 @@ def evaluate_pre_print_gate(
         ),
         "fit": fit_detail,
     }
+    # Pro+ additive enrichment — attached as a NEW key only.  None on free
+    # tier; the block above is already complete and unchanged either way.
+    block["enrichment"] = _maybe_enrich_block(
+        block, job_path=job_path, printer_id=printer_id, material_id=material_id,
+    )
+    return block
 
 
 def check_material_temp(
@@ -254,7 +306,7 @@ def check_material_temp(
     blocked, code, msg = _temp_verdict(printer_id, mid)
     if not blocked:
         return None
-    return {
+    block = {
         "ok": False,
         "blocked": True,
         "code": code,
@@ -266,6 +318,12 @@ def check_material_temp(
             "force_print_oversize — an autonomous agent cannot self-approve it."
         ),
     }
+    # Pro+ additive enrichment — the material swap that lets this printer
+    # print the part.  None on free tier; verdict unchanged either way.
+    block["enrichment"] = _maybe_enrich_block(
+        block, printer_id=printer_id, material_id=mid,
+    )
+    return block
 
 
 # ---------------------------------------------------------------------------

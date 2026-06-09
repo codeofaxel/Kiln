@@ -75,7 +75,60 @@ def _material_temp_block(
     return {
         "error_code": v["code"],
         "error_message": (v["reason"] + " " + v.get("override_hint", "")).strip(),
+        # Carry the Pro+ enrichment (material swap) the gate attached, so the
+        # slice-layer block surfaces "here's what to print it in instead".
+        "enrichment": v.get("enrichment"),
     }
+
+
+def _attach_fit_enrichment(
+    fit: dict,
+    input_path: str,
+    printer_id: str | None,
+    material_id: str | None,
+) -> dict:
+    """Attach Pro+ enrichment to an EXCEEDS_BED bed-fit block, in place.
+
+    No-op for any other error code (OFF_BED is auto-centerable, not a split
+    case).  The enrichment (real usable envelope + split plan) lives in
+    kiln-pro; this just hands the gate's enricher the bbox the bed-fit
+    validator already computed.  Never raises.
+    """
+    if not isinstance(fit, dict) or fit.get("error_code") != "EXCEEDS_BED":
+        return fit
+    try:
+        from kiln.printers.print_gate import _maybe_enrich_block
+
+        enrichment = _maybe_enrich_block(
+            {"blocked": True, "code": "EXCEEDS_BED", "fit": fit},
+            job_path=input_path,
+            printer_id=printer_id,
+            material_id=material_id,
+        )
+        if enrichment is not None:
+            fit["enrichment"] = enrichment
+    except Exception:  # noqa: BLE001 — enrichment must never break slicing
+        pass
+    return fit
+
+
+def _gate_error_response(gate_err: dict) -> dict:
+    """Build the slice tool's error response, carrying any Pro+ enrichment.
+
+    Single chokepoint for the three slice-tool bed-fit-gate callsites so the
+    enrichment block (when present) rides out alongside the standard error,
+    without each callsite re-implementing the merge.
+    """
+    from kiln.server import _error_dict
+
+    resp = _error_dict(
+        gate_err.get("error_message", "Bed-fit check failed."),
+        code=gate_err.get("error_code", "BED_FIT_ERROR"),
+    )
+    enrichment = gate_err.get("enrichment")
+    if enrichment:
+        resp["enrichment"] = enrichment
+    return resp
 
 
 def _apply_bed_fit_gate(
@@ -124,6 +177,7 @@ def _apply_bed_fit_gate(
         # rewriters.  Still run a bbox validation but can't auto-fix.
         fit = validate_mesh_for_printer(input_path, effective_printer_id)
         if not fit["ok"] and fit["error_code"] in ("OFF_BED_GEOMETRY", "EXCEEDS_BED"):
+            _attach_fit_enrichment(fit, input_path, effective_printer_id, material_id)
             return input_path, fit, fit
         return input_path, None, fit
 
@@ -139,6 +193,7 @@ def _apply_bed_fit_gate(
             ofit["auto_oriented"] = True
             ofit["oriented_input_path"] = oriented
             return oriented, None, ofit
+        _attach_fit_enrichment(fit, input_path, effective_printer_id, material_id)
         return input_path, fit, fit
     if fit["error_code"] == "OFF_BED_GEOMETRY":
         if auto_center and fit.get("suggested_translate"):
@@ -456,10 +511,7 @@ class _SlicerToolsPlugin:
                     input_path, effective_printer_id, auto_center,
                 )
                 if gate_err is not None:
-                    return _srv._error_dict(
-                        gate_err.get("error_message", "Bed-fit check failed."),
-                        code=gate_err.get("error_code", "BED_FIT_ERROR"),
-                    )
+                    return _gate_error_response(gate_err)
                 result = slice_file(
                     effective_input,
                     output_dir=output_dir,
@@ -712,10 +764,7 @@ class _SlicerToolsPlugin:
                     input_abs, effective_printer_id, auto_center,
                 )
                 if gate_err is not None:
-                    return _srv._error_dict(
-                        gate_err.get("error_message", "Bed-fit check failed."),
-                        code=gate_err.get("error_code", "BED_FIT_ERROR"),
-                    )
+                    return _gate_error_response(gate_err)
 
                 # -- Slice --
                 result = slice_file(
@@ -1148,10 +1197,7 @@ class _SlicerToolsPlugin:
                     material_id=material,
                 )
                 if gate_err is not None:
-                    return _srv._error_dict(
-                        gate_err.get("error_message", "Bed-fit check failed."),
-                        code=gate_err.get("error_code", "BED_FIT_ERROR"),
-                    )
+                    return _gate_error_response(gate_err)
 
                 result = slice_file(
                     effective_input,
