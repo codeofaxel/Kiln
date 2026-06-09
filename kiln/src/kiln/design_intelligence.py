@@ -745,6 +745,19 @@ def get_material_profile(material_id: str) -> MaterialProfile | None:
     kb = _get_kb()
     data = kb.materials.get(material_id.lower())
     if data is None:
+        # Not in the curated catalog. A kiln-pro Business+ user may have
+        # ingested this material's datasheet into their local library; resolve
+        # it through the bridge when kiln-pro is installed. Free tier (or any
+        # error) falls through to None. See https://kiln3d.com/pricing.
+        ingested = None
+        try:
+            from kiln_pro.bridge import pro_features
+
+            ingested = pro_features.get_ingested_material_profile(material_id)
+        except Exception:  # noqa: BLE001 — kiln-pro absent/erroring → free-tier fallback
+            ingested = None
+        if ingested:
+            return MaterialProfile(**ingested)
         return None
 
     return MaterialProfile(
