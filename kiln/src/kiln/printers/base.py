@@ -405,15 +405,60 @@ class PrinterAdapter(ABC):
 
     # -- print control --------------------------------------------------
 
-    @abstractmethod
     def start_print(self, file_name: str, **kwargs: Any) -> PrintResult:
         """Begin printing a file that already exists on the printer.
+
+        TEMPLATE METHOD — adapters must NOT override this.  It runs the
+        universal pre-print impossibility gate (build-volume + hotend-temp
+        ceilings) that no entry point — MCP tool, scheduler, CLI, recovery —
+        can bypass, then delegates to the adapter's :meth:`_start_print_impl`.
+
+        The gate soft-passes whenever fit/temperature can't be determined, so
+        it never false-blocks a valid print; it refuses only prints that are
+        *certain* to fail or damage hardware, and only a human-confirmed
+        ``force_print_oversize`` grant can override it.
 
         Args:
             file_name: Name (or path) of the file as known by the printer.
             **kwargs: Adapter-specific print parameters (e.g. Bambu AMS
                 settings).  Adapters that don't support extra parameters
                 silently ignore them.
+
+        Raises:
+            PrinterError: If the printer cannot start the job.
+        """
+        try:
+            from kiln.printers.print_gate import run_adapter_gate
+
+            blocked = run_adapter_gate(self, file_name, kwargs)
+        except Exception:  # noqa: BLE001 — a gate failure must never block a print
+            import logging as _logging
+
+            _logging.getLogger(__name__).debug(
+                "pre-print gate raised; allowing print", exc_info=True
+            )
+            blocked = None
+        if blocked is not None:
+            hint = blocked.get("override_hint", "")
+            reason = blocked.get("reason", "Print blocked by the pre-print safety gate.")
+            return PrintResult(
+                success=False,
+                message=reason + (" " + hint if hint else ""),
+            )
+        return self._start_print_impl(file_name, **kwargs)
+
+    @abstractmethod
+    def _start_print_impl(self, file_name: str, **kwargs: Any) -> PrintResult:
+        """Adapter-specific print start, called AFTER the pre-print gate passes.
+
+        Each adapter puts its real start logic here (M23/M24 over serial,
+        FTPS + MQTT for Bambu, REST for OctoPrint/Moonraker/PrusaLink, etc.).
+        Never call this directly — callers use :meth:`start_print`, which
+        gates first.
+
+        Args:
+            file_name: Name (or path) of the file as known by the printer.
+            **kwargs: Adapter-specific print parameters.
 
         Raises:
             PrinterError: If the printer cannot start the job.

@@ -791,7 +791,7 @@ class PrusaLinkAdapter(PrinterAdapter):
     # PrinterAdapter -- print control
     # ------------------------------------------------------------------
 
-    def start_print(self, file_name: str, **_kwargs: Any) -> PrintResult:
+    def _start_print_impl(self, file_name: str, **_kwargs: Any) -> PrintResult:
         """Begin printing a file on the printer.
 
         Resolves display names to API-safe file paths, then attempts

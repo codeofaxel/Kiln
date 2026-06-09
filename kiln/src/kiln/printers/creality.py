@@ -783,7 +783,7 @@ class CrealityAdapter(PrinterAdapter):
     def upload_file(self, file_path: str) -> UploadResult:
         return self._backend.upload_file(file_path)
 
-    def start_print(self, file_name: str, **kwargs: Any) -> PrintResult:
+    def _start_print_impl(self, file_name: str, **kwargs: Any) -> PrintResult:
         return self._backend.start_print(file_name, **kwargs)
 
     def cancel_print(self) -> PrintResult:

@@ -2280,7 +2280,7 @@ class BambuAdapter(PrinterAdapter):
         """
         return f"file:///sdcard/model/{basename}"
 
-    def start_print(self, file_name: str, **kwargs: Any) -> PrintResult:
+    def _start_print_impl(self, file_name: str, **kwargs: Any) -> PrintResult:
         """Begin printing a file on the Bambu printer.
 
         The file must already exist on the printer's SD card (uploaded
