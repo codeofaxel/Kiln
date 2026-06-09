@@ -702,6 +702,22 @@ def validate_joint(
                 "A thin, even gap produces the strongest bond."
             )
 
+        # Which adhesive? Pro+ gets the cited recommendation inline; free tier
+        # (or no kiln-pro) gets a nudge to the adhesive intelligence, which is
+        # served via the REST proxy. The recommendation itself is computed and
+        # tier-gated in kiln-pro — nothing curated is decided here.
+        rules_checked.append("adhesive_recommendation")
+        hint = _adhesive_hint_for_joint(mat_a, mat_b)
+        if hint:
+            recommendations.append(hint)
+        else:
+            recommendations.append(
+                "Bonding two printed plastics? Kiln Pro's adhesive intelligence "
+                "recommends the right cited adhesive, surface prep, and the full "
+                "cure schedule for your exact materials (recommend_adhesive). "
+                "More: https://kiln3d.com/pricing"
+            )
+
     elif jtype == "loose":
         rules_checked.append("clearance_range")
         if interface.clearance_mm < clearance_range[0]:
@@ -1026,6 +1042,28 @@ def _calibration_view_for_clearance(
         )
 
     return verdict_block, narrow_factor, str(tier)
+
+
+def _adhesive_hint_for_joint(material_a: str, material_b: str) -> str | None:
+    """Tier-gated adhesive recommendation line for a glued joint, via kiln-pro.
+
+    Pro+ → a one-line cited recommendation (which adhesive + a pointer to
+    ``recommend_adhesive``).  Free tier, a denied caller, or no kiln-pro
+    installed → ``None``, and the validator shows an upgrade nudge instead.
+    Lazy-imports ``kiln_pro`` so public Kiln keeps working without the pro
+    package; the recommendation is computed and tier-gated server-side, so
+    nothing curated is decided here (mirrors :func:`_screw_hole_detail_for_joint`).
+    """
+    try:
+        from kiln_pro.adhesives import (  # type: ignore[import-not-found]
+            adhesive_assembly_hint,
+        )
+    except ImportError:
+        return None
+    try:
+        return adhesive_assembly_hint(material_a, material_b)
+    except Exception:
+        return None
 
 
 def _screw_hole_detail_for_joint(
