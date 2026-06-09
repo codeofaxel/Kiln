@@ -667,3 +667,44 @@ class TestRecommendDesignMaterial:
 
         assert result["success"] is False
         assert "boom" in result["error"]
+
+    @patch("kiln.design_intelligence.get_material_profile")
+    @patch("kiln.design_intelligence.recommend_material_for_design")
+    def test_bonding_caveat_surfaced(self, mock_rec, mock_profile, registered_tools):
+        # Recommender picks PP; its (Pro-overlay) bonding block is very_hard,
+        # so the tool surfaces a structured bonding block + a top-of-list
+        # warning and points at recommend_adhesive.
+        mock_rec.return_value = SimpleNamespace(
+            to_dict=lambda: {"material": "pp", "reasoning": "stiff + chemical"},
+        )
+        mock_profile.return_value = SimpleNamespace(
+            bonding={
+                "bonding_difficulty": "very_hard",
+                "primer_required": True,
+                "recommended_primer": "synthetic test primer",
+                "bonding_note": "synthetic test note",
+            },
+            bonding_caveat=lambda: "synthetic caveat mentioning hard to bond",
+        )
+
+        result = registered_tools["recommend_design_material"]("chemical tank fitting")
+
+        assert result["success"] is True
+        assert result["bonding"]["material"] == "pp"
+        assert result["bonding"]["difficulty"] == "very_hard"
+        assert result["bonding"]["primer_required"] is True
+        assert result["bonding"]["for_details_use"] == "recommend_adhesive"
+        assert any("hard to bond" in w for w in result.get("warnings", []))
+
+    @patch("kiln.design_intelligence.get_material_profile")
+    @patch("kiln.design_intelligence.recommend_material_for_design")
+    def test_bonding_absent_for_free_tier(self, mock_rec, mock_profile, registered_tools):
+        # Free tier: overlay absent -> profile.bonding empty -> no bonding key,
+        # no bonding warning, recommendation otherwise unaffected.
+        mock_rec.return_value = SimpleNamespace(to_dict=lambda: {"material": "petg"})
+        mock_profile.return_value = SimpleNamespace(bonding={}, bonding_caveat=lambda: "")
+
+        result = registered_tools["recommend_design_material"]("outdoor bracket")
+
+        assert result["success"] is True
+        assert "bonding" not in result

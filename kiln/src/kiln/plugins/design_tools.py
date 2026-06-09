@@ -359,6 +359,26 @@ class _DesignToolsPlugin:
                 )
                 result = rec.to_dict()
                 result["success"] = True
+
+                def _slug(obj):
+                    """Extract a material slug from the recommendation
+                    result's varied shapes (dict with material_id /
+                    material / name keys, or a bare string)."""
+                    if isinstance(obj, dict):
+                        return (
+                            obj.get("material_id")
+                            or obj.get("material")
+                            or obj.get("name")
+                            or obj.get("display_name")
+                        )
+                    if isinstance(obj, str):
+                        return obj
+                    return None
+
+                primary_slug = _slug(
+                    result.get("material") or result.get("recommended_material")
+                )
+
                 # Food-safety overlay (kiln-pro feature; free-tier silently skips):
                 # when the requirements imply food / pet / mouth contact,
                 # warn or override if the top pick isn't food_safe and limit
@@ -376,26 +396,6 @@ class _DesignToolsPlugin:
                     and use_case_implies_food_contact(requirements)
                 ):
                     result["food_contact_use_case_detected"] = True
-
-                    def _slug(obj):
-                        """Extract a material slug from the recommendation
-                        result's varied shapes (dict with material_id /
-                        material / name keys, or a bare string)."""
-                        if isinstance(obj, dict):
-                            return (
-                                obj.get("material_id")
-                                or obj.get("material")
-                                or obj.get("name")
-                                or obj.get("display_name")
-                            )
-                        if isinstance(obj, str):
-                            return obj
-                        return None
-
-                    primary_obj = (
-                        result.get("material") or result.get("recommended_material")
-                    )
-                    primary_slug = _slug(primary_obj)
                     if primary_slug:
                         verdict = assess_food_safety(primary_slug)
                         result["food_safety"] = {
@@ -428,6 +428,36 @@ class _DesignToolsPlugin:
                         result["alternatives_food_safe_only"] = [
                             a for a, s in zip(raw_alts, slugs, strict=False) if s and s in safe_set
                         ]
+
+                # Bonding caveat (kiln-pro adhesive-intelligence reverse-link;
+                # free tier silently skips because the `bonding` overlay field
+                # is absent on the merged profile).  Surface the recommended
+                # material's bonding reality at selection time and point at
+                # recommend_adhesive for the per-adhesive matrix.  Fires the
+                # warning on difficulty (hard/very_hard), never on
+                # primer_required alone, so a flexible material (TPU) still
+                # warns.  Enrichment only — never break the recommendation.
+                try:
+                    from kiln.design_intelligence import get_material_profile
+
+                    profile = (
+                        get_material_profile(primary_slug) if primary_slug else None
+                    )
+                    if profile is not None and profile.bonding:
+                        b = profile.bonding
+                        result["bonding"] = {
+                            "material": primary_slug,
+                            "difficulty": b.get("bonding_difficulty"),
+                            "primer_required": b.get("primer_required", False),
+                            "recommended_primer": b.get("recommended_primer"),
+                            "note": b.get("bonding_note"),
+                            "for_details_use": "recommend_adhesive",
+                        }
+                        caveat = profile.bonding_caveat()
+                        if caveat:
+                            result.setdefault("warnings", []).insert(0, caveat)
+                except Exception:  # noqa: BLE001 - enrichment must never break the rec
+                    pass
                 return result
             except Exception as exc:
                 _logger.error("Material recommendation failed: %s", exc, exc_info=True)

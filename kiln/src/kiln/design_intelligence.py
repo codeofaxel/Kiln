@@ -245,10 +245,11 @@ class MaterialProfile:
     """Full material property sheet for design reasoning.
 
     When the kiln-pro engineering overlay isn't loaded,
-    ``mechanical``, ``design_limits``, ``use_case_ratings``, and
-    ``agent_guidance`` may be empty; consumers MUST treat these as
-    optional and fall back to safety-floor inference when absent.
-    See :func:`has_engineering_data` for the canonical check.
+    ``mechanical``, ``design_limits``, ``use_case_ratings``,
+    ``agent_guidance``, and ``bonding`` may be empty; consumers MUST
+    treat these as optional and fall back to safety-floor inference
+    when absent.  See :func:`has_engineering_data` for the canonical
+    check.
     """
 
     material_id: str
@@ -260,6 +261,11 @@ class MaterialProfile:
     design_limits: dict[str, Any] = field(default_factory=dict)
     use_case_ratings: dict[str, Any] = field(default_factory=dict)
     agent_guidance: list[str] = field(default_factory=list)
+    # kiln-pro adhesive-intelligence reverse-link: how hard this material
+    # is to glue (bonding_difficulty / primer_required / recommended_primer
+    # / compatible_adhesive_chemistries / bonding_note).  Present only when
+    # the overlay merged (Pro+); empty for free tier.  See bonding_caveat().
+    bonding: dict[str, Any] = field(default_factory=dict)
 
     def has_engineering_data(self) -> bool:
         """True when the kiln-pro engineering overlay is loaded.
@@ -270,6 +276,29 @@ class MaterialProfile:
         emit the upgrade nudge in their response.
         """
         return bool(self.mechanical) and bool(self.use_case_ratings)
+
+    def bonding_caveat(self) -> str:
+        """A material-selection bonding warning, or ``""`` when none is warranted.
+
+        Non-empty only when the kiln-pro adhesive-intelligence overlay
+        supplied a ``bonding`` block (Pro+); free tier always gets ``""``.
+        Fires on a ``bonding_difficulty`` of ``hard``/``very_hard`` — never
+        on ``primer_required`` alone, so a flexible material like TPU (hard
+        to bond because rigid glue peels off, not because it needs a primer)
+        still warns.  The ``bonding_note`` carries the how-to; the
+        ``recommend_adhesive`` tool has the full per-adhesive matrix.
+        """
+        difficulty = self.bonding.get("bonding_difficulty")
+        if difficulty not in ("hard", "very_hard"):
+            return ""
+        primer = " — needs a primer" if self.bonding.get("primer_required") else ""
+        note = self.bonding.get("bonding_note") or ""
+        head = f"{self.display_name} is {difficulty.replace('_', ' ')} to bond{primer}."
+        note_part = f" {note}" if note else ""
+        return (
+            f"{head}{note_part} "
+            "Use recommend_adhesive for specific adhesives and surface prep."
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -778,6 +807,7 @@ def get_material_profile(material_id: str) -> MaterialProfile | None:
         design_limits=data.get("design_limits", {}),
         use_case_ratings=data.get("use_case_ratings", {}),
         agent_guidance=data.get("agent_guidance", []),
+        bonding=data.get("bonding", {}),
     )
 
 
@@ -797,6 +827,7 @@ def list_material_profiles() -> list[MaterialProfile]:
                 design_limits=data.get("design_limits", {}),
                 use_case_ratings=data.get("use_case_ratings", {}),
                 agent_guidance=data.get("agent_guidance", []),
+                bonding=data.get("bonding", {}),
             )
         )
     return profiles

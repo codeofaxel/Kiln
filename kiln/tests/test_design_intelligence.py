@@ -36,12 +36,14 @@ from kiln.design_intelligence import (
     DesignBrief,
     EnvironmentReport,
     LoadEstimate,
+    MaterialProfile,
     MultiMaterialReport,
     PostProcessingGuide,
     PrintDiagnostic,
     PrinterCompatibilityReport,
     PrinterDesignProfile,
     TroubleshootingResult,
+    _get_kb,
     _reset_knowledge_base,
     check_environment_compatibility,
     check_multi_material_compatibility,
@@ -1273,3 +1275,104 @@ class TestLoadProOverlayOrEmpty:
         finally:
             if real_module is not None:
                 sys.modules["kiln_pro.data_overlays"] = real_module
+
+
+# ---------------------------------------------------------------------------
+# Bonding metadata — public reverse-link to kiln-pro adhesive intelligence
+# ---------------------------------------------------------------------------
+
+
+def _profile_with_bonding(bonding: dict, *, display_name: str = "PP") -> MaterialProfile:
+    """A minimal MaterialProfile carrying only a synthetic bonding block.
+
+    The bonding verdict is kiln-pro overlay content; these tests exercise the
+    PUBLIC surfacing logic with a synthetic block, so they don't depend on the
+    overlay being installed (they run on free-tier CI too).
+    """
+    return MaterialProfile(
+        material_id=display_name.lower(),
+        display_name=display_name,
+        category="thermoplastic",
+        thermal={},
+        chemical={},
+        bonding=bonding,
+    )
+
+
+class TestBondingMetadata:
+    """``MaterialProfile.bonding`` + ``bonding_caveat()`` — the reverse-link to
+    kiln-pro adhesive intelligence, surfaced at material-selection time."""
+
+    def test_caveat_very_hard_with_primer(self):
+        p = _profile_with_bonding(
+            {
+                "bonding_difficulty": "very_hard",
+                "primer_required": True,
+                "bonding_note": "synthetic test note (very_hard case)",
+            },
+            display_name="PP",
+        )
+        caveat = p.bonding_caveat()
+        assert "PP is very hard to bond" in caveat
+        assert "needs a primer" in caveat
+        assert "synthetic test note (very_hard case)" in caveat
+        assert "recommend_adhesive" in caveat
+
+    def test_caveat_hard_flexible_fires_without_primer(self):
+        # TPU: hard, but the fix is a flexible adhesive, NOT a primer. The
+        # warning must still fire (keyed on difficulty) and must NOT claim a
+        # primer is needed — the contract that primer_required=False does not
+        # suppress the caveat.
+        p = _profile_with_bonding(
+            {
+                "bonding_difficulty": "hard",
+                "primer_required": False,
+                "bonding_note": "synthetic test note (flexible case)",
+            },
+            display_name="TPU",
+        )
+        caveat = p.bonding_caveat()
+        assert "TPU is hard to bond" in caveat
+        assert "needs a primer" not in caveat
+        assert "synthetic test note (flexible case)" in caveat
+        assert "recommend_adhesive" in caveat
+
+    def test_caveat_easy_is_silent(self):
+        p = _profile_with_bonding(
+            {"bonding_difficulty": "easy", "primer_required": False, "bonding_note": "CA works."},
+            display_name="PLA",
+        )
+        assert p.bonding_caveat() == ""
+
+    def test_caveat_never_fires_on_primer_alone(self):
+        # A non-hard difficulty never warns, even if primer_required is set —
+        # the logic keys off difficulty, not the primer flag.
+        p = _profile_with_bonding(
+            {"bonding_difficulty": "easy", "primer_required": True, "bonding_note": "x"},
+        )
+        assert p.bonding_caveat() == ""
+
+    def test_no_bonding_block_is_silent_free_tier(self):
+        # Free tier: no overlay -> empty bonding -> no caveat, no crash.
+        p = MaterialProfile(
+            material_id="pla",
+            display_name="PLA",
+            category="thermoplastic",
+            thermal={},
+            chemical={},
+        )
+        assert p.bonding == {}
+        assert p.bonding_caveat() == ""
+
+    def test_get_material_profile_carries_bonding(self):
+        # The get_material_profile extraction passes a merged `bonding` block
+        # through to the dataclass (petg ships in public materials.json; the
+        # autouse _reset_kb fixture discards this mutation after the test).
+        kb = _get_kb()
+        kb.materials["petg"]["bonding"] = {
+            "bonding_difficulty": "easy",
+            "bonding_note": "test-only",
+        }
+        profile = get_material_profile("petg")
+        assert profile is not None
+        assert profile.bonding["bonding_difficulty"] == "easy"
