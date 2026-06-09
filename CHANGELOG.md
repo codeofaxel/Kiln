@@ -8,6 +8,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - Business tier: import a material's datasheet and Kiln uses it in your designs, not just its built-in materials.
+- **Won't-fit / can't-melt protection.** Kiln now stops a print that can't
+  physically succeed — too big for the build plate, or a material your hotend
+  can't melt — before it wastes filament or crashes the nozzle. It rotates a
+  part to fit when it can, never blocks one it isn't sure about, and takes a
+  one-command override (`force_print_oversize`) for when you're slicing for
+  another printer. *Free tells you it won't work; Kiln Pro tells you how to
+  make it — your printer's true usable area, the cleanest way to split an
+  oversize part, and the material to switch to.*
 - **Adhesive intelligence for bonding printed parts (Kiln Pro+).** New MCP tools
   — `recommend_adhesive`, `get_adhesive_profile`, `record_bond_outcome` —
   recommend the right glue for joining two printed plastics with surface prep
