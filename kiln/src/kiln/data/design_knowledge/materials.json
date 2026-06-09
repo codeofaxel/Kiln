@@ -340,6 +340,9 @@
         "enclosure_required": false,
         "hardened_nozzle_required": false
       }
+    },
+    "bonding": {
+      "hard_to_bond": true
     }
   },
   "asa": {
@@ -526,6 +529,9 @@
         "enclosure_required": false,
         "hardened_nozzle_required": true
       }
+    },
+    "bonding": {
+      "hard_to_bond": true
     }
   },
   "polycarbonate": {
@@ -818,6 +824,9 @@
         "enclosure_required": false,
         "hardened_nozzle_required": true
       }
+    },
+    "bonding": {
+      "hard_to_bond": true
     }
   },
   "pet_cf": {
@@ -1337,6 +1346,9 @@
         "enclosure_required": false,
         "hardened_nozzle_required": true
       }
+    },
+    "bonding": {
+      "hard_to_bond": true
     }
   },
   "pla_matte": {
@@ -1581,6 +1593,9 @@
         "enclosure_required": false,
         "hardened_nozzle_required": false
       }
+    },
+    "bonding": {
+      "hard_to_bond": true
     }
   },
   "tpu_85a": {
@@ -1634,6 +1649,9 @@
         "hardened_nozzle_required": false,
         "ams_compatible": false
       }
+    },
+    "bonding": {
+      "hard_to_bond": true
     }
   },
   "pvb": {
@@ -1772,6 +1790,9 @@
         "hardened_nozzle_required": false,
         "ams_compatible": false
       }
+    },
+    "bonding": {
+      "hard_to_bond": true
     }
   }
 }

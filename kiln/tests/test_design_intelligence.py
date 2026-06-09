@@ -1376,3 +1376,39 @@ class TestBondingMetadata:
         profile = get_material_profile("petg")
         assert profile is not None
         assert profile.bonding["bonding_difficulty"] == "easy"
+
+    def test_floor_nudge_fires_for_free_tier(self):
+        # Free tier: only the public common-knowledge `hard_to_bond` flag, no
+        # precise verdict -> the generic upgrade nudge (states the risk, points
+        # at Pro), NOT the Pro caveat.
+        p = _profile_with_bonding({"hard_to_bond": True}, display_name="Polypropylene")
+        caveat = p.bonding_caveat()
+        assert "Polypropylene bonds poorly" in caveat
+        assert "Kiln Pro" in caveat
+        assert "kiln3d.com/pricing" in caveat
+        assert "recommend_adhesive" not in caveat  # that's the Pro-tier caveat
+
+    def test_pro_verdict_overrides_floor_flag(self):
+        # When BOTH the floor flag and a Pro difficulty are present (overlay
+        # merged on top of the public floor), the precise Pro caveat wins.
+        p = _profile_with_bonding(
+            {
+                "hard_to_bond": True,
+                "bonding_difficulty": "very_hard",
+                "primer_required": True,
+                "bonding_note": "synthetic test note",
+            },
+            display_name="PP",
+        )
+        caveat = p.bonding_caveat()
+        assert "PP is very hard to bond" in caveat
+        assert "recommend_adhesive" in caveat
+        assert "bonds poorly" not in caveat  # not the free floor nudge
+
+    def test_public_materials_carry_hard_to_bond_floor(self):
+        # The public safety floor flags the textbook-hard families (free tier
+        # sees the nudge); easy materials carry no flag.
+        assert get_material_profile("pp").bonding.get("hard_to_bond") is True
+        assert get_material_profile("nylon").bonding.get("hard_to_bond") is True
+        assert get_material_profile("tpu_85a").bonding.get("hard_to_bond") is True
+        assert get_material_profile("pla").bonding.get("hard_to_bond") is None

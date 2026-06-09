@@ -150,6 +150,14 @@ _UPGRADE_HINT_ENVIRONMENT = (
     "and what to do about it. "
     "See https://kiln3d.com/pricing"
 )
+# Free-tier bonding nudge: shown when a recommended material carries the
+# public common-knowledge `hard_to_bond` floor flag but no Pro overlay (so no
+# precise verdict).  States the risk and points at the paid fix without
+# telling the user to abandon gluing.  `{name}` = material display name.
+_BONDING_FLOOR_NUDGE = (
+    "{name} bonds poorly with common glues. Kiln Pro names the adhesive "
+    "and surface prep that will actually hold it. See https://kiln3d.com/pricing"
+)
 
 
 def load_pro_overlay_or_empty(kind: str) -> dict[str, Any]:
@@ -280,25 +288,33 @@ class MaterialProfile:
     def bonding_caveat(self) -> str:
         """A material-selection bonding warning, or ``""`` when none is warranted.
 
-        Non-empty only when the kiln-pro adhesive-intelligence overlay
-        supplied a ``bonding`` block (Pro+); free tier always gets ``""``.
-        Fires on a ``bonding_difficulty`` of ``hard``/``very_hard`` — never
-        on ``primer_required`` alone, so a flexible material like TPU (hard
-        to bond because rigid glue peels off, not because it needs a primer)
-        still warns.  The ``bonding_note`` carries the how-to; the
-        ``recommend_adhesive`` tool has the full per-adhesive matrix.
+        Two tiers, by what the merged ``bonding`` block carries:
+
+        * **Pro** (overlay supplied a ``bonding_difficulty``): a precise
+          caveat that fires on ``hard``/``very_hard`` — never on
+          ``primer_required`` alone, so a flexible material like TPU (hard
+          to bond because rigid glue peels off, not because it needs a
+          primer) still warns.  The ``bonding_note`` carries the how-to and
+          ``recommend_adhesive`` has the full per-adhesive matrix.
+        * **Free** (only the public common-knowledge ``hard_to_bond`` floor
+          flag, no precise verdict): a generic nudge that states the risk
+          and points at the paid fix.
+
+        Returns ``""`` for an easy material or one with no ``bonding`` block.
         """
         difficulty = self.bonding.get("bonding_difficulty")
-        if difficulty not in ("hard", "very_hard"):
-            return ""
-        primer = " — needs a primer" if self.bonding.get("primer_required") else ""
-        note = self.bonding.get("bonding_note") or ""
-        head = f"{self.display_name} is {difficulty.replace('_', ' ')} to bond{primer}."
-        note_part = f" {note}" if note else ""
-        return (
-            f"{head}{note_part} "
-            "Use recommend_adhesive for specific adhesives and surface prep."
-        )
+        if difficulty in ("hard", "very_hard"):
+            primer = " — needs a primer" if self.bonding.get("primer_required") else ""
+            note = self.bonding.get("bonding_note") or ""
+            head = f"{self.display_name} is {difficulty.replace('_', ' ')} to bond{primer}."
+            note_part = f" {note}" if note else ""
+            return (
+                f"{head}{note_part} "
+                "Use recommend_adhesive for specific adhesives and surface prep."
+            )
+        if self.bonding.get("hard_to_bond"):
+            return _BONDING_FLOOR_NUDGE.format(name=self.display_name)
+        return ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

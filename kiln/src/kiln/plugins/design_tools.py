@@ -429,14 +429,15 @@ class _DesignToolsPlugin:
                             a for a, s in zip(raw_alts, slugs, strict=False) if s and s in safe_set
                         ]
 
-                # Bonding caveat (kiln-pro adhesive-intelligence reverse-link;
-                # free tier silently skips because the `bonding` overlay field
-                # is absent on the merged profile).  Surface the recommended
-                # material's bonding reality at selection time and point at
-                # recommend_adhesive for the per-adhesive matrix.  Fires the
-                # warning on difficulty (hard/very_hard), never on
-                # primer_required alone, so a flexible material (TPU) still
-                # warns.  Enrichment only — never break the recommendation.
+                # Bonding caveat (reverse-link to the adhesive intelligence),
+                # surfaced at material-selection time.  Two tiers from the
+                # merged profile: Pro (overlay supplied a precise verdict) gets
+                # the full block + caveat pointing at recommend_adhesive; free
+                # (only the public common-knowledge `hard_to_bond` floor flag)
+                # gets a minimal block + an upgrade nudge.  The warning fires on
+                # difficulty (hard/very_hard), never on primer_required alone,
+                # so a flexible material (TPU) still warns.  Enrichment only —
+                # never break the recommendation.
                 try:
                     from kiln.design_intelligence import get_material_profile
 
@@ -445,14 +446,21 @@ class _DesignToolsPlugin:
                     )
                     if profile is not None and profile.bonding:
                         b = profile.bonding
-                        result["bonding"] = {
-                            "material": primary_slug,
-                            "difficulty": b.get("bonding_difficulty"),
-                            "primer_required": b.get("primer_required", False),
-                            "recommended_primer": b.get("recommended_primer"),
-                            "note": b.get("bonding_note"),
-                            "for_details_use": "recommend_adhesive",
-                        }
+                        if b.get("bonding_difficulty"):  # Pro overlay merged
+                            result["bonding"] = {
+                                "material": primary_slug,
+                                "difficulty": b.get("bonding_difficulty"),
+                                "primer_required": b.get("primer_required", False),
+                                "recommended_primer": b.get("recommended_primer"),
+                                "note": b.get("bonding_note"),
+                                "for_details_use": "recommend_adhesive",
+                            }
+                        elif b.get("hard_to_bond"):  # free common-knowledge floor
+                            result["bonding"] = {
+                                "material": primary_slug,
+                                "hard_to_bond": True,
+                                "upgrade_url": "https://kiln3d.com/pricing",
+                            }
                         caveat = profile.bonding_caveat()
                         if caveat:
                             result.setdefault("warnings", []).insert(0, caveat)

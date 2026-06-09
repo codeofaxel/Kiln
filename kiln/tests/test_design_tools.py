@@ -708,3 +708,27 @@ class TestRecommendDesignMaterial:
 
         assert result["success"] is True
         assert "bonding" not in result
+
+    @patch("kiln.design_intelligence.get_material_profile")
+    @patch("kiln.design_intelligence.recommend_material_for_design")
+    def test_bonding_floor_nudge_free_tier(self, mock_rec, mock_profile, registered_tools):
+        # Free tier with the public common-knowledge floor flag (no overlay):
+        # a minimal bonding block (hard_to_bond + upgrade_url, no Pro fields)
+        # and the upgrade nudge as a top-of-list warning.
+        mock_rec.return_value = SimpleNamespace(to_dict=lambda: {"material": "pp"})
+        mock_profile.return_value = SimpleNamespace(
+            bonding={"hard_to_bond": True},
+            bonding_caveat=lambda: (
+                "Polypropylene bonds poorly with common glues. ... "
+                "See https://kiln3d.com/pricing"
+            ),
+        )
+
+        result = registered_tools["recommend_design_material"]("chemical tank fitting")
+
+        assert result["success"] is True
+        assert result["bonding"]["hard_to_bond"] is True
+        assert result["bonding"]["upgrade_url"] == "https://kiln3d.com/pricing"
+        assert "difficulty" not in result["bonding"]  # no Pro verdict leaked
+        assert "for_details_use" not in result["bonding"]
+        assert any("kiln3d.com/pricing" in w for w in result.get("warnings", []))
