@@ -12,6 +12,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   recommend the right glue for joining two printed plastics with surface prep
   and the full cure schedule, cited to datasheets. Served via kiln-pro; see
   https://kiln3d.com/pricing.
+- **Adhesive recommendation on glued joints (Kiln Pro+).** `validate_assembly`
+  names the cited adhesive for your two materials; free tier gets a one-line
+  pointer to `recommend_adhesive`.
 
 ## [1.1.7.1] - 2026-06-05
 
