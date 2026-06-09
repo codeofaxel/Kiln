@@ -784,7 +784,12 @@ class CrealityAdapter(PrinterAdapter):
         return self._backend.upload_file(file_path)
 
     def _start_print_impl(self, file_name: str, **kwargs: Any) -> PrintResult:
-        return self._backend.start_print(file_name, **kwargs)
+        # Delegate to the backend's IMPL, not its start_print(): the gate
+        # already ran once at this adapter's start_print() (Template Method)
+        # with the correct Creality printer id.  Calling the backend's
+        # start_print() would re-run the gate with the backend's (often
+        # unresolved) model and double-gate the print.
+        return self._backend._start_print_impl(file_name, **kwargs)
 
     def cancel_print(self) -> PrintResult:
         return self._backend.cancel_print()

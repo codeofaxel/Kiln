@@ -130,9 +130,14 @@ def _temp_verdict(
         #   thermal["print_temp_range_c"] == [min, max]  (e.g. PC = [270, 310])
         thermal = getattr(mat, "thermal", None)
         rng = thermal.get("print_temp_range_c") if isinstance(thermal, dict) else None
-        mat_min = rng[0] if rng and len(rng) >= 1 and rng[0] else None
+        mat_min = rng[0] if rng and len(rng) >= 1 else None  # don't drop a legit 0
 
-        if printer_max and mat_min and mat_min > printer_max:
+        # Strict ">" is deliberate: min == max means the printer can JUST reach
+        # the material's floor — printable (zero headroom is a quality concern,
+        # not an impossibility), so blocking it would be a false-block.  Only a
+        # min that strictly exceeds the ceiling is physically impossible.
+        # Explicit "is not None" (not truthiness) so a legitimate 0 isn't lost.
+        if printer_max is not None and mat_min is not None and mat_min > printer_max:
             return (
                 True,
                 "MATERIAL_EXCEEDS_HOTEND",
@@ -292,9 +297,30 @@ def _resolve_material(kwargs: dict[str, Any]) -> str | None:
     # material-aware temp check where the material is already known.
     for k in ("material", "material_id", "expected_material"):
         v = kwargs.get(k)
-        if isinstance(v, str) and v:
-            return v
+        if isinstance(v, str) and v.strip():
+            # Normalize to the catalog key shape (lowercased, trimmed) so AMS
+            # tray strings like "PETG " / "ABS" resolve to 'petg' / 'abs'.
+            # Unknown ids still soft-pass (get_material_profile -> None) — safe.
+            return v.strip().lower()
     return None
+
+
+def _is_resume_print(file_name: str, kwargs: dict[str, Any]) -> bool:
+    """True for a resume-mode continuation (mid-print decoration / recovery).
+
+    A resume print's geometry was already validated when the original job was
+    started, it is already homed, and its resume 3MF strips the start gcode (no
+    G28) and cannot be re-oriented.  Re-gating it could ONLY false-block a valid
+    continuation, so the backstop skips it.  Detected via the explicit flag or
+    the conventional resume filenames produced by decorate_during_print /
+    revert_mid_print.
+    """
+    if kwargs.get("resume_from_paused"):
+        return True
+    name = (file_name or "").lower()
+    return "_resume_" in name or name.startswith(
+        ("transformed_resume", "original_resume")
+    )
 
 
 def run_adapter_gate(
@@ -304,15 +330,25 @@ def run_adapter_gate(
 
     Returns a *blocked* verdict dict (caller refuses the print) or ``None`` to
     allow.  Soft-passes (``None``) whenever the model, local file, or material
-    can't be determined — the backstop only refuses what it can prove
-    impossible.
+    can't be determined, and for resume-mode continuations — the backstop only
+    refuses what it can prove impossible.
     """
+    # Resume-mode prints are committed continuations — never re-gate them.
+    if _is_resume_print(file_name, kwargs):
+        return None
+
     printer_id = _resolve_printer_model(adapter)
     job = _resolve_local_job(file_name, kwargs)
+    override = _override_active(printer_id)
     verdict = evaluate_pre_print_gate(
         job,
         printer_id,
         material_id=_resolve_material(kwargs),
-        allow_oversize=_override_active(printer_id),
+        allow_oversize=override,
     )
+    # Single-use override: a human confirmation authorises ONE otherwise-blocked
+    # print, not a time window of them.  Consume the grant the instant it's used
+    # (verdict.overridden is set only when the override actually rescued a block).
+    if override and verdict.get("overridden"):
+        _oversize_grants.pop((printer_id or "").lower(), None)
     return verdict if verdict.get("blocked") else None

@@ -4826,6 +4826,74 @@ def clear_emergency_stop(
 
 
 @mcp.tool()
+def force_print_oversize(printer_id: str = "", ttl_minutes: int = 5) -> dict:
+    """Briefly override the pre-print impossibility gate for ONE printer.
+
+    Kiln refuses a print that physically cannot succeed on the target
+    printer — geometry that exceeds the build volume (the nozzle would
+    crash) or a material whose minimum nozzle temperature exceeds the
+    printer's hotend ceiling (it cannot melt the filament).  Those are
+    hard physical limits, not warnings, so a normal print call is blocked.
+
+    This is the human's "I understand — print it anyway" escape hatch, e.g.
+    when you are deliberately sending the file to a *different* printer than
+    the one connected.  It grants a short, per-printer override that lets the
+    NEXT otherwise-blocked print through, then expires.
+
+    Safety: classified ``confirm`` (see ``data/tool_safety.json``).  An
+    autonomous agent cannot self-approve it — the confirmation layer keeps a
+    human in the loop, exactly like ``emergency_stop``.  Designing and slicing
+    any size is never blocked; only the final print-to-hardware step is.
+
+    :param printer_id: Printer model to override (e.g. ``"bambu_a1"``).
+        Empty resolves to the active printer.
+    :param ttl_minutes: Minutes the override stays active (default 5, max 60).
+    :returns: Grant confirmation, or a confirmation-required challenge.
+    """
+    if err := _check_auth("print"):
+        return err
+    if conf := _check_confirmation(
+        "force_print_oversize",
+        {"printer_id": printer_id, "ttl_minutes": ttl_minutes},
+    ):
+        return conf
+
+    ttl = max(1, min(int(ttl_minutes or 5), 60))
+    pid = (printer_id or "").strip()
+    if not pid:
+        try:
+            from kiln.printer_model_resolver import resolve_printer_model
+
+            pid = resolve_printer_model() or ""
+        except Exception:
+            logger.debug("force_print_oversize: could not resolve active model", exc_info=True)
+            pid = ""
+
+    try:
+        from kiln.printers.print_gate import grant_oversize_override
+
+        grant_oversize_override(pid, ttl_seconds=ttl * 60)
+    except Exception as exc:
+        return _error_dict(f"Could not grant override: {exc}", code="INTERNAL_ERROR")
+
+    _audit(
+        "force_print_oversize",
+        "granted",
+        details={"printer_id": pid, "ttl_minutes": ttl},
+    )
+    return {
+        "status": "success",
+        "printer_id": pid or "active printer",
+        "expires_in_minutes": ttl,
+        "message": (
+            f"Override granted for {pid or 'the active printer'} for {ttl} "
+            f"minute(s). The next print the safety gate would have blocked "
+            f"(oversize or over-temp) will proceed. This action is logged."
+        ),
+    }
+
+
+@mcp.tool()
 def emergency_trip_input(
     printer_name: str,
     input_name: str = "external_button",

@@ -24,6 +24,10 @@
     "upload_file_confirm": {
       "level": "guarded"
     },
+    "force_print_oversize": {
+      "level": "confirm",
+      "tags": ["print", "override", "hardware-risk"]
+    },
     "delete_file": {
       "level": "confirm",
       "irreversible": true
