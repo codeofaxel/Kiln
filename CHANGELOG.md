@@ -3,6 +3,16 @@
 All notable changes to Kiln are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- **Adhesive intelligence for bonding printed parts (Kiln Pro+).** New MCP tools
+  — `recommend_adhesive`, `get_adhesive_profile`, `record_bond_outcome` —
+  recommend the right glue for joining two printed plastics with surface prep
+  and the full cure schedule, cited to datasheets. Served via kiln-pro; see
+  https://kiln3d.com/pricing.
+
 ## [1.1.7.1] - 2026-06-05
 
 ### Added
