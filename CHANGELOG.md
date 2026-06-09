@@ -7,6 +7,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Business tier: import a material's datasheet and Kiln uses it in your designs, not just its built-in materials.
 - **Adhesive intelligence for bonding printed parts (Kiln Pro+).** New MCP tools
   — `recommend_adhesive`, `get_adhesive_profile`, `record_bond_outcome` —
   recommend the right glue for joining two printed plastics with surface prep
