@@ -757,7 +757,15 @@ def get_material_profile(material_id: str) -> MaterialProfile | None:
         except Exception:  # noqa: BLE001 — kiln-pro absent/erroring → free-tier fallback
             ingested = None
         if ingested:
-            return MaterialProfile(**ingested)
+            # Fail closed: a malformed bridge payload (missing/extra keys) must
+            # degrade to safety-floor inference, never raise out of a lookup.
+            try:
+                return MaterialProfile(**ingested)
+            except (TypeError, KeyError) as exc:
+                logger.debug(
+                    "ingested material %r had an unexpected shape: %s",
+                    material_id, exc,
+                )
         return None
 
     return MaterialProfile(
