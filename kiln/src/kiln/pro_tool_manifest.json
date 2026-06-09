@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-06-08T23:58:48.254230+00:00",
+  "generated": "2026-06-09T00:51:09.879676+00:00",
   "tool_count": 325,
   "categories": {
     "product_generators": {
@@ -752,6 +752,19 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "work_instruction": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Work Instruction"
           }
         },
         "required": [
@@ -4632,6 +4645,18 @@
             ],
             "default": null,
             "title": "Merged By"
+          },
+          "pr_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pr Id"
           }
         },
         "required": [
