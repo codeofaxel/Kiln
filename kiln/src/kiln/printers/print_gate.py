@@ -235,6 +235,39 @@ def evaluate_pre_print_gate(
     }
 
 
+def check_material_temp(
+    printer_id: str | None, material_id: str | None,
+) -> dict[str, Any] | None:
+    """Slice-layer temperature-ceiling check (public, free).
+
+    Returns a block verdict when the material's *minimum* nozzle temperature
+    exceeds the printer's rated hotend ceiling — i.e. the printer physically
+    cannot melt it — or ``None`` to allow (including every soft-pass /
+    undetermined case).  Used by the slice path, where the material is known.
+
+    Reuses the exact ``_temp_verdict`` the print-time backstop uses (one source
+    of truth) and only ever reads PUBLIC datasheet / safety-floor data (printer
+    rated max-temp + material safety-floor temp range) — never the curated
+    device-intelligence SME, which stays in the kiln-pro overlay.
+    """
+    mid = (material_id or "").strip().lower() or None
+    blocked, code, msg = _temp_verdict(printer_id, mid)
+    if not blocked:
+        return None
+    return {
+        "ok": False,
+        "blocked": True,
+        "code": code,
+        "reason": msg,
+        "suggestions": _suggestions(None, code),
+        "override_hint": (
+            "This is a hard physical limit. To slice/print anyway (e.g. you are "
+            "targeting a different printer), a human can call "
+            "force_print_oversize — an autonomous agent cannot self-approve it."
+        ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Human-gated override state
 #

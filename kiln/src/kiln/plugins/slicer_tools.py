@@ -18,10 +18,71 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 
+def _try_orient_to_fit(input_path: str, printer_id: str) -> str | None:
+    """Rotate an oversized STL to try to make it fit the bed (free + local).
+
+    Returns the path to a rotated temp copy that fits, or None if no tried
+    orientation fits.  Uses the PUBLIC orientation helper + the printer's
+    datasheet bed size only (no curated SME).  We try the two axis-aligned
+    re-orientations that change the bounding box (lay the part on its other
+    faces) — this rescues the common "modelled tall, fits lying down" /
+    "long-in-X fits long-in-Y" cases without disturbing a part already fine.
+    """
+    try:
+        from kiln.auto_orient import apply_orientation
+        from kiln.printers.bed_fit import validate_mesh_for_printer
+    except Exception:  # noqa: BLE001
+        return None
+    import tempfile
+
+    stem = os.path.splitext(os.path.basename(input_path))[0]
+    for rx, ry, rz in ((90.0, 0.0, 0.0), (0.0, 90.0, 0.0)):
+        try:
+            tmp_dir = tempfile.mkdtemp(prefix="kiln_orient_")
+            oriented = os.path.join(tmp_dir, f"{stem}_oriented.stl")
+            apply_orientation(input_path, rx, ry, rz, output_path=oriented)
+            if validate_mesh_for_printer(oriented, printer_id).get("ok"):
+                _logger.info(
+                    "Auto-oriented %s (rot %g/%g/%g) to fit the %s bed.",
+                    os.path.basename(input_path), rx, ry, rz, printer_id,
+                )
+                return oriented
+        except Exception:  # noqa: BLE001
+            _logger.debug("orient-to-fit candidate failed", exc_info=True)
+    return None
+
+
+def _material_temp_block(
+    printer_id: str | None, material_id: str | None,
+) -> dict | None:
+    """Bed-fit-gate-shaped temp-ceiling block dict, or None.
+
+    Delegates to the print_gate single-source-of-truth check (which reads only
+    PUBLIC datasheet/safety-floor data — printer rated max-temp + material
+    safety-floor range, never the curated SME) and maps the verdict to this
+    gate's ``{error_code, error_message}`` shape.
+    """
+    if not material_id:
+        return None
+    try:
+        from kiln.printers.print_gate import check_material_temp
+
+        v = check_material_temp(printer_id, material_id)
+    except Exception:  # noqa: BLE001
+        return None
+    if v is None:
+        return None
+    return {
+        "error_code": v["code"],
+        "error_message": (v["reason"] + " " + v.get("override_hint", "")).strip(),
+    }
+
+
 def _apply_bed_fit_gate(
     input_path: str,
     effective_printer_id: str | None,
     auto_center: bool,
+    material_id: str | None = None,
 ) -> tuple[str, dict | None, dict]:
     """Pre-slice safety gate: verify the mesh fits within the printer's
     build volume and hasn't been placed off-bed (origin-centered
@@ -50,6 +111,13 @@ def _apply_bed_fit_gate(
         # what they're doing (e.g. generic slice without a target printer).
         return input_path, None, {"gate": "skipped_no_printer"}
 
+    # Material temperature ceiling — independent of fit.  Refuse a material the
+    # printer's hotend physically cannot reach (e.g. PC's 270C floor on a 260C
+    # Ender).  Authoritative here because the material is resolved at slice time.
+    temp_block = _material_temp_block(effective_printer_id, material_id)
+    if temp_block is not None:
+        return input_path, temp_block, temp_block
+
     if not input_path.lower().endswith(".stl"):
         # Only validate + translate STLs for now.  3MF/STEP/OBJ are out
         # of scope for the translate path — we'd need format-specific
@@ -63,6 +131,14 @@ def _apply_bed_fit_gate(
     if fit["ok"]:
         return input_path, None, fit
     if fit["error_code"] == "EXCEEDS_BED":
+        # Auto-orient before giving up: a part too tall/wide as-modelled often
+        # fits once rotated. (Free: public orientation helper + datasheet bed.)
+        oriented = _try_orient_to_fit(input_path, effective_printer_id)
+        if oriented is not None:
+            ofit = validate_mesh_for_printer(oriented, effective_printer_id)
+            ofit["auto_oriented"] = True
+            ofit["oriented_input_path"] = oriented
+            return oriented, None, ofit
         return input_path, fit, fit
     if fit["error_code"] == "OFF_BED_GEOMETRY":
         if auto_center and fit.get("suggested_translate"):
@@ -1063,10 +1139,13 @@ class _SlicerToolsPlugin:
                         _logger.debug("Profile override injection failed", exc_info=True)
 
                 # --- Bed-fit safety gate (Layer 1) ---
-                # Blocks off-bed / oversized geometry before slicing.
-                # May auto-translate an origin-centered STL to bed-centered.
+                # Blocks off-bed / oversized geometry before slicing (auto-
+                # orients to fit if it can), and refuses a material the printer
+                # physically can't melt.  May auto-translate an origin-centered
+                # STL to bed-centered.
                 effective_input, gate_err, gate_info = _apply_bed_fit_gate(
                     input_path, effective_printer_id, auto_center,
+                    material_id=material,
                 )
                 if gate_err is not None:
                     return _srv._error_dict(

@@ -207,3 +207,22 @@ class TestSwarmFixes:
         # zero min survives extraction (and 0 < 260 -> not blocked)
         monkeypatch.setattr(di, "get_material_profile", lambda mid: _Mat(0, 300))
         assert pg._temp_verdict("ender3", "x")[0] is False
+
+
+class TestSliceLayerTemp:
+    """check_material_temp — the public slice-layer temperature gate."""
+
+    def test_blocks_unreachable_material(self):
+        v = pg.check_material_temp("ender3", "polycarbonate")
+        assert v is not None and v["code"] == "MATERIAL_EXCEEDS_HOTEND"
+        assert "force_print_oversize" in v["override_hint"]
+
+    def test_allows_reachable_material(self):
+        assert pg.check_material_temp("ender3", "pla") is None
+
+    def test_normalizes_material_string(self):
+        assert pg.check_material_temp("ender3", " POLYCARBONATE ") is not None
+
+    def test_soft_passes_without_printer_or_material(self):
+        assert pg.check_material_temp(None, "polycarbonate") is None
+        assert pg.check_material_temp("ender3", None) is None
