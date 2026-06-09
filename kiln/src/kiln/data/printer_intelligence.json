@@ -102,11 +102,7 @@
       "input_shaping": false,
       "filament_runout_sensor": false,
       "power_loss_recovery": true,
-      "enclosure": "open",
-      "source_notes": [
-        "Stock Ender 3 family is Marlin/Bowden and single-material; camera requires external host such as OctoPrint."
-      ],
-      "notes": "Stock Ender 3 family is single-material, open-frame, and usually camera-less unless paired with OctoPrint/webcam hardware."
+      "enclosure": "open"
     },
     "has_input_shaping": false
   },
@@ -174,11 +170,7 @@
       "input_shaping": false,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
-      "enclosure": "open",
-      "source_notes": [
-        "Ender 3 S1 is direct-drive but still stock single-material/open-frame."
-      ],
-      "notes": "Direct-drive S1 improves TPU over Bowden Enders, but stock hardware remains open-frame and single-material."
+      "enclosure": "open"
     },
     "has_input_shaping": false
   },
@@ -245,12 +237,7 @@
       "input_shaping": true,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
-      "enclosure": "passive",
-      "source_notes": [
-        "Creality CFS-C page lists K1 as compatible; AI camera is sold as optional K1/K1 Max/K1C accessory.",
-        "Creality's K1-series firmware release and Annex document root access plus Fluidd/Mainsail/Moonraker installation paths; treat local Moonraker as service-enabled/reachable, not guaranteed stock-default."
-      ],
-      "notes": "Stock K1 is single-material; CFS-C and AI camera are accessory paths that must be configured explicitly."
+      "enclosure": "passive"
     },
     "has_input_shaping": true
   },
@@ -313,11 +300,7 @@
       "input_shaping": false,
       "filament_runout_sensor": false,
       "power_loss_recovery": true,
-      "enclosure": "open",
-      "source_notes": [
-        "Ender 3 V2 stock control path is serial/OctoPrint, not CrealityOS/Moonraker."
-      ],
-      "notes": "Older Marlin/Bowden machine; use serial or OctoPrint for local control and external camera support."
+      "enclosure": "open"
     },
     "has_input_shaping": false
   },
@@ -354,12 +337,7 @@
       "input_shaping": true,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
-      "enclosure": "open",
-      "source_notes": [
-        "Creality SPARKX i7 support page lists AI monitoring camera yes and auto filament relay with CFS yes.",
-        "No official stock local Moonraker exposure evidence was found; Kiln should use the Creality adapter only when /server/info is reachable."
-      ],
-      "notes": "Built as an open-frame four-color Creality CFS printer with stock AI monitoring camera."
+      "enclosure": "open"
     },
     "materials": {
       "PLA": {
@@ -456,12 +434,7 @@
       "input_shaping": true,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
-      "enclosure": "passive",
-      "source_notes": [
-        "Creality K1 Max support lists AI monitoring and calibration cameras; CFS auto filament relay is no on stock page; CFS-C page lists K1 Max compatible.",
-        "Creality's K1-series firmware release and Annex document root access plus Fluidd/Mainsail/Moonraker installation paths; treat local Moonraker as service-enabled/reachable, not guaranteed stock-default."
-      ],
-      "notes": "K1 Max stock hardware has AI camera/LiDAR but is single-material until a CFS-C retrofit is installed and mapped."
+      "enclosure": "passive"
     },
     "has_input_shaping": true
   },
@@ -528,12 +501,7 @@
       "input_shaping": true,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
-      "enclosure": "passive",
-      "source_notes": [
-        "Creality K1C support lists AI monitoring camera yes and CFS relay no; CFS-C page lists K1C compatible.",
-        "Creality's K1-series firmware release and Annex document root access plus Fluidd/Mainsail/Moonraker installation paths; treat local Moonraker as service-enabled/reachable, not guaranteed stock-default."
-      ],
-      "notes": "K1C stock hardware has AI monitoring and steel-tipped nozzle support; CFS-C remains an explicit accessory workflow."
+      "enclosure": "passive"
     },
     "has_input_shaping": true
   },
@@ -593,12 +561,7 @@
       "input_shaping": true,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
-      "enclosure": "open",
-      "source_notes": [
-        "Creality K1 SE support lists steel-tipped nozzle; CFS-C page lists K1 SE compatible.",
-        "No official K1 SE-specific stock local Moonraker evidence was found; keep this profile in Moonraker-if-reachable mode."
-      ],
-      "notes": "K1 SE is open-frame and stock single-material; CFS-C is supported as an accessory path, camera is not assumed."
+      "enclosure": "open"
     },
     "has_input_shaping": true
   },
@@ -660,13 +623,7 @@
       "input_shaping": true,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
-      "enclosure": "open",
-      "source_notes": [
-        "Creality K2 guide lists multicolor printing with 4 CFS units up to 16 colors; nozzle AI camera is only K2 Pro/Plus.",
-        "Creality K2 support/compare pages list steel-tipped tri-metal nozzle and PLA-CF support.",
-        "Creality publishes K2-series Klipper source, but local Fluidd/Moonraker port behavior is community/third-party confirmed rather than officially documented."
-      ],
-      "notes": "K2 is CFS-capable but base-vs-combo hardware must be confirmed before multicolor jobs."
+      "enclosure": "open"
     },
     "has_input_shaping": true
   },
@@ -734,13 +691,7 @@
       "input_shaping": true,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
-      "enclosure": "heated_or_passive",
-      "source_notes": [
-        "Creality K2 guide lists heated chamber for K2 Pro/Plus and nozzle AI camera only on K2 Pro/Plus.",
-        "Creality K2 Pro support page lists steel-tipped tri-metal nozzle and PA-CF/PLA-CF/PPA-CF support.",
-        "Creality publishes K2-series Klipper source, but local Fluidd/Moonraker port behavior is community/third-party confirmed rather than officially documented."
-      ],
-      "notes": "K2 Pro adds chamber and dual-camera monitoring; CFS hardware/bundle must be confirmed."
+      "enclosure": "heated_or_passive"
     },
     "has_input_shaping": true
   },
@@ -808,12 +759,7 @@
       "input_shaping": true,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
-      "enclosure": "heated_or_passive",
-      "source_notes": [
-        "Creality K2 guide lists K2 Plus 350 C hotend, 120 C bed, broad engineering filament support, dual AI camera, and 4 CFS/16-color support.",
-        "Creality K2 Plus support documents LAN HTTP/WebSocket control and WebRTC video; community/third-party setup guides provide the concrete Fluidd/Moonraker behavior."
-      ],
-      "notes": "K2 Plus is the high-temperature CFS-capable model; confirm bundle/CFS count and chamber prep before engineering or multicolor jobs."
+      "enclosure": "heated_or_passive"
     },
     "has_input_shaping": true
   },
@@ -880,12 +826,7 @@
       "input_shaping": true,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
-      "enclosure": "open",
-      "source_notes": [
-        "Creality K2 SE Combo page lists AI camera as optional accessory, CFS compatibility yes, and max CFS units up to 4.",
-        "No official K2 SE stock local Moonraker evidence was found; keep this profile in Moonraker-if-reachable mode."
-      ],
-      "notes": "K2 SE is open-frame and CFS-capable; camera is accessory-dependent and CFS hardware must be present."
+      "enclosure": "open"
     },
     "has_input_shaping": true
   },
@@ -952,12 +893,7 @@
       "input_shaping": true,
       "filament_runout_sensor": true,
       "power_loss_recovery": false,
-      "enclosure": "open",
-      "source_notes": [
-        "Creality Hi Combo support lists AI monitoring camera yes, auto filament relay with CFS yes, RFID yes, and power-loss recovery no.",
-        "Creality publishes Hi Klipper source, but local Fluidd/Moonraker port behavior is community/third-party confirmed rather than officially documented."
-      ],
-      "notes": "Creality Hi Combo includes camera/CFS features; base-vs-combo hardware should be checked before multicolor jobs."
+      "enclosure": "open"
     },
     "has_input_shaping": true
   },
@@ -993,12 +929,7 @@
       "input_shaping": true,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
-      "enclosure": "open",
-      "source_notes": [
-        "Creality Ender-3 V4 Combo page lists CFS compatibility yes, up to 4 CFS units, and CFS sold separately.",
-        "No official Ender-3 V4 stock local Moonraker evidence was found; keep this profile in Moonraker-if-reachable mode."
-      ],
-      "notes": "Ender-3 V4 is CFS-compatible but CFS is accessory/bundle-dependent; no stock camera is assumed."
+      "enclosure": "open"
     },
     "materials": {
       "PLA": {
@@ -1098,12 +1029,7 @@
       "input_shaping": true,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
-      "enclosure": "open",
-      "source_notes": [
-        "Creality Ender-3 V3 support page does not list stock AI monitoring camera or CFS relay.",
-        "Creality Wiki officially documents local Fluidd browser control for Ender-3 V3 at http://<printer-ip>:4408; Kiln still requires a reachable Moonraker /server/info API response."
-      ],
-      "notes": "Open-frame direct-drive V3 profile; stock workflow is single-material and camera-less unless externally modified."
+      "enclosure": "open"
     },
     "has_input_shaping": true
   },
@@ -1171,12 +1097,7 @@
       "input_shaping": true,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
-      "enclosure": "open",
-      "source_notes": [
-        "Creality Ender-3 V3 KE support page lists AI camera for monitoring as optional and no CFS auto filament relay.",
-        "Creality's Ender-3 V3 KE firmware release and Annex document root access plus Fluidd/Mainsail/Moonraker installation paths; treat local Moonraker as service-enabled/reachable, not guaranteed stock-default."
-      ],
-      "notes": "V3 KE can add camera monitoring, but stock profile stays single-material and open-frame."
+      "enclosure": "open"
     },
     "has_input_shaping": true
   },
@@ -1237,11 +1158,7 @@
       "input_shaping": true,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
-      "enclosure": "open",
-      "source_notes": [
-        "Ender-3 V3 SE is treated as stock open-frame single-material without CFS or camera."
-      ],
-      "notes": "Lower-cost V3 SE profile: open frame, single-material, no stock camera/CFS."
+      "enclosure": "open"
     },
     "has_input_shaping": false
   },
@@ -1307,12 +1224,7 @@
       "input_shaping": true,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
-      "enclosure": "open",
-      "source_notes": [
-        "Ender-3 V3 Plus is treated as a larger stock open-frame single-material profile.",
-        "No official Ender-3 V3 Plus stock local Moonraker evidence was found; the Ender-3 V3 Fluidd wiki page should not be assumed to cover Plus without hardware confirmation."
-      ],
-      "notes": "Large V3 open-frame profile; no stock camera/CFS assumed."
+      "enclosure": "open"
     },
     "has_input_shaping": true
   },
@@ -1380,12 +1292,7 @@
       "input_shaping": true,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
-      "enclosure": "open",
-      "source_notes": [
-        "Creality Ender-5 Max support page lists AI camera for monitoring as optional and auto filament relay no.",
-        "No official Ender-5 Max stock local Moonraker evidence was found; keep this profile in Moonraker-if-reachable mode."
-      ],
-      "notes": "Large open-frame machine with optional AI camera; no stock CFS/multicolor path is assumed."
+      "enclosure": "open"
     },
     "has_input_shaping": true
   },
@@ -1451,12 +1358,7 @@
       "input_shaping": true,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
-      "enclosure": "open",
-      "source_notes": [
-        "CR-10 SE profile is handled as single-material CrealityOS/Klipper unless user adds external host/accessories.",
-        "Creality's CR-10 SE firmware release and Annex document root access plus Fluidd/Mainsail/Moonraker installation paths; treat local Moonraker as service-enabled/reachable, not guaranteed stock-default."
-      ],
-      "notes": "CR-10 SE is treated as a single-material CrealityOS/Klipper printer with no stock camera/CFS assumed."
+      "enclosure": "open"
     },
     "has_input_shaping": true
   },
@@ -2277,11 +2179,7 @@
       "input_shaping": false,
       "filament_runout_sensor": false,
       "power_loss_recovery": true,
-      "enclosure": "open",
-      "source_notes": [
-        "Ender 5 stock workflow is Marlin single-material; camera requires external host hardware."
-      ],
-      "notes": "Cube-frame motion helps stability, but stock Ender 5 remains open-frame and single-material."
+      "enclosure": "open"
     },
     "has_input_shaping": false
   },
@@ -2344,11 +2242,7 @@
       "input_shaping": false,
       "filament_runout_sensor": false,
       "power_loss_recovery": true,
-      "enclosure": "open",
-      "source_notes": [
-        "CR-10 stock workflow is Marlin single-material; large-bed risk is first-layer and warping, not multicolor automation."
-      ],
-      "notes": "Large open-frame CR-10 class profile; camera and multicolor require third-party host/accessory hardware."
+      "enclosure": "open"
     },
     "has_input_shaping": false
   },
