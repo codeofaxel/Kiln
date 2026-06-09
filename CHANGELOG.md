@@ -16,6 +16,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Adhesive recommendation on glued joints (Kiln Pro+).** `validate_assembly`
   names the cited adhesive for your two materials; free tier gets a one-line
   pointer to `recommend_adhesive`.
+- **Adhesive recommendations now learn from real-world bond outcomes (Kiln Pro+).**
+  Free tier gives cited, datasheet-backed glue picks; Pro additionally lets
+  accumulated field reports of how a glue actually held sharpen the ranking,
+  marked as field data and never replacing cited specs. See
+  https://kiln3d.com/pricing.
 
 ## [1.1.7.1] - 2026-06-05
 
