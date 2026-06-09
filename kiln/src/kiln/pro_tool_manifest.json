@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-06-09T06:36:15.672472+00:00",
-  "tool_count": 343,
+  "generated": "2026-06-09T22:59:23.790879+00:00",
+  "tool_count": 345,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -7452,7 +7452,7 @@
     },
     {
       "name": "list_ingested_materials",
-      "description": "Browse the local ingested-materials library, or fetch one full spec.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Browse your ingested-materials library, or fetch one full spec.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "engineering_intelligence",
       "parameters": {
@@ -10233,6 +10233,11 @@
             ],
             "default": null,
             "title": "Failure Subtype"
+          },
+          "client_event_id": {
+            "default": "",
+            "title": "Client Event Id",
+            "type": "string"
           }
         },
         "required": [
@@ -10804,8 +10809,8 @@
     },
     {
       "name": "generate_frisbee",
-      "description": "Generate a flying-disc frisbee with optional top decoration.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Generate a flying-disc frisbee with optional top decoration.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -11035,8 +11040,8 @@
     },
     {
       "name": "generate_license_plate_frame",
-      "description": "Generate a US-spec license plate frame.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Generate a US-spec license plate frame.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -11137,8 +11142,8 @@
     },
     {
       "name": "generate_nameplate",
-      "description": "Generate a desk nameplate with two-line raised text.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Generate a desk nameplate with two-line raised text.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -11286,8 +11291,8 @@
     },
     {
       "name": "generate_pen_cup",
-      "description": "Generate a desktop pen / brush cup with optional QR + decoration.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Generate a desktop pen / brush cup with optional QR + decoration.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -11518,9 +11523,96 @@
       }
     },
     {
+      "name": "generate_rolling_tray",
+      "description": "Generate a rolling tray \u2014 a shallow rectangular work tray with a concave *cove* inner wall, so loose contents sweep clean into a corner instead of catching a 90-degree edge.  Decorate the interior work surface and the exterior underside, both.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "category": "product_generators",
+      "parameters": {
+        "properties": {
+          "top": {
+            "default": "",
+            "title": "Top",
+            "type": "string"
+          },
+          "bottom": {
+            "default": "plain",
+            "title": "Bottom",
+            "type": "string"
+          },
+          "width_mm": {
+            "default": 190.0,
+            "title": "Width Mm",
+            "type": "number"
+          },
+          "depth_mm": {
+            "default": 135.0,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "height_mm": {
+            "default": 18.0,
+            "title": "Height Mm",
+            "type": "number"
+          },
+          "wall_mm": {
+            "default": 2.4,
+            "title": "Wall Mm",
+            "type": "number"
+          },
+          "corner_radius_mm": {
+            "default": 14.0,
+            "title": "Corner Radius Mm",
+            "type": "number"
+          },
+          "cove_radius_mm": {
+            "default": 0.0,
+            "title": "Cove Radius Mm",
+            "type": "number"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "body_color": {
+            "default": "white",
+            "title": "Body Color",
+            "type": "string"
+          },
+          "color_overrides": {
+            "default": "",
+            "title": "Color Overrides",
+            "type": "string"
+          },
+          "size": {
+            "default": "",
+            "title": "Size",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "photo_mask": {
+            "default": "",
+            "title": "Photo Mask",
+            "type": "string"
+          },
+          "brief_id": {
+            "default": "",
+            "title": "Brief Id",
+            "type": "string"
+          }
+        },
+        "title": "generate_rolling_trayArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "generate_soap_dish",
-      "description": "Generate a draining soap dish with optional bottom branding.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Generate a draining soap dish with optional bottom branding.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
       "category": "product_generators",
       "parameters": {
         "properties": {
@@ -12533,6 +12625,35 @@
       }
     },
     {
+      "name": "backfill_artifact_into_org",
+      "description": "Move an existing tenant-owned artifact into *org_id*, updating BOTH the cloud rows and the local ownership marker.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "teams",
+      "parameters": {
+        "properties": {
+          "artifact_type": {
+            "title": "Artifact Type",
+            "type": "string"
+          },
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_type",
+          "artifact_id",
+          "org_id"
+        ],
+        "title": "backfill_artifact_into_orgArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "create_org",
       "description": "Create a new org.  Owner is auto-enrolled as an owner-role member so permission checks never need a special case.  ``tier`` is one of ``pro``, ``business``, ``enterprise``.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -13190,6 +13311,27 @@
           "block_changes_requested": {
             "default": true,
             "title": "Block Changes Requested",
+            "type": "boolean"
+          },
+          "path_rules": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Path Rules"
+          },
+          "allow_unsatisfiable": {
+            "default": false,
+            "title": "Allow Unsatisfiable",
             "type": "boolean"
           }
         },
