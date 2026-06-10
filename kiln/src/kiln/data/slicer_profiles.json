@@ -35,7 +35,7 @@
         "_universal"
       ],
       "requires_klipper": false,
-      "notes": "Pre-splicing system \u2014 filament is joined upstream before reaching the nozzle, so actual print pause is near-zero. 28s is the splice time; purge tower extrusion adds wall-clock time at print speed. Works with virtually any single-extruder FDM printer. Source: Mosaic product specs + splice tuning documentation."
+      "notes": "Pre-splicing system — filament is joined upstream before reaching the nozzle, so actual print pause is near-zero. 28s is the splice time; purge tower extrusion adds wall-clock time at print speed. Works with virtually any single-extruder FDM printer. Source: Mosaic product specs + splice tuning documentation."
     },
     "coprint_kcm": {
       "display_name": "Co Print KCM2",
@@ -46,7 +46,7 @@
         "_klipper"
       ],
       "requires_klipper": true,
-      "notes": "Klipper Chroma Module \u2014 4s mechanical swap via 8-in-1 hub, plus ~26s purge. Compatible with any Klipper printer (Neptune 4, Voron, Sovol SV08, etc). Requires hardware install + custom Klipper macros. Source: Co Print product page + community benchmarks."
+      "notes": "Klipper Chroma Module — 4s mechanical swap via 8-in-1 hub, plus ~26s purge. Compatible with any Klipper printer (Neptune 4, Voron, Sovol SV08, etc). Requires hardware install + custom Klipper macros. Source: Co Print product page + community benchmarks."
     },
     "chameleon_mk4": {
       "display_name": "3D Chameleon Mk4",
@@ -68,7 +68,7 @@
         "elegoo_centauri_carbon"
       ],
       "requires_klipper": false,
-      "notes": "Integrated multi-color system for Elegoo Centauri Carbon 2 Combo. Not a retrofit add-on \u2014 built into the CC2 Combo variant. 70s average per color change. RFID filament detection. Source: NotebookCheck CC2 review (Jan 2026)."
+      "notes": "Integrated multi-color system for Elegoo Centauri Carbon 2 Combo. Not a retrofit add-on — built into the CC2 Combo variant. 70s average per color change. RFID filament detection. Source: NotebookCheck CC2 review (Jan 2026)."
     }
   },
   "default": {
@@ -111,7 +111,7 @@
     "tool_change": {
       "tool_change_seconds": 90,
       "tool_changer": "none",
-      "tool_change_notes": "Generic default \u2014 manual M600 pause assumed"
+      "tool_change_notes": "Generic default — manual M600 pause assumed"
     }
   },
   "ender3": {
@@ -163,7 +163,7 @@
   "ender3_s1": {
     "display_name": "Creality Ender 3 S1 / S1 Pro",
     "slicer": "prusaslicer",
-    "notes": "Sprite direct drive extruder \u2014 short retraction. All-metal hotend safe to 300C.",
+    "notes": "Sprite direct drive extruder — short retraction. All-metal hotend safe to 300C.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.25",
@@ -999,7 +999,7 @@
   "prusa_mk4": {
     "display_name": "Prusa MK4 / MK4S",
     "slicer": "prusaslicer",
-    "notes": "Nextruder \u2014 low retraction distance. Input shaping enabled. PrusaSlicer 2.7+ recommended.",
+    "notes": "Nextruder — low retraction distance. Input shaping enabled. PrusaSlicer 2.7+ recommended.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
@@ -1079,7 +1079,7 @@
   "bambu_x1c": {
     "display_name": "Bambu Lab X1 Carbon",
     "slicer": "prusaslicer",
-    "notes": "Enclosed CoreXY. Hardened nozzle. High speeds. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode \u2014 Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence. Without these, extrusion silently fails.",
+    "notes": "Enclosed CoreXY. Hardened nozzle. High speeds. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode — Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence. Without these, extrusion silently fails.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
@@ -1116,7 +1116,7 @@
     "tool_change": {
       "tool_change_seconds": 97,
       "tool_changer": "ams",
-      "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge (default 400mm\u00b3). Source: BambuStudio fdm_machine_common.json + X1C 0.4 nozzle.json."
+      "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge (default 400mm³). Source: BambuStudio fdm_machine_common.json + X1C 0.4 nozzle.json."
     }
   },
   "bambu_x1e": {
@@ -1159,13 +1159,13 @@
     "tool_change": {
       "tool_change_seconds": 97,
       "tool_changer": "ams",
-      "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge (default 400mm\u00b3). Source: BambuStudio fdm_machine_common.json + X1C 0.4 nozzle.json."
+      "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge (default 400mm³). Source: BambuStudio fdm_machine_common.json + X1C 0.4 nozzle.json."
     }
   },
   "bambu_p1s": {
     "display_name": "Bambu Lab P1S",
     "slicer": "prusaslicer",
-    "notes": "Enclosed CoreXY. Same toolhead as X1C without LiDAR. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode \u2014 Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence.",
+    "notes": "Enclosed CoreXY. Same toolhead as X1C without LiDAR. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode — Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
@@ -1251,7 +1251,7 @@
   "bambu_a1": {
     "display_name": "Bambu Lab A1",
     "slicer": "prusaslicer",
-    "notes": "Open-frame bed-slinger. All-metal hotend. CRITICAL: Bambu A1 requires use_relative_e_distances (M83) for the T1000 virtual tool. Start/end gcode MUST be empty \u2014 Kiln's bambu_3mf module injects BambuStudio's proprietary 620-line init sequence (M620 M motor enable, AMS load, extrusion calibration, bed leveling) and end sequence (AMS retract, cooldown, finish sound). Without these, G1 E commands are silently ignored. Speeds proven on A1 Combo firmware 01.08.03.00.",
+    "notes": "Open-frame bed-slinger. All-metal hotend. CRITICAL: Bambu A1 requires use_relative_e_distances (M83) for the T1000 virtual tool. Start/end gcode MUST be empty — Kiln's bambu_3mf module injects BambuStudio's proprietary 620-line init sequence (M620 M motor enable, AMS load, extrusion calibration, bed leveling) and end sequence (AMS retract, cooldown, finish sound). Without these, G1 E commands are silently ignored. Speeds proven on A1 Combo firmware 01.08.03.00.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
@@ -1941,6 +1941,46 @@
       "tool_change_notes": "No automatic tool changer. M600 manual pause only."
     }
   },
+  "sovol_sv07_plus": {
+    "display_name": "Sovol SV07 Plus",
+    "slicer": "orcaslicer",
+    "notes": "Klipper-based. Direct drive. All-metal hotend. Moonraker/Mainsail built in.",
+    "settings": {
+      "layer_height": "0.2",
+      "first_layer_height": "0.2",
+      "perimeters": "3",
+      "top_solid_layers": "4",
+      "bottom_solid_layers": "4",
+      "fill_density": "20%",
+      "fill_pattern": "gyroid",
+      "infill_speed": "120",
+      "perimeter_speed": "80",
+      "external_perimeter_speed": "60",
+      "first_layer_speed": "25",
+      "travel_speed": "200",
+      "nozzle_diameter": "0.4",
+      "filament_diameter": "1.75",
+      "temperature": "210",
+      "first_layer_temperature": "215",
+      "bed_temperature": "60",
+      "first_layer_bed_temperature": "65",
+      "fan_always_on": "1",
+      "min_fan_speed": "100",
+      "max_fan_speed": "100",
+      "disable_fan_first_layers": "2",
+      "retract_length": "0.6",
+      "retract_speed": "40",
+      "retract_lift": "0.2",
+      "bed_shape": "0x0,220x0,220x220,0x220",
+      "max_print_height": "250",
+      "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. M600 manual pause only."
+    }
+  },
   "flashforge_adventurer5m": {
     "display_name": "FlashForge Adventurer 5M / 5M Pro",
     "slicer": "orcaslicer",
@@ -2018,13 +2058,13 @@
     "tool_change": {
       "tool_change_seconds": 3,
       "tool_changer": "tool_changer",
-      "tool_change_notes": "Prusa XL tool changer: ~3s per swap. Physical toolhead dock \u2014 no purge needed (separate nozzles). Fastest mechanism available. Source: Prusa official specs."
+      "tool_change_notes": "Prusa XL tool changer: ~3s per swap. Physical toolhead dock — no purge needed (separate nozzles). Fastest mechanism available. Source: Prusa official specs."
     }
   },
   "bambu_p1p": {
     "display_name": "Bambu Lab P1P",
     "slicer": "prusaslicer",
-    "notes": "Open-frame CoreXY. Same mechanics as P1S without enclosure. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode \u2014 Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence.",
+    "notes": "Open-frame CoreXY. Same mechanics as P1S without enclosure. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode — Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
@@ -2067,7 +2107,7 @@
   "bambu_a1_mini": {
     "display_name": "Bambu Lab A1 Mini",
     "slicer": "prusaslicer",
-    "notes": "Compact bed-slinger. Same hotend as A1 but smaller build volume (180x180x180). AMS Lite compatible. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode \u2014 Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence.",
+    "notes": "Compact bed-slinger. Same hotend as A1 but smaller build volume (180x180x180). AMS Lite compatible. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode — Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",

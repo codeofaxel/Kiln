@@ -27,7 +27,7 @@
       220,
       250
     ],
-    "notes": "PTFE-lined hotend by default \u2014 exceeding 240C risks toxic fumes. All-metal upgrade raises safe limit to 300C."
+    "notes": "PTFE-lined hotend by default — exceeding 240C risks toxic fumes. All-metal upgrade raises safe limit to 300C."
   },
   "ender3_s1": {
     "display_name": "Creality Ender 3 S1 / S1 Pro",
@@ -57,7 +57,7 @@
       220,
       300
     ],
-    "notes": "Standard Ender 5 dimensions (220x220x300). Ender 5 Plus users should create a custom profile with 350x350x400. PTFE hotend \u2014 same hotend caution as Ender 3."
+    "notes": "Standard Ender 5 dimensions (220x220x300). Ender 5 Plus users should create a custom profile with 350x350x400. PTFE hotend — same hotend caution as Ender 3."
   },
   "cr10": {
     "display_name": "Creality CR-10 / CR-10S",
@@ -407,7 +407,7 @@
       180,
       180
     ],
-    "notes": "PTFE-lined hotend \u2014 reduced max temp. Bowden setup."
+    "notes": "PTFE-lined hotend — reduced max temp. Bowden setup."
   },
   "bambu_x1c": {
     "display_name": "Bambu Lab X1 Carbon",
@@ -706,6 +706,21 @@
       220,
       220,
       250
+    ],
+    "notes": "Klipper-based. All-metal hotend. High-speed."
+  },
+  "sovol_sv07_plus": {
+    "display_name": "Sovol SV07 Plus",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 110.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 20000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 22.0,
+    "build_volume": [
+      300,
+      300,
+      350
     ],
     "notes": "Klipper-based. All-metal hotend. High-speed."
   },

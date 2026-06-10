@@ -2502,6 +2502,44 @@
     "max_bed_temp": 110,
     "has_input_shaping": true
   },
+  "sovol_sv07_plus": {
+    "display_name": "Sovol SV07 Plus",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 210,
+        "bed": 60,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 80,
+        "fan": 50
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 100,
+        "fan": 0
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50
+      }
+    },
+    "build_volume_mm": [
+      300,
+      300,
+      350
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 110,
+    "has_input_shaping": true
+  },
   "flashforge_adventurer5m": {
     "display_name": "FlashForge Adventurer 5M / 5M Pro",
     "firmware": "klipper",
