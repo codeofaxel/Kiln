@@ -7,6 +7,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Per-printer nozzle in `fleet_status`.** Now includes each printer's reported
+  nozzle material and diameter, when the printer reports it (e.g. Bambu over
+  MQTT).
 - Business tier: import a material's datasheet and Kiln uses it in your designs, not just its built-in materials.
 - **Won't-fit / can't-melt protection.** Kiln now stops a print that can't
   physically succeed — too big for the build plate, or a material your hotend
