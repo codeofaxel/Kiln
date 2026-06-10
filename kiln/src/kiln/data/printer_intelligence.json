@@ -2465,7 +2465,7 @@
     "has_input_shaping": false
   },
   "sovol_sv07": {
-    "display_name": "Sovol SV07 / SV07 Plus",
+    "display_name": "Sovol SV07",
     "firmware": "klipper",
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
@@ -2494,9 +2494,9 @@
       }
     },
     "build_volume_mm": [
-      250,
-      250,
-      240
+      220,
+      220,
+      250
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 110,
