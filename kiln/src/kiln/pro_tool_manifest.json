@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-06-10T08:50:00.412735+00:00",
-  "tool_count": 347,
+  "generated": "2026-06-10T23:46:33.731409+00:00",
+  "tool_count": 348,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -936,6 +936,41 @@
             "default": "",
             "title": "Notes",
             "type": "string"
+          },
+          "printer_model": {
+            "default": "",
+            "title": "Printer Model",
+            "type": "string"
+          },
+          "joints": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Joints"
+          },
+          "applied_fixes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Applied Fixes"
           }
         },
         "required": [
@@ -4050,6 +4085,25 @@
           "feature_version_id"
         ],
         "title": "get_featureArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_part_passport",
+      "description": "Everything about one part/design in a single call \u2014 the Part Passport.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "get_part_passportArguments",
         "type": "object"
       }
     },
