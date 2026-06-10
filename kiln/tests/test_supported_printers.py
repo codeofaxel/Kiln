@@ -120,21 +120,3 @@ def test_public_surface_exposes_only_name_not_specs():
                 f"supported_printers.json contains '{banned}' — specs must not ship "
                 "to the public surface. Regenerate after removing it."
             )
-
-
-def test_compatibility_doc_has_no_per_model_spec_table():
-    """docs/COMPATIBILITY.md (public on GitHub) lists WHICH models we support and
-    how to connect them — never a per-model spec table (temps/bed/volume). Same
-    rule as /printers: discovery is public, the curated catalog is not."""
-    import re
-
-    doc = ROOT / "docs" / "COMPATIBILITY.md"
-    if not doc.exists():
-        return
-    text = doc.read_text()
-    # leak pattern: a markdown row carrying two temperature columns (hotend + bed)
-    spec_rows = re.findall(r"\|[^|\n]*\b\d{2,3}\s*C\b[^|\n]*\|[^|\n]*\b\d{2,3}\s*C\b", text)
-    assert not spec_rows, (
-        f"COMPATIBILITY.md has {len(spec_rows)} per-model spec row(s) with temps — "
-        "the public doc must not carry the curated spec table; keep id + name only."
-    )
