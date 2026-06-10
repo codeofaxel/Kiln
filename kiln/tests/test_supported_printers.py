@@ -69,3 +69,23 @@ def test_surface_has_expected_shape():
     for brand in payload["brands"]:
         assert brand["brand"] and brand["models"]
         assert brand["model_count"] == len(brand["models"])
+
+
+def test_readme_printer_block_is_not_stale():
+    """The README's auto-generated printer breadth block must match the data."""
+    import re
+
+    if not gen.README.exists():
+        return
+    text = gen.README.read_text()
+    if gen.RM_BEGIN not in text:
+        return  # README not wired with markers in this checkout
+    payload, _ = gen.build_surface()
+    expected = gen.render_readme_block(payload)
+    match = re.search(
+        re.escape(gen.RM_BEGIN) + ".*?" + re.escape(gen.RM_END), text, re.DOTALL
+    )
+    assert match and match.group(0) == expected, (
+        "README printer block is stale — run "
+        "`python3 scripts/generate_supported_printers.py`."
+    )
