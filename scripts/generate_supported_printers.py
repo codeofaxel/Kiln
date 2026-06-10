@@ -105,8 +105,12 @@ def build_surface() -> tuple[dict, list[tuple[str, list[str]]]]:
             incomplete.append((pid, missing))
             continue
         brand = derive_manufacturer(pid, name)
+        # PUBLIC SURFACE — name + id only. NEVER add per-model engineering specs
+        # (build volume, temps, materials, ...) here: this JSON ships to the
+        # crawlable /printers page, and the curated catalog detail is moat.
+        # Pinned by test_public_surface_exposes_only_name_not_specs.
         by_brand.setdefault(brand, []).append(
-            {"id": pid, "name": name, "build_volume_mm": entry.get("build_volume_mm")}
+            {"id": pid, "name": name}
         )
 
     # Brands ordered by breadth (most models first), then alphabetically;

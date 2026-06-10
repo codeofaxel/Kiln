@@ -10,192 +10,87 @@
       "models": [
         {
           "id": "cr10",
-          "name": "Creality CR-10 / CR-10S",
-          "build_volume_mm": [
-            300,
-            300,
-            400
-          ]
+          "name": "Creality CR-10 / CR-10S"
         },
         {
           "id": "cr10_se",
-          "name": "Creality CR-10 SE",
-          "build_volume_mm": [
-            220,
-            220,
-            265
-          ]
+          "name": "Creality CR-10 SE"
         },
         {
           "id": "ender3",
-          "name": "Creality Ender 3 / Ender 3 Pro / Ender 3 V2",
-          "build_volume_mm": [
-            220,
-            220,
-            250
-          ]
+          "name": "Creality Ender 3 / Ender 3 Pro / Ender 3 V2"
         },
         {
           "id": "ender3_s1",
-          "name": "Creality Ender 3 S1 / S1 Pro",
-          "build_volume_mm": [
-            220,
-            220,
-            270
-          ]
+          "name": "Creality Ender 3 S1 / S1 Pro"
         },
         {
           "id": "ender3_v2",
-          "name": "Creality Ender 3 V2",
-          "build_volume_mm": [
-            220,
-            220,
-            250
-          ]
+          "name": "Creality Ender 3 V2"
         },
         {
           "id": "ender5",
-          "name": "Creality Ender 5 / Ender 5 Plus",
-          "build_volume_mm": [
-            220,
-            220,
-            300
-          ]
+          "name": "Creality Ender 5 / Ender 5 Plus"
         },
         {
           "id": "ender3_v3",
-          "name": "Creality Ender-3 V3",
-          "build_volume_mm": [
-            220,
-            220,
-            250
-          ]
+          "name": "Creality Ender-3 V3"
         },
         {
           "id": "ender3_v3_ke",
-          "name": "Creality Ender-3 V3 KE",
-          "build_volume_mm": [
-            220,
-            220,
-            240
-          ]
+          "name": "Creality Ender-3 V3 KE"
         },
         {
           "id": "ender3_v3_plus",
-          "name": "Creality Ender-3 V3 Plus",
-          "build_volume_mm": [
-            300,
-            300,
-            330
-          ]
+          "name": "Creality Ender-3 V3 Plus"
         },
         {
           "id": "ender3_v3_se",
-          "name": "Creality Ender-3 V3 SE",
-          "build_volume_mm": [
-            220,
-            220,
-            250
-          ]
+          "name": "Creality Ender-3 V3 SE"
         },
         {
           "id": "ender3_v4",
-          "name": "Creality Ender-3 V4",
-          "build_volume_mm": [
-            220,
-            220,
-            235
-          ]
+          "name": "Creality Ender-3 V4"
         },
         {
           "id": "ender5_max",
-          "name": "Creality Ender-5 Max",
-          "build_volume_mm": [
-            400,
-            400,
-            400
-          ]
+          "name": "Creality Ender-5 Max"
         },
         {
           "id": "creality_hi",
-          "name": "Creality Hi",
-          "build_volume_mm": [
-            260,
-            260,
-            300
-          ]
+          "name": "Creality Hi"
         },
         {
           "id": "k1",
-          "name": "Creality K1",
-          "build_volume_mm": [
-            220,
-            220,
-            250
-          ]
+          "name": "Creality K1"
         },
         {
           "id": "k1_max",
-          "name": "Creality K1 Max",
-          "build_volume_mm": [
-            300,
-            300,
-            300
-          ]
+          "name": "Creality K1 Max"
         },
         {
           "id": "k1_se",
-          "name": "Creality K1 SE",
-          "build_volume_mm": [
-            220,
-            220,
-            250
-          ]
+          "name": "Creality K1 SE"
         },
         {
           "id": "k1c",
-          "name": "Creality K1C",
-          "build_volume_mm": [
-            220,
-            220,
-            250
-          ]
+          "name": "Creality K1C"
         },
         {
           "id": "k2",
-          "name": "Creality K2",
-          "build_volume_mm": [
-            260,
-            260,
-            260
-          ]
+          "name": "Creality K2"
         },
         {
           "id": "k2_plus",
-          "name": "Creality K2 Plus",
-          "build_volume_mm": [
-            350,
-            350,
-            350
-          ]
+          "name": "Creality K2 Plus"
         },
         {
           "id": "k2_pro",
-          "name": "Creality K2 Pro",
-          "build_volume_mm": [
-            300,
-            300,
-            300
-          ]
+          "name": "Creality K2 Pro"
         },
         {
           "id": "k2_se",
-          "name": "Creality K2 SE",
-          "build_volume_mm": [
-            220,
-            215,
-            245
-          ]
+          "name": "Creality K2 SE"
         }
       ]
     },
@@ -206,84 +101,39 @@
       "models": [
         {
           "id": "bambu_a1",
-          "name": "Bambu Lab A1",
-          "build_volume_mm": [
-            256,
-            256,
-            256
-          ]
+          "name": "Bambu Lab A1"
         },
         {
           "id": "bambu_a1_mini",
-          "name": "Bambu Lab A1 Mini",
-          "build_volume_mm": [
-            180,
-            180,
-            180
-          ]
+          "name": "Bambu Lab A1 Mini"
         },
         {
           "id": "bambu_a2l",
-          "name": "Bambu Lab A2L",
-          "build_volume_mm": [
-            330,
-            320,
-            325
-          ]
+          "name": "Bambu Lab A2L"
         },
         {
           "id": "bambu_h2s",
-          "name": "Bambu Lab H2S",
-          "build_volume_mm": [
-            340,
-            320,
-            340
-          ]
+          "name": "Bambu Lab H2S"
         },
         {
           "id": "bambu_p1p",
-          "name": "Bambu Lab P1P",
-          "build_volume_mm": [
-            256,
-            256,
-            256
-          ]
+          "name": "Bambu Lab P1P"
         },
         {
           "id": "bambu_p1s",
-          "name": "Bambu Lab P1S",
-          "build_volume_mm": [
-            256,
-            256,
-            256
-          ]
+          "name": "Bambu Lab P1S"
         },
         {
           "id": "bambu_p2s",
-          "name": "Bambu Lab P2S",
-          "build_volume_mm": [
-            256,
-            256,
-            256
-          ]
+          "name": "Bambu Lab P2S"
         },
         {
           "id": "bambu_x1c",
-          "name": "Bambu Lab X1 Carbon",
-          "build_volume_mm": [
-            256,
-            256,
-            256
-          ]
+          "name": "Bambu Lab X1 Carbon"
         },
         {
           "id": "bambu_x1e",
-          "name": "Bambu Lab X1E",
-          "build_volume_mm": [
-            256,
-            256,
-            256
-          ]
+          "name": "Bambu Lab X1E"
         }
       ]
     },
@@ -294,39 +144,19 @@
       "models": [
         {
           "id": "elegoo_centauri_carbon",
-          "name": "Elegoo Centauri Carbon / Carbon 2",
-          "build_volume_mm": [
-            256,
-            256,
-            256
-          ]
+          "name": "Elegoo Centauri Carbon / Carbon 2"
         },
         {
           "id": "elegoo_neptune3",
-          "name": "Elegoo Neptune 3 / 3 Pro / 3 Plus",
-          "build_volume_mm": [
-            220,
-            220,
-            280
-          ]
+          "name": "Elegoo Neptune 3 / 3 Pro / 3 Plus"
         },
         {
           "id": "elegoo_neptune4",
-          "name": "Elegoo Neptune 4 / 4 Pro",
-          "build_volume_mm": [
-            225,
-            225,
-            265
-          ]
+          "name": "Elegoo Neptune 4 / 4 Pro"
         },
         {
           "id": "elegoo_orangestorm_giga",
-          "name": "Elegoo OrangeStorm Giga",
-          "build_volume_mm": [
-            800,
-            800,
-            1000
-          ]
+          "name": "Elegoo OrangeStorm Giga"
         }
       ]
     },
@@ -337,39 +167,19 @@
       "models": [
         {
           "id": "prusa_mk4",
-          "name": "Prusa MK4 / MK4S",
-          "build_volume_mm": [
-            250,
-            210,
-            220
-          ]
+          "name": "Prusa MK4 / MK4S"
         },
         {
           "id": "prusa_mini",
-          "name": "Prusa Mini / Mini+",
-          "build_volume_mm": [
-            180,
-            180,
-            180
-          ]
+          "name": "Prusa Mini / Mini+"
         },
         {
           "id": "prusa_xl",
-          "name": "Prusa XL",
-          "build_volume_mm": [
-            360,
-            360,
-            360
-          ]
+          "name": "Prusa XL"
         },
         {
           "id": "prusa_mk3s",
-          "name": "Prusa i3 MK3S / MK3S+",
-          "build_volume_mm": [
-            250,
-            210,
-            210
-          ]
+          "name": "Prusa i3 MK3S / MK3S+"
         }
       ]
     },
@@ -380,30 +190,15 @@
       "models": [
         {
           "id": "sovol_sv06",
-          "name": "Sovol SV06 / SV06 Plus",
-          "build_volume_mm": [
-            220,
-            220,
-            250
-          ]
+          "name": "Sovol SV06 / SV06 Plus"
         },
         {
           "id": "sovol_sv07",
-          "name": "Sovol SV07",
-          "build_volume_mm": [
-            220,
-            220,
-            250
-          ]
+          "name": "Sovol SV07"
         },
         {
           "id": "sovol_sv07_plus",
-          "name": "Sovol SV07 Plus",
-          "build_volume_mm": [
-            300,
-            300,
-            350
-          ]
+          "name": "Sovol SV07 Plus"
         }
       ]
     },
@@ -414,21 +209,11 @@
       "models": [
         {
           "id": "voron_0",
-          "name": "Voron 0 / 0.2",
-          "build_volume_mm": [
-            120,
-            120,
-            120
-          ]
+          "name": "Voron 0 / 0.2"
         },
         {
           "id": "voron_2",
-          "name": "Voron 2.4 / Trident",
-          "build_volume_mm": [
-            300,
-            300,
-            300
-          ]
+          "name": "Voron 2.4 / Trident"
         }
       ]
     },
@@ -439,12 +224,7 @@
       "models": [
         {
           "id": "anker_m5",
-          "name": "AnkerMake M5 / M5C",
-          "build_volume_mm": [
-            235,
-            235,
-            250
-          ]
+          "name": "AnkerMake M5 / M5C"
         }
       ]
     },
@@ -455,12 +235,7 @@
       "models": [
         {
           "id": "artillery_sw_x3",
-          "name": "Artillery Sidewinder X3 Plus / X3 Pro",
-          "build_volume_mm": [
-            240,
-            240,
-            260
-          ]
+          "name": "Artillery Sidewinder X3 Plus / X3 Pro"
         }
       ]
     },
@@ -471,12 +246,7 @@
       "models": [
         {
           "id": "flashforge_adventurer5m",
-          "name": "FlashForge Adventurer 5M / 5M Pro",
-          "build_volume_mm": [
-            220,
-            220,
-            220
-          ]
+          "name": "FlashForge Adventurer 5M / 5M Pro"
         }
       ]
     },
@@ -487,12 +257,7 @@
       "models": [
         {
           "id": "qidi_x_plus3",
-          "name": "QIDI X-Plus 3",
-          "build_volume_mm": [
-            280,
-            280,
-            270
-          ]
+          "name": "QIDI X-Plus 3"
         }
       ]
     },
@@ -503,12 +268,7 @@
       "models": [
         {
           "id": "ratrig_vcore3",
-          "name": "Rat Rig V-Core 3 / V-Core 3.1",
-          "build_volume_mm": [
-            300,
-            300,
-            300
-          ]
+          "name": "Rat Rig V-Core 3 / V-Core 3.1"
         }
       ]
     },
@@ -519,12 +279,7 @@
       "models": [
         {
           "id": "sparkx_i7",
-          "name": "Creality SPARKX i7",
-          "build_volume_mm": [
-            260,
-            260,
-            255
-          ]
+          "name": "Creality SPARKX i7"
         }
       ]
     }

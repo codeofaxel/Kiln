@@ -6,9 +6,6 @@ const { brands, total_models, total_brands } = supported;
 
 const brandNames = brands.map((b) => b.brand).join(', ');
 
-const fmtVol = (v: number[] | null) =>
-  Array.isArray(v) && v.length === 3 ? `${v[0]} × ${v[1]} × ${v[2]} mm` : '';
-
 // schema.org ItemList of every supported model (SEO long-tail).
 const schema = {
   '@type': 'ItemList',
@@ -76,7 +73,6 @@ const schema = {
               {b.models.map((m) => (
                 <li class="model" data-name={m.name.toLowerCase()}>
                   <span class="model-name">{m.name}</span>
-                  {fmtVol(m.build_volume_mm) && <span class="model-vol">{fmtVol(m.build_volume_mm)}</span>}
                 </li>
               ))}
             </ul>
@@ -248,12 +244,6 @@ const schema = {
   }
   .model-name {
     font-size: 14px;
-  }
-  .model-vol {
-    font-size: 12px;
-    color: var(--text-muted);
-    font-family: var(--mono);
-    white-space: nowrap;
   }
   .catch-all {
     margin-top: 32px;

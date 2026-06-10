@@ -89,3 +89,34 @@ def test_readme_printer_block_is_not_stale():
         "README printer block is stale — run "
         "`python3 scripts/generate_supported_printers.py`."
     )
+
+
+# Fields allowed on the PUBLIC, crawlable /printers surface. Just enough to
+# answer "is my printer supported?" — never per-model engineering specs.
+_PUBLIC_MODEL_FIELDS = {"id", "name"}
+
+
+def test_public_surface_exposes_only_name_not_specs():
+    """The /printers surface (and its committed JSON) must list WHICH printers we
+    support — never per-model engineering specs (build volume, temps, materials,
+    nozzle, ...). The curated catalog detail is moat; only the brand→model list
+    ships to a page anyone can scrape. Allowlist, fail-closed: a new per-model
+    field fails here until it is consciously classified as public-safe."""
+    payload, _ = gen.build_surface()
+    for brand in payload["brands"]:
+        for model in brand["models"]:
+            leaked = set(model) - _PUBLIC_MODEL_FIELDS
+            assert not leaked, (
+                f"{model.get('id')}: public /printers surface would leak {leaked} — "
+                "per-model specs are moat; only id+name may ship. Remove it from "
+                "the model dict in scripts/generate_supported_printers.py."
+            )
+
+    # belt-and-suspenders: the committed JSON the site bundles must be clean too.
+    if gen.OUT.exists():
+        raw = gen.OUT.read_text().lower()
+        for banned in ("build_volume", "max_hotend", "max_bed", "nozzle", "temp"):
+            assert banned not in raw, (
+                f"supported_printers.json contains '{banned}' — specs must not ship "
+                "to the public surface. Regenerate after removing it."
+            )
