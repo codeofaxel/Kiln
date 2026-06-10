@@ -57,6 +57,10 @@ scripts/*
 # catalogs, OpenSCAD libraries, and printer g-code files that runtime
 # code depends on — prevents `package-data` glob regressions.
 !scripts/audit_wheel_inventory.py
+# …and for the supported-printers surface generator + drift gate, which
+# keeps docs/site's /printers page in sync with the printer catalog and
+# is run by tests/CI so the marketing surface can never go stale.
+!scripts/generate_supported_printers.py
 
 # Internal working docs (backed up via iCloud)
 .dev

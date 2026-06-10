@@ -223,7 +223,8 @@ Kiln ships curated safety profiles with per-printer temperature limits, feedrate
 | `anker_m5` | AnkerMake M5 / M5C | 300 C | 110 C | 235x235x250 |
 | `artillery_sw_x3` | Artillery Sidewinder X3 Plus / X3 Pro | 300 C | 110 C | 300x300x400 |
 | `sovol_sv06` | Sovol SV06 / SV06 Plus | 300 C | 110 C | 220x220x250 |
-| `sovol_sv07` | Sovol SV07 / SV07 Plus | 300 C | 110 C | 220x220x250 |
+| `sovol_sv07` | Sovol SV07 | 300 C | 110 C | 220x220x250 |
+| `sovol_sv07_plus` | Sovol SV07 Plus | 300 C | 110 C | 300x300x350 |
 | `flashforge_adventurer5m` | FlashForge Adventurer 5M / 5M Pro | 280 C | 110 C | 220x220x220 |
 | `qidi_x_plus3` | QIDI X-Plus 3 | 350 C | 120 C | 280x280x270 |
 | `klipper_generic` | Generic Klipper Printer (Moonraker) | 300 C | 120 C | 235x235x250 |

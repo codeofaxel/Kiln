@@ -3,7 +3,7 @@ const { current = '' } = Astro.props;
 
 // Which sub-page slugs belong under the "Product" dropdown.  Used to
 // mark the Product trigger active when the visitor is on any of them.
-const productPages = ['install', 'features', 'use-cases', 'farms', 'integrations', 'boundary'];
+const productPages = ['install', 'features', 'use-cases', 'farms', 'integrations', 'printers', 'boundary'];
 const productActive = productPages.includes(current);
 
 // ``Docs`` is a plain link, not a dropdown.  The FAQ lives on the
@@ -47,6 +47,7 @@ const docsActive = docsPages.includes(current);
           <li role="none"><a role="menuitem" href="/use-cases" class:list={[{ active: current === 'use-cases' }]}>Use Cases</a></li>
           <li role="none"><a role="menuitem" href="/farms" class:list={[{ active: current === 'farms' }]}>Print Farms</a></li>
           <li role="none"><a role="menuitem" href="/integrations" class:list={[{ active: current === 'integrations' }]}>Integrations</a></li>
+          <li role="none"><a role="menuitem" href="/printers" class:list={[{ active: current === 'printers' }]}>Printers</a></li>
           <li role="none"><a role="menuitem" href="/boundary" class:list={[{ active: current === 'boundary' }]}>Boundary</a></li>
         </ul>
       </div>

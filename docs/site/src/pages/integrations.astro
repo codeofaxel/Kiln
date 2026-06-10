@@ -22,7 +22,7 @@ const printerIntegrations: Integration[] = [
     name: 'moonraker',
     title: 'Moonraker / Klipper',
     description:
-      'Use Kiln with Moonraker and Klipper printers for high-speed workflows, fleet routing, and JSON-first automation in CLI or MCP.',
+      'Use Kiln with any Moonraker/Klipper printer — Voron, Rat Rig V-Core 3, Sovol SV07, QIDI X-Plus 3, and more — for high-speed workflows, fleet routing, and JSON-first automation in CLI or MCP.',
     icon: '🌙',
     tag: 'REST API',
   },
@@ -38,7 +38,7 @@ const printerIntegrations: Integration[] = [
     name: 'bambu',
     title: 'Bambu Lab',
     description:
-      'Bring Bambu Lab printers (X1C, P1S, P1P, A1, A1 Mini) into an AI-native workflow with controlled commands, telemetry, and queue orchestration.',
+      'Bring Bambu Lab printers — X1C, X1E, P1S, P1P, P2S, A1, A1 Mini, A2L, and the enclosed H2S — into an AI-native workflow with controlled commands, telemetry, and queue orchestration.',
     icon: '🟦',
     tag: 'MQTT',
   },
@@ -181,7 +181,7 @@ const integrationSchema = {
       <div class="section-header">
         <span class="section-label">Printer backends</span>
         <h2>Works with your existing printers</h2>
-        <p class="lead">Use Kiln as a universal interface for mixed-brand 3D printer fleets.</p>
+        <p class="lead">Use Kiln as a universal interface for mixed-brand 3D printer fleets — with tuned profiles for <a href="/printers">dozens of specific models</a>.</p>
       </div>
       <div class="printer-grid">
         {printerIntegrations.map((integration, i) => (
