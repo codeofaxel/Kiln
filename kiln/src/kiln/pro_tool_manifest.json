@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-06-09T22:59:23.790879+00:00",
-  "tool_count": 345,
+  "generated": "2026-06-10T08:50:00.412735+00:00",
+  "tool_count": 347,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -499,11 +499,6 @@
             "default": false,
             "title": "Include Retired",
             "type": "boolean"
-          },
-          "lang": {
-            "default": "en",
-            "title": "Lang",
-            "type": "string"
           }
         },
         "title": "diff_assembly_manualsArguments",
@@ -775,6 +770,35 @@
       }
     },
     {
+      "name": "get_build_history",
+      "description": "Show what prior builds of a design have taught us (Enterprise) \u2014 the read side of the closed loop.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "assembly_manuals",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "get_build_historyArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "get_manual_revision",
       "description": "Fetch a single manual revision by id (Pro+).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -850,6 +874,76 @@
           }
         },
         "title": "load_assembly_manualArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_build_outcome",
+      "description": "Record what actually happened building a unit from a factory work instruction (Enterprise) \u2014 the write side of the closed loop.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "assembly_manuals",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "sign_off_result": {
+            "default": "pass",
+            "title": "Sign Off Result",
+            "type": "string"
+          },
+          "observed_defects": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Observed Defects"
+          },
+          "manual_revision": {
+            "default": 0,
+            "title": "Manual Revision",
+            "type": "integer"
+          },
+          "build_class": {
+            "default": "",
+            "title": "Build Class",
+            "type": "string"
+          },
+          "operator": {
+            "default": "",
+            "title": "Operator",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id",
+          "printer_id",
+          "material"
+        ],
+        "title": "record_build_outcomeArguments",
         "type": "object"
       }
     },
