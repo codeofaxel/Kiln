@@ -25,8 +25,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   more — so you can find your exact machine in seconds. The list stays in sync
   with the printer catalog automatically.
 - **Sovol SV07 Plus support, plus a build-volume fix for the SV07.** Kiln now
-  carries a tuned profile for the larger SV07 Plus (300 × 300 × 350 mm), and
-  corrects the standard SV07 to its true 220 × 220 × 250 mm bed.
+  carries a tuned profile for the larger SV07 Plus, and corrects the standard
+  SV07's build volume.
+- **Deeper per-printer guidance (Kiln Pro+).** The model-specific know-how Kiln
+  brings to a print — quirks, common failure modes, calibration tips — now runs
+  as deep for budget and mid-range printers as for the flagships.
 - **Adhesive intelligence for bonding printed parts (Kiln Pro+).** New MCP tools
   — `recommend_adhesive`, `get_adhesive_profile`, `record_bond_outcome` —
   recommend the right glue for joining two printed plastics with surface prep
