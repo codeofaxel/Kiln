@@ -19,6 +19,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   another printer. *Free tells you it won't work; Kiln Pro tells you how to
   make it — your printer's true usable area, the cleanest way to split an
   oversize part, and the material to switch to.*
+- **Check if Kiln supports your printer — instantly.** A new [Supported Printers](https://kiln3d.com/printers)
+  page lists every model Kiln ships a tuned profile for, grouped by brand with a
+  live filter — Bambu Lab, Creality, Prusa, Elegoo, Sovol, Voron, AnkerMake, and
+  more — so you can find your exact machine in seconds. The list stays in sync
+  with the printer catalog automatically.
+- **Sovol SV07 Plus support, plus a build-volume fix for the SV07.** Kiln now
+  carries a tuned profile for the larger SV07 Plus (300 × 300 × 350 mm), and
+  corrects the standard SV07 to its true 220 × 220 × 250 mm bed.
 - **Adhesive intelligence for bonding printed parts (Kiln Pro+).** New MCP tools
   — `recommend_adhesive`, `get_adhesive_profile`, `record_bond_outcome` —
   recommend the right glue for joining two printed plastics with surface prep
