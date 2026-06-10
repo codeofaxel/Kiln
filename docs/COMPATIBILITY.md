@@ -177,57 +177,57 @@ Notes: The adapter communicates exclusively over local LAN -- it does not use th
 
 Notes: Both slicers are invoked via their `--export-gcode` CLI flag for headless slicing. Version detection uses `--version`. The `KILN_SLICER_PATH` environment variable can override auto-detection. Supported input formats: `.stl`, `.3mf`, `.step`, `.stp`, `.obj`, `.amf`.
 
-## Supported Printer Models (Safety Profiles)
+## Supported Printer Models
 
-Kiln ships curated safety profiles with per-printer temperature limits, feedrate limits, volumetric flow limits, and build volumes:
+Kiln recognizes the following printer models. Use the Profile ID as your `printer_model` (e.g. `kiln auth --type creality --printer_model k1_max`); Kiln applies the right temperature limits, flow caps, and a tuned profile automatically.
 
-| Profile ID | Display Name | Max Hotend | Max Bed | Build Volume |
-|---|---|---|---|---|
-| `default` | Generic / Unknown Printer | 300 C | 130 C | -- |
-| `ender3` | Creality Ender 3 / Ender 3 Pro / Ender 3 V2 | 260 C | 110 C | 220x220x250 |
-| `ender3_v2` | Creality Ender 3 V2 | 260 C | 110 C | 220x220x250 |
-| `ender3_s1` | Creality Ender 3 S1 / S1 Pro | 300 C | 110 C | 220x220x270 |
-| `ender5` | Creality Ender 5 / Ender 5 Plus | 260 C | 110 C | 220x220x300 |
-| `cr10` | Creality CR-10 / CR-10S | 260 C | 110 C | 300x300x400 |
-| `sparkx_i7` | Creality SPARKX i7 | 300 C | 100 C | 260x260x255 |
-| `k1` | Creality K1 | 300 C | 100 C | 220x220x250 |
-| `k1_max` / `creality_k1_max` | Creality K1 Max | 300 C | 100 C | 300x300x300 |
-| `k1c` / `creality_k1c` | Creality K1C | 300 C | 100 C | 220x220x250 |
-| `k1_se` / `creality_k1_se` | Creality K1 SE | 300 C | 100 C | 220x220x250 |
-| `k2` / `creality_k2` | Creality K2 | 300 C | 100 C | 260x260x260 |
-| `k2_pro` / `creality_k2_pro` | Creality K2 Pro | 300 C | 110 C | 300x300x300 |
-| `k2_plus` / `creality_k2_plus` | Creality K2 Plus | 350 C | 120 C | 350x350x350 |
-| `k2_se` / `creality_k2_se` | Creality K2 SE | 300 C | 100 C | 220x215x245 |
-| `creality_hi` | Creality Hi | 300 C | 100 C | 260x260x300 |
-| `ender3_v4` | Creality Ender-3 V4 | 300 C | 100 C | 220x220x235 |
-| `ender3_v3` | Creality Ender-3 V3 | 300 C | 110 C | 220x220x250 |
-| `ender3_v3_ke` | Creality Ender-3 V3 KE | 300 C | 100 C | 220x220x240 |
-| `ender3_v3_se` | Creality Ender-3 V3 SE | 260 C | 100 C | 220x220x250 |
-| `ender3_v3_plus` | Creality Ender-3 V3 Plus | 300 C | 100 C | 300x300x330 |
-| `ender5_max` | Creality Ender-5 Max | 300 C | 100 C | 400x400x400 |
-| `cr10_se` | Creality CR-10 SE | 300 C | 110 C | 220x220x265 |
-| `prusa_mk3s` | Prusa i3 MK3S / MK3S+ | 300 C | 120 C | 250x210x210 |
-| `prusa_mk4` | Prusa MK4 / MK4S | 300 C | 120 C | 250x210x220 |
-| `prusa_xl` | Prusa XL | 300 C | 120 C | 360x360x360 |
-| `prusa_mini` | Prusa Mini / Mini+ | 280 C | 100 C | 180x180x180 |
-| `bambu_x1c` | Bambu Lab X1 Carbon | 300 C | 120 C | 256x256x256 |
-| `bambu_p1s` | Bambu Lab P1S | 300 C | 120 C | 256x256x256 |
-| `bambu_p1p` | Bambu Lab P1P | 300 C | 110 C | 256x256x256 |
-| `bambu_a1_mini` | Bambu Lab A1 Mini | 300 C | 80 C | 180x180x180 |
-| `bambu_a1` | Bambu Lab A1 | 300 C | 100 C | 256x256x256 |
-| `voron_0` | Voron 0 / 0.2 | 300 C | 120 C | 120x120x120 |
-| `voron_2` | Voron 2.4 / Trident | 300 C | 120 C | 350x350x350 |
-| `ratrig_vcore3` | Rat Rig V-Core 3 / V-Core 3.1 | 300 C | 120 C | 300x300x300 |
-| `elegoo_neptune3` | Elegoo Neptune 3 / 3 Pro / 3 Plus | 260 C | 110 C | 220x220x280 |
-| `elegoo_neptune4` | Elegoo Neptune 4 / 4 Pro / 4 Max | 300 C | 110 C | 235x235x265 |
-| `anker_m5` | AnkerMake M5 / M5C | 300 C | 110 C | 235x235x250 |
-| `artillery_sw_x3` | Artillery Sidewinder X3 Plus / X3 Pro | 300 C | 110 C | 300x300x400 |
-| `sovol_sv06` | Sovol SV06 / SV06 Plus | 300 C | 110 C | 220x220x250 |
-| `sovol_sv07` | Sovol SV07 | 300 C | 110 C | 220x220x250 |
-| `sovol_sv07_plus` | Sovol SV07 Plus | 300 C | 110 C | 300x300x350 |
-| `flashforge_adventurer5m` | FlashForge Adventurer 5M / 5M Pro | 280 C | 110 C | 220x220x220 |
-| `qidi_x_plus3` | QIDI X-Plus 3 | 350 C | 120 C | 280x280x270 |
-| `klipper_generic` | Generic Klipper Printer (Moonraker) | 300 C | 120 C | 235x235x250 |
+| Profile ID | Display Name |
+|---|---|
+| `default` | Generic / Unknown Printer |
+| `ender3` | Creality Ender 3 / Ender 3 Pro / Ender 3 V2 |
+| `ender3_v2` | Creality Ender 3 V2 |
+| `ender3_s1` | Creality Ender 3 S1 / S1 Pro |
+| `ender5` | Creality Ender 5 / Ender 5 Plus |
+| `cr10` | Creality CR-10 / CR-10S |
+| `sparkx_i7` | Creality SPARKX i7 |
+| `k1` | Creality K1 |
+| `k1_max` / `creality_k1_max` | Creality K1 Max |
+| `k1c` / `creality_k1c` | Creality K1C |
+| `k1_se` / `creality_k1_se` | Creality K1 SE |
+| `k2` / `creality_k2` | Creality K2 |
+| `k2_pro` / `creality_k2_pro` | Creality K2 Pro |
+| `k2_plus` / `creality_k2_plus` | Creality K2 Plus |
+| `k2_se` / `creality_k2_se` | Creality K2 SE |
+| `creality_hi` | Creality Hi |
+| `ender3_v4` | Creality Ender-3 V4 |
+| `ender3_v3` | Creality Ender-3 V3 |
+| `ender3_v3_ke` | Creality Ender-3 V3 KE |
+| `ender3_v3_se` | Creality Ender-3 V3 SE |
+| `ender3_v3_plus` | Creality Ender-3 V3 Plus |
+| `ender5_max` | Creality Ender-5 Max |
+| `cr10_se` | Creality CR-10 SE |
+| `prusa_mk3s` | Prusa i3 MK3S / MK3S+ |
+| `prusa_mk4` | Prusa MK4 / MK4S |
+| `prusa_xl` | Prusa XL |
+| `prusa_mini` | Prusa Mini / Mini+ |
+| `bambu_x1c` | Bambu Lab X1 Carbon |
+| `bambu_p1s` | Bambu Lab P1S |
+| `bambu_p1p` | Bambu Lab P1P |
+| `bambu_a1_mini` | Bambu Lab A1 Mini |
+| `bambu_a1` | Bambu Lab A1 |
+| `voron_0` | Voron 0 / 0.2 |
+| `voron_2` | Voron 2.4 / Trident |
+| `ratrig_vcore3` | Rat Rig V-Core 3 / V-Core 3.1 |
+| `elegoo_neptune3` | Elegoo Neptune 3 / 3 Pro / 3 Plus |
+| `elegoo_neptune4` | Elegoo Neptune 4 / 4 Pro / 4 Max |
+| `anker_m5` | AnkerMake M5 / M5C |
+| `artillery_sw_x3` | Artillery Sidewinder X3 Plus / X3 Pro |
+| `sovol_sv06` | Sovol SV06 / SV06 Plus |
+| `sovol_sv07` | Sovol SV07 |
+| `sovol_sv07_plus` | Sovol SV07 Plus |
+| `flashforge_adventurer5m` | FlashForge Adventurer 5M / 5M Pro |
+| `qidi_x_plus3` | QIDI X-Plus 3 |
+| `klipper_generic` | Generic Klipper Printer (Moonraker) |
 
 ## MCP Clients
 
