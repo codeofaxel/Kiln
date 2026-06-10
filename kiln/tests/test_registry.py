@@ -33,6 +33,8 @@ def _make_mock_adapter(
     tool_temp_target: float | None = 0.0,
     bed_temp_actual: float | None = 22.0,
     bed_temp_target: float | None = 0.0,
+    nozzle_type: str | None = None,
+    nozzle_diameter: str | None = None,
 ) -> MagicMock:
     """Create a MagicMock that behaves like a PrinterAdapter."""
     adapter = MagicMock(spec=PrinterAdapter)
@@ -45,6 +47,8 @@ def _make_mock_adapter(
         tool_temp_target=tool_temp_target,
         bed_temp_actual=bed_temp_actual,
         bed_temp_target=bed_temp_target,
+        nozzle_type=nozzle_type,
+        nozzle_diameter=nozzle_diameter,
     )
     return adapter
 
@@ -245,6 +249,23 @@ class TestGetFleetStatus:
         assert entry["state"] == "offline"
         assert entry["tool_temp_actual"] is None
         assert entry["bed_temp_actual"] is None
+
+    def test_surfaces_reported_nozzle_per_printer(self):
+        # An adapter that reports its installed nozzle (Bambu, over MQTT)
+        # surfaces it per-printer; one that doesn't leaves the fields None.
+        # This per-printer reading is what lets a fleet view cross-check every
+        # printer's nozzle against its saved record, not just the active one.
+        registry = PrinterRegistry()
+        registry.register("reports", _make_mock_adapter(
+            name="bambu", nozzle_type="hardened_steel", nozzle_diameter="0.4",
+        ))
+        registry.register("silent", _make_mock_adapter(name="generic"))
+
+        fleet = {entry["name"]: entry for entry in registry.get_fleet_status()}
+        assert fleet["reports"]["nozzle_type"] == "hardened_steel"
+        assert fleet["reports"]["nozzle_diameter"] == "0.4"
+        assert fleet["silent"]["nozzle_type"] is None
+        assert fleet["silent"]["nozzle_diameter"] is None
 
     def test_empty_registry(self):
         registry = PrinterRegistry()

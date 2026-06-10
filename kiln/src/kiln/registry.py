@@ -264,6 +264,14 @@ class PrinterRegistry:
                 "tool_temp_target": state.tool_temp_target,
                 "bed_temp_actual": state.bed_temp_actual,
                 "bed_temp_target": state.bed_temp_target,
+                # The nozzle the printer itself reports, when the adapter
+                # surfaces it (Bambu populates these from its MQTT report;
+                # adapters that don't leave them None). Carried per-printer so a
+                # fleet view can cross-check each printer's installed nozzle
+                # against its saved record — not just the one active printer
+                # printer_status() happens to reflect.
+                "nozzle_type": state.nozzle_type,
+                "nozzle_diameter": state.nozzle_diameter,
             }
 
         def _error(name: str, adapter: PrinterAdapter, exc: Exception) -> dict:
