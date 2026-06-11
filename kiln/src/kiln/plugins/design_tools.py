@@ -504,6 +504,14 @@ class _DesignToolsPlugin:
                     }
                 result = estimate.to_dict()
                 result["success"] = True
+                # Disclose the flat safety margin: the lookup uses a fixed 3x
+                # regardless of use, so it is NOT enough for high-consequence
+                # parts (life-safety/lifting want 5-10x — see design_for_load).
+                result["safety_basis"] = (
+                    "Uses a general 3x safety margin, not tuned to your "
+                    "application. Life-safety and lifting parts need more "
+                    "(typically 5-10x) — size those with an engineer."
+                )
                 # estimate_structural_load is definitionally a load-bearing
                 # question — always surface the heuristic-grade upgrade nudge.
                 from kiln.load_bearing_detector import attach_load_bearing_nudge
