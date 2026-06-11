@@ -883,10 +883,8 @@ def _record_local_tool_call(name: str) -> None:
     if pro_features is not None:
         # kiln-pro owns recording on this machine; do NOT also run the
         # public ledger below or the same call would be counted twice.
-        try:
+        with contextlib.suppress(Exception):
             pro_features.record_local_tool_call(name)
-        except Exception:
-            pass
         return
     try:
         from kiln import usage_ledger
