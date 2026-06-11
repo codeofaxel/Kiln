@@ -536,6 +536,51 @@ class TestAnalyzeStructuralRisks:
                 )
 
 
+class TestStructuralRiskDemoteNotDelete:
+    """The Pro overlay must DEMOTE borderline risks to info, never DELETE them.
+
+    A paying (overlay) caller must see the exact same features a free caller
+    sees — borderline ones quieted to a note, nothing silently hidden.
+    """
+
+    @staticmethod
+    def _key(r):
+        return (r.risk_type, r.metric_name,
+                round(r.location_mm[0], 1), round(r.location_mm[1], 1),
+                round(r.location_mm[2], 1))
+
+    def test_overlay_demotes_borderline_but_hides_nothing(self, tall_thin_stl, monkeypatch):
+        import kiln.design_intelligence as di
+
+        # Free tier: no overlay.
+        monkeypatch.setattr(di, "load_pro_overlay_or_empty", lambda kind: {})
+        free = analyze_structural_risks(tall_thin_stl)
+
+        # Pro tier: a calibrated escalation threshold that the 2x2 (4 mm^2)
+        # thin neck cannot clear -> it must DEMOTE to info, not vanish.
+        monkeypatch.setattr(
+            di, "load_pro_overlay_or_empty",
+            lambda kind: {"min_cross_section_mm2": 1.0} if kind == "structural_thresholds" else {},
+        )
+        pro = analyze_structural_risks(tall_thin_stl)
+
+        sev = {"critical": 0, "warning": 1, "info": 2}
+        free_by = {self._key(r): r.severity for r in free}
+        pro_by = {self._key(r): r.severity for r in pro}
+
+        # 1) Nothing hidden: identical feature set on both tiers.
+        assert set(free_by) == set(pro_by)
+        # 2) Pro is never LOUDER than free on any feature.
+        for k in free_by:
+            assert sev[pro_by[k]] >= sev[free_by[k]]
+        # 3) At least one borderline warning was demoted to info (the thin neck).
+        demoted = [k for k in free_by if sev[pro_by[k]] > sev[free_by[k]]]
+        assert demoted, "expected at least one borderline risk demoted to info"
+        assert all(pro_by[k] == "info" for k in demoted)
+        # 4) Free tier behaviour is unchanged (no demotion without an overlay).
+        assert all(s != "info" or free_by[k] == "info" for k, s in free_by.items())
+
+
 class TestRecommendReinforcements:
     """recommend_reinforcements derives fixes from risk analysis."""
 
@@ -975,12 +1020,14 @@ class TestStructuralThresholdsTierSeam:
     def test_free_tier_never_underflags_relative_to_pro(
         self, borderline_cantilever_stl, monkeypatch,
     ):
-        """RELEASE BLOCKER.  Same mesh under free tier produces findings
-        that are a SUPERSET of (or equal to) findings under Pro tier.
-        Free can never SILENCE a finding Pro would have raised.
+        """RELEASE BLOCKER.  Demote-not-delete: the same mesh must surface the
+        SAME findings on both tiers — borderline ones quieted to an info note
+        on Pro, NEVER silenced.  Free can't see a finding Pro hid, and Pro
+        can't hide a finding free raised.
 
-        Borderline fixture: a 5×5×22.5mm prism — height/base = 4.5.
-        Public's 4.0 threshold flags it; Pro's 5.0 doesn't."""
+        Borderline fixture: a 5×5×22.5mm prism — height/base = 4.5.  Public's
+        4.0 threshold flags it as a warning; Pro's 5.0 calibrated bar demotes
+        it to an info note (surfaced, not deleted)."""
         # Free tier: empty overlay
         monkeypatch.setattr(
             "kiln.design_intelligence.load_pro_overlay_or_empty",
@@ -995,24 +1042,35 @@ class TestStructuralThresholdsTierSeam:
         )
         pro_risks = analyze_structural_risks(borderline_cantilever_stl)
 
-        # Pro flags must be a subset of free flags — every risk_type Pro
-        # raised must also appear in free's output.
+        # Demote-not-delete: identical feature set on both tiers — nothing
+        # hidden in EITHER direction.
         pro_keys = {(r.risk_type, round(r.location_mm[2], 1)) for r in pro_risks}
         free_keys = {(r.risk_type, round(r.location_mm[2], 1)) for r in free_risks}
-        missed = pro_keys - free_keys
-        assert not missed, (
-            f"SAFETY VIOLATION: free tier under-flagged vs Pro. "
-            f"Pro raised but free did not: {missed}"
+        assert pro_keys == free_keys, (
+            f"SAFETY VIOLATION: tiers surfaced different features. "
+            f"free-only={free_keys - pro_keys}, pro-only={pro_keys - free_keys}"
         )
-        # And specifically: free MUST flag the 4.5:1 ratio as insufficient_base.
-        assert any(r.risk_type == "insufficient_base" for r in free_risks), (
+        # Free flags the 4.5:1 ratio as a real (non-info) warning.
+        free_base = [r for r in free_risks if r.risk_type == "insufficient_base"]
+        assert free_base, (
             "Free tier missed the 4.5:1 height/base prism — the borderline "
             "geometry the public-stricter threshold exists to catch."
         )
-        # Pro should NOT flag it (calibrated 5.0 threshold; 4.5 < 5.0).
-        assert not any(r.risk_type == "insufficient_base" for r in pro_risks), (
-            "Pro tier flagged a 4.5:1 ratio prism — the calibrated baseline "
-            "should silently pass it.  Did the overlay value drift?"
+        assert any(r.severity != "info" for r in free_base)
+        # Pro still SURFACES it (demote-not-delete) but quiets the borderline
+        # height/base finding to info rather than deleting it.
+        pro_hb = [
+            r for r in pro_risks
+            if r.risk_type == "insufficient_base"
+            and r.metric_name == "height_to_base_ratio"
+        ]
+        assert pro_hb, (
+            "Pro tier deleted the 4.5:1 height/base finding — demote-not-delete "
+            "requires it surfaced as an info note, never hidden."
+        )
+        assert all(r.severity == "info" for r in pro_hb), (
+            "Pro must DEMOTE the borderline 4.5:1 ratio to info, not leave it a "
+            "full warning (and not delete it)."
         )
 
     def test_explicit_kwarg_overrides_both_tiers(

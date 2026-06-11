@@ -33,17 +33,19 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Constants — INVERSE-PATTERN overlay seam
+# Constants — DEMOTE-NOT-DELETE overlay seam
 # ---------------------------------------------------------------------------
 #
-# Tiering for structural-risk thresholds is the inverse of the usual
-# paywall pattern: the no-overlay path ships STRICTER values so a
-# caller without the overlay always sees a superset of the flags an
-# overlay-loaded caller would see for the same mesh.  The kiln-pro
-# ``structural_thresholds`` overlay (loaded by
-# ``analyze_structural_risks``) unlocks the calibrated baseline.
+# Detection always uses these public (stricter) values, so EVERY caller —
+# overlay or not — surfaces the same features for a given mesh; a Pro caller
+# is never silently denied a warning a free caller would get.  The kiln-pro
+# ``structural_thresholds`` overlay (loaded by ``analyze_structural_risks``)
+# supplies calibrated (looser) values that act as an ESCALATION line: a
+# feature past the calibrated threshold stays a full warning, while one that
+# only trips the stricter public floor is DEMOTED to an ``info`` note —
+# quieter for the experienced user, nothing hidden.
 #
-# Stricter direction per metric:
+# Stricter direction per metric (the public floor that surfaces a feature):
 #   - thin_neck_ratio:           HIGHER value flags MORE thin sections
 #   - cantilever_risk_ratio:     LOWER value flags MORE cantilevers
 #   - min_cross_section_mm2:     HIGHER value flags MORE small sections
@@ -1151,21 +1153,22 @@ def analyze_structural_risks(
 ) -> list[StructuralRisk]:
     """Analyze an STL for structural risks.
 
-    Threshold tiering — INVERSE PATTERN:
+    Threshold tiering — DEMOTE, NOT DELETE:
 
-    - Without the ``structural_thresholds`` overlay: STRICTER
-      thresholds than the calibrated baseline.  A caller without the
-      overlay sees more warnings than a caller with the overlay
-      would for the same geometry; the no-overlay path never
-      under-flags relative to the calibrated baseline.
-    - With the ``structural_thresholds`` overlay: calibrated baseline
-      thresholds.  Same algorithm, same risk taxonomy, but threshold
-      bands match the curated judgment (e.g. ``thin_neck_ratio``
-      0.30 vs no-overlay 0.35).
+    - Detection always surfaces at the public (stricter) thresholds,
+      so EVERY caller — overlay or not — sees the same features.  A Pro
+      caller is never silently denied a warning a free caller would get.
+    - With the ``structural_thresholds`` overlay (Pro): the calibrated
+      (looser) values become an ESCALATION line, not a detection line.
+      A feature past the calibrated threshold stays a full warning; one
+      that only trips the stricter public floor is DEMOTED to ``info``
+      (e.g. a 4.5:1 cantilever is a warning for free but an info note
+      for Pro, whose calibrated bar is 5.0:1).  Quieter for the
+      experienced user — nothing hidden.
 
-    Explicit kwargs override both paths — power-user escape hatch
-    for callers who know exactly what they want.  ``None`` means
-    "use the overlay if loaded, else the stricter public default."
+    Explicit kwargs pin a dial (surface == escalate), disabling its
+    demotion — power-user escape hatch.  ``None`` means "surface at the
+    public floor; demote with the overlay if loaded."
 
     Performs geometric analysis to find:
     - Thin necks (narrow cross-sections that will snap)
@@ -1191,35 +1194,65 @@ def analyze_structural_risks(
 
     bbox = _bounding_box(vertices)
 
-    # --- Resolve thresholds: explicit kwarg > overlay > public default
+    # --- Demote-not-delete tiering.
+    # SURFACE thresholds are always the public (stricter) values, so a Pro
+    # caller sees exactly the same features a free caller would — nothing a
+    # free user is warned about ever silently disappears for someone who paid.
+    # When the overlay is present, its calibrated (looser) values become the
+    # ESCALATION line: a feature that still trips the calibrated threshold
+    # stays a full warning; one that only trips the stricter public floor is
+    # DEMOTED to "info" — quieted for the experienced user, never hidden.
+    # An explicit kwarg pins a dial (surface == escalate), disabling demotion
+    # for that dial (power-user escape hatch).
     overlay = load_pro_overlay_or_empty("structural_thresholds")
-    thin_neck_ratio = overlay.get("thin_neck_ratio", _THIN_NECK_RATIO_PUBLIC)
-    cantilever_risk_ratio = overlay.get(
-        "cantilever_risk_ratio", _CANTILEVER_RISK_RATIO_PUBLIC,
-    )
-    if min_cross_section_mm2 is None:
-        min_cross_section_mm2 = overlay.get(
-            "min_cross_section_mm2", _MIN_CROSS_SECTION_MM2_PUBLIC,
-        )
-    if sharp_angle_threshold_deg is None:
-        sharp_angle_threshold_deg = overlay.get(
-            "sharp_angle_threshold_deg", _SHARP_ANGLE_THRESHOLD_DEG_PUBLIC,
-        )
+    surf_thin = _THIN_NECK_RATIO_PUBLIC
+    surf_cant = _CANTILEVER_RISK_RATIO_PUBLIC
+    surf_area = (min_cross_section_mm2 if min_cross_section_mm2 is not None
+                 else _MIN_CROSS_SECTION_MM2_PUBLIC)
+    surf_sharp = (sharp_angle_threshold_deg if sharp_angle_threshold_deg is not None
+                  else _SHARP_ANGLE_THRESHOLD_DEG_PUBLIC)
 
-    risks: list[StructuralRisk] = []
-    risks.extend(_find_thin_necks(
-        triangles, bbox,
-        min_area_mm2=min_cross_section_mm2,
-        ratio_threshold=thin_neck_ratio,
-    ))
+    def _dial_risks(thin: float, cant: float, area: float, sharp: float) -> list[StructuralRisk]:
+        out: list[StructuralRisk] = []
+        out.extend(_find_thin_necks(
+            triangles, bbox, min_area_mm2=area, ratio_threshold=thin,
+        ))
+        out.extend(_find_sharp_corners(triangles, angle_threshold_deg=sharp))
+        out.extend(_check_base_adequacy(triangles, bbox, cantilever_risk_ratio=cant))
+        return out
+
+    def _key(r: StructuralRisk) -> tuple:
+        # A geometric feature has a stable (type, metric, location) across runs.
+        return (r.risk_type, r.metric_name,
+                round(r.location_mm[0], 1), round(r.location_mm[1], 1),
+                round(r.location_mm[2], 1))
+
+    # Dial-gated detectors surface at the public (strict) thresholds.
+    dial_risks = _dial_risks(surf_thin, surf_cant, surf_area, surf_sharp)
+
+    if overlay:
+        esc_thin = overlay.get("thin_neck_ratio", surf_thin)
+        esc_cant = overlay.get("cantilever_risk_ratio", surf_cant)
+        esc_area = surf_area if min_cross_section_mm2 is not None else overlay.get(
+            "min_cross_section_mm2", surf_area)
+        esc_sharp = surf_sharp if sharp_angle_threshold_deg is not None else overlay.get(
+            "sharp_angle_threshold_deg", surf_sharp)
+        # Features that still trip the calibrated thresholds are genuine
+        # warnings; those that only trip the stricter public floor are
+        # borderline → demote to "info" rather than drop them.
+        survivors = {_key(r) for r in _dial_risks(esc_thin, esc_cant, esc_area, esc_sharp)}
+        for r in dial_risks:
+            if r.severity != "info" and _key(r) not in survivors:
+                r.severity = "info"
+                r.description += (
+                    " (Borderline: Kiln Pro's calibrated thresholds quiet this "
+                    "to a note rather than a warning — review it yourself if "
+                    "this feature is load-bearing.)"
+                )
+
+    # Dial-free detectors are unaffected by the overlay; run once.
+    risks: list[StructuralRisk] = dial_risks
     risks.extend(_find_cantilevers(triangles, bbox))
-    risks.extend(_find_sharp_corners(
-        triangles, angle_threshold_deg=sharp_angle_threshold_deg,
-    ))
-    risks.extend(_check_base_adequacy(
-        triangles, bbox,
-        cantilever_risk_ratio=cantilever_risk_ratio,
-    ))
     risks.extend(_find_weak_layer_adhesion_zones(triangles, bbox))
 
     # Sort by severity: critical first, then warning, then info
