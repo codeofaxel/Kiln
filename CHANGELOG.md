@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Design-time sourcing-risk for bought parts (Kiln Enterprise).** Flags the
+  off-the-shelf components a design depends on that are going end-of-life,
+  single-source, or long-lead — before you commit a bill of materials you
+  can't buy in a year. Served via kiln-pro; see https://kiln3d.com/pricing.
 - **Part Passport (Kiln Pro+).** `get_part_passport` hands your agent everything
   about a design in one call, instead of asking tool by tool. Enterprise adds
   approval gates. See https://kiln3d.com/pricing.
