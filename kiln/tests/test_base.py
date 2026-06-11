@@ -346,7 +346,7 @@ class TestPrinterAdapterABC:
             def upload_file(self, file_path):
                 return UploadResult(success=True, file_name="", message="")
 
-            def start_print(self, file_name):
+            def _start_print_impl(self, file_name):
                 return PrintResult(success=True, message="")
 
             def cancel_print(self):

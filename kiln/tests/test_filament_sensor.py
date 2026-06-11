@@ -89,7 +89,7 @@ class TestBaseFilamentStatus:
             def upload_file(self, file_path):
                 pass
 
-            def start_print(self, file_name):
+            def _start_print_impl(self, file_name):
                 pass
 
             def cancel_print(self):

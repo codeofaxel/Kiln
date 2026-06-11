@@ -153,7 +153,7 @@ class TestAdapterSafetyProfile:
                 return []
             def upload_file(self, path):
                 pass
-            def start_print(self, name):
+            def _start_print_impl(self, name):
                 pass
             def cancel_print(self):
                 pass

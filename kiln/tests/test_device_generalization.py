@@ -40,7 +40,7 @@ class TestDeviceAdapterAlias:
             def get_job(self): return JobProgress()
             def list_files(self): return []
             def upload_file(self, p): return UploadResult(success=True, file_name="f", message="ok")
-            def start_print(self, f): return PrintResult(success=True, message="ok")
+            def _start_print_impl(self, f): return PrintResult(success=True, message="ok")
             def cancel_print(self): return PrintResult(success=True, message="ok")
             def pause_print(self): return PrintResult(success=True, message="ok")
             def resume_print(self): return PrintResult(success=True, message="ok")
@@ -125,7 +125,7 @@ class TestOptionalDeviceMethods:
             def get_job(self): return JobProgress()
             def list_files(self): return []
             def upload_file(self, p): return UploadResult(success=True, file_name="f", message="ok")
-            def start_print(self, f): return PrintResult(success=True, message="ok")
+            def _start_print_impl(self, f): return PrintResult(success=True, message="ok")
             def cancel_print(self): return PrintResult(success=True, message="ok")
             def pause_print(self): return PrintResult(success=True, message="ok")
             def resume_print(self): return PrintResult(success=True, message="ok")

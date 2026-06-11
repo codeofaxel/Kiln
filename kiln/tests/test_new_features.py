@@ -453,7 +453,7 @@ class TestAdapterSnapshot:
             def get_job(self): pass
             def list_files(self): pass
             def upload_file(self, path): pass
-            def start_print(self, name): pass
+            def _start_print_impl(self, name): pass
             def cancel_print(self): pass
             def pause_print(self): pass
             def resume_print(self): pass
