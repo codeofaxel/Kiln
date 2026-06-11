@@ -422,11 +422,13 @@ def _build_upgrade_recommendation(trip_reasons: list[str]) -> dict[str, Any]:
         "tier": "free",
         "engineering_grade": "heuristic",
         "warning": (
-            "This part looks load-bearing.  The estimate above is the "
-            "quick answer.  Kiln Pro shows the receipts — engineering "
-            "safety factor, fatigue + creep checks, your printer's "
-            "calibrated tolerances — when it matters.  → "
-            "https://kiln3d.com/pricing"
+            "This part looks load-bearing.  This is a quick heuristic, not a "
+            "test of your actual printed part — and not enough for anything "
+            "that could hurt someone if it fails (overhead or climbing loads, "
+            "child or vehicle parts).  Print it, load-test it, and for "
+            "high-stakes parts get an engineer's sign-off.  Kiln Pro shows the "
+            "real safety factor, fatigue + creep checks, and your printer's "
+            "calibrated tolerances → https://kiln3d.com/pricing"
         ),
         "trip_reasons": trip_reasons,
         "pro_upgrade": {
