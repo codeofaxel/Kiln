@@ -46,6 +46,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   accumulated field reports of how a glue actually held sharpen the ranking,
   marked as field data and never replacing cited specs. See
   https://kiln3d.com/pricing.
+- **Factory work instructions in seven languages (Enterprise).** Controlled,
+  shop-floor-grade assembly instructions — a procurable BOM, per-step torque and
+  go/no-go checks, sign-off and gates — now generate end to end in English,
+  German, French, Spanish, Italian, Chinese, or Japanese, each with its own page
+  numbering, so a line anywhere in the world builds from the same source in its
+  own language. Served via kiln-pro; see https://kiln3d.com/pricing.
 
 ## [1.1.7.1] - 2026-06-05
 
