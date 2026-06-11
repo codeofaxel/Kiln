@@ -57,6 +57,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   numbering, so a line anywhere in the world builds from the same source in its
   own language. Served via kiln-pro; see https://kiln3d.com/pricing.
 
+### Changed
+
+- **Load-bearing answers lead with the safety truth (free).** When you ask if a
+  printed part can hold a load, Kiln says up front that it's a quick estimate,
+  not a test of your real printed part — and names what never to trust it for
+  without an engineer (overhead or climbing loads, child or vehicle parts).
+  Borderline geometry now shows as a note instead of going quiet. *Free flags
+  what's risky; Kiln Pro tunes the analysis to your printer — see
+  https://kiln3d.com/pricing.*
+
 ## [1.1.7.1] - 2026-06-05
 
 ### Added
