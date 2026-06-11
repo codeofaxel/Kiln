@@ -7,6 +7,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Part Passport (Kiln Pro+).** `get_part_passport` hands your agent everything
+  about a design in one call, instead of asking tool by tool. Enterprise adds
+  approval gates. See https://kiln3d.com/pricing.
 - **Per-printer nozzle in `fleet_status`.** Now includes each printer's reported
   nozzle material and diameter, when the printer reports it (e.g. Bambu over
   MQTT).
