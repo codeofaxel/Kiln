@@ -19,6 +19,13 @@ import InstallTabs from '../components/InstallTabs.astro';
 // (auto-config for Claude Desktop / Claude Code / Codex) — the same
 // flow the Windows tab and the GitHub README teach.  The manual JSON
 // config stays one <details> fold away for other MCP clients.
+//
+// 2026-06-12: normie pass.  Copy says what the user experiences
+// ("connects Kiln to your AI apps"), never the mechanism ("merges
+// MCP configs").  The Windows tab's "let your AI install it" prompt
+// is promoted to a platform-neutral callout at the top of step 1 —
+// for non-technical visitors, the AI they already have IS the
+// installer.  Keep this page and the README Quick Start in lockstep.
 
 const mcpConfig = JSON.stringify({
   mcpServers: {
@@ -40,8 +47,18 @@ const mcpConfigCompact = JSON.stringify({
 
 const connectCommands = 'kiln signin\nkiln install-mcp';
 const connectCommandsDisplay =
-  'kiln signin        # free account — OAuth from this terminal\n' +
-  'kiln install-mcp   # wires Claude Desktop, Claude Code & Codex';
+  'kiln signin        # create your free account\n' +
+  'kiln install-mcp   # connects Kiln to your AI apps';
+
+// One prompt that hands the entire setup to an AI that can run
+// commands (Claude Code, Codex, ...).  Platform-neutral version of
+// the Windows tab's "fastest" path.
+const agentSetupPrompt =
+  'Set up Kiln (kiln3d.com) on my computer. If Python 3.10+\n' +
+  "isn't installed, install it first. Then run pip install kiln3d.\n" +
+  'Then run kiln signin, then kiln install-mcp to connect Kiln\n' +
+  'to this agent. Finish with kiln doctor and show me the result.\n' +
+  'Tell me if I need to restart anything.';
 
 const installHowToSchema = {
   '@type': 'HowTo',
@@ -53,13 +70,13 @@ const installHowToSchema = {
     {
       '@type': 'HowToStep',
       name: 'Install Kiln',
-      text: 'Install Kiln by pasting pip install kiln3d into your AI agent or terminal.',
+      text: 'Paste one setup prompt into an AI that can run commands and it installs Kiln for you — or install it yourself with pip install kiln3d.',
       url: 'https://kiln3d.com/install',
     },
     {
       '@type': 'HowToStep',
       name: 'Connect your AI',
-      text: 'Run kiln signin then kiln install-mcp to wire Kiln into Claude Desktop, Claude Code, or Codex — or paste the MCP server config into any MCP-capable agent.',
+      text: 'Run kiln signin then kiln install-mcp — Kiln connects itself to Claude Desktop, Claude Code, and Codex. Any other MCP-compatible app gets a paste-in config via kiln install-mcp --print.',
       url: 'https://kiln3d.com/install',
     },
     {
@@ -104,7 +121,15 @@ const installHowToSchema = {
           <div class="step-number">1</div>
           <div class="step-content">
             <h3>Install Kiln</h3>
-            <p>Pick your platform &mdash; each tab has copy-paste commands.</p>
+            <div class="agent-setup-callout">
+              <p class="agent-setup-label">Easiest &mdash; let your AI do the whole thing</p>
+              <p class="agent-setup-body">Already use Claude Code, Codex, or another AI that can run commands? Paste this to it, and it installs and connects Kiln for you:</p>
+              <div class="code-block">
+                <button class="copy-btn" data-code={agentSetupPrompt}>Copy</button>
+                <pre><code set:text={agentSetupPrompt} /></pre>
+              </div>
+            </div>
+            <p>Or do it yourself &mdash; pick your platform; each tab has copy-paste commands.</p>
             <InstallTabs />
           </div>
         </li>
@@ -112,14 +137,15 @@ const installHowToSchema = {
           <div class="step-number">2</div>
           <div class="step-content">
             <h3>Connect your AI</h3>
-            <p>One command wires Kiln into Claude Desktop, Claude Code, and Codex &mdash; it finds your agents and merges their configs safely.</p>
+            <p>Two quick commands &mdash; Kiln sets itself up inside Claude Desktop, Claude Code, and Codex.</p>
             <div class="code-block">
               <button class="copy-btn" data-code={connectCommands}>Copy</button>
               <pre><code set:text={connectCommandsDisplay} /></pre>
             </div>
+            <p>Restart your AI app and it can run your printer. <span class="step-skip">(Used the easiest path in step 1? This already happened.)</span></p>
             <details class="manual-config">
-              <summary>Different agent? Paste the config yourself</summary>
-              <p><code>kiln install-mcp --print</code> prints this snippet for any MCP client:</p>
+              <summary>Using a different AI app? Paste the config yourself</summary>
+              <p><code>kiln install-mcp --print</code> prints this for any MCP-compatible app:</p>
               <div class="code-block">
                 <button class="copy-btn" data-code={mcpConfigCompact}>Copy</button>
                 <pre><code set:text={mcpConfig} /></pre>
@@ -269,6 +295,35 @@ const installHowToSchema = {
     padding: 0;
     border: none;
   }
+  /* "Let your AI install it" callout (Step 1) — accent-tinted card
+     matching the InstallTabs .wsl-note treatment.  For visitors who
+     aren't comfortable in a terminal, the AI they already have is
+     the installer; the prompt is the entire setup. */
+  .agent-setup-callout {
+    margin: 16px 0 24px;
+    padding: 18px 20px 20px;
+    background: rgba(255, 107, 43, 0.06);
+    border: 1px solid rgba(255, 107, 43, 0.2);
+    border-radius: 12px;
+  }
+  .agent-setup-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 0 0 6px;
+  }
+  .agent-setup-body {
+    font-size: 14px;
+    color: var(--text-muted);
+    margin: 0;
+    line-height: 1.6;
+  }
+  /* Quiet aside on the step-2 restart line for visitors who used
+     the step-1 callout. */
+  .step-skip {
+    opacity: 0.75;
+  }
+
   /* Manual-config fold (Step 2) — muted disclosure matching the
      .faq-link footnote register so the happy path stays one command
      tall; the JSON only renders for visitors who ask for it. */

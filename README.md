@@ -24,6 +24,10 @@ pip install kiln3d
 ```
 
 <p align="center">
+  <img src="docs/assets/kiln-demo-loop.svg" alt="A Kiln agent session: the user asks for a coaster with their dog's photo; Kiln designs it, checks it will print, slices, and prints it on a Bambu A1 — done in 41 minutes." width="640">
+</p>
+
+<p align="center">
   <img src="docs/site/public/demo/ash-coaster.jpg" alt="A 3D-printed coaster with a relief portrait of a French bulldog and the name ASH along the bottom edge, held in a hand" width="640">
 </p>
 
@@ -46,14 +50,14 @@ Three steps. Then ask your AI to make something.
 pip install kiln3d
 ```
 
-**2. Connect your AI** — one command wires Kiln into Claude Desktop, Claude Code, and Codex:
+**2. Connect your AI** — Kiln sets itself up inside Claude Desktop, Claude Code, and Codex:
 
 ```bash
-kiln signin        # free account — OAuth straight from the terminal
-kiln install-mcp   # finds your agents, merges their MCP configs safely
+kiln signin        # create your free account
+kiln install-mcp   # connects Kiln to your AI apps
 ```
 
-Restart your agent and it sees every Kiln tool. Different agent? `kiln install-mcp --print` emits a snippet for any MCP client — or paste it yourself:
+Restart your AI app and it can run your printer. (Claude Code and Codex can even run this whole setup for you — the one-prompt version lives at [kiln3d.com/install](https://kiln3d.com/install).) Using a different MCP client? `kiln install-mcp --print` prints the config — or paste it yourself:
 
 <details>
 <summary><strong>Manual MCP config (any client, no sign-in needed)</strong></summary>
@@ -76,10 +80,10 @@ Drop this into Claude Desktop, Claude Code, Codex, Cursor, or any MCP-capable ag
 
 > I have a Bambu A1, make me a coaster with my dog's photo on it
 
-That's the whole happy path. The agent invokes Kiln's tools to design, slice, and print — you don't touch a CLI. OS-specific walkthrough (Windows, WSL 2, Linux) at **[kiln3d.com/install](https://kiln3d.com/install)**.
+That's the whole happy path. Your AI does the designing, slicing, and printing — you never touch a CLI. OS-specific walkthrough (Windows, WSL 2, Linux) at **[kiln3d.com/install](https://kiln3d.com/install)**.
 
 > [!TIP]
-> `kiln doctor` runs pre-flight checks on your setup and tells you what to fix. `kiln self-update` upgrades in place when a new release lands.
+> `kiln doctor` checks your whole setup and tells you exactly what to fix. `kiln self-update` upgrades in place when a new release lands.
 
 <details>
 <summary><strong>Prefer to drive it yourself? (CLI tour)</strong></summary>
@@ -236,6 +240,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing)) add Git-for-3D ver
 - **Modify mid-print** — Add decorations, append features, or swap materials on a live print with atomic revert if anything goes wrong. (Pro)
 - **Smart material routing** — 25 materials, 45 brand-specific filament profiles (Bambu, Prusament, Polymaker, and more) across 11 material families. Intent-based recommendations with printer capability awareness.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure recovery, closed-loop AI generation feedback (failed prints auto-improve future generations), preflight safety checks on every job.
+- **Doomed prints stopped early** — Too big for the build plate, or a material your hotend can't melt? Caught before filament is wasted, rotated to fit when possible, one-command override. Pro shows the fix: true usable area, cleanest split, or the material to switch to.
 - **Search → Slice → Print** — Search and download 3D models from MyMiniFactory and Cults3D (search only), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
 - **Safety at scale** — 51 named per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
 

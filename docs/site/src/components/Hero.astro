@@ -34,8 +34,19 @@
         <span class="compat-pill">Prusa Link</span>
         <span class="compat-pill">Elegoo</span>
         <span class="compat-pill">Direct USB</span>
+        <a href="/printers" class="compat-pill compat-pill-more">+ more brands</a>
       </div>
       <p class="compat-sub-inline">Plugs into any agent. Operates any printer.</p>
+      <!-- Full supported-brand roster as crawlable text: the long-tail
+           brand searches (Sovol, Voron, QIDI, RatRig, ...) have nowhere
+           else above the fold to resolve, and the descriptive-anchor
+           link funnels both the visitor and link authority to the
+           searchable /printers list.  Brand order + count are generated
+           from supported_printers.json (49 models / 12 brands); keep in
+           sync if that data changes. -->
+      <p class="compat-brands-inline">
+        Tuned profiles for Creality, Bambu Lab, Elegoo, Prusa, Sovol, Voron, AnkerMake, Artillery, FlashForge, QIDI, RatRig &amp; SparkX. <a href="/printers" class="compat-brands-link">See if yours is supported &rarr;</a>
+      </p>
     </div>
 
     <a href="/install" class="hero-cta">Connect your AI &rarr;</a>
@@ -180,8 +191,13 @@
     border-color: var(--accent);
     transform: translateY(-1px);
   }
-  /* "+ any MCP agent" — dashed border + muted text reads as "and
-     more" without a separate visual treatment elsewhere. */
+  /* Link pills (the printers "+ more brands" → /printers) keep the
+     pill shape, never an underline. */
+  a.compat-pill {
+    text-decoration: none;
+  }
+  /* "+ any MCP agent" / "+ more brands" — dashed border + muted text
+     reads as "and more" without a separate visual treatment. */
   .compat-pill-more {
     border-style: dashed;
     color: var(--text-muted);
@@ -189,12 +205,38 @@
   }
   .compat-pill-more:hover {
     color: var(--text);
+    border-color: var(--accent);
   }
   .compat-sub-inline {
     font-size: 13px;
     color: var(--text-muted);
     line-height: 1.5;
     margin-top: 18px;
+  }
+  /* Full supported-brand roster — quiet line under the punchline.
+     Names every brand Kiln ships a tuned profile for so brand-name
+     searches resolve here, and its descriptive-anchor link routes to
+     the searchable /printers page. */
+  .compat-brands-inline {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    line-height: 1.6;
+    margin: 8px auto 0;
+    max-width: 600px;
+    text-wrap: pretty;
+    opacity: 0.85;
+  }
+  .compat-brands-link {
+    color: var(--text-muted);
+    text-decoration: none;
+    white-space: nowrap;
+    border-bottom: 1px dashed var(--border);
+    padding-bottom: 1px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .compat-brands-link:hover {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
   }
 
   /* Primary CTA — accent-filled, sized to be the obvious next

@@ -211,6 +211,18 @@ const sections: Section[] = [
         q: "Does Kiln track nozzle wear?",
         a: "Yes — Kiln Pro watches nozzle wear across every print on every supported printer. It warns before a job would push the nozzle past its wear limit, flags abrasive-filament mismatches up front (carbon-fiber on a brass nozzle gets a heads-up), folds wear into failure diagnosis, and recommends a nozzle replacement when that's the real fix instead of another retry."
       },
+      {
+        q: "What happens if I ask Kiln to print something too big for my printer?",
+        a: "Kiln stops it before it starts. If a part won't fit your build plate — or calls for a material your hotend can't melt — Kiln catches it before any filament is wasted or the nozzle crashes. It rotates the part to fit when that solves it, never blocks a print it isn't sure about, and there's a one-command override for when you're deliberately slicing for a different printer. That protection is free for everyone; Kiln Pro adds the fix — your printer's true usable area, the cleanest way to split an oversize part, or the material to switch to."
+      },
+      {
+        q: "Can Kiln tell me if a printed part will survive fuel, cleaners, or sunlight?",
+        a: "Yes — ask about the exact liquid or exposure you have in mind and Kiln answers honestly, including the part most people miss: 3D-printed parts take chemicals harder than solid plastic does. The warnings are always free — if it's a bad idea, Kiln says so on any tier. The go-aheads are paid: everyday exposures (cleaners, oils, sunlight, weather) are Kiln Business, and answers someone could get hurt by — fuels, automotive fluids, food contact, harsh chemicals — are Enterprise."
+      },
+      {
+        q: "Can Kiln use my material's datasheet instead of its built-in catalog?",
+        a: "Yes, on Kiln Business. Import the material's datasheet and Kiln designs with your material's real numbers instead of the closest built-in match."
+      },
     ]
   },
   {
