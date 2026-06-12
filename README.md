@@ -1,9 +1,6 @@
 <!-- mcp-name: io.github.codeofaxel/kiln -->
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/kiln-banner-1280x640-light.svg">
-    <img src="docs/assets/kiln-banner-1280x640.svg" alt="Kiln" width="640">
-  </picture>
+  <img src="docs/assets/kiln-banner-1280x640.svg" alt="Kiln" width="640">
 </p>
 
 <p align="center">
