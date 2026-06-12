@@ -1,6 +1,9 @@
 <!-- mcp-name: io.github.codeofaxel/kiln -->
 <p align="center">
-  <img src="docs/assets/kiln-banner-1280x640.svg" alt="Kiln" width="640">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/kiln-banner-1280x640-light.svg">
+    <img src="docs/assets/kiln-banner-1280x640.svg" alt="Kiln" width="640">
+  </picture>
 </p>
 
 <p align="center">
@@ -539,7 +542,7 @@ Logo files live in [`docs/assets/`](docs/assets/) — all vector SVG, scale to a
 
 | File | Use |
 |------|-----|
-| `kiln-banner-1280x640.svg` | GitHub / social media banner |
+| `kiln-banner-1280x640.svg` / `kiln-banner-1280x640-light.svg` | GitHub / social media banner (dark / light scheme) |
 | `kiln-logo-dark.svg` / `kiln-logo-light.svg` | Primary mark + wordmark (dark / light bg) |
 | `kiln-horizontal-dark.svg` / `kiln-horizontal-light.svg` | Horizontal lockup (dark / light bg) |
 | `kiln-logo-dark-notext.svg` | Mark only (dark bg) |
