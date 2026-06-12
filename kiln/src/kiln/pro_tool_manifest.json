@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-06-10T23:46:33.731409+00:00",
-  "tool_count": 348,
+  "generated": "2026-06-12T02:16:04.006556+00:00",
+  "tool_count": 353,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -218,8 +218,8 @@
     },
     {
       "name": "auto_generate_manual_for_print",
-      "description": "Fire the automatic manual trigger for a multi-part print (Pro+).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Fire the automatic manual trigger for a multi-part print (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "assembly_manuals",
       "parameters": {
         "properties": {
@@ -317,8 +317,8 @@
     },
     {
       "name": "diff_assembly_manuals",
-      "description": "Compute a \"what changed\" PDF between two manual revisions (Pro+).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Compute a \"what changed\" PDF between two manual revisions (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "assembly_manuals",
       "parameters": {
         "properties": {
@@ -507,8 +507,8 @@
     },
     {
       "name": "embed_manual_in_3mf",
-      "description": "Augment a 3MF with the assembly manual + signed manifest (Pro+).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Augment a 3MF with the assembly manual + signed manifest (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "assembly_manuals",
       "parameters": {
         "properties": {
@@ -579,8 +579,8 @@
     },
     {
       "name": "find_manual_siblings",
-      "description": "List sibling revisions of a parametric design (Pro+).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "List sibling revisions of a parametric design (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "assembly_manuals",
       "parameters": {
         "properties": {
@@ -608,8 +608,8 @@
     },
     {
       "name": "generate_assembly_manual",
-      "description": "Generate a flat-pack-style assembly manual for a multi-part print (Pro+).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Generate a flat-pack-style assembly manual for a multi-part print (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "assembly_manuals",
       "parameters": {
         "properties": {
@@ -800,8 +800,8 @@
     },
     {
       "name": "get_manual_revision",
-      "description": "Fetch a single manual revision by id (Pro+).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Fetch a single manual revision by id (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "assembly_manuals",
       "parameters": {
         "properties": {
@@ -819,8 +819,8 @@
     },
     {
       "name": "list_manual_history",
-      "description": "List the chronological revision history of a design's manuals (Pro+).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "List the chronological revision history of a design's manuals (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "assembly_manuals",
       "parameters": {
         "properties": {
@@ -843,8 +843,8 @@
     },
     {
       "name": "load_assembly_manual",
-      "description": "Load a previously generated manual's spec back into a dict (Pro+).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Load a previously generated manual's spec back into a dict (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "assembly_manuals",
       "parameters": {
         "properties": {
@@ -984,8 +984,8 @@
     },
     {
       "name": "retire_manual_revision",
-      "description": "Soft-delete a manual revision (Pro+, owner-only).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Soft-delete a manual revision (Business+, owner-only).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "assembly_manuals",
       "parameters": {
         "properties": {
@@ -7395,6 +7395,96 @@
       }
     },
     {
+      "name": "assess_bom_sourcing_risk",
+      "description": "Flag the off-the-shelf parts a design can't reliably buy in a year.",
+      "tier": "free",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "components": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Components"
+          },
+          "bom": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Bom"
+          },
+          "bom_csv": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Bom Csv"
+          },
+          "confirm_mapping": {
+            "default": false,
+            "title": "Confirm Mapping",
+            "type": "boolean"
+          }
+        },
+        "title": "assess_bom_sourcing_riskArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "check_chemical_resistance",
+      "description": "Will a printed <material> part survive <reagent>? -- cited, plain-English, tier-gated.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "reagent": {
+            "title": "Reagent",
+            "type": "string"
+          },
+          "show_math": {
+            "default": false,
+            "title": "Show Math",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "material",
+          "reagent"
+        ],
+        "title": "check_chemical_resistanceArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "design_hole_for_product",
       "description": "Design a hole or slot sized to fit a real-world product.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -7529,6 +7619,30 @@
       }
     },
     {
+      "name": "get_material_chemical_profile",
+      "description": "Full chemical-durability profile for one material -- every reagent your tier unlocks.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "show_math": {
+            "default": false,
+            "title": "Show Math",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "material"
+        ],
+        "title": "get_material_chemical_profileArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "ingest_material_datasheet",
       "description": "Verify quoted datasheet values and build a structured material profile.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -7641,6 +7755,39 @@
           "name"
         ],
         "title": "lookup_fastenerArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "propose_sourcing_remediation",
+      "description": "Close the loop on a flagged part: propose what to do about it.",
+      "tier": "free",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "component": {
+            "additionalProperties": true,
+            "title": "Component",
+            "type": "object"
+          },
+          "design_role": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Role"
+          }
+        },
+        "required": [
+          "component"
+        ],
+        "title": "propose_sourcing_remediationArguments",
         "type": "object"
       }
     },
@@ -7920,6 +8067,60 @@
           "result"
         ],
         "title": "record_bond_outcomeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_chemical_outcome",
+      "description": "Record how a printed part actually held up to a chemical -- so Kiln learns.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "reagent": {
+            "title": "Reagent",
+            "type": "string"
+          },
+          "result": {
+            "title": "Result",
+            "type": "string"
+          },
+          "environment": {
+            "default": "",
+            "title": "Environment",
+            "type": "string"
+          },
+          "duration": {
+            "default": "",
+            "title": "Duration",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "default",
+            "title": "Printer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "material",
+          "reagent",
+          "result"
+        ],
+        "title": "record_chemical_outcomeArguments",
         "type": "object"
       }
     },
