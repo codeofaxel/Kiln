@@ -14,6 +14,11 @@ import InstallTabs from '../components/InstallTabs.astro';
 // Pro CTA routes to /pricing, NOT direct-to-Stripe, so the
 // commercial-use modal in pricing.astro can route Etsy / Shopify
 // sellers to Business instead of shipping them the wrong tier.
+//
+// 2026-06-11: step 2 now leads with `kiln signin` + `kiln install-mcp`
+// (auto-config for Claude Desktop / Claude Code / Codex) — the same
+// flow the Windows tab and the GitHub README teach.  The manual JSON
+// config stays one <details> fold away for other MCP clients.
 
 const mcpConfig = JSON.stringify({
   mcpServers: {
@@ -33,6 +38,11 @@ const mcpConfigCompact = JSON.stringify({
   }
 });
 
+const connectCommands = 'kiln signin\nkiln install-mcp';
+const connectCommandsDisplay =
+  'kiln signin        # free account — OAuth from this terminal\n' +
+  'kiln install-mcp   # wires Claude Desktop, Claude Code & Codex';
+
 const installHowToSchema = {
   '@type': 'HowTo',
   name: 'How to install Kiln for AI-powered 3D printing',
@@ -49,7 +59,7 @@ const installHowToSchema = {
     {
       '@type': 'HowToStep',
       name: 'Connect your AI',
-      text: 'Paste the Kiln MCP server config into Claude Desktop, Claude Code, Codex, or any MCP-capable agent.',
+      text: 'Run kiln signin then kiln install-mcp to wire Kiln into Claude Desktop, Claude Code, or Codex — or paste the MCP server config into any MCP-capable agent.',
       url: 'https://kiln3d.com/install',
     },
     {
@@ -102,11 +112,19 @@ const installHowToSchema = {
           <div class="step-number">2</div>
           <div class="step-content">
             <h3>Connect your AI</h3>
-            <p>Paste this into Claude Desktop, Claude Code, Codex, or any MCP-capable agent.</p>
+            <p>One command wires Kiln into Claude Desktop, Claude Code, and Codex &mdash; it finds your agents and merges their configs safely.</p>
             <div class="code-block">
-              <button class="copy-btn" data-code={mcpConfigCompact}>Copy</button>
-              <pre><code set:text={mcpConfig} /></pre>
+              <button class="copy-btn" data-code={connectCommands}>Copy</button>
+              <pre><code set:text={connectCommandsDisplay} /></pre>
             </div>
+            <details class="manual-config">
+              <summary>Different agent? Paste the config yourself</summary>
+              <p><code>kiln install-mcp --print</code> prints this snippet for any MCP client:</p>
+              <div class="code-block">
+                <button class="copy-btn" data-code={mcpConfigCompact}>Copy</button>
+                <pre><code set:text={mcpConfig} /></pre>
+              </div>
+            </details>
           </div>
         </li>
         <li>
@@ -251,6 +269,30 @@ const installHowToSchema = {
     padding: 0;
     border: none;
   }
+  /* Manual-config fold (Step 2) — muted disclosure matching the
+     .faq-link footnote register so the happy path stays one command
+     tall; the JSON only renders for visitors who ask for it. */
+  .manual-config {
+    margin: 14px 0 0;
+  }
+  .manual-config summary {
+    font-size: 13px;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.15s;
+  }
+  .manual-config summary:hover {
+    color: var(--text);
+  }
+  .manual-config[open] summary {
+    margin-bottom: 4px;
+  }
+  .manual-config p {
+    font-size: 13px;
+    margin: 8px 0 0;
+  }
+
   /* Example prompt (Step 3) — chat-bubble shape, accent left
      border, italic so the visitor parses it as "what you'd say to
      your AI" rather than as another code block. */

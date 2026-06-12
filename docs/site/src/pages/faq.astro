@@ -47,11 +47,11 @@ const sections: Section[] = [
     items: [
       {
         q: "What printers does Kiln support?",
-        a: "Kiln supports printers running OctoPrint, Moonraker (Klipper), Creality K1/K2/Hi/Ender V3 KE-class printers when local Moonraker is reachable, Bambu Lab (X1C, P1S, P1P, A1, A1 Mini), Elegoo (Centauri Carbon, Saturn, Mars via SDCP; Neptune 4 and OrangeStorm Giga via Moonraker), Prusa Link (MK4, MK3.9, Mini, XL), and any Marlin-based printer over USB (Ender 3, CR-10, Prusa MK3, etc.). Creality printers that do not expose local Moonraker can still use OctoPrint or Direct USB when those paths are available."
+        a: "Kiln supports printers running OctoPrint, Moonraker (Klipper) — including Voron, RatRig, Sovol, and other Klipper builds — Creality K1/K2/Hi/Ender V3 KE-class printers when local Moonraker is reachable, Bambu Lab (X1C, X1E, P1S, P1P, P2S, A1, A1 Mini, A2L, H2S), Elegoo (Centauri Carbon, Saturn, Mars via SDCP; Neptune 4 and OrangeStorm Giga via Moonraker), Prusa Link (MK4, XL, Mini+), and any Marlin-based printer over USB (Ender 3, CR-10, Prusa MK3, etc.). Tuned per-model profiles cover dozens of models across a dozen brands — find yours on the <a href='/printers'>supported printers page</a>. Creality printers that do not expose local Moonraker can still use OctoPrint or Direct USB when those paths are available."
       },
       {
         q: "How do I install Kiln?",
-        a: "Install via pip: <code>pip install kiln3d</code>, then run <code>kiln</code> to start the MCP server. Point your AI agent at the server and you're ready to go. Full instructions are on the <a href='/install'>install page</a>."
+        a: "Install via pip: <code>pip install kiln3d</code>, then <code>kiln signin</code> (free account) and <code>kiln install-mcp</code> — it finds Claude Desktop, Claude Code, and Codex and wires Kiln into their configs automatically. Using a different MCP client? <code>kiln install-mcp --print</code> emits the config to paste. Full instructions are on the <a href='/install'>install page</a>."
       },
       {
         q: "What AI agents work with Kiln?",
@@ -63,7 +63,7 @@ const sections: Section[] = [
       },
       {
         q: "Can I use Kiln without AI, just as a CLI or API?",
-        a: "Yes. Kiln includes a full command-line interface with 221 commands and a REST API. You can manage printers, queue jobs, slice files, and run print operations entirely from the terminal or your own scripts — no AI agent required."
+        a: "Yes. Kiln includes a full command-line interface with <!-- KILN_CLI_COUNT:OLD --> 223 CLI commands and a REST API. You can manage printers, queue jobs, slice files, and run print operations entirely from the terminal or your own scripts — no AI agent required."
       },
       {
         q: "Can I version-control my 3D designs in Kiln?",
@@ -123,7 +123,7 @@ const sections: Section[] = [
       },
       {
         q: "Does Kiln send my data to the cloud?",
-        a: "No. Kiln runs entirely on your local machine. Your printer data, G-code files, and print history stay on your network. The only external connections are ones you explicitly configure — like third-party fulfillment providers or third-party marketplace search."
+        a: "Kiln is local-first: your designs, G-code, printer credentials, and print files stay on your network, and printer control never requires an account. The cloud touches that exist are explicit and controllable — a version-update check (disable with <code>KILN_NO_UPDATE_CHECK=1</code>), anonymized print-outcome sharing that improves community learning (success/failure signals, never your designs or files; controlled via Kiln's telemetry preferences), connections you configure yourself like marketplace search and fulfillment, and signed-in features you choose to use, like cloud sync and your stats dashboard."
       },
       {
         q: "Can I restrict which tools the AI agent can access?",
@@ -205,7 +205,11 @@ const sections: Section[] = [
       },
       {
         q: "Does Kiln support Bambu AMS and multi-material printing?",
-        a: "Yes. Kiln auto-detects AMS trays, identifies loaded filament colors and types, and routes the correct AMS slot when starting a print. For multicolor prints, Kiln handles automatic color segmentation and multi-gcode merging. Use <code>ams_status()</code> to check loaded materials and <code>slice_and_print</code> for automatic AMS routing."
+        a: "Yes. Kiln auto-detects AMS trays, identifies loaded filament colors and types, and routes the correct AMS slot when starting a print. For multicolor prints, Kiln handles automatic color segmentation and multi-gcode merging. On an AMS 2 Pro or AMS HT, Kiln can also run the dryer — start or stop a drying cycle and check filament humidity and time remaining — free for everyone. Use <code>ams_status()</code> to check loaded materials and <code>slice_and_print</code> for automatic AMS routing."
+      },
+      {
+        q: "Does Kiln track nozzle wear?",
+        a: "Yes — Kiln Pro watches nozzle wear across every print on every supported printer. It warns before a job would push the nozzle past its wear limit, flags abrasive-filament mismatches up front (carbon-fiber on a brass nozzle gets a heads-up), folds wear into failure diagnosis, and recommends a nozzle replacement when that's the real fix instead of another retry."
       },
     ]
   },
@@ -223,7 +227,7 @@ const sections: Section[] = [
       },
       {
         q: "How do I contribute?",
-        a: "Fork the repo, create a branch, and submit a pull request. Kiln uses pytest for testing (19,390 tests across both repos), Ruff for linting, and follows strict patterns documented in the contributing guide. Issues and feature requests are welcome on <a href='https://github.com/codeofaxel/Kiln' target='_blank' rel='noopener'>GitHub</a>."
+        a: "Fork the repo, create a branch, and submit a pull request. Kiln uses pytest for testing (19,390 tests across both repos), Ruff for linting, and follows strict patterns documented in the contributing guide. Issues and feature requests are welcome on <a href='https://github.com/codeofaxel/Kiln' target='_blank' rel='noopener'>GitHub</a>.
       },
     ]
   },

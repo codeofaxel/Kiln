@@ -29,7 +29,7 @@ All three modes use the same MCP tools and CLI commands.
 
 **Key properties:**
 
-- **Local-first.** Local printer communication stays on your network. No cloud relay, no accounts, no telemetry.
+- **Local-first.** Printer communication stays on your network, and printer control never requires an account. Cloud touches are explicit and controllable: a version-update check (`KILN_NO_UPDATE_CHECK=1` disables it), anonymized community print-outcome sharing (controlled via telemetry preferences; never your designs or files), and opt-in signed-in features like cloud sync and stats.
 - **Adapter-based.** One interface covers OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, and Direct USB/Serial. New backends plug in without changing upstream consumers.
 - **Safety-enforced.** Pre-flight checks, G-code validation, and temperature limits are protocol-level — not optional.
 - **Agent-native.** Every operation returns structured JSON. Every error includes machine-readable status codes. `--json` on every CLI command.
@@ -41,7 +41,7 @@ All three modes use the same MCP tools and CLI commands.
 | OctoPrint | HTTP REST | Any OctoPrint-connected printer | Stable |
 | Moonraker | HTTP REST | Klipper-based (Voron, RatRig, etc.) | Stable |
 | Creality | HTTP REST via Moonraker | SPARKX i7, K1/K1 Max/K1C/K1 SE, K2/K2 Pro/K2 Plus/K2 SE, Creality Hi, Ender-3 V4/V3 KE, Ender-5 Max, CR-10 SE when local Moonraker is reachable; older Marlin Creality machines use OctoPrint or Direct USB | Stable when Moonraker is reachable |
-| Bambu Lab | MQTT/LAN | X1C, P1S, A1 | Stable |
+| Bambu Lab | MQTT/LAN | X1C, X1E, P1S, P1P, P2S, A1, A1 Mini, A2L, H2S | Stable |
 | Prusa Link | HTTP REST | MK4, XL, Mini+ | Stable |
 | Elegoo | WebSocket/SDCP | Centauri Carbon, Saturn, Mars series. Neptune 4/OrangeStorm Giga use Moonraker. | Stable |
 | Direct USB | Serial | Any Marlin/RepRapFirmware printer over USB (Ender 3, Prusa MK3, CR-10, etc.) | Stable |
