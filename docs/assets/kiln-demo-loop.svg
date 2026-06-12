@@ -1,0 +1,188 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 800" width="640" height="400" role="img" aria-label="A Kiln agent session: the user asks for a coaster with their dog's photo, Kiln designs it, checks printability, slices, prints on a Bambu A1, and finishes in 41 minutes.">
+<!--
+  kiln-demo-loop.svg — hand-authored animated README demo.
+
+  One master timeline: every animation runs 11s, infinite, linear;
+  beats live at keyframe percentages so the loop stays in sync.
+
+    beat                          window      element
+    ─────────────────────────────────────────────────────────
+    content fade in/out           0–2 / 96–100  .content
+    sentence typewriter (steps)   2–24%       .typewipe
+    row 1 design                  26–35%      .row1 / .spin1 / .chk1
+    row 2 printability            36–46%      .row2 / .spin2 / .chk2
+    row 3 slice+print             47–57%      .row3 / .spin3 / .chk3
+    status box rises              59–61%      .statusbox
+    bar 0→26%, T1 visible         61–67%      .barfill / .t1
+    bar →63%, T2 visible          67–73%      .barfill / .t2
+    bar →100%, T3 (done) visible  73–96%      .barfill / .t3
+    done row + arrow nudge        78–96%      .donerow / .arrow
+
+  Numbers are derived from product spec, not invented:
+  generate_coaster defaults to 90 mm × 7 mm (thickness_mm min 7);
+  7 mm at 0.2 mm layers = 35 layers; ~41 min and ~12 g PLA ≈ $0.31
+  are A1-realistic for that geometry.  Tool names are the real
+  registry names.  The sentence is the canonical README step-3 ask.
+
+  prefers-reduced-motion: all animations off; base attributes are
+  the final frame (spinners stay hidden, checks and done state show).
+-->
+<style>
+  .sans { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  .content { animation: k-content 11s linear infinite both; }
+  @keyframes k-content {
+    0% { opacity: 0; } 2% { opacity: 1; } 96% { opacity: 1; }
+    99.5% { opacity: 0; } 100% { opacity: 0; }
+  }
+
+  /* Beat 1 — the sentence types out (steps = typewriter chunks). */
+  .typewipe {
+    transform-box: fill-box; transform-origin: 0 50%;
+    animation: k-type 11s linear infinite both;
+  }
+  @keyframes k-type {
+    0% { transform: scaleX(0); }
+    2% { transform: scaleX(0); animation-timing-function: steps(44, end); }
+    24% { transform: scaleX(1); }
+    100% { transform: scaleX(1); }
+  }
+
+  /* Beat 2 — three tool rows appear, spinner → check. */
+  .row1 { animation: k-row1 11s linear infinite both; }
+  .row2 { animation: k-row2 11s linear infinite both; }
+  .row3 { animation: k-row3 11s linear infinite both; }
+  @keyframes k-row1 { 0%,26% { opacity: 0; } 27%,100% { opacity: 1; } }
+  @keyframes k-row2 { 0%,36% { opacity: 0; } 37%,100% { opacity: 1; } }
+  @keyframes k-row3 { 0%,47% { opacity: 0; } 48%,100% { opacity: 1; } }
+
+  .spin1 { animation: k-spin1 11s linear infinite both; }
+  .spin2 { animation: k-spin2 11s linear infinite both; }
+  .spin3 { animation: k-spin3 11s linear infinite both; }
+  @keyframes k-spin1 { 0%,26.5% { opacity: 0; } 27%,33% { opacity: 1; } 33.5%,100% { opacity: 0; } }
+  @keyframes k-spin2 { 0%,36.5% { opacity: 0; } 37%,44% { opacity: 1; } 44.5%,100% { opacity: 0; } }
+  @keyframes k-spin3 { 0%,47.5% { opacity: 0; } 48%,55% { opacity: 1; } 55.5%,100% { opacity: 0; } }
+
+  .arc {
+    transform-box: fill-box; transform-origin: center;
+    animation: k-arc 0.8s linear infinite;
+  }
+  @keyframes k-arc { to { transform: rotate(360deg); } }
+
+  .chk1 { animation: k-chk1 11s linear infinite both; }
+  .chk2 { animation: k-chk2 11s linear infinite both; }
+  .chk3 { animation: k-chk3 11s linear infinite both; }
+  @keyframes k-chk1 { 0%,33.5% { opacity: 0; } 35%,100% { opacity: 1; } }
+  @keyframes k-chk2 { 0%,44.5% { opacity: 0; } 46%,100% { opacity: 1; } }
+  @keyframes k-chk3 { 0%,55.5% { opacity: 0; } 57%,100% { opacity: 1; } }
+
+  /* Beat 3 — live status: bar fills in three honest stages. */
+  .statusbox { animation: k-status 11s linear infinite both; }
+  @keyframes k-status {
+    0%,59% { opacity: 0; transform: translateY(12px); }
+    61%,100% { opacity: 1; transform: translateY(0); }
+  }
+  .barfill {
+    transform-box: fill-box; transform-origin: 0 50%;
+    animation: k-bar 11s linear infinite both;
+  }
+  @keyframes k-bar {
+    0%,61% { transform: scaleX(0); }
+    63% { transform: scaleX(0.26); } 67% { transform: scaleX(0.26); }
+    69% { transform: scaleX(0.63); } 73% { transform: scaleX(0.63); }
+    76% { transform: scaleX(1); } 100% { transform: scaleX(1); }
+  }
+  .t1 { animation: k-t1 11s linear infinite both; }
+  .t2 { animation: k-t2 11s linear infinite both; }
+  .t3 { animation: k-t3 11s linear infinite both; }
+  @keyframes k-t1 { 0%,61% { opacity: 0; } 61.5%,67% { opacity: 1; } 67.5%,100% { opacity: 0; } }
+  @keyframes k-t2 { 0%,67.5% { opacity: 0; } 68%,73% { opacity: 1; } 73.5%,100% { opacity: 0; } }
+  @keyframes k-t3 { 0%,73.5% { opacity: 0; } 74%,100% { opacity: 1; } }
+
+  /* Beat 4 — done line hands off to the real photo below. */
+  .donerow { animation: k-done 11s linear infinite both; }
+  @keyframes k-done {
+    0%,78% { opacity: 0; } 80%,100% { opacity: 1; }
+  }
+  .arrow { animation: k-arrow 11s linear infinite both; }
+  @keyframes k-arrow {
+    0%,80% { transform: translateY(0); }
+    83% { transform: translateY(6px); } 86% { transform: translateY(0); }
+    89% { transform: translateY(6px); } 92% { transform: translateY(0); }
+    100% { transform: translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .content, .typewipe, .row1, .row2, .row3, .spin1, .spin2, .spin3,
+    .arc, .chk1, .chk2, .chk3, .statusbox, .barfill, .t1, .t2, .t3,
+    .donerow, .arrow { animation: none !important; }
+  }
+</style>
+
+<defs>
+  <clipPath id="typeclip">
+    <rect class="typewipe" x="60" y="128" width="1180" height="52"/>
+  </clipPath>
+</defs>
+
+<!-- Window card -->
+<rect x="8" y="8" width="1264" height="784" rx="20" fill="#1A1A1A" stroke="#2E2E2E" stroke-width="2"/>
+<circle cx="56" cy="56" r="7" fill="#333333"/>
+<circle cx="82" cy="56" r="7" fill="#333333"/>
+<circle cx="108" cy="56" r="7" fill="#333333"/>
+
+<g class="content">
+  <!-- Beat 1 — what you say -->
+  <text class="sans" x="64" y="112" font-size="20" font-weight="600" fill="#6F6F6F" letter-spacing="0.12em">YOU</text>
+  <g clip-path="url(#typeclip)">
+    <text class="sans" x="64" y="166" font-size="34" font-weight="500" fill="#ECECEC">I have a Bambu A1, make me a coaster with my dog&#8217;s photo on it</text>
+  </g>
+
+  <!-- Beat 2 — what Kiln does (real tool names, plain-English lead) -->
+  <g class="row1">
+    <g class="spin1"><circle class="arc" cx="80" cy="238" r="13" fill="none" stroke="#8A8A8A" stroke-width="3.5" stroke-dasharray="61 21" stroke-linecap="round"/></g>
+    <g class="chk1"><path d="M70 238 l7 8 l14 -16" fill="none" stroke="#DDDDDD" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></g>
+    <text class="sans" x="112" y="248" font-size="29" fill="#D6D6D6">Designing the coaster &#8212; 90 mm round, photo on top</text>
+    <text class="mono" x="1216" y="247" font-size="21" fill="#6F6F6F" text-anchor="end">generate_coaster</text>
+  </g>
+  <g class="row2">
+    <g class="spin2"><circle class="arc" cx="80" cy="314" r="13" fill="none" stroke="#8A8A8A" stroke-width="3.5" stroke-dasharray="61 21" stroke-linecap="round"/></g>
+    <g class="chk2"><path d="M70 314 l7 8 l14 -16" fill="none" stroke="#DDDDDD" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></g>
+    <text class="sans" x="112" y="324" font-size="29" fill="#D6D6D6">Checking it&#8217;ll print well &#8212; scores 96/100</text>
+    <text class="mono" x="1216" y="323" font-size="21" fill="#6F6F6F" text-anchor="end">analyze_printability</text>
+  </g>
+  <g class="row3">
+    <g class="spin3"><circle class="arc" cx="80" cy="390" r="13" fill="none" stroke="#8A8A8A" stroke-width="3.5" stroke-dasharray="61 21" stroke-linecap="round"/></g>
+    <g class="chk3"><path d="M70 390 l7 8 l14 -16" fill="none" stroke="#DDDDDD" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></g>
+    <text class="sans" x="112" y="400" font-size="29" fill="#D6D6D6">Slicing &amp; starting on the Bambu A1</text>
+    <text class="mono" x="1216" y="399" font-size="21" fill="#6F6F6F" text-anchor="end">slice_and_print</text>
+  </g>
+
+  <!-- Beat 3 — live print status (layer / time / cost) -->
+  <g class="statusbox">
+    <rect x="64" y="446" width="1152" height="118" rx="14" fill="#222222" stroke="#2E2E2E" stroke-width="1.5"/>
+    <rect x="96" y="478" width="1088" height="10" rx="5" fill="#303030"/>
+    <rect class="barfill" x="96" y="478" width="1088" height="10" rx="5" fill="#FF6B2B"/>
+    <text class="sans t1" x="96" y="538" font-size="26" fill="#CFCFCF">Printing &#8212; layer 9/35 &#183; ~38 min left &#183; est. $0.31</text>
+    <text class="sans t2" x="96" y="538" font-size="26" fill="#CFCFCF">Printing &#8212; layer 22/35 &#183; ~19 min left &#183; est. $0.31</text>
+    <text class="sans t3" x="96" y="538" font-size="26" fill="#CFCFCF">Done &#8212; 41 min total &#183; 12 g PLA &#183; $0.31</text>
+  </g>
+
+  <!-- Beat 4 — hand off to the real photo below in the README -->
+  <g class="donerow">
+    <text class="sans" x="640" y="648" font-size="31" font-weight="600" fill="#FF6B2B" text-anchor="middle">Off the plate. The real one&#8217;s below</text>
+    <text class="sans arrow" x="640" y="706" font-size="34" font-weight="700" fill="#FF6B2B" text-anchor="middle">&#8595;</text>
+  </g>
+</g>
+
+<!-- Quiet brand signature — the kiln mark, filament line in accent -->
+<g opacity="0.45">
+  <line x1="1140" y1="758" x2="1230" y2="758" stroke="#555555" stroke-width="2.6"/>
+  <line x1="1140" y1="758" x2="1157" y2="701" stroke="#555555" stroke-width="2.6"/>
+  <line x1="1230" y1="758" x2="1213" y2="701" stroke="#555555" stroke-width="2.6"/>
+  <line x1="1157" y1="701" x2="1175" y2="701" stroke="#555555" stroke-width="2.6"/>
+  <line x1="1195" y1="701" x2="1213" y2="701" stroke="#555555" stroke-width="2.6"/>
+  <line x1="1150" y1="738" x2="1220" y2="738" stroke="#FF6B2B" stroke-width="3"/>
+</g>
+</svg>

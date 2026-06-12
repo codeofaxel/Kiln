@@ -24,6 +24,10 @@ pip install kiln3d
 ```
 
 <p align="center">
+  <img src="docs/assets/kiln-demo-loop.svg" alt="A Kiln agent session: the user asks for a coaster with their dog's photo; Kiln designs it, checks it will print, slices, and prints it on a Bambu A1 — done in 41 minutes." width="640">
+</p>
+
+<p align="center">
   <img src="docs/site/public/demo/ash-coaster.jpg" alt="A 3D-printed coaster with a relief portrait of a French bulldog and the name ASH along the bottom edge, held in a hand" width="640">
 </p>
 
