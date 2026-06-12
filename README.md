@@ -50,14 +50,14 @@ Three steps. Then ask your AI to make something.
 pip install kiln3d
 ```
 
-**2. Connect your AI** — one command wires Kiln into Claude Desktop, Claude Code, and Codex:
+**2. Connect your AI** — Kiln sets itself up inside Claude Desktop, Claude Code, and Codex:
 
 ```bash
-kiln signin        # free account — OAuth straight from the terminal
-kiln install-mcp   # finds your agents, merges their MCP configs safely
+kiln signin        # create your free account
+kiln install-mcp   # connects Kiln to your AI apps
 ```
 
-Restart your agent and it sees every Kiln tool. Different agent? `kiln install-mcp --print` emits a snippet for any MCP client — or paste it yourself:
+Restart your AI app and it can run your printer. (Claude Code and Codex can even run this whole setup for you — the one-prompt version lives at [kiln3d.com/install](https://kiln3d.com/install).) Using a different MCP client? `kiln install-mcp --print` prints the config — or paste it yourself:
 
 <details>
 <summary><strong>Manual MCP config (any client, no sign-in needed)</strong></summary>
@@ -80,10 +80,10 @@ Drop this into Claude Desktop, Claude Code, Codex, Cursor, or any MCP-capable ag
 
 > I have a Bambu A1, make me a coaster with my dog's photo on it
 
-That's the whole happy path. The agent invokes Kiln's tools to design, slice, and print — you don't touch a CLI. OS-specific walkthrough (Windows, WSL 2, Linux) at **[kiln3d.com/install](https://kiln3d.com/install)**.
+That's the whole happy path. Your AI does the designing, slicing, and printing — you never touch a CLI. OS-specific walkthrough (Windows, WSL 2, Linux) at **[kiln3d.com/install](https://kiln3d.com/install)**.
 
 > [!TIP]
-> `kiln doctor` runs pre-flight checks on your setup and tells you what to fix. `kiln self-update` upgrades in place when a new release lands.
+> `kiln doctor` checks your whole setup and tells you exactly what to fix. `kiln self-update` upgrades in place when a new release lands.
 
 <details>
 <summary><strong>Prefer to drive it yourself? (CLI tour)</strong></summary>
