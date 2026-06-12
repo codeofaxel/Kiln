@@ -541,6 +541,18 @@ class _DesignToolsPlugin:
                     }
                 result = report.to_dict()
                 result["success"] = True
+                # The `chemicals` map in this report is coarse per-class
+                # (fuels/solvents/acids…).  Per-reagent cited verdicts are
+                # served one query at a time by check_chemical_resistance
+                # (kiln-pro, locally or via the hosted API) — this surface
+                # carries only the pointer, never the curated matrix.
+                result["cited_chemical_resistance"] = (
+                    "For a specific reagent (diesel, acetone, bleach, vinegar, "
+                    "UV …) with a cited verdict and the as-printed caveat, use "
+                    "check_chemical_resistance. Safety warnings are free; "
+                    "curated verdicts are a kiln-pro feature — "
+                    "https://kiln3d.com/pricing."
+                )
                 return result
             except Exception as exc:
                 _logger.error(

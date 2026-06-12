@@ -12011,7 +12011,17 @@ def get_material_properties(material_id: str) -> dict:
                 f"Unknown material '{material_id}'. Available: {', '.join(available)}",
                 code="NOT_FOUND",
             )
-        return {"success": True, "material": profile.to_dict()}
+        result = {"success": True, "material": profile.to_dict()}
+        # Per-reagent durability (will a printed part survive diesel /
+        # acetone / bleach / vinegar / UV …) is served one query at a
+        # time by check_chemical_resistance — this bulk response carries
+        # only the free safety floor, never the curated matrix.
+        result["chemical_resistance"] = {
+            "per_reagent_tool": "check_chemical_resistance",
+            "note": "Safety warnings are always free; cited survival "
+            "verdicts are a kiln-pro feature — https://kiln3d.com/pricing.",
+        }
+        return result
     except Exception as exc:
         logger.exception("Error in get_material_properties")
         return _error_dict(
