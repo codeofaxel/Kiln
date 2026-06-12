@@ -171,7 +171,7 @@ const farmsSchema = {
   ]}
   schema={farmsSchema}
 >
-  <section class="farm-hero">
+  <section class="page-hero farm-hero">
     <div class="hero-scene" aria-hidden="true">
       <div class="control-map">
         <div class="map-clients">
@@ -210,7 +210,7 @@ const farmsSchema = {
 
     <div class="container hero-copy">
       <p class="eyebrow">Kiln for print farms</p>
-      <h1>The control layer for AI-ready printer rooms.</h1>
+      <h1>The control layer for AI-ready <span class="serif-accent">printer rooms</span>.</h1>
       <p class="lead">
         Kiln gives agents using MCP, plus CLI and CI workflows, one safe local
         control path for
@@ -235,11 +235,11 @@ const farmsSchema = {
   <section class="farm-thesis bordered">
     <div class="container">
       <div class="thesis-grid">
-        <div>
+        <div data-reveal>
           <p class="eyebrow">The actual farm problem</p>
           <h2>More printers usually means more control surfaces.</h2>
         </div>
-        <p>
+        <p data-reveal style="--reveal-delay: 0.08s">
           A serious print room rarely standardizes forever. One team adds a
           Bambu Lab printer for speed, a Creality machine for large-format
           throughput, a Prusa for reliability, a Klipper machine for tuning,
@@ -253,13 +253,17 @@ const farmsSchema = {
 
   <section class="farm-capabilities bordered">
     <div class="container">
-      <div class="section-head">
+      <div class="section-head" data-reveal>
         <p class="eyebrow">Operating model</p>
         <h2>Built around the room, not one brand.</h2>
       </div>
       <div class="capability-grid">
-        {capabilities.map((capability) => (
-          <article class="capability-card">
+        {capabilities.map((capability, index) => (
+          <article
+            class="card capability-card"
+            data-reveal
+            style={`--reveal-delay: ${(index * 0.07).toFixed(2)}s`}
+          >
             <span>{capability.eyebrow}</span>
             <h3>{capability.title}</h3>
             <p>{capability.body}</p>
@@ -271,7 +275,7 @@ const farmsSchema = {
 
   <section class="backend-section bordered">
     <div class="container">
-      <div class="section-head two-col">
+      <div class="split-head" data-reveal>
         <div>
           <p class="eyebrow">Printer coverage</p>
           <h2>Farm-ready because the adapters are real.</h2>
@@ -284,7 +288,7 @@ const farmsSchema = {
           every one.
         </p>
       </div>
-      <div class="backend-list">
+      <div class="card backend-list" data-reveal style="--reveal-delay: 0.08s">
         {backends.map((backend) => (
           <article class="backend-row">
             <div>
@@ -300,20 +304,20 @@ const farmsSchema = {
 
   <section class="boundary-section bordered">
     <div class="container">
-      <div class="section-head">
+      <div class="section-head" data-reveal>
         <p class="eyebrow">Clean public/private boundary</p>
         <h2>Open infrastructure below. Business and Enterprise fleets above.</h2>
-        <p class="section-sub">
+        <p class="lead">
           This is the line that lets the public package stay useful while
           Business and Enterprise workflows remain protected.
         </p>
       </div>
-      <p class="tier-note">
+      <p class="tier-note" data-reveal style="--reveal-delay: 0.06s">
         Pro is intentionally limited to one printer. Fleet features belong to
         Business and Enterprise.
       </p>
       <div class="boundary-grid">
-        <article class="boundary-column">
+        <article class="card boundary-column" data-reveal>
           <div class="column-kicker">Public Kiln</div>
           {publicLayer.map((item) => (
             <div class="boundary-item">
@@ -322,7 +326,7 @@ const farmsSchema = {
             </div>
           ))}
         </article>
-        <article class="boundary-column pro">
+        <article class="card boundary-column pro" data-reveal style="--reveal-delay: 0.08s">
           <div class="column-kicker">Business and Enterprise layer</div>
           {proLayer.map((item) => (
             <div class="boundary-item">
@@ -337,7 +341,7 @@ const farmsSchema = {
 
   <section class="shop-section bordered">
     <div class="container">
-      <div class="section-head two-col">
+      <div class="split-head" data-reveal>
         <div>
           <p class="eyebrow">Who this is for</p>
           <h2>Rooms where print failure has a real cost.</h2>
@@ -349,8 +353,12 @@ const farmsSchema = {
         </p>
       </div>
       <div class="shop-grid">
-        {shopTypes.map((shop) => (
-          <article class="shop-card">
+        {shopTypes.map((shop, index) => (
+          <article
+            class="card shop-card"
+            data-reveal
+            style={`--reveal-delay: ${(index * 0.07).toFixed(2)}s`}
+          >
             <h3>{shop.title}</h3>
             <p>{shop.body}</p>
           </article>
@@ -360,7 +368,7 @@ const farmsSchema = {
   </section>
 
   <section class="farm-cta bordered">
-    <div class="container">
+    <div class="container" data-reveal>
       <p class="eyebrow">Start local, scale cleanly</p>
       <h2>Give every agent the same printer surface.</h2>
       <p class="lead">
@@ -377,80 +385,44 @@ const farmsSchema = {
 </BaseLayout>
 
 <style>
-  .bordered {
-    border-top: 1px solid var(--border);
-  }
-
-  .eyebrow {
-    color: var(--accent);
-    font-family: var(--mono);
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    margin: 0 0 12px;
-    text-transform: uppercase;
-  }
-
-  .farm-hero {
-    min-height: 760px;
-    overflow: hidden;
-    padding: 0;
-    position: relative;
-  }
-
-  .farm-hero::before {
-    background:
-      linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-    background-size: 54px 54px;
-    content: '';
-    inset: 0;
-    opacity: 0.36;
-    position: absolute;
-  }
-
-  .farm-hero::after {
-    background: linear-gradient(180deg, rgba(15, 15, 15, 0.08), var(--bg) 92%);
-    content: '';
-    inset: 0;
-    pointer-events: none;
-    position: absolute;
+  /* ------------------------------------------------------------------------
+     Hero — the page-hero voice with the control-map diagram above the copy.
+     The map flows top-down: agent clients → Kiln interfaces → the local
+     Kiln core → adapters → machines.  Pure decoration (aria-hidden), laid
+     out in normal flow so it wraps instead of colliding at narrow widths.
+     ------------------------------------------------------------------------ */
+  .page-hero.farm-hero {
+    padding: 56px 0 88px;
   }
 
   .hero-scene {
-    inset: 0;
-    opacity: 0.72;
+    position: relative;
+    max-width: 1040px;
+    margin: 0 auto 64px;
+    padding: 36px 20px 10px;
+  }
+
+  /* Machined grid behind the diagram, fading out radially at the edges. */
+  .hero-scene::before {
+    content: '';
     position: absolute;
+    inset: -24px 0;
+    background:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 54px 54px;
+    opacity: 0.55;
+    mask-image: radial-gradient(80% 100% at 50% 42%, #000 32%, transparent 78%);
+    -webkit-mask-image: radial-gradient(80% 100% at 50% 42%, #000 32%, transparent 78%);
   }
 
   .control-map {
-    left: 50%;
-    max-width: 980px;
-    min-height: 340px;
-    position: absolute;
-    top: 34px;
-    transform: translateX(-50%);
-    width: min(86vw, 980px);
-  }
-
-  .control-map::before,
-  .control-map::after {
-    background: radial-gradient(circle, rgba(255, 107, 43, 0.18), transparent 68%);
-    content: '';
-    height: 230px;
-    left: 50%;
-    position: absolute;
-    transform: translateX(-50%);
-    width: 360px;
-  }
-
-  .control-map::before {
-    top: 16px;
-  }
-
-  .control-map::after {
-    opacity: 0.58;
-    top: 166px;
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
   }
 
   .map-clients,
@@ -461,160 +433,106 @@ const farmsSchema = {
     flex-wrap: wrap;
     gap: 8px;
     justify-content: center;
-    position: relative;
-    z-index: 1;
   }
 
-  .map-clients,
-  .map-interfaces {
-    left: 0;
-    position: absolute;
-    right: 0;
-  }
-
-  .map-clients {
-    top: 0;
-  }
-
-  .map-interfaces {
-    top: 40px;
-  }
+  .adapter-track { max-width: 720px; }
+  .endpoint-track { max-width: 820px; }
 
   .map-clients span,
   .map-interfaces span,
   .adapter-track span,
   .endpoint-track span {
-    background: rgba(15, 15, 15, 0.76);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+    border: 1px solid var(--border-strong);
     border-radius: 999px;
-    color: rgba(232, 232, 232, 0.78);
+    color: var(--text-secondary);
     font-family: var(--mono);
     font-size: 10px;
-    letter-spacing: 0.04em;
-    padding: 6px 10px;
+    letter-spacing: 0.05em;
+    line-height: 1;
+    padding: 7px 11px;
     text-transform: uppercase;
+    white-space: nowrap;
   }
 
-  .map-clients span,
+  /* Kiln's own surfaces carry the ember; everything else stays neutral. */
   .map-interfaces span {
-    border-color: rgba(255, 107, 43, 0.22);
-    color: rgba(255, 173, 128, 0.92);
+    background: color-mix(in srgb, var(--accent) 7%, transparent);
+    border-color: var(--border-accent);
+    color: var(--accent-bright);
   }
 
-  .map-interfaces span {
-    background: rgba(255, 107, 43, 0.055);
+  .endpoint-track span {
+    border-color: var(--border);
+    color: var(--text-muted);
   }
 
   .map-core {
-    align-items: center;
-    background:
-      radial-gradient(circle at 50% 0%, rgba(255, 107, 43, 0.16), transparent 54%),
-      rgba(16, 16, 16, 0.78);
-    border: 1px solid rgba(255, 107, 43, 0.24);
-    border-radius: 999px;
-    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.54);
-    display: grid;
-    height: 116px;
-    justify-items: center;
-    left: 50%;
-    padding: 18px;
-    position: absolute;
-    top: 86px;
-    transform: translateX(-50%);
-    width: 116px;
+    position: relative;
     z-index: 2;
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    gap: 4px;
+    width: 118px;
+    height: 118px;
+    margin: 30px 0;
+    padding: 0 14px;
+    border: 1px solid var(--border-accent);
+    border-radius: 999px;
+    background:
+      radial-gradient(circle at 50% 0%, var(--accent-glow), transparent 58%),
+      var(--bg-elevated);
+    box-shadow:
+      0 24px 70px rgba(0, 0, 0, 0.5),
+      0 0 90px var(--accent-glow);
   }
 
+  /* Connector stems above and below the core node. */
   .map-core::before,
   .map-core::after {
-    background: rgba(255, 107, 43, 0.32);
     content: '';
-    height: 30px;
-    left: 50%;
     position: absolute;
+    left: 50%;
     transform: translateX(-50%);
     width: 1px;
+    height: 28px;
   }
 
   .map-core::before {
     bottom: 100%;
+    background: linear-gradient(180deg, transparent, var(--border-accent));
   }
 
   .map-core::after {
     top: 100%;
+    background: linear-gradient(180deg, var(--border-accent), transparent);
   }
 
   .map-core p,
   .map-core span {
+    margin: 0;
     color: var(--text-muted);
     font-family: var(--mono);
-    font-size: 8px;
-    letter-spacing: 0.06em;
+    font-size: 9px;
+    letter-spacing: 0.07em;
     line-height: 1.3;
-    margin: 0;
     text-align: center;
     text-transform: uppercase;
   }
 
   .map-core strong {
     color: var(--text);
-    font-size: 26px;
+    font-size: 22px;
+    font-weight: 700;
     letter-spacing: 0.08em;
     line-height: 1;
     text-transform: uppercase;
   }
 
-  .adapter-track {
-    left: 50%;
-    margin: 0;
-    max-width: 720px;
-    position: absolute;
-    top: 238px;
-    transform: translateX(-50%);
-    width: 100%;
-  }
-
-  .adapter-track span {
-    border-color: rgba(122, 211, 162, 0.24);
-    color: rgba(153, 221, 183, 0.86);
-  }
-
-  .endpoint-track {
-    left: 50%;
-    margin: 0;
-    max-width: 820px;
-    position: absolute;
-    top: 296px;
-    transform: translateX(-50%);
-    width: 100%;
-  }
-
-  .endpoint-track span {
-    background: rgba(255, 255, 255, 0.035);
-  }
-
-  .hero-copy {
-    padding-bottom: 76px;
-    padding-top: 366px;
-    position: relative;
-    text-align: center;
-    z-index: 1;
-  }
-
-  .hero-copy h1 {
-    font-size: clamp(42px, 6.6vw, 70px);
-    letter-spacing: 0;
-    line-height: 0.98;
-    margin: 0 auto 22px;
-    max-width: 880px;
-  }
-
-  .hero-copy .lead {
-    color: rgba(232, 232, 232, 0.76);
-    font-size: 18px;
-    line-height: 1.55;
-    margin: 0 auto 24px;
-    max-width: 760px;
+  .page-hero.farm-hero h1 {
+    max-width: 21ch;
+    margin-inline: auto;
   }
 
   .cta-actions {
@@ -622,6 +540,7 @@ const farmsSchema = {
     flex-wrap: wrap;
     gap: 12px;
     justify-content: center;
+    margin-top: 36px;
   }
 
   .cta-actions .btn-ghost {
@@ -629,17 +548,16 @@ const farmsSchema = {
   }
 
   .proof-strip {
-    border-top: 1px solid var(--border);
     display: grid;
-    gap: 0;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    margin: 32px auto 0;
+    border-top: 1px solid var(--border);
+    margin: 56px auto 0;
     max-width: 820px;
   }
 
   .proof-item {
     border-right: 1px solid var(--border);
-    padding: 18px 14px 0;
+    padding: 20px 16px 0;
   }
 
   .proof-item:last-child {
@@ -647,8 +565,8 @@ const farmsSchema = {
   }
 
   .proof-item strong {
-    color: var(--text);
     display: block;
+    color: var(--text);
     font-family: var(--mono);
     font-size: 24px;
     line-height: 1;
@@ -658,74 +576,65 @@ const farmsSchema = {
   .proof-item span {
     color: var(--text-muted);
     font-size: 13px;
+    letter-spacing: 0.01em;
   }
 
-  .farm-thesis,
-  .farm-capabilities,
-  .backend-section,
-  .boundary-section,
-  .shop-section,
-  .farm-cta {
-    padding: 82px 0;
-  }
-
+  /* ------------------------------------------------------------------------
+     Section heads — centered .section-head comes from the system; split-head
+     is the left-aligned variant: eyebrow + h2 on the left, supporting copy
+     on the right.
+     ------------------------------------------------------------------------ */
   .thesis-grid,
-  .section-head.two-col {
+  .split-head {
     display: grid;
-    gap: 54px;
-    grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.1fr);
+    grid-template-columns: minmax(260px, 0.95fr) minmax(0, 1.05fr);
+    gap: clamp(32px, 6vw, 72px);
+    align-items: start;
+  }
+
+  .split-head {
+    margin-bottom: 56px;
   }
 
   .thesis-grid h2,
-  .section-head h2,
-  .farm-cta h2 {
-    font-size: clamp(28px, 4vw, 44px);
-    letter-spacing: 0;
-    line-height: 1.08;
-    margin: 0;
+  .split-head h2 {
+    margin-bottom: 0;
   }
 
-  .thesis-grid > p,
-  .section-head.two-col > p,
-  .section-sub {
-    color: var(--text-muted);
+  .thesis-grid > p {
+    color: var(--text-secondary);
+    font-size: var(--text-lead);
+    line-height: 1.65;
+    margin: 0;
+    max-width: 58ch;
+    text-wrap: pretty;
+  }
+
+  .split-head > p {
+    color: var(--text-secondary);
     font-size: 16px;
-    line-height: 1.75;
+    line-height: 1.7;
     margin: 0;
+    max-width: 54ch;
+    text-wrap: pretty;
   }
 
-  .thesis-grid > p,
-  .section-head.two-col > p {
-    hyphens: auto;
-    text-align: justify;
-    text-align-last: left;
-    text-justify: inter-word;
-  }
-
-  .section-head {
-    margin-bottom: 36px;
-  }
-
+  /* ------------------------------------------------------------------------
+     Glass cards + table rows
+     ------------------------------------------------------------------------ */
   .capability-grid {
     display: grid;
-    gap: 16px;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
   }
 
-  .capability-card,
-  .shop-card {
-    background: rgba(255, 255, 255, 0.025);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 24px;
-  }
-
-  .capability-card span {
-    color: var(--accent);
+  .capability-card > span {
     display: block;
+    color: var(--accent);
     font-family: var(--mono);
     font-size: 12px;
-    margin-bottom: 18px;
+    letter-spacing: 0.12em;
+    margin-bottom: 20px;
   }
 
   .capability-card h3,
@@ -733,8 +642,9 @@ const farmsSchema = {
   .backend-row h3,
   .boundary-item h3 {
     color: var(--text);
-    font-size: 18px;
-    letter-spacing: 0;
+    font-size: var(--text-h3);
+    font-weight: 600;
+    letter-spacing: -0.012em;
     line-height: 1.3;
     margin: 0 0 10px;
   }
@@ -743,155 +653,143 @@ const farmsSchema = {
   .shop-card p,
   .backend-row p,
   .boundary-item p {
-    color: var(--text-muted);
-    font-size: 14px;
+    color: var(--text-secondary);
+    font-size: 15px;
     line-height: 1.65;
     margin: 0;
+    text-wrap: pretty;
   }
 
-  .capability-card p,
-  .shop-card p,
-  .backend-row p,
-  .boundary-item p {
-    hyphens: auto;
-    text-align: justify;
-    text-align-last: left;
-    text-justify: inter-word;
-  }
-
+  /* Backend coverage as one glass table: hairline-divided rows. */
   .backend-list {
-    border-bottom: 1px solid var(--border);
-    border-top: 1px solid var(--border);
+    padding: 0;
+    overflow: hidden;
   }
 
   .backend-row {
     display: grid;
+    grid-template-columns: 250px minmax(0, 1fr);
     gap: 28px;
-    grid-template-columns: 260px 1fr;
-    padding: 24px 0;
+    padding: 24px 28px;
   }
 
   .backend-row + .backend-row {
     border-top: 1px solid var(--border);
   }
 
+  .backend-row h3 {
+    margin-bottom: 6px;
+  }
+
   .backend-row span {
-    color: var(--accent);
     display: block;
+    color: var(--accent);
     font-family: var(--mono);
     font-size: 12px;
+    letter-spacing: 0.04em;
+  }
+
+  /* ------------------------------------------------------------------------
+     Public / private boundary columns
+     ------------------------------------------------------------------------ */
+  .tier-note {
+    color: var(--text-secondary);
+    font-size: 15px;
+    line-height: 1.6;
+    margin: -28px auto 48px;
+    max-width: 56ch;
+    text-align: center;
   }
 
   .boundary-grid {
     display: grid;
-    gap: 18px;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .tier-note {
-    color: rgba(232, 232, 232, 0.78);
-    font-size: 14px;
-    line-height: 1.6;
-    margin: -12px 0 28px;
+    gap: 18px;
+    align-items: start;
   }
 
   .boundary-column {
-    background: rgba(255, 255, 255, 0.025);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 26px;
+    padding: 30px;
   }
 
   .boundary-column.pro {
-    border-color: rgba(255, 107, 43, 0.28);
+    border-color: var(--border-accent);
+    background:
+      radial-gradient(120% 70% at 50% -8%, var(--accent-glow), transparent 60%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
+      var(--bg);
   }
 
   .column-kicker {
     border-bottom: 1px solid var(--border);
-    color: var(--text);
+    color: var(--text-muted);
     font-family: var(--mono);
     font-size: 12px;
-    margin-bottom: 22px;
+    letter-spacing: 0.12em;
+    margin-bottom: 24px;
     padding-bottom: 16px;
     text-transform: uppercase;
   }
 
-  .boundary-item + .boundary-item {
-    border-top: 1px solid var(--border);
-    margin-top: 20px;
-    padding-top: 20px;
+  .boundary-column.pro .column-kicker {
+    border-bottom-color: color-mix(in srgb, var(--accent) 20%, transparent);
+    color: var(--accent-bright);
   }
 
+  .boundary-item + .boundary-item {
+    border-top: 1px solid var(--border);
+    margin-top: 22px;
+    padding-top: 22px;
+  }
+
+  /* ------------------------------------------------------------------------
+     Shop types + closing CTA
+     ------------------------------------------------------------------------ */
   .shop-grid {
     display: grid;
-    gap: 16px;
     grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 18px;
   }
 
   .farm-cta {
     text-align: center;
   }
 
-  .farm-cta h2 {
-    margin-bottom: 16px;
-  }
-
   .farm-cta .lead {
-    color: var(--text-muted);
-    font-size: 17px;
-    line-height: 1.7;
-    margin: 0 auto 30px;
-    max-width: 680px;
+    margin: 0 auto 8px;
+    max-width: 600px;
   }
 
+  /* ------------------------------------------------------------------------
+     Responsive
+     ------------------------------------------------------------------------ */
   @media (max-width: 900px) {
-    .farm-hero {
-      min-height: 760px;
-    }
-
-    .control-map {
-      min-height: 360px;
-      top: 34px;
-      width: calc(100vw - 32px);
-    }
-
-    .map-clients,
-    .map-interfaces {
-      margin-left: auto;
-      margin-right: auto;
-      max-width: 460px;
-    }
-
-    .map-core {
-      top: 92px;
-    }
-
-    .adapter-track {
-      top: 258px;
-    }
-
-    .endpoint-track {
-      top: 316px;
-    }
-
-    .hero-copy {
-      padding-top: 396px;
-    }
-
     .thesis-grid,
-    .section-head.two-col,
-    .backend-row,
+    .split-head,
     .boundary-grid,
-    .capability-grid,
-    .shop-grid {
+    .capability-grid {
       grid-template-columns: 1fr;
+    }
+
+    .shop-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .backend-row {
+      grid-template-columns: 1fr;
+      gap: 10px;
+      padding: 22px 24px;
     }
 
     .proof-strip {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .proof-item:nth-child(2) {
+    .proof-item {
+      padding: 18px 16px;
+    }
+
+    .proof-item:nth-child(even) {
       border-right: none;
     }
 
@@ -901,91 +799,45 @@ const farmsSchema = {
   }
 
   @media (max-width: 640px) {
-    .farm-hero {
-      min-height: 780px;
+    .page-hero.farm-hero {
+      padding: 36px 0 56px;
     }
 
-    .control-map {
-      min-height: 390px;
-      top: 32px;
+    .hero-scene {
+      margin-bottom: 44px;
+      padding-top: 28px;
     }
 
-    .map-clients,
-    .map-interfaces,
-    .adapter-track,
-    .endpoint-track {
-      gap: 8px;
-    }
-
-    .map-clients span,
-    .map-interfaces span,
-    .adapter-track span,
-    .endpoint-track span {
-      font-size: 10px;
-      padding: 7px 9px;
-    }
-
-    .map-interfaces {
-      top: 46px;
-    }
-
-    .map-core {
-      height: 112px;
-      padding: 16px;
-      top: 104px;
-      width: 112px;
-    }
-
-    .map-core strong {
-      font-size: 24px;
-    }
-
-    .adapter-track {
-      top: 286px;
-    }
-
+    /* Trim the decorative tracks so the diagram stays calm on small screens. */
     .adapter-track span:nth-child(n + 6),
     .endpoint-track span:nth-child(n + 5) {
       display: none;
     }
 
-    .endpoint-track {
-      top: 344px;
+    .map-core {
+      width: 108px;
+      height: 108px;
+      margin: 24px 0;
     }
 
-    .hero-copy {
-      padding-bottom: 54px;
-      padding-top: 440px;
-    }
-
-    .hero-copy h1 {
-      font-size: clamp(36px, 12vw, 48px);
-    }
-
-    .hero-copy .lead {
-      font-size: 16px;
+    .map-core strong {
+      font-size: 20px;
     }
 
     .proof-strip {
+      margin-top: 44px;
+    }
+
+    .split-head {
+      margin-bottom: 44px;
+    }
+
+    .tier-note {
+      margin: -12px auto 40px;
+    }
+
+    .shop-grid {
       grid-template-columns: 1fr;
-    }
-
-    .proof-item,
-    .proof-item:nth-child(2) {
-      border-right: none;
-    }
-
-    .proof-item + .proof-item {
-      border-top: 1px solid var(--border);
-    }
-
-    .farm-thesis,
-    .farm-capabilities,
-    .backend-section,
-    .boundary-section,
-    .shop-section,
-    .farm-cta {
-      padding: 56px 0;
     }
   }
 </style>

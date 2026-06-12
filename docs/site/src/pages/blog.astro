@@ -176,19 +176,25 @@ const blogSchema = [
   ]}
   schema={blogSchema}
 >
-  <div class="blog-page">
+  <div class="page-hero">
     <div class="container">
-      <header class="blog-header">
-        <h1>What's New in Kiln</h1>
-        <p class="lead">Updates, releases, and announcements from the Kiln project.</p>
-      </header>
+      <h1>What's <span class="serif-accent">New</span> in Kiln</h1>
+      <p class="lead">Updates, releases, and announcements from the Kiln project.</p>
+    </div>
+  </div>
 
+  <div class="blog-index">
+    <div class="container-narrow">
       <div class="posts">
-        {posts.map((post) => (
-          <article class="post-card">
+        {posts.map((post, index) => (
+          <article
+            class="card post-card"
+            data-reveal
+            style={`--reveal-delay: ${Math.min(index * 7, 21) / 100}s`}
+          >
             <div class="post-meta">{post.date}</div>
             <h2><a href={post.url}>{post.title}</a></h2>
-            <p set:html={post.excerpt} />
+            <p class="post-excerpt" set:html={post.excerpt} />
             <div class="post-tags">
               {post.tags.map((tag) => <span class="tag">{tag}</span>)}
             </div>
@@ -197,7 +203,7 @@ const blogSchema = [
         ))}
       </div>
 
-      <div class="blog-cta">
+      <div class="blog-cta" data-reveal>
         <p>Follow development on <a href="https://github.com/codeofaxel/Kiln" target="_blank" rel="noopener">GitHub</a> for the latest updates.</p>
       </div>
     </div>
@@ -205,100 +211,124 @@ const blogSchema = [
 </BaseLayout>
 
 <style>
-  .blog-page {
-    padding: 80px 0 100px;
-  }
-  .blog-header {
-    margin-bottom: 48px;
-  }
-  .blog-header h1 {
-    font-size: 36px;
-    font-weight: 700;
-    margin-bottom: 12px;
-  }
-  .lead {
-    color: var(--text-muted);
-    font-size: 16px;
+  .blog-index {
+    padding: 0 0 112px;
   }
 
+  /* ── Editorial post list ── */
   .posts {
     display: flex;
     flex-direction: column;
-    gap: 24px;
-    margin-bottom: 48px;
+    gap: 20px;
   }
 
   .post-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 32px;
+    padding: 36px 38px;
+    transition: border-color 0.25s ease;
   }
+  .post-card:hover {
+    border-color: var(--border-strong);
+  }
+
   .post-meta {
-    font-size: 13px;
+    font-family: var(--mono);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
     color: var(--text-muted);
-    margin-bottom: 12px;
+    margin-bottom: 14px;
   }
+
   .post-card h2 {
-    font-size: 22px;
-    font-weight: 600;
-    margin-bottom: 16px;
+    font-size: clamp(19px, 2.4vw, 23px);
+    font-weight: 650;
+    line-height: 1.3;
+    letter-spacing: -0.018em;
+    margin-bottom: 14px;
+    text-wrap: balance;
   }
   .post-card h2 a {
     color: var(--text);
     text-decoration: none;
+    transition: color 0.18s ease;
   }
   .post-card h2 a:hover {
-    color: var(--accent);
+    color: var(--accent-bright);
+    text-decoration: none;
   }
-  .post-card p {
+
+  .post-excerpt {
     font-size: 15px;
-    color: var(--text-muted);
-    line-height: 1.6;
-    margin-bottom: 12px;
+    color: var(--text-secondary);
+    line-height: 1.65;
+    max-width: 62ch;
+    text-wrap: pretty;
+  }
+  .post-excerpt :global(code) {
+    color: var(--text);
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    padding: 1px 6px;
+    border-radius: calc(var(--radius-sm) - 2px);
+    font-size: 0.85em;
   }
 
   .post-tags {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
-    margin-top: 16px;
+    margin-top: 18px;
   }
   .tag {
+    font-family: var(--mono);
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 500;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--accent);
-    background: var(--accent-glow);
-    border: 1px solid rgba(255, 107, 43, 0.25);
-    padding: 3px 10px;
-    border-radius: 12px;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    padding: 4px 11px;
+    border-radius: 999px;
   }
 
   .read-more {
     display: inline-block;
-    margin-top: 16px;
+    margin-top: 20px;
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 550;
     color: var(--accent);
-    text-decoration: none;
-    transition: opacity 0.15s;
+    transition: color 0.18s ease;
   }
   .read-more:hover {
-    opacity: 0.8;
+    color: var(--accent-bright);
     text-decoration: none;
   }
 
+  /* ── Footer note ── */
   .blog-cta {
+    position: relative;
     text-align: center;
     color: var(--text-muted);
     font-size: 14px;
+    margin-top: 72px;
+    padding-top: 40px;
+  }
+  .blog-cta::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(420px, 80%);
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
   }
 
   @media (max-width: 640px) {
-    .blog-page { padding: 50px 0 60px; }
-    .blog-header h1 { font-size: 28px; }
-    .post-card { padding: 24px; }
-    .post-card h2 { font-size: 19px; }
+    .blog-index { padding-bottom: 64px; }
+    .posts { gap: 16px; }
+    .post-card { padding: 26px 22px; }
+    .blog-cta { margin-top: 56px; padding-top: 32px; }
   }
 </style>

@@ -27,10 +27,10 @@ import CTA from '../components/CTA.astro';
     'printability analysis',
   ]}
 >
-  <div class="features-hero">
+  <div class="page-hero">
     <div class="container">
       <h1>What Kiln can do.</h1>
-      <p class="sub">
+      <p class="lead">
         Design, printability, lifecycle, fleet, safety, and the agent protocol that ties them together &mdash; every capability currently shipping.
       </p>
     </div>
@@ -40,27 +40,3 @@ import CTA from '../components/CTA.astro';
 
   <CTA />
 </BaseLayout>
-
-<style>
-  .features-hero {
-    padding: 80px 0 40px;
-    text-align: center;
-  }
-  .features-hero h1 {
-    font-size: clamp(32px, 5vw, 56px);
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    line-height: 1.05;
-    color: var(--text);
-    margin: 0 0 18px;
-    text-wrap: balance;
-  }
-  .features-hero .sub {
-    font-size: clamp(15px, 1.8vw, 18px);
-    line-height: 1.55;
-    color: var(--text-muted);
-    max-width: 640px;
-    margin: 0 auto;
-    text-wrap: pretty;
-  }
-</style>

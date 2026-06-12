@@ -41,7 +41,7 @@ const lines = `<span class="user">You:</span> Print me a headphone stand for my 
 ---
 
 <div class="container">
-  <div class="demo">
+  <div class="demo" data-reveal>
     <div class="demo-bar">
       <span class="dot red"></span>
       <span class="dot yellow"></span>
@@ -52,41 +52,67 @@ const lines = `<span class="user">You:</span> Print me a headphone stand for my 
 </div>
 
 <style>
+  /* Terminal window — glass on the code surface, hairline border,
+     deep float shadow with a restrained ember underglow. */
   .demo {
-    background: var(--bg-card);
+    position: relative;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.008) 140px),
+      var(--bg-code);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
     max-width: 760px;
     margin: 0 auto 100px;
     overflow: hidden;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),
+      0 30px 80px -32px rgba(0, 0, 0, 0.7),
+      0 18px 56px -28px var(--accent-glow);
   }
+  /* Window chrome — slightly elevated glass strip, hairline base. */
   .demo-bar {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 12px 16px;
-    background: var(--bg-code);
+    gap: 8px;
+    padding: 13px 16px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
     border-bottom: 1px solid var(--border);
   }
+  /* Traffic-light dots — platform-conventional fills (not tokens by
+     design), with a faint gloss so they read as hardware, not flat UI. */
   .dot {
-    width: 10px;
-    height: 10px;
+    width: 11px;
+    height: 11px;
     border-radius: 50%;
     background: var(--border);
+    box-shadow:
+      inset 0 1px 1px rgba(255, 255, 255, 0.25),
+      inset 0 -1px 1px rgba(0, 0, 0, 0.25);
   }
   .dot.red { background: #FF5F56; }
   .dot.yellow { background: #FFBD2E; }
   .dot.green { background: #27C93F; }
+
   .demo-content {
-    padding: 24px;
+    padding: 28px;
     font-family: var(--mono);
     font-size: 12.5px;
-    line-height: 1.7;
+    line-height: 1.75;
     color: var(--text-muted);
     white-space: pre-wrap;
   }
   .demo-content :global(.user) { color: var(--text); font-weight: 600; }
   .demo-content :global(.agent) { color: var(--accent); font-weight: 600; }
+  /* Tool / output hues — syntax colors, aligned to the global
+     .code-block syntax palette (.string green) for coherence. */
   .demo-content :global(.tool) { color: #8BA8E8; }
-  .demo-content :global(.output) { color: #6B8A6B; }
+  .demo-content :global(.output) { color: #8FAE8F; }
+
+  @media (max-width: 640px) {
+    .demo { border-radius: var(--radius); }
+    .demo-content {
+      padding: 20px 16px;
+      font-size: 12px;
+    }
+  }
 </style>

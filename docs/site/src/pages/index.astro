@@ -51,13 +51,13 @@ import CTA from '../components/CTA.astro';
   -->
   <section id="demo" class="receipts bordered">
     <div class="container">
-      <h2 class="receipts-heading">One thing today. Or a hundred this week.</h2>
-      <p class="receipts-sub">Same printer. Same desk. One prompt each.</p>
+      <h2 class="receipts-heading" data-reveal>One thing today. Or a hundred this week.</h2>
+      <p class="receipts-sub" data-reveal style="--reveal-delay: 0.08s">Same printer. Same desk. One prompt each.</p>
 
       <div class="receipts-grid">
         <!-- Door 1: one thing, today.  Ash coaster — the
              personal-prototype-by-dinner promise. -->
-        <figure class="receipt">
+        <figure class="receipt" data-reveal>
           <div class="receipt-img-wrap">
             <img
               src="/demo/ash-coaster.jpg"
@@ -77,7 +77,7 @@ import CTA from '../components/CTA.astro';
 
         <!-- Door 2: a hundred this week.  Kiln-branded ashtray —
              the startup-merch / your-own-factory promise. -->
-        <figure class="receipt">
+        <figure class="receipt" data-reveal style="--reveal-delay: 0.08s">
           <div class="receipt-img-wrap">
             <img
               src="/demo/kiln-ashtray.jpg"
@@ -96,7 +96,7 @@ import CTA from '../components/CTA.astro';
         </figure>
       </div>
 
-      <div class="receipts-video">
+      <div class="receipts-video" data-reveal>
         <p class="receipts-video-label">The full run</p>
         <div class="receipts-video-wrap">
           <video
@@ -116,18 +116,20 @@ import CTA from '../components/CTA.astro';
 
   <section class="bordered kit-promise">
     <div class="container">
-      <h2 class="lc-heading">From idea to a printed product in an afternoon. Manual included. <span class="kit-pro-pill">Business</span></h2>
-      <p class="lc-lead">Multi-part prints ship with a printable PDF assembly manual &mdash; Bill of Materials, isometric step renders, pause-and-check verification gates.</p>
+      <div class="section-head" data-reveal>
+        <h2>From idea to a printed product in an afternoon. Manual included. <span class="kit-pro-pill">Business</span></h2>
+        <p class="lead">Multi-part prints ship with a printable PDF assembly manual &mdash; Bill of Materials, isometric step renders, pause-and-check verification gates.</p>
+      </div>
       <div class="manual-proof">
-        <figure>
+        <figure data-reveal>
           <img src="/assets/manual-screenshots/desk-hook-cover.png" alt="Cover page of a Kiln-generated Desk Hook Kit assembly manual with labelled parts and scan-to-verify QR code" loading="lazy" width="1224" height="1584" />
           <figcaption>Cover page &mdash; labelled parts, QR verification, and build summary</figcaption>
         </figure>
-        <figure>
+        <figure data-reveal style="--reveal-delay: 0.08s">
           <img src="/assets/manual-screenshots/desk-hook-step-02.png" alt="Kiln-generated manual step page showing the hook arm snapping into the back plate with labelled parts, direction arrow, and instruction copy" loading="lazy" width="1224" height="1584" />
           <figcaption>Per-step page &mdash; part labels, mating arrow, and exact instruction copy</figcaption>
         </figure>
-        <figure>
+        <figure data-reveal style="--reveal-delay: 0.16s">
           <img src="/assets/manual-screenshots/desk-hook-step-03.png" alt="Final step of a Kiln-generated Desk Hook Kit manual with the current part highlighted and a warning check below the instruction" loading="lazy" width="1224" height="1584" />
           <figcaption>Final step &mdash; current part highlighted with a pause-and-check warning</figcaption>
         </figure>
@@ -173,35 +175,35 @@ import CTA from '../components/CTA.astro';
   -->
   <section class="topic-hub bordered">
     <div class="container">
-      <h2>Explore Kiln by topic</h2>
-      <p class="lead">Everything you need for setup, integrations, operations, and production workflows.</p>
+      <h2 data-reveal>Explore Kiln by topic</h2>
+      <p class="lead" data-reveal style="--reveal-delay: 0.06s">Everything you need for setup, integrations, operations, and production workflows.</p>
 
       <div class="hub-grid">
-        <a href="/install" class="hub-card">
+        <a href="/install" class="card card-lift hub-card" data-reveal>
           <h3>Install and setup</h3>
           <p>Quick install, first printer connection, and MCP server setup.</p>
         </a>
-        <a href="/integrations" class="hub-card">
+        <a href="/integrations" class="card card-lift hub-card" data-reveal style="--reveal-delay: 0.06s">
           <h3>Printer and ecosystem integrations</h3>
           <p>OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, marketplaces, and fulfillment.</p>
         </a>
-        <a href="/printers" class="hub-card">
+        <a href="/printers" class="card card-lift hub-card" data-reveal style="--reveal-delay: 0.12s">
           <h3>Is your printer supported?</h3>
           <p>Tuned profiles for dozens of models across a dozen brands — Bambu Lab, Creality, Prusa, Elegoo, Sovol, Voron, and more. Find yours.</p>
         </a>
-        <a href="/use-cases" class="hub-card">
+        <a href="/use-cases" class="card card-lift hub-card" data-reveal style="--reveal-delay: 0.18s">
           <h3>Use cases</h3>
           <p>Print farm automation, AI prototyping, outsourced production, and lab operations.</p>
         </a>
-        <a href="/docs" class="hub-card">
+        <a href="/docs" class="card card-lift hub-card" data-reveal style="--reveal-delay: 0.24s">
           <h3>Documentation</h3>
           <p>CLI, MCP tools, safety architecture, and full configuration reference.</p>
         </a>
-        <a href="/blog" class="hub-card">
+        <a href="/blog" class="card card-lift hub-card" data-reveal style="--reveal-delay: 0.3s">
           <h3>Releases and updates</h3>
           <p>Feature launches, integration announcements, and real-world print stories.</p>
         </a>
-        <a href="/faq" class="hub-card">
+        <a href="/faq" class="card card-lift hub-card" data-reveal style="--reveal-delay: 0.36s">
           <h3>FAQ</h3>
           <p>Answers on pricing, compatibility, deployment, safety, and operations.</p>
         </a>
@@ -213,65 +215,37 @@ import CTA from '../components/CTA.astro';
 </BaseLayout>
 
 <style>
-  .bordered {
-    border-top: 1px solid var(--border);
-  }
-
   /* ---- Intellectual property band ---- *
    * Quiet, considered "Defensibility" treatment.  Single label
    * + single statement, no list, no badges.  Strict rule: the
    * statement string must match the .patent-footer copy in
    * pricing.astro verbatim.  Drift here = drift in the IP
-   * signal; keep them identical. */
+   * signal; keep them identical.  Deliberately shorter than the
+   * global section rhythm and with no scroll reveal — this band
+   * should be felt, not noticed. */
   .ip-band {
-    padding: 40px 0;
+    padding: 52px 0;
     text-align: center;
   }
   .ip-label {
-    font-size: 10px;
-    font-weight: 700;
+    font-size: 11px;
+    font-weight: 650;
     text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: var(--text-muted);
-    margin-bottom: 8px;
+    letter-spacing: 0.2em;
+    color: var(--text-subtle);
+    margin-bottom: 10px;
   }
   .ip-statement {
     font-size: 15px;
-    color: var(--text);
+    color: var(--text-secondary);
     max-width: 480px;
     margin: 0 auto;
-    line-height: 1.5;
-  }
-
-  /* Shared centered section heading used by the product proof blocks. */
-  .lc-heading {
-    font-size: clamp(30px, 4.8vw, 54px);
-    font-weight: 800;
-    line-height: 1.08;
-    letter-spacing: -0.022em;
-    color: var(--text);
-    margin: 0 auto 22px;
-    max-width: 880px;
-    text-wrap: balance;
-  }
-  .lc-lead {
-    font-size: clamp(15px, 1.8vw, 18px);
-    line-height: 1.55;
-    color: var(--text-muted);
-    max-width: 620px;
-    margin: 0 auto;
-    text-wrap: pretty;
+    line-height: 1.6;
   }
 
   /* Kit-promise — sells the "from object to product" escalation
-     after the receipts grid. */
-  .kit-promise {
-    text-align: center;
-    padding: 112px 0 96px;
-  }
-  @media (max-width: 640px) {
-    .kit-promise { padding: 72px 0 60px; }
-  }
+     after the receipts grid.  Head uses the global .section-head
+     unit; only the tier pill and proof strip are page-scoped. */
 
   /* Pro pill on the kit-promise heading.  Mirrors .g3d-pro-pill in
      GitForThreeDHighlight.astro so both Pro-tier sections wear the
@@ -287,7 +261,7 @@ import CTA from '../components/CTA.astro';
     text-transform: uppercase;
     color: var(--accent);
     background: var(--accent-glow);
-    border: 1px solid rgba(255, 107, 43, 0.35);
+    border: 1px solid var(--border-accent);
     border-radius: 999px;
     position: relative;
     top: -0.15em;
@@ -300,9 +274,9 @@ import CTA from '../components/CTA.astro';
   .manual-proof {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 20px;
+    gap: 24px;
     max-width: 1040px;
-    margin: 56px auto 0;
+    margin: 0 auto;
   }
   .manual-proof figure {
     margin: 0;
@@ -313,67 +287,57 @@ import CTA from '../components/CTA.astro';
     width: 100%;
     max-width: 100%;
     height: auto;
-    border-radius: 10px;
+    border-radius: var(--radius);
     border: 1px solid var(--border);
+    /* Paper color of the rendered manual pages — content-derived,
+       not a surface token; keeps PNG edges seamless. */
     background: #fff8ee;
     display: block;
+    box-shadow: 0 20px 48px -28px rgba(0, 0, 0, 0.55);
   }
   .manual-proof figcaption {
-    margin-top: 12px;
+    margin-top: 14px;
     font-size: 13px;
-    line-height: 1.45;
+    line-height: 1.5;
     color: var(--text-muted);
   }
   .manual-proof-caption {
-    margin: 24px auto 0;
+    margin: 32px auto 0;
     font-size: 13px;
     color: var(--text-muted);
     max-width: 720px;
     font-style: italic;
+    text-align: center;
   }
   @media (max-width: 720px) {
     .manual-proof {
       grid-template-columns: 1fr;
-      gap: 32px;
+      gap: 36px;
       max-width: min(100%, 420px);
       width: 100%;
     }
   }
 
-  .topic-hub {
-    /* Symmetric vertical padding so the section breathes evenly
-       between its border-top and the next section's border. */
-    padding: 72px 0 80px;
-  }
-
   .hub-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 16px;
+    gap: 18px;
   }
 
+  /* Topic cards compose the global .card/.card-lift glass surface;
+     only the inner type is page-scoped. */
   .hub-card {
     display: block;
-    padding: 22px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--bg-card);
-    text-decoration: none;
-    transition: border-color 0.15s ease, transform 0.15s ease;
-  }
-
-  .hub-card:hover {
-    border-color: var(--accent);
-    transform: translateY(-2px);
     text-decoration: none;
   }
-
   .hub-card h3 {
     color: var(--text);
-    font-size: 18px;
-    margin-bottom: 8px;
+    font-size: var(--text-h3);
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    line-height: 1.3;
+    margin-bottom: 10px;
   }
-
   .hub-card p {
     color: var(--text-muted);
     font-size: 14px;
@@ -383,18 +347,12 @@ import CTA from '../components/CTA.astro';
   /* Receipts — demo section.  Object-first, no Telegram-screenshot
      grid, no "Read the full story" link punt.  Two hero prints
      captioned with the sentence that produced them, sitting above
-     the unedited 1:18 agent-run video.  Typography matches the
-     surrounding proof sections so the page reads as one system. */
+     the unedited 1:18 agent-run video.  Treated as a gallery:
+     generous gaps, framed plates, editorial serif captions. */
   .receipts {
-    padding: 120px 0;
     text-align: center;
   }
   .receipts-heading {
-    font-size: clamp(28px, 4vw, 48px);
-    font-weight: 800;
-    line-height: 1.1;
-    letter-spacing: -0.022em;
-    color: var(--text);
     /* Heading + subtitle act as a tight pair — keep them visually
        glued (16px gap) and let the subtitle carry the breath
        before the photo grid below.  Heading max-width tuned so
@@ -403,17 +361,16 @@ import CTA from '../components/CTA.astro';
        visible: promise A. promise B. */
     margin: 0 auto 16px;
     max-width: 760px;
-    text-wrap: balance;
   }
   /* Subtitle under the new two-promise heading.  Carries the
      "at-home / your-own-factory" half of Adam's value props so
      neither door has to wait for the captions to deliver it. */
   .receipts-sub {
-    font-size: clamp(15px, 1.7vw, 18px);
-    line-height: 1.5;
-    color: var(--text-muted);
+    font-size: var(--text-lead);
+    line-height: 1.55;
+    color: var(--text-secondary);
     max-width: 560px;
-    margin: 0 auto 64px;
+    margin: 0 auto 80px;
     text-wrap: pretty;
   }
   /* Per-photo kicker — names which door the visitor is looking
@@ -421,24 +378,24 @@ import CTA from '../components/CTA.astro';
      voice as the run-video label below for vertical symmetry. */
   .receipt-kicker {
     font-size: 11px;
-    font-weight: 700;
+    font-weight: 650;
     text-transform: uppercase;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.18em;
     color: var(--accent);
-    margin: 0 0 10px;
+    margin: 0 0 12px;
   }
 
   .receipts-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 48px;
-    margin: 0 auto 96px;
-    max-width: 880px;
+    gap: 56px;
+    margin: 0 auto 112px;
+    max-width: 920px;
   }
   @media (max-width: 720px) {
     .receipts-grid {
       grid-template-columns: 1fr;
-      gap: 64px;
+      gap: 72px;
     }
   }
 
@@ -451,11 +408,16 @@ import CTA from '../components/CTA.astro';
     /* Portrait 3:4 frame — natural iPhone photo shape without
        cropping the object.  Subject stays comfortably in view. */
     aspect-ratio: 3 / 4;
-    background: var(--bg-card);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
+      var(--bg);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--radius-lg);
     overflow: hidden;
-    margin-bottom: 24px;
+    margin-bottom: 28px;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.04),
+      0 28px 64px -36px rgba(0, 0, 0, 0.65);
   }
   .receipt-img-wrap img {
     width: 100%;
@@ -464,27 +426,30 @@ import CTA from '../components/CTA.astro';
     display: block;
   }
   .receipt-caption {
-    padding: 0 4px;
+    padding: 0 6px;
   }
-  /* The sentence — rendered as a soft italic quote.  This is the
-     "what they said" half of the prompt/result pair; the image is
-     the "what they got."  Together they ARE the demo. */
+  /* The sentence — rendered in the editorial serif as a quote.
+     This is the "what they said" half of the prompt/result pair;
+     the image is the "what they got."  Together they ARE the demo. */
   .receipt-sentence {
     display: block;
-    font-size: clamp(17px, 1.7vw, 20px);
-    font-weight: 500;
-    line-height: 1.45;
-    color: var(--text);
+    font-family: var(--font-serif);
     font-style: italic;
-    margin-bottom: 10px;
+    font-weight: 400;
+    font-size: clamp(21px, 2.2vw, 27px);
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    color: var(--text);
+    margin-bottom: 12px;
     text-wrap: pretty;
     quotes: "\201C" "\201D";
   }
   .receipt-sentence::before { content: open-quote; }
   .receipt-sentence::after { content: close-quote; }
   .receipt-meta {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text-muted);
+    line-height: 1.5;
     margin: 0;
     letter-spacing: 0.01em;
   }
@@ -492,16 +457,18 @@ import CTA from '../components/CTA.astro';
      to let the three-beat poem above ("Photo taken at lunch.
      Sentence sent. In hand by dinner.") keep its rhythm without
      competing with a model number.  Reads as the receipt's
-     printed-at-the-bottom strip. */
+     printed-at-the-bottom strip — set in the mono as a quiet
+     machine plate. */
   .receipt-printer {
-    font-size: 12px;
-    color: var(--text-subtle, var(--text-muted));
-    margin: 6px 0 0;
-    letter-spacing: 0.04em;
-    opacity: 0.75;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-subtle);
+    margin: 10px 0 0;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
-  /* Full-run video block — framed the same as the object cards
+  /* Full-run video block — framed the same as the object plates
      (same border radius, same border, same dark fill) so the
      section reads as one designed surface.  Quiet uppercase label
      above mirrors the kicker at the top of the section for
@@ -512,18 +479,21 @@ import CTA from '../components/CTA.astro';
   }
   .receipts-video-label {
     font-size: 12px;
-    font-weight: 700;
+    font-weight: 650;
     text-transform: uppercase;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.18em;
     color: var(--text-muted);
-    margin: 0 0 18px;
+    margin: 0 0 20px;
   }
   .receipts-video-wrap {
-    border-radius: 14px;
+    border-radius: var(--radius-lg);
     overflow: hidden;
     border: 1px solid var(--border);
-    background: #000;
+    background: var(--bg-code);
     aspect-ratio: 16 / 9;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.04),
+      0 28px 64px -36px rgba(0, 0, 0, 0.65);
   }
   .receipts-video-wrap video {
     width: 100%;
@@ -533,9 +503,9 @@ import CTA from '../components/CTA.astro';
   }
 
   @media (max-width: 720px) {
-    .receipts { padding: 72px 0; }
-    .receipts-heading { margin-bottom: 48px; }
-    .receipts-grid { margin-bottom: 64px; }
+    .receipts-sub { margin-bottom: 56px; }
+    .receipts-grid { margin-bottom: 72px; }
   }
 
 </style>
+</BaseLayout>

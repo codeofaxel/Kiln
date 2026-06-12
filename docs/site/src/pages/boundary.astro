@@ -17,7 +17,7 @@ const boundarySchema = {
   keywords={['kiln boundary', 'orchestration layer', 'provider integration', 'merchant of record']}
   schema={boundarySchema}
 >
-  <section class="hero">
+  <div class="page-hero">
     <div class="container">
       <h1>How Kiln Fits in the Stack</h1>
       <p class="lead">
@@ -25,12 +25,12 @@ const boundarySchema = {
         external provider/network adapters; it does not operate a first-party decentralized manufacturing marketplace/network.
       </p>
     </div>
-  </section>
+  </div>
 
-  <section class="section bordered">
-    <div class="container">
-      <h2>Direct Comparison</h2>
-      <div class="table-wrap">
+  <section class="bordered">
+    <div class="container-narrow">
+      <h2 data-reveal>Direct Comparison</h2>
+      <div class="table-wrap" data-reveal style="--reveal-delay: 0.08s">
         <table>
           <thead>
             <tr>
@@ -71,9 +71,9 @@ const boundarySchema = {
     </div>
   </section>
 
-  <section class="section bordered">
-    <div class="container grid">
-      <article class="card">
+  <section class="bordered scope">
+    <div class="container-narrow grid">
+      <article class="card" data-reveal>
         <h3>In Scope for Kiln</h3>
         <ul>
           <li>Agent-first orchestration and control</li>
@@ -82,7 +82,7 @@ const boundarySchema = {
           <li>Unified CLI, MCP, and API workflows</li>
         </ul>
       </article>
-      <article class="card">
+      <article class="card" data-reveal style="--reveal-delay: 0.08s">
         <h3>Out of Scope for Kiln</h3>
         <ul>
           <li>Operating a first-party decentralized marketplace/network</li>
@@ -94,18 +94,20 @@ const boundarySchema = {
     </div>
   </section>
 
-  <section class="section bordered">
-    <div class="container">
-      <h2>API Naming Transition</h2>
-      <p>
-        Canonical provider tools are <code>connect_provider_account</code>, <code>sync_provider_capacity</code>,
-        <code>list_provider_capacity</code>, <code>find_provider_capacity</code>,
-        <code>submit_provider_job</code>, and <code>provider_job_status</code>.
-      </p>
-      <p>
-        Legacy <code>network_*</code> aliases were removed in <code>v0.4.0</code>.
-        Use the canonical provider integration tools listed above.
-      </p>
+  <section class="bordered">
+    <div class="container-narrow">
+      <h2 data-reveal>API Naming Transition</h2>
+      <div class="prose" data-reveal style="--reveal-delay: 0.08s">
+        <p>
+          Canonical provider tools are <code>connect_provider_account</code>, <code>sync_provider_capacity</code>,
+          <code>list_provider_capacity</code>, <code>find_provider_capacity</code>,
+          <code>submit_provider_job</code>, and <code>provider_job_status</code>.
+        </p>
+        <p>
+          Legacy <code>network_*</code> aliases were removed in <code>v0.4.0</code>.
+          Use the canonical provider integration tools listed above.
+        </p>
+      </div>
     </div>
   </section>
 </BaseLayout>

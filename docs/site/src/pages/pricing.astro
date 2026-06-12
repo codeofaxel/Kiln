@@ -109,15 +109,15 @@ const pricingFaqSchema = {
   ]}
   schema={[pricingSchema, pricingFaqSchema]}
 >
-  <section class="pricing-hero">
+  <div class="page-hero">
     <div class="container">
       <h1>Pricing</h1>
     </div>
-  </section>
+  </div>
 
   <section class="pricing-cards">
     <div class="container-wide">
-      <div class="billing-toggle">
+      <div class="billing-toggle" data-reveal>
         <span class="toggle-label" data-period="monthly">Monthly</span>
         <label class="toggle-switch">
           <input type="checkbox" id="billing-toggle" />
@@ -128,7 +128,7 @@ const pricingFaqSchema = {
 
       <div class="cards-grid">
         <!-- Free Tier -->
-        <div class="card pricing-card">
+        <div class="card pricing-card" data-reveal>
           <div class="card-header">
             <h3>Free</h3>
             <p class="tier-tagline">For trying Kiln on your own printer.</p>
@@ -161,7 +161,7 @@ const pricingFaqSchema = {
         </div>
 
         <!-- Pro Tier -->
-        <div class="card pricing-card">
+        <div class="card pricing-card" data-reveal style="--reveal-delay: 0.06s">
           <div class="card-header">
             <h3>Pro</h3>
             <p class="tier-tagline">For hobbyists &amp; personal projects.</p>
@@ -206,7 +206,7 @@ const pricingFaqSchema = {
         </div>
 
         <!-- Business Tier -->
-        <div class="card pricing-card featured">
+        <div class="card pricing-card featured" data-reveal style="--reveal-delay: 0.12s">
           <div class="badge">Recommended</div>
           <div class="card-header">
             <h3>Business</h3>
@@ -247,7 +247,7 @@ const pricingFaqSchema = {
         </div>
 
         <!-- Enterprise Tier -->
-        <div class="card pricing-card enterprise-card">
+        <div class="card pricing-card enterprise-card" data-reveal style="--reveal-delay: 0.18s">
           <div class="card-header">
             <h3>Enterprise</h3>
             <p class="tier-tagline">Built for your team. Let's talk.</p>
@@ -280,14 +280,14 @@ const pricingFaqSchema = {
           <p class="upgrade-note">Prefer email? <a href="mailto:adam@kiln3d.com?subject=Kiln%20Enterprise%20enquiry">adam@kiln3d.com</a>. Custom pricing tailored to your team, fleet, and compliance needs.</p>
         </div>
       </div>
-      <p class="patent-footer">Kiln's core technology is protected by multiple US patents pending.</p>
+      <p class="patent-footer" data-reveal>Kiln's core technology is protected by multiple US patents pending.</p>
     </div>
   </section>
 
-  <section class="faq">
+  <section class="faq bordered">
     <div class="container">
-      <h2>Frequently Asked Questions</h2>
-      <div class="faq-list">
+      <h2 data-reveal>Frequently Asked Questions</h2>
+      <div class="faq-list" data-reveal style="--reveal-delay: 0.08s">
         <details>
           <summary>Is local printing really free?</summary>
           <p>Yes. Kiln is open source (AGPL-3.0). Local printing, slicing, and printer control are free forever with no limits on print volume.</p>
@@ -494,21 +494,10 @@ const pricingFaqSchema = {
 </script>
 
 <style>
-  .pricing-hero {
-    text-align: center;
-    padding: 100px 0 40px;
-  }
-  .pricing-hero h1 {
-    font-size: 40px;
-    font-weight: 700;
-    margin-bottom: 16px;
-  }
-  .pricing-hero .lead {
-    color: var(--text-muted);
-    font-size: 17px;
-    max-width: 580px;
-    margin: 0 auto;
-    line-height: 1.6;
+  /* Cards section sits directly under the .page-hero opener — the hero
+   * already carries the top rhythm, so this section only pads below. */
+  .pricing-cards {
+    padding-top: 0;
   }
 
   /* Billing toggle */
@@ -516,8 +505,8 @@ const pricingFaqSchema = {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 12px;
-    margin-bottom: 32px;
+    gap: 14px;
+    margin-bottom: 44px;
   }
   .toggle-label {
     font-size: 14px;
@@ -526,15 +515,17 @@ const pricingFaqSchema = {
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
   }
   .save-badge {
-    background: var(--accent);
-    color: #fff;
+    background: var(--accent-glow);
+    border: 1px solid var(--border-accent);
+    color: var(--accent-bright);
     font-size: 11px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 10px;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    padding: 2px 9px;
+    border-radius: 999px;
     white-space: nowrap;
   }
   .toggle-switch {
@@ -550,37 +541,39 @@ const pricingFaqSchema = {
   }
   .toggle-slider {
     position: absolute;
+    inset: 0;
     cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: var(--border);
-    border-radius: 24px;
-    transition: 0.2s;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    transition: background 0.2s var(--ease-swift), border-color 0.2s var(--ease-swift);
   }
   .toggle-slider::before {
     content: '';
     position: absolute;
-    height: 18px;
-    width: 18px;
+    height: 16px;
+    width: 16px;
     left: 3px;
-    bottom: 3px;
-    background: #fff;
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--text);
     border-radius: 50%;
-    transition: 0.2s;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    transition: transform 0.2s var(--ease-swift);
   }
   .toggle-switch input:checked + .toggle-slider {
-    background: var(--accent);
+    background: linear-gradient(180deg, var(--accent-hover), var(--accent-deep));
+    border-color: var(--accent-deep);
   }
   .toggle-switch input:checked + .toggle-slider::before {
-    transform: translateX(20px);
+    transform: translate(20px, -50%);
+  }
+  .toggle-switch input:focus-visible + .toggle-slider {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
   }
 
   /* Cards grid */
-  .pricing-cards {
-    padding: 20px 0 80px;
-  }
   .cards-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -588,55 +581,52 @@ const pricingFaqSchema = {
     align-items: stretch;
   }
 
-  /* Card */
+  /* Card — glass surface from the global .card primitive; this layer
+   * only handles internal layout. */
   .pricing-card {
-    position: relative;
     display: flex;
     flex-direction: column;
-    padding: 32px 28px;
+    padding: 34px 26px 26px;
   }
   .pricing-card .card-header {
-    margin-bottom: 24px;
+    margin-bottom: 22px;
   }
   .pricing-card h3 {
-    font-size: 20px;
-    font-weight: 600;
-    margin-bottom: 4px;
+    font-size: var(--text-h3);
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    margin-bottom: 6px;
     color: var(--text);
   }
   .tier-tagline {
     font-size: 13px;
     color: var(--text-muted);
-    margin: 0 0 12px;
+    margin: 0 0 16px;
     line-height: 1.5;
-    min-height: 36px;
+    min-height: 39px;
   }
   .price {
     display: flex;
     align-items: baseline;
-    gap: 4px;
+    gap: 6px;
   }
   .price .amount {
-    font-size: 40px;
+    font-size: clamp(34px, 3.2vw, 42px);
     font-weight: 700;
+    letter-spacing: -0.03em;
     color: var(--text);
     line-height: 1;
   }
   .price .amount-text {
-    font-size: 26px;
-    font-weight: 600;
+    font-size: clamp(22px, 2vw, 26px);
+    font-weight: 650;
+    letter-spacing: -0.02em;
     color: var(--text);
-    line-height: 1;
+    line-height: 1.1;
   }
   .price .period {
-    font-size: 14px;
+    font-size: 13px;
     color: var(--text-muted);
-  }
-  .price-note {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-top: 6px;
-    margin-bottom: 0;
   }
 
   /* Features list */

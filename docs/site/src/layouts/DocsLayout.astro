@@ -43,9 +43,11 @@ const {
   />
 
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <!-- Fonts: same set as BaseLayout — variable Inter (optical sizing for
+       display sizes), editorial serif for accent words, mono for code. -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400..800;1,14..32,400..700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
   <Nav current={current} />
@@ -57,9 +59,17 @@ const {
 </html>
 
 <style>
+  /* Width and gutters match .container-wide so the three-column docs
+     surface machine-aligns with the rest of the site. */
   .docs-wrapper {
-    max-width: 1200px;
+    max-width: 1280px;
     margin: 0 auto;
-    padding: 0 24px;
+    padding: 0 28px;
+  }
+
+  @media (max-width: 640px) {
+    .docs-wrapper {
+      padding: 0 20px;
+    }
   }
 </style>

@@ -1,47 +1,104 @@
 ---
 const steps = [
-  { icon: '\u{1F4AC}', label: 'Idea' },
-  { icon: '\u{1F4A1}', label: 'Design' },
-  { icon: '\u2728', label: 'Generate' },
-  { icon: '\u{1F52C}', label: 'Validate' },
-  { icon: '\u{1F3A8}', label: 'Decorate' },
-  { icon: '\u2702\uFE0F', label: 'Slice' },
-  { icon: '\u{1F5A8}', label: 'Print' },
-  { icon: '\u{1F4F7}', label: 'Monitor' },
+  'Idea',
+  'Design',
+  'Generate',
+  'Validate',
+  'Decorate',
+  'Slice',
+  'Print',
+  'Monitor',
   // Iterate closes the loop — every outcome feeds the next branch.
-  // Leaf icon matches the Git-for-3D feature card so the two surfaces
-  // read as a single story.
-  { icon: '\u{1F33F}', label: 'Iterate' },
+  'Iterate',
 ];
 ---
 
-<section id="how-it-works" style="border-top: 1px solid var(--border); padding: 56px 0;">
+<section id="how-it-works" class="steps bordered">
   <div class="container">
-    <h2 style="font-size: clamp(24px, 4vw, 40px); font-weight: 700; margin-bottom: 8px;">How it works</h2>
-    <p style="color: var(--text-muted); font-size: 17px; margin-bottom: 36px;">From idea to physical object &mdash; then branch, merge, and print a better one.</p>
-
-    <div style="display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: nowrap;">
-      {steps.map((s, i) => (
-        <>
-          <div style="display: flex; flex-direction: column; align-items: center; text-align: center;">
-            <div style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 18px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 6px;">
-              {s.icon}
-            </div>
-            <div style="font-size: 11px; font-weight: 600; color: var(--text); line-height: 1.2;">
-              {s.label}
-            </div>
-          </div>
-          {i < steps.length - 1 && (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,107,43,0.4)" stroke-width="2" stroke-linecap="round" style="flex-shrink: 0; margin-top: -12px;">
-              <polyline points="9 6 15 12 9 18" />
-            </svg>
-          )}
-        </>
-      ))}
+    <div class="section-head" data-reveal>
+      <h2>How it works</h2>
+      <p class="lead">From idea to physical object &mdash; then branch, merge, and print a better one.</p>
     </div>
 
-    <p style="text-align: center; color: var(--text-muted); font-size: 12px; margin-top: 24px;">
+    <ol class="steps-flow">
+      {steps.map((label, i) => (
+        <li class="step" data-reveal style={`--reveal-delay: ${Math.min(i * 0.05, 0.4).toFixed(2)}s`}>
+          <span class="step-num" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span>
+          <span class="step-label">{label}</span>
+        </li>
+      ))}
+    </ol>
+
+    <p class="steps-note" data-reveal style="--reveal-delay: 0.2s">
       Every step is an MCP tool. Agents compose the pipeline. Humans can run any step from the CLI. Every print outcome feeds the next iteration.
     </p>
   </div>
 </section>
+
+<style>
+  .steps-flow {
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(9, 1fr);
+    column-gap: 18px;
+    row-gap: 36px;
+  }
+
+  /* Each step sits under its own segment of a machined hairline —
+     the gaps between segments give the row its tick-mark rhythm. */
+  .step {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+  }
+
+  .step-num {
+    font-family: var(--mono);
+    font-size: clamp(26px, 3vw, 38px);
+    font-weight: 400;
+    line-height: 1;
+    letter-spacing: -0.04em;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-subtle);
+  }
+
+  /* The final step closes the loop — one ember numeral signals that
+     the flow feeds back into the next iteration. */
+  .step:last-child { border-top-color: var(--border-accent); }
+  .step:last-child .step-num { color: var(--accent); }
+
+  .step-label {
+    font-size: 13.5px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    line-height: 1.3;
+    color: var(--text);
+  }
+
+  .steps-note {
+    margin: 64px auto 0;
+    max-width: 560px;
+    text-align: center;
+    font-size: 13.5px;
+    line-height: 1.7;
+    color: var(--text-muted);
+    text-wrap: pretty;
+  }
+
+  /* Nine columns need ~900px to keep one-word labels on one line;
+     below that the flow folds into a 3×3 loop. */
+  @media (max-width: 900px) {
+    .steps-flow {
+      grid-template-columns: repeat(3, 1fr);
+      column-gap: 16px;
+      row-gap: 32px;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .steps-note { margin-top: 44px; }
+  }
+</style>
