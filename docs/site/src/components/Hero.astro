@@ -4,7 +4,7 @@
 <div class="hero">
   <div class="hero-glow" aria-hidden="true"></div>
   <div class="container">
-    <img src="/assets/kiln-pfp-1024-flat.svg" alt="Kiln" class="hero-logo" width="72" height="72" data-reveal>
+    <img src="/assets/kiln-pfp-1024-flat.svg" alt="Kiln" class="hero-logo" width="128" height="128" data-reveal>
     <p class="tagline" data-reveal style="--reveal-delay: 0.07s"><span class="tagline-line">Spawn an object</span><br><span class="tagline-emphasis serif-accent">into existence.</span></p>
     <h1 data-reveal style="--reveal-delay: 0.14s"><span class="brand">Kiln 3D</span> is how AI agents make real things &mdash; <span class="accent">safely</span>, on any 3D printer.</h1>
     <p class="subtitle" data-reveal style="--reveal-delay: 0.2s">
@@ -80,12 +80,24 @@
 
   .hero .container { position: relative; }
 
+  /* The mark — sized as a presence, not a favicon.  Hairline ring +
+     inner sheen make it read as a made object sitting in the ember
+     light, the same way the printed pieces below sit in their frames. */
   .hero-logo {
-    width: 72px;
+    width: clamp(104px, 11vw, 132px);
     height: auto;
-    border-radius: 18px;
-    margin-bottom: 40px;
-    filter: drop-shadow(0 0 28px rgba(245, 158, 66, 0.4)) drop-shadow(0 0 80px rgba(245, 158, 66, 0.15));
+    border-radius: clamp(24px, 2.5vw, 30px);
+    margin-bottom: 44px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.1),
+      0 24px 48px -20px rgba(0, 0, 0, 0.8);
+    filter: drop-shadow(0 0 36px rgba(245, 158, 66, 0.38)) drop-shadow(0 0 110px rgba(245, 158, 66, 0.16));
+    transition: filter 0.4s ease, transform 0.4s var(--ease-out);
+  }
+  .hero-logo:hover {
+    filter: drop-shadow(0 0 48px rgba(245, 158, 66, 0.5)) drop-shadow(0 0 140px rgba(245, 158, 66, 0.22));
+    transform: translateY(-2px);
   }
 
   /* Primary tagline — the monumental statement.  Optical sizing comes
@@ -279,7 +291,7 @@
 
   @media (max-width: 640px) {
     .hero { padding: 56px 0 64px; }
-    .hero-logo { width: 60px; margin-bottom: 30px; }
+    .hero-logo { width: 96px; border-radius: 22px; margin-bottom: 32px; }
     .tagline { margin-bottom: 22px; }
     .tagline-line,
     .tagline-emphasis { white-space: normal; }

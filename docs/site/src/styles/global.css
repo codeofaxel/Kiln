@@ -9,6 +9,8 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
+  color-scheme: dark;
+
   /* Canvas + surfaces */
   --bg: #0A0A0B;
   --bg-elevated: #131315;
@@ -63,6 +65,11 @@
 html {
   scroll-behavior: smooth;
   scrollbar-color: #2E2C2A var(--bg);
+}
+
+/* Anchored targets clear the sticky nav instead of hiding under it. */
+[id] {
+  scroll-margin-top: 92px;
 }
 
 body {

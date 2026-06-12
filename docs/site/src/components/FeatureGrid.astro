@@ -33,94 +33,94 @@ const {
 const features = [
   // --- Homepage set ---
   {
-    icon: '\u2728',
+    icon: 'cube-spark',
     title: 'Text & Sketch to 3D',
     desc: 'Describe what you want or sketch it. Kiln generates printable models via Gemini Deep Think, Meshy, Tripo3D, Stability AI, or parametric OpenSCAD with a 14-component catalog (gears, threads, hinges, bearings). Design DNA preserves the source for iteration.',
   },
   {
-    icon: '\u{1F33F}',
+    icon: 'branch',
     title: 'Git for 3D Printing',
     desc: 'Branch new ideas without losing the working version. Merge what prints best. Sign a release and prove later that nothing changed. Works on your designs, your decorations, and your mechanical features. Runs offline on free tier; Pro+ syncs across machines via Kiln\u2019s cloud.',
   },
   {
-    icon: '\u{1F504}',
+    icon: 'lifecycle',
     title: 'Print \u2192 Monitor \u2192 Recover',
     desc: 'Full lifecycle: slice, validate safety, upload, print, control speed with natural language, monitor with camera vision, detect failures, diagnose root cause, auto-fix slicer settings, and retry. One conversation, start to finish.',
   },
   {
-    icon: '\u{1F6E1}\uFE0F',
+    icon: 'shield',
     title: 'Safety at Every Step',
     desc: "51 named per-printer safety profiles with temperature and speed limits. G-code validation before every send. Preflight checks, emergency stop, heater watchdog, G-code interception. Agents can\u2019t bypass safety.",
   },
   {
-    icon: '\u{1F517}',
+    icon: 'nodes',
     title: '835 MCP Capabilities, One Protocol',
     desc: "835 MCP capabilities and 223 CLI commands with --json output. Any MCP-compatible agent gets full access. Open source, AGPL-3.0 licensed, plugin-extensible.",
   },
 
   // --- The remaining ten (full /features page only) ---
   {
-    icon: '\u{1F4A1}',
+    icon: 'bulb',
     title: 'Design Intelligence',
     desc: '25 FDM materials with full engineering properties, 45 brand-specific filament profiles, 18 proven design templates (snap-fits, living hinges, threads), and structural load estimation. Kiln understands what makes a good print before generating anything.',
   },
   {
-    icon: '\u{1F52C}',
+    icon: 'layers',
     title: 'Printability Engine',
     desc: 'Analyze models across 7 dimensions (overhangs, thin walls, bridging, adhesion, supports, warping, thermal stress), score 0\u2013100, auto-orient, repair broken meshes, and auto-scale AI-generated models. Problems get fixed, not just flagged.',
   },
   {
-    icon: '\u{1F6D1}',
+    icon: 'stop',
     title: 'Doomed Prints Stopped Early',
     desc: 'Too big for the build plate, or a material your hotend can\u2019t melt? Kiln stops the print before it wastes filament or crashes the nozzle \u2014 rotating the part to fit when that solves it, never blocking when it isn\u2019t sure, with a one-command override. Free for everyone; Pro adds the fix: your printer\u2019s true usable area, the cleanest split, or the material to switch to.',
   },
   {
-    icon: '\u{1F9EA}',
+    icon: 'flask',
     title: 'What Can This Part Survive?',
     desc: 'Ask about the exact liquid or exposure you have in mind \u2014 cleaners, oils, sunlight, fuel \u2014 and Kiln answers honestly, including that printed parts take chemicals harder than solid plastic. Warnings are always free. Everyday-exposure go-aheads are Business; safety-critical answers (fuels, food contact, harsh chemicals) are Enterprise.',
   },
   {
-    icon: '\u{1F9E9}',
+    icon: 'blocks',
     title: 'Multi-Part Assembly',
     desc: 'Design assemblies with up to 10 parts (unlimited with Pro). Clearance validation, joint type detection (snap-fit, press-fit, threaded), tolerance stacking, and automatic split planning for oversize models. Multi-part prints can auto-ship a printable assembly manual (Kiln Business).',
   },
   {
-    icon: '\u{1F4D6}',
+    icon: 'book',
     title: 'Auto Assembly Manuals',
     desc: 'Multi-part prints generate a printable PDF assembly manual (Kiln Business) alongside the slice — Bill of Materials, isometric per-step renders, mating-direction arrows, pause-and-check verification gates. Strict-certainty mode: 100% confident or refuses with surgical fix-it instructions. Multilingual single-PDF + co-branded covers; "what changed" diff PDFs for buyers of older revisions. Factory work instructions (part numbers, torque, inspection sign-off) in seven languages on Enterprise.',
   },
   {
-    icon: '\u{1F9EE}',
+    icon: 'tag',
     title: 'Smart Cost Estimation',
     desc: 'Know what a print will cost before it starts \u2014 material, electricity, time. Get recommendations for cheaper filament alternatives, faster speed profiles, and quality tradeoffs.',
   },
   {
-    icon: '\u{1F30D}',
+    icon: 'globe',
     title: 'Fleet & Fulfillment',
     desc: "Multi-printer fleet with job routing, scheduling, and failure rerouting. Print recovery with automatic retry. No local printer? Outsource to Craftcloud\u2019s 150+ third-party services. Same tools, same safety.",
   },
   {
-    icon: '\u{1F3A8}',
+    icon: 'brush',
     title: 'Surface Decoration',
     desc: 'Emboss or deboss photos, logos, and text onto any model. Multicolor printing support for Bambu AMS. 3 decorations/month free, unlimited with Pro. Scannable QR codes require Business.',
   },
   {
-    icon: '\u{1F30A}',
+    icon: 'waves',
     title: 'Surface Textures',
     desc: 'Tiger stripe, marble, snakeskin, lava, wood grain, and more. Procedural and geometric patterns applied directly to any model with zero cloud dependencies. Pro feature.',
   },
   {
-    icon: '\u{1F9F0}',
+    icon: 'hex',
     title: 'Material & Mesh Intelligence',
     desc: '45 brand-specific filaments with purchase links and compatibility matching. Plus mesh repair, boolean ops, hollowing, chamfers, fillets, and wall thickening. Know what spool to buy and fix broken STLs.',
   },
   {
-    icon: '\u2728',
+    icon: 'pencil',
     title: 'Mid-print Modification',
     desc: 'Decorate, add features, or swap material on a live print \u2014 without restarting. Atomic revert if anything goes wrong. The G-code rewriter re-slices from the current layer, splices the change, and resumes with tamper-evident provenance. Pro feature.',
   },
   {
-    icon: '\u{1F501}',
+    icon: 'undo',
     title: 'Autonomous Failure Recovery',
     desc: 'Detect failures via camera vision, diagnose root cause, auto-fix slicer settings, and resume from the exact layer \u2014 no filament wasted. Cross-printer learning compounds: every recovery on one machine improves recovery decisions on the rest. Pro feature.',
   },
@@ -128,6 +128,31 @@ const features = [
 
 const visibleFeatures = limit ? features.slice(0, limit) : features;
 const hiddenCount = limit ? features.length - limit : 0;
+
+// Bespoke line icons — one geometric language (24px grid, 1.7 stroke,
+// round caps) so the grid reads as a designed set, not a sticker sheet.
+// Keys match the `icon` field on each feature above.
+const ICONS: Record<string, string> = {
+  'cube-spark': '<path d="M11 4.6 17.6 8.4v7.2L11 19.4l-6.6-3.8V8.4L11 4.6Z"/><path d="M4.6 8.5 11 12.2l6.4-3.7M11 12.2v7.1"/><path d="M19.2 2.8v3.6M17.4 4.6H21"/>',
+  branch: '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="7.5" r="2.5"/><path d="M6 8.5v7M18 10c0 4.4-4.6 5.5-9.4 5.8"/>',
+  lifecycle: '<path d="M21 12a9 9 0 0 1-15.5 6.2L3 16.1"/><path d="M3 21.2v-5.1h5.1"/><path d="M3 12a9 9 0 0 1 15.5-6.2L21 7.9"/><path d="M21 2.8v5.1h-5.1"/>',
+  shield: '<path d="M12 3.2 18.8 6v5.1c0 4.3-2.8 7.7-6.8 9.7-4-2-6.8-5.4-6.8-9.7V6L12 3.2Z"/><path d="m9 11.6 2.2 2.2 3.8-4.2"/>',
+  nodes: '<circle cx="5.5" cy="12" r="2.4"/><circle cx="18.5" cy="5.5" r="2.4"/><circle cx="18.5" cy="18.5" r="2.4"/><path d="m7.7 10.9 8.6-4.3M7.7 13.1l8.6 4.3"/>',
+  arrow: '<path d="M5 12h13M13.5 6.5 19 12l-5.5 5.5"/>',
+  bulb: '<path d="M12 3a6.2 6.2 0 0 1 3.8 11.1c-.8.6-1.2 1.4-1.2 2.2H9.4c0-.8-.4-1.6-1.2-2.2A6.2 6.2 0 0 1 12 3Z"/><path d="M9.5 19.5h5M10.5 22h3"/>',
+  layers: '<path d="m12 3.5 8.5 4.7L12 12.9 3.5 8.2 12 3.5Z"/><path d="m4 12.4 8 4.4 8-4.4"/><path d="m4 16.3 8 4.4 8-4.4"/>',
+  stop: '<path d="M8.2 3.2h7.6l5 5v7.6l-5 5H8.2l-5-5V8.2l5-5Z"/><path d="M12 7.8v5.2"/><circle cx="12" cy="16.4" r="1.1" fill="currentColor" stroke="none"/>',
+  flask: '<path d="M10 3.2h4M10 3.2v5.9L4.9 18.2a1.9 1.9 0 0 0 1.7 2.6h10.8a1.9 1.9 0 0 0 1.7-2.6L14 9.1V3.2"/><path d="M7.3 14.8h9.4"/>',
+  blocks: '<rect x="3.8" y="9.2" width="11" height="11" rx="2.2"/><path d="M9.2 5.7A2.7 2.7 0 0 1 11.9 3h5.4A2.7 2.7 0 0 1 20 5.7v5.4a2.7 2.7 0 0 1-2.7 2.7h-2.5"/>',
+  book: '<path d="M4 5.7A2.7 2.7 0 0 1 6.7 3H20v14.6H6.7A2.7 2.7 0 0 0 4 20.3V5.7Z"/><path d="M20 17.6v3.2H6.7A2.7 2.7 0 0 1 4 20.3"/>',
+  tag: '<path d="M3.5 12.4 11.6 20.5a1.9 1.9 0 0 0 2.7 0l6.2-6.2a1.9 1.9 0 0 0 0-2.7L12.4 3.5H5.4a1.9 1.9 0 0 0-1.9 1.9v7Z"/><circle cx="8.4" cy="8.4" r="1.4"/>',
+  globe: '<circle cx="12" cy="12" r="8.6"/><path d="M3.4 12h17.2"/><path d="M12 3.4c2.5 2.3 3.9 5.3 3.9 8.6s-1.4 6.3-3.9 8.6c-2.5-2.3-3.9-5.3-3.9-8.6s1.4-6.3 3.9-8.6Z"/>',
+  brush: '<path d="m9.4 12 8-8a2.55 2.55 0 0 1 3.6 3.6l-8 8"/><path d="M7.3 14.7a3.1 3.1 0 0 0-3.1 3.1c0 1.4-1.1 2.1-2.2 2.1 1 1.2 2.4 2.1 4 2.1a4.1 4.1 0 0 0 4.1-4.1 3.1 3.1 0 0 0-2.8-3.2Z"/>',
+  waves: '<path d="M3 7.5c3-2.8 6-2.8 9 0s6 2.8 9 0"/><path d="M3 12.5c3-2.8 6-2.8 9 0s6 2.8 9 0"/><path d="M3 17.5c3-2.8 6-2.8 9 0s6 2.8 9 0"/>',
+  hex: '<path d="M12 3l7.6 4.4v8.9L12 20.7l-7.6-4.4V7.4L12 3Z"/><circle cx="12" cy="12" r="2.6"/>',
+  pencil: '<path d="M16.8 3.7a2.4 2.4 0 0 1 3.4 3.4L8 19.3l-4.4 1.1L4.7 16 16.8 3.7Z"/><path d="m14.5 6 3.4 3.4"/>',
+  undo: '<path d="M3 7.5v5.4h5.4"/><path d="M20.9 17.4A9 9 0 0 0 6 10.7l-3 2.2"/><circle cx="12.5" cy="17.4" r="1.1" fill="currentColor" stroke="none"/>',
+};
 ---
 
 <section id="features" class="features-section bordered">
@@ -140,14 +165,18 @@ const hiddenCount = limit ? features.length - limit : 0;
     <div class="features">
       {visibleFeatures.map((f, i) => (
         <div class="feature card" data-reveal style={`--reveal-delay: ${Math.min(i * 0.06, 0.36)}s`}>
-          <div class="icon">{f.icon}</div>
+          <div class="icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" set:html={ICONS[f.icon] ?? ICONS['cube-spark']} />
+          </div>
           <h3>{f.title}</h3>
           <p>{f.desc}</p>
         </div>
       ))}
       {moreLink && hiddenCount > 0 && (
         <a class="feature card card-lift feature-more" href={moreLink} data-reveal style="--reveal-delay: 0.3s">
-          <div class="icon icon-more" aria-hidden="true">&rarr;</div>
+          <div class="icon icon-more" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" set:html={ICONS.arrow} />
+          </div>
           <h3>More capabilities</h3>
           <p>
             See more of what Kiln does &mdash; printability engine, multi-part assembly, autonomous failure recovery, mid-print modification, fleet &amp; fulfillment, and more.
@@ -174,14 +203,18 @@ const hiddenCount = limit ? features.length - limit : 0;
   .icon {
     width: 44px;
     height: 44px;
-    background: linear-gradient(180deg, rgba(255, 107, 43, 0.14), rgba(255, 107, 43, 0.05));
+    color: var(--accent-bright);
+    background: linear-gradient(180deg, rgba(255, 107, 43, 0.13), rgba(255, 107, 43, 0.04));
     border: 1px solid rgba(255, 107, 43, 0.18);
     border-radius: var(--radius);
     display: flex;
     align-items: center;
     justify-content: center;
     margin-bottom: 18px;
-    font-size: 19px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  .icon svg {
+    display: block;
   }
   .feature h3 {
     font-size: 16.5px;
@@ -222,9 +255,6 @@ const hiddenCount = limit ? features.length - limit : 0;
     background: linear-gradient(180deg, var(--accent-hover), var(--accent-deep));
     border: none;
     color: #fff;
-    font-weight: 700;
-    font-size: 20px;
-    line-height: 1;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
   }
 </style>

@@ -131,11 +131,11 @@ const pricingFaqSchema = {
         <div class="card pricing-card" data-reveal>
           <div class="card-header">
             <h3>Free</h3>
-            <p class="tier-tagline">For trying Kiln on your own printer.</p>
             <div class="price">
               <span class="amount">$0</span>
               <span class="period">/ forever</span>
             </div>
+            <p class="tier-tagline">For trying Kiln on your own printer.</p>
           </div>
           <ul class="features">
             <li><span class="check">&#10003;</span> Unlimited local printing</li>
@@ -156,21 +156,21 @@ const pricingFaqSchema = {
             <li><span class="check">&#10003;</span> 3 fulfillment orders/month free</li>
             <li><span class="check">&#10003;</span> 5% orchestration fee on fulfillment</li>
           </ul>
-          <a href="/install" class="btn card-cta">Let's build &#8594;</a>
           <p class="upgrade-note">Install with <code>pip install kiln3d</code></p>
+          <a href="/install" class="btn card-cta">Let's build &#8594;</a>
         </div>
 
         <!-- Pro Tier -->
         <div class="card pricing-card" data-reveal style="--reveal-delay: 0.06s">
           <div class="card-header">
             <h3>Pro</h3>
-            <p class="tier-tagline">For hobbyists &amp; personal projects.</p>
             <div class="price">
               <span class="amount monthly-price">$49</span>
               <span class="amount annual-price" style="display:none">$39</span>
               <span class="period monthly-period">/ month</span>
               <span class="period annual-period" style="display:none">/ mo, billed annually</span>
             </div>
+            <p class="tier-tagline">For hobbyists &amp; personal projects.</p>
           </div>
           <ul class="features">
             <li><span class="check">&#10003;</span> Everything in Free</li>
@@ -201,8 +201,8 @@ const pricingFaqSchema = {
             <li><span class="check">&#10003;</span> Part Passport &mdash; everything about a design in one call, instead of asking tool by tool</li>
             <li><span class="check">&#10003;</span> REST API server</li>
           </ul>
-          <button type="button" class="btn card-cta checkout-cta" data-tier="pro">Get Pro &#8594;</button>
           <p class="upgrade-note">Already installed? Run <code>kiln license activate &lt;key&gt;</code></p>
+          <button type="button" class="btn card-cta checkout-cta" data-tier="pro">Get Pro &#8594;</button>
         </div>
 
         <!-- Business Tier -->
@@ -210,13 +210,13 @@ const pricingFaqSchema = {
           <div class="badge">Recommended</div>
           <div class="card-header">
             <h3>Business</h3>
-            <p class="tier-tagline">For anyone selling what they print &mdash; Etsy, Shopify, custom orders, client work.</p>
             <div class="price">
               <span class="amount monthly-price">$199</span>
               <span class="amount annual-price" style="display:none">$159</span>
               <span class="period monthly-period">/ month</span>
               <span class="period annual-period" style="display:none">/ mo, billed annually</span>
             </div>
+            <p class="tier-tagline">For anyone selling what they print &mdash; Etsy, Shopify, custom orders, client work.</p>
           </div>
           <ul class="features">
             <li><span class="check">&#10003;</span> Everything in Pro</li>
@@ -242,18 +242,18 @@ const pricingFaqSchema = {
             <li><span class="check">&#10003;</span> Custom safety profiles</li>
             <li><span class="check">&#10003;</span> Webhook integrations</li>
           </ul>
-          <button type="button" class="btn card-cta checkout-cta" data-tier="business">Get Business &#8594;</button>
           <p class="upgrade-note">Already installed? Run <code>kiln license activate &lt;key&gt;</code></p>
+          <button type="button" class="btn card-cta checkout-cta" data-tier="business">Get Business &#8594;</button>
         </div>
 
         <!-- Enterprise Tier -->
         <div class="card pricing-card enterprise-card" data-reveal style="--reveal-delay: 0.18s">
           <div class="card-header">
             <h3>Enterprise</h3>
-            <p class="tier-tagline">Built for your team. Let's talk.</p>
             <div class="price">
               <span class="amount-text">Contact us</span>
             </div>
+            <p class="tier-tagline">Built for your team. Let's talk.</p>
           </div>
           <ul class="features">
             <li><span class="check">&#10003;</span> Everything in Business</li>
@@ -276,8 +276,8 @@ const pricingFaqSchema = {
             <li><span class="check">&#10003;</span> On-prem / VPC deployment options</li>
             <li><span class="check">&#10003;</span> Custom integrations &amp; procurement terms</li>
           </ul>
-          <a href="https://cal.com/kiln3d/intro-call" target="_blank" rel="noopener" class="btn card-cta">Book an intro call &#8594;</a>
           <p class="upgrade-note">Prefer email? <a href="mailto:adam@kiln3d.com?subject=Kiln%20Enterprise%20enquiry">adam@kiln3d.com</a>. Custom pricing tailored to your team, fleet, and compliance needs.</p>
+          <a href="https://cal.com/kiln3d/intro-call" target="_blank" rel="noopener" class="btn card-cta">Book an intro call &#8594;</a>
         </div>
       </div>
       <p class="patent-footer" data-reveal>Kiln's core technology is protected by multiple US patents pending.</p>
@@ -598,17 +598,16 @@ const pricingFaqSchema = {
     margin-bottom: 6px;
     color: var(--text);
   }
-  .tier-tagline {
-    font-size: 13px;
-    color: var(--text-muted);
-    margin: 0 0 16px;
-    line-height: 1.5;
-    min-height: 39px;
-  }
+  /* Price sits directly under the tier name in a fixed-height row, so
+   * the four price lines share one baseline no matter how the taglines
+   * below them wrap.  Tagline length variance lands between price and
+   * feature list — the one place it can't break any alignment. */
   .price {
     display: flex;
     align-items: baseline;
     gap: 6px;
+    height: 46px;
+    margin-top: 8px;
   }
   .price .amount {
     font-size: clamp(34px, 3.2vw, 42px);
@@ -616,23 +615,31 @@ const pricingFaqSchema = {
     letter-spacing: -0.03em;
     color: var(--text);
     line-height: 1;
+    font-variant-numeric: tabular-nums;
   }
   .price .amount-text {
     font-size: clamp(22px, 2vw, 26px);
     font-weight: 650;
     letter-spacing: -0.02em;
     color: var(--text);
-    line-height: 1.1;
+    line-height: 1.3;
+    align-self: flex-start;
   }
   .price .period {
     font-size: 13px;
     color: var(--text-muted);
   }
+  .tier-tagline {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 6px 0 0;
+    line-height: 1.5;
+  }
 
   /* Features list */
   .features {
     list-style: none;
-    margin-bottom: 32px;
+    margin-bottom: 28px;
     flex: 1;
   }
   .features li {
@@ -661,12 +668,11 @@ const pricingFaqSchema = {
     margin-top: 1px;
   }
 
-  /* CTA button — bottom-pinned by .features { flex: 1 } absorbing leftover
-   * space.  We deliberately do NOT use margin-top: auto here: combined with
-   * the same on .upgrade-note it splits leftover space between the two,
-   * making short-feature cards (Free) "float" the button mid-card while
-   * dense cards (Pro/Business) anchor it correctly.  Letting flex grow do
-   * the work keeps all four CTAs y-aligned regardless of bullet count. */
+  /* CTA button — the card's LAST element, bottom-pinned by
+   * .features { flex: 1 } absorbing leftover space.  The note sits
+   * ABOVE the button so its 1-vs-3-line length variance can never
+   * shift the button row: all four CTAs share the card's bottom
+   * edge by construction. */
   .card-cta {
     width: 100%;
     text-align: center;
@@ -703,18 +709,15 @@ const pricingFaqSchema = {
     opacity: 0.9;
   }
 
-  /* Upgrade note under CTA.  min-height pins notes to a 2-line block so
-   * their varying lengths ("Install with…", "Already installed? Run…",
-   * "Custom pricing tailored…") don't shift the CTA y-position between
-   * cards.  The code chip can flex-wrap to a second line on narrow
-   * columns without crowding the button above. */
+  /* Upgrade note — quiet line between the feature list and the CTA.
+   * Lives above the button so its varying length ("Install with…" /
+   * "Custom pricing tailored…") never moves the button row. */
   .upgrade-note {
     text-align: center;
     font-size: 12px;
     line-height: 1.5;
-    color: var(--text-muted);
-    margin: 12px 0 0;
-    min-height: 36px;
+    color: var(--text-subtle);
+    margin: 0 0 14px;
   }
   .upgrade-note code {
     font-size: 12px;

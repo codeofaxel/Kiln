@@ -13,9 +13,10 @@
     <div class="footer-grid">
       <div class="footer-col footer-brand">
         <a href="/" class="footer-logo" aria-label="Kiln home">
-          <img src="/assets/kiln-logo-dark-notext.svg" alt="" width="30" height="30">
+          <img src="/assets/kiln-logo-dark-notext.svg" alt="" width="40" height="40">
+          <span class="footer-wordmark">K<span class="accent">I</span>LN</span>
         </a>
-        <p class="footer-tagline">Spawn an object<br>into existence.</p>
+        <p class="footer-tagline serif-accent">Spawn an object<br>into existence.</p>
       </div>
       <div class="footer-col">
         <div class="col-label">Product</div>
@@ -125,18 +126,31 @@
   }
 
   .footer-brand {
-    gap: 16px;
+    gap: 18px;
   }
   .footer-logo {
     display: inline-flex;
-    width: 30px;
+    align-items: center;
+    gap: 12px;
+  }
+  .footer-logo img {
+    border-radius: 10px;
+    filter: drop-shadow(0 0 14px rgba(245, 158, 66, 0.25));
+  }
+  .footer-wordmark {
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 0.18em;
+    color: var(--text);
+  }
+  .footer-wordmark .accent {
+    color: var(--accent);
   }
   .footer-tagline {
     margin: 0;
-    font-size: 14px;
-    line-height: 1.45;
+    font-size: 19px;
+    line-height: 1.35;
     color: var(--text-secondary);
-    letter-spacing: -0.01em;
   }
   .cookie-prefs {
     background: none;

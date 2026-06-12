@@ -207,6 +207,9 @@ const rows: Row[] = [
 
   .cmp-table {
     width: 100%;
+    /* Floor keeps the three columns readable on phones — the wrap
+       scrolls horizontally instead of crushing cells into slivers. */
+    min-width: 720px;
     border-collapse: separate;
     border-spacing: 0;
   }
