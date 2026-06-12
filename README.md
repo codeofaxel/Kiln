@@ -4,6 +4,7 @@
 </p>
 
 <p align="center">
+  <a href="https://pypi.org/project/kiln3d/"><img src="https://img.shields.io/pypi/v/kiln3d" alt="PyPI"></a>
   <a href="https://pypi.org/project/kiln3d/"><img src="https://img.shields.io/pypi/pyversions/kiln3d" alt="Python"></a>
   <a href="https://github.com/codeofaxel/Kiln/blob/main/LICENSE"><img src="https://img.shields.io/github/license/codeofaxel/Kiln" alt="License"></a>
   <a href="https://github.com/codeofaxel/Kiln/blob/main/SIGNING.md"><img src="https://img.shields.io/badge/verified%20by-sigstore%20%2B%20SLSA-0f6fdc?logo=sigstore&logoColor=white" alt="Verified by Sigstore + SLSA"></a>
@@ -42,7 +43,17 @@ Three steps. Then ask your AI to make something.
 pip install kiln3d
 ```
 
-**2. Connect your AI** — paste this into Claude Desktop, Claude Code, Codex, or any MCP-capable agent:
+**2. Connect your AI** — one command wires Kiln into Claude Desktop, Claude Code, and Codex:
+
+```bash
+kiln signin        # free account — OAuth straight from the terminal
+kiln install-mcp   # finds your agents, merges their MCP configs safely
+```
+
+Restart your agent and it sees every Kiln tool. Different agent? `kiln install-mcp --print` emits a snippet for any MCP client — or paste it yourself:
+
+<details>
+<summary><strong>Manual MCP config (any client, no sign-in needed)</strong></summary>
 
 ```json
 {
@@ -55,11 +66,17 @@ pip install kiln3d
 }
 ```
 
+Drop this into Claude Desktop, Claude Code, Codex, Cursor, or any MCP-capable agent. Runs on the free tier until you sign in.
+</details>
+
 **3. Ask** — paste a sentence like this into your agent. Kiln does the rest:
 
 > I have a Bambu A1, make me a coaster with my dog's photo on it
 
-That's the whole happy path. The agent invokes Kiln's tools to design, slice, and print — you don't touch a CLI. Full walkthrough at **[kiln3d.com/install](https://kiln3d.com/install)**.
+That's the whole happy path. The agent invokes Kiln's tools to design, slice, and print — you don't touch a CLI. OS-specific walkthrough (Windows, WSL 2, Linux) at **[kiln3d.com/install](https://kiln3d.com/install)**.
+
+> [!TIP]
+> `kiln doctor` runs pre-flight checks on your setup and tells you what to fix. `kiln self-update` upgrades in place when a new release lands.
 
 <details>
 <summary><strong>Prefer to drive it yourself? (CLI tour)</strong></summary>
@@ -134,7 +151,7 @@ kiln agent --model openai/gpt-4o
 kiln agent --model meta-llama/llama-3.1-70b-instruct --tier essential
 ```
 
-Tool tiers auto-match model capability: **essential** (16 tools) for smaller models, **standard** (61 tools) for mid-range, **full** (133 tools) for stronger models. All 823 tools are available over MCP via `kiln serve`.
+Tool tiers auto-match model capability: **essential** (16 tools) for smaller models, **standard** (61 tools) for mid-range, **full** (133 tools) for stronger models. All <!-- KILN_MCP_TOOL_COUNT:OLD --> 823 tools are available over MCP via `kiln serve`.
 </details>
 
 <details>
@@ -208,7 +225,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing)) add Git-for-3D ver
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, Serial. Manage a mixed fleet from one place.
 - **No printer? No problem** — Outsource jobs to Craftcloud's 150+ manufacturing services through the hosted proxy, or use direct mode with your own provider credentials.
-- **AI-native** — 830 MCP capabilities and 223 CLI commands built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 830 MCP capabilities and <!-- KILN_CLI_COUNT:OLD --> 223 CLI commands built for AI agents. Not a web UI with an API bolted on.
 - **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print.
 - **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command.
 - **Manuals included** — Multi-part prints can generate printable PDF assembly manuals with Bill of Materials, isometric step renders, mating arrows, and pause-and-check verification gates. (Pro)
@@ -217,7 +234,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing)) add Git-for-3D ver
 - **Smart material routing** — 25 materials, 45 brand-specific filament profiles (Bambu, Prusament, Polymaker, and more) across 11 material families. Intent-based recommendations with printer capability awareness.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure recovery, closed-loop AI generation feedback (failed prints auto-improve future generations), preflight safety checks on every job.
 - **Search → Slice → Print** — Search and download 3D models from MyMiniFactory and Cults3D (search only), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
-- **Safety at scale** — 44 named per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
+- **Safety at scale** — 51 named per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
 
 ## Supported Printers
 
@@ -335,7 +352,7 @@ Patent pending across semantic mesh merge, outcome-correlated branching, and sig
 
 ## What Agents Can Do
 
-The Kiln MCP server (`kiln serve`) exposes **810 tools** to agents, plus prompts and resources for **817 total MCP capabilities**. Rather than list them all here, agents browse the live catalog with `get_skill_manifest` and ToolSearch-style discovery. A representative slice:
+The Kiln MCP server (`kiln serve`) exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 823 tools** to agents, plus prompts and resources for **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 830 total MCP capabilities**. Rather than list them all here, agents browse the live catalog with `get_skill_manifest` and ToolSearch-style discovery. A representative slice:
 
 | Theme | Example tools |
 |-------|---------------|
@@ -485,7 +502,7 @@ Entry-point plugins are **default-deny** in production (`KILN_PLUGIN_POLICY=stri
 | `plugins/` | Focused MCP tool modules loaded by the plugin loader |
 | `gcode.py` | G-code safety validator with per-printer limits |
 | `gcode_interceptor.py` | Rule-based G-code interception and safety rewriting |
-| `safety_profiles.py` | Bundled safety database (44 named printer models, temps/feedrates/flow) |
+| `safety_profiles.py` | Bundled safety database (51 named printer models, temps/feedrates/flow) |
 | `slicer_profiles.py` | Bundled slicer profiles (auto-generates .ini files per printer) |
 | `printer_intelligence.py` | Printer knowledge base (firmware quirks, materials, failure modes) |
 | `pipelines.py` | Pre-validated print pipelines (quick_print, calibrate, benchmark) |
