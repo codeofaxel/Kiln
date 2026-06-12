@@ -122,13 +122,13 @@ const ANY_TRACKING_CONFIGURED = Boolean(PIXEL_ID || GA4_ID || ADS_ID);
     position: fixed;
     inset-inline: 0;
     bottom: 0;
-    z-index: 50;
-    border-top: 1px solid var(--border);
-    background: rgba(15, 15, 15, 0.96);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    z-index: 1000; /* above the global grain overlay so the controls stay crisp */
+    border-top: 1px solid var(--border-strong);
+    background: rgba(10, 10, 11, 0.9);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
     padding: 20px 24px;
-    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.5);
     color: var(--text);
     font-size: 14px;
     line-height: 1.5;
@@ -182,30 +182,32 @@ const ANY_TRACKING_CONFIGURED = Boolean(PIXEL_ID || GA4_ID || ADS_ID);
   }
   .buttons button {
     font: inherit;
-    padding: 9px 16px;
-    border-radius: 6px;
+    font-weight: 500;
+    padding: 9px 20px;
+    border-radius: 999px;
     cursor: pointer;
     border: 1px solid transparent;
-    transition: background .12s ease, border-color .12s ease, color .12s ease;
+    transition: background .15s ease, border-color .15s ease, color .15s ease;
   }
   .buttons .primary {
-    background: var(--accent);
-    color: #0F0F0F;
+    background: linear-gradient(180deg, var(--accent-hover), var(--accent-deep));
+    color: #fff;
     font-weight: 600;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
   }
   .buttons .primary:hover {
-    background: var(--accent-hover);
+    filter: brightness(1.06);
   }
   .buttons .secondary,
   .buttons .tertiary {
-    background: transparent;
-    border-color: var(--border);
+    background: rgba(255, 255, 255, 0.03);
+    border-color: var(--border-strong);
     color: var(--text);
   }
   .buttons .secondary:hover,
   .buttons .tertiary:hover {
-    border-color: var(--text-muted);
-    background: var(--bg-card);
+    border-color: rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.06);
   }
   .buttons .tertiary {
     color: var(--text-muted);

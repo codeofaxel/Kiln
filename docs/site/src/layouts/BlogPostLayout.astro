@@ -59,7 +59,7 @@ const modifiedIso =
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400..800;1,14..32,400..700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
   <Nav current="blog" />
@@ -113,9 +113,9 @@ const modifiedIso =
 
   /* ── Header ── */
   .post-header {
-    padding: 48px 0 40px;
+    padding: 64px 0 44px;
     border-bottom: 1px solid var(--border);
-    margin-bottom: 48px;
+    margin-bottom: 52px;
   }
 
   .back-link {
@@ -123,38 +123,44 @@ const modifiedIso =
     align-items: center;
     gap: 6px;
     font-size: 13px;
+    font-weight: 500;
     color: var(--text-muted);
     text-decoration: none;
-    margin-bottom: 24px;
+    margin-bottom: 32px;
+    transition: color 0.15s ease, gap 0.2s var(--ease-out);
   }
 
   .back-link:hover {
-    color: var(--accent);
+    color: var(--text);
+    gap: 9px;
   }
 
   .post-tags {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
-    margin-bottom: 16px;
+    margin-bottom: 18px;
   }
 
   .tag {
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.07em;
     color: var(--accent);
     background: var(--accent-glow);
-    border: 1px solid rgba(255, 107, 43, 0.25);
-    padding: 3px 10px;
-    border-radius: 12px;
+    border: 1px solid var(--border-accent);
+    padding: 3px 11px;
+    border-radius: 999px;
   }
 
   .post-title {
-    font-size: 36px;
+    font-size: clamp(34px, 4.4vw, 52px);
     font-weight: 700;
-    line-height: 1.2;
-    margin-bottom: 16px;
+    line-height: 1.08;
+    letter-spacing: -0.034em;
+    margin-bottom: 18px;
+    text-wrap: balance;
   }
 
   .post-meta {
@@ -166,9 +172,10 @@ const modifiedIso =
   .post-hero {
     width: 100%;
     height: auto;
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     border: 1px solid var(--border);
-    margin-bottom: 48px;
+    margin-bottom: 52px;
+    box-shadow: 0 24px 60px -32px rgba(0, 0, 0, 0.8);
   }
 
   /* ── Body ── */
@@ -200,7 +207,7 @@ const modifiedIso =
 
   .post-body :global(strong) {
     font-weight: 600;
-    color: #fff;
+    color: var(--text);
   }
 
   .post-body :global(em) {
@@ -241,8 +248,8 @@ const modifiedIso =
     background: var(--bg-code);
     border: 1px solid var(--border);
     padding: 2px 7px;
-    border-radius: 4px;
-    color: #ccc;
+    border-radius: 5px;
+    color: var(--text-secondary);
   }
 
   .post-body :global(pre) {
@@ -267,13 +274,15 @@ const modifiedIso =
   }
 
   .post-body :global(blockquote) {
-    margin: 24px 0;
-    padding: 16px 24px;
-    border-left: 3px solid var(--accent);
-    background: var(--accent-glow);
-    border-radius: 0 8px 8px 0;
+    margin: 28px 0;
+    padding: 18px 26px;
+    border-left: 2px solid var(--accent);
+    background: linear-gradient(90deg, rgba(255, 107, 43, 0.07), transparent 80%);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    font-family: var(--font-serif);
     font-style: italic;
-    color: var(--text-muted);
+    font-size: 1.12em;
+    color: var(--text-secondary);
   }
 
   .post-body :global(blockquote p) {

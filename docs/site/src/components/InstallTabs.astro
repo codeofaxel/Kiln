@@ -229,10 +229,15 @@ result. Tell me if I need to restart anything.</code>
     pointer-events: none;
   }
 
+  /* Segmented control — a glass rail with the active platform as a
+     filled segment.  Same CSS-only radio mechanism as before. */
   .tab-bar {
-    display: flex;
-    gap: 0;
-    border-bottom: 1px solid var(--border);
+    display: inline-flex;
+    gap: 2px;
+    padding: 4px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: 999px;
     margin-bottom: 32px;
   }
 
@@ -240,13 +245,13 @@ result. Tell me if I need to restart anything.</code>
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 12px 24px;
+    padding: 9px 20px;
     font-size: 14px;
     font-weight: 500;
     color: var(--text-muted);
     cursor: pointer;
-    border-bottom: 2px solid transparent;
-    transition: all 0.15s;
+    border-radius: 999px;
+    transition: color 0.18s ease, background 0.18s ease;
     user-select: none;
   }
 
@@ -260,7 +265,8 @@ result. Tell me if I need to restart anything.</code>
   #tab-windows:checked ~ .tab-bar label[for="tab-windows"],
   #tab-wsl:checked ~ .tab-bar label[for="tab-wsl"] {
     color: var(--text);
-    border-bottom-color: var(--accent);
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
 
   .tab-panel {
@@ -309,9 +315,9 @@ result. Tell me if I need to restart anything.</code>
     gap: 12px;
     align-items: flex-start;
     padding: 16px 20px;
-    background: rgba(255, 107, 43, 0.06);
+    background: linear-gradient(180deg, rgba(255, 107, 43, 0.08), rgba(255, 107, 43, 0.03));
     border: 1px solid rgba(255, 107, 43, 0.2);
-    border-radius: 8px;
+    border-radius: var(--radius);
     margin: 20px 0;
   }
 

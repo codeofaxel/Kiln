@@ -27,18 +27,20 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     opacity: 0.6;
   }
   .not-found h1 {
-    font-size: 96px;
+    font-size: clamp(110px, 16vw, 180px);
     font-weight: 700;
+    letter-spacing: -0.05em;
     line-height: 1;
-    margin-bottom: 12px;
-    background: linear-gradient(135deg, var(--text) 0%, var(--text-muted) 100%);
+    margin-bottom: 10px;
+    background: var(--ember-gradient);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    opacity: 0.92;
   }
   .not-found p {
-    font-size: 18px;
+    font-size: var(--text-lead);
     color: var(--text-muted);
-    margin-bottom: 36px;
+    margin-bottom: 40px;
   }
 </style>

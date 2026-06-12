@@ -12,12 +12,14 @@ const printers = [
 
 <section class="bordered">
   <div class="container">
-    <h2>Supported printers</h2>
-    <p class="lead">Works with the most popular 3D printer ecosystems out of the box.</p>
+    <div class="section-head">
+      <h2 data-reveal>Supported printers</h2>
+      <p class="lead" data-reveal style="--reveal-delay: 0.06s">Works with the most popular 3D printer ecosystems out of the box.</p>
+    </div>
 
     <div class="printer-grid">
-      {printers.map((p) => (
-        <div class="printer-card">
+      {printers.map((p, i) => (
+        <div class="printer-card card" data-reveal style={`--reveal-delay: ${Math.min(i * 0.05, 0.3)}s`}>
           <div class="name">{p.name}</div>
           <div class="desc">{p.desc}</div>
         </div>
@@ -27,13 +29,10 @@ const printers = [
 </section>
 
 <style>
-  .bordered {
-    border-top: 1px solid var(--border);
-  }
   .printer-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 16px;
+    gap: 14px;
   }
   @media (max-width: 900px) {
     .printer-grid {
@@ -41,16 +40,14 @@ const printers = [
     }
   }
   .printer-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 24px;
+    padding: 26px 24px;
     text-align: center;
   }
   .name {
     font-weight: 600;
-    font-size: 15px;
-    margin-bottom: 4px;
+    font-size: 15.5px;
+    letter-spacing: -0.012em;
+    margin-bottom: 5px;
   }
   .desc {
     font-size: 13px;

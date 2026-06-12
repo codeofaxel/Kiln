@@ -62,8 +62,9 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
     margin-bottom: 24px;
   }
   .checkout-success h1 {
-    font-size: 40px;
+    font-size: clamp(38px, 5vw, 52px);
     font-weight: 700;
+    letter-spacing: -0.036em;
     margin-bottom: 16px;
   }
   .checkout-success .lead {
@@ -74,11 +75,14 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
   }
   .next-steps {
     text-align: left;
-    background: var(--bg-card, #f8f8f8);
-    border: 1px solid var(--border, #e5e5e5);
-    border-radius: 10px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
+      var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
     padding: 28px 32px;
     margin-bottom: 32px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
   }
   .next-steps h2 {
     font-size: 18px;
@@ -93,16 +97,17 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
     margin-bottom: 16px;
   }
   .next-steps pre {
-    background: #111;
-    color: #eee;
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    color: var(--text);
     padding: 10px 14px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     font-size: 13px;
     margin: 8px 0 0;
     overflow-x: auto;
   }
   .next-steps code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--mono);
   }
   .fallback {
     color: var(--text-muted);
@@ -111,13 +116,11 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
   }
   .cta-row {
     display: flex;
-    gap: 12px;
+    gap: 14px;
     justify-content: center;
     flex-wrap: wrap;
   }
-  .btn-ghost {
-    background: transparent;
-    border: 1px solid var(--border, #d5d5d5);
-    color: var(--text, inherit);
+  .cta-row .btn-ghost {
+    margin-left: 0;
   }
 </style>

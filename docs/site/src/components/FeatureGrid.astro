@@ -130,21 +130,23 @@ const visibleFeatures = limit ? features.slice(0, limit) : features;
 const hiddenCount = limit ? features.length - limit : 0;
 ---
 
-<section id="features" class="features-section">
+<section id="features" class="features-section bordered">
   <div class="container">
-    <h2>{title}</h2>
-    <p class="lead">{lead}</p>
+    <div class="section-head">
+      <h2 data-reveal>{title}</h2>
+      <p class="lead" data-reveal style="--reveal-delay: 0.06s">{lead}</p>
+    </div>
 
     <div class="features">
-      {visibleFeatures.map((f) => (
-        <div class="feature">
+      {visibleFeatures.map((f, i) => (
+        <div class="feature card" data-reveal style={`--reveal-delay: ${Math.min(i * 0.06, 0.36)}s`}>
           <div class="icon">{f.icon}</div>
           <h3>{f.title}</h3>
           <p>{f.desc}</p>
         </div>
       ))}
       {moreLink && hiddenCount > 0 && (
-        <a class="feature feature-more" href={moreLink}>
+        <a class="feature card card-lift feature-more" href={moreLink} data-reveal style="--reveal-delay: 0.3s">
           <div class="icon icon-more" aria-hidden="true">&rarr;</div>
           <h3>More capabilities</h3>
           <p>
@@ -157,130 +159,72 @@ const hiddenCount = limit ? features.length - limit : 0;
 </section>
 
 <style>
-  /* Hairline divider matching every other major section transition on
-     the landing page (.bordered class in index.astro).  Without this,
-     the gap between "Explore Kiln by topic" and "What Kiln does" reads
-     as an undesigned empty void instead of an intentional section
-     break.  Same color token + 1px stroke as the section dividers
-     above and below; same visual rhythm. */
   .features-section {
-    border-top: 1px solid var(--border);
-    /* Match the vertical breathing room of the other major sections
-       (Git-for-3D, ComparisonTable, Receipts).  Without explicit
-       padding the H2 sat flush against the section divider line. */
-    padding: 80px 0;
+    padding: 112px 0;
   }
 
   .features {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 20px;
+    gap: 16px;
   }
   .feature {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 28px;
+    padding: 26px 28px;
   }
   .icon {
-    width: 40px;
-    height: 40px;
-    background: var(--accent-glow);
-    border-radius: 8px;
+    width: 44px;
+    height: 44px;
+    background: linear-gradient(180deg, rgba(255, 107, 43, 0.14), rgba(255, 107, 43, 0.05));
+    border: 1px solid rgba(255, 107, 43, 0.18);
+    border-radius: var(--radius);
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-bottom: 16px;
-    font-size: 20px;
+    margin-bottom: 18px;
+    font-size: 19px;
   }
   .feature h3 {
-    font-size: 16px;
+    font-size: 16.5px;
     font-weight: 600;
+    letter-spacing: -0.015em;
     margin-bottom: 8px;
   }
   .feature p {
     font-size: 14px;
     color: var(--text-muted);
-    line-height: 1.5;
-    /* Justify the body copy so the right edge of every card aligns
-       cleanly with its neighbors — pulls the grid from "ragged paragraphs
-       sitting in boxes" up to "intentional editorial layout." Hyphens
-       enabled so a long word in a narrow column doesn't blow the
-       justification spacing into rivers of whitespace. */
-    text-align: justify;
-    text-justify: inter-word;
-    hyphens: auto;
+    line-height: 1.6;
+    text-wrap: pretty;
   }
 
-  /* The 6th cell — "Plus N more → see all capabilities" — rendered
-     as a peer to the five capability cards so the grid lands as a
-     clean 2×3 composition instead of the 3+2 orphan shape.  Same
-     silhouette + padding as .feature, differentiated by dashed
-     border + accent-colored arrow affordance so users read it as
-     navigational, not a sixth feature they forgot to learn about. */
+  /* The 6th cell — "More capabilities" — rendered as a peer to the
+     five capability cards so the grid lands as a clean 2×3
+     composition instead of the 3+2 orphan shape.  Same silhouette +
+     padding as .feature, differentiated by dashed border +
+     ember arrow affordance so users read it as navigational, not a
+     sixth feature they forgot to learn about. */
   .feature-more {
     display: block;
     text-decoration: none;
     color: inherit;
     border-style: dashed;
-    transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
   }
   .feature-more:hover {
-    border-color: var(--accent);
-    transform: translateY(-2px);
+    border-color: var(--border-accent);
     text-decoration: none;
-    background: var(--bg-card);
   }
   .feature-more h3 {
     color: var(--text);
   }
   .feature-more p {
     color: var(--text-muted);
-    text-align: left;  /* override justify — too short to justify cleanly */
-    hyphens: manual;
   }
   .feature-more .icon-more {
-    background: var(--accent);
+    background: linear-gradient(180deg, var(--accent-hover), var(--accent-deep));
+    border: none;
     color: #fff;
     font-weight: 700;
-    font-size: 22px;
+    font-size: 20px;
     line-height: 1;
-  }
-
-  .compat-strip {
-    margin-top: 48px;
-    padding: 36px 32px;
-    text-align: center;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-  }
-  .compat-title {
-    font-size: 18px;
-    font-weight: 600;
-    margin-bottom: 16px;
-  }
-  .compat-list {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 12px;
-  }
-  .compat-name {
-    font-size: 16px;
-    font-weight: 500;
-    color: var(--text);
-  }
-  .compat-dot {
-    color: var(--text-muted);
-    font-size: 18px;
-    user-select: none;
-  }
-  .compat-sub {
-    font-size: 14px;
-    color: var(--text-muted);
-    line-height: 1.5;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
   }
 </style>

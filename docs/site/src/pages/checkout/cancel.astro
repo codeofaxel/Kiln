@@ -42,8 +42,9 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
     opacity: 0.6;
   }
   .checkout-cancel h1 {
-    font-size: 36px;
+    font-size: clamp(34px, 5vw, 46px);
     font-weight: 700;
+    letter-spacing: -0.034em;
     margin-bottom: 16px;
   }
   .checkout-cancel .lead {
@@ -54,15 +55,13 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
   }
   .cta-row {
     display: flex;
-    gap: 12px;
+    gap: 14px;
     justify-content: center;
     flex-wrap: wrap;
     margin-bottom: 32px;
   }
-  .btn-ghost {
-    background: transparent;
-    border: 1px solid var(--border, #d5d5d5);
-    color: var(--text, inherit);
+  .cta-row .btn-ghost {
+    margin-left: 0;
   }
   .footnote {
     color: var(--text-muted);

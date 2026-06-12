@@ -103,21 +103,21 @@ const installHowToSchema = {
   schema={installHowToSchema}
 >
   <!-- Mini-hero — paradigm echo from the landing page.  One
-       sentence, sized to match the .receipts-heading typography on
-       index.astro so /install reads as the next sentence in the
-       same conversation the visitor started one click ago. -->
-  <section class="install-hero">
+       sentence in the page-hero voice so /install reads as the next
+       sentence in the same conversation the visitor started one
+       click ago. -->
+  <div class="page-hero">
     <div class="container">
-      <h1 class="install-headline">Three minutes. Then ask your AI to make something.</h1>
+      <h1 class="install-headline">Three minutes. Then ask your AI to <span class="serif-accent ink-ember">make something.</span></h1>
     </div>
-  </section>
+  </div>
 
   <!-- Three steps — install, connect, ask.  Each step exposes one
        copyable line (or one config block) and zero extra ceremony. -->
   <section class="install-steps">
     <div class="container">
       <ol class="steps">
-        <li>
+        <li data-reveal>
           <div class="step-number">1</div>
           <div class="step-content">
             <h3>Install Kiln</h3>
@@ -133,7 +133,7 @@ const installHowToSchema = {
             <InstallTabs />
           </div>
         </li>
-        <li>
+        <li data-reveal>
           <div class="step-number">2</div>
           <div class="step-content">
             <h3>Connect your AI</h3>
@@ -153,7 +153,7 @@ const installHowToSchema = {
             </details>
           </div>
         </li>
-        <li>
+        <li data-reveal>
           <div class="step-number">3</div>
           <div class="step-content">
             <h3>Ask</h3>
@@ -173,7 +173,7 @@ const installHowToSchema = {
        happens at /pricing. -->
   <section class="pro-cta-section">
     <div class="container">
-      <div class="pro-cta-card">
+      <div class="pro-cta-card" data-reveal>
         <h2 class="pro-cta-headline">You&rsquo;re ready to print.</h2>
         <p class="pro-cta-body">
           Free covers your first prints.  Pro covers the rest of the
@@ -211,40 +211,32 @@ const installHowToSchema = {
 </BaseLayout>
 
 <style>
-  /* Mini-hero — single sentence sized to match the landing page's
-     .receipts-heading so the visitor reads /install as the next
-     beat in the same voice. */
-  .install-hero {
-    text-align: center;
-    padding: 100px 0 64px;
-  }
+  /* Page-hero h1 keeps a slightly tighter max-width than the global
+     default so the sentence breaks into two balanced lines. */
   .install-headline {
-    font-size: clamp(28px, 4vw, 48px);
-    font-weight: 800;
-    line-height: 1.1;
-    letter-spacing: -0.022em;
-    color: var(--text);
-    max-width: 780px;
-    margin: 0 auto;
-    text-wrap: balance;
+    max-width: 820px;
+    margin-left: auto;
+    margin-right: auto;
   }
 
   /* Three-step list — same .step-number / .step-content shape the
      legacy install page used so the typography stays familiar. */
   .install-steps {
-    padding: 16px 0 56px;
+    padding: 0 0 56px;
   }
   .steps {
     list-style: none;
     padding: 0;
+    max-width: 880px;
+    margin: 0 auto;
     display: flex;
     flex-direction: column;
     gap: 0;
   }
   .steps li {
     display: flex;
-    gap: 24px;
-    padding: 36px 0;
+    gap: 28px;
+    padding: 44px 0;
     border-bottom: 1px solid var(--border);
   }
   .steps li:last-child {
@@ -252,26 +244,28 @@ const installHowToSchema = {
   }
   .step-number {
     flex-shrink: 0;
-    width: 36px;
-    height: 36px;
+    width: 44px;
+    height: 44px;
     display: flex;
     align-items: center;
     justify-content: center;
     border-radius: 50%;
-    background: rgba(255, 107, 43, 0.1);
+    background: linear-gradient(180deg, rgba(255, 107, 43, 0.14), rgba(255, 107, 43, 0.05));
     color: var(--accent);
     font-weight: 600;
-    font-size: 14px;
-    border: 1px solid rgba(255, 107, 43, 0.25);
+    font-size: 16px;
+    border: 1px solid var(--border-accent);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
   .step-content {
     flex: 1;
     min-width: 0;
   }
   .step-content h3 {
-    font-size: 17px;
+    font-size: 20px;
     font-weight: 600;
-    margin-bottom: 6px;
+    letter-spacing: -0.018em;
+    margin-bottom: 8px;
   }
   .step-content p {
     font-size: 14px;
@@ -300,11 +294,12 @@ const installHowToSchema = {
      aren't comfortable in a terminal, the AI they already have is
      the installer; the prompt is the entire setup. */
   .agent-setup-callout {
-    margin: 16px 0 24px;
-    padding: 18px 20px 20px;
-    background: rgba(255, 107, 43, 0.06);
+    margin: 18px 0 26px;
+    padding: 20px 22px 22px;
+    background: linear-gradient(180deg, rgba(255, 107, 43, 0.08), rgba(255, 107, 43, 0.03));
     border: 1px solid rgba(255, 107, 43, 0.2);
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
   }
   .agent-setup-label {
     font-size: 14px;
@@ -375,18 +370,24 @@ const installHowToSchema = {
     padding: 16px 0 64px;
   }
   .pro-cta-card {
-    max-width: 640px;
+    max-width: 680px;
     margin: 0 auto;
     text-align: center;
-    padding: 44px 36px;
+    padding: 56px 40px 48px;
     border: 1px solid var(--border);
-    border-radius: 14px;
-    background: var(--bg-card);
+    border-radius: var(--radius-xl);
+    background:
+      radial-gradient(420px 200px at 50% 0%, rgba(255, 107, 43, 0.07), transparent 70%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
+      var(--bg);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),
+      0 24px 60px -32px rgba(0, 0, 0, 0.8);
   }
   .pro-cta-headline {
-    font-size: 28px;
+    font-size: clamp(26px, 3vw, 34px);
     font-weight: 700;
-    letter-spacing: -0.015em;
+    letter-spacing: -0.028em;
     margin: 0 0 16px;
     color: var(--text);
   }
@@ -394,20 +395,17 @@ const installHowToSchema = {
     font-size: 15px;
     color: var(--text-muted);
     line-height: 1.65;
-    margin: 0 auto 24px;
+    margin: 0 auto 28px;
     max-width: 480px;
     text-wrap: pretty;
   }
   .pro-cta-btn {
-    display: inline-block;
-    padding: 12px 28px;
     font-size: 15px;
-    font-weight: 600;
   }
   .pro-cta-price {
-    font-size: 13px !important;
+    font-size: 13px;
     color: var(--text-muted);
-    margin: 12px 0 0 !important;
+    margin: 14px 0 0;
     letter-spacing: 0.01em;
   }
 
@@ -461,19 +459,13 @@ const installHowToSchema = {
   }
 
   @media (max-width: 640px) {
-    .install-hero {
-      padding: 72px 0 40px;
-    }
     .steps li {
       flex-direction: column;
-      gap: 12px;
-      padding: 28px 0;
+      gap: 14px;
+      padding: 32px 0;
     }
     .pro-cta-card {
-      padding: 32px 20px;
-    }
-    .pro-cta-headline {
-      font-size: 24px;
+      padding: 36px 22px;
     }
   }
 </style>

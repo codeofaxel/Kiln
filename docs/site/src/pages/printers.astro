@@ -34,7 +34,7 @@ const schema = {
   ]}
   schema={schema}
 >
-  <section class="printers-hero">
+  <section class="printers-hero page-hero">
     <div class="container">
       <span class="eyebrow">Compatibility</span>
       <h1>Every printer Kiln supports</h1>
@@ -122,48 +122,39 @@ const schema = {
 
 <style>
   .printers-hero {
-    text-align: center;
-    padding: 88px 0 36px;
-  }
-  .eyebrow {
-    display: inline-block;
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--accent);
-    background: var(--accent-glow);
-    border: 1px solid rgba(255, 107, 43, 0.25);
-    border-radius: 20px;
-    padding: 3px 12px;
-    margin-bottom: 14px;
-  }
-  .printers-hero h1 {
-    font-size: clamp(30px, 4.5vw, 48px);
-    line-height: 1.15;
-    margin-bottom: 16px;
+    padding-bottom: 40px;
   }
   .printers-hero .lead {
     max-width: 720px;
-    margin: 0 auto 28px;
+    margin: 0 auto 32px;
   }
   .filter-wrap {
-    max-width: 520px;
+    max-width: 560px;
     margin: 0 auto;
   }
   #printer-filter {
     width: 100%;
-    padding: 14px 18px;
+    padding: 15px 24px;
     font-size: 16px;
+    font-family: inherit;
     color: var(--text);
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015)),
+      var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
     outline: none;
-    transition: border-color 0.15s ease;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  #printer-filter::placeholder {
+    color: var(--text-subtle);
   }
   #printer-filter:focus {
-    border-color: var(--accent);
+    border-color: var(--border-accent);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.04),
+      0 0 0 4px rgba(255, 107, 43, 0.12);
   }
   .filter-empty {
     font-size: 14px;
@@ -172,22 +163,29 @@ const schema = {
   }
 
   .brands-section {
-    padding: 8px 0 80px;
+    padding: 8px 0 96px;
   }
   .brand-list {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
+    gap: 14px;
     align-items: start;
   }
   .brand {
-    background: var(--bg-card);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
+      var(--bg);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
     overflow: hidden;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    transition: border-color 0.2s ease;
+  }
+  .brand:hover {
+    border-color: var(--border-strong);
   }
   .brand[open] {
-    border-color: var(--accent);
+    border-color: var(--border-accent);
   }
   .brand summary {
     display: flex;
@@ -255,9 +253,6 @@ const schema = {
   }
 
   @media (max-width: 720px) {
-    .printers-hero {
-      padding: 60px 0 24px;
-    }
     .brand-list {
       grid-template-columns: 1fr;
     }

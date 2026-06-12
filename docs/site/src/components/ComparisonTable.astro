@@ -154,12 +154,14 @@ const rows: Row[] = [
 ];
 ---
 
-<section class="cmp-section">
+<section class="cmp-section bordered">
   <div class="container">
-    <h2 class="cmp-heading">Before and after Kiln</h2>
-    <p class="cmp-sub">One tool instead of a dozen. One conversation instead of a dozen tabs.</p>
+    <div class="section-head">
+      <h2 class="cmp-heading" data-reveal>Before and after Kiln</h2>
+      <p class="cmp-sub lead" data-reveal style="--reveal-delay: 0.06s">One tool instead of a dozen. One conversation instead of a dozen tabs.</p>
+    </div>
 
-    <div class="cmp-table-outer">
+    <div class="cmp-table-outer" data-reveal style="--reveal-delay: 0.12s">
       <table class="cmp-table">
         <thead>
           <tr>
@@ -187,28 +189,20 @@ const rows: Row[] = [
 
 <style>
   .cmp-section {
-    border-top: 1px solid var(--border);
-    padding: 80px 0;
-  }
-
-  .cmp-heading {
-    font-size: clamp(24px, 4vw, 40px);
-    font-weight: 700;
-    margin-bottom: 12px;
-  }
-
-  .cmp-sub {
-    color: var(--text-muted);
-    font-size: 18px;
-    margin-bottom: 48px;
+    padding: 112px 0;
   }
 
   .cmp-table-outer {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    border-radius: 14px;
+    border-radius: var(--radius-lg);
     border: 1px solid var(--border);
-    background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 100%);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.008)),
+      var(--bg);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.04),
+      0 24px 60px -32px rgba(0, 0, 0, 0.8);
   }
 
   .cmp-table {
@@ -225,16 +219,16 @@ const rows: Row[] = [
   .cmp-table th {
     padding: 18px 28px;
     font-size: 11px;
-    font-weight: 700;
+    font-weight: 650;
     text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--text-muted);
+    letter-spacing: 0.16em;
+    color: var(--text-subtle);
     text-align: left;
     border-bottom: 1px solid var(--border);
   }
 
-  .cmp-th-with {
-    color: var(--accent) !important;
+  .cmp-table th.cmp-th-with {
+    color: var(--accent);
   }
 
   /* ---- Body cells ---- */
@@ -306,9 +300,13 @@ const rows: Row[] = [
     border-bottom: none;
   }
 
-  /* ---- Mic-drop row ---- */
-  .cmp-last {
-    background: rgba(255, 107, 43, 0.06) !important;
+  /* ---- Mic-drop row ----
+     Selectors carry tbody specificity so the zebra/hover rules above
+     never need overriding. */
+  .cmp-table tbody tr.cmp-last,
+  .cmp-table tbody tr.cmp-last:nth-child(even),
+  .cmp-table tbody tr.cmp-last:hover {
+    background: rgba(255, 107, 43, 0.06);
   }
 
   .cmp-last .cmp-cap {
@@ -321,11 +319,12 @@ const rows: Row[] = [
     font-style: italic;
   }
 
-  .cmp-last .cmp-new {
+  .cmp-table tbody tr.cmp-last .cmp-new,
+  .cmp-table tbody tr.cmp-last:hover .cmp-new {
     color: var(--accent);
     font-weight: 600;
     font-size: 14px;
-    background: rgba(255, 107, 43, 0.1) !important;
+    background: rgba(255, 107, 43, 0.1);
     border-left-color: var(--accent);
   }
 
@@ -333,12 +332,12 @@ const rows: Row[] = [
   .cmp-tier {
     display: inline-block;
     margin-left: 8px;
-    padding: 1px 6px;
+    padding: 2px 8px;
     font-size: 9.5px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    border-radius: 3px;
+    letter-spacing: 0.07em;
+    border-radius: 999px;
     vertical-align: middle;
   }
 

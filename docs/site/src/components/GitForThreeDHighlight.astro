@@ -18,25 +18,25 @@
 // mapping the filing surface for competitors.
 ---
 
-<section class="g3d-section">
+<section class="g3d-section bordered">
   <div class="container">
     <div class="g3d-inner">
       <div class="g3d-copy">
-        <h2 class="g3d-heading">Git for 3D Printing <span class="g3d-pro-pill">Pro</span></h2>
-        <p class="g3d-lead">
+        <h2 class="g3d-heading" data-reveal>Git for 3D Printing <span class="g3d-pro-pill">Pro</span></h2>
+        <p class="g3d-lead" data-reveal style="--reveal-delay: 0.06s">
           Branch new ideas without losing the working version. Merge what prints best.
           Sign a release and prove later that nothing changed.
         </p>
-        <p class="g3d-sub">Works on three things you iterate on:</p>
+        <p class="g3d-sub" data-reveal style="--reveal-delay: 0.12s">Works on three things you iterate on:</p>
         <ul class="g3d-list">
-          <li><strong>Your designs</strong> &mdash; the mesh itself</li>
-          <li><strong>Your decorations</strong> &mdash; logos, textures, photo-emboss, brand assets</li>
-          <li><strong>Your features</strong> &mdash; reusable parts: a hat for an action figure, a mounting bracket, chamfers, fillets, pockets, holes</li>
+          <li class="card" data-reveal style="--reveal-delay: 0.16s"><strong>Your designs</strong> &mdash; the mesh itself</li>
+          <li class="card" data-reveal style="--reveal-delay: 0.22s"><strong>Your decorations</strong> &mdash; logos, textures, photo-emboss, brand assets</li>
+          <li class="card" data-reveal style="--reveal-delay: 0.28s"><strong>Your features</strong> &mdash; reusable parts: a hat for an action figure, a mounting bracket, chamfers, fillets, pockets, holes</li>
         </ul>
-        <p class="g3d-lead g3d-lead-small">
+        <p class="g3d-lead g3d-lead-small" data-reveal style="--reveal-delay: 0.3s">
           On Pro and up. Local-first &mdash; branches, merges, and signed releases live on your machine. Pro adds cross-machine cloud sync; Business adds team pull requests and approval gates; Enterprise adds audit log export, SSO, and step-up authentication on production releases.
         </p>
-        <div class="g3d-ctas">
+        <div class="g3d-ctas" data-reveal style="--reveal-delay: 0.34s">
           <a href="/pricing" class="btn g3d-btn-primary">Get Pro &rarr;</a>
           <a href="#features" class="btn btn-ghost g3d-btn-secondary">See all features</a>
         </div>
@@ -46,21 +46,19 @@
 </section>
 
 <style is:global>
-  /* Shares the page's main dark canvas — no distinct background.
-     Only a hairline border-top delimits the section, matching the
-     rhythm every other ``.bordered`` section on the page follows. */
+  /* Shares the page's main dark canvas; the .bordered global hairline
+     delimits the section. */
   .g3d-section {
-    padding: 80px 0;
-    border-top: 1px solid var(--border);
+    padding: 112px 0;
   }
 
   /* Single-column layout.  Content centers on the page's vertical
-     spine to match the hero + learning-curve sections above;
-     individual sub-blocks (list, tier footnote) reset their text-
-     align to left for readability where centered multi-line bodies
-     would otherwise look ragged. */
+     spine to match the hero + proof sections above; individual
+     sub-blocks (cards, tier footnote) reset their text-align to left
+     for readability where centered multi-line bodies would otherwise
+     look ragged. */
   .g3d-inner {
-    max-width: 720px;
+    max-width: 880px;
     margin: 0 auto;
     text-align: center;
   }
@@ -71,48 +69,37 @@
     display: inline-block;
     vertical-align: middle;
     margin-left: 14px;
-    padding: 4px 10px;
+    padding: 4px 11px;
     font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--accent);
     background: var(--accent-glow);
-    border: 1px solid rgba(255, 107, 43, 0.35);
+    border: 1px solid var(--border-accent);
     border-radius: 999px;
     position: relative;
-    top: -0.15em;
+    top: -0.18em;
   }
 
   .g3d-heading {
     font-family: var(--font);
-    font-size: clamp(36px, 5vw, 56px);
-    line-height: 1.05;
-    font-weight: 800;
-    letter-spacing: -0.02em;
+    font-size: var(--text-h2);
+    line-height: 1.06;
+    font-weight: 700;
+    letter-spacing: -0.032em;
     margin: 0 0 20px;
     color: var(--text);
     text-wrap: balance;
   }
-  .g3d-heading::after {
-    content: "";
-    display: block;
-    width: 72px;
-    height: 4px;
-    background: linear-gradient(90deg, var(--accent), #f59e42);
-    border-radius: 2px;
-    /* Auto side-margins center the accent bar under the now-
-       centered heading. */
-    margin: 16px auto 0;
-  }
 
   .g3d-lead {
-    font-size: 18px;
+    font-size: var(--text-lead);
     line-height: 1.55;
-    color: var(--text);
-    /* Centered block so the 540px paragraph sits on the spine. */
-    margin: 0 auto 20px;
-    max-width: 540px;
+    color: var(--text-secondary);
+    /* Centered block so the paragraph sits on the spine. */
+    margin: 0 auto 44px;
+    max-width: 560px;
     /* Prevent last-line orphans. */
     text-wrap: pretty;
   }
@@ -120,49 +107,53 @@
      centering 4+ lines of dense text reads as ragged.  Block still
      sits on the spine via auto margins. */
   .g3d-lead-small {
-    font-size: 15px;
+    font-size: 14px;
     color: var(--text-muted);
     text-wrap: pretty;
     max-width: 640px;
     text-align: left;
+    margin-bottom: 36px;
   }
 
   .g3d-sub {
-    font-size: 14px;
+    font-size: 12px;
+    font-weight: 650;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-muted);
-    margin: 0 0 12px;
+    letter-spacing: 0.18em;
+    color: var(--text-subtle);
+    margin: 0 0 18px;
   }
 
+  /* The three iteration surfaces as a glass card row.  Same list
+     markup, card presentation: the strong label reads as the card
+     title, the rest of the line as its description. */
   .g3d-list {
     list-style: none;
     padding: 0;
-    /* Centered block — the cluster of bullets sits on the spine,
-       but items inside read left-aligned so the arrow + label line
-       up naturally and long items don't go ragged on both edges. */
-    margin: 0 auto 24px;
-    max-width: 560px;
+    margin: 0 auto 36px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
     text-align: left;
   }
-  .g3d-list li {
-    padding: 8px 0 8px 28px;
-    position: relative;
-    font-size: 16px;
+  .g3d-list li.card {
+    padding: 22px 24px;
+    font-size: 14.5px;
+    line-height: 1.6;
+    color: var(--text-muted);
+  }
+  .g3d-list strong {
+    display: block;
     color: var(--text);
-  }
-  .g3d-list li::before {
-    content: "\2192";
-    position: absolute;
-    left: 0;
-    color: var(--accent);
     font-weight: 600;
+    font-size: 16px;
+    letter-spacing: -0.012em;
+    margin-bottom: 6px;
   }
-  .g3d-list strong { color: var(--text); font-weight: 600; }
 
   .g3d-ctas {
     display: flex;
-    gap: 12px;
+    gap: 14px;
     flex-wrap: wrap;
     margin-top: 8px;
     /* Center the button row on the spine. */
@@ -171,6 +162,7 @@
   .g3d-btn-secondary { margin-left: 0; }
 
   @media (max-width: 900px) {
-    .g3d-section { padding: 56px 0; }
+    .g3d-section { padding: 72px 0; }
+    .g3d-list { grid-template-columns: 1fr; max-width: 560px; }
   }
 </style>

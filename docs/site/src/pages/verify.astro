@@ -115,11 +115,12 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     margin: 0 0 0.5rem;
   }
   .verify-head h1 {
-    font-size: clamp(2rem, 5vw, 2.75rem);
-    line-height: 1.1;
+    font-size: clamp(2.2rem, 5vw, 3.2rem);
+    line-height: 1.06;
     color: var(--text);
     margin: 0 0 0.75rem;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.035em;
+    text-wrap: balance;
   }
   .lead {
     color: var(--text-muted);
@@ -130,16 +131,21 @@ import BaseLayout from '../layouts/BaseLayout.astro';
   }
 
   .verify-form {
-    background: var(--bg-card);
-    border-radius: 14px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
+      var(--bg);
+    border-radius: var(--radius-lg);
     padding: 1.75rem;
     border: 1px solid var(--border);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.04),
+      0 24px 60px -32px rgba(0, 0, 0, 0.8);
   }
 
   .dropzone {
     display: block;
-    border: 2px dashed var(--border);
-    border-radius: 12px;
+    border: 2px dashed var(--border-strong);
+    border-radius: var(--radius);
     padding: 2.5rem 1.5rem;
     text-align: center;
     cursor: pointer;
@@ -220,13 +226,14 @@ import BaseLayout from '../layouts/BaseLayout.astro';
   .verify-submit {
     margin-top: 1.5rem;
     width: 100%;
-    padding: 0.9rem 1.25rem;
+    padding: 0.95rem 1.25rem;
     font-size: 1rem;
     font-weight: 600;
     color: #fff;
-    background: var(--accent);
+    background: linear-gradient(180deg, var(--accent-hover), var(--accent-deep));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
     border: 0;
-    border-radius: 10px;
+    border-radius: 999px;
     cursor: pointer;
     transition: background 0.15s ease, transform 0.05s ease, opacity 0.15s ease;
     display: flex;
