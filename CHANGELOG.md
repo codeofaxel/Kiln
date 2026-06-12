@@ -7,6 +7,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Will this part survive gasoline? Vinegar? A summer in the sun?** Kiln now
+  answers for the exact liquid or exposure you have in mind — and it's honest
+  that printed parts take chemicals harder than solid plastic. The warnings
+  are always free: if it's a bad idea, Kiln says so. The go-aheads are paid:
+  everyday exposures — cleaners, oils, sunlight, weather — are Kiln Business,
+  and the answers someone could get hurt by — fuels, automotive fluids, food
+  contact, harsh chemicals — are Enterprise. See https://kiln3d.com/pricing.
 - **Design-time sourcing-risk for bought parts (Kiln Enterprise).** Flags the
   off-the-shelf components a design depends on that are going end-of-life,
   single-source, or long-lead — before you commit a bill of materials you
