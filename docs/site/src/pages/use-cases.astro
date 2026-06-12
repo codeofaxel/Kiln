@@ -21,7 +21,7 @@ const useCases: UseCase[] = [
       'Material-aware design intelligence that adapts geometry for your chosen filament',
       'End-to-end pipeline: describe, generate, validate, slice, print, monitor',
     ],
-    icon: '🎨',
+    icon: 'cube-spark',
     num: '01',
   },
   {
@@ -34,7 +34,7 @@ const useCases: UseCase[] = [
       'Automatic orientation optimization to minimize supports and maximize strength',
       'Wall thickness validation and mesh repair for manifold geometry',
     ],
-    icon: '🔍',
+    icon: 'search',
     num: '02',
   },
   {
@@ -47,7 +47,7 @@ const useCases: UseCase[] = [
       'Assembly planning with connector geometry and alignment guides',
       'Multi-material print coordination across AMS slots or multiple printers',
     ],
-    icon: '🧩',
+    icon: 'blocks',
     num: '03',
   },
   {
@@ -60,7 +60,7 @@ const useCases: UseCase[] = [
       'Side-by-side comparison of local printing vs. third-party fulfillment quotes',
       'Project-level cost tracking across multiple prints and materials',
     ],
-    icon: '📊',
+    icon: 'chart',
     num: '04',
   },
   {
@@ -73,7 +73,7 @@ const useCases: UseCase[] = [
       'Automated retries and reroutes when a printer fails',
       'Centralized telemetry for progress, temperatures, and health',
     ],
-    icon: '🏭',
+    icon: 'factory',
     num: '05',
   },
   {
@@ -86,7 +86,7 @@ const useCases: UseCase[] = [
       '835 MCP capabilities and 223 CLI commands for full workflow control',
       'REST API, CLI, and MCP interfaces for custom agent integrations',
     ],
-    icon: '🤖',
+    icon: 'cpu',
     num: '06',
   },
   {
@@ -99,7 +99,7 @@ const useCases: UseCase[] = [
       'Route orders to external providers from the same Kiln interface',
       'Kiln orchestrates the workflow; the provider remains merchant of record',
     ],
-    icon: '☁️',
+    icon: 'globe',
     num: '07',
   },
   {
@@ -112,7 +112,7 @@ const useCases: UseCase[] = [
       'Standardize setup across semester resets and staff changes',
       'Document print histories and job outcomes for reproducibility',
     ],
-    icon: '🔬',
+    icon: 'flask',
     num: '08',
   },
   {
@@ -125,7 +125,7 @@ const useCases: UseCase[] = [
       'Generate, validate, and orient designs before wasting material',
       'Automate repetitive print-and-ship workflows',
     ],
-    icon: '🛒',
+    icon: 'cart',
     num: '09',
   },
   {
@@ -140,10 +140,26 @@ const useCases: UseCase[] = [
       'Cross-branch A/B correlates print outcomes with design changes across branches',
       'Cherry-pick a single modification across branches, conflict-aware',
     ],
-    icon: '🌿',
+    icon: 'branch',
     num: '10',
   },
 ];
+
+// Bespoke line icons — same geometric language as the homepage
+// FeatureGrid (24px grid, 1.7 stroke, round caps).  Shared concepts
+// reuse the homepage paths; the rest are drawn to match.
+const ICONS: Record<string, string> = {
+  'cube-spark': '<path d="M11 4.6 17.6 8.4v7.2L11 19.4l-6.6-3.8V8.4L11 4.6Z"/><path d="M4.6 8.5 11 12.2l6.4-3.7M11 12.2v7.1"/><path d="M19.2 2.8v3.6M17.4 4.6H21"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.7-4.7"/>',
+  blocks: '<rect x="3.8" y="9.2" width="11" height="11" rx="2.2"/><path d="M9.2 5.7A2.7 2.7 0 0 1 11.9 3h5.4A2.7 2.7 0 0 1 20 5.7v5.4a2.7 2.7 0 0 1-2.7 2.7h-2.5"/>',
+  chart: '<path d="M4 20.2h16"/><rect x="5.6" y="12" width="3.3" height="6.4" rx="0.6"/><rect x="10.35" y="7.4" width="3.3" height="11" rx="0.6"/><rect x="15.1" y="14.4" width="3.3" height="4" rx="0.6"/>',
+  factory: '<path d="M3.5 20.5h17"/><path d="M5 20.5v-9.2l5 3.2v-3.2l5 3.2V6.5h3.5v14"/><path d="M8 17h.01M13 17h.01"/>',
+  cpu: '<rect x="6.5" y="6.5" width="11" height="11" rx="2.2"/><rect x="10" y="10" width="4" height="4" rx="0.7"/><path d="M9.5 3.4v3M14.5 3.4v3M9.5 17.6v3M14.5 17.6v3M3.4 9.5h3M3.4 14.5h3M17.6 9.5h3M17.6 14.5h3"/>',
+  globe: '<circle cx="12" cy="12" r="8.6"/><path d="M3.4 12h17.2"/><path d="M12 3.4c2.5 2.3 3.9 5.3 3.9 8.6s-1.4 6.3-3.9 8.6c-2.5-2.3-3.9-5.3-3.9-8.6s1.4-6.3 3.9-8.6Z"/>',
+  flask: '<path d="M10 3.2h4M10 3.2v5.9L4.9 18.2a1.9 1.9 0 0 0 1.7 2.6h10.8a1.9 1.9 0 0 0 1.7-2.6L14 9.1V3.2"/><path d="M7.3 14.8h9.4"/>',
+  cart: '<circle cx="9.5" cy="19.3" r="1.3"/><circle cx="17" cy="19.3" r="1.3"/><path d="M2.8 4h2.1l2.2 11.1a1.3 1.3 0 0 0 1.3 1.05h8.1a1.3 1.3 0 0 0 1.28-1.03l1.27-6.12H6.1"/>',
+  branch: '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="7.5" r="2.5"/><path d="M6 8.5v7M18 10c0 4.4-4.6 5.5-9.4 5.8"/>',
+};
 
 const useCasesSchema = {
   '@type': 'CollectionPage',
@@ -201,7 +217,9 @@ const useCasesSchema = {
         >
           <div class="usecase-left">
             <div class="usecase-meta">
-              <span class="usecase-icon">{useCase.icon}</span>
+              <span class="usecase-icon" aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" set:html={ICONS[useCase.icon] ?? ICONS['cube-spark']} />
+              </span>
               <span class="usecase-num">{useCase.num}</span>
             </div>
             <h2>{useCase.title}</h2>
@@ -275,12 +293,14 @@ const useCasesSchema = {
     justify-content: center;
     width: 44px;
     height: 44px;
-    font-size: 20px;
-    line-height: 1;
-    background: var(--accent-glow);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    color: var(--accent-bright);
+    background: linear-gradient(180deg, rgba(255, 107, 43, 0.13), rgba(255, 107, 43, 0.04));
+    border: 1px solid rgba(255, 107, 43, 0.18);
+    border-radius: var(--radius);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  .usecase-icon svg {
+    display: block;
   }
 
   .usecase-num {

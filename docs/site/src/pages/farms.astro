@@ -198,12 +198,12 @@ const farmsSchema = {
           <span>Direct USB</span>
         </div>
         <div class="endpoint-track">
-          <span>K1 Max</span>
           <span>Bambu A1</span>
-          <span>MK4</span>
-          <span>Centauri</span>
-          <span>Neptune 4</span>
-          <span>Ender 3 USB</span>
+          <span>Ender 3</span>
+          <span>Prusa MK4</span>
+          <span>Elegoo Centauri</span>
+          <span>Sovol SV07</span>
+          <span>Voron 2.4</span>
         </div>
       </div>
     </div>
@@ -229,6 +229,14 @@ const farmsSchema = {
           </div>
         ))}
       </div>
+      <!-- Full supported-brand roster — keeps the farms hero in parity
+           with the landing hero + README so a mixed-fleet operator sees
+           their brands named here too.  Brand order + count generated
+           from supported_printers.json (49 models / 12 brands); keep in
+           sync with the Hero.astro roster line if that data changes. -->
+      <p class="farm-brands">
+        Tuned profiles for Creality, Bambu Lab, Elegoo, Prusa, Sovol, Voron, AnkerMake, Artillery, FlashForge, QIDI, RatRig &amp; SparkX. <a href="/printers">See every supported model &rarr;</a>
+      </p>
     </div>
   </section>
 
@@ -577,6 +585,29 @@ const farmsSchema = {
     color: var(--text-muted);
     font-size: 13px;
     letter-spacing: 0.01em;
+  }
+
+  /* Full supported-brand roster — quiet crawlable line closing the hero,
+     mirroring the landing hero's brand line so the two stay in sync. */
+  .farm-brands {
+    max-width: 720px;
+    margin: 28px auto 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-subtle);
+    text-wrap: pretty;
+  }
+  .farm-brands a {
+    color: var(--text-muted);
+    text-decoration: none;
+    white-space: nowrap;
+    border-bottom: 1px dashed var(--border-strong);
+    padding-bottom: 1px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .farm-brands a:hover {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
   }
 
   /* ------------------------------------------------------------------------
