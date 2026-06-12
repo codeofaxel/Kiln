@@ -1528,7 +1528,7 @@
   },
   "tpu_95a": {
     "display_name": "TPU 95A (Standard Flexible)",
-    "category": "thermoplastic",
+    "category": "thermoplastic_elastomer",
     "thermal": {
       "glass_transition_c": -40,
       "max_service_temp_c": 80,
@@ -1600,7 +1600,7 @@
   },
   "tpu_85a": {
     "display_name": "TPU 85A (Soft Flexible)",
-    "category": "thermoplastic",
+    "category": "thermoplastic_elastomer",
     "thermal": {
       "glass_transition_c": -45,
       "max_service_temp_c": 70,
