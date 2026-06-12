@@ -167,12 +167,24 @@ def _load() -> None:
         try:
             materials = {}
             for mat_name, mat_data in data.get("materials", {}).items():
-                materials[mat_name] = MaterialProfile(
-                    hotend=int(mat_data["hotend"]),
-                    bed=int(mat_data["bed"]),
-                    fan=int(mat_data["fan"]),
-                    notes=mat_data.get("notes", ""),
-                )
+                try:
+                    materials[mat_name] = MaterialProfile(
+                        hotend=int(mat_data["hotend"]),
+                        bed=int(mat_data["bed"]),
+                        fan=int(mat_data["fan"]),
+                        notes=mat_data.get("notes", ""),
+                    )
+                except (KeyError, TypeError, ValueError) as mat_exc:
+                    # An overlay can enrich a material this profile carries
+                    # no temp triple for (the merge runs before parsing) —
+                    # drop that one entry, never the whole profile.
+                    logger.debug(
+                        "Skipping intel material '%s.%s' without a full "
+                        "temp profile: %s",
+                        key,
+                        mat_name,
+                        mat_exc,
+                    )
 
             failure_modes = []
             for fm in data.get("failure_modes", []):
