@@ -50,10 +50,16 @@ const {
   <!-- Favicon -->
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 
-  <!-- Fonts -->
+  <!-- Fonts: variable Inter (optical sizing for display sizes), an
+       editorial serif for accent words, mono for code. -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400..800;1,14..32,400..700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <!-- Marks the document as JS-capable before first paint so the
+       scroll-reveal styles only ever hide content when the observer
+       below is guaranteed to run. -->
+  <script is:inline>document.documentElement.classList.add('js');</script>
 
   <VercelAnalytics />
 </head>
@@ -74,5 +80,55 @@ const {
   <GoogleAnalytics />
   <GoogleAdsConversion />
   <CookieBanner />
+
+  <!-- Scroll reveal: flips data-reveal elements to .is-revealed.
+       Elements already in the viewport reveal immediately (the hero
+       entrance never depends on observer timing); everything below the
+       fold reveals on first intersection.  A watchdog reveals the rest
+       if the observer never delivers its mandatory initial callback —
+       content visibility must not have a single point of failure.
+       Reduced-motion users get content immediately via the media query
+       in global.css; no-JS users never hide content because the hiding
+       styles are scoped to html.js. -->
+  <script is:inline>
+    (() => {
+      const els = Array.from(document.querySelectorAll('[data-reveal]'));
+      if (!els.length) return;
+      const revealAll = () => els.forEach((el) => el.classList.add('is-revealed'));
+      if (!('IntersectionObserver' in window) ||
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        revealAll();
+        return;
+      }
+
+      const vh = window.innerHeight || document.documentElement.clientHeight;
+      const pending = [];
+      for (const el of els) {
+        const r = el.getBoundingClientRect();
+        if (r.top < vh * 0.96 && r.bottom > 0) el.classList.add('is-revealed');
+        else pending.push(el);
+      }
+      if (!pending.length) return;
+
+      let alive = false;
+      const io = new IntersectionObserver((entries) => {
+        alive = true;
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-revealed');
+            io.unobserve(entry.target);
+          }
+        }
+      }, { threshold: 0.1, rootMargin: '0px 0px -8% 0px' });
+      pending.forEach((el) => io.observe(el));
+
+      // Per spec the observer reports initial state asynchronously but
+      // promptly.  If nothing has arrived shortly after load, treat the
+      // observer as broken and show everything.
+      window.setTimeout(() => {
+        if (!alive) { revealAll(); io.disconnect(); }
+      }, 1200);
+    })();
+  </script>
 </body>
 </html>

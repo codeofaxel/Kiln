@@ -2,11 +2,12 @@
 ---
 
 <div class="hero">
+  <div class="hero-glow" aria-hidden="true"></div>
   <div class="container">
-    <img src="/assets/kiln-pfp-1024-flat.svg" alt="Kiln" class="hero-logo" width="300" height="300">
-    <p class="tagline"><span class="tagline-line">Spawn an object</span><br><span class="tagline-emphasis">into existence.</span></p>
-    <h1><span class="brand">Kiln 3D</span> is how AI agents make real things &mdash; <span class="accent">safely</span>, on any 3D printer.</h1>
-    <p class="subtitle">
+    <img src="/assets/kiln-pfp-1024-flat.svg" alt="Kiln" class="hero-logo" width="72" height="72" data-reveal>
+    <p class="tagline" data-reveal style="--reveal-delay: 0.07s"><span class="tagline-line">Spawn an object</span><br><span class="tagline-emphasis serif-accent">into existence.</span></p>
+    <h1 data-reveal style="--reveal-delay: 0.14s"><span class="brand">Kiln 3D</span> is how AI agents make real things &mdash; <span class="accent">safely</span>, on any 3D printer.</h1>
+    <p class="subtitle" data-reveal style="--reveal-delay: 0.2s">
       Describe what you want. Kiln designs, prints, and monitors it &mdash; then branches, merges, and signs the version that works.
     </p>
 
@@ -15,8 +16,8 @@
          now sits above the fold instead of below the receipts.
          Sub-line "any printer" tightens to "any machine" when CNC
          / laser adapters land. -->
-    <h2 class="compat-heading">Bring your AI. We brought the rest.</h2>
-    <div class="compat-strip-inline">
+    <h2 class="compat-heading" data-reveal style="--reveal-delay: 0.26s">Bring your AI. We brought the rest.</h2>
+    <div class="compat-strip-inline" data-reveal style="--reveal-delay: 0.32s">
       <p class="compat-row-label">Agents</p>
       <div class="compat-list-inline">
         <span class="compat-pill">Claude</span>
@@ -49,47 +50,73 @@
       </p>
     </div>
 
-    <a href="/install" class="hero-cta">Connect your AI &rarr;</a>
+    <div class="hero-actions" data-reveal style="--reveal-delay: 0.38s">
+      <a href="/install" class="btn hero-cta">Connect your AI &rarr;</a>
+      <a href="#demo" class="link-arrow">See it work &darr;</a>
+    </div>
   </div>
 </div>
 
 <style>
   .hero {
-    padding: 100px 0 80px;
+    position: relative;
+    padding: 96px 0 110px;
     text-align: center;
   }
-  .hero-logo {
-    width: clamp(200px, 25vw, 340px);
-    height: auto;
-    border-radius: 48px;
-    margin-bottom: 44px;
-    filter: drop-shadow(0 0 60px rgba(245, 158, 66, 0.25)) drop-shadow(0 0 120px rgba(245, 158, 66, 0.1));
-    transition: filter 0.3s ease;
-  }
-  .hero-logo:hover {
-    filter: drop-shadow(0 0 80px rgba(245, 158, 66, 0.35)) drop-shadow(0 0 160px rgba(245, 158, 66, 0.15));
+
+  /* Ember horizon behind the headline — one large, very soft light
+     source so the dark canvas reads as material instead of empty. */
+  .hero-glow {
+    position: absolute;
+    inset: -140px 0 auto;
+    height: 640px;
+    pointer-events: none;
+    background:
+      radial-gradient(640px 360px at 50% 8%, rgba(255, 107, 43, 0.13), transparent 70%),
+      radial-gradient(1100px 480px at 50% -4%, rgba(255, 147, 87, 0.06), transparent 75%);
+    mask-image: linear-gradient(180deg, #000 65%, transparent);
+    -webkit-mask-image: linear-gradient(180deg, #000 65%, transparent);
   }
 
-  /* Primary tagline — the emotional hero statement */
+  .hero .container { position: relative; }
+
+  .hero-logo {
+    width: 72px;
+    height: auto;
+    border-radius: 18px;
+    margin-bottom: 40px;
+    filter: drop-shadow(0 0 28px rgba(245, 158, 66, 0.4)) drop-shadow(0 0 80px rgba(245, 158, 66, 0.15));
+  }
+
+  /* Primary tagline — the monumental statement.  Optical sizing comes
+     from the variable font; tight leading + deep negative tracking are
+     what make it read as set type rather than scaled body text. */
   .tagline {
-    font-size: clamp(28px, 4.5vw, 64px);
-    font-weight: 800;
-    line-height: 1.15;
-    letter-spacing: -0.03em;
-    margin-bottom: 24px;
+    font-size: var(--text-display);
+    font-weight: 700;
+    line-height: 1.0;
+    letter-spacing: -0.045em;
+    margin-bottom: 30px;
     color: var(--text);
+    text-wrap: balance;
   }
   .tagline-line,
   .tagline-emphasis {
     white-space: nowrap;
   }
   .tagline-emphasis {
-    background: linear-gradient(135deg, var(--accent), #f59e42, var(--accent));
+    display: inline-block;
+    padding-right: 0.06em; /* keep the italic's last glyph clear of the clip box */
+    background: var(--ember-gradient);
     background-size: 200% 200%;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-    animation: gradient-shift 6s ease-in-out infinite;
+    animation: gradient-shift 7s ease-in-out infinite;
+  }
+  .tagline .serif-accent {
+    font-size: 1.04em;
+    letter-spacing: -0.015em;
   }
 
   @keyframes gradient-shift {
@@ -99,12 +126,12 @@
 
   /* Secondary H1 — SEO-optimized, visually subordinate */
   .hero h1 {
-    font-size: clamp(18px, 2.8vw, 26px);
-    font-weight: 500;
-    line-height: 1.4;
-    margin-bottom: 16px;
+    font-size: clamp(17px, 2.4vw, 22px);
+    font-weight: 450;
+    line-height: 1.45;
+    margin-bottom: 14px;
     color: var(--text-muted);
-    letter-spacing: -0.01em;
+    letter-spacing: -0.012em;
   }
   .hero h1 .brand {
     font-weight: 600;
@@ -113,30 +140,25 @@
   .hero h1 .accent { color: var(--accent); font-weight: 600; }
 
   .subtitle {
-    font-size: clamp(16px, 2.5vw, 20px);
-    color: var(--text-muted);
-    max-width: 720px;
-    margin: 0 auto 40px;
-    line-height: 1.5;
-  }
-  .subtitle .nowrap {
-    white-space: nowrap;
+    font-size: clamp(16px, 2.2vw, 19px);
+    color: var(--text-secondary);
+    max-width: 660px;
+    margin: 0 auto 56px;
+    line-height: 1.55;
+    text-wrap: pretty;
   }
 
-  /* BYO compat strip — promoted into the hero on 2026-04-26.
-     Sized smaller than the below-the-fold version (clamp 22-36px
-     instead of 28-48px) so the .tagline above stays the visual
-     anchor while the BYO claim acts as a secondary load-bearing
-     line.  Card max-width matches the old install-block width
-     (720px) so the hero retains the same horizontal rhythm. */
+  /* BYO compat strip — sized smaller than the tagline so the
+     monumental statement stays the visual anchor while the BYO claim
+     acts as a secondary load-bearing line. */
   .compat-heading {
-    font-size: clamp(22px, 3.2vw, 36px);
-    font-weight: 800;
+    font-size: clamp(22px, 3vw, 34px);
+    font-weight: 700;
     line-height: 1.1;
-    letter-spacing: -0.022em;
+    letter-spacing: -0.028em;
     color: var(--text);
     text-align: center;
-    margin: 24px auto 20px;
+    margin: 0 auto 22px;
     max-width: 780px;
     text-wrap: balance;
   }
@@ -144,28 +166,31 @@
     text-align: center;
     width: 100%;
     min-width: 0;
-    padding: 24px 32px;
-    background: var(--bg-card);
+    padding: 30px 36px 26px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
+      var(--bg);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    max-width: 720px;
+    border-radius: var(--radius-xl);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),
+      0 24px 60px -32px rgba(0, 0, 0, 0.8);
+    max-width: 760px;
     margin: 0 auto;
   }
   /* Tiny uppercase row label — separates the agents row from the
-     printers row so a normie can parse the strip at a glance.
-     Same typographic shape as .receipts-video-label / receipt-
-     kicker on index.astro for cross-page consistency. */
+     printers row so a normie can parse the strip at a glance. */
   .compat-row-label {
     font-size: 11px;
-    font-weight: 700;
+    font-weight: 650;
     text-transform: uppercase;
-    letter-spacing: 0.16em;
-    color: var(--text-muted);
-    margin: 0 0 10px;
+    letter-spacing: 0.18em;
+    color: var(--text-subtle);
+    margin: 0 0 12px;
     text-align: center;
   }
   .compat-list-inline + .compat-row-label {
-    margin-top: 16px;
+    margin-top: 22px;
   }
   .compat-list-inline {
     display: flex;
@@ -173,22 +198,24 @@
     align-items: center;
     justify-content: center;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 9px;
   }
   .compat-pill {
     display: inline-block;
     max-width: 100%;
-    padding: 7px 16px;
+    padding: 8px 17px;
     font-size: 14px;
     font-weight: 500;
+    letter-spacing: -0.005em;
     color: var(--text);
-    background: var(--bg-code);
+    background: rgba(255, 255, 255, 0.035);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    transition: border-color 0.15s ease, transform 0.15s ease;
+    border-radius: 999px;
+    transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s var(--ease-out);
   }
   .compat-pill:hover {
-    border-color: var(--accent);
+    border-color: var(--border-accent);
+    background: rgba(255, 107, 43, 0.07);
     transform: translateY(-1px);
   }
   /* Link pills (the printers "+ more brands" → /printers) keep the
@@ -205,32 +232,29 @@
   }
   .compat-pill-more:hover {
     color: var(--text);
-    border-color: var(--accent);
+    border-color: var(--border-accent);
+    background: transparent;
   }
   .compat-sub-inline {
     font-size: 13px;
     color: var(--text-muted);
     line-height: 1.5;
-    margin-top: 18px;
+    margin-top: 22px;
   }
-  /* Full supported-brand roster — quiet line under the punchline.
-     Names every brand Kiln ships a tuned profile for so brand-name
-     searches resolve here, and its descriptive-anchor link routes to
-     the searchable /printers page. */
+  /* Full supported-brand roster — quiet line under the punchline. */
   .compat-brands-inline {
     font-size: 12.5px;
-    color: var(--text-muted);
+    color: var(--text-subtle);
     line-height: 1.6;
     margin: 8px auto 0;
     max-width: 600px;
     text-wrap: pretty;
-    opacity: 0.85;
   }
   .compat-brands-link {
     color: var(--text-muted);
     text-decoration: none;
     white-space: nowrap;
-    border-bottom: 1px dashed var(--border);
+    border-bottom: 1px dashed var(--border-strong);
     padding-bottom: 1px;
     transition: color 0.15s, border-color 0.15s;
   }
@@ -239,34 +263,29 @@
     border-bottom-color: var(--accent);
   }
 
-  /* Primary CTA — accent-filled, sized to be the obvious next
-     action below the BYO strip.  Routes to /install where the
-     3-step happy path lives. */
-  .hero-cta {
-    display: inline-block;
-    margin-top: 36px;
-    padding: 14px 32px;
-    background: var(--accent);
-    color: #fff;
-    font-size: 16px;
-    font-weight: 600;
-    border-radius: 10px;
-    text-decoration: none;
-    transition: transform 0.15s, box-shadow 0.15s;
+  /* Primary CTA row below the BYO strip — one filled action, one
+     quiet anchor down to the proof section. */
+  .hero-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 26px;
+    margin-top: 44px;
   }
-  .hero-cta:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(255, 107, 43, 0.3);
-    text-decoration: none;
+  .hero-cta {
+    font-size: 16px;
+    padding: 16px 34px;
   }
 
   @media (max-width: 640px) {
-    .hero { padding: 60px 0 50px; }
-    .tagline { margin-bottom: 20px; }
+    .hero { padding: 56px 0 64px; }
+    .hero-logo { width: 60px; margin-bottom: 30px; }
+    .tagline { margin-bottom: 22px; }
     .tagline-line,
     .tagline-emphasis { white-space: normal; }
-    .compat-strip-inline { padding: 22px 18px; }
-    .compat-heading { margin: 20px auto 18px; }
-    .hero-cta { margin-top: 28px; padding: 12px 26px; }
+    .subtitle { margin-bottom: 40px; }
+    .compat-strip-inline { padding: 24px 18px 22px; border-radius: var(--radius-lg); }
+    .compat-heading { margin: 0 auto 18px; }
+    .hero-actions { margin-top: 32px; flex-direction: column; gap: 18px; }
   }
 </style>

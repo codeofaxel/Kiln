@@ -11,6 +11,12 @@
 <footer>
   <div class="container">
     <div class="footer-grid">
+      <div class="footer-col footer-brand">
+        <a href="/" class="footer-logo" aria-label="Kiln home">
+          <img src="/assets/kiln-logo-dark-notext.svg" alt="" width="30" height="30">
+        </a>
+        <p class="footer-tagline">Spawn an object<br>into existence.</p>
+      </div>
       <div class="footer-col">
         <div class="col-label">Product</div>
         <a href="/install">Install</a>
@@ -80,11 +86,21 @@
 
 <style>
   footer {
-    border-top: 1px solid var(--border);
-    background: rgba(15, 15, 15, 0.6);
-    padding: 56px 0 40px;
-    font-size: 13px;
+    position: relative;
+    background: linear-gradient(180deg, transparent, rgba(255, 107, 43, 0.025));
+    padding: 72px 0 48px;
+    font-size: 13.5px;
     color: var(--text-muted);
+  }
+  footer::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(1280px, 94%);
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-strong) 18%, var(--border-strong) 82%, transparent);
   }
   footer a {
     color: var(--text-muted);
@@ -97,15 +113,30 @@
 
   .footer-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: 1.4fr repeat(4, 1fr);
     gap: 40px;
-    margin-bottom: 48px;
+    margin-bottom: 56px;
   }
 
   .footer-col {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 11px;
+  }
+
+  .footer-brand {
+    gap: 16px;
+  }
+  .footer-logo {
+    display: inline-flex;
+    width: 30px;
+  }
+  .footer-tagline {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+    letter-spacing: -0.01em;
   }
   .cookie-prefs {
     background: none;
@@ -125,19 +156,19 @@
 
   .col-label {
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 650;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text);
-    margin-bottom: 4px;
+    letter-spacing: 0.16em;
+    color: var(--text-subtle);
+    margin-bottom: 6px;
   }
 
   .footer-bottom {
     border-top: 1px solid var(--border);
-    padding-top: 28px;
+    padding-top: 32px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 9px;
     align-items: center;
     text-align: center;
   }
@@ -194,12 +225,15 @@
 
   @media (max-width: 720px) {
     footer {
-      padding: 40px 0 32px;
+      padding: 48px 0 36px;
     }
     .footer-grid {
       grid-template-columns: repeat(2, 1fr);
       gap: 32px 24px;
-      margin-bottom: 36px;
+      margin-bottom: 40px;
+    }
+    .footer-brand {
+      grid-column: 1 / -1;
     }
   }
 </style>
