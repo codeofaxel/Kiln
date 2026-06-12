@@ -3,6 +3,10 @@ const { current = '' } = Astro.props;
 
 // Which sub-page slugs belong under the "Product" dropdown.  Used to
 // mark the Product trigger active when the visitor is on any of them.
+// ``boundary`` still highlights the Product trigger (so the header
+// doesn't lie when a visitor lands there from a contextual link), but
+// it is no longer surfaced as a dropdown item — the page exists for the
+// few who seek it out, not as a prominent nav destination.
 const productPages = ['install', 'features', 'use-cases', 'farms', 'integrations', 'printers', 'boundary'];
 const productActive = productPages.includes(current);
 
@@ -48,7 +52,6 @@ const docsActive = docsPages.includes(current);
           <li role="none"><a role="menuitem" href="/farms" class:list={[{ active: current === 'farms' }]}>Print Farms</a></li>
           <li role="none"><a role="menuitem" href="/integrations" class:list={[{ active: current === 'integrations' }]}>Integrations</a></li>
           <li role="none"><a role="menuitem" href="/printers" class:list={[{ active: current === 'printers' }]}>Printers</a></li>
-          <li role="none"><a role="menuitem" href="/boundary" class:list={[{ active: current === 'boundary' }]}>Boundary</a></li>
         </ul>
       </div>
       <a href="/docs" class:list={[{ active: docsActive }]}>Docs</a>

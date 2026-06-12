@@ -15,7 +15,7 @@ const printerIntegrations: Integration[] = [
     title: 'OctoPrint',
     description:
       'Connect any OctoPrint-powered printer to Kiln so AI agents can run monitored prints, queue jobs, and enforce safety checks through one interface.',
-    icon: '🐙',
+    icon: 'server',
     tag: 'REST API',
   },
   {
@@ -23,7 +23,7 @@ const printerIntegrations: Integration[] = [
     title: 'Moonraker / Klipper',
     description:
       'Use Kiln with any Moonraker/Klipper printer — Voron, Rat Rig V-Core 3, Sovol SV07, QIDI X-Plus 3, and more — for high-speed workflows, fleet routing, and JSON-first automation in CLI or MCP.',
-    icon: '🌙',
+    icon: 'gauge',
     tag: 'REST API',
   },
   {
@@ -31,7 +31,7 @@ const printerIntegrations: Integration[] = [
     title: 'Creality',
     description:
       'Connect Creality K1, K2, Hi, Ender V3 KE, and similar CrealityOS printers through local Moonraker when reachable on the LAN. Older Marlin Creality machines still work through OctoPrint or Direct USB.',
-    icon: '🟩',
+    icon: 'printer',
     tag: 'Moonraker',
   },
   {
@@ -39,7 +39,7 @@ const printerIntegrations: Integration[] = [
     title: 'Bambu Lab',
     description:
       'Bring Bambu Lab printers — X1C, X1E, P1S, P1P, P2S, A1, A1 Mini, A2L, and the enclosed H2S — into an AI-native workflow with controlled commands, telemetry, and queue orchestration.',
-    icon: '🟦',
+    icon: 'broadcast',
     tag: 'MQTT',
   },
   {
@@ -47,7 +47,7 @@ const printerIntegrations: Integration[] = [
     title: 'Prusa Link',
     description:
       'Run Prusa printers through a consistent API so agents can monitor status, launch prints, and manage multi-printer jobs without custom glue code.',
-    icon: '🟧',
+    icon: 'link',
     tag: 'REST API',
   },
   {
@@ -55,7 +55,7 @@ const printerIntegrations: Integration[] = [
     title: 'Elegoo',
     description:
       'Give AI agents access to Elegoo printers with standardized command handling, safety profiles, and remote monitoring inside the Kiln control plane.',
-    icon: '⬛',
+    icon: 'printer',
     tag: 'REST API',
   },
   {
@@ -63,7 +63,7 @@ const printerIntegrations: Integration[] = [
     title: 'Direct USB',
     description:
       'Connect any Marlin-based printer over USB — no OctoPrint or Klipper needed. Plug in a cable and go. Works with Ender 3, Prusa MK3, CR-10, and any printer running Marlin or RepRapFirmware.',
-    icon: '🔌',
+    icon: 'usb',
     tag: 'USB',
   },
 ];
@@ -74,7 +74,7 @@ const ecosystemIntegrations: Integration[] = [
     title: 'Craftcloud',
     description:
       'Get quotes and place outsourced 3D print orders across 150+ providers when local printers are busy, offline, or unavailable.',
-    icon: '☁️',
+    icon: 'cloud',
     tag: 'Fulfillment',
   },
   {
@@ -82,7 +82,7 @@ const ecosystemIntegrations: Integration[] = [
     title: 'Search 3rd-Party Marketplaces',
     description:
       'Search and download 3D models from MyMiniFactory (works out of the box) and Cults3D (search only, requires your own API key). Find existing blueprints before generating from scratch.',
-    icon: '🔍',
+    icon: 'search',
     tag: 'Discovery',
   },
   {
@@ -90,15 +90,15 @@ const ecosystemIntegrations: Integration[] = [
     title: 'PrusaSlicer & OrcaSlicer',
     description:
       'Auto-detect installed slicers. Slice STL files with bundled printer profiles, adaptive layer heights, and material-aware settings. Go from model to G-code in one call.',
-    icon: '✂️',
+    icon: 'layers',
     tag: 'Slicing',
   },
   {
     name: 'mcp',
     title: 'Model Context Protocol',
     description:
-      'Expose Kiln as an MCP server so Claude, GPT, and other AI agents can use 828 MCP tools safely with structured, typed responses.',
-    icon: '🤖',
+      'Expose Kiln as an MCP server so Claude, GPT, and other AI agents can use 835 MCP capabilities safely with structured, typed responses.',
+    icon: 'cpu',
     tag: 'AI Protocol',
   },
   {
@@ -106,7 +106,7 @@ const ecosystemIntegrations: Integration[] = [
     title: 'Text & Sketch to 3D',
     description:
       'Generate printable models from text or sketches via Gemini Deep Think, Meshy, Tripo3D, Stability AI, or parametric OpenSCAD. Auto-discovered from env vars.',
-    icon: '✨',
+    icon: 'cube-spark',
     tag: 'Generation',
   },
   {
@@ -114,10 +114,33 @@ const ecosystemIntegrations: Integration[] = [
     title: 'Webhooks & Event Bus',
     description:
       'Register HTTP endpoints for instant notifications when jobs complete, fail, or change state. HMAC-SHA256 signed payloads for secure integration.',
-    icon: '🔔',
+    icon: 'bell',
     tag: 'Events',
   },
 ];
+
+// Bespoke line icons — same geometric language as the homepage
+// FeatureGrid + use-cases (24px grid, 1.7 stroke, round caps).
+const ICONS: Record<string, string> = {
+  server: '<rect x="3.5" y="4.5" width="17" height="6" rx="1.6"/><rect x="3.5" y="13.5" width="17" height="6" rx="1.6"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+  gauge: '<path d="M3.6 17.5a8.5 8.5 0 1 1 16.8 0"/><path d="M12 17.5 16 11"/><circle cx="12" cy="17.5" r="1.1" fill="currentColor" stroke="none"/>',
+  printer: '<path d="M7 8.5V3.5h10v5"/><rect x="3.5" y="8.5" width="17" height="8" rx="1.6"/><path d="M7 15.5v5h10v-5"/><path d="M16.5 11.5h.01"/>',
+  broadcast: '<circle cx="12" cy="12" r="1.8"/><path d="M8 8a5.5 5.5 0 0 0 0 8M16 8a5.5 5.5 0 0 1 0 8"/><path d="M5.2 5.2a9.5 9.5 0 0 0 0 13.6M18.8 5.2a9.5 9.5 0 0 1 0 13.6"/>',
+  link: '<path d="M9.5 14.5 14.5 9.5"/><path d="M7.6 12 6 13.6a3.6 3.6 0 0 0 5.1 5.1l1.5-1.6"/><path d="M16.4 12 18 10.4a3.6 3.6 0 0 0-5.1-5.1L11.4 6.9"/>',
+  usb: '<circle cx="12" cy="20.4" r="1.4"/><path d="M12 19V4.5"/><path d="m9.4 7 2.6-2.8L14.6 7"/><path d="M12 13.4 8 11.2V8.7"/><rect x="6.7" y="6.6" width="2.6" height="2.4" rx="0.4"/><path d="M12 10.8 16 8.6"/><circle cx="16.3" cy="7.5" r="1.1"/>',
+  cloud: '<path d="M7 18h10a4 4 0 0 0 .5-7.97A6 6 0 0 0 6 9.5 3.75 3.75 0 0 0 7 18Z"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.7-4.7"/>',
+  layers: '<path d="m12 3.5 8.5 4.7L12 12.9 3.5 8.2 12 3.5Z"/><path d="m4 12.4 8 4.4 8-4.4"/><path d="m4 16.3 8 4.4 8-4.4"/>',
+  cpu: '<rect x="6.5" y="6.5" width="11" height="11" rx="2.2"/><rect x="10" y="10" width="4" height="4" rx="0.7"/><path d="M9.5 3.4v3M14.5 3.4v3M9.5 17.6v3M14.5 17.6v3M3.4 9.5h3M3.4 14.5h3M17.6 9.5h3M17.6 14.5h3"/>',
+  'cube-spark': '<path d="M11 4.6 17.6 8.4v7.2L11 19.4l-6.6-3.8V8.4L11 4.6Z"/><path d="M4.6 8.5 11 12.2l6.4-3.7M11 12.2v7.1"/><path d="M19.2 2.8v3.6M17.4 4.6H21"/>',
+  bell: '<path d="M6.5 9.8a5.5 5.5 0 0 1 11 0c0 4.6 1.8 5.7 1.8 5.7H4.7s1.8-1.1 1.8-5.7Z"/><path d="M10 19a2 2 0 0 0 4 0"/>',
+};
+
+// The six protocol-specific backends sit in the grid; Direct USB is the
+// universal catch-all, so it reads as a deliberate full-width closer
+// rather than orphaning a 7th cell.
+const gridBackends = printerIntegrations.filter((p) => p.name !== 'usb');
+const usbBackend = printerIntegrations.find((p) => p.name === 'usb')!;
 
 const integrationSchema = {
   '@type': 'ItemList',
@@ -169,8 +192,11 @@ const integrationSchema = {
           <span class="stat-label">3rd-party marketplaces</span>
         </div>
         <div class="stat">
-          <span class="stat-num">789</span>
-          <span class="stat-label">MCP tools</span>
+          <!-- 835 MCP capabilities — keep in sync with the live FastMCP
+               registry count (scripts/check_doc_counts.py). The marker
+               below makes this split stat visible to that gate. -->
+          <span class="stat-num" data-count="mcp-capabilities">835</span>
+          <span class="stat-label">MCP capabilities</span>
         </div>
       </div>
     </div>
@@ -184,7 +210,7 @@ const integrationSchema = {
         <p class="lead">Use Kiln as a universal interface for mixed-brand 3D printer fleets — with tuned profiles for <a href="/printers">dozens of specific models</a>.</p>
       </div>
       <div class="printer-grid">
-        {printerIntegrations.map((integration, i) => (
+        {gridBackends.map((integration, i) => (
           <article
             class="card integration-card"
             id={integration.name}
@@ -192,13 +218,27 @@ const integrationSchema = {
             style={`--reveal-delay: ${Math.min(i * 0.06, 0.4)}s`}
           >
             <div class="card-top">
-              <span class="card-icon">{integration.icon}</span>
+              <span class="card-icon" aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" set:html={ICONS[integration.icon]} />
+              </span>
               <span class="card-tag">{integration.tag}</span>
             </div>
             <h3>{integration.title}</h3>
             <p>{integration.description}</p>
           </article>
         ))}
+        <article class="card integration-card integration-card-wide" id={usbBackend.name} data-reveal style="--reveal-delay: 0.38s">
+          <span class="card-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" set:html={ICONS[usbBackend.icon]} />
+          </span>
+          <div class="wide-text">
+            <div class="wide-head">
+              <h3>{usbBackend.title}</h3>
+              <span class="card-tag">{usbBackend.tag}</span>
+            </div>
+            <p>{usbBackend.description}</p>
+          </div>
+        </article>
       </div>
     </div>
   </section>
@@ -219,7 +259,9 @@ const integrationSchema = {
             style={`--reveal-delay: ${Math.min(i * 0.06, 0.4)}s`}
           >
             <div class="card-top">
-              <span class="card-icon">{integration.icon}</span>
+              <span class="card-icon" aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" set:html={ICONS[integration.icon]} />
+              </span>
               <span class="card-tag">{integration.tag}</span>
             </div>
             <h3>{integration.title}</h3>
@@ -283,17 +325,13 @@ const integrationSchema = {
     max-width: 720px;
   }
 
-  /* Printer grid: 3-up, collapsing by available width */
-  .printer-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 16px;
-  }
-
-  /* Ecosystem grid: 2×3 */
+  /* Both grids are a fixed 3-up so rows stay even.  Seven printer
+     backends = six cards + Direct USB as a full-width closer; six
+     ecosystem cards = a clean 2×3. */
+  .printer-grid,
   .ecosystem-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 16px;
   }
 
@@ -314,14 +352,56 @@ const integrationSchema = {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 42px;
-    height: 42px;
-    font-size: 20px;
-    line-height: 1;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    color: var(--accent-bright);
+    background: linear-gradient(180deg, rgba(255, 107, 43, 0.13), rgba(255, 107, 43, 0.04));
+    border: 1px solid rgba(255, 107, 43, 0.18);
+    border-radius: var(--radius);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  .card-icon svg {
+    display: block;
+  }
+
+  /* Direct USB closer — spans the full row, laid out horizontally so
+     the catch-all backend reads as the section's deliberate footer. */
+  .integration-card-wide {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .integration-card-wide .wide-text {
+    min-width: 0;
+  }
+  .integration-card-wide .wide-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .integration-card-wide h3 {
+    margin-bottom: 0;
+  }
+  .integration-card-wide p {
+    margin: 0;
+  }
+  @media (max-width: 900px) {
+    .printer-grid,
+    .ecosystem-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+  @media (max-width: 600px) {
+    .printer-grid,
+    .ecosystem-grid {
+      grid-template-columns: 1fr;
+    }
+    .integration-card-wide {
+      align-items: flex-start;
+    }
   }
 
   .card-tag {
@@ -371,12 +451,6 @@ const integrationSchema = {
 
   .cta-actions .btn-ghost {
     margin-left: 0;
-  }
-
-  @media (max-width: 720px) {
-    .ecosystem-grid {
-      grid-template-columns: 1fr;
-    }
   }
 
   @media (max-width: 640px) {
