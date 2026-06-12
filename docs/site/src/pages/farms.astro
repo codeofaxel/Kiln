@@ -39,7 +39,7 @@ const backends: Backend[] = [
   {
     name: 'Bambu Lab',
     protocol: 'MQTT + local network',
-    note: 'A1, P1, and X1 families through the dedicated Bambu adapter.',
+    note: 'A1, A2, P1, P2, X1, and H2 families through the dedicated Bambu adapter.',
   },
   {
     name: 'Creality',
@@ -64,7 +64,7 @@ const backends: Backend[] = [
   {
     name: 'Moonraker / Klipper',
     protocol: 'HTTP / WebSocket',
-    note: 'Generic Klipper-class machines when their Moonraker API is reachable on the local network.',
+    note: 'Generic Klipper-class machines when their Moonraker API is reachable on the local network — Voron, RatRig, Sovol, and other Klipper builds.',
   },
   {
     name: 'Direct USB',
@@ -215,7 +215,7 @@ const farmsSchema = {
         Kiln gives agents using MCP, plus CLI and CI workflows, one safe local
         control path for
         mixed printer fleets: discover, validate, slice, upload, start,
-        monitor, and stop jobs through adapter-aware guardrails.
+        monitor, recover, and stop jobs through adapter-aware guardrails.
       </p>
       <div class="cta-actions">
         <a href="/install" class="btn">Install Kiln</a>
@@ -278,7 +278,10 @@ const farmsSchema = {
         </div>
         <p>
           Kiln does not need every printer to speak the same protocol. It needs
-          each adapter to expose the same safe operations to the agent.
+          each adapter to expose the same safe operations to the agent. Tuned
+          per-model profiles cover dozens of models across a dozen brands
+          &mdash; the <a href="/printers">supported printers list</a> has
+          every one.
         </p>
       </div>
       <div class="backend-list">

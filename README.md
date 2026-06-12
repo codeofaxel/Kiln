@@ -231,7 +231,7 @@ Paid tiers ([kiln3d.com/pricing](https://kiln3d.com/pricing)) add Git-for-3D ver
 - **AI-native** — <!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 830 MCP capabilities and <!-- KILN_CLI_COUNT:OLD --> 223 CLI commands built for AI agents. Not a web UI with an API bolted on.
 - **Describe it, print it** — Natural-language to physical object pipeline: text or sketch → AI generation → validation → slice → print.
 - **Decorate anything** — QR codes, photos, logos, text, SVGs, and procedural textures (tiger stripe, marble, camo, wood grain, honeycomb) embossed or debossed onto any model with one command.
-- **Manuals included** — Multi-part prints can generate printable PDF assembly manuals with Bill of Materials, isometric step renders, mating arrows, and pause-and-check verification gates. (Pro)
+- **Manuals included** — Multi-part prints can generate printable PDF assembly manuals with Bill of Materials, isometric step renders, mating arrows, and pause-and-check verification gates. (Business)
 - **Resume, don't restart** — Cancelled or failed print? Resume from the exact layer it stopped on any supported FDM printer. No filament wasted. (Pro)
 - **Modify mid-print** — Add decorations, append features, or swap materials on a live print with atomic revert if anything goes wrong. (Pro)
 - **Smart material routing** — 25 materials, 45 brand-specific filament profiles (Bambu, Prusament, Polymaker, and more) across 11 material families. Intent-based recommendations with printer capability awareness.
@@ -400,8 +400,8 @@ All local printing is **free forever** — status, file management, slicing, fle
 | Tier | Price | Headline |
 |------|-------|----------|
 | **Free** | $0 | Unlimited local printing, slicing, marketplace search, safety profiles, one printer, design intelligence, linear design history. |
-| **Pro** | $49/mo | Git-for-3D branching/signed releases, product templates, procedural textures, mid-print modification, print resume, failure recovery, assembly manuals, solo cloud sync. |
-| **Business** | $199/mo | Commercial use, 3 printers + 3 seats, fleet management, cross-printer learning, QR generation, team pull requests, approval gates, fulfillment, webhooks. |
+| **Pro** | $49/mo | Git-for-3D branching/signed releases, product templates, procedural textures, mid-print modification, print resume, failure recovery, nozzle-wear tracking, solo cloud sync. |
+| **Business** | $199/mo | Commercial use, 3 printers + 3 seats, fleet management, cross-printer learning, QR generation, assembly manuals, team pull requests, approval gates, fulfillment, webhooks. |
 | **Enterprise** | Contact us | Large fleets, SSO/SCIM, RBAC, audit trail, encrypted G-code at rest, white-label manuals, 99.9% SLA, on-prem/VPC. |
 
 Full comparison at **[kiln3d.com/pricing](https://kiln3d.com/pricing)**. Run `kiln upgrade` to activate a license key. For provider-routed orders, the provider remains merchant of record; Kiln acts as orchestration infrastructure.
