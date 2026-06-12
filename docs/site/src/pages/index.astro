@@ -203,9 +203,12 @@ import CTA from '../components/CTA.astro';
           <h3>Releases and updates</h3>
           <p>Feature launches, integration announcements, and real-world print stories.</p>
         </a>
-        <a href="/faq" class="card card-lift hub-card" data-reveal style="--reveal-delay: 0.36s">
-          <h3>FAQ</h3>
-          <p>Answers on pricing, compatibility, deployment, safety, and operations.</p>
+        <a href="/faq" class="card card-lift hub-card hub-card-wide" data-reveal style="--reveal-delay: 0.36s">
+          <span class="hub-wide-main">
+            <h3>FAQ</h3>
+            <p>Answers on pricing, compatibility, deployment, safety, and operations.</p>
+          </span>
+          <svg class="hub-wide-arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13.5 6.5 19 12l-5.5 5.5"/></svg>
         </a>
       </div>
     </div>
@@ -318,9 +321,12 @@ import CTA from '../components/CTA.astro';
     }
   }
 
+  /* Fixed 3-column grid so the six topic cards always land as a clean
+     3×2 block; the seventh (FAQ) spans the full width below as a
+     deliberate closing row rather than a lonely orphan cell. */
   .hub-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    grid-template-columns: repeat(3, 1fr);
     gap: 18px;
   }
 
@@ -342,6 +348,57 @@ import CTA from '../components/CTA.astro';
     color: var(--text-muted);
     font-size: 14px;
     line-height: 1.6;
+  }
+
+  /* Full-width closing card — turns the odd seventh topic into an
+     intentional section footer instead of a half-empty orphan row.
+     Title + blurb sit inline on the left, an ember arrow trails right. */
+  .hub-card-wide {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+  }
+  .hub-wide-main {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    min-width: 0;
+  }
+  .hub-card-wide h3 {
+    margin-bottom: 0;
+  }
+  .hub-card-wide p {
+    font-size: 14.5px;
+  }
+  .hub-wide-arrow {
+    flex-shrink: 0;
+    color: var(--text-subtle);
+    transition: color 0.2s ease, transform 0.25s var(--ease-out);
+  }
+  .hub-card-wide:hover .hub-wide-arrow {
+    color: var(--accent);
+    transform: translateX(4px);
+  }
+
+  /* Mirror the old auto-fit responsiveness: 3 cols → 2 on tablets →
+     1 on phones.  The wide closer spans whatever the column count is
+     via grid-column: 1 / -1, so it stays full-width at every step. */
+  @media (max-width: 900px) {
+    .hub-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+  @media (max-width: 600px) {
+    .hub-grid {
+      grid-template-columns: 1fr;
+    }
+    .hub-card-wide {
+      align-items: flex-start;
+      gap: 16px;
+    }
   }
 
   /* Receipts — demo section.  Object-first, no Telegram-screenshot
