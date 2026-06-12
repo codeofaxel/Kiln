@@ -84,7 +84,9 @@ CREALITY_CAPABILITY_KEYS = {
     "filament_runout_sensor",
     "power_loss_recovery",
     "enclosure",
-    "source_notes",
+    # Sourcing rides the merged overlay under the underscore convention
+    # (internal QA trail — stripped at the wire boundary, kept locally).
+    "_source_notes",
 }
 
 # ===================================================================

@@ -238,6 +238,11 @@ class TestMaterialValueRanges:
     def test_flexural_strength_plausible(self, materials):
         for mat_id, mat in materials.items():
             val = mat["mechanical"]["flexural_strength_mpa"]
+            # Elastomers carry an explicit null — they flex without breaking,
+            # so there is no flexural strength to range-check (same convention
+            # as PP's null glass transition).
+            if val is None:
+                continue
             assert 10 <= val <= 250, (
                 f"{mat_id} flexural_strength_mpa {val} out of plausible range [10, 250]"
             )
@@ -280,6 +285,11 @@ class TestMaterialValueRanges:
 
     def test_max_service_temp_below_glass_transition_or_hdt(self, materials):
         for mat_id, mat in materials.items():
+            # Elastomers operate by deflecting — HDT at 0.45 MPa sits far
+            # below their realistic continuous service temperature, so the
+            # rigid-plastic HDT ceiling does not apply to them.
+            if mat.get("category") == "thermoplastic_elastomer":
+                continue
             max_svc = mat["thermal"]["max_service_temp_c"]
             hdt = mat["thermal"]["heat_deflection_c"]
             # Max service temp should not exceed HDT (parts deform above HDT)

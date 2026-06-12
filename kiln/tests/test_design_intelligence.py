@@ -105,7 +105,9 @@ class TestMaterialProfiles:
     def test_get_tpu_flexible(self):
         p = get_material_profile("tpu")
         assert p is not None
-        assert p.mechanical["elongation_at_break_pct"] == 580
+        # 450 is the audited engineering-overlay value (the 2026-06 data
+        # honesty pass derated the earlier 580).
+        assert p.mechanical["elongation_at_break_pct"] == 450
         assert p.design_limits["living_hinge_viable"] is True
 
     def test_get_polycarbonate(self):
