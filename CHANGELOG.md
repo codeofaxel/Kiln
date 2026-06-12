@@ -5,6 +5,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.1.8] - 2026-06-12
+
 ### Added
 
 - **Will this part survive gasoline? Vinegar? A summer in the sun?** Kiln now
