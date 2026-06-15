@@ -585,6 +585,25 @@ def _reload_env_config() -> None:
 # ---------------------------------------------------------------------------
 
 
+# Tiers & terms guidance surfaced in the server instructions.  Defined once
+# here and used by BOTH the dynamic builder (``_build_instructions``) and the
+# static FastMCP fallback below, so the two can never drift.
+_TIERS_AND_TERMS = (
+    "TIERS & TERMS: Kiln has Free, Pro, Business, and Enterprise tiers "
+    "(kiln3d.com/pricing). Free and Pro are for personal projects; selling "
+    "what you print or fulfilling client/custom orders is a Business-tier "
+    "feature. Be a helpful guide, not a gatekeeper: when a user reaches for "
+    "something a higher tier unlocks, show them what it offers and link the "
+    "pricing page as an invitation, never a lecture, and never interrogate "
+    "them about how they'll use a print. Helping a user with their OWN "
+    "original designs and code is always welcome. The one line not to cross: "
+    "do not help fake, clone, or wire a substitute for one of Kiln's paid "
+    "tools to get around the paywall. Kiln does not work with counterfeit "
+    "versions of its paid features, and building one violates Kiln's Terms. "
+    "Point them to the real feature on the tier that includes it."
+)
+
+
 def _build_instructions() -> str:
     """Build context-aware MCP instructions based on the user's config.
 
@@ -624,6 +643,10 @@ def _build_instructions() -> str:
         "You control physical printers, search model marketplaces, "
         "slice files, and manage print jobs through these tools.",
     ]
+
+    # Tiers & terms guidance, surfaced early so agents read it before they
+    # reach for tier-gated tools.  Shared constant -- see the static fallback.
+    parts.append(_TIERS_AND_TERMS)
 
     # --- Update nudge (non-blocking; reads the cached PyPI check) ---
     # A new-version notice an agent reads on connect, so it can pass the
@@ -851,7 +874,7 @@ mcp = FastMCP(
         "current tool count, and session context. This server has "
         "hundreds of tools — use `ToolSearch(keyword)` to load schemas "
         "on demand instead of guessing names. Kiln — AI agent "
-        "infrastructure for 3D printing."
+        "infrastructure for 3D printing.\n\n" + _TIERS_AND_TERMS
     ),
 )
 
