@@ -9,8 +9,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Previews now show up every time you make something, not almost every
   time.** Kiln already popped up a preview the moment you created or changed
-  a model, but a few paths quietly skipped it (compiling a design, optimizing
-  orientation, multicolor splits, and more), so you'd have to ask "show me."
+  a model, but a few paths quietly skipped it, so you'd have to ask "show me."
   Those blind spots are fixed: the preview just appears, every time.
 
 ## [1.1.8] - 2026-06-12
