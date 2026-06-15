@@ -35,6 +35,8 @@ node_modules/
 CLAUDE.md
 AGENTS.md
 .claude/
+# Local git worktrees (parallel feature-branch checkouts) — never committed
+.worktrees/
 .mcp.json
 .pre-commit-config.yaml
 
