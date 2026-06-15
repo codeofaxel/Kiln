@@ -395,7 +395,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 828 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 835 total MCP capabilities**. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
+Kiln exposes **<!-- KILN_MCP_TOOL_COUNT:OLD --> 829 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 836 total MCP capabilities**. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
 
 kiln-pro tools are discoverable through the public `pro_tool_manifest.json` even when kiln-pro is not installed locally. Free-tier callers receive structured `TIER_REQUIRED` responses with the required tier and pricing URL; paired machines can proxy eligible paid-tier tool calls through the hosted Kiln REST endpoint so the paid code stays server-side.
 

@@ -7,6 +7,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Turn any design into a production drawing (Business+).** Kiln can now give
+  you a clean, dimensioned drawing of a part — top, front, and side views with
+  real measurements, plus PDF and DXF files a machine shop or client can use.
+  For something you designed in Kiln it fills in the exact measurements for you;
+  for an imported model it measures what it can and says so. Served via
+  kiln-pro; see https://kiln3d.com/pricing.
+
 - **Previews now show up every time you make something, not almost every
   time.** Kiln already popped up a preview the moment you created or changed
   a model, but a few paths quietly skipped it, so you'd have to ask "show me."
