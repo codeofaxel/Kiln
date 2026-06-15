@@ -952,12 +952,22 @@ class _ColorToolsPlugin:
             z_range = max(z_values) - min(z_values)
             warn = _band_height_warning(z_range, num_colors)
 
-            return _build_result(
+            response = _build_result(
                 zones, output_dir, base_name, "z_height",
                 len(triangles), threemf_path,
                 compose_3mf_error=compose_err,
                 band_warning=warn,
             )
+            try:
+                from kiln_pro.plugins.git_render_tools import (
+                    attach_inspect_bundle,
+                )
+
+                return attach_inspect_bundle(
+                    response, level="quick", stl_keys=("multicolor_3mf",),
+                )
+            except ImportError:
+                return response
 
         @mcp.tool()
         def auto_color_by_region(
@@ -1032,12 +1042,22 @@ class _ColorToolsPlugin:
                 z_range = max(z_values) - min(z_values)
                 warn = _band_height_warning(z_range, num_colors)
 
-            return _build_result(
+            response = _build_result(
                 zones, output_dir, base_name, method,
                 len(triangles), threemf_path,
                 compose_3mf_error=compose_err,
                 band_warning=warn,
             )
+            try:
+                from kiln_pro.plugins.git_render_tools import (
+                    attach_inspect_bundle,
+                )
+
+                return attach_inspect_bundle(
+                    response, level="quick", stl_keys=("multicolor_3mf",),
+                )
+            except ImportError:
+                return response
 
         _logger.debug("Registered color tools")
 

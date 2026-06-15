@@ -643,7 +643,7 @@ class _ValidationPipelinePlugin:
             else:
                 next_action = prepared_report.get("next_action")
 
-            return {
+            response = {
                 "status": "success" if ready else "needs_attention",
                 "original": original_info,
                 "prepared": prepared_info,
@@ -653,6 +653,16 @@ class _ValidationPipelinePlugin:
                 "ready_to_print": ready,
                 "next_action": next_action,
             }
+            try:
+                from kiln_pro.plugins.git_render_tools import (
+                    attach_inspect_bundle,
+                )
+
+                return attach_inspect_bundle(
+                    response, level="quick", source_path=working_path,
+                )
+            except ImportError:
+                return response
 
         _logger.debug("Registered validation pipeline tools")
 

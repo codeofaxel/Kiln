@@ -856,7 +856,17 @@ class _DesignReasoningToolsPlugin:
                     constraints=parsed_constraints,
                     output_dir=output_dir or None,
                 )
-                return {"success": True, **result.to_dict()}
+                response = {"success": True, **result.to_dict()}
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", source_path=response.get("best_stl_path"),
+                    )
+                except ImportError:
+                    return response
             except ValueError as exc:
                 return _srv._error_dict(str(exc), code="INVALID_ARGS")
             except Exception as exc:
@@ -1067,7 +1077,7 @@ class _DesignReasoningToolsPlugin:
             if brief_id:
                 _attach_brief_to_iteration_result(brief_id, best_result)
 
-            return {
+            response = {
                 "success": True,
                 "iterations": iterations,
                 "iteration_count": len(iterations),
@@ -1075,6 +1085,18 @@ class _DesignReasoningToolsPlugin:
                 "brief_id": brief_id or None,
                 **best_result,
             }
+            try:
+                from kiln_pro.plugins.git_render_tools import (
+                    attach_inspect_bundle,
+                )
+
+                return attach_inspect_bundle(
+                    response,
+                    level="full",
+                    source_path=best_result.get("result", {}).get("local_path"),
+                )
+            except ImportError:
+                return response
 
         # ------------------------------------------------------------------
         # optimize_print_orientation
@@ -1098,7 +1120,17 @@ class _DesignReasoningToolsPlugin:
                 from kiln.generation.validation import optimize_orientation
 
                 result = optimize_orientation(file_path, output_path=output_path or None)
-                return {"success": True, **result}
+                response = {"success": True, **result}
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", source_path=response.get("path"),
+                    )
+                except ImportError:
+                    return response
             except Exception as exc:
                 return _srv._error_dict(
                     f"Orientation optimization failed: {exc}", code="ORIENT_ERROR"
@@ -1161,7 +1193,16 @@ class _DesignReasoningToolsPlugin:
                     response["bed_size_source"] = "printer_intelligence"
                     response["bed_size_model_id"] = resolved_model_id
                     response["bed_dims_mm"] = [bed_x_mm, bed_y_mm, bed_z_mm]
-                return response
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("fixed_file",),
+                    )
+                except ImportError:
+                    return response
             except ValueError as exc:
                 return _srv._error_dict(str(exc), code="INVALID_ARGS")
             except Exception as exc:

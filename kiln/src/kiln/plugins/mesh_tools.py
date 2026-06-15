@@ -817,7 +817,16 @@ class _MeshToolsPlugin:
                     response["bed_size_source"] = "printer_intelligence"
                     response["bed_size_model_id"] = resolved_model_id
                     response["bed_dims_mm"] = [bed_x_mm, bed_y_mm]
-                return response
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(
+                        response, level="quick", stl_keys=("path",),
+                    )
+                except ImportError:
+                    return response
             except ValueError as exc:
                 return _error_dict(str(exc), code="INVALID_ARGS")
             except Exception as exc:
@@ -1298,7 +1307,15 @@ class _MeshToolsPlugin:
                 )
 
                 result = _extract(file_path, output_path=output_path or None)
-                return {"success": True, **result}
+                response = {"success": True, **result}
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(response, level="quick")
+                except ImportError:
+                    return response
             except FileNotFoundError as exc:
                 return _error_dict(str(exc), code="FILE_NOT_FOUND")
             except Exception as exc:

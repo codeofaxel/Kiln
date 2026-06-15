@@ -1310,11 +1310,19 @@ class _DesignToolsPlugin:
                     return {"success": False, "error": "Provide scad_code or scad_path"}
 
                 stl_path = compile_scad_code(code, timeout=timeout)
-                return {
+                response = {
                     "success": True,
                     "stl_path": stl_path,
                     "message": f"Compiled to {stl_path}",
                 }
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(response, level="quick")
+                except ImportError:
+                    return response
             except ValueError as exc:
                 return {"success": False, "error": str(exc)}
             except Exception as exc:
@@ -1348,13 +1356,21 @@ class _DesignToolsPlugin:
                 )
                 warnings = result.get("warnings", [])
                 suffix = f" with {len(warnings)} warnings" if warnings else ""
-                return {
+                response = {
                     "success": True,
                     **result,
                     "message": (
                         f"Updated {parameter_name}={new_value}, compiled to STL{suffix}."
                     ),
                 }
+                try:
+                    from kiln_pro.plugins.git_render_tools import (
+                        attach_inspect_bundle,
+                    )
+
+                    return attach_inspect_bundle(response, level="quick")
+                except ImportError:
+                    return response
             except ValueError as exc:
                 return {"success": False, "error": str(exc)}
             except Exception as exc:
