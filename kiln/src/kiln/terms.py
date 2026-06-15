@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 
-_CURRENT_TERMS_VERSION = "1.3"
+_CURRENT_TERMS_VERSION = "3.0"
 
 _SETTINGS_KEY_VERSION = "terms_accepted_version"
 _SETTINGS_KEY_TIMESTAMP = "terms_accepted_at"
@@ -30,8 +30,8 @@ _TERMS_SUMMARY = """\
      fee-free. Local printing is always free.
   6. Kiln is provided "as is" without warranty of any kind.
 
-  Full terms: https://github.com/codeofaxel/Kiln/blob/main/TERMS_OF_USE.md
-  Privacy policy: https://github.com/codeofaxel/Kiln/blob/main/PRIVACY.md"""
+  Full terms: https://kiln3d.com/terms
+  Privacy policy: https://kiln3d.com/privacy"""
 
 
 def get_accepted_version(*, db=None) -> str | None:
