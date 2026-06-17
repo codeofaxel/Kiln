@@ -574,3 +574,28 @@ class TestListRecipeVersions:
         v2_entry = versions[1]
         assert v2_entry["notes"] == "recolor body"
         assert v2_entry["changes"] == {"body.color": "white -> red"}
+
+
+def test_from_dict_tolerates_slot_seed_created_at():
+    """A recipe seeded by the design-slot primitive carries ``created_at``
+    (not ``created``).  Loading it must not raise — otherwise the first
+    save on a freshly-created design slot crashes."""
+    seed = {
+        "design_id": "demo",
+        "name": "Demo",
+        "description": "seeded slot",
+        "created_at": "2026-06-17T00:00:00+00:00",
+        "archived": False,
+    }
+    recipe = DesignRecipe.from_dict(seed)
+    assert recipe.name == "Demo"
+    assert recipe.created == "2026-06-17T00:00:00+00:00"
+
+
+def test_from_dict_prefers_created_over_created_at():
+    """When both fields are present, ``created`` wins; absence of both
+    degrades to an empty string rather than a KeyError."""
+    both = {"name": "X", "created": "A", "created_at": "B"}
+    assert DesignRecipe.from_dict(both).created == "A"
+    neither = {"name": "X"}
+    assert DesignRecipe.from_dict(neither).created == ""

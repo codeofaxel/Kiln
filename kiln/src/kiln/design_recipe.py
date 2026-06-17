@@ -133,7 +133,11 @@ class DesignRecipe:
         parts = [DesignPart.from_dict(p) for p in data.get("parts", [])]
         return cls(
             name=data["name"],
-            created=data["created"],
+            # Tolerate a recipe seeded by the design-slot primitive
+            # (which writes ``created_at``) so loading it never raises
+            # a KeyError; fall back to an empty string if neither form
+            # is present rather than crashing the whole load path.
+            created=data.get("created") or data.get("created_at") or "",
             parts=parts,
             source_scad=data.get("source_scad"),
             parameters=data.get("parameters", {}),
