@@ -129,8 +129,14 @@ def _server_request(path: str, method: str, bearer: str, payload: dict | None = 
     import urllib.error  # noqa: F401  (urlopen raises urllib.error subclasses)
     import urllib.request
 
+    from kiln.api_device import device_fingerprint_headers
+
     try:
         headers = {"Authorization": f"Bearer {bearer}"}
+        # The /api/terms/* routes are gated by _require_authed_tenant, which
+        # enforces the activation cap — name this device so a license-key
+        # bearer is counted instead of rejected.  Harmless on the JWT path.
+        headers.update(device_fingerprint_headers())
         data = None
         if payload is not None:
             headers["Content-Type"] = "application/json"

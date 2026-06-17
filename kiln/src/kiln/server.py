@@ -11353,9 +11353,16 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
     import json
     import urllib.error
     import urllib.request
+
+    from kiln.api_device import device_fingerprint_headers
     try:
         headers = {"Content-Type": "application/json"}
         headers["Authorization"] = f"Bearer {bearer}"
+        # Name this device so the hosted activation cap can count it: a
+        # license-key bearer on a metered tool is metered per-device, and
+        # the server rejects a card-less license-bearer call once the cap
+        # is enforced.  Harmless on the paired-OAuth (JWT) path.
+        headers.update(device_fingerprint_headers())
         req = urllib.request.Request(
             f"{api_url.rstrip('/')}/api/tools/{tool_name}",
             data=json.dumps(kwargs).encode() if kwargs else None,
