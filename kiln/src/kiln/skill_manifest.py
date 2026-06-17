@@ -123,6 +123,8 @@ class SkillManifest:
                 "iterate: edit the OpenSCAD, recompile, show a fresh preview each round; offer 'loop ~3 more then check in, or loop until it's done?'",
                 "validate_generated_mesh / analyze_printability — printability check (conservative defaults are free)",
                 "Cloud AI providers (the design_and_generate path) are opt-in and need the user's own API key — don't suggest unless asked or the shape is organic/photo-based",
+                "From a photo/sketch: SEE it yourself and write OpenSCAD to match — no image-to-3D provider needed; generate_model_from_image (Meshy) is opt-in only",
+                "Organic/curvy shapes: use the bundled BOSL2 metaballs/skin in your OpenSCAD; expect a few refine rounds",
             ],
             "design_and_generate": [
                 "design_session(verb=\"start\", idea=\"...\") — capture the saved goal",

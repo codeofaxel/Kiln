@@ -443,6 +443,17 @@ class _UtilityToolsPlugin:
                     "queue_jobs": "submit_job → job_status → queue_summary",
                 },
                 "creating_models": {
+                    "front_door": (
+                        "When the user wants to MAKE an object, the flow is "
+                        "always the same: understand what they want → make it → "
+                        "SHOW a preview → iterate. Where design_session is "
+                        "available it is the front door (it captures the goal, "
+                        "generates, checks, previews, and versions in one place, "
+                        "defaulting to OpenSCAD-native); where it isn't, deliver "
+                        "the SAME loop yourself with compile_scad. Product "
+                        "generators, templates, image, and cloud are sub-paths "
+                        "under this one flow — not separate starting points."
+                    ),
                     "default_is_openscad": (
                         "To make a custom object from a description, DEFAULT to "
                         "writing the OpenSCAD yourself and compiling it locally "
@@ -460,6 +471,23 @@ class _UtilityToolsPlugin:
                         "easily reach. If a generate_* tool returns NO_PROVIDER, "
                         "fall back to writing OpenSCAD — never tell the user to "
                         "go get a key."
+                    ),
+                    "from_an_image": (
+                        "User gave you a reference photo or sketch? You can SEE "
+                        "it — look at the image yourself and write the OpenSCAD "
+                        "to match. You do NOT need an image-to-3D provider for "
+                        "this. generate_model_from_image (Meshy) is an OPT-IN "
+                        "for users who specifically want a photoreal mesh "
+                        "reconstruction and bring their own key; it is never "
+                        "required."
+                    ),
+                    "organic_shapes": (
+                        "For curvy / organic / sculptural shapes (vases, "
+                        "characters, anatomical forms), reach for the bundled "
+                        "BOSL2 toolkit in your OpenSCAD — metaballs and skin() "
+                        "build smooth organic geometry that plain primitives "
+                        "can't. Organic shapes especially take a few refine "
+                        "rounds — say so upfront and iterate with previews."
                     ),
                     "show_every_round": (
                         "Render and SHOW a preview image every time you make or "
