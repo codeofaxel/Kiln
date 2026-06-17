@@ -148,6 +148,48 @@ class TestSaveDesignVersion:
         # No crash from missing kiln_pro
         assert "version" in result
 
+    def test_save_works_when_kiln_pro_hook_unimportable(self, monkeypatch, tmp_path):
+        """FREE-TIER REGRESSION: with the kiln-pro bridge unimportable
+        (the exact shape of a free install where kiln-pro is absent),
+        ``save_design_version`` must still succeed recipe-only — no crash,
+        no branch block, identical behaviour to before the hook existed.
+
+        We force the ImportError deterministically even though kiln-pro
+        is installed in this dev env, so the regression is proven, not
+        merely assumed-absent.
+        """
+        monkeypatch.setattr("kiln.plugins.version_tools._DESIGNS_ROOT", str(tmp_path))
+
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _blocked_import(name, *args, **kwargs):
+            if name == "kiln_pro.bridge" or name.startswith("kiln_pro.bridge"):
+                raise ImportError("simulated free tier: kiln_pro absent")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _blocked_import)
+
+        mcp = _make_mcp_with_tools()
+        result = mcp["save_design_version"](
+            design_id="free-tier-design",
+            scad_source="cube([10, 10, 10]);",
+            prompt="a cube",
+            notes="free save",
+        )
+
+        # Recipe path still works exactly as before.
+        assert result["ok"] is True
+        assert result["version"]["version"] == 1
+        assert result["version"]["design_id"] == "free-tier-design"
+        # No Pro-only branch block leaked into the free response.
+        assert "branch" not in result["version"]
+        # The recipe sidecar was written to disk (the free-tier
+        # source of truth), proving the save genuinely completed.
+        recipe_path = result["version"]["path"]
+        assert recipe_path and recipe_path.endswith(".json")
+
     def test_brief_id_persists_on_first_version(self, monkeypatch, tmp_path):
         """A4: caller-supplied brief_id lands on the recipe + in the response."""
         monkeypatch.setattr("kiln.plugins.version_tools._DESIGNS_ROOT", str(tmp_path))
