@@ -1,12 +1,16 @@
 """Terms of use acceptance tracking.
 
-Stores acceptance state in the SQLite settings table.  The current terms
-version is bumped whenever TERMS_OF_USE.md changes materially; a version mismatch
-triggers re-acceptance during ``kiln setup``.
+Stores acceptance state in the SQLite settings table — the local floor, and the
+only gate for a no-account install.  When the install has a hosted-API bearer
+(a license key or a paired sign-in), acceptance is also mirrored to the account
+so it is honored across the user's devices and surfaces (web, MCP, CLI).  The
+current terms version is bumped whenever TERMS_OF_USE.md changes materially; a
+version mismatch triggers re-acceptance.
 """
 
 from __future__ import annotations
 
+import os
 import time
 
 _CURRENT_TERMS_VERSION = "3.0"
@@ -50,6 +54,97 @@ _TERMS_SUMMARY = """\
 _SUMMARY_REVIEWED_FOR_VERSION = "3.0"
 
 
+# --- Account-scoped acceptance (honored across the user's devices) ----------
+#
+# The local record above is the floor: authoritative, fast, offline-safe, and
+# the ONLY gate for a no-account install.  When this install has a hosted-API
+# bearer (a license key or a paired sign-in), acceptance is ALSO mirrored to the
+# account so it is honored on the user's other devices and surfaces.  All of it
+# is best-effort — a network failure never blocks accepting or using Kiln; the
+# local record carries the user through.
+
+_SETTINGS_KEY_SERVER_CHECK = "terms_server_checked_at"
+
+# Don't re-poll the account for a cross-device acceptance more than once per this
+# interval — the local record covers the common case, so this only paces the
+# "did I accept on another machine?" lookup for a not-yet-accepted install.
+_SERVER_RECHECK_TTL_S = 300.0
+
+_REQUEST_TIMEOUT_S = 5.0
+
+
+def _hosted_api_base() -> str:
+    """The hosted API base — ``KILN_API_URL`` override else the default.
+
+    Mirrors ``server._pro_api_call`` (lazily imported so this low-level module
+    never drags in the heavy server module at import time).
+    """
+    override = (os.environ.get("KILN_API_URL") or "").strip()
+    if override:
+        return override.rstrip("/")
+    try:
+        from kiln.server import _HOSTED_KILN_API_URL
+
+        return _HOSTED_KILN_API_URL.rstrip("/")
+    except Exception:
+        return "https://api.kiln3d.com"
+
+
+def _account_bearer() -> str:
+    """The install's hosted-API bearer: license key or paired sign-in token.
+
+    Same resolution order as ``server._pro_api_call``.  Empty string when this
+    is a no-account install — the local record is then the only gate, by design.
+    """
+    bearer = (os.environ.get("KILN_LICENSE_KEY") or "").strip()
+    if bearer:
+        return bearer
+    try:
+        from kiln.server import _paired_access_token
+
+        return _paired_access_token() or ""
+    except Exception:
+        return ""
+
+
+def _is_safe_base(base: str) -> bool:
+    """Only put the bearer on the wire over https (localhost exempt for dev)."""
+    return (
+        base.startswith("https://")
+        or base.startswith("http://127.0.0.1")
+        or base.startswith("http://localhost")
+    )
+
+
+def _server_request(path: str, method: str, bearer: str, payload: dict | None = None):
+    """Best-effort call to a hosted terms endpoint; ``None`` on any failure.
+
+    Stdlib-only (urllib) so terms.py — imported early in CLI startup — never
+    forces an httpx dependency on the free tier.
+    """
+    base = _hosted_api_base()
+    if not _is_safe_base(base):
+        return None
+    import json
+    import urllib.error  # noqa: F401  (urlopen raises urllib.error subclasses)
+    import urllib.request
+
+    try:
+        headers = {"Authorization": f"Bearer {bearer}"}
+        data = None
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
+            data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            f"{base}{path}", data=data, headers=headers, method=method
+        )
+        with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT_S) as resp:
+            return json.loads(resp.read())
+    except Exception:
+        # Offline / unreachable / rejected — the local record is the fallback.
+        return None
+
+
 def get_accepted_version(*, db=None) -> str | None:
     """Return the accepted terms version, or ``None`` if never accepted."""
     if db is None:
@@ -60,18 +155,76 @@ def get_accepted_version(*, db=None) -> str | None:
 
 
 def is_current(*, db=None) -> bool:
-    """Return ``True`` if the user has accepted the current terms version."""
-    return get_accepted_version(db=db) == _CURRENT_TERMS_VERSION
+    """Return ``True`` if the user has accepted the current terms version.
+
+    Account-aware: the local record is authoritative (fast, offline-safe).  When
+    it is stale AND this install has an account bearer, the server is consulted
+    at most once per :data:`_SERVER_RECHECK_TTL_S` to import an acceptance made
+    on another device, backfilling the local record on success.  No bearer ->
+    local-only (the no-account floor).
+    """
+    if db is None:
+        from kiln.persistence import get_db
+
+        db = get_db()
+
+    if get_accepted_version(db=db) == _CURRENT_TERMS_VERSION:
+        return True
+
+    bearer = _account_bearer()
+    if not bearer:
+        return False
+
+    # Throttle the cross-device lookup so a not-yet-accepted install doesn't poll
+    # on every gated call.
+    try:
+        last = float(db.get_setting(_SETTINGS_KEY_SERVER_CHECK) or 0)
+    except (TypeError, ValueError):
+        last = 0.0
+    now = time.time()
+    if now - last < _SERVER_RECHECK_TTL_S:
+        return False
+    db.set_setting(_SETTINGS_KEY_SERVER_CHECK, str(now))
+
+    resp = _server_request("/api/terms/acceptance", "GET", bearer)
+    if (
+        isinstance(resp, dict)
+        and resp.get("accepted")
+        and resp.get("version") == _CURRENT_TERMS_VERSION
+    ):
+        # Accepted on another device — backfill local so future checks are fast
+        # and offline-safe (the server already has it, so don't re-POST).
+        db.set_setting(_SETTINGS_KEY_VERSION, _CURRENT_TERMS_VERSION)
+        db.set_setting(_SETTINGS_KEY_TIMESTAMP, str(now))
+        return True
+    return False
 
 
-def record_acceptance(*, db=None) -> None:
-    """Record that the user accepted the current terms version."""
+def record_acceptance(*, db=None, method: str = "setup", verbatim_text: str | None = None) -> None:
+    """Record acceptance of the current terms version.
+
+    Always writes the local record (the floor for every install).  When an
+    account bearer is present, ALSO best-effort mirrors the acceptance to the
+    account so it is honored on the user's other devices and surfaces.  ``method``
+    names the surface (``setup`` / ``cli`` / ``cli_noninteractive`` / ``env`` /
+    ``mcp_in_chat`` / ``web_checkbox``); ``verbatim_text`` carries the exact
+    phrase a user typed for the in-chat MCP path (the consent proof there).
+    """
     if db is None:
         from kiln.persistence import get_db
 
         db = get_db()
     db.set_setting(_SETTINGS_KEY_VERSION, _CURRENT_TERMS_VERSION)
     db.set_setting(_SETTINGS_KEY_TIMESTAMP, str(time.time()))
+
+    bearer = _account_bearer()
+    if bearer:
+        _server_request(
+            "/api/terms/accept",
+            "POST",
+            bearer,
+            {"method": method, "verbatim_text": verbatim_text},
+        )
 
 
 def prompt_acceptance() -> bool:
