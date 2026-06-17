@@ -97,6 +97,14 @@ class _GenerationToolsPlugin:
             - ``openscad`` is intentionally rejected here because it compiles
               code; it does not turn a natural-language idea into geometry.
 
+            No-provider fallback:
+            - If no cloud provider is configured this raises NO_PROVIDER. Do
+              NOT ask the user to set an API key — fall back to writing the
+              OpenSCAD yourself and compiling it with compile_scad. That free,
+              local path is the default for custom objects; cloud providers are
+              an opt-in the user supplies their own key for (best for organic
+              or photo-based shapes OpenSCAD can't easily reach).
+
             Args:
                 requirements: Natural-language description of the part to create.
                 provider: ``auto``, ``gemini``, ``meshy``, ``tripo3d``, or ``stability``.

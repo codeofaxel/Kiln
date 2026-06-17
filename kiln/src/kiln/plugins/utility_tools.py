@@ -442,6 +442,48 @@ class _UtilityToolsPlugin:
                     "monitor": "printer_status, printer_snapshot, await_print_completion",
                     "queue_jobs": "submit_job → job_status → queue_summary",
                 },
+                "creating_models": {
+                    "default_is_openscad": (
+                        "To make a custom object from a description, DEFAULT to "
+                        "writing the OpenSCAD yourself and compiling it locally "
+                        "with compile_scad — free, no API key, works for every "
+                        "user. This is the first reach for any 'make me a ...' "
+                        "request. (compile_scad needs the OpenSCAD binary; see "
+                        "the 'openscad' field below if it isn't installed.)"
+                    ),
+                    "providers_are_opt_in": (
+                        "Cloud AI text-to-3D / image-to-3D backends (Gemini, "
+                        "Meshy, Tripo3D, Stability) are OPTIONAL and need the "
+                        "USER'S OWN API key. Do NOT suggest them, and do NOT ask "
+                        "the user to set a key, unless the user explicitly asks "
+                        "or wants an organic / photo-based shape OpenSCAD can't "
+                        "easily reach. If a generate_* tool returns NO_PROVIDER, "
+                        "fall back to writing OpenSCAD — never tell the user to "
+                        "go get a key."
+                    ),
+                    "show_every_round": (
+                        "Render and SHOW a preview image every time you make or "
+                        "change a model — and after EVERY iteration round, "
+                        "automatically, without being asked (visualize_model / "
+                        "render_design_mesh). For complex or organic asks, tell "
+                        "the user upfront that good results usually take a few "
+                        "rounds — that's normal. Check each result yourself: "
+                        "does it sit on the bed, is it printable, does it match "
+                        "the ask."
+                    ),
+                    "iteration_loop": (
+                        "After the first preview, offer the choice in plain "
+                        "English: 'Want me to loop about 3 more times and then "
+                        "check in, or keep looping until I think it's done?' Show "
+                        "a fresh preview after each round so the user can stop "
+                        "anytime, point at a version they liked, and say "
+                        "'iterate from that one but change X.' Never grind "
+                        "without showing previews; never stop at a bad result. "
+                        "(Saving every version and branching from a past one is "
+                        "a Pro feature — kiln3d.com/pricing; free users still get "
+                        "the live preview loop and linear history.)"
+                    ),
+                },
                 "safety_tools": [
                     "preflight_check — validates printer readiness before printing",
                     "validate_gcode — checks G-code for dangerous commands before sending",

@@ -315,10 +315,13 @@ def _resolve_original_design_provider(
             errors.append(f"{candidate}: {exc}")
 
     raise GenerationError(
-        "No original-design generation backend is configured. Preferred path is "
-        "Gemini for idea-to-CAD, then Meshy, Tripo3D, or Stability. Configure one "
-        "of: KILN_GEMINI_API_KEY, KILN_MESHY_API_KEY, KILN_TRIPO3D_API_KEY, "
-        f"KILN_STABILITY_API_KEY. Details: {' | '.join(errors)}",
+        "No cloud generation backend is configured — and you don't need one. "
+        "Default path for a custom object: write the OpenSCAD yourself and "
+        "compile it locally with compile_scad — free, no API key, no signup. "
+        "Only reach for cloud text-to-3D (Gemini/Meshy/Tripo3D/Stability, each "
+        "needs the user's OWN API key) if the user explicitly asks, or wants an "
+        "organic / photo-based shape OpenSCAD can't easily reach. Do NOT ask the "
+        f"user to set an API key. (Provider details: {' | '.join(errors)})",
         code="NO_PROVIDER",
     )
 
