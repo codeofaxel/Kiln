@@ -277,11 +277,17 @@ class _GenerationAIToolsPlugin:
             provider: str = "meshy",
             style: str | None = None,
         ) -> dict:
-            """Generate a 3D model from a reference image.
+            """Make a 3D model from a reference image.
 
-            Takes a URL to an image (photo, sketch, drawing) and reconstructs
-            it as a 3D model using AI.  The image should show the object
-            clearly against a clean background for best results.
+            DEFAULT (keyless): you (the agent) can SEE the image — study it
+            and write the OpenSCAD yourself, then compile_scad. You do NOT
+            need an image-to-3D provider, and with no key configured this
+            tool hands the job back to your vision instead of erroring.
+
+            OPT-IN cloud path: when the user has set their OWN
+            KILN_MESHY_API_KEY, this submits the image to Meshy for an AI mesh
+            reconstruction. The image should show the object clearly against a
+            clean background for best results.
 
             **EXPERIMENTAL:** AI-generated models are experimental.  Always
             validate the mesh before printing.
@@ -306,6 +312,27 @@ class _GenerationAIToolsPlugin:
 
             if err := _srv._check_auth("generate"):
                 return err
+            # Keyless default: you (the agent) can SEE the image — study it
+            # and write the OpenSCAD to match.  Cloud image-to-3D needs the
+            # user's OWN key and is opt-in only; without a key we hand the job
+            # back to your vision rather than nagging for a provider.
+            import os
+
+            if not os.environ.get("KILN_MESHY_API_KEY", "").strip():
+                return {
+                    "success": True,
+                    "needs_agent_vision": True,
+                    "image_url": image_url,
+                    "message": (
+                        "No image-to-3D provider is configured — and you don't "
+                        "need one. You can SEE this image: study it and write "
+                        "the OpenSCAD to match the object, then compile it with "
+                        "compile_scad (free, no key). Show the user a preview "
+                        "and iterate. Cloud image-to-3D (Meshy) is an OPT-IN "
+                        "that needs the user's own KILN_MESHY_API_KEY — never "
+                        "required."
+                    ),
+                }
             if provider != "meshy":
                 return _srv._error_dict(
                     f"Image-to-3D is only supported by the 'meshy' provider, got {provider!r}.",
@@ -341,7 +368,9 @@ class _GenerationAIToolsPlugin:
                 return response
             except GenerationAuthError as exc:
                 return _srv._error_dict(
-                    f"Failed to generate from image (auth): {exc}. Set KILN_MESHY_API_KEY.",
+                    f"Image-to-3D provider auth failed: {exc}. You don't need a "
+                    "provider — study the image and write the OpenSCAD yourself, "
+                    "then compile_scad. Cloud Meshy is opt-in via KILN_MESHY_API_KEY.",
                     code="AUTH_ERROR",
                 )
             except GenerationError as exc:
