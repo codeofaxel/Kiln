@@ -177,9 +177,12 @@ def is_current(*, db=None) -> bool:
 
     # Throttle the cross-device lookup so a not-yet-accepted install doesn't poll
     # on every gated call.
+    # Throttle bookkeeping is best-effort: a settings-DB hiccup (e.g. a transient
+    # write-lock) must NOT abort the acceptance check — that would fail the gate
+    # OPEN over benign infra — so both the read and the write are guarded.
     try:
         last = float(db.get_setting(_SETTINGS_KEY_SERVER_CHECK) or 0)
-    except (TypeError, ValueError):
+    except Exception:
         last = 0.0
     now = time.time()
     # Throttle only when the last check is in the recent PAST.  A future-dated
@@ -188,7 +191,10 @@ def is_current(*, db=None) -> bool:
     # import until real time caught back up; the lower bound prevents that.
     if 0 <= now - last < _SERVER_RECHECK_TTL_S:
         return False
-    db.set_setting(_SETTINGS_KEY_SERVER_CHECK, str(now))
+    try:
+        db.set_setting(_SETTINGS_KEY_SERVER_CHECK, str(now))
+    except Exception:
+        pass  # couldn't stamp the throttle — fine, we just re-poll next time
 
     resp = _server_request("/api/terms/acceptance", "GET", bearer)
     if (
