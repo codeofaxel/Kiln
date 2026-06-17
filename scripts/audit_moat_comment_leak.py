@@ -23,7 +23,7 @@ curated values; this one protects the *method*.
 
 from __future__ import annotations
 
-import hashlib
+import re
 import sys
 import tokenize
 from pathlib import Path
@@ -70,20 +70,30 @@ _STRATEGY_TOKENS = (
     "bore is widening",
     "bore widening faster",
     "routes its per-component",
+    "correlate flow",
+    "gram-count wear",
+    "wear-tracking subsystem",
 )
 
-# Consciously reviewed blocks that mention the overlay AND trip a strategy
-# token but do NOT leak methodology.  Keyed by sha1 of the normalized
-# block text → reason.  Keep SMALL — trimming beats allowlisting.
-_ALLOWLIST: dict[str, str] = {}
+# Consciously reviewed blocks that trip the detector but are CONTRACT /
+# architecture notes (merge mechanism, public-floor fallback, upgrade
+# nudge, bundle/resume wiring) — NOT narration of how the overlay reasons.
+# Keyed by (filename, a stable marker phrase from the block).  Only add a
+# block after confirming it describes the boundary, not the method.
+_ALLOWLIST: tuple[tuple[str, str], ...] = (
+    ("design_intelligence.py", "Single choke point: merge the kiln-pro engineering moat overlays"),
+    ("design_intelligence.py", "Recommend a material using ONLY safety-floor fields"),
+    ("design_intelligence.py", "Always attach the upgrade nudge when the load detector tripped"),
+    ("design_versions.py", "Design version control for parametric designs"),
+    ("original_design.py", "Run a harsh audit of an original design"),
+    ("slicer_tools.py", "Attach Pro+ enrichment to an EXCEEDS_BED"),
+    ("print_recovery.py", "Stamp gcode_path so kiln-pro's resume engine"),
+)
 
 
-def _norm(text: str) -> str:
-    return " ".join(text.lower().split())
-
-
-def _fingerprint(text: str) -> str:
-    return hashlib.sha1(_norm(text).encode()).hexdigest()
+def _allowlisted(path: Path, text: str) -> bool:
+    name = path.name
+    return any(fn in name and marker in text for fn, marker in _ALLOWLIST)
 
 
 def _blocks(path: Path):
@@ -115,34 +125,80 @@ def _blocks(path: Path):
         yield block_line, "\n".join(block)
 
 
-def _is_leak(text: str) -> bool:
+# Beyond the curated vocabulary, catch the GENERAL narration signature:
+# the overlay as the *active subject* of a reasoning verb ("the overlay
+# routes / reads / flags / detects / classifies / weights X"), or a
+# purpose clause that exists to serve the overlay ("exposed so the overlay
+# can …").  A plain contract ("exposed for the kiln-pro overlay",
+# "consumed by the overlay") has the overlay as a passive recipient — no
+# trailing reasoning verb — and does NOT trip these.  This is what makes
+# the gate catch novel narration, not just the phrases we already trimmed.
+_OVERLAY_ACTION = re.compile(
+    r"(?:overlay|kiln-pro|kiln_pro)\b[^.\n]{0,60}?\b(?:"
+    r"uses?|reads?|routes?|flags?|detects?|classif\w+|confirms?|applies|"
+    r"apply|weights?|correlat\w+|cross-references?|distinguish\w*|catches|"
+    r"enrich\w+|infers?|derives?|downgrade\w*"
+    r")\b",
+    re.IGNORECASE,
+)
+_OVERLAY_PURPOSE = re.compile(
+    r"\b(?:so (?:the |that )?)[^.\n]{0,50}?(?:overlay|kiln-pro|kiln_pro)\b"
+    r"[^.\n]{0,40}?\b(?:can|to|will)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_leak(text: str, *, broad: bool = False) -> bool:
     low = text.lower()
     if not any(m in low for m in _OVERLAY_MENTIONS):
         return False
-    return any(tok in low for tok in _STRATEGY_TOKENS)
+    if any(tok in low for tok in _STRATEGY_TOKENS):
+        return True
+    # The broad subject-verb heuristic ("the overlay routes/reads/flags X")
+    # catches NOVEL narration, but it also trips legitimate seam / contract /
+    # marketed-feature notes — so it is advisory-only (``--sweep``), never
+    # part of the hard CI gate.  Run it periodically and review by hand.
+    if broad:
+        return bool(_OVERLAY_ACTION.search(text) or _OVERLAY_PURPOSE.search(text))
+    return False
 
 
 def main() -> int:
+    broad = "--sweep" in sys.argv
     leaks: list[tuple[Path, int, str]] = []
     for path in sorted(_SRC.rglob("*.py")):
         for line, text in _blocks(path):
-            if _is_leak(text) and _fingerprint(text) not in _ALLOWLIST:
+            if _is_leak(text, broad=broad) and not _allowlisted(path, text):
                 leaks.append((path, line, text))
 
     if not leaks:
-        print("Moat-comment audit: clean.")
+        print("Moat-comment audit: clean." + (" (--sweep)" if broad else ""))
         return 0
 
     root = _SRC.parent.parent.parent
-    print("MOAT-COMMENT LEAK — public Kiln narrates the kiln-pro overlay's strategy:")
+    print(
+        "MOAT-COMMENT SWEEP (advisory) — review each by hand:"
+        if broad
+        else "MOAT-COMMENT LEAK — public Kiln narrates the kiln-pro overlay's strategy:"
+    )
     for path, line, text in leaks:
         print(f"\n  {path.relative_to(root)}:{line}")
         for ln in text.splitlines()[:6]:
             print(f"    {ln.strip()}")
+
+    if broad:
+        print(
+            f"\n{len(leaks)} block(s) flagged by the broad heuristic — most are "
+            "legitimate contract / seam / marketed-feature notes.  Trim only the "
+            "ones that narrate HOW the overlay reasons, then add the new vocabulary "
+            "to _STRATEGY_TOKENS so the hard gate catches it next time."
+        )
+        return 0  # advisory — never fails the build
+
     print(
         f"\n{len(leaks)} block(s).  Trim the moat reasoning (keep the math + the "
-        "'exposed for the kiln-pro overlay' contract).  If a block is genuinely "
-        "a contract note, add its fingerprint to _ALLOWLIST with a reason."
+        "'exposed for the kiln-pro overlay' contract), or — if genuinely a contract "
+        "note — add a (filename, marker) entry to _ALLOWLIST."
     )
     return 2
 

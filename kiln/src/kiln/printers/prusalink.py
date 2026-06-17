@@ -64,9 +64,8 @@ _STATE_MAP: dict[str, PrinterStatus] = {
 
 # Prusa Link state strings that indicate the printer is in a
 # user-intervention or fault posture.  Used by the flow-anomaly
-# cross-check to recognize transitions INTO an anomaly window so the
-# kiln-pro wear-tracking subsystem can correlate flow signals against
-# gram-count wear estimates.
+# cross-check to recognize transitions INTO an anomaly window that the
+# kiln-pro nozzle wear cross-check consumes.
 #
 # Source: Prusa Link Web API (`/api/v1/status`).  The `printer.state`
 # enum carries values like "IDLE", "PRINTING", "PAUSED", "FINISHED",

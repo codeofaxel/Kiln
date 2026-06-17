@@ -446,13 +446,15 @@ class _UtilityToolsPlugin:
                     "front_door": (
                         "When the user wants to MAKE an object, the flow is "
                         "always the same: understand what they want → make it → "
-                        "SHOW a preview → iterate. Where design_session is "
-                        "available it is the front door (it captures the goal, "
-                        "generates, checks, previews, and versions in one place, "
-                        "defaulting to OpenSCAD-native); where it isn't, deliver "
-                        "the SAME loop yourself with compile_scad. Product "
-                        "generators, templates, image, and cloud are sub-paths "
-                        "under this one flow — not separate starting points."
+                        "SHOW a preview → iterate. If design_session is in your "
+                        "available tools, use it as the front door (it captures "
+                        "the goal, generates, checks, previews, and versions in "
+                        "one place, defaulting to OpenSCAD-native). If it is NOT "
+                        "in your tools (free local install), run the SAME loop "
+                        "yourself with compile_scad — do not try to call "
+                        "design_session. Either way, product generators, "
+                        "templates, image, and cloud are sub-paths under this "
+                        "one flow, not separate starting points."
                     ),
                     "default_is_openscad": (
                         "To make a custom object from a description, DEFAULT to "
