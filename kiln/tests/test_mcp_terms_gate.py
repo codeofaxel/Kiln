@@ -52,6 +52,10 @@ def test_consent_message_carries_notice_and_phrase():
     assert server._TERMS_ACCEPT_PHRASE in msg
     assert "https://kiln3d.com/terms" in msg
     assert "Business" in msg  # the tier rule from the summary is present (real notice)
+    # The anti-inference guardrail is the whole point of in-chat consent — pin it
+    # so it can't be silently dropped from _terms_consent_message.
+    assert "infer" in msg.lower()
+    assert "on the user's behalf" in msg.lower()
 
 
 # --- the wrapper raises the gate at the chokepoint -------------------------

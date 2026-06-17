@@ -1339,23 +1339,28 @@ def cli(ctx: click.Context, printer: str | None) -> None:
     ctx.obj["printer"] = printer
 
     # Terms-of-use gate (one-time, account-aware).  Once accepted, is_current()
-    # short-circuits on the local record so this never prompts again.  Commands
-    # that must run BEFORE acceptance are exempt: ``setup`` (its own gate),
-    # ``accept-terms`` (the accept action itself), ``serve`` (the MCP server —
-    # acceptance is enforced per-tool there; gating startup would brick a non-
-    # interactive Claude Desktop launch), and any ``--help`` invocation.
-    try:
-        invoked = ctx.invoked_subcommand
-        help_requested = any(a in ("--help", "-h") for a in sys.argv[1:])
-        if invoked not in _TERMS_GATE_EXEMPT and not help_requested:
+    # short-circuits on the local record so this never prompts again.  Onboarding,
+    # identity, config, and maintenance commands run BEFORE acceptance (see
+    # _TERMS_GATE_EXEMPT); everything that does substantive work gates.  Two
+    # failure modes kept distinct: a terms-check INFRA error fails OPEN (never
+    # block a user over a DB/network hiccup), but a user who is SHOWN the terms
+    # and declines/aborts must BLOCK — so _enforce_terms_gate's own SystemExit /
+    # click.Abort / KeyboardInterrupt are NOT swallowed here.
+    invoked = ctx.invoked_subcommand
+    # Help is --help only (Kiln does not alias -h to help; -h is --host on the
+    # auth command).  Matching '-h' here would let `kiln <cmd> -h <host>` bypass.
+    help_requested = "--help" in sys.argv[1:]
+    if invoked not in _TERMS_GATE_EXEMPT and not help_requested:
+        try:
             from kiln.terms import is_current
 
-            if not is_current():
-                _enforce_terms_gate()
-    except SystemExit:
-        raise
-    except Exception as exc:
-        logger.debug("terms gate skipped (DB not ready?): %s", exc)
+            accepted = is_current()
+        except Exception as exc:
+            logger.debug("terms gate skipped (terms check failed): %s", exc)
+            accepted = True  # fail OPEN only on a terms-check infra error
+        if not accepted:
+            # decline -> SystemExit(1); Ctrl-C / EOF -> click.Abort; both propagate.
+            _enforce_terms_gate()
 
     # Kick a non-blocking PyPI update check, then soft-nag if a newer Kiln
     # is out.  Same discipline as the terms nag: stderr, interactive
@@ -1373,8 +1378,30 @@ def cli(ctx: click.Context, printer: str | None) -> None:
         logger.debug("Update check skipped: %s", exc)
 
 
-# Commands that must run BEFORE terms acceptance (see the gate in ``cli`` above).
-_TERMS_GATE_EXEMPT = frozenset({"setup", "accept-terms", "serve", None})
+# Commands that must run BEFORE terms acceptance — onboarding, identity, config,
+# maintenance, the accept action itself, and the MCP server (which gates per
+# tool).  Everything else (the substantive print/design/control commands) gates.
+# Gating the identity commands would brick onboarding and is CIRCULAR for OAuth
+# users: `kiln signin` is what establishes the bearer is_current() needs to
+# import a web-side acceptance.  Pinned by tests in test_cli_terms_gate.py so
+# this set cannot silently drift.
+_TERMS_GATE_EXEMPT = frozenset({
+    None,
+    "setup",
+    "accept-terms",
+    "serve",
+    "auth",         # save printer credentials (config, setup-family)
+    "self-update",  # maintenance — don't gate updating Kiln
+    # identity / account (kiln.cli.auth_commands.register_auth_cli):
+    "signin",
+    "signout",
+    "whoami",
+    "pair",
+    "link",
+    "login",
+    "logout",
+    "invite",
+})
 
 
 def _terms_gate_interactive() -> bool:

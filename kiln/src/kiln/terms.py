@@ -182,7 +182,11 @@ def is_current(*, db=None) -> bool:
     except (TypeError, ValueError):
         last = 0.0
     now = time.time()
-    if now - last < _SERVER_RECHECK_TTL_S:
+    # Throttle only when the last check is in the recent PAST.  A future-dated
+    # stamp (system clock rolled back — NTP correction, VM snapshot, manual set)
+    # would make (now - last) negative and otherwise lock out the cross-device
+    # import until real time caught back up; the lower bound prevents that.
+    if 0 <= now - last < _SERVER_RECHECK_TTL_S:
         return False
     db.set_setting(_SETTINGS_KEY_SERVER_CHECK, str(now))
 
