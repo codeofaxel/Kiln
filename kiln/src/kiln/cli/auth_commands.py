@@ -205,7 +205,16 @@ def _cli_version() -> str:
     "--timeout", type=int, default=900, show_default=True,
     help="Max seconds to wait for the user to complete the browser step.",
 )
-def auth_login(no_browser: bool, timeout: int) -> None:
+@click.option(
+    # Hidden on purpose: `--provider` is NOT a real flag here.  It's the
+    # natural wrong guess (account sign-in vs. linking a GitHub identity
+    # for signing are different things), so instead of Click's bare
+    # "No such option: --provider" we catch it and redirect to the right
+    # command.  Hidden so it never appears in --help and the canonical
+    # flag set stays {--no-browser, --timeout}.
+    "--provider", "provider", default=None, hidden=True,
+)
+def auth_login(no_browser: bool, timeout: int, provider: str | None) -> None:
     """Sign in to your Kiln account via OAuth (Google / Apple / GitHub).
 
     This is KILN ACCOUNT AUTHENTICATION — use this to log in to the
@@ -224,6 +233,26 @@ def auth_login(no_browser: bool, timeout: int) -> None:
     license key needed for OAuth-linked Pro+ accounts.  Backwards-compat
     alias: ``kiln login`` (same command, same flow).
     """
+    # `--provider` isn't an option for account sign-in (this command picks
+    # the provider for you on the browser page).  It's the natural wrong
+    # guess for "connect my GitHub identity to sign design releases", which
+    # is a separate command.  Redirect there and bail WITHOUT signing in,
+    # so we never half-start a device flow the user didn't mean to run.
+    if provider is not None:
+        target = str(provider).strip().lower() or "github"
+        click.echo(
+            "`--provider` isn't an option for `kiln login` (that's account "
+            "sign-in, which picks the provider for you in the browser).",
+            err=True,
+        )
+        click.echo(
+            "To connect a GitHub identity for signing design releases, run:",
+            err=True,
+        )
+        click.echo("", err=True)
+        click.echo(f"    kiln identity link --provider {target}", err=True)
+        sys.exit(2)
+
     # 1) Start the device flow.
     start = _http_post("/api/auth/device/start", {})
     if not start.get("success"):

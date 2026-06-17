@@ -112,6 +112,133 @@ class TestRegisterAuthCli:
 
 
 # =====================================================================
+# CLI: `kiln login --provider <X>` redirect hint
+# =====================================================================
+
+
+class TestLoginProviderHint:
+    """`kiln login --provider github` is the natural wrong guess —
+    account sign-in (this command) vs. linking a GitHub identity for
+    signing design releases (`kiln identity link`) are different things.
+    Instead of Click's bare "No such option: --provider", the command
+    catches it and redirects to the right place, exiting non-zero
+    WITHOUT starting a device flow.  Plain `kiln login` is unchanged."""
+
+    def test_provider_flag_redirects_instead_of_no_such_option(self, monkeypatch):
+        import click
+        from click.testing import CliRunner
+        from kiln.cli import auth_commands
+        from kiln.cli.auth_commands import register_auth_cli
+
+        # If the redirect failed to short-circuit, the command would try
+        # to start the device flow — explode loudly so a regression that
+        # silently hit the network can't pass.
+        def _explode(*a, **k):  # pragma: no cover - must never be reached
+            raise AssertionError("device flow started despite --provider")
+
+        monkeypatch.setattr(auth_commands, "_http_post", _explode)
+
+        g = click.Group("kiln")
+        register_auth_cli(g)
+        r = CliRunner().invoke(g, ["login", "--provider", "github"])
+
+        # Non-zero exit, but NOT Click's bare "No such option" failure.
+        assert r.exit_code != 0
+        assert "No such option" not in r.output
+        # The redirect names the right command + flag.
+        assert "kiln identity link" in r.output
+        assert "--provider github" in r.output
+
+    def test_provider_flag_message_goes_to_stderr(self, monkeypatch):
+        import click
+        from click.testing import CliRunner
+        from kiln.cli import auth_commands
+        from kiln.cli.auth_commands import register_auth_cli
+
+        monkeypatch.setattr(
+            auth_commands, "_http_post",
+            lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("device flow started despite --provider")
+            ),
+        )
+
+        g = click.Group("kiln")
+        register_auth_cli(g)
+        r = CliRunner().invoke(g, ["login", "--provider", "github"])
+
+        # The hint is operator guidance, not pipeable output — stderr only,
+        # so `kiln login | ...` stays clean.
+        assert "kiln identity link" in r.stderr
+        assert r.stdout == ""
+
+    def test_provider_flag_is_hidden_from_help(self):
+        import click
+        from click.testing import CliRunner
+        from kiln.cli.auth_commands import register_auth_cli
+
+        g = click.Group("kiln")
+        register_auth_cli(g)
+        r = CliRunner().invoke(g, ["login", "--help"])
+        assert r.exit_code == 0, r.output
+        # Hidden so docs + --help advertise only the real flags.
+        assert "--provider" not in r.output
+        assert "--no-browser" in r.output
+        assert "--timeout" in r.output
+
+    def test_plain_login_is_unchanged(self, auth_home, monkeypatch):
+        """No `--provider` → the redirect branch never fires and the
+        device flow runs exactly as before.  We stub the network so the
+        flow completes locally and assert it actually went through.
+
+        `auth_home` redirects ~/.kiln so the success path's token write
+        lands in a temp dir, never the developer's real session."""
+        import click
+        from click.testing import CliRunner
+        from kiln.cli import auth_commands
+        from kiln.cli.auth_commands import register_auth_cli
+
+        calls: list[str] = []
+
+        def fake_post(path, payload, *, bearer=None, timeout=15.0):
+            calls.append(path)
+            if path.endswith("/device/start"):
+                return {
+                    "success": True,
+                    "device_code": "dev-123",
+                    "user_code": "WXYZ-1234",
+                    "verification_uri": "https://app.kiln3d.com/auth/device",
+                    "interval": 1,
+                    "expires_in": 900,
+                }
+            # poll → immediate success so the flow terminates without sleeping
+            # on a real network.
+            return {
+                "status": "success",
+                "access_token": "tok",
+                "refresh_token": "ref",
+                "email": "a@example.com",
+                "tier": "free",
+                "auth_uid": "uid-1",
+                "has_entitlement": False,
+            }
+
+        monkeypatch.setattr(auth_commands, "_http_post", fake_post)
+        # Don't pop a real browser open during the test.
+        monkeypatch.setattr(auth_commands.webbrowser, "open", lambda *a, **k: False)
+
+        g = click.Group("kiln")
+        register_auth_cli(g)
+        r = CliRunner().invoke(g, ["login", "--no-browser"])
+
+        assert r.exit_code == 0, r.output
+        # The device flow was exercised — start THEN poll — proving the
+        # `--provider` addition didn't divert the normal path.
+        assert any(p.endswith("/device/start") for p in calls)
+        assert any(p.endswith("/device/poll") for p in calls)
+        assert "You’re in" in r.stdout
+
+
+# =====================================================================
 # CLI: logout / whoami (no network required)
 # =====================================================================
 
