@@ -28,6 +28,7 @@ class TestGetStarted:
             "tool_discovery",
             "quick_start",
             "core_workflows",
+            "creating_models",
             "safety_tools",
             "session_recovery",
             "tip",
