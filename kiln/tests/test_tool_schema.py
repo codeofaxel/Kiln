@@ -272,7 +272,7 @@ class TestSchemaIntegration:
             "analyze_design_requirements",
             "build_generation_prompt",
             "audit_original_design",
-            "generate_original_design",
+            "generate_model_with_provider",
         ):
             assert tool_name in names
 

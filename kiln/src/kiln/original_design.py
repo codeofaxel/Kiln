@@ -281,7 +281,7 @@ def _resolve_original_design_provider(
 
     if _looks_like_openscad_code(requirements_text):
         raise GenerationError(
-            "generate_original_design expects natural-language requirements, not "
+            "generate_model_with_provider expects natural-language requirements, not "
             "raw OpenSCAD code. Use generate_model(provider='openscad') for direct "
             "code compilation.",
             code="INVALID_INPUT",

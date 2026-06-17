@@ -33,7 +33,7 @@ def registered_tools(mock_mcp):
 
 
 _EXPECTED_TOOLS = {
-    "generate_original_design",
+    "generate_model_with_provider",
     "preview_generated_model",
     "validate_and_prepare_mesh",
     "generate_texture",
@@ -72,10 +72,10 @@ class TestGenerationToolsRegistration:
 
 
 class TestGenerationToolsPlugin:
-    def test_registers_generate_original_design(self, registered_tools) -> None:
-        assert "generate_original_design" in registered_tools
+    def test_registers_generate_model_with_provider(self, registered_tools) -> None:
+        assert "generate_model_with_provider" in registered_tools
 
-    def test_generate_original_design_wires_to_core_loop(self, registered_tools, monkeypatch) -> None:
+    def test_generate_model_with_provider_wires_to_core_loop(self, registered_tools, monkeypatch) -> None:
         monkeypatch.setattr("kiln.server._check_auth", lambda scope: None)
         captured_kwargs = {}
 
@@ -96,7 +96,7 @@ class TestGenerationToolsPlugin:
 
         monkeypatch.setattr("kiln.original_design.generate_original_design", fake_generate)
 
-        result = registered_tools["generate_original_design"](
+        result = registered_tools["generate_model_with_provider"](
             "phone stand with cable slot",
             provider="auto",
             printer_model="bambu_a1",

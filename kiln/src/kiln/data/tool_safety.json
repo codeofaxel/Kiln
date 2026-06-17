@@ -270,7 +270,7 @@
     "generate_model": {
       "level": "confirm"
     },
-    "generate_original_design": {
+    "generate_model_with_provider": {
       "level": "confirm"
     },
     "generation_status": {

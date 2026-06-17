@@ -70,7 +70,7 @@ TIER_STANDARD: list[str] = TIER_ESSENTIAL + [
     "validate_gcode_safe",
     # Original design & generation
     "generate_model",
-    "generate_original_design",
+    "generate_model_with_provider",
     "download_generated_model",
     "await_generation",
     "validate_generated_mesh",
@@ -198,7 +198,7 @@ TIER_FULL: list[str] = [
     # --- Generation ---
     "list_generation_providers",
     "generate_model",
-    "generate_original_design",
+    "generate_model_with_provider",
     "generation_status",
     "download_generated_model",
     "await_generation",

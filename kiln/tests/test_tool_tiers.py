@@ -238,7 +238,7 @@ class TestToolPresence:
 
     def test_original_design_flow_tools_in_standard(self):
         assert "generate_model" in TIER_STANDARD
-        assert "generate_original_design" in TIER_STANDARD
+        assert "generate_model_with_provider" in TIER_STANDARD
         assert "analyze_design_requirements" in TIER_STANDARD
         assert "build_generation_prompt" in TIER_STANDARD
         assert "audit_original_design" in TIER_STANDARD
@@ -254,7 +254,7 @@ class TestToolPresence:
         assert "register_webhook" not in TIER_STANDARD
 
     def test_original_design_tools_in_full(self):
-        assert "generate_original_design" in TIER_FULL
+        assert "generate_model_with_provider" in TIER_FULL
         assert "build_generation_prompt" in TIER_FULL
         assert "audit_original_design" in TIER_FULL
         assert "analyze_design_requirements" in TIER_FULL

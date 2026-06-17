@@ -39,7 +39,7 @@ class _GenerationToolsPlugin:
     """Text-to-3D and image-to-3D model generation tools.
 
     Tools:
-        - generate_original_design
+        - generate_model_with_provider
         - preview_generated_model
         - validate_and_prepare_mesh
         - generate_texture
@@ -61,7 +61,7 @@ class _GenerationToolsPlugin:
         """Register generation tools with the MCP server."""
 
         @mcp.tool()
-        def generate_original_design(
+        def generate_model_with_provider(
             requirements: str,
             provider: str = "auto",
             material: str | None = None,
@@ -77,20 +77,25 @@ class _GenerationToolsPlugin:
             timeout: int = 600,
             max_attempts: int = 2,
         ) -> dict:
-            """Generate and harshly audit an original printable design.
+            """Generate a printable design via an external AI provider.
 
-            This is the highest-level original-creation tool in Kiln. It takes
-            a natural-language description of what to make, chooses the best
-            available idea-to-3D backend, generates a candidate, audits the
-            result for printability and design correctness, and can perform
-            one or more corrective retries using feedback from failed
-            attempts.
+            The cloud, provider-backed creation path: hands a natural-language
+            description to an external idea-to-3D service, audits the candidate
+            for printability and design correctness, and can perform one or
+            more corrective retries using feedback from failed attempts.
+
+            This is NOT the default. It needs a configured provider (the user
+            supplies their own API key). For most custom objects the free,
+            keyless path is to author the OpenSCAD yourself and compile it with
+            ``compile_scad`` — no provider required. Reach for this tool when
+            the shape is organic or photo-derived and hard to express in
+            OpenSCAD AND a provider is configured.
 
             For the user-facing saved-goal flow (capturing duty / environment /
             materials / safety so the audit and post-print review can verify
             the result against the user's intent), call this through
             ``design_session(verb="generate", session_id=...)`` rather than
-            calling ``generate_original_design`` directly.
+            calling ``generate_model_with_provider`` directly.
 
             Provider notes:
             - ``auto`` prefers Gemini for idea-to-CAD when available.
@@ -183,9 +188,9 @@ class _GenerationToolsPlugin:
                     code=exc.code or "GENERATION_ERROR",
                 )
             except Exception as exc:
-                _logger.exception("Unexpected error in generate_original_design")
+                _logger.exception("Unexpected error in generate_model_with_provider")
                 return _srv._error_dict(
-                    f"Unexpected error in generate_original_design: {exc}",
+                    f"Unexpected error in generate_model_with_provider: {exc}",
                     code="INTERNAL_ERROR",
                 )
 

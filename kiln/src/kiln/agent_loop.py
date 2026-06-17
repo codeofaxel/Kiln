@@ -225,7 +225,7 @@ _STANDARD_TOOLS = _ESSENTIAL_TOOLS | frozenset(
         "printer_stats",
         "annotate_print",
         "generate_model",
-        "generate_original_design",
+        "generate_model_with_provider",
         "download_generated_model",
         "await_generation",
         "validate_generated_mesh",
