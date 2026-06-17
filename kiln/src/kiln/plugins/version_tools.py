@@ -239,8 +239,31 @@ class _VersionToolsPlugin:
                     mesh_diff = enriched.get("mesh_diff")
                     if mesh_diff and mesh_diff.get("warnings"):
                         result["warnings"] = mesh_diff["warnings"]
+
+                    # Register the saved version with the branch system so
+                    # it becomes a branch-linked, pushable commit — the
+                    # same registration external-mesh imports perform. This
+                    # is LOCAL only: it advances the on-device branch head
+                    # so the version can be pushed later; it does NOT push.
+                    # ``getattr`` so an older kiln-pro that predates this
+                    # hook degrades to recipe-only, exactly like free tier
+                    # (a missing attribute is not an error here).
+                    register = getattr(
+                        pro_features, "register_saved_version", None
+                    )
+                    if register is not None:
+                        registration = register(
+                            design_id=design_id,
+                            scad_source=scad_source,
+                            stl_path=recipe.stl_path or stl_path or None,
+                            prompt=recipe.prompt or "",
+                            parameters=recipe.parameters,
+                            notes=recipe.notes or "",
+                        )
+                        if registration:
+                            result["version"]["branch"] = registration
                 except ImportError:
-                    pass  # Free tier — no provenance enrichment
+                    pass  # Free tier — no provenance enrichment or branch registration
 
                 try:
                     from kiln_pro.plugins.git_render_tools import (
