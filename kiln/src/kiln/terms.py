@@ -154,14 +154,16 @@ def get_accepted_version(*, db=None) -> str | None:
     return db.get_setting(_SETTINGS_KEY_VERSION)
 
 
-def is_current(*, db=None) -> bool:
+def is_current(*, db=None, force_server: bool = False) -> bool:
     """Return ``True`` if the user has accepted the current terms version.
 
     Account-aware: the local record is authoritative (fast, offline-safe).  When
     it is stale AND this install has an account bearer, the server is consulted
     at most once per :data:`_SERVER_RECHECK_TTL_S` to import an acceptance made
     on another device, backfilling the local record on success.  No bearer ->
-    local-only (the no-account floor).
+    local-only (the no-account floor).  ``force_server`` bypasses that throttle —
+    the MCP gate sets it right after minting an accept link, so the user's tap is
+    seen on the very next call instead of waiting out the recheck window.
     """
     if db is None:
         from kiln.persistence import get_db
@@ -180,17 +182,18 @@ def is_current(*, db=None) -> bool:
     # Throttle bookkeeping is best-effort: a settings-DB hiccup (e.g. a transient
     # write-lock) must NOT abort the acceptance check — that would fail the gate
     # OPEN over benign infra — so both the read and the write are guarded.
-    try:
-        last = float(db.get_setting(_SETTINGS_KEY_SERVER_CHECK) or 0)
-    except Exception:
-        last = 0.0
     now = time.time()
-    # Throttle only when the last check is in the recent PAST.  A future-dated
-    # stamp (system clock rolled back — NTP correction, VM snapshot, manual set)
-    # would make (now - last) negative and otherwise lock out the cross-device
-    # import until real time caught back up; the lower bound prevents that.
-    if 0 <= now - last < _SERVER_RECHECK_TTL_S:
-        return False
+    if not force_server:
+        try:
+            last = float(db.get_setting(_SETTINGS_KEY_SERVER_CHECK) or 0)
+        except Exception:
+            last = 0.0
+        # Throttle only when the last check is in the recent PAST.  A future-dated
+        # stamp (system clock rolled back — NTP correction, VM snapshot, manual
+        # set) would make (now - last) negative and otherwise lock out the cross-
+        # device import until real time caught back up; the lower bound stops that.
+        if 0 <= now - last < _SERVER_RECHECK_TTL_S:
+            return False
     try:
         db.set_setting(_SETTINGS_KEY_SERVER_CHECK, str(now))
     except Exception:

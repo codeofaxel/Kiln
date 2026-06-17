@@ -921,34 +921,81 @@ def _record_local_tool_call(name: str) -> None:
 # --- Terms-of-Use gate (MCP) ------------------------------------------------
 #
 # The first substantive MCP tool call by an un-accepted identity short-circuits
-# with a one-time consent gate.  It is raised (not returned) so the lowlevel MCP
-# handler surfaces it to the agent as a tool error to relay.  A small whitelist
-# stays reachable so a new user can orient and accept.  Once accepted,
+# with a one-time consent gate, raised so the lowlevel MCP handler surfaces it to
+# the agent as a tool error to relay.  Crucially, the agent CANNOT accept on the
+# user's behalf: there is no accept tool, and an MCP agent has no browser and no
+# shell — so the only paths to acceptance are human actions the agent can't take:
+# tapping the account-scoped one-tap accept LINK (account / licensed installs) or
+# running `kiln accept-terms` in their own terminal (no-account installs).  A
+# small whitelist stays reachable so a new user can orient.  Once accepted,
 # is_current() short-circuits on the local record and this never fires again.
-# Account-aware acceptance lives in kiln.terms; the verbatim phrase the user
-# types is the consent proof for this surface.
 
-_TERMS_GATE_WHITELIST = frozenset(
-    {"get_started", "check_my_tier", "kiln_health", "accept_terms"}
-)
-_TERMS_ACCEPT_PHRASE = "I accept the Kiln Terms"
+_TERMS_GATE_WHITELIST = frozenset({"get_started", "check_my_tier", "kiln_health"})
+
+# In-process: after the gate mints an accept link we force is_current() to poll
+# the server fresh (bypassing its recheck throttle) for this window, so the
+# user's tap is seen on the very next tool call instead of waiting it out.
+_accept_link_pending_until = 0.0
+_ACCEPT_LINK_PENDING_WINDOW_S = 900.0
+
+
+def _mint_accept_link() -> str | None:
+    """Mint a one-tap accept URL for this install's account, or ``None``.
+
+    Reuses kiln.terms' bearer + hosted-API plumbing.  ``None`` when there's no
+    account bearer (a no-account install) or the mint is offline/unavailable.
+    """
+    try:
+        from kiln.terms import _account_bearer, _server_request
+
+        bearer = _account_bearer()
+        if not bearer:
+            return None
+        resp = _server_request("/api/terms/accept-link", "POST", bearer, {})
+        if isinstance(resp, dict) and resp.get("url"):
+            return str(resp["url"])
+    except Exception:
+        logger.debug("terms gate: accept-link mint failed", exc_info=True)
+    return None
 
 
 def _terms_consent_message() -> str:
-    """The one-time consent gate the agent relays to the user."""
+    """The one-time consent gate the agent relays to the user.
+
+    Offers a human action the agent cannot perform — tap the account-scoped
+    accept link, or (no account) run ``kiln accept-terms``.  There is deliberately
+    no in-chat accept path.
+    """
+    global _accept_link_pending_until
     from kiln.terms import _CURRENT_TERMS_VERSION, _TERMS_SUMMARY
 
-    return (
+    head = (
         f"One-time setup — Kiln Terms of Use acceptance required "
         f"(v{_CURRENT_TERMS_VERSION}).\n\n"
-        "Before I can run Kiln tools for you, please review and accept the "
-        "Terms:\n\n"
+        "Before I can run Kiln tools for you, here are the terms:\n\n"
         f"{_TERMS_SUMMARY}\n\n"
-        "To accept, the user must reply, in their own words, with exactly:\n"
-        f"    {_TERMS_ACCEPT_PHRASE}\n"
-        "Then call the `accept_terms` tool, passing that exact text as "
-        "`verbatim_text`.  Do NOT accept on the user's behalf or infer "
-        "acceptance from 'ok' / 'go ahead' — it must be the user's own statement."
+    )
+
+    link = _mint_accept_link()
+    if link:
+        import time as _time
+
+        _accept_link_pending_until = _time.time() + _ACCEPT_LINK_PENDING_WINDOW_S
+        return head + (
+            "To accept, tap this link and click \"I Agree\" — about 5 seconds:\n"
+            f"    {link}\n\n"
+            "Then just tell me to continue and I'll pick right back up. "
+            "(I can't accept for you — it has to be your tap.)"
+        )
+
+    # No account on this install — point the human at an action the agent also
+    # can't take: a one-line terminal command, or signing in to accept in a
+    # browser.
+    return head + (
+        "To accept, run this once in your terminal (about 5 seconds):\n"
+        "    kiln accept-terms\n\n"
+        "…or sign in at https://kiln3d.com and accept there. Then tell me to "
+        "continue. (I can't accept for you — it has to be you.)"
     )
 
 
@@ -957,35 +1004,15 @@ def _terms_gate_blocks(tool_name: str) -> bool:
     if tool_name in _TERMS_GATE_WHITELIST:
         return False
     try:
+        import time as _time
+
         from kiln.terms import is_current
 
-        return not is_current()
+        force = _time.time() < _accept_link_pending_until
+        return not is_current(force_server=force)
     except Exception:
         # Never block a tool over a terms-check infrastructure error.
         return False
-
-
-def _record_mcp_acceptance(verbatim_text: str) -> dict:
-    """Core of the ``accept_terms`` tool — record the user's acceptance."""
-    from kiln.terms import _CURRENT_TERMS_VERSION, is_current, record_acceptance
-
-    if is_current():
-        return {
-            "status": "ok",
-            "accepted": True,
-            "version": _CURRENT_TERMS_VERSION,
-            "message": "Terms of use already accepted.",
-        }
-    record_acceptance(
-        method="mcp_in_chat",
-        verbatim_text=(verbatim_text or "").strip() or None,
-    )
-    return {
-        "status": "ok",
-        "accepted": True,
-        "version": _CURRENT_TERMS_VERSION,
-        "message": "Thanks — your acceptance of the Kiln Terms of Use has been recorded.",
-    }
 
 
 def _install_mcp_request_context_capture() -> None:
@@ -1028,23 +1055,6 @@ def _install_mcp_request_context_capture() -> None:
 
 
 _install_mcp_request_context_capture()
-
-
-@mcp.tool()
-def accept_terms(verbatim_text: str = "") -> dict:
-    """Record the user's acceptance of Kiln's Terms of Use (one-time).
-
-    Call this ONLY after the user has, in their own words, stated that they
-    accept the terms (e.g. they replied "I accept the Kiln Terms").  Pass their
-    exact words as ``verbatim_text``.  Do NOT call this on the user's behalf or
-    infer acceptance from "ok" / "go ahead" — it must be the user's explicit
-    statement.
-
-    Account-aware: when the install is signed in or licensed, the acceptance is
-    mirrored to the user's Kiln account so it's honored on their other devices.
-    Full terms: https://kiln3d.com/terms
-    """
-    return _record_mcp_acceptance(verbatim_text)
 
 
 # ---------------------------------------------------------------------------
