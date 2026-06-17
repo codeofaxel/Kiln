@@ -1129,13 +1129,7 @@ class BambuAdapter(PrinterAdapter):
             # Flow-anomaly cross-check — when the merged push_status
             # carries an HMS code that the firmware classifies as a
             # flow / extrusion issue, feed the signal into the
-            # kiln-pro nozzle wear cross-check.  Lets the wear-tracking
-            # subsystem learn that this nozzle threw a flow signal
-            # mid-print (cross-references with the gram-count wear
-            # estimate; sustained flow signals on a nozzle whose
-            # gram-count says "fresh" are a hint the gram count is
-            # wrong, the filament path has friction, or the bore is
-            # widening faster than population).
+            # kiln-pro nozzle wear cross-check.
             #
             # The wire is intentionally idempotent: every status
             # message that carries the same HMS code re-fires the

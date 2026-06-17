@@ -63,6 +63,10 @@ scripts/*
 # keeps docs/site's /printers page in sync with the printer catalog and
 # is run by tests/CI so the marketing surface can never go stale.
 !scripts/generate_supported_printers.py
+# …and for the moat-comment leak gate, which is run by a CI-collected
+# test so public comments can never narrate the kiln-pro overlay's
+# internal strategy.
+!scripts/audit_moat_comment_leak.py
 
 # Internal working docs (backed up via iCloud)
 .dev

@@ -506,13 +506,8 @@ class PrusaLinkAdapter(PrinterAdapter):
         chamber_target = printer.get("target_chamber") if isinstance(printer, dict) else None
 
         # Flow-anomaly cross-check — fire on TRANSITION INTO ATTENTION /
-        # ERROR (with a filament-path message hint) so the kiln-pro
-        # nozzle wear-tracking subsystem can correlate flow signals
-        # against the gram-count wear estimate.  Sustained flow signals
-        # on a nozzle whose gram-count says "fresh" are a hint that
-        # either the gram count is wrong, the filament path has
-        # friction, or the bore is widening faster than population
-        # estimates predict.
+        # ERROR (with a filament-path message hint) and feed the signal
+        # into the kiln-pro nozzle wear cross-check.
         #
         # Transition-only firing — _prior_state guards against
         # steady-state ATTENTION flooding the wear-signal log every

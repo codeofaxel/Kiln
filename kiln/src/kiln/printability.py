@@ -284,14 +284,11 @@ class PrintabilityReport:
     cost: CostAnalysis | None = None
     # Cavity-width analysis — sibling to ``thin_walls`` measuring the
     # dimensions of cavities cut INTO the mesh (engraved grooves,
-    # debossed text, narrow slots).  Outward ray-casting; sub-perimeter
-    # widths flag as ``unprintable`` in the kiln-pro overlay.  Defaults
+    # debossed text, narrow slots) via outward ray-casting.  Defaults
     # to ``None`` for clients that construct the report directly.
     cavities: CavityAnalysis | None = None
-    # Bounding-box dimensions exposed for density-based topology checks
-    # (the kiln-pro overlay reads these to detect lattice / thread /
-    # dense-feature geometries where the wall verdict downgrades to
-    # advisory).  Keys: ``width_mm``, ``depth_mm``, ``height_mm``.
+    # Bounding-box dimensions.  Keys: ``width_mm``, ``depth_mm``,
+    # ``height_mm``.  Exposed for the kiln-pro overlay.
     dimensions_mm: dict[str, float] = field(default_factory=dict)
     model_height_mm: float = 0.0
     recommendations: list[str] = field(default_factory=list)
@@ -299,11 +296,8 @@ class PrintabilityReport:
     # Detected cylindrical-hole features.  Each entry is a dict with
     # keys ``position`` (dict[x_mm,y_mm,z_mm]), ``diameter_mm``,
     # ``depth_mm``, ``axis`` (one of "x"/"y"/"z"), ``triangle_count``.
-    # Populated by ``analyze_printability`` and consumed by the kiln-pro
-    # printability overlay's hole-too-small material rule + the
-    # per-machine "hole" calibration feature class.  Free-tier installs
-    # see the list but no Pro tuning; Pro+ installs feed it into the
-    # overlay enrichment pass.
+    # Populated by ``analyze_printability``; exposed for the kiln-pro
+    # overlay and per-machine calibration.
     holes: list[dict[str, Any]] = field(default_factory=list)
     # Optional kiln-pro overlay block.  Populated by
     # ``analyze_printability`` when the kiln-pro package is installed
@@ -311,47 +305,31 @@ class PrintabilityReport:
     # for tier details.
     enrichment: dict[str, Any] | None = None
     # Total triangle count in the parsed mesh.  Exposed so downstream
-    # consumers (notably the kiln-pro overlay's coverage notes) can
-    # gauge mesh-density confidence — a coarse mesh below ~500
-    # triangles with ``thin_walls.thin_wall_count == 0`` is a "Pro
-    # cannot analyze" signal, not a "no thin walls" signal.  Defaults
-    # to 0 for clients that construct PrintabilityReport directly
-    # without going through ``analyze_printability``.
+    # consumers can gauge mesh-density confidence — a coarse mesh below
+    # ~500 triangles with ``thin_walls.thin_wall_count == 0`` is a "low
+    # mesh density" signal, not a "no thin walls" signal.  Defaults to 0
+    # for clients that construct PrintabilityReport directly without
+    # going through ``analyze_printability``.
     triangle_count: int = 0
     # Number of disjoint connected components in the mesh (triangle
     # islands joined by shared-vertex adjacency).  A single closed body
-    # is 1; a lattice/scaffold of N independent struts is N; a plate
-    # with an embedded floating inclusion is 2.  Exposed so the
-    # kiln-pro overlay can route lattice/scaffold topologies through
-    # strut-specific load-bearing thresholds rather than apply the
-    # continuous-wall floors.  Defaults to 0 for clients that construct
-    # PrintabilityReport directly.
+    # is 1; a multi-body mesh is N.  Exposed for the kiln-pro overlay.
+    # Defaults to 0 for clients that construct PrintabilityReport
+    # directly.
     connected_components: int = 0
     # Component-size uniformity: 0.0–1.0 scalar (rounded to 3 places).
-    # 1.0 = every component has the same bbox volume (canonical lattice
-    # — identical struts).  Near 0.0 = one big component plus tiny
-    # ones (e.g. host plate with floating inclusions).  Secondary
-    # signal the kiln-pro overlay uses ALONGSIDE
-    # ``connected_components`` to confirm lattice topology before
-    # applying strut semantics — guards against multi-body soups that
-    # AREN'T lattices but happen to have many components.  Trivially
-    # 1.0 for single-component meshes (no spread).  Defaults to 0.0.
+    # 1.0 = every component has the same bbox volume; near 0.0 = one big
+    # component plus tiny ones.  Trivially 1.0 for single-component
+    # meshes.  Exposed for the kiln-pro overlay.  Defaults to 0.0.
     component_size_uniformity: float = 0.0
     # Topological genus, summed across components, derived from the
-    # Euler characteristic χ = V − E + F.  Counts independent "holes
-    # through the body" — a closed solid is 0, a torus (or a plate with
-    # one through-hole) is 1, a curved lattice infill (gyroid / TPMS) is
-    # typically tens to hundreds (roughly one handle per period of the
-    # surface).  Complements ``connected_components`` for the kiln-pro
-    # overlay's strut classifier: cubic lattices fragment into many
-    # disjoint bars (n_components catches them, genus does not), while
-    # curved lattice infills are one connected scaffold with many
-    # handles (genus catches them, n_components does not).  Together
-    # the two signals cover both lattice families.  Non-closed /
-    # non-manifold meshes produce anomalous values that don't match
-    # the physical handle count; consumers should not treat the
-    # number as authoritative when ``is_manifold`` is False or when
-    # the mesh is otherwise known-open.  Defaults to 0.
+    # Euler characteristic χ = V − E + F — the count of independent
+    # "holes through the body" (a closed solid is 0, a torus is 1).
+    # Non-closed / non-manifold meshes produce anomalous values that
+    # don't match the physical handle count; consumers should not treat
+    # the number as authoritative when ``is_manifold`` is False or the
+    # mesh is otherwise known-open.  Exposed for the kiln-pro overlay.
+    # Defaults to 0.
     genus: int = 0
 
     def to_dict(self) -> dict[str, Any]:
@@ -1587,9 +1565,8 @@ def _analyze_cavity_widths(
     measurement.
 
     Sub-perimeter cavities (groove widths below the slicer's thinnest
-    extrusion) cannot be reproduced during printing; the kiln-pro
-    overlay flags these as ``unprintable``.  Material-specific floors
-    apply to the cavity dimensions exactly as they do to wall thicknesses.
+    extrusion) cannot be reproduced during printing and are flagged
+    accordingly.
     """
     total = len(triangles)
     if total < 4:
@@ -3092,20 +3069,13 @@ def analyze_printability(
     thin_walls = _analyze_thin_walls(triangles, vertices, nozzle_diameter=nozzle_diameter)
     cavities = _analyze_cavity_widths(triangles, vertices, nozzle_diameter=nozzle_diameter)
 
-    # Connected-component count: one closed body = 1; an N-strut lattice
-    # = N axis-line components.  Exposed on the report so the kiln-pro
-    # overlay can route lattice / scaffold topologies through strut-
-    # specific load-bearing thresholds (a 1.5 mm TPU strut needs a
-    # different floor than a 1.5 mm continuous TPU wall).
+    # Connected-component count: one closed body = 1; a multi-body mesh
+    # = N components.  Exposed for the kiln-pro overlay.
     #
     # ``component_size_uniformity`` is a 0–1 scalar describing how
     # similar the components are in volume — 1.0 = all components have
-    # identical bbox volume (canonical lattice signature); near 0.0 =
-    # one big component plus tiny ones (host plate with small floating
-    # inclusions).  The kiln-pro overlay uses this as a SECONDARY
-    # signal to confirm that a multi-component mesh actually IS a
-    # lattice / scaffold before applying strut semantics, rather than
-    # an unrelated multi-body soup that happens to have many parts.
+    # identical bbox volume; near 0.0 = one big component plus tiny
+    # ones.  Exposed for the kiln-pro overlay.
     component_count = 0
     component_size_uniformity = 0.0
     mesh_genus = 0

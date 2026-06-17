@@ -494,12 +494,7 @@ class ElegooAdapter(PrinterAdapter):
         # Flow-anomaly cross-check — when the SDCP push carries an
         # ``ErrorStatusReason`` that the firmware classifies as a
         # filament-path failure (jam or runout), feed the signal
-        # into the kiln-pro nozzle wear cross-check.  Lets the
-        # wear-tracking subsystem learn that this nozzle threw a
-        # flow signal mid-print; sustained signals on a nozzle
-        # whose gram-count says "fresh" are a hint the gram count
-        # is wrong, the filament path has friction, or the bore is
-        # widening faster than population.
+        # into the kiln-pro nozzle wear cross-check.
         #
         # The cause code can ride in any of the nested sections
         # the firmware uses (Data, Status, PrintInfo, etc.) and we

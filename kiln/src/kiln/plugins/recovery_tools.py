@@ -52,19 +52,17 @@ def _classify_drift_kind_from_failure(
 ) -> str:
     """Map a free-form failure context to a ``drift_kind`` value.
 
-    The kiln-pro wear hypothesis routes its per-component attribution
-    on ``drift_kind`` — ``"dimensional"`` weights tip wear (matching
-    geometric symptoms like first-layer thickness drift or fine-detail
-    loss), ``"flow"`` weights bore wear (matching extrusion-rate
-    symptoms like under-extrusion or layer-adhesion failures), and
-    ``"unknown"`` falls back to single-scalar wear.
+    Returns ``"dimensional"`` (geometric symptoms — first-layer
+    thickness drift, fine-detail loss), ``"flow"`` (extrusion-rate
+    symptoms — under-extrusion, layer-adhesion failures), or
+    ``"unknown"``.  The value is consumed by the kiln-pro overlay.
 
-    This classifier looks at both the failure message and the
-    classified analysis text for known keyword cues.  Flow keywords
-    take precedence over dimensional keywords because flow symptoms
-    are typically more specific signals (under-extrusion implicates
-    the bore directly), while dimensional symptoms (which can also
-    stem from belt tension or frame settling) are weaker tip cues.
+    Looks at both the failure message and the classified analysis text
+    for known keyword cues.  Flow keywords take precedence over
+    dimensional keywords because flow symptoms are typically more
+    specific (under-extrusion implicates the extrusion path directly),
+    while dimensional symptoms can also stem from belt tension or frame
+    settling.
     """
     msg = ((failure_message or "") + " " + str(analysis or "")).lower()
     if any(k in msg for k in _FLOW_DRIFT_KEYWORDS):
