@@ -47,6 +47,6 @@ sse-starlette==3.4.1
 starlette==1.0.0
 typing-inspection==0.4.2
 typing_extensions==4.15.0
-urllib3==2.6.3
+urllib3==2.7.0
 uvicorn==0.46.0
 zeroconf==0.148.0
