@@ -1338,24 +1338,24 @@ def cli(ctx: click.Context, printer: str | None) -> None:
     ctx.ensure_object(dict)
     ctx.obj["printer"] = printer
 
-    # Soft nag if terms haven't been accepted yet (non-blocking).
-    # Only shown in interactive terminals — never in piped/agent output.
+    # Terms-of-use gate (one-time, account-aware).  Once accepted, is_current()
+    # short-circuits on the local record so this never prompts again.  Commands
+    # that must run BEFORE acceptance are exempt: ``setup`` (its own gate),
+    # ``accept-terms`` (the accept action itself), ``serve`` (the MCP server —
+    # acceptance is enforced per-tool there; gating startup would brick a non-
+    # interactive Claude Desktop launch), and any ``--help`` invocation.
     try:
-        if sys.stderr.isatty():
+        invoked = ctx.invoked_subcommand
+        help_requested = any(a in ("--help", "-h") for a in sys.argv[1:])
+        if invoked not in _TERMS_GATE_EXEMPT and not help_requested:
             from kiln.terms import is_current
 
             if not is_current():
-                invoked = ctx.invoked_subcommand
-                if invoked not in ("setup", None):
-                    click.echo(
-                        click.style(
-                            "  Note: Terms of use not yet accepted. Run 'kiln setup' to review and accept.",
-                            fg="yellow",
-                        ),
-                        err=True,
-                    )
+                _enforce_terms_gate()
+    except SystemExit:
+        raise
     except Exception as exc:
-        logger.debug("DB not initialised yet — skipping startup check: %s", exc)
+        logger.debug("terms gate skipped (DB not ready?): %s", exc)
 
     # Kick a non-blocking PyPI update check, then soft-nag if a newer Kiln
     # is out.  Same discipline as the terms nag: stderr, interactive
@@ -1371,6 +1371,85 @@ def cli(ctx: click.Context, printer: str | None) -> None:
                 click.echo(click.style(f"  {line}", fg="yellow"), err=True)
     except Exception as exc:
         logger.debug("Update check skipped: %s", exc)
+
+
+# Commands that must run BEFORE terms acceptance (see the gate in ``cli`` above).
+_TERMS_GATE_EXEMPT = frozenset({"setup", "accept-terms", "serve", None})
+
+
+def _terms_gate_interactive() -> bool:
+    """True when we can prompt the user — a real terminal on both ends."""
+    try:
+        return sys.stdin.isatty() and sys.stderr.isatty()
+    except Exception:
+        return False
+
+
+def _enforce_terms_gate() -> None:
+    """Block until the user has accepted the current Terms of Use.
+
+    One-time: after acceptance ``is_current()`` is True and the caller never
+    reaches here again.  Three paths:
+
+      * interactive terminal — show the summary and confirm (decline -> exit 1);
+      * non-interactive + ``KILN_ACCEPT_TERMS=1`` — record acceptance by
+        configuration (the operator has accepted) and proceed;
+      * non-interactive without the flag — exit 1 with the fix, so CI / scripts
+        fail loudly with the escape hatch instead of silently running unaccepted.
+    """
+    from kiln.terms import prompt_acceptance, record_acceptance
+
+    if (os.environ.get("KILN_ACCEPT_TERMS") or "").strip().lower() in ("1", "true", "yes"):
+        record_acceptance(method="env")
+        return
+
+    if _terms_gate_interactive():
+        if prompt_acceptance(method="cli"):
+            return
+        click.echo("  You must accept the terms of use to use Kiln.", err=True)
+        raise SystemExit(1)
+
+    click.echo(
+        click.style(
+            "  Terms of use not yet accepted. Run 'kiln accept-terms' once "
+            "(or set KILN_ACCEPT_TERMS=1 for unattended use).\n"
+            "  Full terms: https://kiln3d.com/terms",
+            fg="yellow",
+        ),
+        err=True,
+    )
+    raise SystemExit(1)
+
+
+@cli.command("accept-terms")
+@click.option("--yes", "-y", is_flag=True, help="Accept non-interactively (scripts / CI).")
+def accept_terms(yes: bool) -> None:
+    """Review and accept Kiln's Terms of Use (one-time).
+
+    Account-aware: when you're signed in or licensed, acceptance is mirrored to
+    your Kiln account so it is honored on your other devices.  For unattended
+    use pass ``--yes`` or set ``KILN_ACCEPT_TERMS=1``.
+    Full terms: https://kiln3d.com/terms
+    """
+    from kiln.terms import is_current, prompt_acceptance, record_acceptance
+
+    if is_current():
+        click.echo(click.style("  Terms of use already accepted.", fg="green"))
+        return
+
+    if yes or not _terms_gate_interactive():
+        record_acceptance(method="cli_noninteractive")
+        click.echo(
+            click.style(
+                "  Terms of use accepted. Full terms: https://kiln3d.com/terms",
+                fg="green",
+            )
+        )
+        return
+
+    if not prompt_acceptance(method="cli"):
+        click.echo("  Terms not accepted.", err=True)
+        raise SystemExit(1)
 
 
 def _ensure_utf8_streams() -> None:

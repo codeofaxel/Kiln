@@ -227,11 +227,12 @@ def record_acceptance(*, db=None, method: str = "setup", verbatim_text: str | No
         )
 
 
-def prompt_acceptance() -> bool:
+def prompt_acceptance(method: str = "setup") -> bool:
     """Display the terms summary and prompt for acceptance.
 
-    Returns ``True`` if the user accepted, ``False`` otherwise.
-    Uses click for consistent CLI prompting.
+    Returns ``True`` if the user accepted, ``False`` otherwise.  ``method`` names
+    the surface that prompted (``setup`` / ``cli`` / ...) and is recorded with
+    the acceptance.  Uses click for consistent CLI prompting.
     """
     import click
 
@@ -242,7 +243,7 @@ def prompt_acceptance() -> bool:
     click.echo()
     accepted = click.confirm("  Do you accept these terms?", default=True)
     if accepted:
-        record_acceptance()
+        record_acceptance(method=method)
         click.echo(click.style("  Terms accepted.", fg="green"))
     click.echo()
     return accepted

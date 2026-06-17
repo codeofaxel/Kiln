@@ -789,3 +789,22 @@ def _bypass_openscad_runnable_probe(request, monkeypatch):
         )
     except (ImportError, AttributeError):
         pass  # emboss_generator absent; nothing to bypass
+
+
+@pytest.fixture(autouse=True)
+def _bypass_terms_gate(monkeypatch):
+    """Default every test to "terms already accepted" so the one-time CLI terms
+    gate (in ``kiln.cli.main``'s group callback) never blocks an unrelated
+    command in a fresh test environment.
+
+    Only affects callers that look up ``kiln.terms.is_current`` at call time
+    (the lazy import in the CLI gate).  Tests that exercise the gate or the
+    acceptance flow set ``kiln.terms.is_current`` explicitly — a later
+    monkeypatch on the same shared instance wins — and ``test_terms.py`` binds
+    ``is_current`` at import, so its direct calls still hit the real function.
+    """
+    try:
+        import kiln.terms  # noqa: F401 — ensure module loads
+        monkeypatch.setattr("kiln.terms.is_current", lambda *a, **k: True)
+    except (ImportError, AttributeError):
+        pass  # terms module absent; nothing to bypass
