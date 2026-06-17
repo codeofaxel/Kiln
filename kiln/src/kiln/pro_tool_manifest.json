@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-06-12T02:16:04.006556+00:00",
-  "tool_count": 353,
+  "generated": "2026-06-17T19:56:17.330708+00:00",
+  "tool_count": 356,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -86,6 +86,10 @@
     "design_inspection": {
       "label": "Design Inspection",
       "pitch": "Structured visual evidence for any design \u2014 renders, cross-section slices, raw measurements, and a print-readiness verdict \u2014 bundled into one inspectable report with a manifest."
+    },
+    "technical_drawings": {
+      "label": "Technical Drawings",
+      "pitch": "Turn any design into a clean, dimensioned production drawing \u2014 front, top, and side views with real measurements, a title block, and PNG / PDF / DXF files a machine shop or client can use. Built for selling what you print."
     },
     "design_session": {
       "label": "Design Sessions",
@@ -1506,6 +1510,30 @@
       }
     },
     {
+      "name": "cloud_clone_preset",
+      "description": "Bootstrap local storage for a remote-only decoration preset.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "preset_id": {
+            "title": "Preset Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preset_id"
+        ],
+        "title": "cloud_clone_presetArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "cloud_list_remote_branches",
       "description": "List branches on the remote for *design_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -1610,6 +1638,54 @@
           "design_id"
         ],
         "title": "cloud_pull_branchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_pull_preset_branch",
+      "description": "Pull one decoration-preset branch's new versions from a remote.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "preset_id": {
+            "title": "Preset Id",
+            "type": "string"
+          },
+          "branch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Branch Id"
+          },
+          "branch_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Branch Name"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preset_id"
+        ],
+        "title": "cloud_pull_preset_branchArguments",
         "type": "object"
       }
     },
@@ -1898,7 +1974,7 @@
     },
     {
       "name": "cloud_sync_devices",
-      "description": "List all devices connected to your cloud sync account.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "List all devices connected to your Device Sync account.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "cloud_sync",
       "parameters": {
@@ -2635,6 +2711,11 @@
           "material": {
             "default": "",
             "title": "Material",
+            "type": "string"
+          },
+          "scad_code": {
+            "default": "",
+            "title": "Scad Code",
             "type": "string"
           }
         },
@@ -12160,8 +12241,8 @@
     },
     {
       "name": "batch_generate_products",
-      "description": "Generate N decorated products from N photos in one call (Pro).\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "free",
+      "description": "Generate N decorated products from N photos in one call (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
       "category": "product_intelligence",
       "parameters": {
         "properties": {
@@ -12236,8 +12317,8 @@
     },
     {
       "name": "generate_decorated_product",
-      "description": "Generate a fully decorated product from a photo in one step (Pro).\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "free",
+      "description": "Generate a fully decorated product from a photo in one step (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
       "category": "product_intelligence",
       "parameters": {
         "properties": {
@@ -13843,6 +13924,68 @@
           "provider_user_id"
         ],
         "title": "unlink_identityArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_technical_drawing",
+      "description": "Generate a dimensioned production drawing from a 3D model.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "category": "technical_drawings",
+      "parameters": {
+        "properties": {
+          "source_path": {
+            "title": "Source Path",
+            "type": "string"
+          },
+          "scad_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scad Params"
+          },
+          "standard": {
+            "default": "house_style",
+            "title": "Standard",
+            "type": "string"
+          },
+          "formats": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Formats"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_path"
+        ],
+        "title": "generate_technical_drawingArguments",
         "type": "object"
       }
     },
