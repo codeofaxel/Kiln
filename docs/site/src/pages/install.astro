@@ -121,15 +121,17 @@ const installHowToSchema = {
           <div class="step-number">1</div>
           <div class="step-content">
             <h3>Install Kiln</h3>
+            <p class="install-expect">Here&rsquo;s what happens: you&rsquo;ll install a few free tools (Python, Kiln, and OpenSCAD &mdash; the engine Kiln designs with), connect Kiln to your AI app, then ask it to make something. There&rsquo;s a download or two, so give it a few minutes.</p>
             <div class="agent-setup-callout">
               <p class="agent-setup-label">Easiest &mdash; let your AI do the whole thing</p>
-              <p class="agent-setup-body">Already use Claude Code, Codex, or another AI that can run commands? Paste this to it, and it installs and connects Kiln for you:</p>
+              <p class="agent-setup-body">Using Claude Code, Codex, or another AI that can run commands on your computer? Paste this to it and it installs and connects Kiln for you &mdash; no terminal needed:</p>
               <div class="code-block">
                 <button class="copy-btn" data-code={agentSetupPrompt}>Copy</button>
                 <pre><code set:text={agentSetupPrompt} /></pre>
               </div>
+              <p class="agent-setup-note"><strong>Using Claude Desktop?</strong> It can&rsquo;t run commands for you, so this prompt won&rsquo;t install anything &mdash; that&rsquo;s the snag most people hit. Use the manual steps below instead: you&rsquo;ll paste a couple of lines into Terminal once, and we tell you exactly what each one does.</p>
             </div>
-            <p>Or do it yourself &mdash; pick your platform; each tab has copy-paste commands.</p>
+            <p>Or do it yourself &mdash; pick your platform below (this is the path for Claude Desktop). Each has copy-paste commands.</p>
             <InstallTabs />
           </div>
         </li>
@@ -143,6 +145,7 @@ const installHowToSchema = {
               <pre><code set:text={connectCommandsDisplay} /></pre>
             </div>
             <p>Restart your AI app and it can run your printer. <span class="step-skip">(Used the easiest path in step 1? This already happened.)</span></p>
+            <p class="install-success"><strong>How you&rsquo;ll know it worked:</strong> ask your AI &ldquo;is Kiln connected?&rdquo; and it&rsquo;ll confirm Kiln is loaded and ready. That&rsquo;s it &mdash; you&rsquo;re set up.</p>
             <details class="manual-config">
               <summary>Using a different AI app? Paste the config yourself</summary>
               <p><code>kiln install-mcp --print</code> prints this for any MCP-compatible app:</p>
@@ -156,8 +159,8 @@ const installHowToSchema = {
         <li data-reveal>
           <div class="step-number">3</div>
           <div class="step-content">
-            <h3>Ask</h3>
-            <p>Paste any sentence like this into your agent.  Kiln does the rest.</p>
+            <h3>Ask &mdash; and here&rsquo;s what to say first</h3>
+            <p>Once Kiln is connected, just describe what you want in plain English &mdash; no special commands. Try something like:</p>
             <blockquote class="example-prompt">I have a Bambu A1, make me a coaster with my dog&rsquo;s photo on it</blockquote>
           </div>
         </li>
@@ -318,6 +321,34 @@ const installHowToSchema = {
   .step-skip {
     opacity: 0.75;
   }
+
+  /* Key onboarding lines — "what to expect", the Claude Desktop snag,
+     and the success check.  Rendered at full --text (not --text-muted)
+     so the instructions win the contrast fight with the accent prompt
+     card; normie feedback was that gray instructions got lost next to
+     the brighter prompt. */
+  .install-expect {
+    font-size: 15px;
+    color: var(--text);
+    line-height: 1.6;
+    margin-bottom: 6px;
+  }
+  .agent-setup-note {
+    font-size: 13.5px;
+    color: var(--text);
+    margin: 14px 0 0;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 107, 43, 0.18);
+    line-height: 1.6;
+  }
+  .agent-setup-note strong { color: var(--accent-bright, var(--accent)); }
+  .install-success {
+    font-size: 14px;
+    color: var(--text);
+    margin-top: 8px;
+    line-height: 1.6;
+  }
+  .install-success strong { color: var(--accent-bright, var(--accent)); }
 
   /* Manual-config fold (Step 2) — muted disclosure matching the
      .faq-link footnote register so the happy path stays one command
