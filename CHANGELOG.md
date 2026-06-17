@@ -19,6 +19,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   a model, but a few paths quietly skipped it, so you'd have to ask "show me."
   Those blind spots are fixed: the preview just appears, every time.
 
+### Changed
+
+- **Free accounts can sign in to the web app.** A free Kiln account now signs
+  in to kiln3d.com and lands on a home that helps you connect Kiln to your AI
+  app, so you can start designing and printing right away. The cloud workshop —
+  version history, branches, and sharing for your designs — stays a Pro feature.
+
 ## [1.1.8] - 2026-06-12
 
 ### Added
