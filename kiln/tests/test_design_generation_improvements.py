@@ -5176,38 +5176,6 @@ class TestPlanCompositionFromDescription:
         assert "text" in shapes
 
 
-class TestPlanDesignFromDescriptionTool:
-    """MCP tool wrapper tests for plan_design_from_description."""
-
-    @patch("kiln.server._check_auth", return_value=None)
-    def test_empty_description_still_works(self, mock_auth):
-        plan_design_from_description = _get_plugin_tool("design_reasoning_tools", "plan_design_from_description")
-
-        result = plan_design_from_description("")
-        assert result["success"] is True
-        assert len(result["primitives"]) >= 1
-
-    @patch("kiln.server._check_auth", return_value=None)
-    @patch("kiln.design_reasoning.plan_composition_from_description")
-    def test_success_returns_result(self, mock_plan, mock_auth):
-        from kiln.design_reasoning import CompositionPlan
-        plan_design_from_description = _get_plugin_tool("design_reasoning_tools", "plan_design_from_description")
-
-        mock_plan.return_value = CompositionPlan(
-            description="a cube",
-            primitives=[{"type": "primitive", "shape": "cube", "params": {"size": [50, 50, 50]}}],
-            operations=[],
-            estimated_dimensions_mm={"width": 50.0, "depth": 50.0, "height": 50.0},
-            complexity="simple",
-            notes=["Material hint: PLA (informational)."],
-            confidence="high",
-        )
-
-        result = plan_design_from_description("a cube")
-        assert result["success"] is True
-        assert result["complexity"] == "simple"
-
-
 class TestArrangePartsOnPlateTool:
     """MCP tool wrapper tests for arrange_parts_on_plate."""
 

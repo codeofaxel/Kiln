@@ -10129,7 +10129,7 @@ def predict_print_failure(
 # Design reasoning tools extracted → plugins/design_reasoning_tools.py
 # (analyze_structural_risks, recommend_design_reinforcements, assess_load_bearing,
 #  design_improvement_plan, apply_design_reinforcements, infer_print_settings,
-#  optimize_template_params, arrange_parts_on_plate, plan_design_from_description)
+#  optimize_template_params, arrange_parts_on_plate)
 # ---------------------------------------------------------------------------
 
 

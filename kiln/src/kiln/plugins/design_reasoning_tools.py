@@ -79,7 +79,6 @@ class _DesignReasoningToolsPlugin:
         - design_improvement_plan
         - apply_design_reinforcements
         - infer_print_settings
-        - plan_design_from_description
         - design_advisor
         - arrange_parts_on_plate
         - auto_arrange_parts_on_plate
@@ -377,51 +376,6 @@ class _DesignReasoningToolsPlugin:
                 return _srv._error_dict(str(exc), code="INVALID_ARGS")
             except Exception as exc:
                 return _srv._error_dict(f"Print settings inference failed: {exc}")
-
-        # ------------------------------------------------------------------
-        # plan_design_from_description
-        # ------------------------------------------------------------------
-
-        @mcp.tool()
-        def plan_design_from_description(
-            description: str,
-            target_size_mm: float = 50.0,
-            material: str = "PLA",
-        ) -> dict:
-            """Convert a natural language description into a CSG composition plan (planning only, no STL output).
-
-            Rule-based keyword parser (no LLM required). Scans the description
-            for shape keywords (cube, cylinder, sphere, etc.) and operation
-            keywords (hole, combine, etc.) to build a CSG primitive tree.
-
-            The output can be passed directly to ``compose_part_from_primitives``
-            to generate an STL file.
-
-            Best for simple functional parts described in plain English, e.g.:
-            - "a box with a hole" → cube + difference(cylinder)
-            - "a rod and a sphere" → cylinder + union(sphere)
-            - "a hollow cylinder" → pipe shape
-
-            :param description: Natural language description of the design.
-            :param target_size_mm: Target primary dimension in mm (default 50).
-            :param material: Material hint (informational only).
-            :returns: Dict with primitives, operations, estimated_dimensions_mm,
-                      complexity, notes, and confidence.
-            """
-            _srv._check_auth("design:plan")
-            try:
-                from kiln.design_reasoning import plan_composition_from_description
-
-                result = plan_composition_from_description(
-                    description,
-                    target_size_mm=target_size_mm,
-                    material=material,
-                )
-                return {"success": True, **result.to_dict()}
-            except ValueError as exc:
-                return _srv._error_dict(str(exc), code="INVALID_ARGS")
-            except Exception as exc:
-                return _srv._error_dict(f"Design planning failed: {exc}")
 
         # ------------------------------------------------------------------
         # design_advisor
