@@ -7,6 +7,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Make objects without an API key.** A few item-creation paths used to
+  nudge you toward setting up an outside AI service first. Now Kiln defaults
+  to designing the model itself and previews it for you to refine — and a
+  reference photo works the same keyless way.
+
+- **Common items route straight to their dedicated maker.** Ask for something
+  Kiln already supports — a coaster, tray, keychain and more — and it now
+  reaches for that tuned generator automatically instead of building from
+  scratch. (Pro+)
+
 - **Turn any design into a production drawing (Business+).** Kiln can now give
   you a clean, dimensioned drawing of a part — top, front, and side views with
   real measurements, plus PDF and DXF files a machine shop or client can use.
