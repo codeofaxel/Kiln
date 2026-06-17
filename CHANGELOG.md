@@ -7,6 +7,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Decoration apply engine.** Kiln can now better render a saved decoration
+  recipe — a logo, photo, or pattern — onto a model in a single step. Saving,
+  versioning, and syncing those decorations across your devices are Kiln Pro
+  features (https://kiln3d.com).
+
 - **Accept once, everywhere.** Accepting Kiln's Terms of Use is now a one-time
   tap, remembered everywhere you use Kiln — the CLI, your AI assistant, and the
   web app — so you're never asked twice.
