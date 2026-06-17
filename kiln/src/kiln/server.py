@@ -918,6 +918,76 @@ def _record_local_tool_call(name: str) -> None:
         pass
 
 
+# --- Terms-of-Use gate (MCP) ------------------------------------------------
+#
+# The first substantive MCP tool call by an un-accepted identity short-circuits
+# with a one-time consent gate.  It is raised (not returned) so the lowlevel MCP
+# handler surfaces it to the agent as a tool error to relay.  A small whitelist
+# stays reachable so a new user can orient and accept.  Once accepted,
+# is_current() short-circuits on the local record and this never fires again.
+# Account-aware acceptance lives in kiln.terms; the verbatim phrase the user
+# types is the consent proof for this surface.
+
+_TERMS_GATE_WHITELIST = frozenset(
+    {"get_started", "check_my_tier", "kiln_health", "accept_terms"}
+)
+_TERMS_ACCEPT_PHRASE = "I accept the Kiln Terms"
+
+
+def _terms_consent_message() -> str:
+    """The one-time consent gate the agent relays to the user."""
+    from kiln.terms import _CURRENT_TERMS_VERSION, _TERMS_SUMMARY
+
+    return (
+        f"One-time setup — Kiln Terms of Use acceptance required "
+        f"(v{_CURRENT_TERMS_VERSION}).\n\n"
+        "Before I can run Kiln tools for you, please review and accept the "
+        "Terms:\n\n"
+        f"{_TERMS_SUMMARY}\n\n"
+        "To accept, the user must reply, in their own words, with exactly:\n"
+        f"    {_TERMS_ACCEPT_PHRASE}\n"
+        "Then call the `accept_terms` tool, passing that exact text as "
+        "`verbatim_text`.  Do NOT accept on the user's behalf or infer "
+        "acceptance from 'ok' / 'go ahead' — it must be the user's own statement."
+    )
+
+
+def _terms_gate_blocks(tool_name: str) -> bool:
+    """True if this MCP tool call must be blocked pending terms acceptance."""
+    if tool_name in _TERMS_GATE_WHITELIST:
+        return False
+    try:
+        from kiln.terms import is_current
+
+        return not is_current()
+    except Exception:
+        # Never block a tool over a terms-check infrastructure error.
+        return False
+
+
+def _record_mcp_acceptance(verbatim_text: str) -> dict:
+    """Core of the ``accept_terms`` tool — record the user's acceptance."""
+    from kiln.terms import _CURRENT_TERMS_VERSION, is_current, record_acceptance
+
+    if is_current():
+        return {
+            "status": "ok",
+            "accepted": True,
+            "version": _CURRENT_TERMS_VERSION,
+            "message": "Terms of use already accepted.",
+        }
+    record_acceptance(
+        method="mcp_in_chat",
+        verbatim_text=(verbatim_text or "").strip() or None,
+    )
+    return {
+        "status": "ok",
+        "accepted": True,
+        "version": _CURRENT_TERMS_VERSION,
+        "message": "Thanks — your acceptance of the Kiln Terms of Use has been recorded.",
+    }
+
+
 def _install_mcp_request_context_capture() -> None:
     """Capture current MCP request context so auth can read per-request metadata."""
     tool_mgr = mcp._tool_manager
@@ -935,6 +1005,10 @@ def _install_mcp_request_context_capture() -> None:
     ):
         token = _current_mcp_request_context.set(context)
         try:
+            if _terms_gate_blocks(name):
+                # One-time consent gate — raised so the lowlevel handler returns
+                # it to the agent as a tool error to relay (see _terms_* above).
+                raise RuntimeError(_terms_consent_message())
             result = await original_call_tool(
                 name,
                 arguments,
@@ -954,6 +1028,24 @@ def _install_mcp_request_context_capture() -> None:
 
 
 _install_mcp_request_context_capture()
+
+
+@mcp.tool()
+def accept_terms(verbatim_text: str = "") -> dict:
+    """Record the user's acceptance of Kiln's Terms of Use (one-time).
+
+    Call this ONLY after the user has, in their own words, stated that they
+    accept the terms (e.g. they replied "I accept the Kiln Terms").  Pass their
+    exact words as ``verbatim_text``.  Do NOT call this on the user's behalf or
+    infer acceptance from "ok" / "go ahead" — it must be the user's explicit
+    statement.
+
+    Account-aware: when the install is signed in or licensed, the acceptance is
+    mirrored to the user's Kiln account so it's honored on their other devices.
+    Full terms: https://kiln3d.com/terms
+    """
+    return _record_mcp_acceptance(verbatim_text)
+
 
 # ---------------------------------------------------------------------------
 # Printer adapter singleton
