@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Accept once, everywhere.** Accepting Kiln's Terms of Use is now a one-time
+  tap, remembered everywhere you use Kiln — the CLI, your AI assistant, and the
+  web app — so you're never asked twice.
+
 - **Make objects without an API key.** A few item-creation paths used to
   nudge you toward setting up an outside AI service first. Now Kiln defaults
   to designing the model itself and previews it for you to refine — and a
