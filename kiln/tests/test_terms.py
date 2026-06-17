@@ -12,6 +12,8 @@ from kiln.terms import (
     _CURRENT_TERMS_VERSION,
     _SETTINGS_KEY_TIMESTAMP,
     _SETTINGS_KEY_VERSION,
+    _SUMMARY_REVIEWED_FOR_VERSION,
+    _TERMS_SUMMARY,
     get_accepted_version,
     is_current,
     prompt_acceptance,
@@ -114,3 +116,35 @@ class TestPromptAcceptance:
                 with mock.patch("click.echo"):
                     prompt_acceptance()
         assert get_accepted_version(db=db) is None
+
+
+# ---------------------------------------------------------------------------
+# Summary review marker -- forcing function so the copy can't silently go stale
+# ---------------------------------------------------------------------------
+
+
+class TestSummaryReviewMarker:
+    def test_summary_reviewed_for_current_version(self):
+        """The review marker must track the current terms version.
+
+        Goes red whenever _CURRENT_TERMS_VERSION is bumped without
+        re-reviewing _TERMS_SUMMARY and the other acceptance surfaces.
+        Bumping the marker is the conscious "yes, I refreshed the copy" step.
+        """
+        assert _SUMMARY_REVIEWED_FOR_VERSION == _CURRENT_TERMS_VERSION, (
+            "Terms version changed but the summary review marker was not bumped. "
+            "Re-read _TERMS_SUMMARY and the web/MCP acceptance copy, update what "
+            "materially changed, then set _SUMMARY_REVIEWED_FOR_VERSION to match."
+        )
+
+    def test_summary_covers_the_load_bearing_points(self):
+        """The summary must carry the points that make it fair notice."""
+        # Safety responsibility
+        assert "safety" in _TERMS_SUMMARY.lower()
+        # The tier / commercial rule (the headline v3.0 addition)
+        assert "Business" in _TERMS_SUMMARY
+        # Fee transparency
+        assert "5%" in _TERMS_SUMMARY
+        # Canonical links
+        assert "https://kiln3d.com/terms" in _TERMS_SUMMARY
+        assert "https://kiln3d.com/privacy" in _TERMS_SUMMARY

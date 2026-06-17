@@ -15,23 +15,39 @@ _SETTINGS_KEY_VERSION = "terms_accepted_version"
 _SETTINGS_KEY_TIMESTAMP = "terms_accepted_at"
 
 _TERMS_SUMMARY = """\
-  By using Kiln you agree that:
+  By using Kiln, you're agreeing to a few things:
 
-  1. You are responsible for complying with all applicable laws in your
-     jurisdiction.
-  2. You are responsible for what you print. Kiln does not monitor,
-     filter, or restrict the content of files you print.
-  3. You are responsible for printer safety. Kiln's safety systems
-     reduce risk but do not eliminate it.
-  4. Third-party content (marketplaces, fulfillment) is governed by
-     those providers' own terms.
-  5. Fulfillment orders incur a 5% orchestration fee
-     (min $0.25, max $200). Your first 3 orders each month are
-     fee-free. Local printing is always free.
-  6. Kiln is provided "as is" without warranty of any kind.
+  1. Safety stays with you. Kiln's checks lower the risk of a print
+     going wrong — they don't remove it. Supervise what an AI agent
+     runs on your printer, and don't run prints unattended without
+     smoke/fire precautions.
+  2. What you make is yours — and your responsibility. You own your
+     designs and outputs, and you're responsible for following the
+     laws that apply to you. Kiln itself doesn't monitor or restrict
+     your files, though the AI assistant you use may decline a
+     request under its own policies.
+  3. Free and Pro are for personal projects. Selling what you print —
+     or fulfilling client and custom orders — is a Business-tier
+     feature.
+  4. Fees are shown up front. Fulfillment orders carry a 5%
+     orchestration fee (min $0.25, max $200); your first 3 each month
+     are free. Printing on your own printer is always free.
+  5. Third parties set their own rules. Marketplaces and fulfillment
+     partners are governed by their terms, not Kiln's.
+  6. Kiln is provided "as is", without warranty.
 
-  Full terms: https://kiln3d.com/terms
+  Please read the full Terms before you accept: https://kiln3d.com/terms
   Privacy policy: https://kiln3d.com/privacy"""
+
+
+# Forcing function: this marker MUST equal _CURRENT_TERMS_VERSION (enforced by
+# test_summary_reviewed_for_current_version).  When you bump the terms version,
+# that test stays red until you have re-read _TERMS_SUMMARY above AND the
+# matching acceptance copy on the other surfaces -- the web sign-up and the MCP
+# first-run gate -- updated whatever materially changed, then set this to match.
+# It makes "did we refresh every place the user accepts the terms?" a conscious
+# step on every change instead of something we remember to do by luck.
+_SUMMARY_REVIEWED_FOR_VERSION = "3.0"
 
 
 def get_accepted_version(*, db=None) -> str | None:

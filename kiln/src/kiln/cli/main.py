@@ -453,7 +453,7 @@ def _get_adapter_from_ctx(ctx: click.Context):
     ok, err = validate_printer_config(cfg)
     if not ok:
         ptype = cfg.get("type", "unknown")
-        pname = printer_name or "(active)"
+        pname = printer_name or "(default)"
         hint = ""
         if "api_key" in (err or ""):
             hint = f"\n  Quick fix: kiln auth --name {pname} --host {cfg.get('host', 'HOST')} --type {ptype} --api-key YOUR_KEY"
@@ -7196,7 +7196,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     if existing:
         click.echo(f"  Found {len(existing)} printer(s) already configured:")
         for p in existing:
-            marker = " (active)" if p.get("active") else ""
+            marker = " (default)" if p.get("active") else ""
             click.echo(f"    - {p['name']} [{p['type']}] {p['host']}{marker}")
         click.echo()
         action = click.prompt(
