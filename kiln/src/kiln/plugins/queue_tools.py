@@ -149,14 +149,15 @@ def queue_summary() -> dict:
         pending = _srv._queue.pending_count()
         active = _srv._queue.active_count()
         total = _srv._queue.total_count
-        registered_printers = _srv._registry.count
+        registry = _srv._get_registry()
+        registered_printers = registry.count
         emergency_latched_printers: list[str] = []
         if registered_printers > 0:
             try:
                 from kiln.emergency import get_emergency_coordinator
 
                 coord = get_emergency_coordinator()
-                for name in _srv._registry.list_names():
+                for name in registry.list_names():
                     status = coord.get_latch_status(name)
                     if bool(status.get("latched")):
                         emergency_latched_printers.append(name)
