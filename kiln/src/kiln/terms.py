@@ -10,6 +10,7 @@ version mismatch triggers re-acceptance.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import time
 
@@ -200,10 +201,9 @@ def is_current(*, db=None, force_server: bool = False) -> bool:
         # device import until real time caught back up; the lower bound stops that.
         if 0 <= now - last < _SERVER_RECHECK_TTL_S:
             return False
-    try:
+    # couldn't stamp the throttle — fine, we just re-poll next time
+    with contextlib.suppress(Exception):
         db.set_setting(_SETTINGS_KEY_SERVER_CHECK, str(now))
-    except Exception:
-        pass  # couldn't stamp the throttle — fine, we just re-poll next time
 
     resp = _server_request("/api/terms/acceptance", "GET", bearer)
     if (

@@ -27,7 +27,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
-from typing import Callable
+from collections.abc import Callable
 
 PACKAGE_NAME = "kiln3d"
 UPGRADE_COMMAND = f"pip install --upgrade {PACKAGE_NAME}"
