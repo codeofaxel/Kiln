@@ -3,7 +3,7 @@
 All notable changes to Kiln are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [1.1.9] - 2026-06-18
 
 ### Added
 
