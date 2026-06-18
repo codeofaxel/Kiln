@@ -164,6 +164,12 @@ def test_fresh_cache_newer_returns_nudge(tmp_path):
         "latest": "1.1.5.2",
         "command": "pip install --upgrade kiln3d",
         "summary": "Kiln 1.1.5.2 is available (you're on 1.1.5.1).",
+        # Enriched to an offer the agent can act on, naming the tool to call.
+        "offer": (
+            "A newer Kiln (1.1.5.2) is out. Happy to update it for you "
+            "whenever you like — just say the word."
+        ),
+        "action": "upgrade_kiln",
     }
 
 

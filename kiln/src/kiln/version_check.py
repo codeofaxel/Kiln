@@ -257,12 +257,20 @@ def check_for_update(current_version: str | None = None) -> dict[str, Any] | Non
     if not isinstance(latest, str) or not is_newer(latest, current):
         return None
 
+    # Frame it as an offer the agent can act on, not just a command to echo.
+    # Lazy import keeps the version_policy <-> version_check cycle clean.
+    from kiln.version_policy import evaluate
+
+    verdict = evaluate(current, latest=latest)
     return {
         "available": True,
         "current": current,
         "latest": latest,
         "command": UPGRADE_COMMAND,
-        "summary": f"Kiln {latest} is available (you're on {current}).",
+        "summary": verdict.headline,
+        "offer": verdict.offer,
+        # The tool an agent calls once the user says "yes, update it."
+        "action": "upgrade_kiln",
     }
 
 

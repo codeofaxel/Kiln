@@ -24,6 +24,7 @@ class _UtilityToolsPlugin:
 
     Tools:
         - get_session_log
+        - upgrade_kiln
         - health_check
         - kiln_health
         - get_started
@@ -85,6 +86,70 @@ class _UtilityToolsPlugin:
                     f"Unexpected error in get_session_log: {exc}",
                     code="INTERNAL_ERROR",
                 )
+
+        # ------------------------------------------------------------------
+        # upgrade_kiln
+        # ------------------------------------------------------------------
+
+        @mcp.tool()
+        def upgrade_kiln(confirm: bool = False, force: bool = False) -> dict:
+            """Update the Kiln package to the latest version — for the user.
+
+            The Apple-grade upgrade path. When a newer Kiln is available (or a
+            hosted call returns an upgrade-required signal), OFFER to handle it:
+            ask "want me to update Kiln for you now?" and call this with
+            confirm=True once they agree. Don't make the user run a pip command.
+
+            AGENT CONTRACT (important):
+              * NEVER call this while a print is active — wait until it finishes.
+                Swapping Kiln mid-print is unsafe.
+              * Confirm with the user first; this changes their installed
+                software. Pass confirm=True only after they say yes.
+              * On success the new version is on disk but the running Kiln still
+                has the old code loaded — relay the restart instruction from the
+                result so the user applies it at a safe moment (not mid-print).
+
+            Args:
+                confirm: Set True to actually perform the update. Called without
+                    it, this returns the offer to show the user and changes
+                    nothing.
+                force: Override the mid-print safety defer — only when the user
+                    explicitly insists.
+            """
+            import kiln.server as _srv
+
+            try:
+                from kiln import self_update
+            except Exception as exc:  # noqa: BLE001
+                return _srv._error_dict(
+                    f"Upgrade is unavailable in this build: {exc}",
+                    code="INTERNAL_ERROR",
+                )
+
+            current = self_update.current_version()
+            if not confirm:
+                return {
+                    "success": True,
+                    "status": "needs_confirmation",
+                    "current": current,
+                    "message": (
+                        "Want me to update Kiln for you now? It takes a few "
+                        "seconds, then one quick restart at a safe moment (not "
+                        "mid-print) and I'll pick up right where we left off. "
+                        "Confirm and I'll run it (upgrade_kiln with confirm=true)."
+                    ),
+                }
+
+            try:
+                result = self_update.perform_upgrade(force=force)
+            except Exception as exc:  # noqa: BLE001 -- never surface a raw traceback
+                _logger.exception("Unexpected error in upgrade_kiln")
+                return _srv._error_dict(
+                    f"Update failed unexpectedly: {exc}. You can run it yourself: "
+                    f"{self_update.UPGRADE_COMMAND}",
+                    code="INTERNAL_ERROR",
+                )
+            return {"success": bool(result.get("ok")), **result}
 
         # ------------------------------------------------------------------
         # health_check

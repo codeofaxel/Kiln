@@ -659,7 +659,9 @@ def _build_instructions() -> str:
         if _update_line:
             parts.append(
                 f"UPDATE AVAILABLE: {_update_line} "
-                "Mention this to the user so they can upgrade when convenient."
+                "Offer to handle it for them — ask 'want me to update Kiln for "
+                "you now?' and, on yes, call the upgrade_kiln tool (never while "
+                "a print is active). Don't just tell them to run a command."
             )
     except Exception:  # noqa: BLE001 -- nudge is best-effort, never fatal
         pass
