@@ -7,6 +7,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Kiln can update itself — just say the word.** When a newer version of Kiln
+  is out, your AI assistant now offers to install it for you ("want me to update
+  Kiln for you now?") and does it on a yes — instead of leaving you to copy a
+  command. It holds off while a print is running, and tells you plainly that one
+  quick restart finishes the job.
+
 - **Decoration apply engine.** Kiln can now better render a saved decoration
   recipe — a logo, photo, or pattern — onto a model in a single step. Saving,
   versioning, and syncing those decorations across your devices are Kiln Pro
