@@ -11357,6 +11357,7 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
     import urllib.request
 
     from kiln.api_device import device_fingerprint_headers
+    from kiln.version_check import _current_version
     try:
         headers = {"Content-Type": "application/json"}
         headers["Authorization"] = f"Bearer {bearer}"
@@ -11365,6 +11366,10 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
         # the server rejects a card-less license-bearer call once the cap
         # is enforced.  Harmless on the paired-OAuth (JWT) path.
         headers.update(device_fingerprint_headers())
+        # Announce our version so the hosted server can apply a minimum-version
+        # floor (e.g. force an upgrade for a release with new terms / fixes).
+        # A client that never sends this is treated as below the floor.
+        headers["X-Kiln-Client-Version"] = _current_version()
         req = urllib.request.Request(
             f"{api_url.rstrip('/')}/api/tools/{tool_name}",
             data=json.dumps(kwargs).encode() if kwargs else None,
