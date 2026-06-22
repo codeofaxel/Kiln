@@ -1295,7 +1295,7 @@
   "bambu_a2l": {
     "display_name": "Bambu Lab A2L",
     "slicer": "prusaslicer",
-    "notes": "Open-frame large-format bed-slinger (330x320x325). PMSM servo extruder; stainless nozzle (fit hardened for CF). CRITICAL: like every Bambu, requires use_relative_e_distances (M83) and EMPTY start/end gcode - Kiln's bambu_3mf module injects BambuStudio's proprietary init/end sequence; without it G1 E moves are silently ignored. NOT YET hardware-proven on the A2L (mirrors the A1 profile, same kinematic class); the A2L may need its own BambuStudio machine init sequence once that profile ships - verify before relying on it.",
+    "notes": "Open-frame large-format bed-slinger (330x320x325). PMSM servo extruder; stainless nozzle (fit hardened for CF). CRITICAL: like every Bambu, requires use_relative_e_distances (M83) and EMPTY start/end gcode - Kiln's bambu_3mf module injects BambuStudio's proprietary init/end sequence; without it G1 E moves are silently ignored. Field-proven on real A2L hardware; BambuStudio now ships the dedicated A2L machine profile (its own init/end gcode), which bambu_3mf injects.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
