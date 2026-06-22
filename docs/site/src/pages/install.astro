@@ -58,7 +58,10 @@ const agentSetupPrompt =
   "isn't installed, install it first. Then run pip install kiln3d.\n" +
   'Then run kiln signin, then kiln install-mcp to connect Kiln\n' +
   'to this agent. Finish with kiln doctor and show me the result.\n' +
-  'Tell me if I need to restart anything.';
+  'Tell me if I need to restart anything.\n' +
+  'Once it works, give me one quick tip: my results with Kiln depend\n' +
+  'on the AI model driving it, so for the best designs I should use the\n' +
+  'most capable model and highest-thinking mode I have.';
 
 const installHowToSchema = {
   '@type': 'HowTo',
@@ -162,6 +165,7 @@ const installHowToSchema = {
             <h3>Ask &mdash; and here&rsquo;s what to say first</h3>
             <p>Once Kiln is connected, just describe what you want in plain English &mdash; no special commands. Try something like:</p>
             <blockquote class="example-prompt">I have a Bambu A1, make me a coaster with my dog&rsquo;s photo on it</blockquote>
+            <p class="model-tip">Kiln thinks with your AI &mdash; so for designs you care about, use the most capable model you have, and give it room to think. That&rsquo;s where great results come from.</p>
           </div>
         </li>
       </ol>
@@ -393,6 +397,19 @@ const installHowToSchema = {
   }
   .example-prompt::before { content: open-quote; }
   .example-prompt::after { content: close-quote; }
+
+  /* Model-quality nudge (Step 3) — Kiln's reasoning is borrowed from
+     the driving model, so the biggest lever on output is which model
+     the visitor runs.  Full --text contrast (not muted) so the tip
+     reads as guidance that matters, sitting just under the example
+     prompt.  Principle-based; no version numbers (they'd go stale). */
+  .model-tip {
+    font-size: 14px;
+    color: var(--text);
+    line-height: 1.6;
+    margin-top: 14px;
+    max-width: 60ch;
+  }
 
   /* Pro CTA card — single floating card, post-value placement.
      One button, one price, no tier table; tier comparison + the
