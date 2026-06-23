@@ -67,6 +67,10 @@ scripts/*
 # test so public comments can never narrate the kiln-pro overlay's
 # internal strategy.
 !scripts/audit_moat_comment_leak.py
+# …and for the public SME-table leak gate, which is run by a CI-collected
+# test so public source can never ship a curated cross-vendor capability /
+# SME table (the moat belongs in the private tier or a pro overlay).
+!scripts/audit_public_sme_leak.py
 
 # Internal working docs (backed up via iCloud)
 .dev
