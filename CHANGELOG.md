@@ -7,6 +7,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Finish a Klipper print after a power loss, in one call (Pro).** When power
+  comes back, Kiln resumes the *same* print from the layer where it stopped —
+  not a reprint. Klipper loses track of the bed height after a power-cut, so
+  Kiln re-finds it safely — with a quick confirmation from you — then carries on
+  finishing the object.
+
+- **Triage a whole shop after an outage, in one call (Business+).** After a
+  power outage, Kiln checks every printer in a mixed-brand, mixed-model fleet at
+  once and sorts them into self-recovering, needs-a-quick-look, or reprint.
+
 - **The Bambu A2L, dialed in (Pro+).** On top of free A2L support, Kiln now reads the printer like an expert — clog/feed-jam detection on any setup, build-plate-seated check, carbon-fiber nozzle advice, clear enclosure and AMS guidance, and more for paid tiers. See https://kiln3d.com/pricing.
 
 ### Fixed
