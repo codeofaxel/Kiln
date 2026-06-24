@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from kiln.printers.base import PrinterError
+from kiln.printers.base import PrinterError, PrinterStatus
 from kiln.printers.creality import (
     CrealityAdapter,
     _candidate_moonraker_urls,
@@ -208,3 +208,31 @@ class TestCrealityDiagnostics:
         assert "marlin-era" in guidance
         assert "serial" in guidance
         assert "octoprint" in guidance
+
+
+class TestCrealityResumeInheritsHonesty:
+    """Creality runs on the Moonraker backend and inherits the base
+    resume_print() template, so it honestly degrades when nothing is paused —
+    no false 'resumed'.  (This is the case originally flagged.)
+    """
+
+    def _adapter(self) -> CrealityAdapter:
+        with patch("kiln.printers.creality.requests.get") as mock_get:
+            mock_get.return_value = MagicMock(
+                ok=True,
+                status_code=200,
+                json=MagicMock(return_value={"result": {"klippy_state": "ready"}}),
+            )
+            return CrealityAdapter("k1-max.local", timeout=5, retries=1)
+
+    def test_resume_when_not_paused_is_honest(self):
+        adapter = self._adapter()
+        adapter.get_state = MagicMock(
+            return_value=MagicMock(state=PrinterStatus.IDLE)
+        )
+        adapter._backend._resume_print_impl = MagicMock()
+        result = adapter.resume_print()
+        assert result.success is False
+        assert "no paused print" in result.message.lower()
+        # The gate fired before delegating — no resume command was sent.
+        adapter._backend._resume_print_impl.assert_not_called()

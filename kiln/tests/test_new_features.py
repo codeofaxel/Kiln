@@ -456,7 +456,7 @@ class TestAdapterSnapshot:
             def _start_print_impl(self, name): pass
             def cancel_print(self): pass
             def pause_print(self): pass
-            def resume_print(self): pass
+            def _resume_print_impl(self): pass
             def set_tool_temp(self, t): pass
             def set_bed_temp(self, t): pass
             def send_gcode(self, cmds): pass

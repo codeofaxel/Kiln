@@ -2596,7 +2596,7 @@ class BambuAdapter(PrinterAdapter):
         self._send_print_command("pause")
         return PrintResult(success=True, message="Print paused.")
 
-    def resume_print(self) -> PrintResult:
+    def _resume_print_impl(self) -> PrintResult:
         """Resume a previously paused print job."""
         self._send_print_command("resume")
         return PrintResult(success=True, message="Print resumed.")

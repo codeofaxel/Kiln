@@ -1048,3 +1048,31 @@ class TestAdapterInterface:
         from kiln.printers import MoonrakerAdapter as Imported
 
         assert Imported is MoonrakerAdapter
+
+
+class TestResumeNotPausedHonest:
+    """resume_print() must not falsely report success when nothing is paused —
+    the base template gates on get_state().  (Creality runs on this backend,
+    so this honesty covers Creality + every Klipper printer.)
+    """
+
+    def test_resume_when_not_paused_is_honest(self):
+        adapter = _adapter()
+        adapter.get_state = mock.Mock(
+            return_value=mock.Mock(state=PrinterStatus.IDLE)
+        )
+        adapter._post = mock.Mock()
+        result = adapter.resume_print()
+        assert result.success is False
+        assert "no paused print" in result.message.lower()
+        adapter._post.assert_not_called()  # never fires a no-op resume
+
+    def test_resume_when_paused_proceeds(self):
+        adapter = _adapter()
+        adapter.get_state = mock.Mock(
+            return_value=mock.Mock(state=PrinterStatus.PAUSED)
+        )
+        adapter._post = mock.Mock()
+        result = adapter.resume_print()
+        assert result.success is True
+        adapter._post.assert_called_once_with("/printer/print/resume")

@@ -1072,7 +1072,7 @@ class OctoPrintAdapter(PrinterAdapter):
         )
         return PrintResult(success=True, message="Print paused.")
 
-    def resume_print(self) -> PrintResult:
+    def _resume_print_impl(self) -> PrintResult:
         """Resume a previously paused print job.
 
         Calls ``POST /api/job`` with ``{"command": "pause", "action": "resume"}``.

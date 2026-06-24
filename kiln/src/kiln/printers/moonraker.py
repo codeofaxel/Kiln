@@ -1091,10 +1091,12 @@ class MoonrakerAdapter(PrinterAdapter):
         self._post("/printer/print/pause")
         return PrintResult(success=True, message="Print paused.")
 
-    def resume_print(self) -> PrintResult:
+    def _resume_print_impl(self) -> PrintResult:
         """Resume a previously paused print job.
 
-        Calls ``POST /printer/print/resume``.
+        Calls ``POST /printer/print/resume``.  The not-paused gate runs in the
+        base :meth:`resume_print` template, so by the time we reach here the
+        print is paused (or the state was uncertain and we fail open).
 
         Raises:
             PrinterError: If the printer cannot resume.

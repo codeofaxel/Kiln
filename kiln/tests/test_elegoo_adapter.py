@@ -427,7 +427,8 @@ class TestPrintControl:
 
     def test_resume_print(self, adapter_with_ws: ElegooAdapter) -> None:
         with mock.patch.object(adapter_with_ws, "_send_command_checked"):
-            result = adapter_with_ws.resume_print()
+            # Gate is in the base resume_print() template; test the transport impl.
+            result = adapter_with_ws._resume_print_impl()
         assert result.success is True
         assert "resumed" in result.message.lower()
 

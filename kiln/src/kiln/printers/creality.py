@@ -797,8 +797,12 @@ class CrealityAdapter(PrinterAdapter):
     def pause_print(self) -> PrintResult:
         return self._backend.pause_print()
 
-    def resume_print(self) -> PrintResult:
-        return self._backend.resume_print()
+    def _resume_print_impl(self) -> PrintResult:
+        # Delegate to the backend's IMPL, not its resume_print(): the
+        # not-paused gate already ran once at this adapter's resume_print()
+        # (base Template Method) via this adapter's get_state.  Calling the
+        # backend's resume_print() would re-run that gate redundantly.
+        return self._backend._resume_print_impl()
 
     def emergency_stop(self) -> PrintResult:
         return self._backend.emergency_stop()

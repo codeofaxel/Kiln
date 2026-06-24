@@ -857,7 +857,7 @@ class PrusaLinkAdapter(PrinterAdapter):
         self._request("PUT", f"/api/v1/job/{job_id}/pause")
         return PrintResult(success=True, message="Print paused.")
 
-    def resume_print(self) -> PrintResult:
+    def _resume_print_impl(self) -> PrintResult:
         """Resume a previously paused print job.
 
         Calls ``PUT /api/v1/job/<id>/resume``.

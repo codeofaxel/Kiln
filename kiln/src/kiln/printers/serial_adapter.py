@@ -780,6 +780,20 @@ class SerialPrinterAdapter(PrinterAdapter):
         )
 
     def resume_print(self) -> PrintResult:
+        """Resume a paused SD print — OVERRIDE of the base template.
+
+        Serial has no real printer-state telemetry: pause is tracked by the
+        local ``self._paused`` flag (set by :meth:`pause_print`), which
+        ``get_state()`` can't reliably surface.  So we gate on the flag
+        directly here instead of the base template's ``get_state()`` check —
+        which would otherwise block a legitimate resume whenever the printer
+        reads as idle/printing rather than paused.
+        """
+        if not self._paused:
+            return self._no_paused_print_result()
+        return self._resume_print_impl()
+
+    def _resume_print_impl(self) -> PrintResult:
         """Resume a previously paused SD print.
 
         Sends ``M24`` (resume SD print).

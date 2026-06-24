@@ -43,7 +43,7 @@ class TestDeviceAdapterAlias:
             def _start_print_impl(self, f): return PrintResult(success=True, message="ok")
             def cancel_print(self): return PrintResult(success=True, message="ok")
             def pause_print(self): return PrintResult(success=True, message="ok")
-            def resume_print(self): return PrintResult(success=True, message="ok")
+            def _resume_print_impl(self): return PrintResult(success=True, message="ok")
             def set_tool_temp(self, t): return True
             def set_bed_temp(self, t): return True
             def send_gcode(self, c): return True
@@ -128,7 +128,7 @@ class TestOptionalDeviceMethods:
             def _start_print_impl(self, f): return PrintResult(success=True, message="ok")
             def cancel_print(self): return PrintResult(success=True, message="ok")
             def pause_print(self): return PrintResult(success=True, message="ok")
-            def resume_print(self): return PrintResult(success=True, message="ok")
+            def _resume_print_impl(self): return PrintResult(success=True, message="ok")
             def set_tool_temp(self, t): return True
             def set_bed_temp(self, t): return True
             def send_gcode(self, c): return True

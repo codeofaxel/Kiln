@@ -922,7 +922,9 @@ class TestBambuAdapterPrintControl:
         assert payload["print"]["command"] == "pause"
 
     def test_resume_print(self, adapter_with_mqtt: BambuAdapter) -> None:
-        result = adapter_with_mqtt.resume_print()
+        # The not-paused gate lives in the base resume_print() template; this
+        # exercises the transport impl directly.
+        result = adapter_with_mqtt._resume_print_impl()
 
         assert result.success is True
         assert "resumed" in result.message.lower()

@@ -98,7 +98,7 @@ class TestBaseFilamentStatus:
             def pause_print(self):
                 pass
 
-            def resume_print(self):
+            def _resume_print_impl(self):
                 pass
 
             def emergency_stop(self):

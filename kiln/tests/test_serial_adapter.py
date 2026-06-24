@@ -885,6 +885,7 @@ class TestResumePrint:
     def test_successful_resume(self):
         mock_ser = _make_mock_serial(readline_responses=[b"ok\n"])
         adapter = _build_adapter(mock_ser)
+        adapter._paused = True  # you can only resume a print that's paused
         result = adapter.resume_print()
         assert isinstance(result, PrintResult)
         assert result.success is True
@@ -1774,3 +1775,18 @@ class TestSerialisation:
         d = adapter.capabilities.to_dict()
         assert d["can_upload"] is True
         assert isinstance(d["supported_extensions"], list)
+
+
+class TestResumeNotPausedHonest:
+    """Serial overrides the base template and gates resume on the local
+    _paused flag (it has no real telemetry).  Resuming when not paused must
+    report honestly, not a false 'resumed'.
+    """
+
+    def test_resume_when_not_paused_is_honest(self):
+        mock_ser = _make_mock_serial(readline_responses=[b"ok\n"])
+        adapter = _build_adapter(mock_ser)
+        adapter._paused = False
+        result = adapter.resume_print()
+        assert result.success is False
+        assert "no paused print" in result.message.lower()

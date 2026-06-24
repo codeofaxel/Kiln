@@ -473,7 +473,8 @@ class TestPrintControl:
         })
         resume_resp = _mock_response(status_code=204)
         with patch.object(a._session, "request", side_effect=[status_resp, resume_resp]):
-            result = a.resume_print()
+            # Gate is in the base resume_print() template; test the transport impl.
+            result = a._resume_print_impl()
 
         assert result.success is True
 

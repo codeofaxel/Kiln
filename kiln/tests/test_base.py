@@ -355,7 +355,7 @@ class TestPrinterAdapterABC:
             def pause_print(self):
                 return PrintResult(success=True, message="")
 
-            def resume_print(self):
+            def _resume_print_impl(self):
                 return PrintResult(success=True, message="")
 
             def set_tool_temp(self, target):
@@ -376,3 +376,62 @@ class TestPrinterAdapterABC:
         instance = Complete()
         assert instance.name == "test"
         assert isinstance(instance.capabilities, PrinterCapabilities)
+
+
+class TestResumePrintTemplate:
+    """The base resume_print() template: refuse to claim success when there's
+    no paused print, but never block a legitimate resume on uncertainty.
+    """
+
+    @staticmethod
+    def _adapter(state):
+        impl_calls: list[str] = []
+
+        class _A(PrinterAdapter):
+            def get_state(self):
+                if isinstance(state, Exception):
+                    raise state
+                return PrinterState(connected=True, state=state)
+
+            def _resume_print_impl(self):
+                impl_calls.append("impl")
+                return PrintResult(success=True, message="Print resumed.")
+
+        _A.__abstractmethods__ = frozenset()  # only need get_state + the impl
+        adapter = _A()
+        adapter._impl_calls = impl_calls
+        return adapter
+
+    def test_paused_proceeds_to_impl(self):
+        a = self._adapter(PrinterStatus.PAUSED)
+        result = a.resume_print()
+        assert result.success is True
+        assert a._impl_calls == ["impl"]
+
+    @pytest.mark.parametrize("state", [PrinterStatus.IDLE, PrinterStatus.PRINTING])
+    def test_not_paused_returns_honest_failure(self, state):
+        a = self._adapter(state)
+        result = a.resume_print()
+        assert result.success is False
+        assert "no paused print" in result.message.lower()
+        assert a._impl_calls == []  # never fired the resume command
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            PrinterStatus.OFFLINE,
+            PrinterStatus.UNKNOWN,
+            PrinterStatus.BUSY,
+            PrinterStatus.ERROR,
+        ],
+    )
+    def test_uncertain_state_fails_open(self, state):
+        a = self._adapter(state)
+        a.resume_print()
+        # Not CONFIDENT it's idle/printing -> fail OPEN: try, surface real result.
+        assert a._impl_calls == ["impl"]
+
+    def test_state_read_error_fails_open(self):
+        a = self._adapter(RuntimeError("transient blip"))
+        a.resume_print()
+        assert a._impl_calls == ["impl"]  # a transient read must never block resume

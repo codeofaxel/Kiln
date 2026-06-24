@@ -480,13 +480,66 @@ class PrinterAdapter(ABC):
             PrinterError: If the printer cannot pause.
         """
 
-    @abstractmethod
     def resume_print(self) -> PrintResult:
         """Resume a previously paused print job.
+
+        TEMPLATE METHOD — adapters must NOT override this; they implement
+        :meth:`_resume_print_impl` instead.  It first checks the live printer
+        state and refuses to claim success when there is no paused print to
+        resume.  "Resume" only continues a *currently-paused* print, so firing
+        it on an idle printer (e.g. after a power loss) or a running one is at
+        best a firmware no-op, often a cryptic firmware error ("Print is not
+        paused, resume aborted"), and on fire-and-forget transports (Bambu
+        MQTT, serial M24) a FALSE ``"Print resumed."`` success.  Either way the
+        user is misled.
+
+        We block only on a CONFIDENT not-paused state (idle / printing).
+        Uncertain states (offline, busy, error, unknown) and any state-read
+        failure fail OPEN — delegate to :meth:`_resume_print_impl` and let the
+        real resume surface its own result — so a transient read never blocks
+        a legitimate resume.
 
         Raises:
             PrinterError: If the printer cannot resume.
         """
+        try:
+            status = self.get_state().state
+        except Exception:  # noqa: BLE001 — never block a real resume on a state-read error
+            status = None
+        if status in (PrinterStatus.IDLE, PrinterStatus.PRINTING):
+            return self._no_paused_print_result()
+        return self._resume_print_impl()
+
+    @abstractmethod
+    def _resume_print_impl(self) -> PrintResult:
+        """Adapter-specific resume, called AFTER the not-paused gate passes.
+
+        Each adapter puts its real resume logic here (MQTT for Bambu, REST for
+        OctoPrint/Moonraker/PrusaLink, SDCP for Elegoo, M24 over serial).
+        Never call this directly — callers use :meth:`resume_print`, which
+        gates first.
+
+        Raises:
+            PrinterError: If the printer cannot resume.
+        """
+
+    def _no_paused_print_result(self) -> PrintResult:
+        """The honest result when there is no paused print to resume.
+
+        Shared by the :meth:`resume_print` template and any adapter that must
+        gate resume on a different signal — e.g. the serial adapter, which
+        tracks pause via a local flag that ``get_state()`` can't reliably
+        surface.  Keep the wording here so there is one source of truth.
+        """
+        return PrintResult(
+            success=False,
+            message=(
+                "No paused print to resume — the printer isn't paused. "
+                "Resume only continues a print that's currently paused; to "
+                "pick up a print that stopped or lost power, use Kiln's print "
+                "recovery instead of resume."
+            ),
+        )
 
     @abstractmethod
     def emergency_stop(self) -> PrintResult:
