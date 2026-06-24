@@ -175,7 +175,7 @@ Tool tiers auto-match model capability: **essential** (16 tools) for smaller mod
 
 Kiln only needs IP reachability on your LAN. Ethernet-only printers are fully supported.
 
-**Optional tools:** [PrusaSlicer](https://www.prusa3d.com/prusaslicer/) or OrcaSlicer for slicing STL → G-code (`brew install --cask prusaslicer`); [OpenSCAD](https://openscad.org/) for local text-to-3D generation (`brew install openscad`); set `KILN_GEMINI_API_KEY` to enable Gemini-generated geometry.
+**Optional tools:** [PrusaSlicer](https://www.prusa3d.com/prusaslicer/) or OrcaSlicer for slicing STL → G-code (`brew install --cask prusaslicer`); [OpenSCAD](https://openscad.org/downloads#snapshots) for local text-to-3D generation — install the current build (`brew install --cask openscad@snapshot`); set `KILN_GEMINI_API_KEY` to enable Gemini-generated geometry.
 
 ### Linux / WSL 2
 
@@ -185,7 +185,8 @@ Kiln only needs IP reachability on your LAN. Ethernet-only printers are fully su
 sudo apt install pipx && pipx ensurepath
 git clone https://github.com/codeofaxel/Kiln.git && cd Kiln
 pipx install ./kiln
-sudo apt install prusa-slicer openscad   # optional: slicing + generation
+sudo apt install prusa-slicer            # optional: slicing for printing
+sudo snap install openscad --edge        # optional: the design engine (current build)
 kiln verify
 
 # Update / uninstall

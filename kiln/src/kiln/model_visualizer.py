@@ -247,8 +247,9 @@ def _find_openscad() -> str:
         if shutil.which(path):
             return path
     raise FileNotFoundError(
-        "OpenSCAD not found. Install it via `brew install openscad` or "
-        "download from https://openscad.org/downloads.html"
+        "OpenSCAD not found. Install the current build: "
+        "`brew install --cask openscad@snapshot` (macOS) "
+        "or https://openscad.org/downloads#snapshots"
     )
 
 

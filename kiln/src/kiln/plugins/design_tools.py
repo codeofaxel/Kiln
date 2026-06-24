@@ -1315,6 +1315,14 @@ class _DesignToolsPlugin:
                     "stl_path": stl_path,
                     "message": f"Compiled to {stl_path}",
                 }
+                # Surface an outdated-OpenSCAD notice at make-time (not just a
+                # buried log) so a maker who skipped get_started still finds out
+                # their engine is slow / SVG-broken and how to upgrade.
+                from kiln.emboss_generator import openscad_version_warning
+
+                _osw = openscad_version_warning()
+                if _osw:
+                    response["openscad_warning"] = _osw
                 try:
                     from kiln_pro.plugins.git_render_tools import (
                         attach_inspect_bundle,

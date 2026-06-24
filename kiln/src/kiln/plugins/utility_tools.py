@@ -210,17 +210,12 @@ class _UtilityToolsPlugin:
                 from kiln.emboss_generator import (
                     _OPENSCAD_MIN_VERSION_YEAR,
                     _OPENSCAD_UPGRADE_MSG,
+                    _openscad_install_command,
                     _openscad_version_year,
                     get_openscad_version,
                 )
 
-                _platform = sys.platform
-                if _platform == "darwin":
-                    _install_cmd = "brew install --cask openscad@snapshot"
-                elif _platform.startswith("linux"):
-                    _install_cmd = "sudo snap install openscad --edge"
-                else:
-                    _install_cmd = "Download from https://openscad.org/downloads#snapshots"
+                _install_cmd = _openscad_install_command()
 
                 openscad_version = get_openscad_version()
                 openscad_info: dict[str, Any] = {"version": openscad_version or "not_found"}
@@ -375,15 +370,13 @@ class _UtilityToolsPlugin:
             openscad_guidance: dict[str, Any] = {}
             _openscad_action_needed = False
             try:
-                from kiln.emboss_generator import _openscad_version_year, get_openscad_version
+                from kiln.emboss_generator import (
+                    _openscad_install_command,
+                    _openscad_version_year,
+                    get_openscad_version,
+                )
 
-                _platform = sys.platform
-                if _platform == "darwin":
-                    _install_cmd = "brew install --cask openscad@snapshot"
-                elif _platform.startswith("linux"):
-                    _install_cmd = "sudo snap install openscad --edge"
-                else:
-                    _install_cmd = "Download from https://openscad.org/downloads#snapshots"
+                _install_cmd = _openscad_install_command()
 
                 _ver = get_openscad_version()
                 if not _ver:
@@ -391,9 +384,8 @@ class _UtilityToolsPlugin:
                     openscad_guidance = {
                         "installed": False,
                         "message": (
-                            "Install OpenSCAD for 3D model generation and decoration: "
-                            "brew install --cask openscad@snapshot  (macOS) "
-                            "or download from https://openscad.org/downloads"
+                            "Install OpenSCAD — Kiln's design engine — to make and "
+                            f"decorate models: {_install_cmd}"
                         ),
                         "install_command": _install_cmd,
                         "required_for": [
@@ -410,9 +402,8 @@ class _UtilityToolsPlugin:
                         "version": _ver,
                         "status": "outdated",
                         "message": (
-                            f"OpenSCAD {_ver} is outdated. Upgrade for full feature support: "
-                            "brew install --cask openscad@snapshot  (macOS) "
-                            "or download from https://openscad.org/downloads"
+                            f"OpenSCAD {_ver} is outdated — it is slower and silently "
+                            f"fails SVG. Upgrade: {_install_cmd}"
                         ),
                         "install_command": _install_cmd,
                         "required_for": [

@@ -2253,7 +2253,7 @@ def optimize_template_params(
     except Exception as exc:
         raise ValueError(
             "OpenSCAD is required for template optimization but was not found. "
-            "Install from https://openscad.org/"
+            "Install the current build from https://openscad.org/downloads#snapshots"
         ) from exc
 
     best_score = -1

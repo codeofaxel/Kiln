@@ -51,11 +51,11 @@ _OPENSCAD_UPGRADE_INSTRUCTIONS = (
     "  Windows: Download from https://openscad.org/downloads#snapshots"
 )
 _OPENSCAD_UPGRADE_MSG = (
-    "OpenSCAD 2021 is outdated and has critical SVG bugs "
-    "(SVG import() in difference() silently fails). "
-    "Please upgrade: "
+    "This OpenSCAD build is outdated: it is far slower (no Manifold backend) and "
+    "silently fails SVG booleans (an SVG logo in difference() produces no "
+    "geometry). Upgrade to a current build: "
     "brew install --cask openscad@snapshot  (macOS) "
-    "or download from https://openscad.org/downloads"
+    "or https://openscad.org/downloads#snapshots"
 )
 
 
@@ -982,6 +982,42 @@ def _warn_if_outdated() -> None:
             version,
             _OPENSCAD_UPGRADE_INSTRUCTIONS,
         )
+
+
+def _openscad_install_command() -> str:
+    """The platform-appropriate command to install the modern OpenSCAD build."""
+    system = platform.system()
+    if system == "Darwin":
+        return "brew install --cask openscad@snapshot"
+    if system == "Linux":
+        return "sudo snap install openscad --edge"
+    return "Download the latest from https://openscad.org/downloads#snapshots"
+
+
+def openscad_version_warning() -> dict | None:
+    """A user-facing upgrade notice when the installed OpenSCAD is older than the
+    minimum recommended year, else ``None``.
+
+    An old build is ~20-100x slower (no Manifold backend) and silently fails SVG
+    booleans, so a maker deserves to know — the buried ``_warn_if_outdated`` log
+    isn't enough.  Callers (e.g. ``compile_scad``) attach this to their result so
+    the warning shows up at the moment someone actually makes something, not only
+    at the ``get_started`` front door.  Reuses the cached version detection, so it
+    costs no extra subprocess.  A *missing* OpenSCAD returns ``None`` here — that
+    case is handled prominently by ``get_started``.
+    """
+    version = get_openscad_version()
+    if not version:
+        return None
+    year = _openscad_version_year(version)
+    if not year or year >= _OPENSCAD_MIN_VERSION_YEAR:
+        return None
+    return {
+        "version": version,
+        "status": "outdated",
+        "message": _OPENSCAD_UPGRADE_MSG,
+        "install_command": _openscad_install_command(),
+    }
 
 
 def _find_openscad_for_svg(openscad_path: str | None = None) -> str:

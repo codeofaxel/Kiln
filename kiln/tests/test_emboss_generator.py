@@ -883,3 +883,45 @@ class TestTextmetricsFlag:
             assert "--enable=textmetrics" in captured[0]
         finally:
             _mod._openscad_version_cache = original_cache
+
+
+class TestOpenscadVersionWarning:
+    """The make-time outdated-OpenSCAD notice (surfaced in compile_scad's result)."""
+
+    def test_install_command_per_platform(self):
+        from kiln.emboss_generator import _openscad_install_command
+
+        with patch("kiln.emboss_generator.platform.system", return_value="Darwin"):
+            assert "openscad@snapshot" in _openscad_install_command()
+        with patch("kiln.emboss_generator.platform.system", return_value="Linux"):
+            assert "snap install openscad --edge" in _openscad_install_command()
+        with patch("kiln.emboss_generator.platform.system", return_value="Windows"):
+            assert "openscad.org" in _openscad_install_command()
+
+    def test_modern_version_no_warning(self):
+        from kiln.emboss_generator import openscad_version_warning
+
+        with patch("kiln.emboss_generator.get_openscad_version", return_value="2026.04.26"):
+            assert openscad_version_warning() is None
+
+    def test_missing_openscad_no_warning(self):
+        # A missing OpenSCAD is handled prominently at the get_started front door,
+        # not here — so this helper stays quiet rather than double-reporting.
+        from kiln.emboss_generator import openscad_version_warning
+
+        with patch("kiln.emboss_generator.get_openscad_version", return_value=""):
+            assert openscad_version_warning() is None
+
+    def test_outdated_version_warns_accurately(self):
+        from kiln.emboss_generator import openscad_version_warning
+
+        with patch("kiln.emboss_generator.get_openscad_version", return_value="2021.01"):
+            w = openscad_version_warning()
+        assert w is not None
+        assert w["version"] == "2021.01"
+        assert w["status"] == "outdated"
+        assert "snapshot" in w["install_command"]
+        # The message must NOT hardcode a year — a user on 2022/2023 (also < 2024)
+        # must never be told they are on "2021".  The accurate version is its own field.
+        assert "2021" not in w["message"]
+        assert "2023" not in w["message"]
