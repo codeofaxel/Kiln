@@ -161,6 +161,51 @@ def get_accepted_version(*, db=None) -> str | None:
     return db.get_setting(_SETTINGS_KEY_VERSION)
 
 
+def get_accepted_at(*, db=None) -> float | None:
+    """Epoch seconds when the current terms were accepted, or ``None``."""
+    if db is None:
+        from kiln.persistence import get_db
+
+        db = get_db()
+    raw = db.get_setting(_SETTINGS_KEY_TIMESTAMP)
+    try:
+        return float(raw) if raw else None
+    except (TypeError, ValueError):
+        return None
+
+
+def review(*, db=None) -> None:
+    """Print the terms summary and this install's current acceptance status.
+
+    Powers ``kiln accept-terms`` when the user has ALREADY accepted, so the
+    command lets them re-read exactly what they agreed to — and see when —
+    instead of a bare "already accepted" line they can't inspect.
+    """
+    import datetime as _dt
+
+    import click
+
+    click.echo()
+    click.echo(click.style("  Terms of Use", bold=True))
+    click.echo(click.style("  ------------", bold=True))
+    click.echo(_TERMS_SUMMARY)
+    click.echo()
+    if get_accepted_version(db=db) == _CURRENT_TERMS_VERSION:
+        at = get_accepted_at(db=db)
+        when = _dt.datetime.fromtimestamp(at).strftime("%Y-%m-%d") if at else "previously"
+        click.echo(click.style(
+            f"  ✓ You accepted these terms (v{_CURRENT_TERMS_VERSION}) on {when}.",
+            fg="green",
+        ))
+    else:
+        click.echo(click.style(
+            "  You have not accepted the current terms yet — run "
+            "'kiln accept-terms' to review and accept.",
+            fg="yellow",
+        ))
+    click.echo()
+
+
 def is_current(*, db=None, force_server: bool = False) -> bool:
     """Return ``True`` if the user has accepted the current terms version.
 
@@ -246,12 +291,18 @@ def record_acceptance(*, db=None, method: str = "setup", verbatim_text: str | No
         )
 
 
-def prompt_acceptance(method: str = "setup") -> bool:
-    """Display the terms summary and prompt for acceptance.
+_ACCEPT_PHRASE = "I accept"
 
-    Returns ``True`` if the user accepted, ``False`` otherwise.  ``method`` names
-    the surface that prompted (``setup`` / ``cli`` / ...) and is recorded with
-    the acceptance.  Uses click for consistent CLI prompting.
+
+def prompt_acceptance(method: str = "setup") -> bool:
+    """Display the terms summary and take EXPLICIT typed consent.
+
+    Returns ``True`` only when the user types the acceptance phrase
+    (case-insensitive, whitespace-forgiving) — never a default keypress, so
+    consent is a deliberate act rather than a reflexive Enter.  The verbatim
+    text is recorded as the consent proof, the same as the in-chat MCP path.
+    ``method`` names the surface that prompted (``setup`` / ``cli`` / ...) and is
+    recorded with the acceptance.
     """
     import click
 
@@ -260,9 +311,21 @@ def prompt_acceptance(method: str = "setup") -> bool:
     click.echo(click.style("  ------------", bold=True))
     click.echo(_TERMS_SUMMARY)
     click.echo()
-    accepted = click.confirm("  Do you accept these terms?", default=True)
-    if accepted:
-        record_acceptance(method=method)
-        click.echo(click.style("  Terms accepted.", fg="green"))
+    click.echo(
+        "  To accept, type "
+        + click.style(_ACCEPT_PHRASE, bold=True)
+        + " and press Enter (anything else cancels):"
+    )
+    try:
+        typed = click.prompt("  >", prompt_suffix=" ", default="", show_default=False)
+    except (click.Abort, EOFError):
+        click.echo()
+        return False
+    if " ".join(typed.split()).rstrip(".").casefold() != _ACCEPT_PHRASE.casefold():
+        click.echo(click.style("  Terms not accepted.", fg="yellow"))
+        click.echo()
+        return False
+    record_acceptance(method=method, verbatim_text=typed.strip())
+    click.echo(click.style("  Terms accepted. Thank you.", fg="green"))
     click.echo()
-    return accepted
+    return True

@@ -97,11 +97,19 @@ def test_gate_skipped_for_help(runner, monkeypatch):
 # --- the `kiln accept-terms` command ---------------------------------------
 
 
-def test_accept_terms_already_accepted(runner, monkeypatch):
-    monkeypatch.setattr("kiln.terms.is_current", lambda *a, **k: True)
+def test_accept_terms_already_accepted_shows_review(runner, monkeypatch):
+    # Already accepted -> the command now REVIEWS: it re-shows the terms summary
+    # and when they were accepted, instead of a bare "already accepted" line the
+    # user can't inspect.
+    import kiln.terms as terms
+
+    monkeypatch.setattr(terms, "is_current", lambda *a, **k: True)
+    monkeypatch.setattr(terms, "get_accepted_version", lambda *a, **k: terms._CURRENT_TERMS_VERSION)
+    monkeypatch.setattr(terms, "get_accepted_at", lambda *a, **k: 1_700_000_000.0)
     res = runner.invoke(cli, ["accept-terms"])
     assert res.exit_code == 0
-    assert "already accepted" in res.output.lower()
+    assert "Terms of Use" in res.output            # the summary is re-shown
+    assert "accepted these terms" in res.output.lower()  # + when
 
 
 def test_accept_terms_yes_records_noninteractive(runner, monkeypatch):
@@ -127,7 +135,7 @@ def test_identity_and_onboarding_commands_are_exempt():
     """
     exempt = cli_main._TERMS_GATE_EXEMPT
     for name in (
-        "setup", "accept-terms", "serve", "auth", "self-update",
+        "setup", "accept-terms", "serve", "rest", "auth", "self-update",
         "signin", "signout", "whoami", "pair", "link", "login", "logout", "invite",
     ):
         assert name in exempt, name + " must be exempt from the terms gate"

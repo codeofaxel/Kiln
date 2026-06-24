@@ -111,26 +111,64 @@ class TestRecordAcceptance:
 
 
 class TestPromptAcceptance:
-    def test_returns_true_on_accept(self, db):
+    def test_returns_true_when_phrase_typed(self, db):
         with mock.patch("kiln.persistence.get_db", return_value=db):
-            with mock.patch("click.confirm", return_value=True):
+            with mock.patch("click.prompt", return_value="I accept"):
                 with mock.patch("click.echo"):
                     assert prompt_acceptance() is True
         assert is_current(db=db) is True
 
-    def test_returns_false_on_decline(self, db):
+    def test_accept_is_case_and_whitespace_forgiving(self, db):
         with mock.patch("kiln.persistence.get_db", return_value=db):
-            with mock.patch("click.confirm", return_value=False):
+            with mock.patch("click.prompt", return_value="  i  ACCEPT.  "):
+                with mock.patch("click.echo"):
+                    assert prompt_acceptance() is True
+        assert is_current(db=db) is True
+
+    def test_returns_false_on_anything_else(self, db):
+        # A bare "yes" no longer accepts — only the deliberate phrase does.
+        with mock.patch("kiln.persistence.get_db", return_value=db):
+            with mock.patch("click.prompt", return_value="yes"):
                 with mock.patch("click.echo"):
                     assert prompt_acceptance() is False
         assert is_current(db=db) is False
 
-    def test_does_not_record_on_decline(self, db):
+    def test_empty_input_does_not_accept(self, db):
+        # A bare Enter must NOT accept — consent is a typed act, not a default
+        # keypress (this was the weak spot: the old confirm defaulted to yes).
         with mock.patch("kiln.persistence.get_db", return_value=db):
-            with mock.patch("click.confirm", return_value=False):
+            with mock.patch("click.prompt", return_value=""):
                 with mock.patch("click.echo"):
-                    prompt_acceptance()
+                    assert prompt_acceptance() is False
         assert get_accepted_version(db=db) is None
+
+    def test_records_verbatim_consent_text(self, db):
+        # The exact phrase typed is stored as the consent proof (parity with the
+        # in-chat MCP path's verbatim_text).
+        with mock.patch("kiln.persistence.get_db", return_value=db):
+            with mock.patch("click.prompt", return_value="I accept"):
+                with mock.patch("click.echo"):
+                    with mock.patch("kiln.terms.record_acceptance") as rec:
+                        assert prompt_acceptance(method="cli") is True
+        assert rec.call_args.kwargs.get("verbatim_text") == "I accept"
+        assert rec.call_args.kwargs.get("method") == "cli"
+
+
+class TestReview:
+    def test_shows_summary_and_when_accepted(self, db, capsys):
+        from kiln.terms import review
+
+        record_acceptance(db=db)
+        review(db=db)
+        out = capsys.readouterr().out
+        assert "Terms of Use" in out                  # the summary is re-shown
+        assert "accepted these terms" in out.lower()  # + when it was accepted
+
+    def test_shows_not_accepted_when_absent(self, db, capsys):
+        from kiln.terms import review
+
+        review(db=db)
+        assert "not accepted" in capsys.readouterr().out.lower()
 
 
 # ---------------------------------------------------------------------------

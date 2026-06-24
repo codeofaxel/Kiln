@@ -1379,8 +1379,13 @@ def cli(ctx: click.Context, printer: str | None) -> None:
 
 
 # Commands that must run BEFORE terms acceptance — onboarding, identity, config,
-# maintenance, the accept action itself, and the MCP server (which gates per
-# tool).  Everything else (the substantive print/design/control commands) gates.
+# maintenance, the accept action itself, and the long-running server daemons
+# (`serve` = MCP, `rest` = REST API), which gate per tool / per request rather
+# than at boot.  Starting a server is an operator/infrastructure action, not an
+# end user accepting terms — the end user accepts on their OWN surface (the web
+# checkout, the MCP first-run gate), so gating the daemon's boot just bricks the
+# server with no human at the keyboard to consent.  Everything else (the
+# substantive print/design/control commands) gates.
 # Gating the identity commands would brick onboarding and is CIRCULAR for OAuth
 # users: `kiln signin` is what establishes the bearer is_current() needs to
 # import a web-side acceptance.  Pinned by tests in test_cli_terms_gate.py so
@@ -1389,7 +1394,8 @@ _TERMS_GATE_EXEMPT = frozenset({
     None,
     "setup",
     "accept-terms",
-    "serve",
+    "serve",        # MCP server daemon — gates per tool, not at boot
+    "rest",         # REST API server daemon — gates per request/tier, not at boot
     "auth",         # save printer credentials (config, setup-family)
     "self-update",  # maintenance — don't gate updating Kiln
     # identity / account (kiln.cli.auth_commands.register_auth_cli):
@@ -1458,10 +1464,12 @@ def accept_terms(yes: bool) -> None:
     use pass ``--yes`` or set ``KILN_ACCEPT_TERMS=1``.
     Full terms: https://kiln3d.com/terms
     """
-    from kiln.terms import is_current, prompt_acceptance, record_acceptance
+    from kiln.terms import is_current, prompt_acceptance, record_acceptance, review
 
     if is_current():
-        click.echo(click.style("  Terms of use already accepted.", fg="green"))
+        # Already accepted — SHOW the terms + when they were accepted, so the
+        # command is a genuine review rather than a one-liner you can't inspect.
+        review()
         return
 
     if yes or not _terms_gate_interactive():
