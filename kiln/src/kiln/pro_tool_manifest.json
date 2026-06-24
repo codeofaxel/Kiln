@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-06-17T19:56:17.330708+00:00",
-  "tool_count": 356,
+  "generated": "2026-06-24T00:52:45.452308+00:00",
+  "tool_count": 360,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -8906,6 +8906,33 @@
       }
     },
     {
+      "name": "assess_fleet_power_loss",
+      "description": "Triage a whole fleet after a power loss \u2014 mixed brands/models (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "failures": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Failures"
+          }
+        },
+        "title": "assess_fleet_power_lossArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "auto_detect_nozzle",
       "description": "Parse a raw printer payload into a NozzleState.",
       "tier": "free",
@@ -9096,6 +9123,86 @@
           "planned_grams"
         ],
         "title": "check_nozzle_capacity_for_printArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "check_power_loss_recovery",
+      "description": "Assess how to recover an interrupted print after a power loss (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_name": {
+            "default": "",
+            "title": "Printer Name",
+            "type": "string"
+          },
+          "probe_xy": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Probe Xy"
+          },
+          "bare_confirmed": {
+            "default": false,
+            "title": "Bare Confirmed",
+            "type": "boolean"
+          },
+          "print_bbox": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Print Bbox"
+          },
+          "moonraker_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Moonraker Config"
+          },
+          "failure_id": {
+            "default": "",
+            "title": "Failure Id",
+            "type": "string"
+          },
+          "gcode_path": {
+            "default": "",
+            "title": "Gcode Path",
+            "type": "string"
+          },
+          "probe_clearance_mm": {
+            "default": 5.0,
+            "title": "Probe Clearance Mm",
+            "type": "number"
+          }
+        },
+        "title": "check_power_loss_recoveryArguments",
         "type": "object"
       }
     },
@@ -9590,6 +9697,19 @@
             "default": 0.0,
             "title": "Prime Extrusion Mm",
             "type": "number"
+          },
+          "power_loss_probe_recovery": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Power Loss Probe Recovery"
           }
         },
         "required": [
@@ -9956,6 +10076,11 @@
             "default": "",
             "title": "Material Type",
             "type": "string"
+          },
+          "strategy": {
+            "default": "",
+            "title": "Strategy",
+            "type": "string"
           }
         },
         "title": "get_recovery_strategy_statsArguments",
@@ -9992,6 +10117,65 @@
       "parameters": {
         "properties": {},
         "title": "list_printer_profilesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "make_printable",
+      "description": "Turn any messy / AI-generated / organic mesh into a print-ready solid.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "model_path": {
+            "title": "Model Path",
+            "type": "string"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "nozzle_mm": {
+            "default": 0.4,
+            "title": "Nozzle Mm",
+            "type": "number"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "bed_x_mm": {
+            "default": 256.0,
+            "title": "Bed X Mm",
+            "type": "number"
+          },
+          "bed_y_mm": {
+            "default": 256.0,
+            "title": "Bed Y Mm",
+            "type": "number"
+          },
+          "bed_z_mm": {
+            "default": 256.0,
+            "title": "Bed Z Mm",
+            "type": "number"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "branch_name": {
+            "default": "printable",
+            "title": "Branch Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_path"
+        ],
+        "title": "make_printableArguments",
         "type": "object"
       }
     },
@@ -10730,6 +10914,76 @@
           "success"
         ],
         "title": "record_recovery_outcomeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "recover_power_loss_print",
+      "description": "One-call power-loss recovery for the printer that lost power (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_name": {
+            "default": "",
+            "title": "Printer Name",
+            "type": "string"
+          },
+          "failure_id": {
+            "default": "",
+            "title": "Failure Id",
+            "type": "string"
+          },
+          "probe_xy": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Probe Xy"
+          },
+          "bare_confirmed": {
+            "default": false,
+            "title": "Bare Confirmed",
+            "type": "boolean"
+          },
+          "moonraker_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Moonraker Config"
+          },
+          "prime_extrusion_mm": {
+            "default": 0.0,
+            "title": "Prime Extrusion Mm",
+            "type": "number"
+          },
+          "probe_clearance_mm": {
+            "default": 5.0,
+            "title": "Probe Clearance Mm",
+            "type": "number"
+          },
+          "output_dir": {
+            "default": "",
+            "title": "Output Dir",
+            "type": "string"
+          }
+        },
+        "title": "recover_power_loss_printArguments",
         "type": "object"
       }
     },
