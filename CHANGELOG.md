@@ -19,6 +19,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **The Bambu A2L, dialed in (Pro+).** On top of free A2L support, Kiln now reads the printer like an expert — clog/feed-jam detection on any setup, build-plate-seated check, carbon-fiber nozzle advice, clear enclosure and AMS guidance, and more for paid tiers. See https://kiln3d.com/pricing.
 
+### Changed
+
+- **Clearer terms acceptance.** `kiln accept-terms` now shows the terms and asks
+  you to type your acceptance, and re-shows them (with the date) if you've
+  already accepted — so you can always see exactly what you agreed to.
+
 ### Fixed
 
 - **Resume tells the truth now.** Hit resume when nothing's actually paused (say a print stopped after a power loss and the printer went idle), and Kiln now says "no paused print to resume" instead of falsely reporting that it resumed. Same honest behavior across every printer Kiln supports.
