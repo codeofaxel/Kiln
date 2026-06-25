@@ -7,6 +7,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Color your make.** After you make something through Kiln's web app at
+  kiln3d.com, give it a texture — tiger stripe, camo, ocean, marble, galaxy and
+  more, in dozens of color combinations — and see it in those real colors in 3D
+  before you download. (Color printing needs a multi-material printer; the
+  download comes with the colors already assigned.)
+
 - **Finish a Klipper print after a power loss, in one call (Pro).** When power
   comes back, Kiln resumes the *same* print from the layer where it stopped —
   not a reprint. Klipper loses track of the bed height after a power-cut, so
