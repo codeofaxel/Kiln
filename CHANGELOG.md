@@ -7,6 +7,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Make your first thing in the browser — free.** Sign in at kiln3d.com and
+  make a real, printable object on the spot: pick a starter — coaster, keychain,
+  desk nameplate, pet tag, fridge magnet, ornament — watch it build in 3D and
+  download it to print. No install, no printer setup, no API key.
+
 - **Color your make.** After you make something through Kiln's web app at
   kiln3d.com, give it a texture — tiger stripe, camo, ocean, marble, galaxy and
   more, in dozens of color combinations — and see it in those real colors in 3D
