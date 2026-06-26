@@ -40,6 +40,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Resume tells the truth now.** Hit resume when nothing's actually paused (say a print stopped after a power loss and the printer went idle), and Kiln now says "no paused print to resume" instead of falsely reporting that it resumed. Same honest behavior across every printer Kiln supports.
 
+- **Recolor your design for free.** Fixed an issue where changing a single-color
+  design to a new color asked for Pro. Only true multi-color designs (different
+  colors on different parts) still need it.
+
 ## [1.1.9] - 2026-06-18
 
 ### Added
