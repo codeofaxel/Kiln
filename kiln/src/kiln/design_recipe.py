@@ -247,27 +247,6 @@ def update_part_color(
     raise ValueError(f"Part {part_name!r} not found in recipe {recipe.name!r}")
 
 
-def normalize_hex_color(value: str | None) -> str | None:
-    """Tidy a hex color to ``#RRGGBB`` (uppercase), or ``None`` if not hex.
-
-    Accepts ``#RRGGBB``, ``RRGGBB``, ``#RGB``, ``RGB``, and the 8-digit
-    ``RRGGBBAA`` form a Bambu AMS tray reports (the alpha byte is dropped).
-    Returns ``None`` for empty input OR for a color *name* like ``"teal"`` —
-    so a caller can normalise hex but pass names straight through, since a
-    recipe part's ``color`` legitimately holds either form.
-    """
-    if not value:
-        return None
-    h = value.strip().lstrip("#").upper()
-    if len(h) == 8:  # RRGGBBAA (AMS tray) — drop alpha
-        h = h[:6]
-    elif len(h) == 3:  # shorthand RGB -> RRGGBB
-        h = "".join(c * 2 for c in h)
-    if len(h) != 6 or any(c not in "0123456789ABCDEF" for c in h):
-        return None
-    return f"#{h}"
-
-
 def update_parameter(
     recipe: DesignRecipe,
     param_name: str,
