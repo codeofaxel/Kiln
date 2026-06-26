@@ -2548,8 +2548,8 @@
     },
     {
       "name": "change_part_color",
-      "description": "Change a part's color in a design recipe and re-slice (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Change a part's color in a design recipe and re-slice.",
+      "tier": "free",
       "category": "design_modification",
       "parameters": {
         "properties": {
