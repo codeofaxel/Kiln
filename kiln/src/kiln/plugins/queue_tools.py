@@ -25,8 +25,11 @@ _ALL_QUEUED_JOBS = 1_000_000
 # ---------------------------------------------------------------------------
 # Standalone functions — importable for direct calls and testing.
 #
-# Each function reads _queue, _event_bus, etc. from kiln.server at call time
-# (via module attribute access) so that monkeypatching works in tests.
+# Each function resolves the queue via kiln.server._get_queue() (and reads
+# _event_bus, etc. as module attributes) at call time, so monkeypatching works
+# in tests AND the queue is lazily created if a server context never
+# initialised it (e.g. the REST/local-admin server, which used to leave the raw
+# _queue global None and crash every queue tool with AttributeError).
 # ---------------------------------------------------------------------------
 
 
@@ -67,7 +70,7 @@ def submit_job(
         or LicenseTier is None  # kiln-pro not installed → free tier
     )
     if _is_free:
-        pending = _srv._queue.pending_count()
+        pending = _srv._get_queue().pending_count()
         if pending >= FREE_TIER_MAX_QUEUED_JOBS:
             return {
                 "success": False,
@@ -84,7 +87,7 @@ def submit_job(
                 "upgrade_url": "https://kiln3d.com/pricing",
             }
     try:
-        job_id = _srv._queue.submit(
+        job_id = _srv._get_queue().submit(
             file_name=file_name,
             printer_name=printer_name,
             submitted_by="mcp-agent",
@@ -123,7 +126,7 @@ def job_status(job_id: str) -> dict:
     from kiln.queue import JobNotFoundError
 
     try:
-        job = _srv._queue.get_job(job_id)
+        job = _srv._get_queue().get_job(job_id)
         return {
             "success": True,
             "job": job.to_dict(),
@@ -143,12 +146,12 @@ def queue_summary() -> dict:
     import kiln.server as _srv
 
     try:
-        summary = _srv._queue.summary()
-        next_job = _srv._queue.next_job()
-        recent = _srv._queue.list_jobs(limit=10)
-        pending = _srv._queue.pending_count()
-        active = _srv._queue.active_count()
-        total = _srv._queue.total_count
+        summary = _srv._get_queue().summary()
+        next_job = _srv._get_queue().next_job()
+        recent = _srv._get_queue().list_jobs(limit=10)
+        pending = _srv._get_queue().pending_count()
+        active = _srv._get_queue().active_count()
+        total = _srv._get_queue().total_count
         registry = _srv._get_registry()
         registered_printers = registry.count
         emergency_latched_printers: list[str] = []
@@ -215,7 +218,7 @@ def cancel_job(job_id: str) -> dict:
     if err := _srv._check_auth("queue"):
         return err
     try:
-        job = _srv._queue.cancel(job_id)
+        job = _srv._get_queue().cancel(job_id)
         _srv._event_bus.publish(
             Event(
                 type=EventType.JOB_CANCELLED,
@@ -277,7 +280,7 @@ def cancel_queued_jobs(
     # printer when asked; the high limit defeats the default 100-row page so
     # a long backlog is seen in full.
     try:
-        targets = _srv._queue.list_jobs(
+        targets = _srv._get_queue().list_jobs(
             status=JobStatus.QUEUED,
             printer_name=printer_name,
             limit=_ALL_QUEUED_JOBS,
@@ -313,7 +316,7 @@ def cancel_queued_jobs(
         # cancelled (cancel() accepts a running job and would kill the live
         # print).  Skip anything no longer QUEUED.
         try:
-            live = _srv._queue.get_job(job.id)
+            live = _srv._get_queue().get_job(job.id)
         except Exception:
             skipped.append({"job_id": job.id, "reason": "no longer in the queue"})
             continue
@@ -326,7 +329,7 @@ def cancel_queued_jobs(
             )
             continue
         try:
-            _srv._queue.cancel(job.id)
+            _srv._get_queue().cancel(job.id)
             cancelled.append(job.id)
             _srv._event_bus.publish(
                 Event(
@@ -374,7 +377,7 @@ def _job_history(limit: int = 20, status: str | None = None) -> dict:
 
     try:
         capped = min(max(limit, 1), 100)
-        all_jobs = _srv._queue.list_jobs(limit=capped)
+        all_jobs = _srv._get_queue().list_jobs(limit=capped)
 
         finished_statuses = {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}
         if status:
