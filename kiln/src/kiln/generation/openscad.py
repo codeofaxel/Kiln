@@ -216,6 +216,17 @@ def _find_openscad(explicit_path: str | None = None) -> str:
             code="OPENSCAD_NOT_RUNNABLE",
         )
 
+    # Environment override.  A packaged or sandboxed install can point this at
+    # a known-good OpenSCAD so the make path never depends on a system install.
+    # Soft: if it's set but won't run (missing / wrong arch), fall through to
+    # the normal search rather than failing, so a stale value never bricks a
+    # machine that does have OpenSCAD.  Same env var the emboss path honors.
+    env_path = os.environ.get("KILN_OPENSCAD_PATH")
+    if env_path and os.path.isfile(env_path) and os.access(env_path, os.X_OK):
+        result = _accept(env_path)
+        if result:
+            return result
+
     # Check PATH.
     which = shutil.which("openscad")
     if which:

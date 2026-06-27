@@ -642,6 +642,44 @@ class TestOpenSCADProvider:
         assert "softwareupdate --install-rosetta" in msg
         assert exc_info.value.code == "OPENSCAD_NOT_RUNNABLE"
 
+    def test_find_openscad_honors_env_path_override(self, tmp_path, monkeypatch):
+        """KILN_OPENSCAD_PATH wins over PATH so a packaged install can pin a
+        known-good binary.  Same env var the emboss detector already honors."""
+        env_bin = tmp_path / "openscad"
+        env_bin.write_text("#!/bin/sh\nexit 0\n")
+        env_bin.chmod(0o755)
+        monkeypatch.setenv("KILN_OPENSCAD_PATH", str(env_bin))
+        # Isolate: no PATH, no macOS bundles — the env override is the only source.
+        with patch("kiln.generation.openscad.shutil.which", return_value=None):
+            with patch("kiln.generation.openscad._MACOS_APP_PATH", ""):
+                with patch("kiln.generation.openscad._MACOS_VERSIONED_PATTERN", ""):
+                    with patch("kiln.emboss_generator._probe_openscad_runs", return_value=(True, None)):
+                        result = _find_openscad()
+        assert result == str(env_bin)
+
+    def test_find_openscad_env_path_soft_fallthrough_when_unrunnable(self, tmp_path, monkeypatch):
+        """A set-but-broken KILN_OPENSCAD_PATH must NOT hard-error — fall through
+        to the normal search so a stale value never bricks a machine that does
+        have a working OpenSCAD on PATH."""
+        env_bin = tmp_path / "env_openscad"
+        env_bin.write_text("#!/bin/sh\nexit 0\n")
+        env_bin.chmod(0o755)
+        path_bin = tmp_path / "path_openscad"
+        path_bin.write_text("#!/bin/sh\nexit 0\n")
+        path_bin.chmod(0o755)
+        monkeypatch.setenv("KILN_OPENSCAD_PATH", str(env_bin))
+
+        def _probe(candidate):
+            # Reject the env candidate, accept the PATH one.
+            return (False, "rejected") if candidate == str(env_bin) else (True, None)
+
+        with patch("kiln.generation.openscad.shutil.which", return_value=str(path_bin)):
+            with patch("kiln.generation.openscad._MACOS_APP_PATH", ""):
+                with patch("kiln.generation.openscad._MACOS_VERSIONED_PATTERN", ""):
+                    with patch("kiln.emboss_generator._probe_openscad_runs", side_effect=_probe):
+                        result = _find_openscad()
+        assert result == str(path_bin)  # fell through to PATH, did not raise
+
 
 # ---------------------------------------------------------------------------
 # Mesh validation tests
