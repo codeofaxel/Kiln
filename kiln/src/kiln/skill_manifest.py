@@ -105,6 +105,7 @@ class SkillManifest:
             "After generating a model, ALWAYS call preview_generated_model() to render multi-angle previews BEFORE printing.",
             "Check the bottom view in previews for bed adhesion issues (elephant's foot, insufficient contact).",
             "Use design_session(verb=\"start\", idea=\"...\") as the FIRST step for any new design — captures the user's saved goal at the duty / environment / materials / safety layer and drives generation, the audit, and the post-print review.",
+            "Saving something reusable has three kinds with different homes: a whole printable object is a design, a reusable mechanical edit or attachable part is a feature, a reusable visual layer (logo / photo / pattern) is a decoration — choose the kind before saving and ask the user if it's ambiguous.",
             "Use recommend_design_material() for material selection and find_design_templates() for proven templates.",
             "Run preflight_check() before every print job.",
             "Never guess on physical operations — ask the user when uncertain.",

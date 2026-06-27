@@ -569,6 +569,18 @@ class _UtilityToolsPlugin:
                         "a Pro feature — kiln3d.com/pricing; free users still get "
                         "the live preview loop and linear history.)"
                     ),
+                    "three_kinds_to_save": (
+                        "When the user wants to SAVE something reusable, there "
+                        "are three kinds and they have different homes: a whole "
+                        "printable object is a design; a reusable mechanical edit "
+                        "or a reusable part that attaches to other objects (a "
+                        "fillet, a clip, a hat that snaps onto a figure) is a "
+                        "feature; a reusable visual layer that rides on a surface "
+                        "(a logo, a photo, a pattern) is a decoration. Pick the "
+                        "kind before you save; if it's ambiguous, ask the user one "
+                        "short question first. Feature and decoration saving are "
+                        "available where those tools are installed."
+                    ),
                 },
                 "safety_tools": [
                     "preflight_check — validates printer readiness before printing",
