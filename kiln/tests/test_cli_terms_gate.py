@@ -136,6 +136,7 @@ def test_identity_and_onboarding_commands_are_exempt():
     exempt = cli_main._TERMS_GATE_EXEMPT
     for name in (
         "setup", "accept-terms", "serve", "rest", "auth", "self-update",
+        "install-mcp", "uninstall-mcp", "install-openscad", "verify", "doctor",
         "signin", "signout", "whoami", "pair", "link", "login", "logout", "invite",
     ):
         assert name in exempt, name + " must be exempt from the terms gate"

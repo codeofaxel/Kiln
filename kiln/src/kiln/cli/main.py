@@ -58,6 +58,7 @@ from kiln.cli.config import (
     validate_printer_config,
 )
 from kiln.cli.install_mcp import register_install_mcp_cli
+from kiln.cli.install_openscad import register_install_openscad_cli
 from kiln.cli.output import (
     format_action,
     format_discovered,
@@ -1398,6 +1399,15 @@ _TERMS_GATE_EXEMPT = frozenset({
     "rest",         # REST API server daemon — gates per request/tier, not at boot
     "auth",         # save printer credentials (config, setup-family)
     "self-update",  # maintenance — don't gate updating Kiln
+    # setup / diagnostics — config-wiring + read-only checks that do NO
+    # substantive print/design work.  Gating these only bricks a fresh install
+    # before the user can wire Kiln up; consent still happens at first real tool
+    # use (the MCP first-run gate) or first substantive CLI command.
+    "install-mcp",
+    "uninstall-mcp",
+    "install-openscad",  # installs the design engine — a dependency, not design
+    "verify",       # `kiln doctor` is an alias of `verify`
+    "doctor",
     # identity / account (kiln.cli.auth_commands.register_auth_cli):
     "signin",
     "signout",
@@ -9457,23 +9467,64 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
             }
         )
 
-    # 6. OpenSCAD available (optional — needed for Gemini Deep Think generation)
+    # 6. OpenSCAD — REQUIRED for local OpenSCAD-native design (Kiln's default
+    #    "make" path), and it must be the development snapshot: the old stable
+    #    build silently breaks SVG/text booleans and lacks the Manifold backend.
+    #    Report honestly and version-check it (never label it "optional").
     openscad_path = shutil.which("openscad")
     if not openscad_path and sys.platform == "darwin":
         _mac_scad = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"
         if os.path.isfile(_mac_scad) and os.access(_mac_scad, os.X_OK):
             openscad_path = _mac_scad
     if openscad_path:
-        checks.append({"name": "openscad", "ok": True, "detail": openscad_path})
-    else:
-        checks.append(
-            {
+        try:
+            from kiln.emboss_generator import (
+                _OPENSCAD_MIN_VERSION_YEAR,
+                _detect_openscad_version,
+                _openscad_version_year,
+            )
+
+            _scad_ver = _detect_openscad_version(openscad_path)
+            _scad_year = _openscad_version_year(_scad_ver)
+        except Exception:
+            _scad_ver, _scad_year, _OPENSCAD_MIN_VERSION_YEAR = "", 0, 2024
+        if _scad_year and _scad_year >= _OPENSCAD_MIN_VERSION_YEAR:
+            checks.append({
+                "name": "openscad",
+                "ok": True,
+                "detail": f"{openscad_path} ({_scad_ver}, current)",
+            })
+        elif _scad_year:
+            checks.append({
                 "name": "openscad",
                 "ok": True,
                 "warn": True,
-                "detail": "not found (optional — needed for AI model generation via Gemini Deep Think)",
-            }
-        )
+                "detail": (
+                    f"{openscad_path} ({_scad_ver}) is OUTDATED — Kiln needs the "
+                    f"{_OPENSCAD_MIN_VERSION_YEAR}+ development snapshot (the old "
+                    "build silently breaks SVG/text). Upgrade: kiln install-openscad"
+                ),
+            })
+        else:
+            checks.append({
+                "name": "openscad",
+                "ok": True,
+                "warn": True,
+                "detail": (
+                    f"{openscad_path} (version unverified — make sure it's the "
+                    f"{_OPENSCAD_MIN_VERSION_YEAR}+ development snapshot)"
+                ),
+            })
+    else:
+        checks.append({
+            "name": "openscad",
+            "ok": True,
+            "warn": True,
+            "detail": (
+                "not found — REQUIRED for designing locally (Kiln's default make "
+                "path). Install the development snapshot: kiln install-openscad"
+            ),
+        })
 
     # 7. SQLite writable
     db_dir = os.path.join(os.path.expanduser("~"), ".kiln")
@@ -11370,6 +11421,7 @@ register_auth_cli(cli)
 # MCP install command — public because a clean ``pip install kiln3d`` should
 # be enough to pair this machine and expose the hosted tool surface.
 register_install_mcp_cli(cli)
+register_install_openscad_cli(cli)
 
 
 # Spend-cap subcommand — `kiln spend-caps {show,raise,approve-order}`.
