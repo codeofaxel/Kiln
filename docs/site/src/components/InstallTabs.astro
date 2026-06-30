@@ -1,4 +1,20 @@
 ---
+// Single source of truth for the paste-to-your-agent setup prompt (rendered
+// once as the hero below).  Plain text (no backticks) so it survives both the
+// copy button's data-code attribute and the visible <code> block.
+const AGENT_PROMPT = `Set up Kiln (kiln3d.com) on this computer and connect it to you, then show me it works. I'm not technical: do the technical parts yourself, explain in plain words, and never accept Kiln's Terms for me — only I can (step 3).
+
+1. Install Kiln in its own sandbox (no admin): run  uv tool install kiln3d. If uv isn't installed, install it first with its official one-line installer for my OS, then continue. (uv brings its own Python — don't install Python separately.) The kiln command may not be on your PATH yet; it installs to my user bin folder (commonly ~/.local/bin/kiln; "uv tool list" shows where). Use that full path for every kiln command below.
+
+2. Install OpenSCAD, the engine Kiln designs with — the DEVELOPMENT SNAPSHOT, not the normal version (the normal one is years old and silently breaks designs). macOS: brew install --cask openscad@snapshot. Windows/Linux: get the latest snapshot from https://openscad.org/downloads#snapshots. Confirm it's 2024 or newer. If installing it needs me to click something, walk me through it.
+
+3. Terms: I accept these myself — you must NOT (if you run the accept command, it silently agrees without showing me anything). Paste me the key points from https://kiln3d.com/terms — especially: Free and Pro are for personal use, selling prints needs the Business tier, fulfillment has a fee, no warranty. Then tell me how to open my Terminal and run  <kiln full path> accept-terms  there myself, and wait until I confirm. If I'm away, stop and leave me just that one step. Never use --yes or KILN_ACCEPT_TERMS.
+
+4. Only after I confirm I accepted: run  <kiln full path> install-mcp --force  (the --force means I don't have to create an account), then  <kiln full path> doctor. Note: doctor calls OpenSCAD "optional" and skips its version, so don't rely on it for OpenSCAD — trust your own step-2 check instead.
+
+5. Don't restart or close yourself. As your final message, tell me by name which app to fully quit and reopen so Kiln loads (it's the app I'm chatting with you in), and to open a fresh terminal. Then tell me to come back and type: Kiln, design me a coaster. I should see a 3D preview in a few seconds; if not, I'll paste the error back to you.
+
+Skip kiln signin unless I tell you I have a Kiln account.`;
 ---
 
 <div class="install-tabs">
@@ -7,6 +23,16 @@
   <input type="radio" name="platform" id="tab-linux" class="tab-radio">
   <input type="radio" name="platform" id="tab-windows" class="tab-radio">
   <input type="radio" name="platform" id="tab-wsl" class="tab-radio">
+
+  <div class="agent-hero">
+    <h3>Fastest: paste this to your AI agent</h3>
+    <p>Have Claude Code, Cursor, Claude Desktop, or another coding agent with terminal access? Paste this &mdash; it does the whole setup for you, on any operating system, with no account needed:</p>
+    <div class="code-block">
+      <button class="copy-btn" data-code={AGENT_PROMPT}>Copy</button>
+      <code class="agent-prompt-code">{AGENT_PROMPT}</code>
+    </div>
+    <p class="agent-hero-sub">Rather do it by hand? Pick your system below.</p>
+  </div>
 
   <div class="tab-bar">
     <label for="tab-macos">
@@ -44,10 +70,10 @@
 <span class="cmd">pipx install kiln3d</span></code>
     </div>
 
-    <p>Or use pip directly:</p>
+    <p>Or with <code>uv</code> (no admin, brings its own Python):</p>
     <div class="code-block">
-      <button class="copy-btn" data-code="pip install kiln3d">Copy</button>
-      <code><span class="cmd">pip install kiln3d</span></code>
+      <button class="copy-btn" data-code="uv tool install kiln3d">Copy</button>
+      <code><span class="cmd">uv tool install kiln3d</span></code>
     </div>
 
     <h3>Install OpenSCAD</h3>
@@ -95,10 +121,10 @@
 <span class="cmd">pipx install kiln3d</span></code>
     </div>
 
-    <p>Or use pip directly:</p>
+    <p>Or with <code>uv</code> (no admin, brings its own Python):</p>
     <div class="code-block">
-      <button class="copy-btn" data-code="pip install kiln3d">Copy</button>
-      <code><span class="cmd">pip install kiln3d</span></code>
+      <button class="copy-btn" data-code="uv tool install kiln3d">Copy</button>
+      <code><span class="cmd">uv tool install kiln3d</span></code>
     </div>
 
     <h3>Install from Source</h3>
@@ -129,18 +155,6 @@
        here but not in WSL 2.  Needs kiln3d >= 1.1.4 (the release
        that fixes the legacy-code-page console crash). -->
   <div class="tab-panel" id="panel-windows">
-    <h3>Fastest: let your AI agent install it</h3>
-    <p>Already have Claude Code (or another agent with terminal access) on this PC? Paste this and it does the whole setup for you:</p>
-    <div class="code-block">
-      <button class="copy-btn" data-code="Set up Kiln (kiln3d.com) on my Windows PC. If Python 3.10+ isn't installed, install it with winget. Then run pip install kiln3d. Then run kiln install-mcp to connect Kiln to this agent. Then run kiln doctor and show me the result. Tell me if I need to restart anything.">Copy</button>
-      <code><span class="comment"># Paste this to your agent</span>
-Set up Kiln (kiln3d.com) on my Windows PC. If Python 3.10+
-isn't installed, install it with winget. Then run
-pip install kiln3d. Then run kiln install-mcp to connect
-Kiln to this agent. Then run kiln doctor and show me the
-result. Tell me if I need to restart anything.</code>
-    </div>
-
     <h3>Manual setup: install Python</h3>
     <p>Kiln needs Python 3.10 or newer. Open <strong>PowerShell</strong> and run:</p>
     <div class="code-block">
@@ -193,10 +207,10 @@ result. Tell me if I need to restart anything.</code>
 <span class="cmd">pipx install kiln3d</span></code>
     </div>
 
-    <p>Or use pip directly:</p>
+    <p>Or with <code>uv</code> (no admin, brings its own Python):</p>
     <div class="code-block">
-      <button class="copy-btn" data-code="pip install kiln3d">Copy</button>
-      <code><span class="cmd">pip install kiln3d</span></code>
+      <button class="copy-btn" data-code="uv tool install kiln3d">Copy</button>
+      <code><span class="cmd">uv tool install kiln3d</span></code>
     </div>
 
     <h3>Install from Source</h3>
@@ -347,6 +361,37 @@ result. Tell me if I need to restart anything.</code>
 
   .wsl-note p {
     margin: 0;
+    font-size: 13px;
+  }
+
+  .agent-hero {
+    margin-bottom: 32px;
+  }
+
+  .agent-hero h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0 0 8px;
+    color: var(--text);
+  }
+
+  .agent-hero > p {
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.7;
+    margin-bottom: 12px;
+  }
+
+  .agent-hero-sub {
+    margin-top: 12px;
+    font-size: 13px;
+  }
+
+  .agent-prompt-code {
+    display: block;
+    white-space: pre-wrap;
+    line-height: 1.6;
+    color: var(--text);
     font-size: 13px;
   }
 
