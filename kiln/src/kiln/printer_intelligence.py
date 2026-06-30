@@ -105,7 +105,7 @@ def _deep_merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str
 
     Overlay values win on conflict; lists are replaced wholesale (matches
     the helper in kiln.design_intelligence so the printer_intelligence
-    overlay merges the same way the other engineering-moat overlays do).
+    overlay merges the same way the other kiln-pro overlays do).
     """
     result = dict(base)
     for key, value in overlay.items():
@@ -630,7 +630,7 @@ def _resolve_caps(printer_id: str) -> dict[str, Any] | None:
     raw = _get_raw(normalised)
     if raw and "max_speed_mm_s" in raw:
         # has_input_shaping is a structured textbook field on each printer
-        # entry (added in the Phase 2 catalog moat split, 2026-05-17).  We
+        # entry (added in the Phase 2 catalog split, 2026-05-17).  We
         # used to scan the curated quirks prose for "input shaping" — but
         # that quirks list now lives in the Pro+ overlay, so free-tier
         # callers wouldn't see it.  has_input_shaping stays in the public

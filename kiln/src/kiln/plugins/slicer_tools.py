@@ -425,7 +425,7 @@ def _maybe_overlay_calibration(
     # First-time-use UX (added inside kiln-pro's calibration_used_block
     # itself — see kiln_pro.engineering.calibration_coach).  Public-side
     # has no knowledge of the marker mechanism; that lives entirely
-    # inside kiln-pro so the moat-side can grow the UX without a
+    # inside kiln-pro so the kiln-pro side can grow the UX without a
     # corresponding public-side change.
 
     return merged, cal_used

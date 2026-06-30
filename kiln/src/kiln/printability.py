@@ -498,8 +498,7 @@ def _material_shrinkage_strain(material: str | None) -> float:
 # Soft seam. Free tier (overlay returns {}) uses the _*_PUBLIC_DEFAULTS
 # below — same rule shapes + values as the pre-seam code, kept here as
 # the public floor. Pro+ overlay supplies curated / tuned versions via
-# the ``printability_judgment`` overlay (kiln_pro/data/
-# printability_judgment_pro_overlay.json).
+# the ``printability_judgment`` overlay.
 
 _WARPING_PUBLIC_DEFAULTS: dict[str, Any] = {
     "geometry_score_rules": [
@@ -537,11 +536,8 @@ _WARPING_PUBLIC_DEFAULTS: dict[str, Any] = {
     # reads both as ``cfg.get(..., {})``-defaulted dicts; absent ->
     # empty -> baseline 0.0 and multiplier falls through to the
     # tendency mapping above.  Free tier = geometric risk + textbook
-    # tendency labels.  Pro overlay (kiln_pro/data/
-    # printability_judgment_pro_overlay.json) supplies the curated
-    # per-material baselines + multiplier overrides (datasheet-grounded
-    # against NatureWorks / BASF / Stratasys / Solvay / Bambu wiki /
-    # passive-components.eu) — that's the engineering-moat overlay.
+    # tendency labels.  The Pro overlay supplies the curated
+    # per-material baselines + multiplier overrides.
     "recommendation_rules": [
         {"metric": "flat_area_total_mm2",  "operator": ">", "threshold": 2000.0,
          "template": "Large flat surface detected ({flat_area_total_mm2:.0f}mm²). Add a 5-8mm brim to resist corner lifting."},
@@ -2362,8 +2358,7 @@ def _analyze_warping(
     # ASA-CF, PC alias) would otherwise fall through to the "moderate"
     # tendency multiplier (1.0) regardless of their real warping
     # tendency.  ``material_specific_multipliers`` lets the overlay
-    # explicitly map these materials to their datasheet-grounded
-    # multipliers (PEEK 2.0, PA6 2.0, PA12 1.5, HIPS 1.0, etc.).
+    # explicitly map these materials to their curated multipliers.
     specific_mults = cfg.get("material_specific_multipliers", {})
     if mat_key in specific_mults:
         material_multiplier = float(specific_mults[mat_key])

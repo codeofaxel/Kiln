@@ -6,12 +6,9 @@
     "_data_quality": {
       "last_audit_date": "2026-04-09",
       "primary_sources": [
-        "Bambu Lab filament datasheets (2024-2025)",
-        "Prusament technical data sheets (2024)",
-        "eSun product specifications (2024-2025)",
-        "Polymaker technical data sheets (2024-2025)",
-        "MatWeb polymer database",
-        "CES EduPack material property ranges"
+        "Manufacturer filament technical datasheets",
+        "Published polymer-property databases",
+        "Empirically validated FDM-printed values"
       ],
       "update_cadence": "annual for established materials (PLA, PETG, ABS), semi-annual for newer composites (CF-Nylon, PA6-GF, PET-CF)",
       "methodology": "Conservative/worst-case values used for composites where manufacturer specs vary. Mechanical values represent typical FDM-printed properties (not injection-molded datasheets). Design limits empirically validated where possible."

@@ -10,10 +10,10 @@
         "Shigley & Mischke 'Mechanical Engineering Design' 10th ed.",
         "ISO 261 / ISO 286 / ISO 60529 / ISO 60715 / ISO 62133 — relevant standards",
         "AGMA 933 — Basic Gear Geometry",
-        "Manufacturer technical datasheets (McMaster-Carr, Keystone, filament vendors)",
-        "Empirical FDM consensus (CNC Kitchen, MakersMuse, Hackaday, /r/3Dprinting)"
+        "Manufacturer technical datasheets and published catalogs",
+        "Empirical FDM community consensus"
       ],
-      "methodology": "Conservative safety-floor values appropriate for AI-controlled FDM printing without expert supervision. Curated reasoning, decision trees, structured variants, holding torques, cycle estimates, and source-cited engineering values are the engineering moat — they ship in Kiln Pro."
+      "methodology": "Conservative safety-floor values appropriate for AI-controlled FDM printing without expert supervision. Deeper curated engineering values ship in Kiln Pro."
     },
     "_split_note": "Discovery + safety-floor profiles for AI-controlled FDM printing. Curated engineering depth (recommended dimensions, structured failure modes, decision trees, holding torques, cycle estimates, helical-gear formulas, IP-rating decision trees, captured-ball variants, anti-walkout lock options, per-material insert tables, DIN-rail variants, and source-cited reasoning) is available in Kiln Pro. See https://kiln3d.com/pricing."
   },

@@ -51,8 +51,8 @@ logger = logging.getLogger(__name__)
 #   - min_cross_section_mm2:     HIGHER value flags MORE small sections
 #   - sharp_angle_threshold_deg: HIGHER value flags MORE less-acute corners
 #
-# Overlay-calibrated values (in kiln_pro/data/structural_thresholds_pro_overlay.json):
-#   0.30 / 5.0 / 4.0 / 60.0
+# The kiln-pro overlay supplies tighter calibrated values for these
+# thresholds; the public defaults below are the conservative floor.
 
 # Stress concentration threshold: cross-section area ratio that signals a
 # "thin neck" where load transfer becomes risky.

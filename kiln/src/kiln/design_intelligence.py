@@ -42,7 +42,7 @@ _DATA_DIR = Path(__file__).parent / "data" / "design_knowledge"
 
 
 # ---------------------------------------------------------------------------
-# kiln-pro engineering-moat overlay (lazy, optional)
+# kiln-pro overlay (lazy, optional)
 # ---------------------------------------------------------------------------
 
 
@@ -50,7 +50,7 @@ def _merge_pro_overlay_if_available(
     public_data: dict[str, dict[str, Any]],
     kind: str,
 ) -> dict[str, dict[str, Any]]:
-    """Merge the kiln-pro engineering-moat overlay into ``public_data``.
+    """Merge the kiln-pro overlay into ``public_data``.
 
     When kiln-pro is not installed, returns ``public_data`` as-is.
     When kiln-pro is installed and the license is valid, kiln-pro
@@ -120,7 +120,7 @@ def _engineering_overlay_loaded() -> bool:
     Returns False when kiln-pro is absent, the license is invalid, the
     network is past the offline-grace window, or the overlay endpoint
     is down.  Returns True only when the merge actually produced the
-    moat content — verified structurally via ``pla.agent_guidance``,
+    curated content — verified structurally via ``pla.agent_guidance``,
     which only exists in the overlay-merged record.
 
     Cheap: a single dict lookup.  No I/O on the hot path.
@@ -429,7 +429,7 @@ class EnvironmentReport:
 class PrinterDesignProfile:
     """Printer capability profile for design-for-manufacturing decisions.
 
-    ``agent_notes`` is part of the engineering moat — the public file
+    ``agent_notes`` is a curated field — the public file
     ships the spec sheet (build volume, temps, materials, layer heights)
     while the curated agent-facing notes move to the kiln-pro overlay
     (see Phase 2 catalog split in ``data/design_knowledge/_split_note``).
@@ -649,14 +649,14 @@ class _DesignKnowledgeBase:
                 raw = json.loads(path.read_text(encoding="utf-8"))
                 setattr(self, attr, {k: v for k, v in raw.items() if not k.startswith("_")})
 
-        # Single choke point: merge the kiln-pro engineering moat overlays
+        # Single choke point: merge the kiln-pro overlays
         # if present.  Without the overlay, the loader sees safety-floor
         # + discovery only; with the overlay, the full record
         # (mechanical + design_limits + use_case_ratings + agent_guidance
         # + brand-tuning + curated guidance for materials; design_rules
         # + agent_guidance + failure_modes + sources + variant tables
         # + Phase 4 depth for design_patterns) is restored via deep
-        # merge.  Engineering moat is in kiln-pro; this loader never
+        # merge.  Curated content is in kiln-pro; this loader never
         # imports kiln-pro at module load — only at first use.
         self._materials = _merge_pro_overlay_if_available(
             self._materials, "materials"
@@ -665,7 +665,7 @@ class _DesignKnowledgeBase:
             self._templates, "design_templates"
         )
 
-        # Phase 2 catalog moat splits (2026-05-17) — public files carry the
+        # Phase 2 catalog splits (2026-05-17) — public files carry the
         # safety floor + textbook math / spec sheets; the curated SME prose
         # (troubleshooting playbooks, post-processing procedures, per-(printer,
         # material) notes, environment notes, requirement worked examples,
@@ -856,7 +856,7 @@ def list_material_profiles() -> list[MaterialProfile]:
 # Public Kiln's materials.json carries only the safety floor: thermal
 # limits, chemical safety (UV/food/outgassing), process-floor design
 # limits (min wall thickness, overhangs), and brand identification +
-# safety-relevant tunings.  The engineering moat (mechanical
+# safety-relevant tunings.  The curated layer (mechanical
 # properties, design_limits beyond process floor, use_case_ratings,
 # agent_guidance paragraphs) ships in kiln-pro's overlay.
 #
@@ -870,7 +870,7 @@ def list_material_profiles() -> list[MaterialProfile]:
 # what it can and can't see.
 #
 # Inputs are public-domain trigger keywords + material datasheet
-# common knowledge.  No moat data ships in this function.
+# common knowledge.  No curated data ships in this function.
 
 # Heat-exposure trigger words (parsed from requirements_text alongside
 # the matched ``heat_exposure`` requirement profile).  Public-domain.
