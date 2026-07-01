@@ -50,9 +50,9 @@ def _extract_leading_json(output: str) -> dict:
 
 
 def _write_session(home: Path) -> None:
-    """Seed the ``~/.kiln/auth_tokens.json`` file the installer's
-    ``_require_signed_in`` gate looks for.  Tests that don't pass
-    ``--force`` need this; tests that do pass ``--force`` skip it."""
+    """Seed the ``~/.kiln/auth_tokens.json`` file so ``_is_signed_in`` reads
+    True — used by tests that want the already-signed-in path (no sign-in
+    nudge).  Install never requires it; this only exercises that branch."""
     tokens = home / ".kiln" / "auth_tokens.json"
     tokens.parent.mkdir(parents=True)
     tokens.write_text(json.dumps({"access_token": "token"}), encoding="utf-8")
@@ -317,14 +317,15 @@ def test_install_mcp_print_preserves_python_module_launch(
 # ---------------------------------------------------------------------------
 
 
-def test_install_mcp_requires_signed_in_session(tmp_path: Path, monkeypatch) -> None:
-    """Without a session on disk, the installer must refuse and tell
-    the user how to fix it.  The resulting config would otherwise run
-    on FREE tier and every pro-tool call would fail cold."""
+def test_install_mcp_proceeds_without_signin_and_nudges(tmp_path: Path, monkeypatch) -> None:
+    """No account required for local use: without a session on disk the
+    installer still wires the client (exit 0) AND prints a one-line
+    invitation to sign in — it never blocks."""
     from kiln.cli import install_mcp as mod
 
     home = tmp_path / "home"
     home.mkdir()  # no .kiln/auth_tokens.json inside
+    config_path = tmp_path / "claude.json"
     kiln_bin = tmp_path / "bin" / "kiln"
     kiln_bin.parent.mkdir(parents=True)
     kiln_bin.write_text("#!/bin/sh\n", encoding="utf-8")
@@ -333,7 +334,7 @@ def test_install_mcp_requires_signed_in_session(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setattr(
         mod,
         "_DEFAULT_CLIENTS",
-        [mod.MCPClient("claude_code", "Claude Code", tmp_path / "claude.json")],
+        [mod.MCPClient("claude_code", "Claude Code", config_path)],
     )
 
     result = CliRunner().invoke(
@@ -341,14 +342,16 @@ def test_install_mcp_requires_signed_in_session(tmp_path: Path, monkeypatch) -> 
         ["--command", str(kiln_bin)],
     )
 
-    assert result.exit_code != 0
-    assert "not signed in" in result.output
+    assert result.exit_code == 0, result.output          # never blocks
+    assert "signin" in result.output.lower()             # the sign-in nudge
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config["mcpServers"]["kiln"]["command"] == str(kiln_bin)  # actually wired
 
 
-def test_install_mcp_force_bypasses_signed_in_check(tmp_path: Path, monkeypatch) -> None:
-    """``--force`` skips the signed-in gate.  Rarely wanted; documented
-    as such.  This exists for power users who explicitly want a free-
-    tier install."""
+def test_install_mcp_force_still_accepted_and_silences_nudge(tmp_path: Path, monkeypatch) -> None:
+    """``--force`` is a deprecated no-op kept for back-compat (the live
+    install page + existing scripts still pass it).  Install already works
+    without an account, so --force now only suppresses the sign-in nudge."""
     from kiln.cli import install_mcp as mod
 
     home = tmp_path / "home"
@@ -371,6 +374,7 @@ def test_install_mcp_force_bypasses_signed_in_check(tmp_path: Path, monkeypatch)
     )
 
     assert result.exit_code == 0, result.output
+    assert "signin" not in result.output.lower()  # --force silences the nudge
     config = json.loads(config_path.read_text(encoding="utf-8"))
     assert config["mcpServers"]["kiln"]["command"] == str(kiln_bin)
 

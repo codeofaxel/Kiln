@@ -470,36 +470,23 @@ def _uninstall_from(client: MCPClient) -> tuple[str, Path]:
 # ═════════════════════════════════════════════════════════════════════
 
 
-def _require_signed_in() -> None:
-    """Raise a ClickException with actionable guidance if the user
-    hasn't signed in via ``kiln signin`` or ``kiln pair``.
+def _is_signed_in() -> bool:
+    """Whether a usable session token is on disk.
 
-    Without a session on disk, the installed MCP server would start on
-    FREE tier, every pro tool would fail with TIER_REQUIRED, and the
-    user would blame Kiln instead of the missing auth step.  Better to
-    refuse upfront with a clear next action."""
+    Kiln runs fully for LOCAL use with NO account, so this predicate never
+    blocks the install.  It only decides whether to show a one-line
+    invitation to sign in (cross-device sync + Pro).  Signing in matters
+    when the user reaches for a hosted/Pro tool, and ``kiln signin`` sets it
+    up then — forcing it at install time is friction before any value."""
     home = os.environ.get("KILN_AUTH_HOME") or str(Path.home())
     tokens_path = Path(home) / ".kiln" / "auth_tokens.json"
     if not tokens_path.is_file():
-        raise click.ClickException(
-            "You're not signed in yet.\n\n"
-            "  Run one of:\n"
-            "    kiln signin              # OAuth from this terminal\n"
-            "    kiln pair <code>        # paste code from app.kiln3d.com\n\n"
-            "  Then re-run `kiln install-mcp`."
-        )
+        return False
     try:
         data = json.loads(tokens_path.read_text(encoding="utf-8"))
-    except Exception as err:
-        raise click.ClickException(
-            f"{tokens_path} exists but isn't readable JSON.  "
-            "Delete the file and run `kiln signin` again."
-        ) from err
-    if not str(data.get("access_token") or "").strip():
-        raise click.ClickException(
-            "Your session file has no access_token.  "
-            "Run `kiln signin` or `kiln pair <code>` again."
-        )
+    except Exception:
+        return False
+    return bool(str(data.get("access_token") or "").strip())
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -562,9 +549,10 @@ def _generic_snippet(entry: dict[str, Any]) -> str:
     ),
 )
 @click.option(
-    "--force", is_flag=True,
-    help="Install even if you aren't signed in.  Rarely wanted — the "
-         "resulting config runs on FREE tier.",
+    "--force", is_flag=True, hidden=True,
+    help="(deprecated) Install is account-free by default; --force now only "
+         "suppresses the one-line sign-in suggestion.  Kept so existing "
+         "scripts and docs that pass --force keep working.",
 )
 def install_mcp(
     only: tuple[str, ...],
@@ -575,9 +563,10 @@ def install_mcp(
 ) -> None:
     """Auto-wire Kiln into supported MCP client configs.
 
-    After ``kiln signin`` or ``kiln pair <code>``, run this to make your
-    AI agent see Kiln's tools.  Safely merges into existing configs —
-    never clobbers sibling MCP servers.
+    Run this to make your AI agent see Kiln's tools — no account needed for
+    local use.  Safely merges into existing configs — never clobbers sibling
+    MCP servers.  (Sign in anytime with ``kiln signin`` to sync across
+    devices and unlock Pro.)
 
     If your agent isn't Claude Desktop, Claude Code, or Codex, run with
     ``--print`` to get a copy-paste-able snippet for any MCP client
@@ -598,8 +587,14 @@ def install_mcp(
         )
         return
 
-    if not force:
-        _require_signed_in()
+    # No account required for local use — never block.  Just invite the user
+    # to sign in (sync + Pro), unless they've silenced it with --force.
+    if not force and not _is_signed_in():
+        click.echo(
+            "  You're set up for local use — no account needed.\n"
+            "  Run `kiln signin` anytime to sync across devices and unlock Pro.",
+            err=True,
+        )
 
     clients = _select_clients(only, skip)
 
