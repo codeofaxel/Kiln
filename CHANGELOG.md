@@ -7,6 +7,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Set up Kiln in one paste — no account needed, free.** Hand your AI agent the
+  setup prompt and it does the whole thing: installs Kiln, gets the right build
+  of OpenSCAD (the engine Kiln designs with), connects Kiln to your agent, and
+  gets you ready to make your first thing — no sign-up, no API key. A new
+  `kiln install-openscad` command installs the correct OpenSCAD for your system
+  in one step, and `kiln doctor` now checks the design engine honestly instead
+  of waving a missing or outdated one through.
+
 - **Make your first thing in the browser — free.** Sign in at kiln3d.com and
   make a real, printable object on the spot: pick a starter — coaster, keychain,
   desk nameplate, pet tag, fridge magnet, ornament — watch it build in 3D and
