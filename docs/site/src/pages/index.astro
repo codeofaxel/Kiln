@@ -149,24 +149,6 @@ import CTA from '../components/CTA.astro';
   <ComparisonTable />
 
   <!--
-    Intellectual property band — added 2026-05-16 as part of the
-    patent-shield rewrite.  Replaces the per-row "Patent Pending"
-    badges on the comparison table (13 badges that mapped the
-    moat row-by-row) and the per-surface breakdown that used to
-    live in the pricing footer.  One quiet, generic line in a
-    Series-A-deck "Defensibility" treatment: confirms substance
-    without naming filing surfaces a competitor could design
-    around.  Same statement appears in the pricing footer; do
-    not let the two strings drift.
-  -->
-  <section class="ip-band bordered">
-    <div class="container">
-      <p class="ip-label">Intellectual Property</p>
-      <p class="ip-statement">Kiln's core technology is protected by multiple US patents pending.</p>
-    </div>
-  </section>
-
-  <!--
     Topic hub — demoted on 2026-04-25 from section 5 to section 9.
     Rationale: docs navigation doesn't sell, it reassures.
     Reassurance belongs after the visitor is already convinced.
@@ -211,6 +193,7 @@ import CTA from '../components/CTA.astro';
           <svg class="hub-wide-arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13.5 6.5 19 12l-5.5 5.5"/></svg>
         </a>
       </div>
+      <p class="patent-footer" data-reveal>Kiln's core technology is protected by multiple US patents pending.</p>
     </div>
   </section>
 
@@ -218,32 +201,21 @@ import CTA from '../components/CTA.astro';
 </BaseLayout>
 
 <style>
-  /* ---- Intellectual property band ---- *
-   * Quiet, considered "Defensibility" treatment.  Single label
-   * + single statement, no list, no badges.  Strict rule: the
-   * statement string must match the .patent-footer copy in
-   * pricing.astro verbatim.  Drift here = drift in the IP
-   * signal; keep them identical.  Deliberately shorter than the
-   * global section rhythm and with no scroll reveal — this band
-   * should be felt, not noticed. */
-  .ip-band {
-    padding: 52px 0;
+  /* ---- Patent footer line ---- *
+   * Quiet IP signal at the foot of the last content section — the
+   * same treatment as .patent-footer on the pricing page, not a
+   * mid-page band.  A legal/credibility line is reassurance, not
+   * conversion, so it sits low and light.  Strict rule: the copy
+   * must stay identical to pricing.astro's .patent-footer; the
+   * deterrent value of "patents pending" doesn't require naming
+   * the filing surface, so keep it generic on both pages. */
+  .patent-footer {
     text-align: center;
-  }
-  .ip-label {
-    font-size: 11px;
-    font-weight: 650;
-    text-transform: uppercase;
-    letter-spacing: 0.2em;
-    color: var(--text-subtle);
-    margin-bottom: 10px;
-  }
-  .ip-statement {
-    font-size: 15px;
-    color: var(--text-secondary);
-    max-width: 480px;
-    margin: 0 auto;
-    line-height: 1.6;
+    margin: 32px auto 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+    letter-spacing: 0.01em;
+    max-width: 720px;
   }
 
   /* Kit-promise — sells the "from object to product" escalation
