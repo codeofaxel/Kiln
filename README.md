@@ -5,6 +5,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/kiln3d/"><img src="https://img.shields.io/pypi/v/kiln3d" alt="PyPI"></a>
+  <a href="https://pepy.tech/projects/kiln3d"><img src="https://img.shields.io/pepy/dt/kiln3d" alt="PyPI Downloads"></a>
   <a href="https://pypi.org/project/kiln3d/"><img src="https://img.shields.io/pypi/pyversions/kiln3d" alt="Python"></a>
   <a href="https://github.com/codeofaxel/Kiln/blob/main/LICENSE"><img src="https://img.shields.io/github/license/codeofaxel/Kiln" alt="License"></a>
   <a href="https://github.com/codeofaxel/Kiln/blob/main/SIGNING.md"><img src="https://img.shields.io/badge/verified%20by-sigstore%20%2B%20SLSA-0f6fdc?logo=sigstore&logoColor=white" alt="Verified by Sigstore + SLSA"></a>
