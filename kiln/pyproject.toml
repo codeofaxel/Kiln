@@ -79,6 +79,7 @@ dev = [
 
 [project.scripts]
 kiln = "kiln.cli.main:main"
+kiln3d = "kiln.cli.main:main"
 
 [project.urls]
 Homepage = "https://kiln3d.com"
