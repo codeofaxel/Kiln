@@ -429,6 +429,46 @@ class _DesignToolsPlugin:
                             a for a, s in zip(raw_alts, slugs, strict=False) if s and s in safe_set
                         ]
 
+                # Skin-contact floor (worn / handled against skin).  Free +
+                # offline: the caution comes from the public skin_contact.json
+                # floor, so it reaches every install without kiln-pro; when
+                # kiln-pro is present the per-exposure verdict is layered on.
+                # Advisory only — never asserts skin-safe, never blocks.
+                from kiln.design_intelligence import (
+                    get_skin_contact_floor,
+                    use_case_implies_skin_contact,
+                )
+                if primary_slug and use_case_implies_skin_contact(requirements):
+                    floor = get_skin_contact_floor(primary_slug)
+                    if floor is not None:
+                        sc = {
+                            "material": floor.display_name,
+                            "concern_level": floor.concern_level,
+                            "honesty_note": floor.honesty_note,
+                            "named_hazards": floor.named_hazards,
+                            "refer_to_medical": floor.refer_to_medical,
+                            "never_skin_safe": True,
+                        }
+                        # Pro enrichment: the per-exposure verdict when
+                        # kiln-pro is installed; free tier stops at the floor.
+                        try:
+                            from kiln_pro.skin_contact import engine as _skin  # noqa: WPS433
+
+                            adv = _skin.free_floor_advisory(primary_slug, requirements)
+                            if adv is not None:
+                                sc["verdict"] = adv.get("verdict")
+                                sc["exposure"] = adv.get("exposure")
+                        except Exception:  # noqa: BLE001 — enrichment is best-effort; the floor stands
+                            pass
+                        result["skin_contact"] = sc
+                        result.setdefault("warnings", []).append(
+                            "SKIN CONTACT: no 3D-printed part is skin-safe, "
+                            "hypoallergenic, or biocompatible. "
+                            + (floor.honesty_note or "")
+                            + " For any mouth, eye, broken-skin, piercing, or "
+                            "implant use, see a medical professional."
+                        )
+
                 # Bonding caveat (reverse-link to the adhesive intelligence),
                 # surfaced at material-selection time.  Two tiers from the
                 # merged profile: Pro (overlay supplied a precise verdict) gets

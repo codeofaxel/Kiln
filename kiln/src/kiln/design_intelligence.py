@@ -365,6 +365,34 @@ class DesignConstraintSet:
     matched_triggers: list[str]
     constraint_rules: dict[str, Any]
     agent_guidance: list[str]
+    caution: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class SkinContactFloor:
+    """The always-free skin-contact safety floor for one material.
+
+    Worn-against-skin advisory ONLY — never a certification: no 3D-printed part
+    is skin-safe, hypoallergenic, or biocompatible.  Holds only the free floor
+    fields (honesty note, named hazards, refer-to-medical); the deeper
+    engineering analysis is a Kiln Pro feature (https://kiln3d.com/pricing).
+    """
+
+    material_id: str
+    display_name: str
+    concern_level: str = ""
+    concern_basis: str = ""
+    honesty_note: str = ""
+    named_hazards: list[str] = field(default_factory=list)
+    refer_to_medical: str = ""
+
+    def has_engineering_data(self) -> bool:
+        # The free floor never carries the deeper analysis (a Kiln Pro
+        # feature), so this is always False.
+        return False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -624,6 +652,7 @@ class _DesignKnowledgeBase:
         self._printer_compatibility: dict[str, dict[str, Any]] = {}
         self._post_processing: dict[str, dict[str, Any]] = {}
         self._multi_material: dict[str, Any] = {}
+        self._skin_contact: dict[str, dict[str, Any]] = {}
         self._loaded = False
 
     def _load(self) -> None:
@@ -641,6 +670,7 @@ class _DesignKnowledgeBase:
             ("printer_material_compatibility.json", "_printer_compatibility"),
             ("post_processing.json", "_post_processing"),
             ("multi_material_pairing.json", "_multi_material"),
+            ("skin_contact.json", "_skin_contact"),
         ]
 
         for filename, attr in _tables:
@@ -697,6 +727,14 @@ class _DesignKnowledgeBase:
         )
         self._printers = _merge_pro_overlay_if_available(
             self._printers, "printer_profiles"
+        )
+        # skin_contact's deeper analysis is a Kiln Pro feature delivered by the
+        # skin-contact tools, not through this design-knowledge merge.  The
+        # merge is wired for uniformity with every other kind; for skin_contact
+        # it adds nothing to the public floor, and the SkinContactFloor
+        # consumer exposes free-floor fields only.
+        self._skin_contact = _merge_pro_overlay_if_available(
+            self._skin_contact, "skin_contact"
         )
 
         self._loaded = True
@@ -765,6 +803,11 @@ class _DesignKnowledgeBase:
         self._load()
         return self._multi_material
 
+    @property
+    def skin_contact(self) -> dict[str, dict[str, Any]]:
+        self._load()
+        return self._skin_contact
+
 
 # Module-level lazy singleton
 _kb: _DesignKnowledgeBase | None = None
@@ -775,6 +818,52 @@ def _get_kb() -> _DesignKnowledgeBase:
     if _kb is None:
         _kb = _DesignKnowledgeBase()
     return _kb
+
+
+# ---------------------------------------------------------------------------
+# Public API — Skin contact (worn / handled against skin)
+# ---------------------------------------------------------------------------
+
+
+def get_skin_contact_floor(material_id: str) -> "SkinContactFloor | None":
+    """The always-free skin-contact safety floor for a material, or ``None``.
+
+    Worn-against-skin advisory only — never a skin-safe certification.  Returns
+    only the free floor fields (honesty note, named hazards, refer-to-medical).
+    """
+    kb = _get_kb()
+    rec = kb.skin_contact.get((material_id or "").lower())
+    # Require a real material record: a merged overlay may add non-material
+    # top-level keys (e.g. a standards cross-reference) that carry no floor.
+    if not isinstance(rec, dict) or "safety_floor" not in rec:
+        return None
+    floor = rec.get("safety_floor") or {}
+    return SkinContactFloor(
+        material_id=(material_id or "").lower(),
+        display_name=rec.get("display_name") or material_id,
+        concern_level=rec.get("concern_level") or "",
+        concern_basis=rec.get("concern_basis") or "",
+        honesty_note=floor.get("honesty_note") or "",
+        named_hazards=list(floor.get("named_hazards") or []),
+        refer_to_medical=floor.get("refer_to_medical") or "",
+    )
+
+
+def use_case_implies_skin_contact(use_case: str) -> bool:
+    """True when *use_case* describes a worn / handled-against-skin item.
+
+    Offline-capable: matches against the ``against_skin`` functional-requirement
+    profile's ``triggers`` (public, on-disk) and suppresses the homographs in
+    its ``trigger_exclusions`` (a napkin ring, a band saw, a watch stand), so
+    the caution fires without kiln-pro and stays credible.
+    """
+    if not isinstance(use_case, str) or not use_case.strip():
+        return False
+    prof = _get_kb().requirements.get("against_skin") or {}
+    low = use_case.lower()
+    if any(str(x).lower() in low for x in (prof.get("trigger_exclusions") or [])):
+        return False
+    return any(str(t).lower() in low for t in (prof.get("triggers") or []))
 
 
 # ---------------------------------------------------------------------------
@@ -2276,6 +2365,11 @@ def match_requirements(text: str) -> list[DesignConstraintSet]:
     results = []
 
     for req_id, data in kb.requirements.items():
+        # A profile may suppress its own homographs so a match stays credible
+        # (against_skin: a napkin ring / band saw / watch stand is not worn).
+        exclusions = data.get("trigger_exclusions", [])
+        if any(str(x).lower() in lower for x in exclusions):
+            continue
         triggers = data.get("triggers", [])
         matched_triggers = [t for t in triggers if t.lower() in lower]
         if matched_triggers:
@@ -2286,6 +2380,7 @@ def match_requirements(text: str) -> list[DesignConstraintSet]:
                     matched_triggers=matched_triggers,
                     constraint_rules=data.get("constraint_rules", {}),
                     agent_guidance=data.get("agent_guidance", []),
+                    caution=data.get("caution", ""),
                 )
             )
 

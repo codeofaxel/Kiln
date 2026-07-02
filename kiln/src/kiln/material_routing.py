@@ -595,6 +595,30 @@ def recommend_material(
                 "Nozzle overlay skipped", exc_info=True,
             )
 
+    # Skin-contact advisory (worn / handled against skin).  This is NOT a
+    # filter — no printed material is skin-safe, so we never drop or downrank
+    # a candidate (unlike the food-safe filter above).  When the intent implies
+    # a worn item we prepend the honest caution for the chosen material so a
+    # material picked for a ring or band carries it.  Public floor; reaches
+    # every install.  Advisory only, best-effort, never breaks routing.
+    try:
+        from kiln.design_intelligence import (
+            get_skin_contact_floor,
+            use_case_implies_skin_contact,
+        )
+
+        if use_case_implies_skin_contact(intent):
+            _floor = get_skin_contact_floor(top_mat.name)
+            _note = _floor.honesty_note if _floor is not None else ""
+            reasoning = (
+                "SKIN CONTACT: no 3D-printed part is skin-safe, hypoallergenic, "
+                f"or biocompatible. {_note} For any mouth, eye, broken-skin, "
+                "piercing, or implant use, see a medical professional.\n\n"
+                f"{reasoning}"
+            )
+    except Exception:  # noqa: BLE001 — advisory is best-effort; never break routing
+        logger.debug("Skin-contact advisory skipped", exc_info=True)
+
     return MaterialRecommendation(
         material=top_mat,
         score=top_score,

@@ -163,6 +163,23 @@ class TestRecommendMaterial:
         rec = recommend_material("outdoor")
         assert rec.material.heat_resistance >= 0.5
 
+    def test_wearable_prepends_skin_contact_advisory(self) -> None:
+        rec = recommend_material("a bracelet worn on the wrist")
+        assert "SKIN CONTACT" in rec.reasoning
+        assert "skin-safe" in rec.reasoning.lower()
+        assert "medical" in rec.reasoning.lower()
+
+    def test_non_wearable_has_no_skin_advisory(self) -> None:
+        rec = recommend_material("strong")
+        assert "SKIN CONTACT" not in rec.reasoning
+
+    def test_skin_advisory_warns_never_filters(self) -> None:
+        # warn-don't-block: a worn intent must still return a real material,
+        # never drop candidates the way the food-safe filter does.
+        rec = recommend_material("a ring worn daily")
+        assert rec.material is not None
+        assert rec.score > 0
+
     def test_recommendation_has_settings(self) -> None:
         rec = recommend_material("strong")
         assert "hotend_temp" in rec.settings

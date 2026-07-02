@@ -668,6 +668,29 @@ class TestRecommendDesignMaterial:
         assert result["success"] is False
         assert "boom" in result["error"]
 
+    @patch("kiln.design_intelligence.recommend_material_for_design")
+    def test_skin_contact_floor_surfaced_for_wearable(self, mock_rec, registered_tools):
+        # A worn-against-skin request surfaces the free skin-contact floor +
+        # a warning inline — the caution reaches the user without asking.
+        mock_rec.return_value = SimpleNamespace(to_dict=lambda: {"material": "pla"})
+
+        result = registered_tools["recommend_design_material"]("a ring worn daily")
+
+        assert result["success"] is True
+        sc = result.get("skin_contact")
+        assert sc is not None, "wearable intent must surface the skin-contact floor"
+        assert sc["never_skin_safe"] is True
+        assert sc["refer_to_medical"] and sc["honesty_note"]
+        assert any("SKIN CONTACT" in w for w in result.get("warnings", []))
+
+    @patch("kiln.design_intelligence.recommend_material_for_design")
+    def test_no_skin_contact_block_for_non_wearable(self, mock_rec, registered_tools):
+        mock_rec.return_value = SimpleNamespace(to_dict=lambda: {"material": "petg"})
+
+        result = registered_tools["recommend_design_material"]("an outdoor shelf bracket")
+
+        assert "skin_contact" not in result
+
     @patch("kiln.design_intelligence.get_material_profile")
     @patch("kiln.design_intelligence.recommend_material_for_design")
     def test_bonding_caveat_surfaced(self, mock_rec, mock_profile, registered_tools):

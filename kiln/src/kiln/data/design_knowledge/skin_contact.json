@@ -1,0 +1,242 @@
+{
+ "_meta": {
+  "version": "1.0.0",
+  "domain": "fdm",
+  "description": "Per-material SKIN-CONTACT safety floor for FDM parts worn or handled against intact skin (rings, bands, grips, earbud shells, jewelry, glasses, masks). Advisory RISK-STRATIFICATION, never certification: no 3D-printed part is skin-safe, hypoallergenic, or biocompatible. This public file is the always-free safety floor (honesty note + named hazards + the refer-to-medical boundary) so the caution reaches every install, offline included. Per-exposure verdicts, the remediation playbook, and the regulated-market compliance mapping are Kiln Pro/Business/Enterprise.",
+  "_split_note": "Safety floor only. The per-exposure verdict, remediation depth (which standard applies, what test answers it, sealing / cleanability), and the REACH / toy-safety compliance layer are curated in Kiln Pro. See https://kiln3d.com/pricing.",
+  "prime_directive": "There is NO affirmative skin-safe verdict. 'No data' is returned as caution, never as safety. Out-of-scope uses (mouth/eye/mucosal, broken skin, piercing, implant, children's mouthing) are out of scope for a printed part — refer to a medical professional and a certified medical-grade material.",
+  "verdict_vocabulary": [
+   "reasonable_for_incidental",
+   "use_caution",
+   "not_recommended",
+   "refer_to_medical"
+  ],
+  "exposure_tiers": {
+   "incidental": "surface / intact skin, limited (<=24h) — brief handling",
+   "prolonged": "surface / intact skin, prolonged (>24h) — worn items",
+   "mucosal": "mucosal membrane — out of intact-skin scope",
+   "broken_implant": "breached surface / implant / permanent — out of scope"
+  }
+ },
+ "pla": {
+  "display_name": "PLA",
+  "base_state": "no_evidence_untested",
+  "concern_level": "untested",
+  "concern_basis": "benign base polymer; risk is the undisclosed colorant/additive load",
+  "safety_floor": {
+   "honesty_note": "No 3D-printed PLA part is tested or certified skin-safe. PLA's benign reputation belongs to characterized medical-grade resin, not to a colored consumer spool.",
+   "named_hazards": [
+    "undisclosed colorant/additive load (the dominant, unlabelled variable)",
+    "low softening temperature (Tg ~55-65 C) under warm, prolonged wear"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pla_plus": {
+  "display_name": "PLA+ (impact-modified PLA)",
+  "base_state": "no_evidence_untested",
+  "concern_level": "untested",
+  "concern_basis": "as PLA plus undisclosed impact modifiers",
+  "safety_floor": {
+   "honesty_note": "'PLA+' is a marketing term for PLA with proprietary, undisclosed impact modifiers; it is LESS characterized for skin than neat PLA, not safer.",
+   "named_hazards": [
+    "undisclosed impact-modifier layer ON TOP OF the base colorant/additive load"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "silk_pla": {
+  "display_name": "Silk / matte PLA (effect PLA)",
+  "base_state": "no_evidence_untested",
+  "concern_level": "untested",
+  "concern_basis": "as PLA plus undisclosed effect additives",
+  "safety_floor": {
+   "honesty_note": "Effect PLA adds undisclosed gloss or matting additives on top of the color; it is the least-characterized PLA for skin contact.",
+   "named_hazards": [
+    "effect additives (silk gloss agents / matte mineral fillers) ON TOP OF the colorant load"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "petg": {
+  "display_name": "PETG / PET / copolyester",
+  "base_state": "no_evidence_untested",
+  "concern_level": "untested",
+  "concern_basis": "benign base with food-contact heritage; colorant load undisclosed",
+  "safety_floor": {
+   "honesty_note": "PETG's food-contact heritage is a good sign but is NOT a skin-safety certification; 'safe for a food container' is a different test from 'safe to wear on skin'.",
+   "named_hazards": [
+    "undisclosed colorant/additive package (often the real sensitizer)",
+    "antimony trioxide polycondensation catalyst residue"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "abs": {
+  "display_name": "ABS",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "high",
+  "concern_basis": "styrene (IARC Group 2A) + acrylonitrile (IARC Group 1 human carcinogen)",
+  "safety_floor": {
+   "honesty_note": "ABS contains two monomers of toxicological concern (styrene, acrylonitrile) and is not tested for skin contact; it is not recommended for worn items.",
+   "named_hazards": [
+    "residual styrene (IARC Group 2A, probably carcinogenic to humans)",
+    "residual acrylonitrile (IARC Group 1 — carcinogenic to humans, Vol. 136 2025)",
+    "undisclosed flame-retardant / colorant package"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "asa": {
+  "display_name": "ASA",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "high",
+  "concern_basis": "styrene (IARC Group 2A) + acrylonitrile (IARC Group 1 human carcinogen)",
+  "safety_floor": {
+   "honesty_note": "ASA replaces ABS's butadiene rubber with an acrylic-ester rubber for UV stability but retains the same two monomers of concern; its weather resistance does not improve its skin profile.",
+   "named_hazards": [
+    "residual styrene (IARC Group 2A) + acrylonitrile (IARC Group 1, carcinogenic to humans) — as ABS",
+    "undisclosed weather-package / colorant additives"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "polycarbonate": {
+  "display_name": "Polycarbonate (PC)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "high",
+  "concern_basis": "BPA — endocrine disruptor, skin-absorbed, releases under heat/sweat",
+  "safety_floor": {
+   "honesty_note": "Polycarbonate is made from BPA, which leaches out with heat and sweat and is absorbed through skin; consumer PC spools are regular BPA-based (not BPA-free / medical) grades and are untested for skin.",
+   "named_hazards": [
+    "bisphenol-A (BPA) — the structural monomer; releases under heat/sweat/abrasion",
+    "BPA is skin-absorbed and an endocrine disruptor"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "nylon": {
+  "display_name": "Nylon / PA6",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "elevated",
+  "concern_basis": "residual caprolactam is a skin/eye/respiratory irritant; hygroscopic",
+  "safety_floor": {
+   "honesty_note": "Nylon-6 is built from caprolactam, a classified skin/eye/respiratory irritant, and is strongly hygroscopic, so a worn part soaks up sweat and can leach residuals; no printed nylon is tested for skin.",
+   "named_hazards": [
+    "residual caprolactam (skin/eye/respiratory irritant, CLP H315/H319/H335)",
+    "high moisture absorption — a worn part soaks and holds sweat"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pa12": {
+  "display_name": "Nylon / PA12",
+  "base_state": "no_evidence_untested",
+  "concern_level": "untested",
+  "concern_basis": "milder nylon; untested for skin",
+  "safety_floor": {
+   "honesty_note": "PA12 is a chemically milder nylon than PA6 (laurolactam-based, lower moisture uptake) but no printed PA12 part is tested for skin contact.",
+   "named_hazards": [
+    "undisclosed colorant/additive load",
+    "hygroscopic (less than PA6, still absorbs sweat)"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "tpu": {
+  "display_name": "TPU / TPE (flexible)",
+  "base_state": "no_evidence_untested",
+  "concern_level": "untested",
+  "concern_basis": "top wearable material; undisclosed plasticizer system, untested for skin",
+  "safety_floor": {
+   "honesty_note": "TPU is the top wearable material (bands, grips, earbud tips), which is exactly why the caution line is held hardest here: consumer TPU has no finished-part skin data and an undisclosed plasticizer system. 'Watch bands are made of TPU' is true — of CERTIFIED skin-contact TPU compounds, not an uncertified consumer spool.",
+   "named_hazards": [
+    "undisclosed plasticizers / processing oils (the real skin-contact variable)",
+    "residual free isocyanate only if under-reacted (fully-reacted TPU has none)"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "cf_nylon": {
+  "display_name": "Carbon-/glass-fiber-filled (PA-CF, PETG-CF, PLA-CF, PA-GF)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "elevated",
+  "concern_basis": "mechanical: exposed fiber ends cause skin irritation / micro-splinters",
+  "safety_floor": {
+   "honesty_note": "Fiber-filled filaments add a MECHANICAL hazard unfilled polymers do not: chopped carbon or glass fiber ends protrude at every cut, abraded, worn, or porous surface and act like fiberglass against skin, independent of chemistry.",
+   "named_hazards": [
+    "exposed fiber ends at cut/abraded/worn/porous surfaces -> mechanical dermatitis / micro-splinters",
+    "respirable fiber dust during sanding (a lung hazard — fitted respirator, not a paper mask)"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "wood_fill": {
+  "display_name": "Wood-fill composite",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "elevated",
+  "concern_basis": "particulate/microbe harboring; wood dust is an inhalation carcinogen",
+  "safety_floor": {
+   "honesty_note": "Wood-look filament is a PLA-type matrix loaded with real wood particles; worn on skin it soaks up sweat and can harbor microbes, and sanding it makes wood dust (IARC Group 1).",
+   "named_hazards": [
+    "wood particles harbor moisture/microbes and can cause mechanical/allergic irritation",
+    "wood dust (sanding) is an IARC Group 1 carcinogen by inhalation"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "metal_fill": {
+  "display_name": "Metal-fill composite (bronze/copper/steel/aluminum)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "high",
+  "concern_basis": "nickel (leading contact allergen) + heavy-metal particulate release",
+  "safety_floor": {
+   "honesty_note": "Metal-look filament contains real metal powder that can release nickel and other metals into sweaty skin; nickel is the leading contact allergen and there is a legal release limit for worn items.",
+   "named_hazards": [
+    "metal particulate can release nickel and other metals into sweaty skin over time",
+    "nickel is the most common contact allergen; a legal release limit exists"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pp": {
+  "display_name": "Polypropylene (PP)",
+  "base_state": "no_evidence_untested",
+  "concern_level": "untested",
+  "concern_basis": "lowest base-chemistry concern; colorant/additive load undisclosed",
+  "safety_floor": {
+   "honesty_note": "Raw PP has among the lowest base-chemistry concern of consumer plastics and a real olefin food-contact heritage, but food-contact clearance is NOT skin certification and the printed part's additives/porosity remain untested for skin.",
+   "named_hazards": [
+    "undisclosed colorant/additive load",
+    "porous layer-line surface (hygiene)"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pva": {
+  "display_name": "PVA (water-soluble support)",
+  "base_state": "wrong_material",
+  "concern_level": "not_applicable",
+  "concern_basis": "wrong material — dissolves in sweat",
+  "safety_floor": {
+   "honesty_note": "PVA is a water-soluble support material; sweat will turn a worn PVA part gummy, so it is simply the wrong material to wear. That is a fitness-for-use fact, not a toxicology verdict.",
+   "named_hazards": [
+    "dissolves in water/sweat — a worn part degrades"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "peek": {
+  "display_name": "PEEK / PEI (ULTEM)",
+  "base_state": "out_of_scope_industrial",
+  "concern_level": "not_applicable",
+  "concern_basis": "certified grades are industrial-only; refer out",
+  "safety_floor": {
+   "honesty_note": "Implant-grade PEEK and medical PEI (ULTEM) are genuinely biocompatible, but that certification belongs to a qualified industrial material + process, not to anything a consumer desktop printer produces; do not treat it as a consumer skin-contact fix.",
+   "named_hazards": [
+    "real biocompatible grades exist but require industrial printers (>350 C, heated chamber)"
+   ],
+   "refer_to_medical": "PEEK/PEI implant- and medical-grade materials are real but industrial-only. For any certified skin-contact or medical need, see a medical professional and a certified medical-grade supplier; a desktop-printed part is not a substitute."
+  }
+ }
+}
