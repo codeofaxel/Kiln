@@ -7,6 +7,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Designing something you'll wear? Kiln now gives you a straight answer on skin
+  contact.** Make a ring, band, watch strap, earbud, or glasses and Kiln flags
+  what matters about wearing a printed part against skin — honestly (no 3D print
+  is truly "skin-safe"), points you to a professional for anything medical, and
+  never blocks your print. Deeper material and compliance guidance is available
+  on paid plans.
+
 - **Set up Kiln in one paste — no account needed, free.** Hand your AI agent the
   setup prompt and it does the whole thing: installs Kiln, gets the right build
   of OpenSCAD (the engine Kiln designs with), connects Kiln to your agent, and
