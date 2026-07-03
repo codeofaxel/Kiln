@@ -8,11 +8,16 @@
     "url": "https://github.com/codeofaxel/Kiln",
     "source": "github"
   },
+  "websiteUrl": "https://kiln3d.com",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "kiln3d",
       "version": "1.1.9",
+      "runtimeHint": "uvx",
+      "packageArguments": [
+        { "type": "positional", "value": "serve" }
+      ],
       "transport": {
         "type": "stdio"
       },
