@@ -26,12 +26,29 @@ import InstallTabs from '../components/InstallTabs.astro';
 // is promoted to a platform-neutral callout at the top of step 1 —
 // for non-technical visitors, the AI they already have IS the
 // installer.  Keep this page and the README Quick Start in lockstep.
+//
+// 2026-07-02: one prompt, one truth.  The page-level agent-setup
+// prompt was a stale duplicate of InstallTabs' AGENT_PROMPT and
+// contradicted it one scroll apart: bare `pip install kiln3d`
+// (fails on externally-managed Pythons — modern macOS brew,
+// Debian), mandatory `kiln signin` (signin is optional; Terms is
+// the real gate), no accept-terms step (the CLI blocks install-mcp
+// until Terms are accepted), and no OpenSCAD (so step 3's coaster
+// demo would fail).  Deleted; InstallTabs' hero prompt is now the
+// single paste-to-agent path.  Step 2 teaches
+// accept-terms → install-mcp --force (matches the CLI contract:
+// install-mcp requires signin OR --force), with signin as the
+// optional cloud/Pro line.  The manual-config example now uses
+// `kiln serve` — the PATH shim from uv/pipx installs —
+// because `python3 -m kiln` can't see isolated tool envs; the
+// copy points at `kiln install-mcp --print` for the
+// machine-exact snippet.
 
 const mcpConfig = JSON.stringify({
   mcpServers: {
     kiln: {
-      command: "python3",
-      args: ["-m", "kiln", "serve"]
+      command: "kiln",
+      args: ["serve"]
     }
   }
 }, null, 2);
@@ -39,29 +56,22 @@ const mcpConfig = JSON.stringify({
 const mcpConfigCompact = JSON.stringify({
   mcpServers: {
     kiln: {
-      command: "python3",
-      args: ["-m", "kiln", "serve"]
+      command: "kiln",
+      args: ["serve"]
     }
   }
 });
 
-const connectCommands = 'kiln signin\nkiln install-mcp';
+const connectCommands = 'kiln signin\nkiln accept-terms\nkiln install-mcp';
 const connectCommandsDisplay =
-  'kiln signin        # create your free account\n' +
-  'kiln install-mcp   # connects Kiln to your AI apps';
+  'kiln signin        # create your free account — designs save + sync\n' +
+  'kiln accept-terms  # one time: read + agree to the terms\n' +
+  'kiln install-mcp   # connect Kiln to your AI apps';
 
-// One prompt that hands the entire setup to an AI that can run
-// commands (Claude Code, Codex, ...).  Platform-neutral version of
-// the Windows tab's "fastest" path.
-const agentSetupPrompt =
-  'Set up Kiln (kiln3d.com) on my computer. If Python 3.10+\n' +
-  "isn't installed, install it first. Then run pip install kiln3d.\n" +
-  'Then run kiln signin, then kiln install-mcp to connect Kiln\n' +
-  'to this agent. Finish with kiln doctor and show me the result.\n' +
-  'Tell me if I need to restart anything.\n' +
-  'Once it works, give me one quick tip: my results with Kiln depend\n' +
-  'on the AI model driving it, so for the best designs I should use the\n' +
-  'most capable model and highest-thinking mode I have.';
+const connectCommandsNoAccount = 'kiln accept-terms\nkiln install-mcp --force';
+const connectCommandsNoAccountDisplay =
+  'kiln accept-terms          # one time: read + agree to the terms\n' +
+  'kiln install-mcp --force   # connect without an account';
 
 const installHowToSchema = {
   '@type': 'HowTo',
@@ -73,13 +83,13 @@ const installHowToSchema = {
     {
       '@type': 'HowToStep',
       name: 'Install Kiln',
-      text: 'Paste one setup prompt into an AI that can run commands and it installs Kiln for you — or install it yourself with pip install kiln3d.',
+      text: 'Paste one setup prompt into an AI that can run commands and it installs Kiln for you — or install it yourself with uv tool install kiln3d.',
       url: 'https://kiln3d.com/install',
     },
     {
       '@type': 'HowToStep',
       name: 'Connect your AI',
-      text: 'Run kiln signin then kiln install-mcp — Kiln connects itself to Claude Desktop, Claude Code, and Codex. Any other MCP-compatible app gets a paste-in config via kiln install-mcp --print.',
+      text: 'Run kiln accept-terms once, then kiln install-mcp --force — Kiln connects itself to Claude Desktop, Claude Code, and Codex, no account needed. Any other MCP-compatible app gets a paste-in config via kiln install-mcp --print.',
       url: 'https://kiln3d.com/install',
     },
     {
@@ -100,7 +110,10 @@ const installHowToSchema = {
     'install kiln',
     'kiln setup',
     'kiln mcp server',
+    '3d printer mcp server',
+    'claude 3d printing',
     '3d printer ai setup',
+    'bambu lab mcp',
     'octoprint ai agent tools',
   ]}
   schema={installHowToSchema}
@@ -124,17 +137,7 @@ const installHowToSchema = {
           <div class="step-number">1</div>
           <div class="step-content">
             <h3>Install Kiln</h3>
-            <p class="install-expect">Here&rsquo;s what happens: you&rsquo;ll install a few free tools (Python, Kiln, and OpenSCAD &mdash; the engine Kiln designs with), connect Kiln to your AI app, then ask it to make something. There&rsquo;s a download or two, so give it a few minutes.</p>
-            <div class="agent-setup-callout">
-              <p class="agent-setup-label">Easiest &mdash; let your AI do the whole thing</p>
-              <p class="agent-setup-body">Using Claude Code, Codex, or another AI that can run commands on your computer? Paste this to it and it installs and connects Kiln for you &mdash; no terminal needed:</p>
-              <div class="code-block">
-                <button class="copy-btn" data-code={agentSetupPrompt}>Copy</button>
-                <pre><code set:text={agentSetupPrompt} /></pre>
-              </div>
-              <p class="agent-setup-note"><strong>Using Claude Desktop?</strong> It can&rsquo;t run commands for you, so this prompt won&rsquo;t install anything &mdash; that&rsquo;s the snag most people hit. Use the manual steps below instead: you&rsquo;ll paste a couple of lines into Terminal once, and we tell you exactly what each one does.</p>
-            </div>
-            <p>Or do it yourself &mdash; pick your platform below (this is the path for Claude Desktop). Each has copy-paste commands.</p>
+            <p class="install-expect">Here&rsquo;s what happens: you&rsquo;ll install two free tools (Kiln and OpenSCAD &mdash; the engine Kiln designs with), connect Kiln to your AI app, then ask it to make something. There&rsquo;s a download or two, so give it a few minutes.</p>
             <InstallTabs />
           </div>
         </li>
@@ -142,16 +145,25 @@ const installHowToSchema = {
           <div class="step-number">2</div>
           <div class="step-content">
             <h3>Connect your AI</h3>
-            <p>Two quick commands &mdash; Kiln sets itself up inside Claude Desktop, Claude Code, and Codex.</p>
+            <p>Three quick commands. <code>signin</code> creates your free account &mdash; it&rsquo;s what saves your designs to the cloud and lets you pick them back up on any device. <code>accept-terms</code> shows Kiln&rsquo;s terms for you to read and agree to (one time, and it has to be you, not your AI). <code>install-mcp</code> wires Kiln into Claude Desktop, Claude Code, and Codex.</p>
             <div class="code-block">
               <button class="copy-btn" data-code={connectCommands}>Copy</button>
               <pre><code set:text={connectCommandsDisplay} /></pre>
             </div>
-            <p>Restart your AI app and it can run your printer. <span class="step-skip">(Used the easiest path in step 1? This already happened.)</span></p>
+            <p>Restart your AI app and it can run your printer. <span class="step-skip">(Used the paste-to-your-agent path in step 1? Terms and connect already happened &mdash; run <code>kiln signin</code> whenever you want to save your work.)</span></p>
+            <details class="manual-config">
+              <summary>Rather not create an account yet?</summary>
+              <p>Everything local works without one &mdash; skip <code>signin</code> and add <code>--force</code>:</p>
+              <div class="code-block">
+                <button class="copy-btn" data-code={connectCommandsNoAccount}>Copy</button>
+                <pre><code set:text={connectCommandsNoAccountDisplay} /></pre>
+              </div>
+              <p>You can run <code>kiln signin</code> to create your free account any time later &mdash; that&rsquo;s what unlocks saving, syncing, and everything in Pro.</p>
+            </details>
             <p class="install-success"><strong>How you&rsquo;ll know it worked:</strong> ask your AI &ldquo;is Kiln connected?&rdquo; and it&rsquo;ll confirm Kiln is loaded and ready. That&rsquo;s it &mdash; you&rsquo;re set up.</p>
             <details class="manual-config">
               <summary>Using a different AI app? Paste the config yourself</summary>
-              <p><code>kiln install-mcp --print</code> prints this for any MCP-compatible app:</p>
+              <p><code>kiln install-mcp --print</code> prints the exact snippet for your machine &mdash; it pins the full path, so it works even when <code>kiln</code> isn&rsquo;t on that app&rsquo;s PATH. It looks like this:</p>
               <div class="code-block">
                 <button class="copy-btn" data-code={mcpConfigCompact}>Copy</button>
                 <pre><code set:text={mcpConfig} /></pre>
@@ -166,6 +178,7 @@ const installHowToSchema = {
             <p>Once Kiln is connected, just describe what you want in plain English &mdash; no special commands. Try something like:</p>
             <blockquote class="example-prompt">I have a Bambu A1, make me a coaster with my dog&rsquo;s photo on it</blockquote>
             <p class="model-tip">Kiln thinks with your AI &mdash; so for designs you care about, use the most capable model you have, and give it room to think. That&rsquo;s where great results come from.</p>
+            <p class="install-success"><strong>Made something you like?</strong> If you haven&rsquo;t signed in yet, run <code>kiln signin</code> to create your free account &mdash; it keeps your designs so you can reopen, tweak, and reprint them later, and follow them to any device.</p>
           </div>
         </li>
       </ol>
@@ -296,56 +309,23 @@ const installHowToSchema = {
     padding: 0;
     border: none;
   }
-  /* "Let your AI install it" callout (Step 1) — accent-tinted card
-     matching the InstallTabs .wsl-note treatment.  For visitors who
-     aren't comfortable in a terminal, the AI they already have is
-     the installer; the prompt is the entire setup. */
-  .agent-setup-callout {
-    margin: 18px 0 26px;
-    padding: 20px 22px 22px;
-    background: linear-gradient(180deg, rgba(255, 107, 43, 0.08), rgba(255, 107, 43, 0.03));
-    border: 1px solid rgba(255, 107, 43, 0.2);
-    border-radius: var(--radius-lg);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  }
-  .agent-setup-label {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text);
-    margin: 0 0 6px;
-  }
-  .agent-setup-body {
-    font-size: 14px;
-    color: var(--text-muted);
-    margin: 0;
-    line-height: 1.6;
-  }
   /* Quiet aside on the step-2 restart line for visitors who used
-     the step-1 callout. */
+     the step-1 paste-to-agent path. */
   .step-skip {
     opacity: 0.75;
   }
 
-  /* Key onboarding lines — "what to expect", the Claude Desktop snag,
-     and the success check.  Rendered at full --text (not --text-muted)
-     so the instructions win the contrast fight with the accent prompt
-     card; normie feedback was that gray instructions got lost next to
-     the brighter prompt. */
+  /* Key onboarding lines — "what to expect" and the success check.
+     Rendered at full --text (not --text-muted) so the instructions
+     win the contrast fight with the accent prompt card; normie
+     feedback was that gray instructions got lost next to the
+     brighter prompt. */
   .install-expect {
     font-size: 15px;
     color: var(--text);
     line-height: 1.6;
     margin-bottom: 6px;
   }
-  .agent-setup-note {
-    font-size: 13.5px;
-    color: var(--text);
-    margin: 14px 0 0;
-    padding-top: 12px;
-    border-top: 1px solid rgba(255, 107, 43, 0.18);
-    line-height: 1.6;
-  }
-  .agent-setup-note strong { color: var(--accent-bright, var(--accent)); }
   .install-success {
     font-size: 14px;
     color: var(--text);
