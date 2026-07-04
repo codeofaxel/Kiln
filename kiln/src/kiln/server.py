@@ -5172,6 +5172,77 @@ def pause_print(keep_temps: bool = True) -> dict:
 
 
 @mcp.tool()
+def skip_print_objects(object_label_ids: list[int], plate_number: int = 1) -> dict:
+    """Abandon one or more failed objects on a multi-object plate, mid-print.
+
+    When one part on a full plate fails — spaghetti, a knocked-loose object,
+    a detached corner — this tells the printer to stop printing just those
+    objects and finish the rest of the plate.  One bad part no longer scraps
+    the whole run.
+
+    The ids are the per-object ``label_id`` values from
+    ``list_plate_objects`` on the file that is currently printing (Bambu
+    assigns them at slice time; the printer reports already-skipped ones in
+    its status).  Discover them first::
+
+        list_plate_objects("my_plate.gcode.3mf")   # -> objects[].label_id
+
+    AGENT DISPLAY CONTRACT: skipping is IRREVERSIBLE for the objects named —
+    confirm the exact objects with the user before calling, and only while a
+    multi-object plate is actively printing.  Skips are cumulative: an object
+    already skipped stays skipped.
+
+    Currently supported on Bambu Lab printers.
+
+    Args:
+        object_label_ids: Label ids to abandon (from ``list_plate_objects``).
+        plate_number: Which plate the ids came from (1-based, default 1).
+            Recorded for context; the ids are what the printer acts on.
+
+    Returns:
+        Dict with the skipped ids and a confirmation message, or an error
+        dict if no print is active or the printer doesn't support skipping.
+    """
+    if err := _check_auth("print"):
+        return err
+    if err := _check_rate_limit("skip_print_objects"):
+        return err
+    if not object_label_ids:
+        return _error_dict(
+            "skip_print_objects needs at least one object label id. "
+            "Run list_plate_objects() on the printing file to find them.",
+            code="NO_OBJECTS",
+        )
+    try:
+        adapter = _get_adapter()
+        skip = getattr(adapter, "skip_objects", None)
+        if not callable(skip):
+            return _error_dict(
+                "This printer doesn't support skipping objects mid-print "
+                "(currently a Bambu Lab capability).",
+                code="UNSUPPORTED",
+            )
+        skip([int(x) for x in object_label_ids])
+        ids = [int(x) for x in object_label_ids]
+        return {
+            "success": True,
+            "skipped_object_label_ids": ids,
+            "plate_number": plate_number,
+            "message": (
+                f"Asked the printer to skip {len(ids)} object(s): {ids}. "
+                "The rest of the plate keeps printing."
+            ),
+        }
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(
+            f"Failed to skip objects: {exc}. Check that a multi-object print is active.",
+        )
+    except Exception as exc:
+        logger.exception("Unexpected error in skip_print_objects")
+        return _error_dict(f"Unexpected error in skip_print_objects: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
 def resume_print() -> dict:
     """Resume a paused print job.
 
@@ -9788,11 +9859,14 @@ def list_plate_objects(file_path: str, plate_number: int = 1) -> dict:
     in the archive.
 
     Use this to discover which parts are in a multi-object file before
-    calling ``extract_plate_object`` to isolate one.
+    calling ``extract_plate_object`` to isolate one — or, if a part fails
+    mid-print, to get its ``label_id`` for ``skip_print_objects`` so you can
+    abandon just that object and save the rest of the plate.
 
     :param file_path: Path to the .3mf or .gcode.3mf file.
     :param plate_number: Which plate to inspect (1-based, default 1).
-    :returns: Dict with ``objects`` list, plate metadata (bed type,
+    :returns: Dict with ``objects`` list (each with a ``label_id`` that
+        ``skip_print_objects`` consumes), plate metadata (bed type,
         filament colours, nozzle diameter, sequential print flag),
         and ``plates_available``.
     """

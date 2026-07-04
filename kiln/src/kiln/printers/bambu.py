@@ -2774,6 +2774,53 @@ class BambuAdapter(PrinterAdapter):
         return True
 
     # ------------------------------------------------------------------
+    # Bambu-specific: skip objects mid-print
+    # ------------------------------------------------------------------
+
+    def skip_objects(self, object_ids: list[int]) -> bool:
+        """Abandon one or more plate objects during a live multi-object print.
+
+        Publishes Bambu's ``skip_objects`` print command.  The printer stops
+        laying down the named objects and finishes the rest of the plate — so
+        one failed part on a full plate no longer forces you to scrap the whole
+        run.
+
+        The ids are the per-object label ids Bambu assigns at slice time: the
+        same numbers ``list_plate_objects`` returns as ``label_id`` and that the
+        printer reports as already-skipped in its status ``s_obj`` list.  They
+        are cumulative on the firmware side — each call adds to the skip set;
+        an object already skipped stays skipped.
+
+        This is irreversible for the objects named, and only meaningful while a
+        multi-object plate is actively printing.
+
+        Args:
+            object_ids: Label ids of the objects to abandon (non-empty).
+
+        Returns:
+            ``True`` once the command is published.
+
+        Raises:
+            PrinterError: If *object_ids* is empty or holds a non-integer id.
+        """
+        if not object_ids:
+            raise PrinterError("skip_objects requires at least one object id.")
+        try:
+            ids = [int(x) for x in object_ids]
+        except (TypeError, ValueError) as exc:
+            raise PrinterError(f"skip_objects: object ids must be integers ({exc}).") from exc
+        self._publish_command(
+            {
+                "print": {
+                    "sequence_id": self._next_seq(),
+                    "command": "skip_objects",
+                    "obj_list": ids,
+                }
+            }
+        )
+        return True
+
+    # ------------------------------------------------------------------
     # Bambu-specific: LED control
     # ------------------------------------------------------------------
 
