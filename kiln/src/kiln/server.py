@@ -14454,9 +14454,73 @@ def decorate_surface(
             )
 
         elif ctype == "text":
+            import math
+
             from kiln.image_to_surface import generate_text_image
+            from kiln.decoration_helpers import _FDM_TEXT_LEGIBILITY_FLOOR_MM
+            from kiln.emboss_generator import (
+                TextMeasureError,
+                measure_text_block_mm,
+            )
 
             text_content = content.split(":", 1)[1] if ":" in content else content
+            # Size the text to the face with MEASURED metrics so it can
+            # never run off the edges.  Kiln knows the face parametrically
+            # and can measure the exact rendered text width (probe
+            # compile), so the fit is math, not a heuristic — the old
+            # baked size=48 rendered "KILN" 146mm wide on a 90mm coaster.
+            #
+            # Round faces (coaster/tray tops — detected by the face's
+            # real area: a disc fills ~78.5% of its bbox) get the
+            # inscribed-circle treatment: the text BLOCK's diagonal must
+            # sit inside the usable radius, with an ample margin, so no
+            # letter corner ever kisses the rim.
+            fit_w = face_width_mm if face_width_mm > 0 else 50.0
+            fit_h = face_info.get("height_mm", 0) or fit_w
+            face_area = face_info.get("area_mm2", 0.0)
+            is_round = (
+                fit_w > 0
+                and fit_h > 0
+                and face_area > 0
+                and face_area / (fit_w * fit_h) < 0.9
+            )
+            ample_margin = max(4.0, 0.06 * min(fit_w, fit_h))
+            if absolute_size_mm <= 0:
+                try:
+                    t_w, t_h, _, _ = measure_text_block_mm(text_content)
+                    k = t_h / t_w if t_w > 0 else 0.3
+                    if is_round:
+                        r_use = min(fit_w, fit_h) / 2.0 - ample_margin
+                        allowed_w = (2.0 * r_use) / math.sqrt(1.0 + k * k)
+                    else:
+                        allowed_w = min(
+                            fit_w - 2.0 * ample_margin,
+                            (fit_h - 2.0 * ample_margin) / k,
+                        )
+                    if allowed_w <= 0:
+                        return _error_dict(
+                            f"Face ({fit_w:.0f}x{fit_h:.0f}mm) is too small "
+                            "to carry readable text.",
+                            code="TEXT_DOES_NOT_FIT",
+                        )
+                    absolute_size_mm = allowed_w
+                    # The emboss generator fits the font so the measured
+                    # width equals this target; warn if that lands below
+                    # the FDM legibility floor.
+                    projected_font = 48.0 * allowed_w / t_w
+                    if projected_font < _FDM_TEXT_LEGIBILITY_FLOOR_MM:
+                        warnings.append(
+                            f"Fitted text is ~{projected_font:.1f}mm tall — "
+                            f"below the {_FDM_TEXT_LEGIBILITY_FLOOR_MM:.0f}mm "
+                            "FDM legibility floor. Shorter text or a larger "
+                            "face will read better."
+                        )
+                except TextMeasureError:
+                    # No probe available (OpenSCAD missing): target the
+                    # usable span conservatively — a round face gets the
+                    # inscribed-square factor so corners stay off the rim.
+                    usable = min(fit_w, fit_h) - 2.0 * ample_margin
+                    absolute_size_mm = max(1.0, usable * (0.71 if is_round else 1.0))
             content_info = generate_text_image(text_content, work_dir)
 
         else:

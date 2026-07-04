@@ -17,6 +17,7 @@ import platform
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -384,30 +385,30 @@ def _heightmap_content_block(
 def _text_content_block(content_info: dict) -> str:
     """Return the OpenSCAD fragment for a text() shape.
 
-    On OpenSCAD 2024+ uses ``textmetrics()`` for pixel-perfect centering.
-    On older versions falls back to ``halign="center"`` which is close but
-    relies on font-specific heuristics.
+    Centering: when the caller measured the rendered text
+    (``_measured_center`` — see :func:`measure_text_block_mm`), translate
+    by the MEASURED bbox center.  That is exact for any font and any
+    glyphs, and works on every OpenSCAD build.  ``textmetrics()`` is NOT
+    used: it is an experimental builtin that ships feature-flagged (e.g.
+    2026.04 builds return ``undef`` unless ``--enable=textmetrics``), and
+    an undef metric silently broke the centering translate — text drew
+    left-aligned from the face center and ran off the edge.  Without a
+    measurement, ``halign/valign="center"`` is the safe fallback.
     """
     text_str = content_info.get("text", "KILN")
     font_size = content_info.get("font_size", 10)
     font = content_info.get("font", "Liberation Sans:style=Bold")
 
-    # Use textmetrics() on 2024+ for exact centering; fall back safely.
-    try:
-        version_year = _openscad_version_year(get_openscad_version())
-        use_textmetrics = version_year >= 2024
-    except Exception:  # noqa: BLE001
-        use_textmetrics = False
-
     escaped_text = _escape_scad_string(text_str)
     escaped_font = _escape_scad_string(font)
 
-    if use_textmetrics:
+    measured = content_info.get("_measured_center")
+    if measured is not None:
+        tx, ty = measured
         return (
-            f'let(tm = textmetrics(text="{escaped_text}", size={font_size}, font="{escaped_font}"))\n'
-            f'  translate([-tm.size[0]/2, -tm.size[1]/2, 0])\n'
+            f'translate([{tx:.4f}, {ty:.4f}, 0])\n'
             f'    text("{escaped_text}", size={font_size}, '
-            f'font="{escaped_font}", valign="baseline");'
+            f'font="{escaped_font}");'
         )
     return (
         f'text("{escaped_text}", '
@@ -415,6 +416,82 @@ def _text_content_block(content_info: dict) -> str:
         f'halign="center", valign="center", '
         f'font="{escaped_font}");'
     )
+
+
+# ---------------------------------------------------------------------------
+# Measured text metrics — the exact rendered size of a text() block
+# ---------------------------------------------------------------------------
+
+# Normalized (per-unit-of-font-size) metrics per (text, font): one tiny probe
+# compile EVER per string+font — metrics scale linearly with font size.
+_TEXT_METRICS_CACHE: dict[tuple[str, str], tuple[float, float, float, float]] = {}
+
+
+class TextMeasureError(RuntimeError):
+    """The text probe compile failed — measured fitting unavailable."""
+
+
+def measure_text_block_mm(
+    text: str,
+    font: str = "Liberation Sans:style=Bold",
+    font_size: float = 48.0,
+) -> tuple[float, float, float, float]:
+    """Measure the EXACT rendered mm bbox of an OpenSCAD ``text()`` block.
+
+    Compiles the text alone (a paper-thin extrude — sub-second under
+    Manifold) and reads the geometry's true bounding box, so the answer
+    is right for any font, any glyphs, any kerning — no ``char_aspect``
+    heuristics, no ``textmetrics()`` (an experimental builtin that ships
+    feature-flagged and returns ``undef`` on stock builds).  The text is
+    rendered in its DEFAULT frame (halign left, valign baseline), which
+    is the same frame the final decoration uses, so the returned offsets
+    center it exactly.
+
+    :returns: ``(width_mm, height_mm, min_x_mm, min_y_mm)`` at *font_size*.
+    :raises TextMeasureError: when OpenSCAD is unavailable or the probe
+        produces no geometry (caller falls back to heuristic centering).
+    """
+    key = (text, font)
+    if key not in _TEXT_METRICS_CACHE:
+        probe_size = 48.0
+        escaped_text = _escape_scad_string(text)
+        escaped_font = _escape_scad_string(font)
+        with tempfile.TemporaryDirectory(prefix="kiln_text_probe_") as d:
+            scad = os.path.join(d, "probe.scad")
+            with open(scad, "w") as f:
+                f.write(
+                    f'linear_extrude(height=0.5) text("{escaped_text}", '
+                    f'size={probe_size}, font="{escaped_font}");\n'
+                )
+            stl = os.path.join(d, "probe.stl")
+            openscad = _find_openscad()
+            if not openscad:
+                raise TextMeasureError("OpenSCAD not found for text probe")
+            proc = subprocess.run(
+                [openscad, "-o", stl, scad],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if proc.returncode != 0 or not os.path.exists(stl):
+                raise TextMeasureError(
+                    f"text probe compile failed: {proc.stderr[-200:] if proc.stderr else 'no output'}"
+                )
+            from kiln.surface_intelligence import _parse_stl
+
+            triangles = _parse_stl(stl)
+            if not triangles:
+                raise TextMeasureError("text probe produced no geometry")
+            xs = [v[0] for t in triangles for v in t["vertices"]]
+            ys = [v[1] for t in triangles for v in t["vertices"]]
+        _TEXT_METRICS_CACHE[key] = (
+            (max(xs) - min(xs)) / probe_size,
+            (max(ys) - min(ys)) / probe_size,
+            min(xs) / probe_size,
+            min(ys) / probe_size,
+        )
+    nw, nh, nx, ny = _TEXT_METRICS_CACHE[key]
+    return nw * font_size, nh * font_size, nx * font_size, ny * font_size
 
 
 # ---------------------------------------------------------------------------
@@ -688,18 +765,51 @@ def generate_emboss_scad(
         # otherwise produce inverted sizing — e.g. "Josh Beckham"
         # width-limited at 11mm while "CEO" height-limited at 17mm
         # on a 200×78 wedge face.
+        #
+        # Sizing + centering are MEASURED, not estimated: a probe compile
+        # gives the text's exact rendered mm bbox (see
+        # ``measure_text_block_mm``), so the font is scaled to truly fit
+        # the target box and the block is centered by its real bounds.
+        # An explicit caller size is honoured but clamped DOWN if its
+        # measured bbox would overflow the face — overflow is never OK.
+        text_str = content_info.get("text", "")
+        text_font = content_info.get("font", "Liberation Sans:style=Bold")
         explicit_font_size = content_info.get("font_size", 0)
-        if explicit_font_size and explicit_font_size > 0:
-            # Caller knows what they want — trust it.
-            pass
-        else:
-            text_str = content_info.get("text", "")
-            # Approximate: each character is ~0.6× font_size wide
-            char_count = max(1, len(text_str))
-            max_font_from_w = target_w / (char_count * 0.6)
-            max_font_from_h = target_h * 0.8  # leave vertical margin
-            auto_font_size = min(max_font_from_w, max_font_from_h)
-            content_info = {**content_info, "font_size": round(auto_font_size, 1)}
+        try:
+            chosen = float(explicit_font_size) if explicit_font_size else 48.0
+            t_w, t_h, _, _ = measure_text_block_mm(text_str, text_font, chosen)
+            fit_ratio = min(target_w / t_w, target_h / t_h) if t_w > 0 and t_h > 0 else 1.0
+            if not explicit_font_size:
+                # Auto: use the target box exactly.
+                chosen *= fit_ratio
+            elif fit_ratio < 1.0:
+                # Explicit but overflowing: shrink to fit, and say so.
+                warnings.append(
+                    f"text font_size={explicit_font_size} would render "
+                    f"{t_w:.0f}mm wide on a {target_w:.0f}mm target — "
+                    f"clamped to {chosen * fit_ratio:.1f} to keep the text "
+                    f"on the face"
+                )
+                chosen *= fit_ratio
+            f_w, f_h, f_minx, f_miny = measure_text_block_mm(text_str, text_font, chosen)
+            content_info = {
+                **content_info,
+                "font_size": round(chosen, 2),
+                # Center by the MEASURED bbox — exact for any glyphs, on
+                # any OpenSCAD build (textmetrics ships feature-flagged
+                # and returns undef on stock builds, which silently broke
+                # the old centering translate).
+                "_measured_center": (-(f_minx + f_w / 2), -(f_miny + f_h / 2)),
+            }
+        except TextMeasureError as exc:
+            _logger.warning("text probe unavailable (%s) — heuristic fit", exc)
+            if not explicit_font_size:
+                # Fallback: the legacy char-aspect estimate.
+                char_count = max(1, len(text_str))
+                max_font_from_w = target_w / (char_count * 0.6)
+                max_font_from_h = target_h * 0.8  # leave vertical margin
+                auto_font_size = min(max_font_from_w, max_font_from_h)
+                content_info = {**content_info, "font_size": round(auto_font_size, 1)}
         inner = _text_content_block(content_info)
         extrude_height = depth_mm + 0.1
         content_block = (

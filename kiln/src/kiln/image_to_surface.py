@@ -1284,7 +1284,7 @@ def prepare_svg_for_emboss(svg_path: str, output_dir: str, *, min_physical_width
 
 
 def generate_text_image(
-    text: str, output_dir: str, *, font_size: int = 48
+    text: str, output_dir: str, *, font_size: int | None = None
 ) -> dict:
     """Return metadata for OpenSCAD native text() module.
 
@@ -1298,27 +1298,37 @@ def generate_text_image(
         The text string to emboss.
     output_dir : str
         Output directory (unused, kept for API consistency).
-    font_size : int
-        Font size parameter for OpenSCAD text().
+    font_size : int | None
+        Explicit font size for OpenSCAD text().  Default ``None`` lets
+        the emboss generator MEASURE the rendered text and size it to
+        fit the target face (the safe path).  The old default of 48 was
+        a silent overflow machine: the generator honours an explicit
+        size verbatim, and "KILN" at 48 renders 146mm wide — off both
+        edges of a 90mm coaster.  Pass a size only when the caller owns
+        the layout (multi-line typography); even then the generator
+        clamps it down if its measured bbox would overflow the face.
 
     Returns
     -------
     dict
-        Keys: type, text, font_size, openscad_fragment
+        Keys: type, text, openscad_fragment — plus font_size when given.
     """
     # Escape quotes for OpenSCAD string literal
     escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+    nominal = font_size if font_size else 48
     fragment = (
-        f'text("{escaped}", size={font_size}, '
+        f'text("{escaped}", size={nominal}, '
         f'halign="center", valign="center", '
         f'font="Liberation Sans:style=Bold");'
     )
-    return {
+    info: dict = {
         "type": "openscad_text",
         "text": text,
-        "font_size": font_size,
         "openscad_fragment": fragment,
     }
+    if font_size:
+        info["font_size"] = font_size
+    return info
 
 
 def rasterize_svg_to_png(

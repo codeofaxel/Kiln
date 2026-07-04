@@ -101,7 +101,16 @@ class TestGenerateTextImage:
         result = generate_text_image("Hello", str(tmp_path))
         assert result["type"] == "openscad_text"
         assert result["text"] == "Hello"
-        assert result["font_size"] == 48
+        # No baked font_size by default: the emboss generator MEASURES the
+        # rendered text and sizes it to the face (the old baked 48 rendered
+        # "KILN" 146mm wide — off both edges of a 90mm coaster).
+        assert "font_size" not in result
+
+    def test_explicit_font_size_is_kept(self, tmp_path):
+        from kiln.image_to_surface import generate_text_image
+
+        result = generate_text_image("Hello", str(tmp_path), font_size=17)
+        assert result["font_size"] == 17
 
     def test_returns_fragment(self, tmp_path):
         from kiln.image_to_surface import generate_text_image
