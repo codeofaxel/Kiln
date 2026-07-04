@@ -7,6 +7,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Your version history, now in the browser (Pro+).** Open any design,
+  decoration, or feature at kiln3d.com to walk its branches, version timeline,
+  and side-by-side comparisons — the full story of how it evolved, no install
+  needed.
+
 - **Skip a failed part mid-print, and see exactly what you save (Pro+).** When
   one object on a full plate fails, Kiln tells you which part to skip and how
   much of the print you keep by doing it, then drops just that part so the rest
