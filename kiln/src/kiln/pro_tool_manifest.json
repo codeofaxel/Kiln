@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-06-24T00:52:45.452308+00:00",
-  "tool_count": 360,
+  "generated": "2026-07-04T04:03:26.008184+00:00",
+  "tool_count": 369,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -82,6 +82,10 @@
     "engineering_intelligence": {
       "label": "Engineering Intelligence",
       "pitch": "Curated, datasheet-cited Pro+ reference data for parts you have to trust \u2014 fastener, hole, and joint specs (ANSI/ISO, FDM-aware clearances, heat-set insert sizing, joint-strategy decision tree) plus material-drying intelligence: a per-material, source-traced dry-or-print verdict that reads your loaded filament and live AMS humidity and hands you a safe, ceiling-clamped recipe in plain English."
+    },
+    "material_safety": {
+      "label": "Material Safety & Skin Contact",
+      "pitch": "Honest, cited safety intelligence for what you make \u2014 chemical durability and skin-contact suitability for worn or handled parts (rings, bands, grips, earbuds). Free tells you what's risky and when to see a professional; Pro tells you exactly what to do about it and how to prove it. Kiln never fakes a 'skin-safe' claim."
     },
     "design_inspection": {
       "label": "Design Inspection",
@@ -1486,6 +1490,35 @@
       }
     },
     {
+      "name": "cloud_backup_configure",
+      "description": "Turn automatic cloud backup of your designs on or off.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Enabled"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "title": "cloud_backup_configureArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "cloud_clone_design",
       "description": "Bootstrap local storage for a remote-only design.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -2717,6 +2750,16 @@
             "default": "",
             "title": "Scad Code",
             "type": "string"
+          },
+          "artifact_type": {
+            "default": "design",
+            "enum": [
+              "design",
+              "feature",
+              "decoration"
+            ],
+            "title": "Artifact Type",
+            "type": "string"
           }
         },
         "required": [
@@ -2967,6 +3010,70 @@
           "feature_id"
         ],
         "title": "archive_featureArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "attach_part_feature",
+      "description": "Attach a reusable PART feature onto a host mesh and compose the result.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "feature_version_id": {
+            "title": "Feature Version Id",
+            "type": "string"
+          },
+          "host_mesh_path": {
+            "title": "Host Mesh Path",
+            "type": "string"
+          },
+          "target_spec": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Spec"
+          },
+          "scale": {
+            "default": 1.0,
+            "title": "Scale",
+            "type": "number"
+          },
+          "design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Design Id"
+          },
+          "output_path": {
+            "default": "",
+            "title": "Output Path",
+            "type": "string"
+          },
+          "validate": {
+            "default": true,
+            "title": "Validate",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "feature_version_id",
+          "host_mesh_path"
+        ],
+        "title": "attach_part_featureArguments",
         "type": "object"
       }
     },
@@ -4309,6 +4416,11 @@
             "default": "",
             "title": "Notes",
             "type": "string"
+          },
+          "feature_kind": {
+            "default": "custom_scad",
+            "title": "Feature Kind",
+            "type": "string"
           }
         },
         "required": [
@@ -5257,6 +5369,81 @@
           "onto_branch_id"
         ],
         "title": "rebase_preset_branchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "recategorize_artifact",
+      "description": "Move a miscategorized artifact into the right category \u2014 \"actually, this is a decoration / a reusable part\".\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_kind": {
+            "title": "Source Kind",
+            "type": "string"
+          },
+          "target_kind": {
+            "title": "Target Kind",
+            "type": "string"
+          },
+          "new_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "New Id"
+          },
+          "new_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "New Name"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "sign": {
+            "default": false,
+            "title": "Sign",
+            "type": "boolean"
+          },
+          "signed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Signed By"
+          }
+        },
+        "required": [
+          "source_id",
+          "source_kind",
+          "target_kind"
+        ],
+        "title": "recategorize_artifactArguments",
         "type": "object"
       }
     },
@@ -8206,6 +8393,115 @@
       }
     },
     {
+      "name": "check_skin_contact_declaration",
+      "description": "Check a supplier substance declaration against per-market restricted-substance limits (Enterprise).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "material_safety",
+      "parameters": {
+        "properties": {
+          "material_id": {
+            "default": "",
+            "title": "Material Id",
+            "type": "string"
+          },
+          "declaration": {
+            "default": "",
+            "title": "Declaration",
+            "type": "string"
+          },
+          "product_category": {
+            "default": "adult",
+            "title": "Product Category",
+            "type": "string"
+          },
+          "markets": {
+            "default": "",
+            "title": "Markets",
+            "type": "string"
+          },
+          "material_scope": {
+            "default": "plastic",
+            "title": "Material Scope",
+            "type": "string"
+          }
+        },
+        "title": "check_skin_contact_declarationArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "check_skin_contact_suitability",
+      "description": "Is a printed <material> part OK for <exposure> skin contact? -- honest, cited, tier-gated.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "material_safety",
+      "parameters": {
+        "properties": {
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "exposure": {
+            "default": "",
+            "title": "Exposure",
+            "type": "string"
+          },
+          "show_math": {
+            "default": false,
+            "title": "Show Math",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "material"
+        ],
+        "title": "check_skin_contact_suitabilityArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_skin_contact_profile",
+      "description": "Full skin-contact profile for one material -- verdicts across every exposure tier.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "material_safety",
+      "parameters": {
+        "properties": {
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "show_math": {
+            "default": false,
+            "title": "Show Math",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "material"
+        ],
+        "title": "get_skin_contact_profileArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "recommend_material_for_skin_contact",
+      "description": "Recommend LOWER-RISK materials for a skin-contact use -- never a \"skin-safe\" green-light.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "material_safety",
+      "parameters": {
+        "properties": {
+          "use": {
+            "title": "Use",
+            "type": "string"
+          }
+        },
+        "required": [
+          "use"
+        ],
+        "title": "recommend_material_for_skin_contactArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "emit_test_event",
       "description": "Fire a synthetic event to verify Telegram/Discord/log wiring.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -9626,6 +9922,29 @@
       }
     },
     {
+      "name": "fleet_skip_objects",
+      "description": "Skip failed objects across several fleet printers at once (Business).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Printers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "printers"
+        ],
+        "title": "fleet_skip_objectsArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "food_safety_for_printer",
       "description": "Pro+ \u2014 combined material + nozzle food-safety verdict.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -10512,6 +10831,42 @@
           "current_layer"
         ],
         "title": "plan_mid_print_decorationArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "plan_object_skip",
+      "description": "Work out which object to skip on a failing multi-object print (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "plate_objects": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Plate Objects",
+            "type": "array"
+          },
+          "failed_objects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Failed Objects",
+            "type": "array"
+          },
+          "printer_type": {
+            "default": "",
+            "title": "Printer Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plate_objects",
+          "failed_objects"
+        ],
+        "title": "plan_object_skipArguments",
         "type": "object"
       }
     },
@@ -12824,8 +13179,8 @@
     },
     {
       "name": "recommend_text_size",
-      "description": "One-stop text-sizing helper for product decoration.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "One-stop text-sizing helper for product decoration.",
+      "tier": "free",
       "category": "product_intelligence",
       "parameters": {
         "properties": {

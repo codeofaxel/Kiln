@@ -819,6 +819,16 @@ class CrealityAdapter(PrinterAdapter):
     def send_gcode(self, commands: list[str]) -> bool:
         return self._backend.send_gcode(commands)
 
+    def skip_objects(self, object_names: list[str]) -> bool:
+        """Abandon named objects mid-print via the Moonraker/Klipper backend.
+
+        Creality's 2024+ machines run Klipper behind Moonraker, so this
+        delegates to ``MoonrakerAdapter.skip_objects`` (``EXCLUDE_OBJECT``).
+        Same precondition: the file must have been sliced with object
+        labelling on.
+        """
+        return self._backend.skip_objects(object_names)
+
     def get_snapshot(self) -> bytes | None:
         return self._backend.get_snapshot()
 

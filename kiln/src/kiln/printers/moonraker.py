@@ -1170,6 +1170,33 @@ class MoonrakerAdapter(PrinterAdapter):
         self._send_gcode(script)
         return True
 
+    def skip_objects(self, object_names: list[str]) -> bool:
+        """Abandon named objects on a live Klipper multi-object print.
+
+        Uses Klipper's ``EXCLUDE_OBJECT NAME=<name>`` — the print keeps going
+        for every other object.  This only works when the file was sliced with
+        object labelling on (the slicer emits ``EXCLUDE_OBJECT_DEFINE`` per
+        object); the *object_names* are those labels.  Klipper has no live API
+        to list them mid-print, so the caller supplies the names (from the
+        sliced file or the slicer's object list).
+
+        Irreversible for the objects named; only meaningful while a
+        multi-object print is active.
+
+        Args:
+            object_names: Klipper object names to exclude (non-empty).
+
+        Returns:
+            ``True`` once the exclude commands are sent.
+
+        Raises:
+            PrinterError: If *object_names* is empty or all blank.
+        """
+        names = [str(n).strip() for n in (object_names or []) if str(n).strip()]
+        if not names:
+            raise PrinterError("skip_objects requires at least one object name.")
+        return self.send_gcode([f"EXCLUDE_OBJECT NAME={n}" for n in names])
+
     # ------------------------------------------------------------------
     # PrinterAdapter -- calibration
     # ------------------------------------------------------------------

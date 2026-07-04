@@ -5172,44 +5172,52 @@ def pause_print(keep_temps: bool = True) -> dict:
 
 
 @mcp.tool()
-def skip_print_objects(object_label_ids: list[int], plate_number: int = 1) -> dict:
+@requires_tier(LicenseTier.PRO)
+def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
     """Abandon one or more failed objects on a multi-object plate, mid-print.
 
-    When one part on a full plate fails — spaghetti, a knocked-loose object,
-    a detached corner — this tells the printer to stop printing just those
+    When one part on a full plate fails — spaghetti, a knocked-loose object, a
+    detached corner — this tells the printer to stop printing just those
     objects and finish the rest of the plate.  One bad part no longer scraps
-    the whole run.
+    the whole run.  A Kiln Pro feature.
 
-    The ids are the per-object ``label_id`` values from
-    ``list_plate_objects`` on the file that is currently printing (Bambu
-    assigns them at slice time; the printer reports already-skipped ones in
-    its status).  Discover them first::
+    The identifier is backend-specific — pass it as a string, Kiln routes it:
+
+    * **Bambu** — the ``label_id`` from ``list_plate_objects`` (e.g. ``"757"``).
+    * **Klipper / Moonraker / Creality** — the object NAME the slicer labelled
+      (e.g. ``"Part1"``); the file must have been sliced with object labelling.
+    * **OctoPrint** — the zero-based ``M486`` object index (needs firmware
+      M486 support).
+
+    Discover Bambu ids first::
 
         list_plate_objects("my_plate.gcode.3mf")   # -> objects[].label_id
+
+    Printer support (honest): Bambu, Klipper/Moonraker, and Creality can skip;
+    OctoPrint can if the firmware speaks M486; **Prusa Link and Elegoo cannot**
+    (their firmware has no per-object skip) and return a clear message.
 
     AGENT DISPLAY CONTRACT: skipping is IRREVERSIBLE for the objects named —
     confirm the exact objects with the user before calling, and only while a
     multi-object plate is actively printing.  Skips are cumulative: an object
     already skipped stays skipped.
 
-    Currently supported on Bambu Lab printers.
-
     Args:
-        object_label_ids: Label ids to abandon (from ``list_plate_objects``).
+        object_ids: Backend-specific object identifiers to abandon (see above).
         plate_number: Which plate the ids came from (1-based, default 1).
             Recorded for context; the ids are what the printer acts on.
 
     Returns:
-        Dict with the skipped ids and a confirmation message, or an error
-        dict if no print is active or the printer doesn't support skipping.
+        Dict with the skipped objects and a confirmation message, or an error
+        dict if no print is active or the printer can't skip objects.
     """
     if err := _check_auth("print"):
         return err
     if err := _check_rate_limit("skip_print_objects"):
         return err
-    if not object_label_ids:
+    if not object_ids:
         return _error_dict(
-            "skip_print_objects needs at least one object label id. "
+            "skip_print_objects needs at least one object id. "
             "Run list_plate_objects() on the printing file to find them.",
             code="NO_OBJECTS",
         )
@@ -5218,19 +5226,22 @@ def skip_print_objects(object_label_ids: list[int], plate_number: int = 1) -> di
         skip = getattr(adapter, "skip_objects", None)
         if not callable(skip):
             return _error_dict(
-                "This printer doesn't support skipping objects mid-print "
-                "(currently a Bambu Lab capability).",
+                "This printer can't skip individual objects mid-print. "
+                "Kiln supports it on Bambu, Klipper/Moonraker, and Creality "
+                "(and OctoPrint with M486 firmware); Prusa Link and Elegoo "
+                "firmware don't expose per-object skipping.",
                 code="UNSUPPORTED",
             )
-        skip([int(x) for x in object_label_ids])
-        ids = [int(x) for x in object_label_ids]
+        # Pass identifiers through as-is — each adapter coerces to its native
+        # type (Bambu/OctoPrint ints, Klipper object-name strings).
+        skip(list(object_ids))
         return {
             "success": True,
-            "skipped_object_label_ids": ids,
+            "skipped_objects": list(object_ids),
             "plate_number": plate_number,
             "message": (
-                f"Asked the printer to skip {len(ids)} object(s): {ids}. "
-                "The rest of the plate keeps printing."
+                f"Asked the printer to skip {len(object_ids)} object(s): "
+                f"{list(object_ids)}. The rest of the plate keeps printing."
             ),
         }
     except (PrinterError, RuntimeError) as exc:
