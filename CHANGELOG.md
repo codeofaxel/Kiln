@@ -7,6 +7,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Skip a failed part mid-print, and see exactly what you save (Pro+).** When
+  one object on a full plate fails, Kiln tells you which part to skip and how
+  much of the print you keep by doing it, then drops just that part so the rest
+  finishes. Pro covers your printer; Business skips across a whole fleet at once.
+
 - **Designing something you'll wear? Kiln now gives you a straight answer on skin
   contact.** Make a ring, band, watch strap, earbud, or glasses and Kiln flags
   what matters about wearing a printed part against skin — honestly (no 3D print
