@@ -444,6 +444,10 @@ cd kiln && python3 -m pytest tests/ -v
 cd ../octoprint-cli && python3 -m pytest tests/ -v
 ```
 
+### Run in Docker
+
+`docker compose up` self-hosts the Kiln MCP server against your own printer — set `KILN_PRINTER_TYPE`/`KILN_PRINTER_HOST`/`KILN_PRINTER_API_KEY` first. This is a personal self-host quickstart, unrelated to the production stack behind the hosted api.kiln3d.com service (that lives in `deploy/`). Prefer zero setup? [kiln3d.com](https://kiln3d.com) runs the hosted version for you.
+
 <details>
 <summary><strong>Configuration reference (auth, webhooks, discovery, plugins)</strong></summary>
 

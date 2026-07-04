@@ -1,3 +1,7 @@
+# Self-host quickstart: runs the open-source Kiln MCP server against your
+# own printer. This is NOT the production stack for the hosted
+# api.kiln3d.com service — that lives in deploy/ (proxy, k8s/helm, SQL).
+# See README's "Run in Docker" section for usage.
 services:
   kiln:
     build: .
