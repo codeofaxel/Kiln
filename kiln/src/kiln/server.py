@@ -5193,9 +5193,14 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
 
         list_plate_objects("my_plate.gcode.3mf")   # -> objects[].label_id
 
-    Printer support (honest): Bambu, Klipper/Moonraker, and Creality can skip;
-    OctoPrint can if the firmware speaks M486; **Prusa Link and Elegoo cannot**
-    (their firmware has no per-object skip) and return a clear message.
+    Printer support (honest): Bambu and any Klipper/Moonraker printer can skip
+    (Voron, RatRig, Qidi, and Klipper-based Creality and Elegoo Neptune /
+    OrangeStorm); Marlin printers via OctoPrint or direct USB can if the
+    firmware speaks M486.  Prusa via Prusa Link can't be skipped remotely — an
+    API limitation, not the printer (it can cancel objects from its own
+    screen).  The Elegoo SDCP protocol (e.g. Centauri Carbon) has no skip
+    command.  A Klipper printer on a non-Klipper connection just needs
+    reconnecting as Moonraker.
 
     AGENT DISPLAY CONTRACT: skipping is IRREVERSIBLE for the objects named —
     confirm the exact objects with the user before calling, and only while a
@@ -5226,10 +5231,16 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
         skip = getattr(adapter, "skip_objects", None)
         if not callable(skip):
             return _error_dict(
-                "This printer can't skip individual objects mid-print. "
-                "Kiln supports it on Bambu, Klipper/Moonraker, and Creality "
-                "(and OctoPrint with M486 firmware); Prusa Link and Elegoo "
-                "firmware don't expose per-object skipping.",
+                "This printer connection can't skip individual objects "
+                "mid-print. Kiln can skip on Bambu, any Klipper/Moonraker "
+                "printer, and Marlin printers via OctoPrint or USB when the "
+                "firmware speaks M486. If this is a Klipper-based printer "
+                "(many Creality and Elegoo Neptune / OrangeStorm models) on a "
+                "non-Klipper connection, reconnect it as Moonraker. Prusa via "
+                "Prusa Link can't be skipped remotely (the API exposes no "
+                "per-object control, though the printer can cancel objects "
+                "from its screen); the Elegoo SDCP protocol (e.g. Centauri "
+                "Carbon) has no skip command.",
                 code="UNSUPPORTED",
             )
         # Pass identifiers through as-is — each adapter coerces to its native

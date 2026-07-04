@@ -89,6 +89,28 @@ def test_octoprint_non_integer_raises():
         a.skip_objects(["not-an-index"])
 
 
+# --- Serial / USB Marlin adapter (M486) -------------------------------------
+
+
+def test_serial_sends_m486():
+    from kiln.printers.serial_adapter import SerialPrinterAdapter
+
+    a = SerialPrinterAdapter.__new__(SerialPrinterAdapter)
+    sent: list[list[str]] = []
+    a.send_gcode = lambda cmds: (sent.append(cmds) or True)  # type: ignore[attr-defined]
+    assert a.skip_objects([0, 2]) is True
+    assert sent == [["M486 P0", "M486 P2"]]
+
+
+def test_serial_empty_raises():
+    from kiln.printers.serial_adapter import SerialPrinterAdapter
+
+    a = SerialPrinterAdapter.__new__(SerialPrinterAdapter)
+    a.send_gcode = lambda cmds: True  # type: ignore[attr-defined]
+    with pytest.raises(PrinterError):
+        a.skip_objects([])
+
+
 # --- the Pro-gated MCP tool -------------------------------------------------
 
 

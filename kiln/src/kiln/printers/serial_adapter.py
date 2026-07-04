@@ -903,6 +903,33 @@ class SerialPrinterAdapter(PrinterAdapter):
             self._send_command(cmd)
         return True
 
+    def skip_objects(self, object_ids: list[int]) -> bool:
+        """Abandon objects on a live multi-object print via ``M486``.
+
+        Sends the RepRap cancel-object gcode ``M486 P<index>`` over the serial
+        link.  Needs FIRMWARE that speaks M486 (Marlin 2.0.5+); on firmware
+        without it the command is a no-op, so pair with a capability check
+        upstream.  *object_ids* are the zero-based M486 object indices.
+
+        Irreversible for the objects named; only meaningful mid-print.
+
+        Args:
+            object_ids: zero-based M486 object indices (non-empty).
+
+        Returns:
+            ``True`` once the commands are sent.
+
+        Raises:
+            PrinterError: If *object_ids* is empty or holds a non-integer.
+        """
+        if not object_ids:
+            raise PrinterError("skip_objects requires at least one object id.")
+        try:
+            ids = [int(x) for x in object_ids]
+        except (TypeError, ValueError) as exc:
+            raise PrinterError(f"skip_objects: object ids must be integers ({exc}).") from exc
+        return self.send_gcode([f"M486 P{i}" for i in ids])
+
     # ------------------------------------------------------------------
     # PrinterAdapter -- calibration
     # ------------------------------------------------------------------

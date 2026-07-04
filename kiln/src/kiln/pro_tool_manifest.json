@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-07-04T04:03:26.008184+00:00",
+  "generated": "2026-07-04T05:55:43.074405+00:00",
   "tool_count": 369,
   "categories": {
     "product_generators": {
@@ -14652,7 +14652,7 @@
             "type": "string"
           },
           "resolution": {
-            "default": 200,
+            "default": 300,
             "title": "Resolution",
             "type": "integer"
           },
@@ -14667,6 +14667,45 @@
             ],
             "default": null,
             "title": "Face"
+          },
+          "mark_image_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Mark Image Path"
+          },
+          "mark_style": {
+            "default": "stencil",
+            "title": "Mark Style",
+            "type": "string"
+          },
+          "mark_scale": {
+            "default": 0.45,
+            "title": "Mark Scale",
+            "type": "number"
+          },
+          "mark_placement": {
+            "default": "center",
+            "title": "Mark Placement",
+            "type": "string"
+          },
+          "mark_depth_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Mark Depth Mm"
           }
         },
         "required": [
@@ -14708,7 +14747,7 @@
             "type": "string"
           },
           "resolution": {
-            "default": 200,
+            "default": 300,
             "title": "Resolution",
             "type": "integer"
           },
@@ -14845,6 +14884,45 @@
             "default": false,
             "title": "Save To Library",
             "type": "boolean"
+          },
+          "mark_image_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Mark Image Path"
+          },
+          "mark_style": {
+            "default": "stencil",
+            "title": "Mark Style",
+            "type": "string"
+          },
+          "mark_scale": {
+            "default": 0.45,
+            "title": "Mark Scale",
+            "type": "number"
+          },
+          "mark_placement": {
+            "default": "center",
+            "title": "Mark Placement",
+            "type": "string"
+          },
+          "mark_depth_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Mark Depth Mm"
           }
         },
         "required": [
