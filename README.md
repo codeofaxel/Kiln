@@ -446,7 +446,7 @@ cd ../octoprint-cli && python3 -m pytest tests/ -v
 
 ### Run in Docker
 
-`docker compose up` self-hosts the Kiln MCP server against your own printer — set `KILN_PRINTER_TYPE`/`KILN_PRINTER_HOST`/`KILN_PRINTER_API_KEY` first. This is a personal self-host quickstart, unrelated to the production stack behind the hosted api.kiln3d.com service (that lives in `deploy/`). Prefer zero setup? [kiln3d.com](https://kiln3d.com) runs the hosted version for you.
+`docker compose up` self-hosts the Kiln MCP server against your own printer — set `KILN_PRINTER_TYPE`/`KILN_PRINTER_HOST`/`KILN_PRINTER_API_KEY` first. This is a personal self-host quickstart, unrelated to the infrastructure behind the hosted api.kiln3d.com service. Prefer zero setup? [kiln3d.com](https://kiln3d.com) runs the hosted version for you.
 
 <details>
 <summary><strong>Configuration reference (auth, webhooks, discovery, plugins)</strong></summary>
@@ -533,7 +533,6 @@ Entry-point plugins are **default-deny** in production (`KILN_PLUGIN_POLICY=stri
 | `pro_tool_manifest.json` | Public manifest for kiln-pro tool discovery and REST proxy stubs |
 | `decoration_quota.py` | Free-tier decoration quota tracking and tier resolution hooks |
 | `cli/` | Click CLI with <!-- KILN_CLI_COUNT:OLD --> 224 commands and JSON output |
-| `deploy/` | Kubernetes manifests and Helm chart for on-prem Enterprise deployment |
 
 kiln-pro ([kiln3d.com](https://kiln3d.com)) extends public Kiln with paid-tier REST serving, billing, licensing, SSO, RBAC, G-code encryption, uptime reporting, team administration, and project-cost workflows. Public Kiln exposes only the interface/proxy surface for those capabilities; the private implementation stays in kiln-pro.
 </details>
