@@ -3,6 +3,9 @@
 # Usage: git clone https://github.com/codeofaxel/Kiln.git ~/.kiln/src && ~/.kiln/src/install.sh
 #        install.sh --uninstall   # Remove Kiln
 #        install.sh --update      # Pull latest and reinstall
+#
+# Installs via uv (preferred — matches the docs' recommended path) if
+# uv is present or can be installed; falls back to pipx otherwise.
 set -euo pipefail
 
 REPO="https://github.com/codeofaxel/Kiln.git"
@@ -26,10 +29,12 @@ has() { command -v "$1" >/dev/null 2>&1; }
 
 if [ "${1:-}" = "--uninstall" ]; then
     info "Uninstalling Kiln..."
-    if has pipx; then
+    if has uv && uv tool list 2>/dev/null | grep -q "^$PKG_NAME "; then
+        uv tool uninstall "$PKG_NAME" && ok "Kiln uninstalled" || warn "uv uninstall failed"
+    elif has pipx; then
         pipx uninstall "$PKG_NAME" 2>/dev/null && ok "Kiln uninstalled" || warn "Kiln was not installed via pipx"
     else
-        warn "pipx not found — trying pip3"
+        warn "Neither uv nor pipx found — trying pip3"
         pip3 uninstall -y "$PKG_NAME" 2>/dev/null && ok "Kiln uninstalled" || warn "Kiln was not installed via pip3"
     fi
     exit 0
@@ -43,7 +48,10 @@ if [ "${1:-}" = "--update" ]; then
     else
         fail "No git repo at $INSTALL_DIR — run install.sh without flags first"
     fi
-    if has pipx; then
+    if has uv && uv tool list 2>/dev/null | grep -q "^$PKG_NAME "; then
+        uv tool install --force "$INSTALL_DIR/kiln"
+        ok "Kiln updated"
+    elif has pipx; then
         pipx install --force "$INSTALL_DIR/kiln"
         ok "Kiln updated"
     else
@@ -88,36 +96,57 @@ fi
 ok "Python $PY_VERSION"
 
 # ---------------------------------------------------------------------------
-# Install pipx if needed
+# Install uv if needed (preferred); fall back to pipx
 # ---------------------------------------------------------------------------
 
-if ! has pipx; then
-    info "Installing pipx..."
-    if [ "$OS" = "macos" ]; then
-        if has brew; then
-            brew install pipx
-        else
-            python3 -m pip install --user pipx 2>/dev/null || pip3 install --user pipx
-        fi
+PKG_MANAGER=""
+
+if ! has uv; then
+    info "Installing uv..."
+    if [ "$OS" = "macos" ] && has brew; then
+        brew install uv 2>/dev/null || true
     else
-        # Linux / WSL
-        if has apt; then
-            sudo apt update -qq && sudo apt install -y -qq pipx
-        elif has dnf; then
-            sudo dnf install -y pipx
-        else
-            python3 -m pip install --user pipx 2>/dev/null || pip3 install --user pipx
-        fi
+        curl -LsSf https://astral.sh/uv/install.sh 2>/dev/null | sh 2>/dev/null || true
     fi
-    pipx ensurepath 2>/dev/null || true
-    # Source updated PATH
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
-if ! has pipx; then
-    fail "Could not install pipx. Install it manually: https://pipx.pypa.io"
+if has uv; then
+    ok "uv available"
+    PKG_MANAGER="uv"
+else
+    warn "Could not install uv — falling back to pipx"
 fi
-ok "pipx available"
+
+if [ "$PKG_MANAGER" != "uv" ]; then
+    if ! has pipx; then
+        info "Installing pipx..."
+        if [ "$OS" = "macos" ]; then
+            if has brew; then
+                brew install pipx
+            else
+                python3 -m pip install --user pipx 2>/dev/null || pip3 install --user pipx
+            fi
+        else
+            # Linux / WSL
+            if has apt; then
+                sudo apt update -qq && sudo apt install -y -qq pipx
+            elif has dnf; then
+                sudo dnf install -y pipx
+            else
+                python3 -m pip install --user pipx 2>/dev/null || pip3 install --user pipx
+            fi
+        fi
+        pipx ensurepath 2>/dev/null || true
+        export PATH="$HOME/.local/bin:$PATH"
+    fi
+
+    if ! has pipx; then
+        fail "Could not install uv or pipx. Install one manually: https://docs.astral.sh/uv or https://pipx.pypa.io"
+    fi
+    ok "pipx available"
+    PKG_MANAGER="pipx"
+fi
 
 # ---------------------------------------------------------------------------
 # Clone or update Kiln
@@ -137,15 +166,18 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Install via pipx
+# Install via uv or pipx
 # ---------------------------------------------------------------------------
 
-info "Installing Kiln via pipx..."
+info "Installing Kiln via $PKG_MANAGER..."
 
-# Uninstall previous version if exists (ignore errors)
-pipx uninstall "$PKG_NAME" 2>/dev/null || true
-
-pipx install "$INSTALL_DIR/kiln"
+if [ "$PKG_MANAGER" = "uv" ]; then
+    uv tool uninstall "$PKG_NAME" 2>/dev/null || true
+    uv tool install "$INSTALL_DIR/kiln"
+else
+    pipx uninstall "$PKG_NAME" 2>/dev/null || true
+    pipx install "$INSTALL_DIR/kiln"
+fi
 ok "Kiln installed (package: $PKG_NAME)"
 
 # ---------------------------------------------------------------------------
@@ -158,6 +190,8 @@ export PATH="$HOME/.local/bin:$PATH"
 if has kiln; then
     KILN_VERSION=$(kiln --version 2>/dev/null || echo "unknown")
     ok "kiln command available ($KILN_VERSION)"
+elif [ "$PKG_MANAGER" = "uv" ]; then
+    warn "kiln not on PATH — restart your terminal or run: uv tool update-shell"
 else
     warn "kiln not on PATH — restart your terminal or run: pipx ensurepath"
 fi
@@ -176,7 +210,11 @@ echo ""
 echo "  Manage installation:"
 echo "  install.sh --update     # Pull latest + reinstall"
 echo "  install.sh --uninstall  # Remove Kiln"
-echo "  pipx uninstall $PKG_NAME  # Manual uninstall (package name is $PKG_NAME, not kiln)"
+if [ "$PKG_MANAGER" = "uv" ]; then
+    echo "  uv tool uninstall $PKG_NAME  # Manual uninstall (package name is $PKG_NAME, not kiln)"
+else
+    echo "  pipx uninstall $PKG_NAME  # Manual uninstall (package name is $PKG_NAME, not kiln)"
+fi
 echo ""
 
 if [ "$OS" = "wsl" ]; then
