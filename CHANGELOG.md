@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Use Kiln with any MCP client, no install at all.** A hosted connector
+  lets Claude, Cursor, or any MCP-compatible app add Kiln by pasting a URL —
+  sign in once, no download, no setup.
+
 - **Your version history, now in the browser (Pro+).** Open any design,
   decoration, or feature at kiln3d.com to walk its branches, version timeline,
   and side-by-side comparisons — the full story of how it evolved, no install
