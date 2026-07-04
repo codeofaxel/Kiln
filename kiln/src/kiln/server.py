@@ -5256,8 +5256,18 @@ def skip_print_objects(object_ids: list[str], plate_number: int = 1) -> dict:
             ),
         }
     except (PrinterError, RuntimeError) as exc:
+        # The most common mistake is the wrong id TYPE for the backend — guide
+        # to the right one instead of blaming the print state.
+        if "integer" in str(exc).lower():
+            return _error_dict(
+                f"Couldn't skip: {exc} Bambu uses the numeric label_id from "
+                "list_plate_objects; OctoPrint/USB use the numeric M486 index; "
+                "Klipper/Moonraker uses the object NAME (a string).",
+                code="BAD_OBJECT_ID",
+            )
         return _error_dict(
-            f"Failed to skip objects: {exc}. Check that a multi-object print is active.",
+            f"Couldn't skip those objects: {exc} "
+            "(skipping only works during a live multi-object print).",
         )
     except Exception as exc:
         logger.exception("Unexpected error in skip_print_objects")

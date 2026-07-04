@@ -169,6 +169,23 @@ def test_tool_empty_is_guarded(monkeypatch):
     assert out["error"]["code"] == "NO_OBJECTS"
 
 
+def test_tool_bad_id_type_guides(monkeypatch):
+    """A Bambu getting a non-numeric id gets a guiding error, not 'no print'."""
+    from kiln.printers.base import PrinterError
+
+    class _Bambu:
+        def skip_objects(self, object_ids):
+            # mirror the real adapter: coercion failure -> PrinterError w/ "integer"
+            try:
+                [int(x) for x in object_ids]
+            except ValueError as exc:
+                raise PrinterError(f"object ids must be integers ({exc}).") from exc
+            return True
+
+    out = _call_tool(monkeypatch, _Bambu(), ["cap"])
+    assert out["error"]["code"] == "BAD_OBJECT_ID"
+
+
 def test_tool_unsupported_printer(monkeypatch):
     class _NoSkip:  # e.g. Prusa Link or Elegoo
         pass
