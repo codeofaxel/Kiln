@@ -36,6 +36,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   in one step, and `kiln doctor` now checks the design engine honestly instead
   of waving a missing or outdated one through.
 
+- **Repaired models now look like the original, not a rebuilt approximation.**
+  The one-step repair for broken or AI-generated models got noticeably more
+  faithful — creases, tips, and thin details that used to blur into a generic
+  blob now come back sharp, and a small torn-open gap in a model (like under a
+  brim or overhang) heals cleanly instead of leaving a ragged seam. Free users
+  get a couple of fixes a month to try it; Kiln Pro removes the limit and tunes
+  the repair further to your exact printer and material.
+
 - **Make your first thing in the browser — free.** Sign in at kiln3d.com and
   make a real, printable object on the spot: pick a starter — coaster, keychain,
   desk nameplate, pet tag, fridge magnet, ornament, jewelry tray, pen cup,
