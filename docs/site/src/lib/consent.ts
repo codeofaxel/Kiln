@@ -18,7 +18,7 @@
  *
  * @see ../../components/CookieBanner.astro — the writer
  * @see ../../components/MetaPixel.astro — the readers
- * @see ../../../../PRIVACY.md §3.2 — disclosure
+ * @see ../../../../policies/PRIVACY.md §3.2 — disclosure
  */
 
 export const CONSENT_COOKIE = "kiln_consent";

@@ -3,7 +3,7 @@ name: SBOM — CycloneDX + SPDX per release
 # Supplemental SBOM workflow — the real gate lives in publish.yml
 # where the PyPI upload is made to wait on SBOM + signing.  This
 # workflow also runs on release:published so a GitHub-only release
-# (no PyPI step) still gets an SBOM attached.  See SIGNING.md for
+# (no PyPI step) still gets an SBOM attached.  See policies/SIGNING.md for
 # the verification recipe.
 #
 # All third-party actions are pinned to a commit SHA, not a tag

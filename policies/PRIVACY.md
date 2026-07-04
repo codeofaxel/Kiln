@@ -522,7 +522,7 @@ new purposes), we will:
 - Update the "Last updated" date and increment the version number
   at the top of this document;
 - Preserve prior versions in the public Git history at
-  https://github.com/codeofaxel/Kiln/blob/main/PRIVACY.md.
+  https://github.com/codeofaxel/Kiln/blob/main/policies/PRIVACY.md.
 
 Non-material changes (typos, reorganization) are pushed
 immediately and noted in Git history.

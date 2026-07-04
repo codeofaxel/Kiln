@@ -4,10 +4,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { marked } from 'marked';
 
-// Read TERMS_OF_USE.md at the repo root at build time.  Canonical copy
-// lives there alongside PRIVACY.md so contributors + auditors see
+// Read TERMS_OF_USE.md from repo-root policies/ at build time.  Canonical
+// copy lives there alongside PRIVACY.md so contributors + auditors see
 // the same document the site renders.
-const mdPath = resolve(process.cwd(), '../../TERMS_OF_USE.md');
+const mdPath = resolve(process.cwd(), '../../policies/TERMS_OF_USE.md');
 const markdown = readFileSync(mdPath, 'utf-8');
 
 function slugify(text: string): string {

@@ -4,11 +4,11 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { marked } from 'marked';
 
-// Read PRIVACY.md at the repo root at build time.  Keeping the
-// canonical copy at the repo root (not duplicated into the site)
-// means CONTRIBUTING + the GitHub UI both see the same document
-// lawyers and auditors read.
-const mdPath = resolve(process.cwd(), '../../PRIVACY.md');
+// Read PRIVACY.md from repo-root policies/ at build time.  Keeping the
+// canonical copy in the repo (not duplicated into the site) means
+// CONTRIBUTING + the GitHub UI both see the same document lawyers
+// and auditors read.
+const mdPath = resolve(process.cwd(), '../../policies/PRIVACY.md');
 const markdown = readFileSync(mdPath, 'utf-8');
 
 function slugify(text: string): string {

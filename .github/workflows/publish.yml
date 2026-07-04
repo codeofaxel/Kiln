@@ -117,7 +117,7 @@ jobs:
   # Gate PyPI upload on supply-chain artifacts.  If SBOM or signing
   # fails, the wheel never goes to PyPI — better to ship nothing than
   # ship unverified.  Enterprise procurement requires these.  See
-  # SIGNING.md for the full verification recipe.
+  # policies/SIGNING.md for the full verification recipe.
   supply-chain-kiln:
     needs: build-kiln
     runs-on: ubuntu-latest

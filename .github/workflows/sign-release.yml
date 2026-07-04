@@ -5,7 +5,7 @@ name: Sign release — Sigstore + SLSA build provenance
 # also fires on release:published so a GitHub-only release (no PyPI
 # step) still gets Sigstore bundles + SLSA provenance.
 #
-# See SIGNING.md for verification recipes.  All third-party actions
+# See policies/SIGNING.md for verification recipes.  All third-party actions
 # are pinned to a commit SHA.
 
 on:
