@@ -5,7 +5,7 @@ Pygments==2.20.0
 certifi==2026.4.22
 charset-normalizer==3.4.7
 click==8.3.3
-coverage==7.13.5
+coverage==7.14.3
 idna==3.13
 iniconfig==2.3.0
 markdown-it-py==4.2.0
