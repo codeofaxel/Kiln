@@ -66,6 +66,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   power outage, Kiln checks every printer in a mixed-brand, mixed-model fleet at
   once and sorts them into self-recovering, needs-a-quick-look, or reprint.
 
+- **Print recovery gets a self-healing move (Pro+; Business+ can apply it
+  fleet-wide across mixed printer brands).** When one part on a multi-object
+  plate fails, Kiln's auto-recovery can now skip just that object and keep the
+  rest of the plate printing — on printers that support it, and only when
+  you've told it to. It also gets smarter over time: real outcomes from every
+  skip feed back into how confidently Kiln recommends the move next time.
+
 - **The Bambu A2L, dialed in (Pro+).** On top of free A2L support, Kiln now reads the printer like an expert — clog/feed-jam detection on any setup, build-plate-seated check, carbon-fiber nozzle advice, clear enclosure and AMS guidance, and more for paid tiers. See https://kiln3d.com/pricing.
 
 ### Changed
