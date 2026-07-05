@@ -899,8 +899,22 @@ def _record_local_tool_call(name: str) -> None:
       call locally and flushes to ``/api/me/stats/record`` when the user
       is signed in via ``python3 -m kiln signin``.
 
+    Two independent channels fire here:
+    * the ANONYMOUS aggregate counter (``daily_stats.record_tool_call``) —
+      always, regardless of kiln-pro / sign-in state; feeds the daily
+      heartbeat, no identity attached.
+    * the PER-USER ledger — exactly one recorder (kiln-pro OR the public
+      ledger, never both) so signed-in work counts once on ``/stats``.
+
     NEVER raises: a stats hook must never break a tool call.
     """
+    # Anonymous per-tool counter for the daily heartbeat — identity-free,
+    # separate from the per-user ledger below.
+    with contextlib.suppress(Exception):
+        from kiln.daily_stats import record_tool_call
+
+        record_tool_call(name)
+
     try:
         from kiln_pro.bridge import pro_features
     except Exception:

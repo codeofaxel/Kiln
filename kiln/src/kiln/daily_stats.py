@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from datetime import date
 from pathlib import Path
@@ -23,6 +24,17 @@ _logger = logging.getLogger(__name__)
 
 _STATS_PATH: Path = Path.home() / ".kiln" / "daily_stats.json"
 _lock = threading.Lock()
+
+# A real MCP tool name: lowercase, starts alpha, 3-65 chars.  The
+# per-tool counter only records names matching this so a weird
+# callable ``__name__`` (or anything not a genuine tool) can't ride
+# into the anonymous heartbeat as a "tool".
+_TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{2,64}$")
+# Cap distinct tool names tracked per day.  A real user touches well
+# under this; the cap just stops the local file (and the heartbeat
+# payload) from growing without bound.  Existing names keep counting
+# once the cap is reached; only brand-new names past the cap are dropped.
+_TOOL_CALLS_MAX_DISTINCT = 300
 
 # Valid event types (top-level counters).
 _VALID_EVENTS = frozenset({
@@ -55,6 +67,13 @@ def _empty_day() -> dict[str, Any]:
         # heartbeat so we can see which tools are driving upgrades
         # vs. which are just hitting unsynced machines.
         "tier_denials": {},        # {"fleet_status": 2, "texture_apply": 1}
+        # Per-tool call counts: tool_name → times called today.  Counts
+        # EVERY local tool dispatch (not just the six outcome events),
+        # so the anonymous heartbeat can finally show what unsigned
+        # local users actually do — the "tools per month" signal that
+        # was previously invisible for anyone not signed in.  Names +
+        # counts only, never arguments or paths.
+        "tool_calls": {},          # {"generate_coaster": 4, "slice_model": 2}
     }
 
 
@@ -180,6 +199,37 @@ def record_tier_denial(tool_name: str) -> None:
         _logger.debug("record_tier_denial(%s) failed: %s", tool_name, exc)
 
 
+def record_tool_call(tool_name: str) -> None:
+    """Increment the per-tool call counter for ``tool_name``.
+
+    Called once per local tool dispatch (see ``server._record_local_tool_call``)
+    so the anonymous daily heartbeat can report which tools are used, not
+    just the six outcome events.  This is the only anonymous view of what
+    a NOT-signed-in local user does — the per-user ledger only syncs when
+    signed in.
+
+    Only genuine tool names (``_TOOL_NAME_RE``) are recorded, and no more
+    than ``_TOOL_CALLS_MAX_DISTINCT`` distinct names per day.  Names +
+    counts only — never arguments.  Thread-safe, never raises.
+    """
+    name = (tool_name or "").strip()
+    if not _TOOL_NAME_RE.match(name):
+        return  # not a real tool name — drop rather than pollute the map
+    try:
+        with _lock:
+            data = _read()
+            buckets = data.get("tool_calls", {})
+            if not isinstance(buckets, dict):
+                buckets = {}
+            if name not in buckets and len(buckets) >= _TOOL_CALLS_MAX_DISTINCT:
+                return  # cap distinct names; existing ones still counted below
+            buckets[name] = int(buckets.get(name, 0)) + 1
+            data["tool_calls"] = buckets
+            _write(data)
+    except Exception as exc:
+        _logger.debug("record_tool_call(%s) failed: %s", tool_name, exc)
+
+
 def get_daily_stats() -> dict[str, Any]:
     """Return today's counters and breakdowns."""
     data = _read()
@@ -196,4 +246,5 @@ def get_daily_stats() -> dict[str, Any]:
         "slicer_profiles": data.get("slicer_profiles", {}),
         "marketplace_sources": data.get("marketplace_sources", {}),
         "tier_denials": data.get("tier_denials", {}),
+        "tool_calls": data.get("tool_calls", {}),
     }

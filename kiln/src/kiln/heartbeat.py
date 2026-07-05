@@ -138,6 +138,23 @@ def _get_daily_counts() -> dict[str, int]:
         return {"prints": 0, "generations": 0, "decorations": 0, "textures": 0}
 
 
+def _top_n(mapping: object, n: int) -> dict:
+    """Return the ``n`` highest-count entries of a ``{name: count}`` map.
+
+    Bounds the heartbeat payload for high-cardinality breakdowns (the
+    per-tool counter): a busy install can touch many tools in a day, but
+    only the busiest ``n`` need to travel.  Non-dict / bad input → ``{}``.
+    """
+    if not isinstance(mapping, dict) or not mapping:
+        return {}
+    try:
+        items = [(k, int(v)) for k, v in mapping.items() if isinstance(v, (int, float))]
+    except Exception:
+        return {}
+    items.sort(key=lambda kv: kv[1], reverse=True)
+    return {k: v for k, v in items[:n]}
+
+
 def _is_pro_installed() -> bool:
     """Check if kiln-pro is installed."""
     try:
@@ -216,6 +233,11 @@ def _send_heartbeat() -> None:
                 # ran `kiln pair`) or persist (they gave up — a
                 # support-ticket ticker).
                 "tier_denials": stats.get("tier_denials", {}),
+                # Per-tool call counts — {tool_name: count_today}.  The
+                # anonymous view of what a not-signed-in local user
+                # actually does.  Capped to the busiest tools so the
+                # payload stays small; names + counts only, never args.
+                "tool_calls": _top_n(stats.get("tool_calls", {}), 100),
             }),
         }).encode()
 
