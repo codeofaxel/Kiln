@@ -43,7 +43,7 @@ requests==2.33.1
 responses==0.26.0
 rich==15.0.0
 rpds-py==0.30.0
-sse-starlette==3.4.1
+sse-starlette==3.4.5
 starlette==1.0.0
 typing-inspection==0.4.2
 typing_extensions==4.15.0
