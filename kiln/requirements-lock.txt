@@ -27,7 +27,7 @@ mdurl==0.1.2
 numpy==2.2.6
 packaging==26.2
 paho-mqtt==2.1.0
-pillow==12.2.0
+pillow==12.3.0
 pluggy==1.6.0
 pycparser==3.0
 pydantic-settings==2.14.0

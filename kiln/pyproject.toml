@@ -67,14 +67,14 @@ stripe = ["stripe>=5.0"]
 payments = ["stripe>=5.0", "cryptography>=41.0"]
 serial = ["pyserial>=3.5"]
 qr = ["qrcode[pil]>=7.0"]
-emboss = ["Pillow>=9.0", "rembg>=2.0", "onnxruntime>=1.16"]
+emboss = ["Pillow>=12.3.0", "rembg>=2.0", "onnxruntime>=1.16"]
 mesh-diagnostics = ["trimesh>=4.0", "numpy>=1.24"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pytest-mock>=3.6",
     "responses>=0.20",
-    "Pillow>=9.0",
+    "Pillow>=12.3.0",
 ]
 
 [project.scripts]
