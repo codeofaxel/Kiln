@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-04T05:55:43.074405+00:00",
-  "tool_count": 369,
+  "generated": "2026-07-09T19:11:41.226558+00:00",
+  "tool_count": 371,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -2576,6 +2576,80 @@
           "mesh_path"
         ],
         "title": "inspect_designArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "inspect_mesh_view",
+      "description": "Look at a mesh the way a human orbits the 3D viewer \u2014 iteratively.",
+      "tier": "free",
+      "category": "design_inspection",
+      "parameters": {
+        "properties": {
+          "mesh_path": {
+            "title": "Mesh Path",
+            "type": "string"
+          },
+          "mode": {
+            "default": "view",
+            "title": "Mode",
+            "type": "string"
+          },
+          "yaw_deg": {
+            "default": 32.0,
+            "title": "Yaw Deg",
+            "type": "number"
+          },
+          "pitch_deg": {
+            "default": -18.0,
+            "title": "Pitch Deg",
+            "type": "number"
+          },
+          "zoom": {
+            "default": 1.0,
+            "title": "Zoom",
+            "type": "number"
+          },
+          "focus": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Focus"
+          },
+          "focus_region": {
+            "default": "",
+            "title": "Focus Region",
+            "type": "string"
+          },
+          "section_frac": {
+            "default": 0.5,
+            "title": "Section Frac",
+            "type": "number"
+          },
+          "reference_path": {
+            "default": "",
+            "title": "Reference Path",
+            "type": "string"
+          },
+          "size": {
+            "default": 800,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mesh_path"
+        ],
+        "title": "inspect_mesh_viewArguments",
         "type": "object"
       }
     },
@@ -9355,6 +9429,47 @@
             "default": 600.0,
             "title": "Monitoring Max Wall S",
             "type": "number"
+          },
+          "plate_objects": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plate Objects"
+          },
+          "failed_objects": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Failed Objects"
+          },
+          "printer_type": {
+            "default": "",
+            "title": "Printer Type",
+            "type": "string"
+          },
+          "allow_skip_failed_objects": {
+            "default": false,
+            "title": "Allow Skip Failed Objects",
+            "type": "boolean"
           }
         },
         "required": [
@@ -14923,6 +15038,18 @@
             ],
             "default": null,
             "title": "Mark Depth Mm"
+          },
+          "printer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Id"
           }
         },
         "required": [
@@ -15069,6 +15196,17 @@
           }
         },
         "title": "preview_texture_2dArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "push_palettes_to_cloud",
+      "description": "Push locally saved custom palettes to your cloud account.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "textures",
+      "parameters": {
+        "properties": {},
+        "title": "push_palettes_to_cloudArguments",
         "type": "object"
       }
     },
