@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 import urllib.request
 from typing import Any, Callable
 
@@ -33,6 +34,12 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_RELAY_URL = "wss://api.kiln3d.com/api/bridge/connect"
 _DEFAULT_API_URL = "https://api.kiln3d.com"
+
+# Liveness the running bridge advertises to a small JSON file, so
+# ``kiln bridge status`` can tell "on and connected" from "on but reconnecting"
+# from "off" WITHOUT opening its own socket.  Written best-effort by whichever
+# process runs the loop (a manual ``start`` or the login service).
+_STATE_FILE = "~/.kiln/bridge.state"
 
 # Injected dependency shapes.
 ToolCaller = Callable[[str, dict], Any]          # (tool_name, args) -> result
@@ -204,12 +211,14 @@ class BridgeClient:
         import websockets  # local import: only needed when actually running
 
         backoff = 1.0
+        write_bridge_state(connected=False)  # advertise "running"; flips true on connect
         while not self._stop:
             try:
                 async with websockets.connect(
                     self._url, additional_headers=self._auth_headers()
                 ) as ws:
                     logger.info("bridge connected to relay")
+                    write_bridge_state(connected=True)
                     backoff = 1.0
                     async for raw in ws:
                         try:
@@ -220,6 +229,7 @@ class BridgeClient:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                write_bridge_state(connected=False)
                 logger.info("bridge link down (%s); retrying in %.0fs", exc, backoff)
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60.0)
@@ -228,10 +238,64 @@ class BridgeClient:
         self._stop = True
 
 
+def _state_path() -> str:
+    return os.path.expanduser(_STATE_FILE)
+
+
+def read_bridge_state() -> dict[str, Any]:
+    """Return the running bridge's last-written liveness state, or ``{}``.
+
+    Consumed by ``kiln bridge status``; never raises on a missing or corrupt
+    file (a bridge that isn't running simply has no state).
+    """
+    try:
+        with open(_state_path(), encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_bridge_state(*, connected: bool) -> None:
+    """Advertise THIS process as the running bridge (best-effort, never raises).
+
+    ``since`` is preserved across a reconnect flap so status can honestly say
+    "connected for 2h" rather than resetting on every dropped frame.
+    """
+    try:
+        prev = read_bridge_state()
+        now = time.time()
+        keep_since = connected and bool(prev.get("connected")) and prev.get("since")
+        since = prev.get("since") if keep_since else (now if connected else None)
+        path = _state_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(
+                {"pid": os.getpid(), "connected": bool(connected),
+                 "since": since, "updated": now},
+                fh,
+            )
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def clear_bridge_state() -> None:
+    """Remove the liveness file on shutdown (best-effort)."""
+    try:
+        os.unlink(_state_path())
+    except OSError:
+        pass
+
+
 def run_bridge() -> None:
     """Blocking entry point: ``python -m kiln.bridge_client``."""
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(BridgeClient().run())
+    try:
+        asyncio.run(BridgeClient().run())
+    finally:
+        clear_bridge_state()
 
 
 if __name__ == "__main__":
