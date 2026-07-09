@@ -124,6 +124,54 @@ def test_systemd_unit_render():
     assert "WantedBy=default.target" in unit
 
 
+def test_run_command_render_quotes_the_interpreter():
+    cmd = bcmd._render_run_command(r"C:\Py 3.12\pythonw.exe")
+    assert cmd == '"C:\\Py 3.12\\pythonw.exe" -m kiln.bridge_client'
+
+
+def test_windows_pythonw_prefers_the_windowless_interpreter(monkeypatch):
+    import sys as _sys
+
+    monkeypatch.setattr(_sys, "executable", "/py/python.exe")
+    monkeypatch.setattr(bcmd.os.path, "exists", lambda p: p.endswith("pythonw.exe"))
+    assert bcmd._windows_pythonw() == "/py/pythonw.exe"
+
+    monkeypatch.setattr(bcmd.os.path, "exists", lambda p: False)
+    assert bcmd._windows_pythonw() == "/py/python.exe"
+
+
+# --- Windows dispatch (the win32 branches, without a registry) -------------
+
+
+def test_win32_dispatch(monkeypatch):
+    import sys as _sys
+
+    monkeypatch.setattr(_sys, "platform", "win32")
+
+    # _service_installed → Run-key probe
+    monkeypatch.setattr(bcmd, "_run_key_installed", lambda: True)
+    assert bcmd._service_installed() is True
+
+    # _pid_alive → query-only probe (never os.kill on Windows)
+    probed = []
+    monkeypatch.setattr(bcmd, "_pid_alive_windows", lambda pid: probed.append(pid) or True)
+    assert bcmd._pid_alive(4242) is True
+    assert probed == [4242]
+
+    # _install_service → Run key + immediate spawn
+    spawned = []
+    monkeypatch.setattr(bcmd, "_install_run_key", lambda: (True, ""))
+    monkeypatch.setattr(bcmd, "_spawn_bridge", lambda: spawned.append(1) or 999)
+    ok, detail = bcmd._install_service()
+    assert ok and detail == "" and spawned == [1]
+
+    # _remove_service → Run-key removal
+    removed = []
+    monkeypatch.setattr(bcmd, "_remove_run_key", lambda: removed.append(1))
+    bcmd._remove_service()
+    assert removed == [1]
+
+
 # --- CLI wiring + the opt-in gate -----------------------------------------
 
 

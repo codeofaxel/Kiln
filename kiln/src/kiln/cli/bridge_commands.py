@@ -14,6 +14,10 @@ It runs ONLY when you turn it on here.  Installing Kiln never connects anything;
     kiln bridge stop       stop the background run
     kiln bridge status     is it on, and is it connected?
 
+Start-on-login is per-user and needs no elevation on all three platforms:
+launchd LaunchAgent (macOS), systemd --user unit (Linux), HKCU Run key
+(Windows, windowless via pythonw).
+
 Needs a signed-in account (``kiln signin`` / ``kiln pair``): the relay routes a
 call only to the bridge running on the SAME account.
 """
@@ -33,10 +37,13 @@ from kiln.bridge_client import (
     read_bridge_state,
 )
 
-# launchd label (macOS) and systemd unit stem (Linux).  One name so status,
-# install, and remove all agree on what "the service" is.
+# launchd label (macOS), systemd unit stem (Linux), and registry Run value
+# (Windows).  One name each so status, install, and remove all agree on what
+# "the service" is.
 _LABEL = "com.kiln3d.bridge"
 _UNIT = "kiln-bridge.service"
+_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+_RUN_VALUE = "KilnBridge"
 _LOG_FILE = os.path.expanduser("~/.kiln/bridge.log")
 
 
@@ -96,6 +103,22 @@ def _render_systemd_unit(python: str) -> str:
     )
 
 
+def _render_run_command(python: str) -> str:
+    """Windows Run-key command: quoted interpreter + the bridge module."""
+    return f'"{python}" -m kiln.bridge_client'
+
+
+def _windows_pythonw() -> str:
+    """Prefer ``pythonw.exe`` (no console window) for the login launch.
+
+    The registry Run key starts console apps WITH a console window;
+    ``pythonw.exe`` is the same interpreter built windowless.  Fall back to
+    ``sys.executable`` when it isn't present (conda/embedded layouts).
+    """
+    candidate = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    return candidate if os.path.exists(candidate) else sys.executable
+
+
 def _describe_status(
     *,
     signed_in: bool,
@@ -153,6 +176,8 @@ def _describe_status(
 
 
 def _pid_alive(pid: int) -> bool:
+    if sys.platform == "win32":
+        return _pid_alive_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -162,6 +187,31 @@ def _pid_alive(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+def _pid_alive_windows(pid: int) -> bool:
+    """Probe a pid WITHOUT signalling it.
+
+    ``os.kill(pid, 0)`` is NOT a probe on Windows — any signal other than the
+    two console events unconditionally TerminateProcess()es the target, so the
+    POSIX idiom would kill the bridge just by asking about it.  Use a
+    query-only process handle instead.
+    """
+    import ctypes  # noqa: PLC0415 — Windows-only path
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False
+    try:
+        code = ctypes.c_ulong()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return False
+        return code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def _running_pid() -> int | None:
@@ -219,7 +269,8 @@ def _await_connected(timeout: float = 6.0) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Login service (enable / disable) — launchd on macOS, systemd --user on Linux
+# Login service (enable / disable) — launchd on macOS, systemd --user on
+# Linux, HKCU Run key on Windows.  All three are per-user, no elevation.
 # ---------------------------------------------------------------------------
 
 
@@ -231,11 +282,50 @@ def _systemd_path() -> str:
     return os.path.expanduser(f"~/.config/systemd/user/{_UNIT}")
 
 
+def _run_key_installed() -> bool:
+    import winreg  # noqa: PLC0415 — Windows-only path
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as key:
+            winreg.QueryValueEx(key, _RUN_VALUE)
+        return True
+    except OSError:
+        return False
+
+
+def _install_run_key() -> tuple[bool, str]:
+    import winreg  # noqa: PLC0415 — Windows-only path
+
+    try:
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as key:
+            winreg.SetValueEx(
+                key, _RUN_VALUE, 0, winreg.REG_SZ,
+                _render_run_command(_windows_pythonw()),
+            )
+        return True, ""
+    except OSError as exc:
+        return False, str(exc)
+
+
+def _remove_run_key() -> None:
+    import winreg  # noqa: PLC0415 — Windows-only path
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_SET_VALUE
+        ) as key:
+            winreg.DeleteValue(key, _RUN_VALUE)
+    except OSError:
+        pass
+
+
 def _service_installed() -> bool:
     if sys.platform == "darwin":
         return os.path.exists(_plist_path())
     if sys.platform.startswith("linux"):
         return os.path.exists(_systemd_path())
+    if sys.platform == "win32":
+        return _run_key_installed()
     return False
 
 
@@ -272,6 +362,18 @@ def _install_service() -> tuple[bool, str]:
         if r.returncode != 0:
             return False, (r.stderr or "").strip() or "systemctl enable failed"
         return True, ""
+    if sys.platform == "win32":
+        # Run key = start at login (per-user, no elevation, windowless via
+        # pythonw).  It doesn't supervise, but the bridge's own reconnect
+        # loop never exits on error, so in-process keep-alive covers it.
+        ok, detail = _install_run_key()
+        if not ok:
+            return False, detail
+        try:
+            _spawn_bridge()  # parity: enable starts it NOW, not just at login
+        except OSError as exc:
+            return False, f"installed for login, but starting now failed: {exc}"
+        return True, ""
     return False, "unsupported-platform"
 
 
@@ -298,6 +400,10 @@ def _remove_service() -> None:
         subprocess.run(
             ["systemctl", "--user", "daemon-reload"], capture_output=True, text=True
         )
+    elif sys.platform == "win32":
+        # The running process is stopped by the caller (`disable` calls
+        # ``_stop_process``); this only removes the login entry.
+        _remove_run_key()
 
 
 def _preflight() -> None:
