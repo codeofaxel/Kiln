@@ -79,6 +79,19 @@ def test_unknown_tier_falls_back_to_auto(mesh, image):
     assert ds.call_args.kwargs["image_style"] == "auto"
 
 
+def test_mark_families_always_trace_never_heightmap(mesh, image):
+    # Logos/brand marks must take the traced-mark path even when the
+    # preset carries a photo posterize tier — a heightmap style here
+    # carves the whole tile (background + frame) around the mark.
+    for family in ("logo_deboss", "logo_emboss", "brand_asset"):
+        with patch("kiln.server.decorate_surface", return_value=_ok()) as ds:
+            apply_decoration_spec(
+                host_mesh_path=mesh, pattern_family=family,
+                image_asset_path=image, posterization_tier="coin",
+            )
+        assert ds.call_args.kwargs["image_style"] == "stencil", family
+
+
 def test_horizontal_caps_selects_top_face(mesh, image):
     with patch("kiln.server.decorate_surface", return_value=_ok()) as ds:
         apply_decoration_spec(

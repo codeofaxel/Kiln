@@ -32,6 +32,9 @@ _DEBOSS_FAMILIES = frozenset({"photo_deboss", "logo_deboss"})
 _IMAGE_FAMILIES = _EMBOSS_FAMILIES | _DEBOSS_FAMILIES | frozenset(
     {"brand_asset", "custom_image"}
 )
+# Families that are marks BY DEFINITION (logos, wordmarks, brand art):
+# always carved via the traced-mark path, never a photo heightmap.
+_MARK_FAMILIES = frozenset({"logo_emboss", "logo_deboss", "brand_asset"})
 _PROCEDURAL_FAMILY = "procedural_texture"
 
 # decorate_surface's accepted image styles; an unrecognised preset tier maps
@@ -142,7 +145,13 @@ def apply_decoration_spec(
         return {"success": False, "error": f"image asset not found: {image_asset_path!r}"}
 
     tier = (posterization_tier or "").strip().lower()
-    image_style = tier if tier in _VALID_IMAGE_STYLES else "auto"
+    if family in _MARK_FAMILIES:
+        # Posterize tiers are a photo concept — honoring one for a logo
+        # would route the mark through a whole-tile heightmap (background
+        # carve + perimeter frame).  Marks always trace.
+        image_style = "stencil"
+    else:
+        image_style = tier if tier in _VALID_IMAGE_STYLES else "auto"
 
     from kiln.server import decorate_surface
 
