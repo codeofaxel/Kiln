@@ -321,8 +321,16 @@ def _svg_content_block(
         # On OpenSCAD 2024+, wrap the union() in fill() so that tiny gaps
         # between adjacent hull() endpoints are closed automatically.
         # fill() is a stable module (added in 2021.01) — no --enable flag needed.
+        #
+        # EXCEPT for mark_geometry output: fill() erases holes, and that
+        # geometry carries real even-odd holes (letter counters, outline
+        # bands).  Such content_info sets openscad_polygons_fill_safe=False.
+        fill_safe = content_info.get("openscad_polygons_fill_safe", True)
         try:
-            use_fill = _openscad_version_year(get_openscad_version()) >= 2024
+            use_fill = (
+                fill_safe
+                and _openscad_version_year(get_openscad_version()) >= 2024
+            )
         except Exception:  # noqa: BLE001
             use_fill = False
 
