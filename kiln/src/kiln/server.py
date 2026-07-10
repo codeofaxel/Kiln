@@ -14990,6 +14990,16 @@ def decorate_surface(
         except Exception:
             pass
 
+        # Quiet quota tile on a SUCCESSFUL decoration, so a free/local caller
+        # sees where they stand ("2 of 3 used") before the wall instead of
+        # only hitting it as an error next time. Best-effort — never blocks
+        # a decoration that already succeeded.
+        try:
+            from kiln.decoration_quota import decoration_quota_status
+            result_dict["quota"] = decoration_quota_status()
+        except Exception:
+            pass
+
         try:
             from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
             return attach_inspect_bundle(result_dict, level="quick")
