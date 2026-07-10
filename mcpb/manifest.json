@@ -1,0 +1,65 @@
+{
+  "manifest_version": "0.4",
+  "name": "kiln",
+  "display_name": "Kiln",
+  "version": "1.1.9",
+  "description": "AI agent control of real 3D printers — design, slice, print, monitor, and recover across Bambu Lab, Creality, Prusa, Elegoo, and more.",
+  "long_description": "Kiln is an open-source MCP server that lets AI agents (Claude Desktop, Claude Code, Codex, or any custom MCP client) drive real 3D printers end to end. In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result — over OctoPrint, Moonraker/Klipper, PrusaLink, Direct USB, and Bambu Lab's native protocol.\n\nThis bundle installs Kiln locally so it can reach a printer on your own network — Kiln is fundamentally a local-first tool, not a hosted service.",
+  "author": {
+    "name": "Kiln Contributors"
+  },
+  "icon": "icon.png",
+  "homepage": "https://kiln3d.com",
+  "documentation": "https://kiln3d.com/docs",
+  "support": "https://github.com/codeofaxel/Kiln/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/codeofaxel/Kiln"
+  },
+  "license": "AGPL-3.0-or-later",
+  "keywords": [
+    "3d-printing", "3d-printer", "bambu-lab", "prusa", "creality", "elegoo",
+    "octoprint", "moonraker", "klipper", "gcode", "slicer", "fabrication",
+    "manufacturing", "print-farm"
+  ],
+  "server": {
+    "type": "uv",
+    "entry_point": "src/server.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": ["run", "--directory", "${__dirname}", "src/server.py"],
+      "env": {
+        "KILN_PRINTER_HOST": "${user_config.printer_host}",
+        "KILN_PRINTER_TYPE": "${user_config.printer_type}",
+        "KILN_PRINTER_API_KEY": "${user_config.printer_api_key}"
+      }
+    }
+  },
+  "user_config": {
+    "printer_host": {
+      "type": "string",
+      "title": "Printer host / URL",
+      "description": "URL of your 3D printer (OctoPrint, Moonraker, Creality, or Prusa Link). Optional — you can also register printers from inside the chat.",
+      "required": false
+    },
+    "printer_type": {
+      "type": "string",
+      "title": "Printer type",
+      "description": "octoprint, moonraker, creality, bambu, prusalink, elegoo, or serial",
+      "required": false
+    },
+    "printer_api_key": {
+      "type": "string",
+      "title": "Printer API key",
+      "description": "API key for your printer's REST API, if it requires one",
+      "sensitive": true,
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  }
+}
