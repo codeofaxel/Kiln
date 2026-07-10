@@ -10907,10 +10907,34 @@ def get_material_recommendation(
         return _error_dict(f"Unexpected error in get_material_recommendation: {exc}", code="INTERNAL_ERROR")
 
 
+# Bambu printers report failures as HMS codes: four 4-hex-digit groups, e.g.
+# ``0300_1A00_0002_0001``.  The raw code plus a pointer to Bambu's own HMS
+# wiki page is the free-tier floor; kiln-pro decodes the code to a cited
+# cause / fix / severity for Pro+ callers at the REST boundary (no curated fix
+# text lives in this public repo).
+_HMS_WIKI_CODE_URL = "https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/{code}"
+
+
+def _normalize_hms_code(raw: str) -> str:
+    """Normalize a Bambu HMS code to uppercase 4-hex groups joined by ``_``.
+
+    Accepts hyphen / underscore / space separated or unseparated input in any
+    case.  Returns ``""`` when the input holds fewer than 8 hex digits, so a
+    stray word can't be misread as a code — a real HMS code is at least the
+    8-hex module/attr prefix (e.g. ``0300_1A00``), usually the full 16 hex
+    digits.
+    """
+    hex_only = "".join(c for c in raw.upper() if c in "0123456789ABCDEF")
+    if len(hex_only) < 8:
+        return ""
+    return "_".join(hex_only[i : i + 4] for i in range(0, len(hex_only), 4))
+
+
 @mcp.tool()
 def troubleshoot_printer(
     printer_id: str,
-    symptom: str,
+    symptom: str = "",
+    hms_code: str = "",
 ) -> dict:
     """Diagnose a printer issue by searching the known failure modes database.
 
@@ -10918,14 +10942,27 @@ def troubleshoot_printer(
     ``"stringing"``) and get possible causes and fixes specific to your
     printer model.
 
+    On Bambu Lab printers you can also pass ``hms_code`` — the HMS error code
+    the printer's screen or app shows (e.g. ``"0300_1A00_0002_0001"``, in any
+    separator or case).  The response echoes the normalized code and a link to
+    Bambu's HMS wiki page for it.  With Kiln Pro (https://kiln3d.com/pricing)
+    the response also carries a decoded cause, fix, and severity for the code.
+
     Args:
         printer_id: Printer model identifier.
-        symptom: Description of the problem.
+        symptom: Description of the problem.  Optional when ``hms_code`` is
+            given.
+        hms_code: Optional Bambu HMS error code to look up.
     """
     if err := _check_auth("intel"):
         return err
+    if not symptom.strip() and not hms_code.strip():
+        return _error_dict(
+            "Provide a symptom describing the problem, or an hms_code to look up.",
+            code="INVALID_INPUT",
+        )
     try:
-        matches = diagnose_issue(printer_id, symptom)
+        matches = diagnose_issue(printer_id, symptom) if symptom.strip() else []
         intel = get_printer_intel(printer_id)
         # Free-tier honest signal: when the kiln-pro overlay didn't merge
         # (no license / network past grace / kiln-pro absent), per-printer
@@ -10942,7 +10979,7 @@ def troubleshoot_printer(
                 "failure-mode playbooks. See https://kiln3d.com/pricing"
             )
         )
-        return {
+        result = {
             "success": True,
             "printer": intel.display_name,
             "symptom": symptom,
@@ -10951,6 +10988,14 @@ def troubleshoot_printer(
             "quirks": intel.quirks,
             "upgrade_hint": upgrade_hint,
         }
+        # Bambu HMS code lookup: the normalized raw code + a wiki pointer are
+        # the free floor.  kiln-pro adds a decoded ``hms_decoded`` block (cause /
+        # fix / severity, cited) for Pro+ callers at the REST boundary.
+        code = _normalize_hms_code(hms_code)
+        if code:
+            result["hms_code"] = code
+            result["hms_wiki_url"] = _HMS_WIKI_CODE_URL.format(code=code)
+        return result
     except KeyError:
         return _error_dict(
             f"No intelligence data for '{printer_id}'.",
