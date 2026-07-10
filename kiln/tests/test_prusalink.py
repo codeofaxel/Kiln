@@ -512,6 +512,13 @@ class TestUnsupportedOps:
         with pytest.raises(PrinterError, match="does not support sending raw G-code"):
             a.send_gcode(["G28"])
 
+    def test_no_set_fan_method(self):
+        # Prusa Link has no raw G-code endpoint (see test_send_gcode_raises
+        # above), so it can't support fan control either -- there's no
+        # set_fan method at all here, rather than one that always raises.
+        a = _adapter()
+        assert not hasattr(a, "set_fan")
+
 
 # ---------------------------------------------------------------------------
 # File deletion

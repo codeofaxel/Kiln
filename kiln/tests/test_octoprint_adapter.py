@@ -714,6 +714,62 @@ class TestSetBedTemp:
 
 
 # ---------------------------------------------------------------------------
+# set_fan() tests
+# ---------------------------------------------------------------------------
+
+class TestSetFan:
+    """Tests for OctoPrintAdapter.set_fan() -- the part-cooling fan only."""
+
+    @responses.activate
+    def test_full_speed(self, adapter):
+        responses.add(
+            responses.POST,
+            f"{OCTOPRINT_HOST}/api/printer/command",
+            status=204,
+        )
+        ok = adapter.set_fan("part", 100)
+        assert ok is True
+
+        body = json.loads(responses.calls[0].request.body)
+        assert body["commands"] == ["M106 S255"]
+
+    @responses.activate
+    def test_zero_sends_m107(self, adapter):
+        responses.add(
+            responses.POST,
+            f"{OCTOPRINT_HOST}/api/printer/command",
+            status=204,
+        )
+        adapter.set_fan("part", 0)
+
+        body = json.loads(responses.calls[0].request.body)
+        assert body["commands"] == ["M107"]
+
+    @responses.activate
+    def test_aliases_accepted(self, adapter):
+        responses.add(
+            responses.POST,
+            f"{OCTOPRINT_HOST}/api/printer/command",
+            status=204,
+        )
+        adapter.set_fan("part_cooling", 50)
+        adapter.set_fan("cooling", 50)
+        assert len(responses.calls) == 2
+
+    def test_aux_is_rejected(self, adapter):
+        with pytest.raises(PrinterError):
+            adapter.set_fan("aux", 100)
+
+    def test_chamber_is_rejected(self, adapter):
+        with pytest.raises(PrinterError):
+            adapter.set_fan("chamber", 100)
+
+    def test_percent_out_of_range_raises(self, adapter):
+        with pytest.raises(PrinterError):
+            adapter.set_fan("part", 101)
+
+
+# ---------------------------------------------------------------------------
 # Retry logic tests
 # ---------------------------------------------------------------------------
 

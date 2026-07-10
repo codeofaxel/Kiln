@@ -5668,21 +5668,29 @@ def set_printer_light(node: str = "chamber_light", mode: str = "on") -> dict:
 
 @mcp.tool()
 def set_fan(node: str = "part", percent: int = 100) -> dict:
-    """Set the speed of a printer fan (Bambu Lab printers only).
+    """Set the speed of a printer fan.
+
+    Supported on Bambu Lab, OctoPrint, and Moonraker/Klipper printers.
+    Prusa Link has no raw G-code endpoint, so fan control isn't available
+    there (https://github.com/prusa3d/Prusa-Link/issues/832).
 
     Args:
-        node: Which fan to set — ``"part"`` (part-cooling / model fan, the
-            one that cools each layer), ``"aux"`` (auxiliary / big fan), or
-            ``"chamber"`` (chamber / exhaust fan). Defaults to ``"part"``.
+        node: Which fan to set. ``"part"`` (part-cooling / model fan, the
+            one that cools each layer) works on every supported printer.
+            ``"aux"`` (auxiliary / big fan) and ``"chamber"`` (chamber /
+            exhaust fan) are Bambu-only — generic Marlin/Klipper firmware has
+            no standard auxiliary or chamber fan Kiln can address without
+            knowing that machine's own G-code macros. Defaults to ``"part"``.
         percent: Fan speed 0-100. ``0`` turns the fan off, ``100`` is full
             speed. Defaults to ``100``.
 
-    Use this to add cooling for bridges and overhangs (part fan), pull heat
-    with the auxiliary fan, or run the chamber/exhaust fan when printing
-    materials like ABS/ASA. The chamber fan only exists on enclosed models —
-    X1 Carbon, X1E, P1S, P2S, H2S — not on open-frame models (A1, A1 Mini,
-    A2L, P1P), where a chamber command is a no-op. The printer's own thermal
-    management may override a manual fan speed during a print.
+    Use this to add cooling for bridges and overhangs (part fan), or — on
+    Bambu — pull heat with the auxiliary fan or run the chamber/exhaust fan
+    for materials like ABS/ASA. The Bambu chamber fan only exists on
+    enclosed models — X1 Carbon, X1E, P1S, P2S, H2S — not on open-frame
+    models (A1, A1 Mini, A2L, P1P), where a chamber command is a no-op. The
+    printer's own thermal management may override a manual fan speed during
+    a print.
     """
     if err := _check_auth("printer_control"):
         return err
@@ -5692,7 +5700,7 @@ def set_fan(node: str = "part", percent: int = 100) -> dict:
         adapter = _get_adapter()
         if not hasattr(adapter, "set_fan"):
             return _error_dict(
-                "Fan control is only available on Bambu Lab printers.",
+                "Fan control isn't available on this printer type.",
                 code="UNSUPPORTED",
             )
         ok = adapter.set_fan(node, percent)
