@@ -7,6 +7,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Sharper 3D previews across the board.** Every preview Kiln renders —
+  your models from all angles, AI-generated designs, decoration mockups,
+  and printer thumbnails — now comes out noticeably crisper, with clean
+  smooth edges instead of jagged ones. Same instant previews, just easier
+  on the eyes.
+
 - **Control your printer's fans directly (free).** Dial the part-cooling fan
   to any speed — more airflow for overhangs and bridges, gentler cooling on
   warp-prone materials. Works across Bambu Lab, OctoPrint, Moonraker/Klipper
