@@ -7,6 +7,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Control your printer's fans directly (free).** Dial the part-cooling fan
+  to any speed — more airflow for overhangs and bridges, gentler cooling on
+  warp-prone materials. Works across Bambu Lab, OctoPrint, Moonraker/Klipper
+  (Creality's K-series and Ender-3 V3 line included), direct-USB, and
+  Elegoo's Centauri Carbon. Bambu Lab also gets the auxiliary and chamber
+  fans, with the chamber fan available on enclosed models.
+
+- **Look up what a Bambu error code actually means.** Paste the HMS code
+  straight off your printer's screen or app into a printer troubleshooting
+  check and get pointed straight to Bambu's own explanation — no more
+  hunting the wiki by hand. *Free tells you where to look; Kiln Pro tells
+  you what it means and what to do about it — the plain-English cause, the
+  fix, and how serious it is.* See https://kiln3d.com/pricing.
+
 - **Anonymous usage insights.** Kiln's daily anonymous check-in now includes
   which built-in tools get used most, helping us prioritize what to improve
   next. No personal data, no file contents — just tool names and counts, and
