@@ -7,6 +7,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Cleaner logo and image debossing.** Carved logos and images on your
+  models no longer pick up a stray frame or background box, and
+  text-bearing marks no longer render mirrored — the engraving now
+  follows the actual shape of your artwork.
+
+- **Decorations: real deletion, working thumbnails, safer signing.**
+  - You can now actually delete a saved decoration, feature, or design
+    (Pro+) — previously the only option was archive/hide. Deleting
+    defaults to a safe, recoverable "retire"; permanent deletion needs a
+    separate confirmation.
+  - The decorations library on the web app now shows real preview images
+    instead of blank placeholders (Pro+).
+  - Signing a decoration release now shows you what you're signing
+    before it's finalized (Pro+).
+
 - **Use Kiln with any MCP client, no install at all.** A hosted connector
   lets Claude, Cursor, or any MCP-compatible app add Kiln by pasting a URL —
   sign in once, no download, no setup.
