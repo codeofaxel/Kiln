@@ -26,13 +26,13 @@ _LIBRARY_DIR_NAME = "decorations"
 
 _VALID_CONTENT_TYPES = {
     "photo", "svg", "qr", "text",
-    "procedural_texture", "ai_texture",
+    "procedural_texture", "ai_texture", "geometric_texture",
 }
 
 # Decoration categories — groups content_types for filtering/display.
 DECORATION_CATEGORIES: dict[str, list[str]] = {
     "surface": ["photo", "svg", "qr", "text"],
-    "texture": ["procedural_texture", "ai_texture"],
+    "texture": ["procedural_texture", "ai_texture", "geometric_texture"],
 }
 
 # Default settings per content type
@@ -43,6 +43,12 @@ _DEFAULTS: dict[str, dict[str, Any]] = {
     "text": {"depth_mm": 0.4, "mode": "deboss", "image_style": "auto"},
     "procedural_texture": {"depth_mm": 0.0, "mode": "multicolor", "image_style": "auto"},
     "ai_texture": {"depth_mm": 0.0, "mode": "multicolor", "image_style": "auto"},
+    # A single-color physical relief (no colour split) — the real carve
+    # depth lives in the decoration's own texture_params, so this is only
+    # the "nobody's ever printed this one before" fallback; 1.2mm/deboss
+    # mirrors apply_geometric_texture's own catalog default for every
+    # texture except carbon fiber (0.6mm) and brushed metal (0.8mm).
+    "geometric_texture": {"depth_mm": 1.2, "mode": "deboss", "image_style": "auto"},
 }
 
 
