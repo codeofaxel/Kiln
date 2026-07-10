@@ -5679,10 +5679,10 @@ def set_fan(node: str = "part", percent: int = 100) -> dict:
 
     Use this to add cooling for bridges and overhangs (part fan), pull heat
     with the auxiliary fan, or run the chamber/exhaust fan when printing
-    materials like ABS/ASA. The chamber fan only exists on enclosed models
-    (X1 / P1 / H2D) — on the A1 / A1 mini a chamber command is a no-op. The
-    printer's own thermal management may override a manual fan speed during a
-    print.
+    materials like ABS/ASA. The chamber fan only exists on enclosed models —
+    X1 Carbon, X1E, P1S, P2S, H2S — not on open-frame models (A1, A1 Mini,
+    A2L, P1P), where a chamber command is a no-op. The printer's own thermal
+    management may override a manual fan speed during a print.
     """
     if err := _check_auth("printer_control"):
         return err

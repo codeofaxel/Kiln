@@ -2906,10 +2906,12 @@ class BambuAdapter(PrinterAdapter):
                 0-100.
 
         Note:
-            The chamber fan only exists on enclosed models (X1 / P1 / H2D); the
-            A1 / A1 mini have no chamber fan, and a chamber command there is a
-            firmware no-op.  The printer's own thermal management may override a
-            manual fan speed during a print.
+            The chamber fan only exists on enclosed models — per Kiln's own
+            printer intelligence data (``has_enclosure``): X1 Carbon, X1E, P1S,
+            P2S, and H2S.  Open-frame models — A1, A1 Mini, A2L, and P1P — have
+            no chamber fan, and a chamber command there is a firmware no-op.
+            The printer's own thermal management may override a manual fan
+            speed during a print.
         """
         key = node.strip().lower()
         index = _FAN_NODE_TO_INDEX.get(key)
