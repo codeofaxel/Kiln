@@ -466,62 +466,11 @@ class TestVisualizeModelOnBambu3MF:
 
 class TestPreviewSupersample:
     """OpenSCAD preview edges are jagged at native resolution; the engine
-    renders oversized and Lanczos-downscales for crisp anti-aliased output."""
+    renders oversized and Lanczos-downscales for crisp anti-aliased output.
 
-    def test_default_factor_is_two(self, monkeypatch: pytest.MonkeyPatch):
-        from kiln.model_visualizer import _preview_supersample
-
-        monkeypatch.delenv("KILN_PREVIEW_SUPERSAMPLE", raising=False)
-        assert _preview_supersample() == 2
-
-    def test_env_override(self, monkeypatch: pytest.MonkeyPatch):
-        from kiln.model_visualizer import _preview_supersample
-
-        monkeypatch.setenv("KILN_PREVIEW_SUPERSAMPLE", "3")
-        assert _preview_supersample() == 3
-
-    def test_env_disables_with_one(self, monkeypatch: pytest.MonkeyPatch):
-        from kiln.model_visualizer import _preview_supersample
-
-        monkeypatch.setenv("KILN_PREVIEW_SUPERSAMPLE", "1")
-        assert _preview_supersample() == 1
-
-    def test_env_clamped_low_and_high(self, monkeypatch: pytest.MonkeyPatch):
-        from kiln.model_visualizer import (
-            _PREVIEW_SUPERSAMPLE_MAX,
-            _preview_supersample,
-        )
-
-        monkeypatch.setenv("KILN_PREVIEW_SUPERSAMPLE", "0")
-        assert _preview_supersample() == 1
-        monkeypatch.setenv("KILN_PREVIEW_SUPERSAMPLE", "-5")
-        assert _preview_supersample() == 1
-        monkeypatch.setenv("KILN_PREVIEW_SUPERSAMPLE", "99")
-        assert _preview_supersample() == _PREVIEW_SUPERSAMPLE_MAX
-
-    def test_env_garbage_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch):
-        from kiln.model_visualizer import _preview_supersample
-
-        monkeypatch.setenv("KILN_PREVIEW_SUPERSAMPLE", "abc")
-        assert _preview_supersample() == 2
-        monkeypatch.setenv("KILN_PREVIEW_SUPERSAMPLE", "")
-        assert _preview_supersample() == 2
-
-    def test_downscale_png_resizes_in_place(self, tmp_path: Path):
-        from PIL import Image
-
-        from kiln.model_visualizer import _downscale_png
-
-        p = tmp_path / "big.png"
-        Image.new("RGB", (200, 100), (128, 128, 128)).save(p)
-        assert _downscale_png(str(p), 50, 25) is True
-        with Image.open(p) as img:
-            assert img.size == (50, 25)
-
-    def test_downscale_png_bad_path_returns_false(self, tmp_path: Path):
-        from kiln.model_visualizer import _downscale_png
-
-        assert _downscale_png(str(tmp_path / "nope.png"), 50, 25) is False
+    Unit tests for the shared ``preview_supersample`` / ``downscale_png``
+    primitives live in ``test_preview_render.py``; these assert
+    ``visualize_model`` actually wires them into its OpenSCAD invocation."""
 
     def test_render_uses_supersampled_imgsize(self, tmp_stl: Path, tmp_path: Path,
                                               monkeypatch: pytest.MonkeyPatch):

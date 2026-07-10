@@ -33,6 +33,8 @@ import subprocess
 import tempfile
 from typing import Any
 
+from kiln.preview_render import downscale_png, effective_supersample
+
 # Public surface — what callers (kiln-pro plugins, REST API, agents)
 # import.  Anything not listed here is internal helper and may move
 # between minor versions.
@@ -148,11 +150,14 @@ def _render_post_flip_preview(
     # without us having to know its bounding box ahead of time — the
     # post-flip transformation moves the object off origin and a
     # fixed camera distance crops the engraving out of frame.
+    # Supersample: render oversized then Lanczos-downscale for crisp
+    # edges — one shared knob governs every OpenSCAD preview surface.
+    ss = effective_supersample()
     cmd = [
         openscad,
         "--preview",
         "-o", png_path,
-        "--imgsize=800,600",
+        f"--imgsize={800 * ss},{600 * ss}",
         "--colorscheme=DeepOcean",
         "--autocenter",
         "--viewall",
@@ -178,6 +183,9 @@ def _render_post_flip_preview(
     if os.path.getsize(png_path) == 0:
         _logger.debug("post-flip preview: empty PNG produced; treating as failed")
         return None
+
+    if ss > 1:
+        downscale_png(png_path, 800, 600)
 
     return png_path
 

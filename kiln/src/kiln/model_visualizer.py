@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kiln.emboss_generator import _openscad_version_year, get_openscad_version
+from kiln.preview_render import downscale_png, effective_supersample
 
 logger = logging.getLogger(__name__)
 
@@ -484,70 +485,6 @@ def _make_scad_wrapper(
     return scad_path
 
 
-# ---------------------------------------------------------------------------
-# Preview supersampling (SSAA)
-# ---------------------------------------------------------------------------
-#
-# OpenSCAD's OpenGL ``--preview`` applies little to no antialiasing, so a
-# render at the requested resolution has visibly jagged, soft edges — the
-# "pixely" look. Rendering at an integer multiple of the target size and
-# downscaling with a Lanczos filter averages several source pixels into
-# each output pixel, producing crisp, anti-aliased previews. Cost scales
-# with the square of the factor in render pixels, so the default is a
-# modest 2×; tune with ``KILN_PREVIEW_SUPERSAMPLE`` (1 disables).
-
-_PREVIEW_SUPERSAMPLE_DEFAULT = 2
-_PREVIEW_SUPERSAMPLE_MAX = 4
-
-
-def _preview_supersample() -> int:
-    """Return the preview supersampling factor (clamped to 1..MAX).
-
-    Reads ``KILN_PREVIEW_SUPERSAMPLE`` when set; otherwise the default.
-    A factor of 1 disables supersampling (native-resolution render).
-    """
-    raw = os.environ.get("KILN_PREVIEW_SUPERSAMPLE")
-    if raw is None or raw == "":
-        return _PREVIEW_SUPERSAMPLE_DEFAULT
-    try:
-        val = int(raw)
-    except (TypeError, ValueError):
-        logger.warning(
-            "Invalid KILN_PREVIEW_SUPERSAMPLE=%r (want an integer); using %d",
-            raw, _PREVIEW_SUPERSAMPLE_DEFAULT,
-        )
-        return _PREVIEW_SUPERSAMPLE_DEFAULT
-    return max(1, min(_PREVIEW_SUPERSAMPLE_MAX, val))
-
-
-def _downscale_png(path: str, target_w: int, target_h: int) -> bool:
-    """Downscale the PNG at *path* in place to *target_w*×*target_h*.
-
-    Uses a Lanczos filter (the quality standard for downsampling). Writes
-    to a sibling temp file and atomically replaces the original, so a
-    failure mid-write never leaves a truncated preview. Returns ``True``
-    on success; on any failure the original file is left untouched and
-    ``False`` is returned so the caller can decide how to degrade.
-    """
-    try:
-        from PIL import Image
-    except ImportError:
-        return False
-    try:
-        with Image.open(path) as img:
-            resample = getattr(Image, "Resampling", Image).LANCZOS
-            resized = img.resize((target_w, target_h), resample)
-        tmp = f"{path}.ss.tmp"
-        resized.save(tmp, "PNG")
-        os.replace(tmp, path)
-        return True
-    except Exception as exc:  # noqa: BLE001 — never let a preview crash the render
-        logger.warning("Preview downscale failed for %s: %s", path, exc)
-        with contextlib.suppress(OSError):
-            os.unlink(f"{path}.ss.tmp")
-        return False
-
-
 def visualize_model(
     file_path: str,
     *,
@@ -747,16 +684,10 @@ def visualize_model(
     )
 
     # Supersample: render oversized, then Lanczos-downscale to the
-    # requested size for crisp, anti-aliased edges. Skip if Pillow is
-    # unavailable so we return a native-resolution (correctly sized)
-    # image rather than an oversized one we can't downscale.
-    ss = _preview_supersample()
-    if ss > 1:
-        try:
-            import PIL  # noqa: F401
-        except ImportError:
-            logger.debug("Pillow unavailable — rendering previews at native resolution")
-            ss = 1
+    # requested size for crisp, anti-aliased edges (shared helper so one
+    # knob governs every OpenSCAD preview surface). effective_supersample
+    # degrades to 1 without Pillow, so output is always the requested size.
+    ss = effective_supersample()
     img_w, img_h = width * ss, height * ss
 
     try:
@@ -821,7 +752,7 @@ def visualize_model(
             # crisp edges. On the rare downscale failure (I/O fault) the
             # oversized-but-valid image is kept rather than lost.
             if ss > 1:
-                _downscale_png(png_path, width, height)
+                downscale_png(png_path, width, height)
 
             views.append({
                 "angle": label,
