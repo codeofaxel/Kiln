@@ -666,6 +666,27 @@ def _build_instructions() -> str:
     except Exception:  # noqa: BLE001 -- nudge is best-effort, never fatal
         pass
 
+    # --- Account nudge (only when signed out) ---
+    # Surfaced once at connect so the agent knows a free account exists and
+    # why it helps, and can offer it at the natural moment (a save / share)
+    # rather than nagging. Reads the same token file the CLI writes; a signed
+    # in user never sees this line. Best-effort — never break the build.
+    try:
+        from kiln.cli.auth_commands import _read_tokens
+
+        if not _read_tokens().get("access_token"):
+            parts.append(
+                "ACCOUNT: The user is not signed in. Kiln works fully without "
+                "an account; a free account adds a cloud design library with "
+                "share links, plus the free monthly allowance of Kiln's hosted "
+                "tools. If the user wants to save or share a design, offer to "
+                "sign them in — call `kiln_signin` and give them the URL it "
+                "returns (or they can run `kiln signin` in a terminal). Mention "
+                "it at most once per session, and never block work on it."
+            )
+    except Exception:  # noqa: BLE001 -- nudge is best-effort, never fatal
+        pass
+
     # --- Fresh install: first-time setup guidance ---
     if is_fresh:
         parts.append(
