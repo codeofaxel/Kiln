@@ -14319,12 +14319,17 @@ def decorate_surface(
 
     **Image styles** for raster images:
 
+    - ``"auto"`` — detects the image kind: a logo/wordmark/line-art
+      image routes to ``"stencil"`` (crisp traced strokes); a
+      continuous-tone photo routes to ``"coin"``
     - ``"coin"`` — histogram-equalized posterize, best for FDM coin-relief
     - ``"portrait"`` — edge-detected line art
     - ``"composite"`` — posterize base + edge overlay hybrid
     - ``"medallion"`` — coin + raised border ring (premium look)
     - ``"photo"`` — simple 3-level posterize
-    - ``"stencil"`` — binary silhouette
+    - ``"stencil"`` (alias ``"logo"``) — the mark's ink is traced into
+      vector strokes and carved directly: crisp edges, no background
+      tile, correct orientation.  The right choice for brand logos.
     - ``"lithophane"`` — full gradient for backlit prints
 
     **Examples**::
@@ -14561,17 +14566,55 @@ def decorate_surface(
         elif ctype == "image":
             from kiln.image_to_surface import prepare_image_for_emboss
 
-            effective_style = image_style if image_style != "auto" else "coin"
-            # Coin style uses proven pipeline defaults: 250px, flip for OpenSCAD
-            coin_like = effective_style in ("coin", "medallion")
-            content_info = prepare_image_for_emboss(
-                content,
-                work_dir,
-                max_resolution=250 if coin_like else 200,
-                invert=(mode == "deboss"),
-                style=effective_style,
-                flip_rows=coin_like,
-            )
+            effective_style = image_style
+            if effective_style == "auto":
+                # Bi-level marks (logos, wordmarks, line art) carve as
+                # traced vector strokes; continuous-tone photos keep the
+                # heightmap relief path.
+                try:
+                    from kiln.mark_geometry import is_bilevel_image
+
+                    effective_style = (
+                        "stencil" if is_bilevel_image(content) else "coin"
+                    )
+                except Exception:  # noqa: BLE001 — detector never blocks a decorate
+                    effective_style = "coin"
+
+            if effective_style in ("stencil", "logo"):
+                # Crisp mark path: trace the ink into native polygon()
+                # geometry and carve ONLY the strokes — no tile frame, no
+                # background carve, no pixel staircase, no mirroring.
+                try:
+                    from kiln.image_to_surface import prepare_logo_image_for_emboss
+
+                    content_info = prepare_logo_image_for_emboss(content, work_dir)
+                except (ValueError, ImportError):
+                    logger.warning(
+                        "Mark trace failed for %s — heightmap stencil fallback",
+                        content,
+                        exc_info=True,
+                    )
+                    content_info = prepare_image_for_emboss(
+                        content,
+                        work_dir,
+                        max_resolution=250,
+                        invert=(mode == "deboss"),
+                        style="stencil",
+                        flip_rows=True,
+                    )
+            else:
+                coin_like = effective_style in ("coin", "medallion")
+                content_info = prepare_image_for_emboss(
+                    content,
+                    work_dir,
+                    max_resolution=250 if coin_like else 200,
+                    invert=(mode == "deboss"),
+                    style=effective_style,
+                    # surface() reads rows bottom-to-top; EVERY heightmap
+                    # style needs the row flip or the relief renders
+                    # upside-down (only the coin path had this right).
+                    flip_rows=True,
+                )
 
         elif ctype == "text":
             import math
@@ -14739,24 +14782,33 @@ def decorate_surface(
                 pass
 
         if not boolean_ok and ctype == "svg":
-            # SVG boolean failed — try heightmap fallback
+            # SVG boolean failed — rasterize and re-carve.  Trace the
+            # raster back into vector strokes first (still frameless);
+            # only if THAT fails fall to the heightmap stencil, which
+            # carves the whole tile.
             try:
                 from kiln.image_to_surface import (
                     prepare_image_for_emboss,
+                    prepare_logo_image_for_emboss,
                     rasterize_svg_to_png,
                 )
 
                 raster_png = os.path.join(work_dir, "svg_rasterized.png")
                 rasterize_svg_to_png(content, raster_png, width_px=2048)
-                content_info = prepare_image_for_emboss(
-                    raster_png,
-                    work_dir,
-                    max_resolution=400,
-                    invert=(mode == "deboss"),
-                    style="stencil",
-                    edge_enhance=False,
-                    flip_rows=True,
-                )
+                try:
+                    content_info = prepare_logo_image_for_emboss(
+                        raster_png, work_dir
+                    )
+                except (ValueError, ImportError):
+                    content_info = prepare_image_for_emboss(
+                        raster_png,
+                        work_dir,
+                        max_resolution=400,
+                        invert=(mode == "deboss"),
+                        style="stencil",
+                        edge_enhance=False,
+                        flip_rows=True,
+                    )
                 scad_result = generate_emboss_scad(
                     model_path=abs_model,
                     content_info=content_info,

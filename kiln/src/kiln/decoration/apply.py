@@ -32,6 +32,9 @@ _DEBOSS_FAMILIES = frozenset({"photo_deboss", "logo_deboss"})
 _IMAGE_FAMILIES = _EMBOSS_FAMILIES | _DEBOSS_FAMILIES | frozenset(
     {"brand_asset", "custom_image"}
 )
+# Families that are marks BY DEFINITION (logos, wordmarks, brand art):
+# always carved via the traced-mark path, never a photo heightmap.
+_MARK_FAMILIES = frozenset({"logo_emboss", "logo_deboss", "brand_asset"})
 _PROCEDURAL_FAMILY = "procedural_texture"
 
 # decorate_surface's accepted image styles; an unrecognised preset tier maps
@@ -142,7 +145,13 @@ def apply_decoration_spec(
         return {"success": False, "error": f"image asset not found: {image_asset_path!r}"}
 
     tier = (posterization_tier or "").strip().lower()
-    image_style = tier if tier in _VALID_IMAGE_STYLES else "auto"
+    if family in _MARK_FAMILIES:
+        # Posterize tiers are a photo concept — honoring one for a logo
+        # would route the mark through a whole-tile heightmap (background
+        # carve + perimeter frame).  Marks always trace.
+        image_style = "stencil"
+    else:
+        image_style = tier if tier in _VALID_IMAGE_STYLES else "auto"
 
     from kiln.server import decorate_surface
 
@@ -157,6 +166,12 @@ def apply_decoration_spec(
         content_type="auto",
     )
 
+    # decorate_surface invoked in-process may return the FastMCP tool
+    # shape ``[Image, payload_dict]`` (inline preview + data).  This
+    # function's contract is "decorate_surface's result DICT" — unwrap
+    # to the payload so callers never juggle transport shapes.
+    if isinstance(result, (list, tuple)):
+        result = next((x for x in result if isinstance(x, dict)), result)
     if isinstance(result, dict):
         path = _decorated_path(result)
         if path and "decorated_model_path" not in result:

@@ -79,6 +79,19 @@ def test_unknown_tier_falls_back_to_auto(mesh, image):
     assert ds.call_args.kwargs["image_style"] == "auto"
 
 
+def test_mark_families_always_trace_never_heightmap(mesh, image):
+    # Logos/brand marks must take the traced-mark path even when the
+    # preset carries a photo posterize tier — a heightmap style here
+    # carves the whole tile (background + frame) around the mark.
+    for family in ("logo_deboss", "logo_emboss", "brand_asset"):
+        with patch("kiln.server.decorate_surface", return_value=_ok()) as ds:
+            apply_decoration_spec(
+                host_mesh_path=mesh, pattern_family=family,
+                image_asset_path=image, posterization_tier="coin",
+            )
+        assert ds.call_args.kwargs["image_style"] == "stencil", family
+
+
 def test_horizontal_caps_selects_top_face(mesh, image):
     with patch("kiln.server.decorate_surface", return_value=_ok()) as ds:
         apply_decoration_spec(
@@ -95,6 +108,19 @@ def test_vertical_walls_falls_back_to_auto_face(mesh, image):
             image_asset_path=image, surface_selection="vertical_walls",
         )
     assert ds.call_args.kwargs["face"] == "auto"
+
+
+def test_fastmcp_list_shape_unwraps_to_payload_dict(mesh, image):
+    # decorate_surface called in-process can return the FastMCP transport
+    # shape [Image, payload] — the contract here is the payload DICT.
+    ok = _ok()
+    with patch("kiln.server.decorate_surface", return_value=[object(), ok]):
+        result = apply_decoration_spec(
+            host_mesh_path=mesh, pattern_family="logo_deboss",
+            image_asset_path=image,
+        )
+    assert isinstance(result, dict)
+    assert result["decorated_model_path"] == "/tmp/out.stl"
 
 
 def test_procedural_is_refused_without_rendering(mesh):
