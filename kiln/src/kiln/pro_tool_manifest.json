@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-07-09T19:11:41.226558+00:00",
+  "generated": "2026-07-10T00:04:07.079587+00:00",
   "tool_count": 371,
   "categories": {
     "product_generators": {
@@ -14821,6 +14821,11 @@
             ],
             "default": null,
             "title": "Mark Depth Mm"
+          },
+          "save_to_library": {
+            "default": false,
+            "title": "Save To Library",
+            "type": "boolean"
           }
         },
         "required": [
@@ -15038,6 +15043,30 @@
             ],
             "default": null,
             "title": "Mark Depth Mm"
+          },
+          "relief_texture": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Relief Texture"
+          },
+          "relief_depth_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Relief Depth Mm"
           },
           "printer_id": {
             "anyOf": [
