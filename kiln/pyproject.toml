@@ -46,6 +46,11 @@ dependencies = [
     "rich>=12.0",
     "paho-mqtt>=2.0",
     "cryptography>=41.0",
+    # websockets powers the web->printer bridge's dial-out client
+    # (``kiln.bridge_client``) — a core dep, not an extra, so the
+    # documented `kiln bridge enable` works on a fresh install instead
+    # of erroring with "install websockets first".
+    "websockets>=12.0",
     # numpy powers the ray-cast wall-thickness measurement in
     # ``kiln.printability._analyze_thin_walls`` — promoted from the
     # ``mesh-diagnostics`` extra so every install measures walls
