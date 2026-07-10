@@ -285,6 +285,26 @@ def _classify_flow_anomaly(error_code: int) -> tuple[str, str] | None:
 _VALID_LED_NODES: frozenset[str] = frozenset({"chamber_light", "work_light"})
 _VALID_LED_MODES: frozenset[str] = frozenset({"on", "off", "flashing"})
 
+# Bambu fan node -> M106 P-index.  Bambu drives its fans with the standard
+# Marlin ``M106 P<n> S<0-255>`` G-code (the same G-code path this adapter
+# already uses for M104/M140 temperature control), where the P-index selects
+# the fan:
+#   P1 part-cooling / model fan   (reported as ``cooling_fan_speed``)
+#   P2 auxiliary / big fan        (reported as ``big_fan1_speed``)
+#   P3 chamber / exhaust fan      (reported as ``big_fan2_speed``)
+# The index<->fan mapping is confirmed by Bambu's published machine G-code and
+# matches the status fields ``get_state`` already reads.  A P-index for a fan a
+# given model lacks (e.g. no chamber fan on the A1 / A1 mini) is a firmware
+# no-op, not an error.
+_FAN_NODE_TO_INDEX: dict[str, int] = {
+    "part": 1,
+    "part_cooling": 1,
+    "cooling": 1,
+    "aux": 2,
+    "auxiliary": 2,
+    "chamber": 3,
+}
+
 # Mapping of printer model identifiers (from 3MF metadata, MQTT, and serial
 # prefixes) to canonical family names.  Used by _check_printer_model_mismatch
 # to detect when a 3MF was sliced for a different printer family.
@@ -2857,6 +2877,53 @@ class BambuAdapter(PrinterAdapter):
                 }
             }
         )
+        return True
+
+    # ------------------------------------------------------------------
+    # Bambu-specific: fan control
+    # ------------------------------------------------------------------
+
+    def set_fan(self, node: str, percent: int) -> bool:
+        """Set the speed of one of the printer's fans.
+
+        Drives the fan with Bambu's standard ``M106 P<n> S<0-255>`` G-code
+        over the same MQTT ``gcode_line`` path this adapter already uses for
+        temperature control, so no live-print state is required beyond an
+        active MQTT connection.
+
+        Args:
+            node: Which fan to set — ``"part"`` (part-cooling / model fan),
+                ``"aux"`` (auxiliary / big fan), or ``"chamber"`` (chamber /
+                exhaust fan).  ``"part_cooling"``, ``"cooling"``, and
+                ``"auxiliary"`` are accepted aliases.
+            percent: Fan speed 0-100 (0 turns the fan off, 100 is full speed).
+
+        Returns:
+            ``True`` once the command is published.
+
+        Raises:
+            PrinterError: If *node* is not a known fan or *percent* is outside
+                0-100.
+
+        Note:
+            The chamber fan only exists on enclosed models (X1 / P1 / H2D); the
+            A1 / A1 mini have no chamber fan, and a chamber command there is a
+            firmware no-op.  The printer's own thermal management may override a
+            manual fan speed during a print.
+        """
+        key = node.strip().lower()
+        index = _FAN_NODE_TO_INDEX.get(key)
+        if index is None:
+            valid = ", ".join(sorted(set(_FAN_NODE_TO_INDEX)))
+            raise PrinterError(f"Unknown fan node {node!r}. Valid nodes: {valid}")
+        try:
+            pct = int(percent)
+        except (TypeError, ValueError) as exc:
+            raise PrinterError(f"set_fan: percent must be an integer 0-100 ({exc}).") from exc
+        if not 0 <= pct <= 100:
+            raise PrinterError(f"set_fan: percent must be 0-100, got {pct}.")
+        speed = round(pct / 100 * 255)
+        self.send_gcode([f"M106 P{index} S{speed}"])
         return True
 
     # ------------------------------------------------------------------

@@ -5667,6 +5667,50 @@ def set_printer_light(node: str = "chamber_light", mode: str = "on") -> dict:
 
 
 @mcp.tool()
+def set_fan(node: str = "part", percent: int = 100) -> dict:
+    """Set the speed of a printer fan (Bambu Lab printers only).
+
+    Args:
+        node: Which fan to set — ``"part"`` (part-cooling / model fan, the
+            one that cools each layer), ``"aux"`` (auxiliary / big fan), or
+            ``"chamber"`` (chamber / exhaust fan). Defaults to ``"part"``.
+        percent: Fan speed 0-100. ``0`` turns the fan off, ``100`` is full
+            speed. Defaults to ``100``.
+
+    Use this to add cooling for bridges and overhangs (part fan), pull heat
+    with the auxiliary fan, or run the chamber/exhaust fan when printing
+    materials like ABS/ASA. The chamber fan only exists on enclosed models
+    (X1 / P1 / H2D) — on the A1 / A1 mini a chamber command is a no-op. The
+    printer's own thermal management may override a manual fan speed during a
+    print.
+    """
+    if err := _check_auth("printer_control"):
+        return err
+    if err := _check_rate_limit("set_fan"):
+        return err
+    try:
+        adapter = _get_adapter()
+        if not hasattr(adapter, "set_fan"):
+            return _error_dict(
+                "Fan control is only available on Bambu Lab printers.",
+                code="UNSUPPORTED",
+            )
+        ok = adapter.set_fan(node, percent)
+        _audit("set_fan", "executed", details={"node": node, "percent": percent})
+        return {
+            "success": True,
+            "node": node.strip().lower(),
+            "percent": int(percent),
+            "accepted": ok,
+        }
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Failed to set fan: {exc}")
+    except Exception as exc:
+        logger.exception("Unexpected error in set_fan")
+        return _error_dict(f"Unexpected error in set_fan: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
 def wrap_gcode_as_3mf(
     gcode_path: str,
     hotend_temp: int = 220,
