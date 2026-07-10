@@ -7,6 +7,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Anonymous usage insights.** Kiln's daily anonymous check-in now includes
+  which built-in tools get used most, helping us prioritize what to improve
+  next. No personal data, no file contents — just tool names and counts, and
+  it's fully covered by the existing opt-out.
+
 - **Cleaner logo and image debossing.** Carved logos and images on your
   models no longer pick up a stray frame or background box, and
   text-bearing marks no longer render mirrored — the engraving now
