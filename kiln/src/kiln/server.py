@@ -5670,9 +5670,11 @@ def set_printer_light(node: str = "chamber_light", mode: str = "on") -> dict:
 def set_fan(node: str = "part", percent: int = 100) -> dict:
     """Set the speed of a printer fan.
 
-    Supported on Bambu Lab, OctoPrint, and Moonraker/Klipper printers.
-    Prusa Link has no raw G-code endpoint, so fan control isn't available
-    there (https://github.com/prusa3d/Prusa-Link/issues/832).
+    Supported on Bambu Lab, OctoPrint, Moonraker/Klipper printers, and
+    Elegoo's Centauri Carbon (FDM). Prusa Link has no raw G-code endpoint, so
+    fan control isn't available there
+    (https://github.com/prusa3d/Prusa-Link/issues/832). Elegoo's resin/MSLA
+    printers (Saturn, Mars) have no part-cooling fan and are refused.
 
     Args:
         node: Which fan to set. ``"part"`` (part-cooling / model fan, the
