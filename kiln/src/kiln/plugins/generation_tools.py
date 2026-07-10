@@ -270,13 +270,14 @@ class _GenerationToolsPlugin:
                                 "intelligence tools for material and printability guidance."
                             ),
                         }
-                    # No colors — fall through to VisualVerifier / OpenSCAD
-                    _logger.debug("3MF has no per-face colors — using OpenSCAD path")
+                    # No per-face colors — fall through to VisualVerifier's
+                    # uniform-color render path
+                    _logger.debug("3MF has no per-face colors — using uniform-color render path")
                 except ImportError:
-                    _logger.debug("Colored renderer not available — using OpenSCAD path")
+                    _logger.debug("Colored renderer not available — using uniform-color render path")
                 except Exception:  # noqa: BLE001
                     _logger.debug(
-                        "Colored 3MF parse/render failed — using OpenSCAD path",
+                        "Colored 3MF parse/render failed — using uniform-color render path",
                         exc_info=True,
                     )
 
