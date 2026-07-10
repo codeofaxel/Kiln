@@ -457,3 +457,132 @@ class TestVisualizeModelOnBambu3MF:
         assert result["rendered"] >= 1
         for v in result["views"]:
             assert os.path.isfile(v["path"])
+
+
+# ---------------------------------------------------------------------------
+# Preview supersampling (SSAA)
+# ---------------------------------------------------------------------------
+
+
+class TestPreviewSupersample:
+    """OpenSCAD preview edges are jagged at native resolution; the engine
+    renders oversized and Lanczos-downscales for crisp anti-aliased output."""
+
+    def test_default_factor_is_two(self, monkeypatch: pytest.MonkeyPatch):
+        from kiln.model_visualizer import _preview_supersample
+
+        monkeypatch.delenv("KILN_PREVIEW_SUPERSAMPLE", raising=False)
+        assert _preview_supersample() == 2
+
+    def test_env_override(self, monkeypatch: pytest.MonkeyPatch):
+        from kiln.model_visualizer import _preview_supersample
+
+        monkeypatch.setenv("KILN_PREVIEW_SUPERSAMPLE", "3")
+        assert _preview_supersample() == 3
+
+    def test_env_disables_with_one(self, monkeypatch: pytest.MonkeyPatch):
+        from kiln.model_visualizer import _preview_supersample
+
+        monkeypatch.setenv("KILN_PREVIEW_SUPERSAMPLE", "1")
+        assert _preview_supersample() == 1
+
+    def test_env_clamped_low_and_high(self, monkeypatch: pytest.MonkeyPatch):
+        from kiln.model_visualizer import (
+            _PREVIEW_SUPERSAMPLE_MAX,
+            _preview_supersample,
+        )
+
+        monkeypatch.setenv("KILN_PREVIEW_SUPERSAMPLE", "0")
+        assert _preview_supersample() == 1
+        monkeypatch.setenv("KILN_PREVIEW_SUPERSAMPLE", "-5")
+        assert _preview_supersample() == 1
+        monkeypatch.setenv("KILN_PREVIEW_SUPERSAMPLE", "99")
+        assert _preview_supersample() == _PREVIEW_SUPERSAMPLE_MAX
+
+    def test_env_garbage_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch):
+        from kiln.model_visualizer import _preview_supersample
+
+        monkeypatch.setenv("KILN_PREVIEW_SUPERSAMPLE", "abc")
+        assert _preview_supersample() == 2
+        monkeypatch.setenv("KILN_PREVIEW_SUPERSAMPLE", "")
+        assert _preview_supersample() == 2
+
+    def test_downscale_png_resizes_in_place(self, tmp_path: Path):
+        from PIL import Image
+
+        from kiln.model_visualizer import _downscale_png
+
+        p = tmp_path / "big.png"
+        Image.new("RGB", (200, 100), (128, 128, 128)).save(p)
+        assert _downscale_png(str(p), 50, 25) is True
+        with Image.open(p) as img:
+            assert img.size == (50, 25)
+
+    def test_downscale_png_bad_path_returns_false(self, tmp_path: Path):
+        from kiln.model_visualizer import _downscale_png
+
+        assert _downscale_png(str(tmp_path / "nope.png"), 50, 25) is False
+
+    def test_render_uses_supersampled_imgsize(self, tmp_stl: Path, tmp_path: Path,
+                                              monkeypatch: pytest.MonkeyPatch):
+        """With the default 2x factor, OpenSCAD is invoked at 2x the
+        requested size, and the returned PNG is downscaled back to it."""
+        from PIL import Image
+
+        monkeypatch.delenv("KILN_PREVIEW_SUPERSAMPLE", raising=False)
+        captured: list[list[str]] = []
+
+        def mock_run(cmd, **kwargs):
+            captured.append(cmd)
+            # Honor the requested --imgsize so the real downscale runs.
+            w = h = None
+            for arg in cmd:
+                if arg.startswith("--imgsize="):
+                    w, h = (int(x) for x in arg.split("=", 1)[1].split(","))
+            for i, arg in enumerate(cmd):
+                if arg == "-o" and i + 1 < len(cmd):
+                    Image.new("RGB", (w, h), (170, 170, 170)).save(cmd[i + 1])
+            mock = MagicMock()
+            mock.returncode = 0
+            return mock
+
+        with patch("kiln.model_visualizer._find_openscad", return_value="openscad"), \
+             patch("subprocess.run", side_effect=mock_run):
+            result = visualize_model(
+                str(tmp_stl), angles=["isometric"],
+                output_dir=str(tmp_path / "out"), width=800, height=600,
+            )
+
+        assert result["success"] is True
+        imgsize_args = [a for c in captured for a in c if a.startswith("--imgsize=")]
+        assert imgsize_args == ["--imgsize=1600,1200"], imgsize_args
+        # Final artifact honors the requested size, not the oversized render.
+        with Image.open(result["views"][0]["path"]) as img:
+            assert img.size == (800, 600)
+
+    def test_render_native_imgsize_when_disabled(self, tmp_stl: Path, tmp_path: Path,
+                                                 monkeypatch: pytest.MonkeyPatch):
+        from PIL import Image
+
+        monkeypatch.setenv("KILN_PREVIEW_SUPERSAMPLE", "1")
+        captured: list[list[str]] = []
+
+        def mock_run(cmd, **kwargs):
+            captured.append(cmd)
+            for i, arg in enumerate(cmd):
+                if arg == "-o" and i + 1 < len(cmd):
+                    Image.new("RGB", (800, 600), (170, 170, 170)).save(cmd[i + 1])
+            mock = MagicMock()
+            mock.returncode = 0
+            return mock
+
+        with patch("kiln.model_visualizer._find_openscad", return_value="openscad"), \
+             patch("subprocess.run", side_effect=mock_run):
+            result = visualize_model(
+                str(tmp_stl), angles=["isometric"],
+                output_dir=str(tmp_path / "out"), width=800, height=600,
+            )
+
+        assert result["success"] is True
+        imgsize_args = [a for c in captured for a in c if a.startswith("--imgsize=")]
+        assert imgsize_args == ["--imgsize=800,600"], imgsize_args
