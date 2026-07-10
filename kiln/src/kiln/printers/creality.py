@@ -819,6 +819,14 @@ class CrealityAdapter(PrinterAdapter):
     def send_gcode(self, commands: list[str]) -> bool:
         return self._backend.send_gcode(commands)
 
+    def set_fan(self, node: str, percent: int) -> bool:
+        """Set the part-cooling fan speed via the Moonraker/Klipper backend.
+
+        Only the single default part-cooling fan is supported — see
+        :meth:`kiln.printers.base.PrinterAdapter._validate_part_fan`.
+        """
+        return self._backend.set_fan(node, percent)
+
     def skip_objects(self, object_names: list[str]) -> bool:
         """Abandon named objects mid-print via the Moonraker/Klipper backend.
 
