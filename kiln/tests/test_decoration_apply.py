@@ -110,6 +110,19 @@ def test_vertical_walls_falls_back_to_auto_face(mesh, image):
     assert ds.call_args.kwargs["face"] == "auto"
 
 
+def test_fastmcp_list_shape_unwraps_to_payload_dict(mesh, image):
+    # decorate_surface called in-process can return the FastMCP transport
+    # shape [Image, payload] — the contract here is the payload DICT.
+    ok = _ok()
+    with patch("kiln.server.decorate_surface", return_value=[object(), ok]):
+        result = apply_decoration_spec(
+            host_mesh_path=mesh, pattern_family="logo_deboss",
+            image_asset_path=image,
+        )
+    assert isinstance(result, dict)
+    assert result["decorated_model_path"] == "/tmp/out.stl"
+
+
 def test_procedural_is_refused_without_rendering(mesh):
     with patch("kiln.server.decorate_surface") as ds:
         result = apply_decoration_spec(
