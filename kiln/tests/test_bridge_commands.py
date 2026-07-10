@@ -16,8 +16,10 @@ from kiln.cli.bridge_commands import (
     _ago,
     _describe_status,
     _render_plist,
+    _render_protocol_command,
     _render_systemd_unit,
     bridge,
+    parse_bridge_uri,
 )
 
 
@@ -176,7 +178,12 @@ def test_win32_dispatch(monkeypatch):
 
 
 def test_group_exposes_all_verbs():
-    assert set(bridge.commands) == {"status", "start", "stop", "enable", "disable"}
+    # handle-uri is hidden from --help (it's OS-invoked, never typed) but
+    # still a real registered command — `hidden=True` only affects listing.
+    assert set(bridge.commands) == {
+        "status", "start", "stop", "enable", "disable", "handle-uri",
+    }
+    assert bridge.commands["handle-uri"].hidden is True
 
 
 def test_start_and_enable_refuse_without_a_signed_in_account(monkeypatch):
@@ -218,3 +225,119 @@ def test_await_connected(monkeypatch):
 
     monkeypatch.setattr(bcmd, "read_bridge_state", lambda: {"connected": False})
     assert bcmd._await_connected(timeout=0.0) is False
+
+
+# --- Windows `kiln://` protocol handler -------------------------------------
+#
+# The one-click "Connect my printer" path: a browser click hands the OS
+# `kiln://bridge/enable`, Windows launches the registered command, which
+# dispatches back into the SAME `_enable_bridge()` the CLI verb runs. Only
+# ever registered as a side effect of a successful `enable` — never the
+# very-first connection, which still needs one typed/pasted command, same as
+# macOS and Linux.
+
+
+def test_render_protocol_command_quotes_the_interpreter_and_passes_percent1():
+    cmd = _render_protocol_command(r"C:\Py 3.12\pythonw.exe")
+    assert cmd == '"C:\\Py 3.12\\pythonw.exe" -m kiln.cli.main bridge handle-uri "%1"'
+
+
+class TestParseBridgeUri:
+    def test_the_one_action_that_exists(self):
+        assert parse_bridge_uri("kiln://bridge/enable") == "enable"
+
+    def test_wrong_scheme_is_rejected(self):
+        assert parse_bridge_uri("http://bridge/enable") is None
+
+    def test_wrong_host_is_rejected(self):
+        assert parse_bridge_uri("kiln://printer/enable") is None
+
+    def test_missing_action_is_rejected(self):
+        assert parse_bridge_uri("kiln://bridge/") is None
+        assert parse_bridge_uri("kiln://bridge") is None
+
+    def test_an_unrecognised_action_still_parses_the_string(self):
+        # parse_bridge_uri only extracts the action; deciding what to DO with
+        # an unknown one is the caller's job (handle_uri ignores it).
+        assert parse_bridge_uri("kiln://bridge/self-destruct") == "self-destruct"
+
+    def test_garbage_input_never_raises(self):
+        assert parse_bridge_uri("") is None
+        assert parse_bridge_uri("not a uri at all") is None
+
+
+def test_win32_protocol_handler_dispatch(monkeypatch):
+    import sys as _sys
+
+    monkeypatch.setattr(_sys, "platform", "win32")
+
+    written = {}
+
+    class _FakeKey:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_create_key(hive, path):
+        written.setdefault(path, {})
+        return _FakeKey()
+
+    def fake_set_value(key, name, _res, _type, value):
+        # The two CreateKey calls happen in sequence; attribute the write to
+        # whichever path was created last (good enough for this fake).
+        written[list(written)[-1]][name] = value
+
+    import types
+    fake_winreg = types.SimpleNamespace(
+        HKEY_CURRENT_USER="HKCU",
+        REG_SZ="REG_SZ",
+        CreateKey=fake_create_key,
+        SetValueEx=fake_set_value,
+    )
+    monkeypatch.setitem(_sys.modules, "winreg", fake_winreg)
+    monkeypatch.setattr(bcmd, "_windows_pythonw", lambda: "C:\\py\\pythonw.exe")
+
+    ok, detail = bcmd._install_protocol_handler()
+    assert ok and detail == ""
+    assert written[bcmd._PROTOCOL_CLASS_KEY]["URL Protocol"] == ""
+    assert "handle-uri" in written[bcmd._PROTOCOL_COMMAND_KEY][""]
+
+
+def test_enable_registers_the_protocol_handler_on_windows_only(monkeypatch):
+    import sys as _sys
+
+    monkeypatch.setattr(bcmd, "_preflight", lambda: None)
+    monkeypatch.setattr(bcmd, "_stop_process", lambda: False)
+    monkeypatch.setattr(bcmd, "_install_service", lambda: (True, ""))
+    monkeypatch.setattr(bcmd, "_await_connected", lambda: True)
+
+    registered = []
+    monkeypatch.setattr(bcmd, "_install_protocol_handler", lambda: registered.append(1))
+
+    monkeypatch.setattr(_sys, "platform", "darwin")
+    bcmd._enable_bridge()
+    assert registered == []  # macOS never attempts registry work
+
+    monkeypatch.setattr(_sys, "platform", "win32")
+    bcmd._enable_bridge()
+    assert registered == [1]
+
+
+def test_handle_uri_command_dispatches_enable(monkeypatch):
+    calls = []
+    monkeypatch.setattr(bcmd, "_enable_bridge", lambda: calls.append("enabled"))
+
+    out = CliRunner().invoke(bridge, ["handle-uri", "kiln://bridge/enable"])
+    assert out.exit_code == 0
+    assert calls == ["enabled"]
+
+
+def test_handle_uri_command_ignores_unrecognised_uris(monkeypatch):
+    calls = []
+    monkeypatch.setattr(bcmd, "_enable_bridge", lambda: calls.append("enabled"))
+
+    out = CliRunner().invoke(bridge, ["handle-uri", "kiln://bridge/wipe-everything"])
+    assert out.exit_code == 0  # never errors loudly — nobody's watching a console
+    assert calls == []

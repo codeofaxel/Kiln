@@ -28,6 +28,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.parse
 
 import click
 
@@ -45,6 +46,17 @@ _UNIT = "kiln-bridge.service"
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 _RUN_VALUE = "KilnBridge"
 _LOG_FILE = os.path.expanduser("~/.kiln/bridge.log")
+
+# Windows-only: the `kiln://` URI scheme, registered under HKCU (per-user, no
+# elevation) so kiln3d.com can offer a real one-click "Connect my printer"
+# link instead of a copy-paste command — but only ever AFTER the first
+# `kiln bridge enable`, which is what registers it. macOS/Linux have no
+# equivalent yet: a pip package cannot register a URL scheme on macOS at all
+# (that needs a signed .app's Info.plist), and Linux's xdg-mime path is real
+# but unbuilt, untested — see the standalone-decision note in tasks.md.
+_PROTOCOL_SCHEME = "kiln"
+_PROTOCOL_CLASS_KEY = rf"Software\Classes\{_PROTOCOL_SCHEME}"
+_PROTOCOL_COMMAND_KEY = rf"{_PROTOCOL_CLASS_KEY}\shell\open\command"
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +118,14 @@ def _render_systemd_unit(python: str) -> str:
 def _render_run_command(python: str) -> str:
     """Windows Run-key command: quoted interpreter + the bridge module."""
     return f'"{python}" -m kiln.bridge_client'
+
+
+def _render_protocol_command(python: str) -> str:
+    """Windows protocol-handler command: what runs when a `kiln://` link is
+    clicked. ``%1`` is the OS's placeholder for the full clicked URI —
+    Windows substitutes it, this code never parses argv itself for that part.
+    """
+    return f'"{python}" -m kiln.cli.main bridge handle-uri "%1"'
 
 
 def _windows_pythonw() -> str:
@@ -319,6 +339,39 @@ def _remove_run_key() -> None:
         pass
 
 
+def _install_protocol_handler() -> tuple[bool, str]:
+    """Register ``kiln://`` under HKCU so Windows routes a clicked link to
+    ``kiln bridge handle-uri``. Idempotent (safe to call on every ``enable``);
+    never removed by ``disable`` — a stale-but-harmless registration is
+    exactly what makes a FUTURE re-enable a real one click.
+    """
+    import winreg  # noqa: PLC0415 — Windows-only path
+
+    try:
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _PROTOCOL_CLASS_KEY) as key:
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "URL:Kiln Bridge Protocol")
+            winreg.SetValueEx(key, "URL Protocol", 0, winreg.REG_SZ, "")
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _PROTOCOL_COMMAND_KEY) as key:
+            winreg.SetValueEx(
+                key, "", 0, winreg.REG_SZ,
+                _render_protocol_command(_windows_pythonw()),
+            )
+        return True, ""
+    except OSError as exc:
+        return False, str(exc)
+
+
+def _protocol_handler_installed() -> bool:
+    import winreg  # noqa: PLC0415 — Windows-only path
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _PROTOCOL_COMMAND_KEY):
+            pass
+        return True
+    except OSError:
+        return False
+
+
 def _service_installed() -> bool:
     if sys.platform == "darwin":
         return os.path.exists(_plist_path())
@@ -455,9 +508,11 @@ def status() -> None:
         click.echo(f"  {line}")
 
 
-@bridge.command()
-def enable() -> None:
-    """Turn the bridge on for good — start now and on every login."""
+def _enable_bridge() -> None:
+    """The core of ``enable`` — shared with the Windows ``kiln://`` handler
+    (:func:`handle_uri`) so a deep-link click does exactly what typing the
+    command would, not a second, drifting copy of the logic.
+    """
     _preflight()
     _stop_process()  # fold any manual run into the managed one — never two bridges
     ok, detail = _install_service()
@@ -468,6 +523,10 @@ def enable() -> None:
                 "Run it for this session instead: kiln bridge start"
             )
         raise click.ClickException(f"Couldn't enable the login service: {detail}")
+    if sys.platform == "win32":
+        # Best-effort: a failed registration must never fail `enable` itself
+        # — the bridge is already running at this point regardless.
+        _install_protocol_handler()
     click.echo(
         click.style("Bridge on.", fg="green")
         + " It starts automatically every time you log in."
@@ -477,6 +536,39 @@ def enable() -> None:
     else:
         click.echo("  Connecting… confirm with: kiln bridge status")
     click.echo("  Turn it off any time: kiln bridge disable")
+
+
+@bridge.command()
+def enable() -> None:
+    """Turn the bridge on for good — start now and on every login."""
+    _enable_bridge()
+
+
+def parse_bridge_uri(uri: str) -> str | None:
+    """Parse ``kiln://bridge/<action>`` into ``<action>``, or ``None`` if the
+    URI isn't a recognised bridge action. Pure — no OS calls — so the exact
+    strings a browser could hand a running app are fully unit-tested without
+    ever registering a real handler.
+    """
+    parsed = urllib.parse.urlparse(uri)
+    if parsed.scheme != "kiln" or parsed.netloc != "bridge":
+        return None
+    return parsed.path.lstrip("/") or None
+
+
+@bridge.command(name="handle-uri", hidden=True)
+@click.argument("uri")
+def handle_uri(uri: str) -> None:
+    """Internal: run the action a ``kiln://`` link was clicked for.
+
+    Invoked by Windows (never typed by a person) when the user clicks a
+    "Connect my printer" link on kiln3d.com — the one-click reconnect that
+    only exists once ``enable`` has registered the handler at least once.
+    An unrecognised action is ignored rather than erroring loudly: nobody is
+    watching a console for this windowless launch.
+    """
+    if parse_bridge_uri(uri) == "enable":
+        _enable_bridge()
 
 
 @bridge.command()
