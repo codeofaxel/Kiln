@@ -7,6 +7,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Every file Kiln touches carries proof of that — free for everyone.**
+  Anything Kiln makes, modifies, or processes gets a short, honest note built
+  into the file (Made / Modified / Processed with Kiln), plus a digitally
+  signed record that confirms the exact bytes weren't altered afterward.
+  Anyone can check a file at https://kiln3d.com/verify — drop the STL or 3MF
+  and see whether it was made with Kiln, who made it, and whether it's
+  untouched, no ID needed. The in-file note can be edited out of a copy, but
+  the signed record still tells the truth; a file Kiln only imported or
+  downloaded carries no claim at all.
+
+- **Put your name on what you make (Pro+).** Turn on creator credit and every
+  new file's signed proof carries your name, a link to where people can find
+  you, and — if you want — a license notice on how the file can be used. On
+  the verify page, anyone who opens your file sees exactly that. Your creator
+  name is separate from your sign-in, can be changed once every 30 days, and
+  an old name stays permanently yours — never handed to anyone else. Served
+  via kiln-pro; see https://kiln3d.com/pricing.
+
 - **Sharper 3D previews across the board.** Every preview Kiln renders —
   your models from all angles, AI-generated designs, decoration mockups,
   and printer thumbnails — now comes out noticeably crisper, with clean
