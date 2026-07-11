@@ -716,13 +716,15 @@ def generate_emboss_scad(
     # face NORMAL there: offset_y_mm changed carve depth instead of
     # sliding the art) and left/right (world-x is the normal).
     #
-    # Cardinal vs non-cardinal still differ in DEPTH handling: cardinal
-    # faces keep the tuned world-Z z_offset logic below; arbitrary
-    # normals (tilted nameplate canvas, sloped trophy face) shift along
-    # the face normal via the inner translate's z component — the
-    # 2026-05-03 nameplate "no visible text" bug was a world-Z shift on
-    # a tilted face leaving the prism entirely inside the body, a
-    # silent no-op cut.
+    # DEPTH handling splits by whether world-Z IS the face normal, not by
+    # cardinal-ness: only FLAT cardinal faces (normal ±world-Z: top/bottom)
+    # keep the tuned world-Z z_offset shift below.  Side cardinal faces
+    # (front/back/left/right) and arbitrary normals (tilted nameplate
+    # canvas, sloped trophy face) shift along the face normal via the inner
+    # translate's z component — the 2026-05-03 nameplate "no visible text"
+    # bug and the 2026-07-10 "text on the front face carves nothing" bug
+    # were both a world-Z shift on a face whose normal isn't world-Z,
+    # leaving the prism off the material — a silent no-op cut.
     is_cardinal = (
         abs(normal[2]) > 0.9
         or abs(normal[1]) > 0.9
@@ -852,10 +854,23 @@ def generate_emboss_scad(
     # material at cz + depth_mm.  This mirrors the top-face behavior where
     # we shift -depth_mm so the prism penetrates inward.
     extrude_height = depth_mm + 0.1
-    if is_cardinal:
-        # Cardinal-face path (top/bottom/front/back/left/right): use the
-        # original world-Z shift logic.  The face's local Z aligns with
-        # ±world-Z (after rotation) so this still works correctly.
+    # A cardinal face is "flat" only when its normal is ±world-Z (top /
+    # bottom).  There, and ONLY there, is world-Z the face normal, so the
+    # deboss prism can be pushed into the body by a world-Z shift on the
+    # outer translate.  On the SIDE cardinal faces (front/back/left/right)
+    # world-Z lies IN the face plane — a world-Z shift slides the prism
+    # sideways, never into the body, so a text/SVG deboss silently no-ops
+    # (measured 2026-07-10: "KILN" on a 120x80x50 front face carved 0
+    # vertices).  Those faces therefore take the same face-local
+    # inner-translate depth shift the non-cardinal path uses: the prism
+    # moves along local +Z, which the rotation has already aligned with
+    # the outward face normal, so depth penetrates the body for ANY
+    # orientation.  Heightmap keeps its own z-scale contract (flat-topped
+    # at the surface) on every face.
+    cardinal_flat = is_cardinal and abs(normal[2]) > 0.9
+    if cardinal_flat:
+        # Flat cardinal face (top/bottom): world-Z shift on the outer
+        # translate (unchanged — the face's local Z aligns with ±world-Z).
         if mode == "deboss":
             if content_type == "heightmap":
                 # Heightmap deboss uses a negative Z scale (see
@@ -866,14 +881,14 @@ def generate_emboss_scad(
                 # proportional across all hmap values, not a step function.
                 z_offset = 0.0
             elif normal[2] < -0.9:
-                # SVG/text deboss on a bottom-like face: prism was flipped by
+                # SVG/text deboss on a bottom face: prism was flipped by
                 # rotate([180,0,0]).  Shift up by full extrude_height so it
                 # penetrates upward into the body sitting above the face.
                 z_offset = extrude_height
             else:
-                # SVG/text deboss on a top-like or side face: prism already
-                # points toward the body after rotation; shift by -depth_mm
-                # so far end penetrates depth.
+                # SVG/text deboss on a top face: prism already points toward
+                # the body after (no) rotation; shift by -depth_mm so far
+                # end penetrates depth.
                 z_offset = -depth_mm
         else:
             # Emboss — protrude outward from the surface.  Rotation already
@@ -885,8 +900,7 @@ def generate_emboss_scad(
 
         translate_line = f"translate([{tx:.6f}, {ty:.6f}, {tz + z_offset:.6f}])"
         # Placement offsets compose post-rotation so they stay in the
-        # face plane on every cardinal face (see the mapping above).
-        # Depth stays on the outer world-Z shift, so the inner z is 0.
+        # face plane.  Depth stays on the outer world-Z shift, inner z = 0.
         if final_offset_x or final_offset_y:
             inner_translate_line = (
                 f"translate([{final_offset_x:.6f}, "
@@ -895,10 +909,11 @@ def generate_emboss_scad(
         else:
             inner_translate_line = ""
     else:
-        # Non-cardinal-face path: outer translate goes to bare face
-        # center; offsets and deboss-shift are applied AFTER rotation in
-        # face-local space so they compose along the face's u/v/normal
-        # axes regardless of world orientation.
+        # Side cardinal faces (front/back/left/right) AND non-cardinal
+        # (arbitrary) normals: outer translate goes to bare face center;
+        # offsets and deboss-shift are applied AFTER rotation in face-local
+        # space so they compose along the face's u/v/normal axes regardless
+        # of world orientation.
         if mode == "deboss":
             if content_type == "heightmap":
                 local_z_shift = 0.0
