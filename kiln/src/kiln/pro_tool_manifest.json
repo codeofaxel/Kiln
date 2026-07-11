@@ -14810,6 +14810,16 @@
             "title": "Mark Placement",
             "type": "string"
           },
+          "mark_offset_x_mm": {
+            "default": 0.0,
+            "title": "Mark Offset X Mm",
+            "type": "number"
+          },
+          "mark_offset_y_mm": {
+            "default": 0.0,
+            "title": "Mark Offset Y Mm",
+            "type": "number"
+          },
           "mark_depth_mm": {
             "anyOf": [
               {
@@ -15031,6 +15041,16 @@
             "default": "center",
             "title": "Mark Placement",
             "type": "string"
+          },
+          "mark_offset_x_mm": {
+            "default": 0.0,
+            "title": "Mark Offset X Mm",
+            "type": "number"
+          },
+          "mark_offset_y_mm": {
+            "default": 0.0,
+            "title": "Mark Offset Y Mm",
+            "type": "number"
           },
           "mark_depth_mm": {
             "anyOf": [
