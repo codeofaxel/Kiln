@@ -14467,11 +14467,14 @@ def decorate_surface(
         or ``"text:..."`` for text.
     :param face: Which face to decorate.  ``"auto"`` picks the largest
         flat face.  Also accepts ``"top"``, ``"bottom"``, ``"front"``,
-        ``"back"``, ``"left"``, ``"right"``.  Placement is reliable on
-        ``top``/``bottom``/``front``; on ``back`` content currently lands
-        rotated 180°, and on ``left``/``right`` the carve can miss the
-        face entirely (measured 2026-07-09) — prefer the reliable three
-        until those paths are fixed.
+        ``"back"``, ``"left"``, ``"right"``.  A deboss now carves into
+        the body on every cardinal face, and ``offset_x/y_mm`` place
+        face-locally (see below).  ``top``/``bottom``/``front`` are the
+        battle-tested three; ``back`` carves and offsets correctly but
+        content may still land rotated 180° (content orientation is
+        unaddressed by the placement fix); on ``left``/``right`` the
+        carve lands but the offset axis scaling is less verified.  Prefer
+        the front-facing three when exact placement matters.
     :param depth_mm: Emboss/deboss depth in mm.  ``0`` = auto based on
         *material* (e.g. 0.6 mm for PLA, 1.2 mm for TPU).
     :param mode: ``"deboss"`` (cut into surface) or ``"emboss"`` (raised).
