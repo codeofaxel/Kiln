@@ -14479,17 +14479,15 @@ def decorate_surface(
     :param material: Material for depth auto-tuning (default ``"PLA"``).
     :param content_type: Override auto-detection: ``"svg"``, ``"image"``,
         ``"text"``.  Default ``"auto"`` detects from *content*.
-    :param offset_x_mm: Placement offset from the face centre along
-        WORLD +x, in mm.  In-plane (slides the art) on top, bottom,
-        front and back faces; on left/right faces world-x is the face
-        NORMAL, so it changes cut depth instead of position.
-    :param offset_y_mm: Placement offset along WORLD +y, in mm.
-        In-plane on top/bottom ONLY — on front/back faces world-y is
-        the face normal, so it shifts the cut depth, not the art.
-        Offsets are world-fixed, never face-local: to slide content
-        across a face, offset along the world axes that lie IN that
-        face's plane (top/bottom: x and y; front/back: x; left/right:
-        y).
+    :param offset_x_mm: Placement offset from the face centre along the
+        face's own WIDTH axis, in mm — positive slides the content
+        toward the content's right.  Offsets are FACE-LOCAL: they are
+        applied inside the face-aligning rotation, so they always move
+        the art in the face plane, never along its normal.
+    :param offset_y_mm: Same, along the face's HEIGHT axis — positive
+        slides the content toward the content's top.  Measured
+        world-axis mapping per face: top +y, bottom −y, front +z,
+        back −z.
     :param image_style: Image preprocessing style.  ``"auto"`` uses
         ``"coin"`` for photos.  See docstring for all options.
     :param placement: Named position preset for content placement.
