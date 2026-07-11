@@ -14467,11 +14467,14 @@ def decorate_surface(
         or ``"text:..."`` for text.
     :param face: Which face to decorate.  ``"auto"`` picks the largest
         flat face.  Also accepts ``"top"``, ``"bottom"``, ``"front"``,
-        ``"back"``, ``"left"``, ``"right"``.  Placement is reliable on
-        ``top``/``bottom``/``front``; on ``back`` content currently lands
-        rotated 180°, and on ``left``/``right`` the carve can miss the
-        face entirely (measured 2026-07-09) — prefer the reliable three
-        until those paths are fixed.
+        ``"back"``, ``"left"``, ``"right"``.  A deboss now carves into
+        the body on every cardinal face, and ``offset_x/y_mm`` place
+        face-locally (see below).  ``top``/``bottom``/``front`` are the
+        battle-tested three; ``back`` carves and offsets correctly but
+        content may still land rotated 180° (content orientation is
+        unaddressed by the placement fix); on ``left``/``right`` the
+        carve lands but the offset axis scaling is less verified.  Prefer
+        the front-facing three when exact placement matters.
     :param depth_mm: Emboss/deboss depth in mm.  ``0`` = auto based on
         *material* (e.g. 0.6 mm for PLA, 1.2 mm for TPU).
     :param mode: ``"deboss"`` (cut into surface) or ``"emboss"`` (raised).
@@ -14479,17 +14482,15 @@ def decorate_surface(
     :param material: Material for depth auto-tuning (default ``"PLA"``).
     :param content_type: Override auto-detection: ``"svg"``, ``"image"``,
         ``"text"``.  Default ``"auto"`` detects from *content*.
-    :param offset_x_mm: Placement offset from the face centre along
-        WORLD +x, in mm.  In-plane (slides the art) on top, bottom,
-        front and back faces; on left/right faces world-x is the face
-        NORMAL, so it changes cut depth instead of position.
-    :param offset_y_mm: Placement offset along WORLD +y, in mm.
-        In-plane on top/bottom ONLY — on front/back faces world-y is
-        the face normal, so it shifts the cut depth, not the art.
-        Offsets are world-fixed, never face-local: to slide content
-        across a face, offset along the world axes that lie IN that
-        face's plane (top/bottom: x and y; front/back: x; left/right:
-        y).
+    :param offset_x_mm: Placement offset from the face centre along the
+        face's own WIDTH axis, in mm — positive slides the content
+        toward the content's right.  Offsets are FACE-LOCAL: they are
+        applied inside the face-aligning rotation, so they always move
+        the art in the face plane, never along its normal.
+    :param offset_y_mm: Same, along the face's HEIGHT axis — positive
+        slides the content toward the content's top.  Measured
+        world-axis mapping per face: top +y, bottom −y, front +z,
+        back −z.
     :param image_style: Image preprocessing style.  ``"auto"`` uses
         ``"coin"`` for photos.  See docstring for all options.
     :param placement: Named position preset for content placement.
