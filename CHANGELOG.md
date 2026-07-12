@@ -5,7 +5,67 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-11
+
 ### Added
+
+- **Every file Kiln touches carries proof of that — free for everyone.**
+  Anything Kiln makes, modifies, or processes gets a short, honest note built
+  into the file (Made / Modified / Processed with Kiln), plus a digitally
+  signed record that confirms the exact bytes weren't altered afterward.
+  Anyone can check a file at https://kiln3d.com/verify — drop the STL or 3MF
+  and see whether it was made with Kiln, who made it, and whether it's
+  untouched, no ID needed. The in-file note can be edited out of a copy, but
+  the signed record still tells the truth; a file Kiln only imported or
+  downloaded carries no claim at all.
+
+- **Put your name on what you make (Pro+).** Turn on creator credit and every
+  new file's signed proof carries your name, a link to where people can find
+  you, and — if you want — a license notice on how the file can be used. On
+  the verify page, anyone who opens your file sees exactly that. Your creator
+  name is separate from your sign-in, can be changed once every 30 days, and
+  an old name stays permanently yours — never handed to anyone else. Served
+  via kiln-pro; see https://kiln3d.com/pricing.
+
+- **Sharper 3D previews across the board.** Every preview Kiln renders —
+  your models from all angles, AI-generated designs, decoration mockups,
+  and printer thumbnails — now comes out noticeably crisper, with clean
+  smooth edges instead of jagged ones. Same instant previews, just easier
+  on the eyes.
+
+- **Control your printer's fans directly (free).** Dial the part-cooling fan
+  to any speed — more airflow for overhangs and bridges, gentler cooling on
+  warp-prone materials. Works across Bambu Lab, OctoPrint, Moonraker/Klipper
+  (Creality's K-series and Ender-3 V3 line included), direct-USB, and
+  Elegoo's Centauri Carbon. Bambu Lab also gets the auxiliary and chamber
+  fans, with the chamber fan available on enclosed models.
+
+- **Look up what a Bambu error code actually means.** Paste the HMS code
+  straight off your printer's screen or app into a printer troubleshooting
+  check and get pointed straight to Bambu's own explanation — no more
+  hunting the wiki by hand. *Free tells you where to look; Kiln Pro tells
+  you what it means and what to do about it — the plain-English cause, the
+  fix, and how serious it is.* See https://kiln3d.com/pricing.
+
+- **Anonymous usage insights.** Kiln's daily anonymous check-in now includes
+  which built-in tools get used most, helping us prioritize what to improve
+  next. No personal data, no file contents — just tool names and counts, and
+  it's fully covered by the existing opt-out.
+
+- **Cleaner logo and image debossing.** Carved logos and images on your
+  models no longer pick up a stray frame or background box, and
+  text-bearing marks no longer render mirrored — the engraving now
+  follows the actual shape of your artwork.
+
+- **Decorations: real deletion, working thumbnails, safer signing.**
+  - You can now actually delete a saved decoration, feature, or design
+    (Pro+) — previously the only option was archive/hide. Deleting
+    defaults to a safe, recoverable "retire"; permanent deletion needs a
+    separate confirmation.
+  - The decorations library on the web app now shows real preview images
+    instead of blank placeholders (Pro+).
+  - Signing a decoration release now shows you what you're signing
+    before it's finalized (Pro+).
 
 - **Use Kiln with any MCP client, no install at all.** A hosted connector
   lets Claude, Cursor, or any MCP-compatible app add Kiln by pasting a URL —
@@ -55,6 +115,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   more, in dozens of color combinations — and see it in those real colors in 3D
   before you download. (Color printing needs a multi-material printer; the
   download comes with the colors already assigned.)
+
+- **Make organic, sculptural shapes.** Describe one in plain words and Kiln
+  sculpts it — no add-on or key. New and still improving, and free to make and
+  refine.
 
 - **Finish a Klipper print after a power loss, in one call (Pro).** When power
   comes back, Kiln resumes the *same* print from the layer where it stopped —

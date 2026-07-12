@@ -31,6 +31,7 @@ from kiln.generation.base import (
     GenerationResult,
     GenerationStatus,
 )
+from kiln.preview_render import downscale_png, effective_supersample
 
 logger = logging.getLogger(__name__)
 
@@ -584,10 +585,13 @@ class OpenSCADProvider(GenerationProvider):
             os.close(out_fd)
 
         binary = self._require_binary()
+        # Supersample: render oversized then Lanczos-downscale for crisp
+        # edges — one shared knob governs every OpenSCAD preview surface.
+        ss = effective_supersample()
         cmd = [
             binary,
             "-o", output_path,
-            f"--imgsize={width},{height}",
+            f"--imgsize={width * ss},{height * ss}",
             "--preview",
             "--colorscheme=DeepOcean",
         ]
@@ -632,6 +636,9 @@ class OpenSCADProvider(GenerationProvider):
                 "OpenSCAD preview produced no output image.",
                 code="RENDER_EMPTY",
             )
+
+        if ss > 1:
+            downscale_png(output_path, width, height)
 
         return output_path
 

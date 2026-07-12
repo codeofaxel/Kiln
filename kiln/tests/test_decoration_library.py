@@ -550,6 +550,59 @@ class TestResolveDecorationSettings:
         assert settings["depth_mm"] == pytest.approx(0.4, abs=0.2)
         assert settings["mode"] == "deboss"
 
+    def test_geometric_texture_defaults(self):
+        dec = self._make_decoration_with_proven(content_type="geometric_texture")
+        settings = resolve_decoration_settings(dec, material="PLA")
+        assert settings["depth_mm"] == pytest.approx(1.2, abs=0.2)
+        assert settings["mode"] == "deboss"
+
+
+class TestEveryValidContentTypeIsWellFormed:
+    """The regression guard for the class of bug that shipped a
+    ``save_to_library`` param whose ``content_type`` was never added here.
+
+    A caller (kiln-pro's ``apply_geometric_texture``) can pass ANY string as
+    ``content_type`` — ``save_decoration`` is the only gate, and its
+    ValueError was silently swallowed by the caller's blanket
+    ``except Exception``, so the feature looked wired (no crash, a
+    success-shaped return) while never actually saving anything.  This test
+    doesn't catch a bad caller (that's the kiln-pro-side static audit
+    reading ``_VALID_CONTENT_TYPES`` directly) — it catches the OTHER half:
+    a content_type added to ``_VALID_CONTENT_TYPES`` without matching
+    entries in ``_DEFAULTS`` / ``DECORATION_CATEGORIES``, which would make
+    a legitimate save succeed but ``resolve_decoration_settings`` or
+    category filtering silently misbehave for it.
+    """
+
+    def test_every_valid_content_type_saves_and_resolves(self, tmp_path):
+        from kiln.decoration_library import _DEFAULTS, _VALID_CONTENT_TYPES, category_for
+
+        for content_type in sorted(_VALID_CONTENT_TYPES):
+            dec = save_decoration(
+                f"probe {content_type}",
+                content_type=content_type,
+                content_data="probe",
+            )
+            assert dec.content_type == content_type
+            # Every content type must resolve to a real category — "unknown"
+            # means DECORATION_CATEGORIES wasn't updated alongside
+            # _VALID_CONTENT_TYPES.
+            assert category_for(content_type) != "unknown", (
+                f"{content_type!r} is valid but has no DECORATION_CATEGORIES entry"
+            )
+            # Every content type must have its OWN defaults entry — a
+            # missing one silently falls back to "photo"'s
+            # (resolve_decoration_settings), which is wrong for anything
+            # that isn't photo-shaped and would hide exactly this bug class
+            # (an isinstance-only check on the fallback values still passes).
+            assert content_type in _DEFAULTS, (
+                f"{content_type!r} is valid but has no _DEFAULTS entry "
+                "(resolve_decoration_settings would silently fall back to photo's)"
+            )
+            settings = resolve_decoration_settings(dec, material="PLA")
+            assert settings["depth_mm"] == _DEFAULTS[content_type]["depth_mm"]
+            assert settings["mode"] == _DEFAULTS[content_type]["mode"]
+
 
 # ---------------------------------------------------------------------------
 # Decoration serialization
@@ -770,6 +823,22 @@ class TestDecorationCategory:
             content_data="wood grain",
         )
         assert dec.category == "texture"
+
+    def test_geometric_texture_is_texture(self, tmp_path):
+        # A single-color physical relief (apply_geometric_texture's
+        # save_to_library) — distinct from procedural_texture (multicolor,
+        # no relief depth). Regression: this content_type was missing from
+        # _VALID_CONTENT_TYPES for a full release cycle, so kiln-pro's save
+        # always raised ValueError, silently swallowed by the caller's
+        # blanket except-Exception — "saved" but nothing ever landed.
+        dec = save_decoration(
+            "Alligator Relief",
+            content_type="geometric_texture",
+            content_data="alligator",
+            texture_params={"texture": "alligator", "depth_mm": 1.6, "mode": "deboss"},
+        )
+        assert dec.category == "texture"
+        assert dec.content_type == "geometric_texture"
 
     def test_category_in_to_dict(self, tmp_path):
         dec = _save_simple(tmp_path, content_type="photo")

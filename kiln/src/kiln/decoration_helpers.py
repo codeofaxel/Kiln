@@ -33,6 +33,8 @@ import subprocess
 import tempfile
 from typing import Any
 
+from kiln.preview_render import downscale_png, effective_supersample
+
 # Public surface — what callers (kiln-pro plugins, REST API, agents)
 # import.  Anything not listed here is internal helper and may move
 # between minor versions.
@@ -88,9 +90,8 @@ def _render_post_flip_preview(
     the print-orientation view (which hides the engraving on the
     bottom face).
 
-    Implementation mirrors the canonical Kiln render pattern used by
-    :func:`kiln.generation.visual_verify.VisualVerifier.render_stl_to_png`,
-    :mod:`kiln.model_visualizer`, and :mod:`kiln.multicolor_3mf`:
+    Implementation mirrors the canonical Kiln OpenSCAD render pattern
+    used by :mod:`kiln.model_visualizer` and :mod:`kiln.multicolor_3mf`:
     write a tiny SCAD that ``import()``s the STL with a wrapping
     transformation, call OpenSCAD with ``--imgsize 800,600
     --colorscheme DeepOcean`` and a 3/4 camera, save the resulting
@@ -149,11 +150,14 @@ def _render_post_flip_preview(
     # without us having to know its bounding box ahead of time — the
     # post-flip transformation moves the object off origin and a
     # fixed camera distance crops the engraving out of frame.
+    # Supersample: render oversized then Lanczos-downscale for crisp
+    # edges — one shared knob governs every OpenSCAD preview surface.
+    ss = effective_supersample()
     cmd = [
         openscad,
         "--preview",
         "-o", png_path,
-        "--imgsize=800,600",
+        f"--imgsize={800 * ss},{600 * ss}",
         "--colorscheme=DeepOcean",
         "--autocenter",
         "--viewall",
@@ -179,6 +183,9 @@ def _render_post_flip_preview(
     if os.path.getsize(png_path) == 0:
         _logger.debug("post-flip preview: empty PNG produced; treating as failed")
         return None
+
+    if ss > 1:
+        downscale_png(png_path, 800, 600)
 
     return png_path
 
@@ -821,8 +828,8 @@ def emboss_text_on_face(
     # PNG showing what the user sees AFTER the natural physical
     # flip, save it alongside the STL.  Best-effort: render
     # failures do not block the emboss — the STL is the load-
-    # bearing artifact.  Pattern mirrors
-    # :func:`kiln.generation.visual_verify.VisualVerifier.render_stl_to_png`.
+    # bearing artifact.  Pattern mirrors :func:`kiln.model_visualizer`'s
+    # OpenSCAD render path.
     #
     # Suppressed by multi-line callers so the chained per-line emboss
     # path doesn't render the preview once per line — the
