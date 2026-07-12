@@ -23,6 +23,7 @@ call only to the bridge running on the SAME account.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import subprocess
@@ -262,10 +263,8 @@ def _stop_process() -> bool:
     pid = _running_pid()
     if pid is None:
         return False
-    try:
+    with contextlib.suppress(OSError):
         os.kill(pid, signal.SIGTERM)
-    except OSError:
-        pass
     for _ in range(30):  # up to ~3s
         if not _pid_alive(pid):
             break
@@ -436,20 +435,16 @@ def _remove_service() -> None:
         path = _plist_path()
         if os.path.exists(path):
             subprocess.run(["launchctl", "unload", "-w", path], capture_output=True, text=True)
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(path)
-            except OSError:
-                pass
     elif sys.platform.startswith("linux") and os.path.exists(_systemd_path()):
         subprocess.run(
             ["systemctl", "--user", "disable", "--now", _UNIT],
             capture_output=True,
             text=True,
         )
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(_systemd_path())
-        except OSError:
-            pass
         subprocess.run(
             ["systemctl", "--user", "daemon-reload"], capture_output=True, text=True
         )
