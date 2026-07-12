@@ -23,7 +23,7 @@
     "manufacturing", "print-farm"
   ],
   "server": {
-    "type": "uv",
+    "type": "python",
     "entry_point": "src/server.py",
     "mcp_config": {
       "command": "uv",
