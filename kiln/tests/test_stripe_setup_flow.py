@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 try:
-    from kiln.payments.stripe_provider import StripeProvider as _check  # noqa: F401
+    from kiln_pro.payments.stripe_provider import StripeProvider as _check  # noqa: F401
 except ImportError:
     pytest.skip("kiln-pro payments module not available", allow_module_level=True)
 
@@ -34,7 +34,7 @@ def _make_provider(
     payment_method_id: str | None = None,
 ) -> Any:
     """Create a StripeProvider without hitting real Stripe."""
-    from kiln.payments.stripe_provider import StripeProvider
+    from kiln_pro.payments.stripe_provider import StripeProvider
 
     return StripeProvider(
         secret_key=secret_key,

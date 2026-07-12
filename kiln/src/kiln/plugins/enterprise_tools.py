@@ -244,13 +244,13 @@ class _EnterpriseToolsPlugin:
         def printer_usage_summary() -> dict:
             """Show printer count, included allowance, and overage charges.
 
-            Enterprise feature. Enterprise base includes 20 printers.
+            Enterprise feature. Enterprise base includes 50 printers.
             Additional printers are $15/month each.
             """
             if err := _srv._check_auth("read"):
                 return err
             try:
-                from kiln.printer_billing import PrinterUsageBilling
+                from kiln_pro.billing.printer_billing import PrinterUsageBilling
 
                 billing = PrinterUsageBilling()
                 active_count = _srv._get_registry().count
@@ -429,9 +429,9 @@ class _EnterpriseToolsPlugin:
         ) -> dict:
             """Report metered printer usage to Stripe for Enterprise billing.
 
-            Enterprise feature. The first 20 printers are included in the base
-            Enterprise price ($499/mo). This tool **automatically subtracts** the
-            20 included printers and reports only the overage count to Stripe's
+            Enterprise feature. The first 50 printers are included in the base
+            Enterprise price. This tool **automatically subtracts** the
+            50 included printers and reports only the overage count to Stripe's
             ``active_printers`` meter at $15/printer/month.
 
             If *active_printer_count* is omitted, the fleet registry is queried
@@ -444,14 +444,14 @@ class _EnterpriseToolsPlugin:
                     to auto-detect from the fleet registry.
 
             Example:
-                With 25 registered printers, this reports **5** to Stripe
-                (25 − 20 included = 5 overage × $15 = $75/mo).
+                With 55 registered printers, this reports **5** to Stripe
+                (55 − 50 included = 5 overage × $15 = $75/mo).
             """
             if err := _srv._check_auth("admin"):
                 return err
             try:
-                from kiln.payments.stripe_provider import StripeProvider
-                from kiln.printer_billing import INCLUDED_PRINTERS
+                from kiln_pro.billing.printer_billing import INCLUDED_PRINTERS
+                from kiln_pro.payments.stripe_provider import StripeProvider
 
                 stripe_key = os.environ.get("KILN_STRIPE_SECRET_KEY", "")
                 if not stripe_key:

@@ -244,12 +244,12 @@ from kiln.marketplaces import (
 from kiln.materials import MaterialTracker
 
 try:
-    from kiln.payments.base import PaymentError
+    from kiln_pro.payments.base import PaymentError
 except ImportError:
     PaymentError = None  # Available in kiln-pro
 
 try:
-    from kiln.payments.manager import PaymentManager
+    from kiln_pro.payments.manager import PaymentManager
 except ImportError:
     PaymentManager = None  # Available in kiln-pro
 from kiln.persistence import get_db
@@ -2335,7 +2335,7 @@ def _get_payment_mgr():
     stripe_key = os.environ.get("KILN_STRIPE_SECRET_KEY", "")
     if stripe_key:
         try:
-            from kiln.payments.stripe_provider import StripeProvider
+            from kiln_pro.payments.stripe_provider import StripeProvider
 
             customer_id = config.get("stripe_customer_id")
             payment_method_id = config.get("stripe_payment_method_id")
@@ -7438,102 +7438,6 @@ def activate_license(key: str) -> dict:
     except Exception as exc:
         logger.exception("Unexpected error in activate_license")
         return _error_dict(f"Failed to activate license: {exc}", code="LICENSE_ERROR")
-
-
-@mcp.tool()
-def get_upgrade_url(tier: str = "pro", billing: str = "monthly", email: str = "") -> dict:
-    """Get a Stripe Checkout URL to purchase or subscribe to a Kiln license.
-
-    Opens a payment page.  After completing payment, the license key can
-    be retrieved with ``kiln upgrade --session <session_id>`` in the CLI.
-
-    Args:
-        tier: ``"pro"``, ``"business"``, or ``"enterprise"``.
-        billing: ``"monthly"`` or ``"annual"``.
-        email: Pre-fill the checkout email field (optional).
-    """
-    if err := _check_auth("billing"):
-        return err
-
-    tier_lower = tier.lower().strip()
-    billing_lower = billing.lower().strip()
-
-    if tier_lower not in ("pro", "business", "enterprise"):
-        return _error_dict(
-            f"Invalid tier: {tier!r}. Use 'pro', 'business', or 'enterprise'.",
-            code="INVALID_INPUT",
-        )
-    if billing_lower not in ("monthly", "annual"):
-        return _error_dict(
-            f"Invalid billing period: {billing!r}. Use 'monthly' or 'annual'.",
-            code="INVALID_INPUT",
-        )
-
-    # Env var name -> lookup key mapping for each tier+billing combo.
-    _PRICE_MAP: dict[tuple[str, str], tuple[str, str]] = {
-        ("pro", "monthly"): ("KILN_STRIPE_PRICE_PRO", "pro_monthly"),
-        ("pro", "annual"): ("KILN_STRIPE_PRICE_PRO_ANNUAL", "pro_annual"),
-        ("business", "monthly"): ("KILN_STRIPE_PRICE_BUSINESS", "business_monthly"),
-        ("business", "annual"): ("KILN_STRIPE_PRICE_BUSINESS_ANNUAL", "business_annual"),
-        ("enterprise", "monthly"): ("KILN_STRIPE_PRICE_ENTERPRISE", "enterprise_monthly"),
-        ("enterprise", "annual"): ("KILN_STRIPE_PRICE_ENTERPRISE_ANNUAL", "enterprise_annual"),
-    }
-
-    price_env, lookup_key = _PRICE_MAP[(tier_lower, billing_lower)]
-
-    stripe_key = os.environ.get("KILN_STRIPE_SECRET_KEY", "")
-    if not stripe_key:
-        return _error_dict("Stripe not configured. Set KILN_STRIPE_SECRET_KEY.", code="CONFIG_MISSING")
-
-    try:
-        from kiln.payments.stripe_provider import StripeProvider
-
-        provider = StripeProvider(secret_key=stripe_key)
-
-        # Resolve price: env var first, then lookup key fallback.
-        price_id = os.environ.get(price_env, "")
-        if not price_id:
-            price_id = provider.resolve_price_by_lookup_key(lookup_key) or ""
-        if not price_id:
-            return _error_dict(
-                f"Stripe price not configured. Set {price_env} or add lookup key '{lookup_key}' in Stripe.",
-                code="CONFIG_MISSING",
-            )
-
-        # Enterprise uses subscription mode (recurring) with optional metered overage.
-        # Pro and Business use one-time payment mode.
-        if tier_lower == "enterprise":
-            overage_price_id = os.environ.get("KILN_STRIPE_PRICE_PRINTER_OVERAGE", "")
-            if not overage_price_id:
-                overage_price_id = provider.resolve_price_by_lookup_key("enterprise_printer_overage") or ""
-
-            result = provider.create_subscription_session(
-                price_id=price_id,
-                customer_email=email or None,
-                metadata={"tier": tier_lower, "billing": billing_lower},
-                metered_price_id=overage_price_id or None,
-            )
-        else:
-            result = provider.create_checkout_session(
-                price_id=price_id,
-                customer_email=email or None,
-                metadata={"tier": tier_lower, "billing": billing_lower},
-            )
-
-        return {
-            "success": True,
-            "checkout_url": result["checkout_url"],
-            "session_id": result["session_id"],
-            "tier": tier_lower,
-            "billing": billing_lower,
-            "next_step": (
-                "Open checkout_url in a browser to complete payment. "
-                "After payment, run 'kiln upgrade --session <session_id>' to activate."
-            ),
-        }
-    except Exception as exc:
-        logger.exception("Unexpected error in get_upgrade_url")
-        return _error_dict(f"Failed to create checkout: {exc}", code="PAYMENT_ERROR")
 
 
 # ---------------------------------------------------------------------------

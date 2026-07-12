@@ -25,7 +25,7 @@ except ImportError:
     _has_billing = False
 
 try:
-    import kiln.payments  # noqa: F401
+    import kiln_pro.payments  # noqa: F401
     _has_payments = True
 except ImportError:
     _has_payments = False
@@ -892,8 +892,8 @@ class TestBilling:
         with patch("kiln.cli.config.get_billing_config", return_value={"user_id": "u1"}), \
              patch("kiln.cli.config.get_or_create_user_id", return_value="u1"), \
              patch("kiln.persistence.get_db"), \
-             patch("kiln.payments.manager.PaymentManager", return_value=mock_mgr), \
-             patch("kiln.payments.stripe_provider.StripeProvider", return_value=mock_provider):
+             patch("kiln_pro.payments.manager.PaymentManager", return_value=mock_mgr), \
+             patch("kiln_pro.payments.stripe_provider.StripeProvider", return_value=mock_provider):
             result = runner.invoke(cli, ["billing", "setup", "--json"])
         assert result.exit_code == 0
         mock_mgr.register_provider.assert_called_once()
@@ -907,7 +907,7 @@ class TestBilling:
         with patch("kiln.cli.config.get_billing_config", return_value={"user_id": "u1"}), \
              patch("kiln.cli.config.get_or_create_user_id", return_value="u1"), \
              patch("kiln.persistence.get_db"), \
-             patch("kiln.payments.manager.PaymentManager", return_value=mock_mgr):
+             patch("kiln_pro.payments.manager.PaymentManager", return_value=mock_mgr):
             result = runner.invoke(cli, ["billing", "status", "--json"])
         assert result.exit_code == 0
 
@@ -916,7 +916,7 @@ class TestBilling:
         mock_mgr.get_billing_history.return_value = []
         with patch("kiln.cli.config.get_billing_config", return_value={}), \
              patch("kiln.persistence.get_db"), \
-             patch("kiln.payments.manager.PaymentManager", return_value=mock_mgr):
+             patch("kiln_pro.payments.manager.PaymentManager", return_value=mock_mgr):
             result = runner.invoke(cli, ["billing", "history", "--json"])
         assert result.exit_code == 0
 

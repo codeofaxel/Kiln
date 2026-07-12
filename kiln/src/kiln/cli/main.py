@@ -4581,11 +4581,11 @@ def order_place(
         BillingLedger = None
     from kiln.fulfillment import OrderRequest
     try:
-        from kiln.payments.base import PaymentError
+        from kiln_pro.payments.base import PaymentError
     except ImportError:
         PaymentError = None
     try:
-        from kiln.payments.manager import PaymentManager
+        from kiln_pro.payments.manager import PaymentManager
     except ImportError:
         PaymentManager = None
     from kiln.persistence import get_db

@@ -6,7 +6,6 @@ Covers:
 - export_safety_profile — happy path, not found
 - get_material_recommendation — happy path, no material, no intel
 - get_printer_intelligence — happy path, not found
-- get_upgrade_url — happy path, invalid tier, invalid billing
 - set_autonomy_level — valid levels, invalid level
 - set_leveling_policy — happy path, error
 - set_printer_light — happy path, unsupported, error
@@ -256,31 +255,6 @@ class TestGetMaterialRecommendation:
         result = get_material_recommendation(printer_id="bogus", material="PLA")
 
         assert result["success"] is False
-
-
-# ---------------------------------------------------------------------------
-# TestGetUpgradeUrl
-# ---------------------------------------------------------------------------
-
-
-class TestGetUpgradeUrl:
-    """Tests for get_upgrade_url()."""
-
-    def test_invalid_tier(self):
-        from kiln.server import get_upgrade_url
-
-        result = get_upgrade_url(tier="diamond")
-
-        assert result["success"] is False
-        assert "Invalid tier" in str(result)
-
-    def test_invalid_billing(self):
-        from kiln.server import get_upgrade_url
-
-        result = get_upgrade_url(tier="pro", billing="weekly")
-
-        assert result["success"] is False
-        assert "Invalid billing" in str(result)
 
 
 # ---------------------------------------------------------------------------

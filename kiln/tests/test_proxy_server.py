@@ -37,7 +37,7 @@ from kiln.fulfillment.proxy_server import ProxyOrchestrator, get_orchestrator
 from kiln.licensing import LicenseInfo, LicenseTier
 
 with contextlib.suppress(ImportError):
-    from kiln.payments.base import PaymentError
+    from kiln_pro.payments.base import PaymentError
 
 # ---------------------------------------------------------------------------
 # Helpers

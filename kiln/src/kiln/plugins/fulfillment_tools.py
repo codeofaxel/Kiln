@@ -224,7 +224,7 @@ class _FulfillmentToolsPlugin:
                     code="NOT_AVAILABLE",
                 )
             try:
-                from kiln.payments.base import PaymentError
+                from kiln_pro.payments.base import PaymentError
             except ImportError:
                 PaymentError = type("PaymentError", (Exception,), {})
 
@@ -594,7 +594,7 @@ class _FulfillmentToolsPlugin:
                     FREE = "free"
                 LicenseTier = _DummyTier
             try:
-                from kiln.payments.base import PaymentError
+                from kiln_pro.payments.base import PaymentError
             except ImportError:
                 PaymentError = type("PaymentError", (Exception,), {})
 
