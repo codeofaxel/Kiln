@@ -91,7 +91,12 @@ class TestHeartbeatShipsToolCalls:
         with mock.patch("urllib.request.urlopen", _fake_urlopen):
             heartbeat._send_heartbeat()
 
-        details = json.loads(captured["body"]["p_details"])
+        # p_details ships as a plain object, not a pre-serialized string —
+        # the outer json.dumps() already encodes it once.  Double-encoding
+        # here used to store a jsonb string scalar server-side instead of
+        # an object, silently breaking the founder dashboard's ingest.
+        details = captured["body"]["p_details"]
+        assert isinstance(details, dict)
         shipped = details["tool_calls"]
         assert len(shipped) == 100          # capped to top-100
         assert "tool_129" in shipped         # busiest survived

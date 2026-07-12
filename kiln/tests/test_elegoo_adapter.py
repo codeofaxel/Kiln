@@ -40,6 +40,7 @@ from kiln.printers.elegoo import (
     _CMD_LIST_FILES,
     _CMD_START_PRINT,
     _CMD_STATUS_REQUEST,
+    _CMD_UPDATE_SETTINGS,
     _PRINT_STATUS_MAP,
     ElegooAdapter,
     _BackoffState,
@@ -512,6 +513,99 @@ class TestSendGcode:
             side_effect=PrinterError("fail"),
         ), pytest.raises(PrinterError):
             adapter_with_ws.send_gcode(["G28"])
+
+
+# ---------------------------------------------------------------------------
+# Fan control
+# ---------------------------------------------------------------------------
+
+
+class TestSetFan:
+    """Tests for set_fan() -- gated to Elegoo's FDM (Centauri) line only."""
+
+    def _fdm_adapter(self, adapter_with_ws: ElegooAdapter) -> ElegooAdapter:
+        adapter_with_ws._last_status["Name"] = "Centauri Carbon"
+        return adapter_with_ws
+
+    def test_full_speed_on_centauri(self, adapter_with_ws: ElegooAdapter) -> None:
+        adapter = self._fdm_adapter(adapter_with_ws)
+        with mock.patch.object(adapter, "_send_command_checked") as m:
+            m.return_value = {"Data": {"Ack": 0}}
+            ok = adapter.set_fan("part", 100)
+        assert ok is True
+        m.assert_called_once_with(
+            _CMD_UPDATE_SETTINGS, {"TargetFanSpeed": {"ModelFan": 100}},
+        )
+
+    def test_percent_sent_directly_no_pwm_scaling(self, adapter_with_ws: ElegooAdapter) -> None:
+        # SDCP takes 0-100 directly -- unlike Marlin's M106 S0-255, there is
+        # no *255/100 scaling here.
+        adapter = self._fdm_adapter(adapter_with_ws)
+        with mock.patch.object(adapter, "_send_command_checked") as m:
+            m.return_value = {"Data": {"Ack": 0}}
+            adapter.set_fan("part", 50)
+        m.assert_called_once_with(
+            _CMD_UPDATE_SETTINGS, {"TargetFanSpeed": {"ModelFan": 50}},
+        )
+
+    def test_aliases_accepted(self, adapter_with_ws: ElegooAdapter) -> None:
+        adapter = self._fdm_adapter(adapter_with_ws)
+        with mock.patch.object(adapter, "_send_command_checked", return_value={"Data": {"Ack": 0}}):
+            adapter.set_fan("part_cooling", 50)
+            adapter.set_fan("cooling", 50)
+
+    def test_aux_is_rejected(self, adapter_with_ws: ElegooAdapter) -> None:
+        adapter = self._fdm_adapter(adapter_with_ws)
+        with pytest.raises(PrinterError):
+            adapter.set_fan("aux", 100)
+
+    def test_percent_out_of_range_raises(self, adapter_with_ws: ElegooAdapter) -> None:
+        adapter = self._fdm_adapter(adapter_with_ws)
+        with pytest.raises(PrinterError):
+            adapter.set_fan("part", 101)
+
+    def test_resin_machine_is_refused(self, adapter_with_ws: ElegooAdapter) -> None:
+        adapter_with_ws._last_status["Name"] = "Saturn 4 Ultra"
+        with (
+            mock.patch.object(adapter_with_ws, "_send_command_checked") as m,
+            pytest.raises(PrinterError, match="resin"),
+        ):
+            adapter_with_ws.set_fan("part", 100)
+        m.assert_not_called()
+
+    def test_unknown_machine_name_fails_closed(self, adapter_with_ws: ElegooAdapter) -> None:
+        # No cached Name, and the attributes fetch returns nothing --
+        # must refuse rather than assume FDM.
+        with (
+            mock.patch.object(adapter_with_ws, "_send_command", return_value=None),
+            pytest.raises(PrinterError),
+        ):
+            adapter_with_ws.set_fan("part", 100)
+
+    def test_uses_cached_name_without_a_round_trip(self, adapter_with_ws: ElegooAdapter) -> None:
+        adapter = self._fdm_adapter(adapter_with_ws)
+        with (
+            mock.patch.object(adapter, "_send_command") as attrs_call,
+            mock.patch.object(adapter, "_send_command_checked", return_value={"Data": {"Ack": 0}}),
+        ):
+            adapter.set_fan("part", 100)
+        attrs_call.assert_not_called()
+
+    def test_fetches_attributes_when_name_not_cached(self, adapter_with_ws: ElegooAdapter) -> None:
+        adapter_with_ws._last_status.pop("Name", None)
+        adapter_with_ws._last_status.pop("MachineName", None)
+        with (
+            mock.patch.object(
+                adapter_with_ws, "_send_command",
+                return_value={"Data": {"Name": "Centauri Carbon 2"}},
+            ) as attrs_call,
+            mock.patch.object(
+                adapter_with_ws, "_send_command_checked", return_value={"Data": {"Ack": 0}},
+            ),
+        ):
+            ok = adapter_with_ws.set_fan("part", 100)
+        assert ok is True
+        attrs_call.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

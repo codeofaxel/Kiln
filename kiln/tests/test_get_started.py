@@ -24,6 +24,7 @@ class TestGetStarted:
         expected_keys = {
             "success",
             "update",
+            "account",
             "overview",
             "tool_discovery",
             "quick_start",

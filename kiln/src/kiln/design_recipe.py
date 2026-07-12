@@ -182,6 +182,16 @@ def save_recipe(recipe: DesignRecipe, directory: str) -> str:
     """
     if not os.path.isdir(directory):
         raise FileNotFoundError(f"Directory does not exist: {directory}")
+    # Durability (repair-on-save): copy the mesh INTO the design directory so
+    # the saved recipe never references an ephemeral temp file.  A stl_path in
+    # /tmp or /var/folders is persisted content-addressed and the reference is
+    # rewritten to the ~/.kiln home BEFORE the recipe + its versioned snapshot
+    # are written.  Single chokepoint — see kiln.asset_store + the
+    # audit_asset_durability gate.
+    from kiln.asset_store import persist_asset
+
+    if recipe.stl_path:
+        recipe.stl_path = persist_asset(recipe.stl_path, directory, prefix="mesh")
     # Always write the canonical "current" recipe
     path = os.path.join(directory, _RECIPE_FILENAME)
     with open(path, "w", encoding="utf-8") as fh:

@@ -321,8 +321,16 @@ def _svg_content_block(
         # On OpenSCAD 2024+, wrap the union() in fill() so that tiny gaps
         # between adjacent hull() endpoints are closed automatically.
         # fill() is a stable module (added in 2021.01) — no --enable flag needed.
+        #
+        # EXCEPT for mark_geometry output: fill() erases holes, and that
+        # geometry carries real even-odd holes (letter counters, outline
+        # bands).  Such content_info sets openscad_polygons_fill_safe=False.
+        fill_safe = content_info.get("openscad_polygons_fill_safe", True)
         try:
-            use_fill = _openscad_version_year(get_openscad_version()) >= 2024
+            use_fill = (
+                fill_safe
+                and _openscad_version_year(get_openscad_version()) >= 2024
+            )
         except Exception:  # noqa: BLE001
             use_fill = False
 
@@ -519,6 +527,10 @@ def _resolve_placement_offsets(
 
     Any explicit ``offset_x_mm`` / ``offset_y_mm`` are added on top of
     the preset, allowing fine-tuning.
+
+    Presets resolve in the FACE-LOCAL frame (like the offsets they
+    feed): "top" means toward the content's top on whichever face is
+    being decorated, not world +y.
     """
     face_h = face.get("height_mm", 0)
     usable_h = face_h * scale
@@ -588,9 +600,15 @@ def generate_emboss_scad(
         across different products.  Clamped to 95% of face width if too
         large; warns if below 5mm (near FDM detail limits).
     offset_x_mm:
-        Horizontal offset from face centre in mm.
+        Placement offset from the face centre along the face's own
+        WIDTH axis, in mm — positive slides the content toward the
+        content's right.  Face-local on every face (cardinal or
+        arbitrary): the offset rides inside the face-aligning
+        rotation, so it always moves the art in the face plane.
     offset_y_mm:
-        Vertical offset from face centre in mm.
+        Same, along the face's HEIGHT axis — positive slides the
+        content toward the content's top.  Measured world-axis
+        mapping per face: top +y, bottom −y, front +z, back −z.
 
     Returns
     -------
@@ -680,25 +698,33 @@ def generate_emboss_scad(
         placement, face, scale, offset_x_mm, offset_y_mm,
     )
 
-    # Detect non-cardinal (arbitrary) face normals.  For cardinal faces
-    # (top/bottom/front/back/left/right) the world-axis offsets and
-    # world-Z deboss shift work correctly because the local face frame
-    # aligns with world axes after rotation.  For arbitrary normals
-    # (tilted nameplate canvas, sloped trophy face, angled tag), the
-    # local face X/Y axes are NOT aligned with world X/Y, so:
-    #   - offset_x_mm / offset_y_mm must be applied in the LOCAL
-    #     face frame (before rotation), or they slide off the face.
-    #   - For deboss, the prism must shift along the FACE NORMAL
-    #     (into the body), not along world Z, or it lands inside the
-    #     body without crossing the face surface — silent no-op cut.
+    # Offsets are FACE-LOCAL on every face: they ride an INNER translate
+    # (post-rotation), so the face-aligning rotation itself defines the
+    # in-plane axes and +offset_x/+offset_y always slide the content
+    # along its own width/height — never along the face normal.
+    # Measured through the real pipeline (image → SCAD → OpenSCAD →
+    # STL readback) the world-axis mapping per cardinal face is:
     #
-    # The 2026-05-03 nameplate "no visible text" bug came from the
-    # second bullet: world-Z shift on a tilted face left the prism
-    # entirely inside the body, never crossing the face surface, so
-    # difference() removed an invisible slab while the face stayed
-    # intact.  Fix below uses an INNER translate (post-rotation,
-    # in face-local frame) so offsets and depth-shift compose
-    # correctly for any normal direction.
+    #   top    → +x moves world +x, +y moves world +y
+    #   bottom → +x moves world +x, +y moves world −y
+    #   front  → +x moves world +x, +y moves world +z
+    #   back   → +x moves world +x, +y moves world −z
+    #
+    # The old cardinal path added offsets to the OUTER translate in
+    # world x/y instead — right for top/bottom (both world axes lie in
+    # the face plane), silently wrong for front/back (world-y is the
+    # face NORMAL there: offset_y_mm changed carve depth instead of
+    # sliding the art) and left/right (world-x is the normal).
+    #
+    # DEPTH handling splits by whether world-Z IS the face normal, not by
+    # cardinal-ness: only FLAT cardinal faces (normal ±world-Z: top/bottom)
+    # keep the tuned world-Z z_offset shift below.  Side cardinal faces
+    # (front/back/left/right) and arbitrary normals (tilted nameplate
+    # canvas, sloped trophy face) shift along the face normal via the inner
+    # translate's z component — the 2026-05-03 nameplate "no visible text"
+    # bug and the 2026-07-10 "text on the front face carves nothing" bug
+    # were both a world-Z shift on a face whose normal isn't world-Z,
+    # leaving the prism off the material — a silent no-op cut.
     is_cardinal = (
         abs(normal[2]) > 0.9
         or abs(normal[1]) > 0.9
@@ -710,18 +736,11 @@ def generate_emboss_scad(
     else:
         boolean_op = "union"
 
-    if is_cardinal:
-        # Cardinal-face path: world-axis offsets, z_offset shift below.
-        tx = cx + final_offset_x
-        ty = cy + final_offset_y
-        tz = cz
-    else:
-        # Non-cardinal: outer translate goes to bare face center; the
-        # offsets and deboss-shift are applied AFTER the rotation as an
-        # inner translate, so they compose in the face-local frame.
-        tx = cx
-        ty = cy
-        tz = cz
+    # Outer translate always goes to the bare face centre; placement
+    # offsets are applied after the rotation (see above).
+    tx = cx
+    ty = cy
+    tz = cz
 
     rotation_clause = _rotation_for_normal(normal)
 
@@ -835,10 +854,23 @@ def generate_emboss_scad(
     # material at cz + depth_mm.  This mirrors the top-face behavior where
     # we shift -depth_mm so the prism penetrates inward.
     extrude_height = depth_mm + 0.1
-    if is_cardinal:
-        # Cardinal-face path (top/bottom/front/back/left/right): use the
-        # original world-Z shift logic.  The face's local Z aligns with
-        # ±world-Z (after rotation) so this still works correctly.
+    # A cardinal face is "flat" only when its normal is ±world-Z (top /
+    # bottom).  There, and ONLY there, is world-Z the face normal, so the
+    # deboss prism can be pushed into the body by a world-Z shift on the
+    # outer translate.  On the SIDE cardinal faces (front/back/left/right)
+    # world-Z lies IN the face plane — a world-Z shift slides the prism
+    # sideways, never into the body, so a text/SVG deboss silently no-ops
+    # (measured 2026-07-10: "KILN" on a 120x80x50 front face carved 0
+    # vertices).  Those faces therefore take the same face-local
+    # inner-translate depth shift the non-cardinal path uses: the prism
+    # moves along local +Z, which the rotation has already aligned with
+    # the outward face normal, so depth penetrates the body for ANY
+    # orientation.  Heightmap keeps its own z-scale contract (flat-topped
+    # at the surface) on every face.
+    cardinal_flat = is_cardinal and abs(normal[2]) > 0.9
+    if cardinal_flat:
+        # Flat cardinal face (top/bottom): world-Z shift on the outer
+        # translate (unchanged — the face's local Z aligns with ±world-Z).
         if mode == "deboss":
             if content_type == "heightmap":
                 # Heightmap deboss uses a negative Z scale (see
@@ -849,14 +881,14 @@ def generate_emboss_scad(
                 # proportional across all hmap values, not a step function.
                 z_offset = 0.0
             elif normal[2] < -0.9:
-                # SVG/text deboss on a bottom-like face: prism was flipped by
+                # SVG/text deboss on a bottom face: prism was flipped by
                 # rotate([180,0,0]).  Shift up by full extrude_height so it
                 # penetrates upward into the body sitting above the face.
                 z_offset = extrude_height
             else:
-                # SVG/text deboss on a top-like or side face: prism already
-                # points toward the body after rotation; shift by -depth_mm
-                # so far end penetrates depth.
+                # SVG/text deboss on a top face: prism already points toward
+                # the body after (no) rotation; shift by -depth_mm so far
+                # end penetrates depth.
                 z_offset = -depth_mm
         else:
             # Emboss — protrude outward from the surface.  Rotation already
@@ -867,12 +899,21 @@ def generate_emboss_scad(
             z_offset = 0.0
 
         translate_line = f"translate([{tx:.6f}, {ty:.6f}, {tz + z_offset:.6f}])"
-        inner_translate_line = ""
+        # Placement offsets compose post-rotation so they stay in the
+        # face plane.  Depth stays on the outer world-Z shift, inner z = 0.
+        if final_offset_x or final_offset_y:
+            inner_translate_line = (
+                f"translate([{final_offset_x:.6f}, "
+                f"{final_offset_y:.6f}, 0])\n        "
+            )
+        else:
+            inner_translate_line = ""
     else:
-        # Non-cardinal-face path: outer translate goes to bare face
-        # center; offsets and deboss-shift are applied AFTER rotation in
-        # face-local space so they compose along the face's u/v/normal
-        # axes regardless of world orientation.
+        # Side cardinal faces (front/back/left/right) AND non-cardinal
+        # (arbitrary) normals: outer translate goes to bare face center;
+        # offsets and deboss-shift are applied AFTER rotation in face-local
+        # space so they compose along the face's u/v/normal axes regardless
+        # of world orientation.
         if mode == "deboss":
             if content_type == "heightmap":
                 local_z_shift = 0.0

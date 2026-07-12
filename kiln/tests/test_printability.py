@@ -1338,6 +1338,30 @@ class TestScoring:
         score = _compute_score(overhangs, thin_walls, bridging, adhesion, supports)
         assert score >= 0
 
+    def test_short_self_supporting_bridges_not_penalized(self):
+        """A decorative surface texture registers 1000+ short grooves as
+        "bridges" (each span well under the 10 mm self-support limit, so
+        ``needs_supports_for_bridges`` is False).  Those must NOT deduct — a
+        printable textured part was dropping two whole grades for relief that
+        prints fine with no supports.  Regression for the "apply a texture →
+        Needs supports / C-grade" false positive.
+        """
+        overhangs = OverhangAnalysis(0, 0, 0.0, False, [])
+        thin_walls = ThinWallAnalysis(1.0, 0, 0.0, [])
+        adhesion = BedAdhesionAnalysis(100.0, 50.0, "low")
+        supports = SupportAnalysis(0.0, 0.0, [])
+        # 1070 short, self-supporting grooves → no penalty, perfect score.
+        texture = BridgingAnalysis(2.24, 1070, False)
+        assert (
+            _compute_score(overhangs, thin_walls, texture, adhesion, supports) == 100
+        )
+        # The SAME count as genuine >10 mm bridges that need support → the
+        # full -15 still fires, so real bridging problems stay caught.
+        real = BridgingAnalysis(25.0, 1070, True)
+        assert (
+            _compute_score(overhangs, thin_walls, real, adhesion, supports) == 85
+        )
+
 
 # ---------------------------------------------------------------------------
 # TestGrading
