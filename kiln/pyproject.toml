@@ -68,8 +68,8 @@ postgres = ["psycopg2-binary>=2.9"]
 # private package and the extra would fail on every public `pip install`.
 # The REST API ships in kiln-pro itself; install it directly from the
 # private repo (see kiln3d.com/docs) — don't promise it here.
-stripe = ["stripe>=5.0"]
-payments = ["stripe>=5.0", "cryptography>=41.0"]
+stripe = ["stripe>=15.3.0"]
+payments = ["stripe>=15.3.0", "cryptography>=41.0"]
 serial = ["pyserial>=3.5"]
 qr = ["qrcode[pil]>=7.0"]
 emboss = ["Pillow>=9.0", "rembg>=2.0", "onnxruntime>=1.16"]
