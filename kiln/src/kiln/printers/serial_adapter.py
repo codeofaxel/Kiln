@@ -903,6 +903,33 @@ class SerialPrinterAdapter(PrinterAdapter):
             self._send_command(cmd)
         return True
 
+    # ------------------------------------------------------------------
+    # Fan control
+    # ------------------------------------------------------------------
+
+    def set_fan(self, node: str, percent: int) -> bool:
+        """Set the part-cooling fan speed via ``M106``/``M107`` G-code.
+
+        Only the single default part-cooling fan is supported — see
+        :meth:`PrinterAdapter._validate_part_fan` for why auxiliary/chamber
+        fan names are rejected on generic Marlin firmware.
+
+        Args:
+            node: Must be ``"part"`` (or the aliases ``"part_cooling"`` /
+                ``"cooling"``) — the part-cooling fan.
+            percent: Fan speed 0-100 (0 turns the fan off, 100 is full speed).
+
+        Returns:
+            ``True`` once the command is sent.
+
+        Raises:
+            PrinterError: If *node* is not the part-cooling fan, or *percent*
+                is outside 0-100.
+        """
+        speed = self._validate_part_fan(node, percent)
+        self.send_gcode([f"M106 S{speed}" if speed else "M107"])
+        return True
+
     def skip_objects(self, object_ids: list[int]) -> bool:
         """Abandon objects on a live multi-object print via ``M486``.
 
