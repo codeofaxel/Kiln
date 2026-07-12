@@ -5,6 +5,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-11
+
 ### Added
 
 - **Every file Kiln touches carries proof of that — free for everyone.**
