@@ -845,6 +845,49 @@ def prepare_image_for_emboss(
     }
 
 
+def prepare_logo_image_for_emboss(
+    image_path: str,
+    output_dir: str,
+    *,
+    max_dim: int = 800,
+) -> dict:
+    """Prepare a bi-level raster logo as traced vector geometry.
+
+    The heightmap path is wrong for marks: ``surface()`` spans the whole
+    rectangular tile, so a logo picks up a background carve, a perimeter
+    frame, a pixel staircase — and, without the row flip, mirrored text.
+    Tracing the ink into native polygon() rings (see
+    :func:`kiln.mark_geometry.trace_image_to_mark`) carves ONLY the
+    strokes through the same proven boolean path SVG marks use.
+
+    Returns a content_info dict of type ``"svg"`` (the boolean-carve
+    contract).  Raises ``ValueError`` when nothing traceable is found so
+    the caller can fall back to the heightmap path.
+    """
+    if _is_heic_container(image_path):
+        os.makedirs(output_dir, exist_ok=True)
+        image_path = _auto_convert_heic(image_path, output_dir)
+
+    from kiln.mark_geometry import trace_image_to_mark
+
+    mark = trace_image_to_mark(image_path, max_dim=max_dim)
+    if mark is None or mark.is_empty:
+        raise ValueError(f"No traceable mark found in image: {image_path}")
+    return {
+        "type": "svg",
+        # Provenance only — the polygons below carry all the geometry.
+        "svg_path": os.path.abspath(image_path),
+        "width": mark.width,
+        "height": mark.height,
+        "aspect_ratio": round(mark.width / mark.height, 4) if mark.height else 1.0,
+        "openscad_polygons": mark.to_scad(),
+        # Real even-odd holes present — fill() would erase them.
+        "openscad_polygons_fill_safe": False,
+        **mark.content_bounds_info(),
+        "traced_from_raster": True,
+    }
+
+
 def _convert_strokes_to_fills(svg_content: str, min_stroke_width: float = 0.0) -> str:
     """Convert SVG stroke-based elements to filled polygons for OpenSCAD.
 
@@ -1179,6 +1222,36 @@ def prepare_svg_for_emboss(svg_path: str, output_dir: str, *, min_physical_width
         min_sw = min_physical_width_mm / scale
     else:
         min_sw = max(width, height) / 80.0  # conservative fallback
+
+    # Primary path: compile the SVG with the real parser (full path
+    # command set, shapes, transforms, even-odd holes) into
+    # origin-centered native polygon() geometry — see kiln.mark_geometry.
+    # This replaces regex extraction that only understood
+    # <polygon>/<rect>/<circle> and dropped every <path>-based logo,
+    # and it centers by construction so offset-origin viewBoxes place
+    # correctly.  The legacy machinery below runs only when the parser
+    # finds no geometry (e.g. text-only SVGs).
+    try:
+        from kiln.mark_geometry import parse_svg_to_mark
+
+        mark = parse_svg_to_mark(content, min_stroke_units=min_sw)
+    except Exception:  # noqa: BLE001 — parser bugs must fall back, not fail
+        _logger.warning("SVG mark parse crashed — using legacy path", exc_info=True)
+        mark = None
+    if mark is not None and not mark.is_empty:
+        return {
+            "type": "svg",
+            "svg_path": abs_path,
+            "width": width,
+            "height": height,
+            "aspect_ratio": (
+                round(mark.width / mark.height, 4) if mark.height else aspect
+            ),
+            "openscad_polygons": mark.to_scad(),
+            # Real even-odd holes present — fill() would erase them.
+            "openscad_polygons_fill_safe": False,
+            **mark.content_bounds_info(),
+        }
 
     # Convert strokes to fills for OpenSCAD compatibility
     has_strokes = "<line" in content or "stroke" in content

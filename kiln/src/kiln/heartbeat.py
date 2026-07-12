@@ -220,7 +220,13 @@ def _send_heartbeat() -> None:
             "p_pro_installed": _is_pro_installed(),
             "p_os_platform": platform.system().lower(),
             "p_device_fingerprint": device_fingerprint,
-            "p_details": json.dumps({
+            # NOT json.dumps'd here — the outer payload = json.dumps({...})
+            # below already serializes this whole dict.  Encoding it twice
+            # stored details as a jsonb STRING scalar server-side instead of
+            # an object, which silently broke the ingest sanitizers and
+            # crashed the founder dashboard's tool-usage tile the first time
+            # anything tried to read it (kiln-pro migration 095, 2026-07-09).
+            "p_details": {
                 "texture_names": stats.get("texture_names", {}),
                 "decoration_types": stats.get("decoration_types", {}),
                 "slicer_profiles": stats.get("slicer_profiles", {}),
@@ -238,7 +244,7 @@ def _send_heartbeat() -> None:
                 # actually does.  Capped to the busiest tools so the
                 # payload stays small; names + counts only, never args.
                 "tool_calls": _top_n(stats.get("tool_calls", {}), 100),
-            }),
+            },
         }).encode()
 
         req = urllib.request.Request(

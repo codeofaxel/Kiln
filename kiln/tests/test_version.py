@@ -44,3 +44,28 @@ def test_server_json_version_matches_package() -> None:
         f"server.json version drift vs pyproject {pkg_version!r}: {drift}. "
         "Bump server.json in lockstep with the package version."
     )
+
+
+def test_mcpb_manifest_version_matches_package() -> None:
+    """mcpb/manifest.json must not drift from the package version.
+
+    Same drift class as server.json (see test above): the MCPB bundle's
+    manifest declares its own ``version`` field, and nothing structural
+    ties it to ``kiln3d``'s pyproject version.  This only catches the
+    *manifest's* version — the bundle also needs an actual repack
+    (``mcpb pack``, which regenerates ``uv.lock`` and re-pins the
+    resolved ``kiln3d`` version) at every release; see mcpb/README.md.
+    """
+    root = Path(__file__).resolve().parents[2]
+    pyproject_text = (root / "kiln" / "pyproject.toml").read_text(encoding="utf-8")
+    match = re.search(r'(?m)^\s*version\s*=\s*"([^"]+)"\s*$', pyproject_text)
+    assert match, "could not find version in kiln/pyproject.toml"
+    pkg_version = match.group(1)
+
+    manifest_path = root / "mcpb" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest.get("version") == pkg_version, (
+        f"mcpb/manifest.json version {manifest.get('version')!r} drifted from "
+        f"pyproject {pkg_version!r}. Bump manifest.json and repack the bundle "
+        "(see mcpb/README.md) in the same commit."
+    )

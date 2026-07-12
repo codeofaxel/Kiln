@@ -76,6 +76,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from kiln.preview_render import downscale_png, effective_supersample
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -130,10 +132,13 @@ def _generate_thumbnail(stl_paths: list[str]) -> bytes | None:
             # Preview mode (no --render) avoids CGAL failures on
             # non-manifold STLs.  DeepOcean gives a dark background
             # with good contrast for printer LCD thumbnails.
+            # Supersample: render oversized then Lanczos-downscale for a
+            # crisp LCD thumbnail — same shared knob as every preview.
+            ss = effective_supersample()
             cmd = [
                 binary,
                 "-o", png_path,
-                f"--imgsize={_THUMBNAIL_SIZE},{_THUMBNAIL_SIZE}",
+                f"--imgsize={_THUMBNAIL_SIZE * ss},{_THUMBNAIL_SIZE * ss}",
                 "--autocenter",
                 "--viewall",
                 "--colorscheme", "DeepOcean",
@@ -143,6 +148,8 @@ def _generate_thumbnail(stl_paths: list[str]) -> bytes | None:
                 cmd, capture_output=True, text=True, timeout=30,
             )
             if os.path.isfile(png_path) and os.path.getsize(png_path) > 0:
+                if ss > 1:
+                    downscale_png(png_path, _THUMBNAIL_SIZE, _THUMBNAIL_SIZE)
                 return Path(png_path).read_bytes()
             return None
         finally:

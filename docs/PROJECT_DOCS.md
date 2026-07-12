@@ -8,7 +8,7 @@
 
 ### Overview
 
-Kiln gives AI agents a safe, unified way to design, validate, and manufacture 3D-printed parts. Connect it to Claude (or any MCP-compatible agent) and your assistant can take a part from description to done: design it, check that it will actually print, slice it, print it on your printer, watch the print, and help recover when something goes wrong — through <!-- KILN_MCP_CAPABILITY_COUNT --> 847 MCP capabilities and a <!-- KILN_CLI_COUNT --> 224-command CLI.
+Kiln gives AI agents a safe, unified way to design, validate, and manufacture 3D-printed parts. Connect it to Claude (or any MCP-compatible agent) and your assistant can take a part from description to done: design it, check that it will actually print, slice it, print it on your printer, watch the print, and help recover when something goes wrong — through <!-- KILN_MCP_CAPABILITY_COUNT --> 867 MCP capabilities and a <!-- KILN_CLI_COUNT --> 233-command CLI.
 
 **Clarification:** Kiln does **not** operate its own marketplace or manufacturing network. It integrates with third-party marketplaces for model discovery and third-party fulfillment providers for outsourced manufacturing. Kiln is orchestration and agent infrastructure, not a supply-side platform.
 
@@ -48,7 +48,7 @@ Parts of Kiln's intelligence stack are patent-pending.
 
 ### The Web App
 
-[kiln3d.com](https://kiln3d.com) is Kiln in the browser. A free account signs in and lands on a home that helps you connect Kiln to your AI app; the cloud workshop — version history, branches, reviews, and sharing for your designs — is a Kiln Pro feature. Nothing about local printer control requires an account.
+[kiln3d.com](https://kiln3d.com) is Kiln in the browser. Sign in for free and make a real, printable object on the spot — pick a starter (coaster, keychain, nameplate, and more), watch it build in 3D, apply a color or texture, and download it to print. No install, no printer, no API key required. The cloud workshop — version history, branches, reviews, and sharing for your designs — is a Kiln Pro feature. Nothing about local printer control requires an account.
 
 ### Supported Printers
 
@@ -204,7 +204,7 @@ You can still go from idea to object: design through the agent or the [web app](
 | `--json` | Output structured JSON (for agents/scripts) |
 | `--help` | Show command help |
 
-The CLI has <!-- KILN_CLI_COUNT --> 224 commands in total; this section documents the everyday core. Run `kiln --help` for the full command tree.
+The CLI has <!-- KILN_CLI_COUNT --> 233 commands in total; this section documents the everyday core. Run `kiln --help` for the full command tree.
 
 ### Commands
 
@@ -334,7 +334,7 @@ The MCP server starts via `kiln serve` or `python -m kiln serve`. The fastest se
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **<!-- KILN_MCP_TOOL_COUNT --> 840 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT --> 847 total MCP capabilities**. The everyday core is documented below by category; agents see the full, current catalog at connect time (`get_started` and `get_skill_manifest` return the complete map).
+Kiln exposes **<!-- KILN_MCP_TOOL_COUNT --> 860 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT --> 867 total MCP capabilities**. The everyday core is documented below by category; agents see the full, current catalog at connect time (`get_started` and `get_skill_manifest` return the complete map).
 
 Paid-tier tools are discoverable too: agents without a license receive a structured response naming the required tier, so they can tell you what's possible and where it lives ([pricing](https://kiln3d.com/pricing)).
 
@@ -537,14 +537,15 @@ Routes manufacturing to third-party fulfillment providers (Craftcloud). Kiln act
 The families below ship through [kiln-pro](https://kiln3d.com/pricing), Kiln's paid companion. Agents discover these tools even without a license and receive a structured pointer to the required tier.
 
 - **Decoration & textures (Pro+).** Emboss or deboss photos, logos, SVG, QR codes, and text onto any face of a model; procedural and image-based textures with custom palettes for multicolor printing. Flagships: `decorate_surface`, `apply_procedural_texture`, `smart_decorate`.
-- **Product generators (free with monthly quota; unlimited on Pro+).** One-call generators for coasters, keychains, nameplates, pet tags, trays, ornaments, magnets, and more — engraving-ready and printer-aware. Flagships: `generate_coaster`, `generate_keychain`, `generate_nameplate`.
+- **Product generators (free with monthly quota; unlimited on Pro+).** One-call generators for coasters, keychains, nameplates, pet tags, trays, ornaments, magnets, and more — engraving-ready and printer-aware, each stating its assumptions (material, sizing) in plain English so you can redirect it in one line. Flagships: `generate_coaster`, `generate_keychain`, `generate_nameplate`.
 - **Version control for designs (Pro+).** Branch, merge, review, release, and sign designs, decorations, and mechanical features; pull requests with team review (Business+ adds enforced approval gates). Flagships: `create_design_branch`, `merge_design_branches`, `sign_design_release`.
 - **Provenance & learning (Pro+).** Design version history with print outcomes attached, regression alerts when a design stops printing well, proven recipes per material and printer, and print-confidence scoring. Flagships: `save_design_version`, `get_proven_recipe`, `get_regression_alerts`.
 - **Per-machine calibration (Pro+).** Kiln learns each printer's real-world offsets from your prints and applies them when slicing — with freshness tracking and a plain-English answer to "why is this dimension what it is?" Flagships: `get_calibration_freshness`, `explain_calibration_for_design`, `ingest_measurement`.
 - **Nozzle intelligence (Pro+).** Per-printer nozzle tracking (material, diameter, filament run through it), wear warnings before a print that would push it past its window, and wear-aware failure analysis. Flagships: `nozzle_wear_status`, `get_nozzle_state`, `record_nozzle_replacement`.
-- **Material intelligence depth.** Drying schedules per filament with one-tap AMS dryer handoff (Pro+); chemical-exposure verdicts for fuels, solvents, cleaners, and outdoor duty (Business+; the safety warnings are always free); adhesive recommendations with prep and cure schedules for joining printed parts (Pro+); manufacturer-datasheet ingestion into your own material library (Business+). Flagships: `drying_advisor`, `check_chemical_resistance`, `recommend_adhesive`, `ingest_material_datasheet`.
+- **Material intelligence depth.** Drying schedules per filament with one-tap AMS dryer handoff (Pro+); chemical-exposure verdicts for fuels, solvents, cleaners, and outdoor duty (Business+; the safety warnings are always free); skin-contact verdicts for jewelry, wearables, and watch straps (always free — paid tiers add risk-reduction guidance and what it takes to sell a skin-contact product); adhesive recommendations with prep and cure schedules for joining printed parts (Pro+); manufacturer-datasheet ingestion into your own material library (Business+). Flagships: `drying_advisor`, `check_chemical_resistance`, `check_skin_contact_suitability`, `recommend_adhesive`, `ingest_material_datasheet`.
 - **Production drawings (Business+).** Dimensioned technical drawings — aligned orthographic views with real measurements, PDF and DXF — from any design. Flagship: `generate_technical_drawing`.
 - **Part Passport (Pro+).** Everything about one design in a single call: versions, materials, manual, BOM, outcomes, releases. Flagship: `get_part_passport`.
+- **Sourcing risk for bought parts (Enterprise).** Flags the purchased components a design depends on that are going end-of-life, single-source, or long-lead — and proposes swaps — before you commit to a bill of materials you can't buy in a year. Flagships: `assess_bom_sourcing_risk`, `propose_sourcing_remediation`.
 - **Assembly manuals (Pro+).** Printable step-by-step PDF manuals for multi-part designs, with BOM and per-step renders. Enterprise adds controlled, multi-language factory work instructions with torque specs, inspection gates, and sign-off. Flagships: `generate_assembly_manual`, `embed_manual_in_3mf`.
 - **Mid-print modification & deep recovery (Pro+).** Add features or decorations to a paused print, resume across power loss, and (Business+) triage a whole fleet after an outage. Flagships: `decorate_during_print`, `recover_power_loss_print`, `assess_fleet_power_loss`.
 - **Business & Enterprise operations.** Billing and spend caps, team and org management, SSO, audit-trail export, multi-site fleet views, and project cost tracking. See [pricing](https://kiln3d.com/pricing) for the full breakdown.
@@ -860,4 +861,4 @@ Kiln's paid tiers ship through the private `kiln-pro` companion package ([kiln3d
 
 *Kiln is a project of Hadron Labs Inc.*
 
-<!-- DOCS_REVIEWED_FOR: 1.1.9 -->
+<!-- DOCS_REVIEWED_FOR: 1.2.0 -->

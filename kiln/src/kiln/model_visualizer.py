@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kiln.emboss_generator import _openscad_version_year, get_openscad_version
+from kiln.preview_render import downscale_png, effective_supersample
 
 logger = logging.getLogger(__name__)
 
@@ -682,6 +683,13 @@ def visualize_model(
         bbox.dz / max(1e-6, max(bbox.dx, bbox.dy)),
     )
 
+    # Supersample: render oversized, then Lanczos-downscale to the
+    # requested size for crisp, anti-aliased edges (shared helper so one
+    # knob governs every OpenSCAD preview surface). effective_supersample
+    # degrades to 1 without Pillow, so output is always the requested size.
+    ss = effective_supersample()
+    img_w, img_h = width * ss, height * ss
+
     try:
         views: list[dict] = []
         stem = Path(file_path).stem
@@ -697,7 +705,7 @@ def visualize_model(
                 openscad,
                 "--preview",
                 "-o", png_path,
-                f"--imgsize={width},{height}",
+                f"--imgsize={img_w},{img_h}",
                 f"--camera={camera}",
                 "--viewall",
                 "--colorscheme=DeepOcean",
@@ -739,6 +747,12 @@ def visualize_model(
                     "error": "Render produced empty output",
                 })
                 continue
+
+            # Downscale the oversized render to the requested size for
+            # crisp edges. On the rare downscale failure (I/O fault) the
+            # oversized-but-valid image is kept rather than lost.
+            if ss > 1:
+                downscale_png(png_path, width, height)
 
             views.append({
                 "angle": label,

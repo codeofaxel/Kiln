@@ -1170,6 +1170,36 @@ class MoonrakerAdapter(PrinterAdapter):
         self._send_gcode(script)
         return True
 
+    # ------------------------------------------------------------------
+    # Fan control
+    # ------------------------------------------------------------------
+
+    def set_fan(self, node: str, percent: int) -> bool:
+        """Set the part-cooling fan speed via ``M106``/``M107`` G-code.
+
+        Only the single default part-cooling fan is supported — see
+        :meth:`PrinterAdapter._validate_part_fan` for why auxiliary/chamber
+        fan names are rejected here. A Klipper machine that names a chamber
+        or auxiliary fan in its own ``printer.cfg`` (e.g. via
+        ``SET_FAN_SPEED FAN=chamber_fan``) isn't reachable through this
+        generic path — Kiln has no way to discover that machine-specific name.
+
+        Args:
+            node: Must be ``"part"`` (or the aliases ``"part_cooling"`` /
+                ``"cooling"``) — the part-cooling fan.
+            percent: Fan speed 0-100 (0 turns the fan off, 100 is full speed).
+
+        Returns:
+            ``True`` once the command is sent.
+
+        Raises:
+            PrinterError: If *node* is not the part-cooling fan, or *percent*
+                is outside 0-100.
+        """
+        speed = self._validate_part_fan(node, percent)
+        self._send_gcode(f"M106 S{speed}" if speed else "M107")
+        return True
+
     def skip_objects(self, object_names: list[str]) -> bool:
         """Abandon named objects on a live Klipper multi-object print.
 

@@ -1023,6 +1023,54 @@ class TestSendGcode:
 
 
 # ---------------------------------------------------------------------------
+# set_fan() tests
+# ---------------------------------------------------------------------------
+
+class TestSetFan:
+    """Tests for set_fan() -- the part-cooling fan only, via M106/M107."""
+
+    def test_full_speed(self):
+        mock_ser = _make_mock_serial()
+        adapter = _build_adapter(mock_ser)
+        with patch.object(adapter, "_send_command") as mock_send:
+            ok = adapter.set_fan("part", 100)
+        assert ok is True
+        mock_send.assert_called_once_with("M106 S255")
+
+    def test_zero_sends_m107(self):
+        mock_ser = _make_mock_serial()
+        adapter = _build_adapter(mock_ser)
+        with patch.object(adapter, "_send_command") as mock_send:
+            adapter.set_fan("part", 0)
+        mock_send.assert_called_once_with("M107")
+
+    def test_aliases_accepted(self):
+        mock_ser = _make_mock_serial()
+        adapter = _build_adapter(mock_ser)
+        with patch.object(adapter, "_send_command"):
+            adapter.set_fan("part_cooling", 50)
+            adapter.set_fan("cooling", 50)
+
+    def test_aux_is_rejected(self):
+        mock_ser = _make_mock_serial()
+        adapter = _build_adapter(mock_ser)
+        with pytest.raises(PrinterError):
+            adapter.set_fan("aux", 100)
+
+    def test_chamber_is_rejected(self):
+        mock_ser = _make_mock_serial()
+        adapter = _build_adapter(mock_ser)
+        with pytest.raises(PrinterError):
+            adapter.set_fan("chamber", 100)
+
+    def test_percent_out_of_range_raises(self):
+        mock_ser = _make_mock_serial()
+        adapter = _build_adapter(mock_ser)
+        with pytest.raises(PrinterError):
+            adapter.set_fan("part", 101)
+
+
+# ---------------------------------------------------------------------------
 # get_firmware_status() tests
 # ---------------------------------------------------------------------------
 

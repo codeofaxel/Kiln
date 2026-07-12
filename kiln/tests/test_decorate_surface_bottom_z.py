@@ -18,11 +18,25 @@ the material instead of further outside it.
 """
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from kiln.emboss_generator import generate_emboss_scad
+
+
+def _openscad_available() -> bool:
+    try:
+        subprocess.run(["openscad", "--version"], capture_output=True, check=True)
+        return True
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return False
+
+
+needs_openscad = pytest.mark.skipif(
+    not _openscad_available(), reason="OpenSCAD required for real text compiles"
+)
 
 
 def _make_bottom_face(center_z: float = 0.0, w: float = 160.0, h: float = 160.0) -> dict:
@@ -49,6 +63,7 @@ def _make_top_face(center_z: float = 7.0, w: float = 90.0, h: float = 90.0) -> d
     }
 
 
+@needs_openscad
 def test_deboss_on_bottom_face_places_prism_inside_material(tmp_path: Path) -> None:
     """The translate Z on a bottom-face deboss should push the prism UP so it
     overlaps with the body material above the face.
@@ -94,6 +109,7 @@ def test_deboss_on_bottom_face_places_prism_inside_material(tmp_path: Path) -> N
     )
 
 
+@needs_openscad
 def test_deboss_on_top_face_still_works(tmp_path: Path) -> None:
     """Top-face deboss behavior must not regress — it was already correct."""
     dummy_stl = tmp_path / "dummy.stl"
@@ -126,6 +142,7 @@ def test_deboss_on_top_face_still_works(tmp_path: Path) -> None:
     )
 
 
+@needs_openscad
 def test_emboss_on_bottom_face_protrudes_outward(tmp_path: Path) -> None:
     """Emboss on a bottom face should protrude AWAY from material (below the
     tray) — z_offset should be 0 so the prism sits at Z=[-h, 0] outside body.
