@@ -10,7 +10,6 @@
   <a href="https://github.com/codeofaxel/Kiln/blob/main/LICENSE"><img src="https://img.shields.io/github/license/codeofaxel/Kiln" alt="License"></a>
   <a href="https://github.com/codeofaxel/Kiln/blob/main/policies/SIGNING.md"><img src="https://img.shields.io/badge/verified%20by-sigstore%20%2B%20SLSA-0f6fdc?logo=sigstore&logoColor=white" alt="Verified by Sigstore + SLSA"></a>
   <a href="https://glama.ai/mcp/servers/codeofaxel/kiln"><img src="https://glama.ai/mcp/servers/codeofaxel/kiln/badge?v=2" alt="Kiln MCP server" width="120"></a>
-  <a href="https://smithery.ai/servers/codeofaxel/kiln"><img src="https://smithery.ai/badge/codeofaxel/kiln?v=2" alt="Smithery badge"></a>
 </p>
 
 ---
@@ -584,3 +583,7 @@ Kiln is a project of **Hadron Labs Inc.**
 [AGPL-3.0 License](LICENSE) — open source with copyleft. [Commercial licensing](policies/COMMERCIAL_LICENSE.md) available for companies that need proprietary use.
 
 By contributing, you agree to the [Contributor License Agreement](policies/CONTRIBUTOR_LICENSE_AGREEMENT.md).
+
+---
+
+Also listed on [Smithery](https://smithery.ai/servers/codeofaxel/kiln).
