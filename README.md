@@ -9,8 +9,8 @@
   <a href="https://pypi.org/project/kiln3d/"><img src="https://img.shields.io/pypi/pyversions/kiln3d" alt="Python"></a>
   <a href="https://github.com/codeofaxel/Kiln/blob/main/LICENSE"><img src="https://img.shields.io/github/license/codeofaxel/Kiln" alt="License"></a>
   <a href="https://github.com/codeofaxel/Kiln/blob/main/policies/SIGNING.md"><img src="https://img.shields.io/badge/verified%20by-sigstore%20%2B%20SLSA-0f6fdc?logo=sigstore&logoColor=white" alt="Verified by Sigstore + SLSA"></a>
-  <a href="https://glama.ai/mcp/servers/codeofaxel/kiln"><img src="https://glama.ai/mcp/servers/codeofaxel/kiln/badge" alt="Kiln MCP server" width="120"></a>
-  <a href="https://smithery.ai/servers/codeofaxel/kiln"><img src="https://smithery.ai/badge/codeofaxel/kiln" alt="Smithery badge"></a>
+  <a href="https://glama.ai/mcp/servers/codeofaxel/kiln"><img src="https://glama.ai/mcp/servers/codeofaxel/kiln/badge?v=2" alt="Kiln MCP server" width="120"></a>
+  <a href="https://smithery.ai/servers/codeofaxel/kiln"><img src="https://smithery.ai/badge/codeofaxel/kiln?v=2" alt="Smithery badge"></a>
 </p>
 
 ---
