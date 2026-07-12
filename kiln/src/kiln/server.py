@@ -14753,12 +14753,12 @@ def decorate_surface(
         elif ctype == "text":
             import math
 
-            from kiln.image_to_surface import generate_text_image
             from kiln.decoration_helpers import _FDM_TEXT_LEGIBILITY_FLOOR_MM
             from kiln.emboss_generator import (
                 TextMeasureError,
                 measure_text_block_mm,
             )
+            from kiln.image_to_surface import generate_text_image
 
             text_content = content.split(":", 1)[1] if ":" in content else content
             # Size the text to the face with MEASURED metrics so it can
