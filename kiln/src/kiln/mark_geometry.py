@@ -500,7 +500,7 @@ def _stroke_segments_to_rings(pts: list[Point], width: float, closed: bool) -> l
         return []
     rings: list[Ring] = []
     hw = width / 2
-    seg_pairs = list(zip(pts, pts[1:]))
+    seg_pairs = list(zip(pts, pts[1:], strict=False))
     if closed:
         seg_pairs.append((pts[-1], pts[0]))
     for (x1, y1), (x2, y2) in seg_pairs:

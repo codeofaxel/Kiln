@@ -22,13 +22,15 @@ printer. The network loop wires the real dependencies.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import tempfile
 import time
 import urllib.request
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -197,10 +199,9 @@ class BridgeClient:
             call_tool=self._call_tool,
             fetch_artifact=self._fetch_artifact,
         )
-        try:
+        with contextlib.suppress(Exception):
+            # socket gone; the server times that call out
             await ws.send(json.dumps(resp))
-        except Exception:
-            pass  # socket gone; the server times that call out
 
     async def run(self) -> None:
         if not self._license:
@@ -283,10 +284,8 @@ def write_bridge_state(*, connected: bool) -> None:
 
 def clear_bridge_state() -> None:
     """Remove the liveness file on shutdown (best-effort)."""
-    try:
+    with contextlib.suppress(OSError):
         os.unlink(_state_path())
-    except OSError:
-        pass
 
 
 def run_bridge() -> None:
