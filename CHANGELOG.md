@@ -114,6 +114,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   before you download. (Color printing needs a multi-material printer; the
   download comes with the colors already assigned.)
 
+- **Make organic, sculptural shapes.** Describe one in plain words and Kiln
+  sculpts it — no add-on or key. New and still improving, and free to make and
+  refine.
+
 - **Finish a Klipper print after a power loss, in one call (Pro).** When power
   comes back, Kiln resumes the *same* print from the layer where it stopped —
   not a reprint. Klipper loses track of the bed height after a power-cut, so
