@@ -666,6 +666,27 @@ def _build_instructions() -> str:
     except Exception:  # noqa: BLE001 -- nudge is best-effort, never fatal
         pass
 
+    # --- Account nudge (only when signed out) ---
+    # Surfaced once at connect so the agent knows a free account exists and
+    # why it helps, and can offer it at the natural moment (a save / share)
+    # rather than nagging. Reads the same token file the CLI writes; a signed
+    # in user never sees this line. Best-effort — never break the build.
+    try:
+        from kiln.cli.auth_commands import _read_tokens
+
+        if not _read_tokens().get("access_token"):
+            parts.append(
+                "ACCOUNT: The user is not signed in. Kiln works fully without "
+                "an account; a free account adds a cloud design library with "
+                "share links, plus the free monthly allowance of Kiln's hosted "
+                "tools. If the user wants to save or share a design, offer to "
+                "sign them in — call `kiln_signin` and give them the URL it "
+                "returns (or they can run `kiln signin` in a terminal). Mention "
+                "it at most once per session, and never block work on it."
+            )
+    except Exception:  # noqa: BLE001 -- nudge is best-effort, never fatal
+        pass
+
     # --- Fresh install: first-time setup guidance ---
     if is_fresh:
         parts.append(
@@ -5664,6 +5685,60 @@ def set_printer_light(node: str = "chamber_light", mode: str = "on") -> dict:
     except Exception as exc:
         logger.exception("Unexpected error in set_printer_light")
         return _error_dict(f"Unexpected error in set_printer_light: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def set_fan(node: str = "part", percent: int = 100) -> dict:
+    """Set the speed of a printer fan.
+
+    Supported on Bambu Lab, OctoPrint, Moonraker/Klipper printers, and
+    Elegoo's Centauri Carbon (FDM). Prusa Link has no raw G-code endpoint, so
+    fan control isn't available there
+    (https://github.com/prusa3d/Prusa-Link/issues/832). Elegoo's resin/MSLA
+    printers (Saturn, Mars) have no part-cooling fan and are refused.
+
+    Args:
+        node: Which fan to set. ``"part"`` (part-cooling / model fan, the
+            one that cools each layer) works on every supported printer.
+            ``"aux"`` (auxiliary / big fan) and ``"chamber"`` (chamber /
+            exhaust fan) are Bambu-only — generic Marlin/Klipper firmware has
+            no standard auxiliary or chamber fan Kiln can address without
+            knowing that machine's own G-code macros. Defaults to ``"part"``.
+        percent: Fan speed 0-100. ``0`` turns the fan off, ``100`` is full
+            speed. Defaults to ``100``.
+
+    Use this to add cooling for bridges and overhangs (part fan), or — on
+    Bambu — pull heat with the auxiliary fan or run the chamber/exhaust fan
+    for materials like ABS/ASA. The Bambu chamber fan only exists on
+    enclosed models — X1 Carbon, X1E, P1S, P2S, H2S — not on open-frame
+    models (A1, A1 Mini, A2L, P1P), where a chamber command is a no-op. The
+    printer's own thermal management may override a manual fan speed during
+    a print.
+    """
+    if err := _check_auth("printer_control"):
+        return err
+    if err := _check_rate_limit("set_fan"):
+        return err
+    try:
+        adapter = _get_adapter()
+        if not hasattr(adapter, "set_fan"):
+            return _error_dict(
+                "Fan control isn't available on this printer type.",
+                code="UNSUPPORTED",
+            )
+        ok = adapter.set_fan(node, percent)
+        _audit("set_fan", "executed", details={"node": node, "percent": percent})
+        return {
+            "success": True,
+            "node": node.strip().lower(),
+            "percent": int(percent),
+            "accepted": ok,
+        }
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Failed to set fan: {exc}")
+    except Exception as exc:
+        logger.exception("Unexpected error in set_fan")
+        return _error_dict(f"Unexpected error in set_fan: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -10863,10 +10938,34 @@ def get_material_recommendation(
         return _error_dict(f"Unexpected error in get_material_recommendation: {exc}", code="INTERNAL_ERROR")
 
 
+# Bambu printers report failures as HMS codes: four 4-hex-digit groups, e.g.
+# ``0300_1A00_0002_0001``.  The raw code plus a pointer to Bambu's own HMS
+# wiki page is the free-tier floor; kiln-pro decodes the code to a cited
+# cause / fix / severity for Pro+ callers at the REST boundary (no curated fix
+# text lives in this public repo).
+_HMS_WIKI_CODE_URL = "https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/{code}"
+
+
+def _normalize_hms_code(raw: str) -> str:
+    """Normalize a Bambu HMS code to uppercase 4-hex groups joined by ``_``.
+
+    Accepts hyphen / underscore / space separated or unseparated input in any
+    case.  Returns ``""`` when the input holds fewer than 8 hex digits, so a
+    stray word can't be misread as a code — a real HMS code is at least the
+    8-hex module/attr prefix (e.g. ``0300_1A00``), usually the full 16 hex
+    digits.
+    """
+    hex_only = "".join(c for c in raw.upper() if c in "0123456789ABCDEF")
+    if len(hex_only) < 8:
+        return ""
+    return "_".join(hex_only[i : i + 4] for i in range(0, len(hex_only), 4))
+
+
 @mcp.tool()
 def troubleshoot_printer(
     printer_id: str,
-    symptom: str,
+    symptom: str = "",
+    hms_code: str = "",
 ) -> dict:
     """Diagnose a printer issue by searching the known failure modes database.
 
@@ -10874,14 +10973,27 @@ def troubleshoot_printer(
     ``"stringing"``) and get possible causes and fixes specific to your
     printer model.
 
+    On Bambu Lab printers you can also pass ``hms_code`` — the HMS error code
+    the printer's screen or app shows (e.g. ``"0300_1A00_0002_0001"``, in any
+    separator or case).  The response echoes the normalized code and a link to
+    Bambu's HMS wiki page for it.  With Kiln Pro (https://kiln3d.com/pricing)
+    the response also carries a decoded cause, fix, and severity for the code.
+
     Args:
         printer_id: Printer model identifier.
-        symptom: Description of the problem.
+        symptom: Description of the problem.  Optional when ``hms_code`` is
+            given.
+        hms_code: Optional Bambu HMS error code to look up.
     """
     if err := _check_auth("intel"):
         return err
+    if not symptom.strip() and not hms_code.strip():
+        return _error_dict(
+            "Provide a symptom describing the problem, or an hms_code to look up.",
+            code="INVALID_INPUT",
+        )
     try:
-        matches = diagnose_issue(printer_id, symptom)
+        matches = diagnose_issue(printer_id, symptom) if symptom.strip() else []
         intel = get_printer_intel(printer_id)
         # Free-tier honest signal: when the kiln-pro overlay didn't merge
         # (no license / network past grace / kiln-pro absent), per-printer
@@ -10898,7 +11010,7 @@ def troubleshoot_printer(
                 "failure-mode playbooks. See https://kiln3d.com/pricing"
             )
         )
-        return {
+        result = {
             "success": True,
             "printer": intel.display_name,
             "symptom": symptom,
@@ -10907,6 +11019,14 @@ def troubleshoot_printer(
             "quirks": intel.quirks,
             "upgrade_hint": upgrade_hint,
         }
+        # Bambu HMS code lookup: the normalized raw code + a wiki pointer are
+        # the free floor.  kiln-pro adds a decoded ``hms_decoded`` block (cause /
+        # fix / severity, cited) for Pro+ callers at the REST boundary.
+        code = _normalize_hms_code(hms_code)
+        if code:
+            result["hms_code"] = code
+            result["hms_wiki_url"] = _HMS_WIKI_CODE_URL.format(code=code)
+        return result
     except KeyError:
         return _error_dict(
             f"No intelligence data for '{printer_id}'.",
@@ -14319,12 +14439,17 @@ def decorate_surface(
 
     **Image styles** for raster images:
 
+    - ``"auto"`` — detects the image kind: a logo/wordmark/line-art
+      image routes to ``"stencil"`` (crisp traced strokes); a
+      continuous-tone photo routes to ``"coin"``
     - ``"coin"`` — histogram-equalized posterize, best for FDM coin-relief
     - ``"portrait"`` — edge-detected line art
     - ``"composite"`` — posterize base + edge overlay hybrid
     - ``"medallion"`` — coin + raised border ring (premium look)
     - ``"photo"`` — simple 3-level posterize
-    - ``"stencil"`` — binary silhouette
+    - ``"stencil"`` (alias ``"logo"``) — the mark's ink is traced into
+      vector strokes and carved directly: crisp edges, no background
+      tile, correct orientation.  The right choice for brand logos.
     - ``"lithophane"`` — full gradient for backlit prints
 
     **Examples**::
@@ -14342,7 +14467,14 @@ def decorate_surface(
         or ``"text:..."`` for text.
     :param face: Which face to decorate.  ``"auto"`` picks the largest
         flat face.  Also accepts ``"top"``, ``"bottom"``, ``"front"``,
-        ``"back"``, ``"left"``, ``"right"``.
+        ``"back"``, ``"left"``, ``"right"``.  A deboss now carves into
+        the body on every cardinal face, and ``offset_x/y_mm`` place
+        face-locally (see below).  ``top``/``bottom``/``front`` are the
+        battle-tested three; ``back`` carves and offsets correctly but
+        content may still land rotated 180° (content orientation is
+        unaddressed by the placement fix); on ``left``/``right`` the
+        carve lands but the offset axis scaling is less verified.  Prefer
+        the front-facing three when exact placement matters.
     :param depth_mm: Emboss/deboss depth in mm.  ``0`` = auto based on
         *material* (e.g. 0.6 mm for PLA, 1.2 mm for TPU).
     :param mode: ``"deboss"`` (cut into surface) or ``"emboss"`` (raised).
@@ -14350,8 +14482,15 @@ def decorate_surface(
     :param material: Material for depth auto-tuning (default ``"PLA"``).
     :param content_type: Override auto-detection: ``"svg"``, ``"image"``,
         ``"text"``.  Default ``"auto"`` detects from *content*.
-    :param offset_x_mm: Horizontal offset from center (mm).
-    :param offset_y_mm: Vertical offset from center (mm).
+    :param offset_x_mm: Placement offset from the face centre along the
+        face's own WIDTH axis, in mm — positive slides the content
+        toward the content's right.  Offsets are FACE-LOCAL: they are
+        applied inside the face-aligning rotation, so they always move
+        the art in the face plane, never along its normal.
+    :param offset_y_mm: Same, along the face's HEIGHT axis — positive
+        slides the content toward the content's top.  Measured
+        world-axis mapping per face: top +y, bottom −y, front +z,
+        back −z.
     :param image_style: Image preprocessing style.  ``"auto"`` uses
         ``"coin"`` for photos.  See docstring for all options.
     :param placement: Named position preset for content placement.
@@ -14561,17 +14700,55 @@ def decorate_surface(
         elif ctype == "image":
             from kiln.image_to_surface import prepare_image_for_emboss
 
-            effective_style = image_style if image_style != "auto" else "coin"
-            # Coin style uses proven pipeline defaults: 250px, flip for OpenSCAD
-            coin_like = effective_style in ("coin", "medallion")
-            content_info = prepare_image_for_emboss(
-                content,
-                work_dir,
-                max_resolution=250 if coin_like else 200,
-                invert=(mode == "deboss"),
-                style=effective_style,
-                flip_rows=coin_like,
-            )
+            effective_style = image_style
+            if effective_style == "auto":
+                # Bi-level marks (logos, wordmarks, line art) carve as
+                # traced vector strokes; continuous-tone photos keep the
+                # heightmap relief path.
+                try:
+                    from kiln.mark_geometry import is_bilevel_image
+
+                    effective_style = (
+                        "stencil" if is_bilevel_image(content) else "coin"
+                    )
+                except Exception:  # noqa: BLE001 — detector never blocks a decorate
+                    effective_style = "coin"
+
+            if effective_style in ("stencil", "logo"):
+                # Crisp mark path: trace the ink into native polygon()
+                # geometry and carve ONLY the strokes — no tile frame, no
+                # background carve, no pixel staircase, no mirroring.
+                try:
+                    from kiln.image_to_surface import prepare_logo_image_for_emboss
+
+                    content_info = prepare_logo_image_for_emboss(content, work_dir)
+                except (ValueError, ImportError):
+                    logger.warning(
+                        "Mark trace failed for %s — heightmap stencil fallback",
+                        content,
+                        exc_info=True,
+                    )
+                    content_info = prepare_image_for_emboss(
+                        content,
+                        work_dir,
+                        max_resolution=250,
+                        invert=(mode == "deboss"),
+                        style="stencil",
+                        flip_rows=True,
+                    )
+            else:
+                coin_like = effective_style in ("coin", "medallion")
+                content_info = prepare_image_for_emboss(
+                    content,
+                    work_dir,
+                    max_resolution=250 if coin_like else 200,
+                    invert=(mode == "deboss"),
+                    style=effective_style,
+                    # surface() reads rows bottom-to-top; EVERY heightmap
+                    # style needs the row flip or the relief renders
+                    # upside-down (only the coin path had this right).
+                    flip_rows=True,
+                )
 
         elif ctype == "text":
             import math
@@ -14739,24 +14916,33 @@ def decorate_surface(
                 pass
 
         if not boolean_ok and ctype == "svg":
-            # SVG boolean failed — try heightmap fallback
+            # SVG boolean failed — rasterize and re-carve.  Trace the
+            # raster back into vector strokes first (still frameless);
+            # only if THAT fails fall to the heightmap stencil, which
+            # carves the whole tile.
             try:
                 from kiln.image_to_surface import (
                     prepare_image_for_emboss,
+                    prepare_logo_image_for_emboss,
                     rasterize_svg_to_png,
                 )
 
                 raster_png = os.path.join(work_dir, "svg_rasterized.png")
                 rasterize_svg_to_png(content, raster_png, width_px=2048)
-                content_info = prepare_image_for_emboss(
-                    raster_png,
-                    work_dir,
-                    max_resolution=400,
-                    invert=(mode == "deboss"),
-                    style="stencil",
-                    edge_enhance=False,
-                    flip_rows=True,
-                )
+                try:
+                    content_info = prepare_logo_image_for_emboss(
+                        raster_png, work_dir
+                    )
+                except (ValueError, ImportError):
+                    content_info = prepare_image_for_emboss(
+                        raster_png,
+                        work_dir,
+                        max_resolution=400,
+                        invert=(mode == "deboss"),
+                        style="stencil",
+                        edge_enhance=False,
+                        flip_rows=True,
+                    )
                 scad_result = generate_emboss_scad(
                     model_path=abs_model,
                     content_info=content_info,
@@ -14836,6 +15022,16 @@ def decorate_surface(
         try:
             from kiln.daily_stats import record_event
             record_event("decorations", detail=ctype or "unknown")
+        except Exception:
+            pass
+
+        # Quiet quota tile on a SUCCESSFUL decoration, so a free/local caller
+        # sees where they stand ("2 of 3 used") before the wall instead of
+        # only hitting it as an error next time. Best-effort — never blocks
+        # a decoration that already succeeded.
+        try:
+            from kiln.decoration_quota import decoration_quota_status
+            result_dict["quota"] = decoration_quota_status()
         except Exception:
             pass
 

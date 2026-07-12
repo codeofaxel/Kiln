@@ -75,6 +75,7 @@ from kiln.cli.output import (
     format_status,
 )
 from kiln.cli.spend_caps_commands import register_spend_caps_cli
+from kiln.cli.bridge_commands import register_bridge_cli
 
 logger = logging.getLogger(__name__)
 
@@ -11431,6 +11432,10 @@ register_install_openscad_cli(cli)
 # opt-in enabled can drive cap changes from the CLI without kiln-pro
 # being installed locally.
 register_spend_caps_cli(cli)
+
+# `kiln bridge {status,start,stop,enable,disable}` — run the web->printer bridge
+# as an opt-in background service.  Public surface; no kiln-pro dependency.
+register_bridge_cli(cli)
 
 
 def main() -> None:

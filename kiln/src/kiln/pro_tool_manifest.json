@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-04T05:55:43.074405+00:00",
-  "tool_count": 369,
+  "generated": "2026-07-12T03:47:12.896570+00:00",
+  "tool_count": 379,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -105,36 +105,6 @@
     }
   },
   "tools": [
-    {
-      "name": "kiln_signin",
-      "description": "Start a Kiln sign-in via OAuth.",
-      "tier": "free",
-      "category": "account_management",
-      "parameters": {
-        "properties": {},
-        "title": "kiln_signinArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "kiln_signin_poll",
-      "description": "Check whether a sign-in started by ``kiln_signin`` is done.",
-      "tier": "free",
-      "category": "account_management",
-      "parameters": {
-        "properties": {
-          "device_code": {
-            "title": "Device Code",
-            "type": "string"
-          }
-        },
-        "required": [
-          "device_code"
-        ],
-        "title": "kiln_signin_pollArguments",
-        "type": "object"
-      }
-    },
     {
       "name": "ams_filament_drying",
       "description": "Start or stop an AMS 2 Pro / AMS HT active dry cycle.",
@@ -2580,6 +2550,80 @@
       }
     },
     {
+      "name": "inspect_mesh_view",
+      "description": "Look at a mesh the way a human orbits the 3D viewer \u2014 iteratively.",
+      "tier": "free",
+      "category": "design_inspection",
+      "parameters": {
+        "properties": {
+          "mesh_path": {
+            "title": "Mesh Path",
+            "type": "string"
+          },
+          "mode": {
+            "default": "view",
+            "title": "Mode",
+            "type": "string"
+          },
+          "yaw_deg": {
+            "default": 32.0,
+            "title": "Yaw Deg",
+            "type": "number"
+          },
+          "pitch_deg": {
+            "default": -18.0,
+            "title": "Pitch Deg",
+            "type": "number"
+          },
+          "zoom": {
+            "default": 1.0,
+            "title": "Zoom",
+            "type": "number"
+          },
+          "focus": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Focus"
+          },
+          "focus_region": {
+            "default": "",
+            "title": "Focus Region",
+            "type": "string"
+          },
+          "section_frac": {
+            "default": 0.5,
+            "title": "Section Frac",
+            "type": "number"
+          },
+          "reference_path": {
+            "default": "",
+            "title": "Reference Path",
+            "type": "string"
+          },
+          "size": {
+            "default": 800,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mesh_path"
+        ],
+        "title": "inspect_mesh_viewArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "change_part_color",
       "description": "Change a part's color in a design recipe and re-slice.",
       "tier": "free",
@@ -2670,6 +2714,41 @@
           "instruction"
         ],
         "title": "smart_redesignArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "build_organic_mesh",
+      "description": "Build a freeform/organic mesh from a smooth-blended primitive recipe.",
+      "tier": "free",
+      "category": "design_session",
+      "parameters": {
+        "properties": {
+          "recipe": {
+            "additionalProperties": true,
+            "title": "Recipe",
+            "type": "object"
+          },
+          "output_path": {
+            "default": "",
+            "title": "Output Path",
+            "type": "string"
+          },
+          "parts": {
+            "default": false,
+            "title": "Parts",
+            "type": "boolean"
+          },
+          "output_dir": {
+            "default": "",
+            "title": "Output Dir",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipe"
+        ],
+        "title": "build_organic_meshArguments",
         "type": "object"
       }
     },
@@ -2766,6 +2845,23 @@
           "verb"
         ],
         "title": "design_sessionArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_organic_idiom",
+      "description": "Look up a curated block-out pattern for the organic engine.",
+      "tier": "free",
+      "category": "design_session",
+      "parameters": {
+        "properties": {
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "title": "get_organic_idiomArguments",
         "type": "object"
       }
     },
@@ -7753,6 +7849,92 @@
       }
     },
     {
+      "name": "check_magnet_design",
+      "description": "Check a proposed printed magnet design for hidden failure modes.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "use_case": {
+            "title": "Use Case",
+            "type": "string"
+          },
+          "magnet_family": {
+            "default": "",
+            "title": "Magnet Family",
+            "type": "string"
+          },
+          "grade_class": {
+            "default": "",
+            "title": "Grade Class",
+            "type": "string"
+          },
+          "coating": {
+            "default": "",
+            "title": "Coating",
+            "type": "string"
+          },
+          "load_mode": {
+            "default": "pull",
+            "title": "Load Mode",
+            "type": "string"
+          },
+          "environment": {
+            "default": "indoor",
+            "title": "Environment",
+            "type": "string"
+          },
+          "max_temp_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Temp C"
+          },
+          "has_air_gap": {
+            "default": false,
+            "title": "Has Air Gap",
+            "type": "boolean"
+          },
+          "adhesive_only": {
+            "default": false,
+            "title": "Adhesive Only",
+            "type": "boolean"
+          },
+          "commercial": {
+            "default": false,
+            "title": "Commercial",
+            "type": "boolean"
+          },
+          "child_accessible": {
+            "default": false,
+            "title": "Child Accessible",
+            "type": "boolean"
+          },
+          "body_adjacent": {
+            "default": false,
+            "title": "Body Adjacent",
+            "type": "boolean"
+          },
+          "show_math": {
+            "default": false,
+            "title": "Show Math",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "use_case"
+        ],
+        "title": "check_magnet_designArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "design_hole_for_product",
       "description": "Design a hole or slot sized to fit a real-world product.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -7863,6 +8045,72 @@
       }
     },
     {
+      "name": "generate_magnet_qc_plan",
+      "description": "Generate a Business-tier QC plan for a magnetized printed product.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "use_case": {
+            "title": "Use Case",
+            "type": "string"
+          },
+          "child_accessible": {
+            "default": false,
+            "title": "Child Accessible",
+            "type": "boolean"
+          },
+          "body_adjacent": {
+            "default": false,
+            "title": "Body Adjacent",
+            "type": "boolean"
+          },
+          "magnet_family": {
+            "default": "",
+            "title": "Magnet Family",
+            "type": "string"
+          },
+          "grade_class": {
+            "default": "",
+            "title": "Grade Class",
+            "type": "string"
+          },
+          "coating": {
+            "default": "",
+            "title": "Coating",
+            "type": "string"
+          },
+          "retention_method": {
+            "default": "",
+            "title": "Retention Method",
+            "type": "string"
+          },
+          "environment": {
+            "default": "indoor",
+            "title": "Environment",
+            "type": "string"
+          },
+          "max_temp_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Temp C"
+          }
+        },
+        "required": [
+          "use_case"
+        ],
+        "title": "generate_magnet_qc_planArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "get_adhesive_profile",
       "description": "Look up one adhesive's cited spec -- cure schedule, service temp, what it bonds.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -7912,8 +8160,8 @@
     },
     {
       "name": "ingest_material_datasheet",
-      "description": "Verify quoted datasheet values and build a structured material profile.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Verify quoted datasheet values and build a structured material profile.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -7982,8 +8230,8 @@
     },
     {
       "name": "list_ingested_materials",
-      "description": "Browse your ingested-materials library, or fetch one full spec.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Browse your ingested-materials library, or fetch one full spec.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -8061,8 +8309,8 @@
     },
     {
       "name": "read_material_datasheet",
-      "description": "Get the extraction rules + field catalog (and fingerprint your text).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Get the extraction rules + field catalog (and fingerprint your text).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -8280,6 +8528,102 @@
       }
     },
     {
+      "name": "recommend_magnet_for_product",
+      "description": "Recommend a magnet strategy for a printed product, with tier-gated depth.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "use_case": {
+            "title": "Use Case",
+            "type": "string"
+          },
+          "print_material": {
+            "default": "",
+            "title": "Print Material",
+            "type": "string"
+          },
+          "environment": {
+            "default": "indoor",
+            "title": "Environment",
+            "type": "string"
+          },
+          "load_mode": {
+            "default": "pull",
+            "title": "Load Mode",
+            "type": "string"
+          },
+          "target_material": {
+            "default": "",
+            "title": "Target Material",
+            "type": "string"
+          },
+          "max_temp_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Temp C"
+          },
+          "commercial": {
+            "default": false,
+            "title": "Commercial",
+            "type": "boolean"
+          },
+          "child_accessible": {
+            "default": false,
+            "title": "Child Accessible",
+            "type": "boolean"
+          },
+          "body_adjacent": {
+            "default": false,
+            "title": "Body Adjacent",
+            "type": "boolean"
+          },
+          "strong_magnets": {
+            "default": true,
+            "title": "Strong Magnets",
+            "type": "boolean"
+          },
+          "multiple_magnets": {
+            "default": false,
+            "title": "Multiple Magnets",
+            "type": "boolean"
+          },
+          "supplier_packet": {
+            "default": false,
+            "title": "Supplier Packet",
+            "type": "boolean"
+          },
+          "compliance": {
+            "default": false,
+            "title": "Compliance",
+            "type": "boolean"
+          },
+          "current_supply_chain": {
+            "default": false,
+            "title": "Current Supply Chain",
+            "type": "boolean"
+          },
+          "show_math": {
+            "default": false,
+            "title": "Show Math",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "use_case"
+        ],
+        "title": "recommend_magnet_for_productArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "record_bond_outcome",
       "description": "Record whether a glued joint held or failed \u2014 so Kiln learns over time.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -8340,8 +8684,8 @@
     },
     {
       "name": "record_chemical_outcome",
-      "description": "Record how a printed part actually held up to a chemical -- so Kiln learns.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Record how a printed part actually held up to a chemical -- so Kiln learns.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -8389,6 +8733,89 @@
           "result"
         ],
         "title": "record_chemical_outcomeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_magnet_outcome",
+      "description": "Record whether a magnet actually held (Pro) \u2014 closes the recommender's feedback loop.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "family": {
+            "title": "Family",
+            "type": "string"
+          },
+          "retention_method": {
+            "title": "Retention Method",
+            "type": "string"
+          },
+          "result": {
+            "title": "Result",
+            "type": "string"
+          },
+          "environment": {
+            "default": "",
+            "title": "Environment",
+            "type": "string"
+          },
+          "load_mode": {
+            "default": "",
+            "title": "Load Mode",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "family",
+          "retention_method",
+          "result"
+        ],
+        "title": "record_magnet_outcomeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "review_magnet_supplier_packet",
+      "description": "Review a magnet supplier packet for Enterprise-grade evidence gaps.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "supplier_fields_json": {
+            "default": "",
+            "title": "Supplier Fields Json",
+            "type": "string"
+          },
+          "max_temp_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Temp C"
+          }
+        },
+        "title": "review_magnet_supplier_packetArguments",
         "type": "object"
       }
     },
@@ -8713,6 +9140,93 @@
           }
         },
         "title": "tail_event_logArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "delete_decoration",
+      "description": "Delete a decoration preset \u2014 retire it (default, recoverable) or erase it permanently.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "other",
+      "parameters": {
+        "properties": {
+          "preset_id": {
+            "title": "Preset Id",
+            "type": "string"
+          },
+          "permanent": {
+            "default": false,
+            "title": "Permanent",
+            "type": "boolean"
+          },
+          "confirm": {
+            "default": "",
+            "title": "Confirm",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preset_id"
+        ],
+        "title": "delete_decorationArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "delete_design",
+      "description": "Delete a design \u2014 retire it (default, recoverable) or erase it permanently.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "other",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "permanent": {
+            "default": false,
+            "title": "Permanent",
+            "type": "boolean"
+          },
+          "confirm": {
+            "default": "",
+            "title": "Confirm",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "delete_designArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "delete_feature",
+      "description": "Delete a feature \u2014 retire it (default, recoverable) or erase it permanently.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "other",
+      "parameters": {
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "permanent": {
+            "default": false,
+            "title": "Permanent",
+            "type": "boolean"
+          },
+          "confirm": {
+            "default": "",
+            "title": "Confirm",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id"
+        ],
+        "title": "delete_featureArguments",
         "type": "object"
       }
     },
@@ -9355,6 +9869,47 @@
             "default": 600.0,
             "title": "Monitoring Max Wall S",
             "type": "number"
+          },
+          "plate_objects": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Plate Objects"
+          },
+          "failed_objects": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Failed Objects"
+          },
+          "printer_type": {
+            "default": "",
+            "title": "Printer Type",
+            "type": "string"
+          },
+          "allow_skip_failed_objects": {
+            "default": false,
+            "title": "Allow Skip Failed Objects",
+            "type": "boolean"
           }
         },
         "required": [
@@ -14652,9 +15207,16 @@
             "type": "string"
           },
           "resolution": {
-            "default": 300,
-            "title": "Resolution",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resolution"
           },
           "face": {
             "anyOf": [
@@ -14667,6 +15229,24 @@
             ],
             "default": null,
             "title": "Face"
+          },
+          "surface": {
+            "anyOf": [
+              {
+                "enum": [
+                  "all",
+                  "outside",
+                  "walls",
+                  "caps"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Surface"
           },
           "mark_image_path": {
             "anyOf": [
@@ -14695,6 +15275,16 @@
             "title": "Mark Placement",
             "type": "string"
           },
+          "mark_offset_x_mm": {
+            "default": 0.0,
+            "title": "Mark Offset X Mm",
+            "type": "number"
+          },
+          "mark_offset_y_mm": {
+            "default": 0.0,
+            "title": "Mark Offset Y Mm",
+            "type": "number"
+          },
           "mark_depth_mm": {
             "anyOf": [
               {
@@ -14706,6 +15296,11 @@
             ],
             "default": null,
             "title": "Mark Depth Mm"
+          },
+          "save_to_library": {
+            "default": false,
+            "title": "Save To Library",
+            "type": "boolean"
           }
         },
         "required": [
@@ -14732,9 +15327,16 @@
             "type": "string"
           },
           "tile_size_mm": {
-            "default": 40.0,
-            "title": "Tile Size Mm",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tile Size Mm"
           },
           "depth_mm": {
             "default": 1.2,
@@ -14795,7 +15397,8 @@
               "tie_dye",
               "marble",
               "lava",
-              "galaxy"
+              "galaxy",
+              "custom"
             ],
             "title": "Texture",
             "type": "string"
@@ -14804,6 +15407,30 @@
             "default": 4,
             "title": "Num Colors",
             "type": "integer"
+          },
+          "image_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Image Path"
+          },
+          "image_tile_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Image Tile Mm"
           },
           "color_palette": {
             "anyOf": [
@@ -14912,6 +15539,16 @@
             "title": "Mark Placement",
             "type": "string"
           },
+          "mark_offset_x_mm": {
+            "default": 0.0,
+            "title": "Mark Offset X Mm",
+            "type": "number"
+          },
+          "mark_offset_y_mm": {
+            "default": 0.0,
+            "title": "Mark Offset Y Mm",
+            "type": "number"
+          },
           "mark_depth_mm": {
             "anyOf": [
               {
@@ -14923,6 +15560,42 @@
             ],
             "default": null,
             "title": "Mark Depth Mm"
+          },
+          "relief_texture": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Relief Texture"
+          },
+          "relief_depth_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Relief Depth Mm"
+          },
+          "printer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Id"
           }
         },
         "required": [
@@ -15069,6 +15742,17 @@
           }
         },
         "title": "preview_texture_2dArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "push_palettes_to_cloud",
+      "description": "Push locally saved custom palettes to your cloud account.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "textures",
+      "parameters": {
+        "properties": {},
+        "title": "push_palettes_to_cloudArguments",
         "type": "object"
       }
     },

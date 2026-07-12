@@ -889,6 +889,58 @@ class TestSetBedTemp:
 
 
 # ---------------------------------------------------------------------------
+# set_fan tests
+# ---------------------------------------------------------------------------
+
+class TestSetFan:
+    """Tests for MoonrakerAdapter.set_fan() -- the part-cooling fan only."""
+
+    def test_full_speed(self) -> None:
+        adapter = _adapter()
+        resp = _mock_response(json_data={"result": "ok"})
+
+        with mock.patch.object(adapter._session, "request", return_value=resp) as mock_req:
+            ok = adapter.set_fan("part", 100)
+
+        assert ok is True
+        call_kwargs = mock_req.call_args
+        assert call_kwargs.kwargs.get("params") == {"script": "M106 S255"}
+
+    def test_zero_sends_m107(self) -> None:
+        adapter = _adapter()
+        resp = _mock_response(json_data={"result": "ok"})
+
+        with mock.patch.object(adapter._session, "request", return_value=resp) as mock_req:
+            adapter.set_fan("part", 0)
+
+        call_kwargs = mock_req.call_args
+        assert call_kwargs.kwargs.get("params") == {"script": "M107"}
+
+    def test_aliases_accepted(self) -> None:
+        adapter = _adapter()
+        resp = _mock_response(json_data={"result": "ok"})
+
+        with mock.patch.object(adapter._session, "request", return_value=resp):
+            adapter.set_fan("part_cooling", 50)
+            adapter.set_fan("cooling", 50)
+
+    def test_aux_is_rejected(self) -> None:
+        adapter = _adapter()
+        with pytest.raises(PrinterError):
+            adapter.set_fan("aux", 100)
+
+    def test_chamber_is_rejected(self) -> None:
+        adapter = _adapter()
+        with pytest.raises(PrinterError):
+            adapter.set_fan("chamber", 100)
+
+    def test_percent_out_of_range_raises(self) -> None:
+        adapter = _adapter()
+        with pytest.raises(PrinterError):
+            adapter.set_fan("part", 101)
+
+
+# ---------------------------------------------------------------------------
 # _send_gcode tests
 # ---------------------------------------------------------------------------
 

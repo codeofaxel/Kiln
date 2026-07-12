@@ -84,10 +84,11 @@ class TestStrokeToFillConversion:
 
         result = prepare_svg_for_emboss(str(svg_file), str(tmp_path / "out"))
 
-        # The processed SVG should contain a <polygon> element
-        with open(result["svg_path"]) as f:
-            processed = f.read()
-        assert "<polygon" in processed
+        # The stroke must become carvable filled geometry.  The mark
+        # parser now expands it directly to native OpenSCAD polygons
+        # (previously: a rewritten SVG file with <polygon> elements).
+        assert "polygon(" in result["openscad_polygons"]
+        assert result["content_width"] > 0
 
 
 # ---------------------------------------------------------------------------

@@ -748,7 +748,7 @@ class GeminiDeepThinkProvider(GenerationProvider):
         with the feedback as additional context (up to
         ``_MAX_VERIFY_RETRIES`` times).
 
-        If verification itself fails (e.g. OpenSCAD can't render PNG,
+        If verification itself fails (e.g. the STL can't be parsed,
         API error), the error is logged and the original result is returned
         unchanged -- verification failures never crash the pipeline.
         """
@@ -757,7 +757,6 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 api_key=self._api_key,
                 model=self._model,
                 session=self._session,
-                openscad_path=self._openscad,
             )
         except Exception as exc:
             logger.warning("Visual verify: failed to initialise verifier: %s", exc)

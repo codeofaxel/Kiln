@@ -465,6 +465,55 @@ class TestTroubleshootPrinter:
 
         assert result["success"] is False
 
+    @patch("kiln.server.get_printer_intel")
+    @patch("kiln.server.diagnose_issue")
+    def test_hms_code_adds_normalized_code_and_wiki_pointer(self, mock_diagnose, mock_intel):
+        from kiln.server import troubleshoot_printer
+
+        mock_diagnose.return_value = []
+        intel = MagicMock()
+        intel.display_name = "Bambu X1C"
+        intel.quirks = []
+        mock_intel.return_value = intel
+
+        # Mixed separators + case still normalize to underscore-joined upper hex.
+        result = troubleshoot_printer(
+            printer_id="bambu_x1c", symptom="", hms_code="0300-1a00-0002-0001"
+        )
+
+        assert result["success"] is True
+        assert result["hms_code"] == "0300_1A00_0002_0001"
+        assert result["hms_wiki_url"].endswith("/hmscode/0300_1A00_0002_0001")
+        # The free floor never carries a curated cause/fix — that is Pro+ only.
+        assert "hms_decoded" not in result
+
+    @patch("kiln.server.get_printer_intel")
+    @patch("kiln.server.diagnose_issue")
+    def test_non_code_hms_input_is_ignored(self, mock_diagnose, mock_intel):
+        from kiln.server import troubleshoot_printer
+
+        mock_diagnose.return_value = []
+        intel = MagicMock()
+        intel.display_name = "Bambu X1C"
+        intel.quirks = []
+        mock_intel.return_value = intel
+
+        result = troubleshoot_printer(
+            printer_id="bambu_x1c", symptom="clogged nozzle", hms_code="not-a-code"
+        )
+
+        assert result["success"] is True
+        assert "hms_code" not in result
+        assert "hms_wiki_url" not in result
+
+    def test_no_symptom_or_code_is_guarded(self):
+        from kiln.server import troubleshoot_printer
+
+        result = troubleshoot_printer(printer_id="ender3", symptom="", hms_code="")
+
+        assert result.get("success") is not True
+        assert result["error"]["code"] == "INVALID_INPUT"
+
 
 # ---------------------------------------------------------------------------
 # TestUploadFileConfirm

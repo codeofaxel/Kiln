@@ -2743,8 +2743,17 @@ def _compute_score(
     if thin_walls.thin_wall_count > 0:
         score -= min(25, int(thin_walls.thin_wall_percentage * 0.5))
 
-    # Bridging deductions (max -15)
-    if bridging.bridge_count > 0:
+    # Bridging deductions (max -15) — only when the bridges actually need
+    # support.  ``bridge_count`` alone counts every short, self-supporting
+    # span too: a decorative surface texture's grooves register as 1000+
+    # sub-millimetre "bridges" (each well under the 10 mm self-support
+    # limit, so ``needs_supports_for_bridges`` is False) and used to max
+    # this deduction out, dropping a perfectly printable textured part two
+    # whole grades for relief that prints fine with no supports.  Gate on
+    # ``needs_supports_for_bridges`` — the same > 10 mm span test the
+    # "Long bridges detected" recommendation already uses below — so the
+    # score and the advice finally agree.
+    if bridging.bridge_count > 0 and bridging.needs_supports_for_bridges:
         score -= min(15, 5 + bridging.bridge_count)
 
     # Bed adhesion deductions (max -15)
