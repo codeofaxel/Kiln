@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kiln3d"
-version = "1.1.9"
-description = "MCP server + CLI that gives AI agents safe access to 3D printers (OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo) — 847 MCP capabilities for AI-driven print workflows"
+version = "1.2.0"
+description = "MCP server + CLI that gives AI agents safe access to 3D printers (OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo) — 867 MCP capabilities for AI-driven print workflows"
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
 requires-python = ">=3.10"
@@ -46,6 +46,11 @@ dependencies = [
     "rich>=12.0",
     "paho-mqtt>=2.0",
     "cryptography>=41.0",
+    # websockets powers the web->printer bridge's dial-out client
+    # (``kiln.bridge_client``) — a core dep, not an extra, so the
+    # documented `kiln bridge enable` works on a fresh install instead
+    # of erroring with "install websockets first".
+    "websockets>=12.0",
     # numpy powers the ray-cast wall-thickness measurement in
     # ``kiln.printability._analyze_thin_walls`` — promoted from the
     # ``mesh-diagnostics`` extra so every install measures walls

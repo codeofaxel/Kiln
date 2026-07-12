@@ -619,6 +619,45 @@ class PrinterAdapter(ABC):
         if target > max_temp:
             raise PrinterError(f"{heater} temperature {target}°C exceeds safety limit ({max_temp}°C).")
 
+    # -- fan control ------------------------------------------------------
+
+    #: Aliases accepted for the single generic default part-cooling fan.
+    #: Unlike Bambu's fixed part/aux/chamber layout (a protocol Bambu itself
+    #: controls end-to-end), generic Marlin/Klipper firmware has no
+    #: standardized auxiliary or chamber fan -- a machine may have neither,
+    #: or expose one only through a printer-specific macro Kiln has no way
+    #: to discover automatically.  So a generic ``set_fan`` supports ONLY
+    #: this one fan; adapters reject anything else rather than guess.
+    _PART_COOLING_FAN_ALIASES: frozenset[str] = frozenset({"part", "part_cooling", "cooling"})
+
+    def _validate_part_fan(self, node: str, percent: int) -> int:
+        """Validate a generic-adapter ``set_fan`` call; return the 0-255 PWM.
+
+        Only the part-cooling fan (:data:`_PART_COOLING_FAN_ALIASES`) is
+        accepted -- see the class attribute for why auxiliary/chamber names
+        can't be supported generically.
+
+        Raises:
+            PrinterError: If *node* isn't the part-cooling fan, or *percent*
+                is outside 0-100.
+        """
+        key = node.strip().lower()
+        if key not in self._PART_COOLING_FAN_ALIASES:
+            raise PrinterError(
+                f"Fan node {node!r} isn't supported here. This printer only "
+                "exposes a single default part-cooling fan (node='part') -- "
+                "unlike Bambu, there's no standard auxiliary or chamber fan "
+                "command Kiln can send without knowing your machine's own "
+                "G-code macros."
+            )
+        try:
+            pct = int(percent)
+        except (TypeError, ValueError) as exc:
+            raise PrinterError(f"set_fan: percent must be an integer 0-100 ({exc}).") from exc
+        if not 0 <= pct <= 100:
+            raise PrinterError(f"set_fan: percent must be 0-100, got {pct}.")
+        return round(pct / 100 * 255)
+
     @abstractmethod
     def set_tool_temp(self, target: float) -> bool:
         """Set the hot-end (tool) target temperature in degrees Celsius.

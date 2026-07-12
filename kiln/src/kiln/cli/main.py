@@ -47,6 +47,7 @@ except ImportError:
     GenerationError = Exception  # type: ignore[misc,assignment]
 
 from kiln.cli.auth_commands import register_auth_cli
+from kiln.cli.bridge_commands import register_bridge_cli
 from kiln.cli.config import (
     list_printers as _list_printers,
 )
@@ -11431,6 +11432,10 @@ register_install_openscad_cli(cli)
 # opt-in enabled can drive cap changes from the CLI without kiln-pro
 # being installed locally.
 register_spend_caps_cli(cli)
+
+# `kiln bridge {status,start,stop,enable,disable}` — run the web->printer bridge
+# as an opt-in background service.  Public surface; no kiln-pro dependency.
+register_bridge_cli(cli)
 
 
 def main() -> None:

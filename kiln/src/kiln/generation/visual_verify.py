@@ -4,6 +4,13 @@ After a 3D model is generated from a text prompt, this module renders a
 preview image of the STL and sends it to Gemini Vision to score how well
 the result matches the original prompt.  If the score is below a
 configurable threshold the caller can use the feedback to regenerate.
+
+Rendering goes through :mod:`kiln.colored_renderer` — the same
+smooth-shaded (Gouraud-lit) software renderer ``visualize_model`` uses —
+rather than OpenSCAD's flat-shaded preview mode.  A judge scoring
+"does this match the prompt" needs to see the model the way a person
+would; flat per-facet shading makes a good result look lumpy and can
+bias the score against geometry that is actually fine.
 """
 
 from __future__ import annotations
@@ -13,11 +20,8 @@ import contextlib
 import logging
 import os
 import re
-import shutil
-import subprocess
-import sys
-import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -28,9 +32,11 @@ logger = logging.getLogger(__name__)
 
 _GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 _REQUEST_TIMEOUT = 60
-_MACOS_APP_PATH = (
-    "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD" if sys.platform == "darwin" else ""
-)
+
+# Matches the flat gray ("#AAAAAA") the old OpenSCAD preview used — a
+# neutral material color that doesn't bias the vision judge toward or
+# away from any particular filament color.
+_DEFAULT_COLOR = (170, 170, 170)
 
 _VERIFICATION_PROMPT = """\
 You are evaluating a 3D model that was generated from a text prompt.
@@ -62,6 +68,35 @@ class VerificationResult:
     suggestion: str  # How to fix if score is low
 
 
+def _load_stl_as_colored_triangles(stl_path: str, color=_DEFAULT_COLOR) -> list:
+    """Parse an STL into the uniform-color triangle list the smooth
+    renderer expects.
+
+    Reuses :func:`kiln.generation.validation._parse_stl` — the same
+    dependency-free binary/ASCII STL reader ``preview.py`` already uses
+    for its own STL path — so this needs no mesh library beyond stdlib.
+    """
+    from kiln.generation.validation import _parse_stl
+    from kiln.threemf_parser import ColoredTriangle
+
+    errors: list[str] = []
+    raw_triangles, _vertices = _parse_stl(Path(stl_path), errors)
+    if errors:
+        raise GenerationError(
+            f"Could not parse STL for rendering: {'; '.join(errors)}",
+            code="STL_PARSE_ERROR",
+        )
+    if not raw_triangles:
+        raise GenerationError(
+            f"STL file has no triangles: {stl_path}",
+            code="STL_EMPTY",
+        )
+    return [
+        ColoredTriangle(v0=tri[0], v1=tri[1], v2=tri[2], color=color)
+        for tri in raw_triangles
+    ]
+
+
 class VisualVerifier:
     """Post-generation visual verification using Gemini Vision."""
 
@@ -73,12 +108,10 @@ class VisualVerifier:
         *,
         model: str = "gemini-2.5-flash",
         session: requests.Session | None = None,
-        openscad_path: str | None = None,
     ) -> None:
         self._api_key = api_key
         self._model = model
         self._session = session or requests.Session()
-        self._openscad = openscad_path or self._find_openscad()
 
     # ------------------------------------------------------------------
     # Public API
@@ -105,15 +138,12 @@ class VisualVerifier:
                 os.unlink(png_path)
 
     def render_stl_to_png(self, stl_path: str) -> str:
-        """Render an STL file to a PNG preview using OpenSCAD.
-
-        Uses OpenSCAD's command-line rendering with a sensible default
-        camera angle that shows the model from a 3/4 perspective.
+        """Render an STL file to a PNG preview, smooth-shaded, isometric.
 
         :param stl_path: Path to the STL file.
         :returns: Path to the rendered PNG (caller is responsible for
             cleanup).
-        :raises GenerationError: If OpenSCAD cannot render the image.
+        :raises GenerationError: If the STL can't be parsed or rendered.
         """
         if not os.path.isfile(stl_path):
             raise GenerationError(
@@ -121,97 +151,47 @@ class VisualVerifier:
                 code="STL_NOT_FOUND",
             )
 
-        fd, png_path = tempfile.mkstemp(suffix=".png", prefix="kiln_verify_")
-        os.close(fd)
+        from kiln.colored_renderer import render_colored_mesh_multi_angle
 
-        # Build the OpenSCAD command for PNG rendering.
-        # --render forces full CGAL render (not just preview).
-        # --camera sets a 3/4 view: translation x,y,z then rotation x,y,z
-        # then distance.
-        # --imgsize sets output resolution.
-        # We import the STL via a tiny wrapper script so OpenSCAD can
-        # render it.
-        scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_verify_")
+        triangles = _load_stl_as_colored_triangles(stl_path)
         try:
-            with os.fdopen(scad_fd, "w", encoding="utf-8") as fh:
-                # Use an import statement to load the STL inside OpenSCAD
-                escaped = stl_path.replace("\\", "\\\\").replace('"', '\\"')
-                fh.write(f'color("#AAAAAA") import("{escaped}");\n')
+            results = render_colored_mesh_multi_angle(triangles, angles=["isometric"])
+        except Exception as exc:  # noqa: BLE001 — surface as GenerationError
+            raise GenerationError(
+                f"Rendering STL preview failed: {exc}",
+                code="RENDER_FAILED",
+            ) from exc
 
-            cmd = [
-                self._openscad,
-                "--preview",
-                "-o", png_path,
-                "--imgsize=800,600",
-                "--colorscheme=DeepOcean",
-                "--camera=0,0,0,55,0,25,200",
-                scad_path,
-            ]
-
-            logger.debug("Visual verify: rendering STL preview: %s", " ".join(cmd))
-
-            try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                )
-            except FileNotFoundError as exc:
-                raise GenerationError(
-                    "OpenSCAD binary not found for PNG rendering.",
-                    code="OPENSCAD_NOT_FOUND",
-                ) from exc
-            except subprocess.TimeoutExpired as exc:
-                raise GenerationError(
-                    "OpenSCAD PNG rendering timed out.",
-                    code="RENDER_TIMEOUT",
-                ) from exc
-
-            if result.returncode != 0:
-                stderr = (result.stderr or "").strip()[:300]
-                raise GenerationError(
-                    f"OpenSCAD PNG render failed (exit {result.returncode}): {stderr}",
-                    code="RENDER_FAILED",
-                )
-
-            if not os.path.isfile(png_path) or os.path.getsize(png_path) == 0:
-                raise GenerationError(
-                    "OpenSCAD produced no PNG output.",
-                    code="RENDER_EMPTY",
-                )
-
-            logger.info(
-                "Visual verify: rendered preview -> %s (%.1f KB)",
-                png_path,
-                os.path.getsize(png_path) / 1024,
+        png_path = results[0]["path"]
+        if not os.path.isfile(png_path) or os.path.getsize(png_path) == 0:
+            raise GenerationError(
+                "Renderer produced no PNG output.",
+                code="RENDER_EMPTY",
             )
-            return png_path
 
-        finally:
-            with contextlib.suppress(OSError):
-                os.unlink(scad_path)
+        logger.info(
+            "Visual verify: rendered preview -> %s (%.1f KB)",
+            png_path,
+            os.path.getsize(png_path) / 1024,
+        )
+        return png_path
 
-    # Camera angles for multi-angle rendering: (label, --camera value)
-    _ANGLES: list[tuple[str, str]] = [
-        ("isometric", "--camera=0,0,0,55,0,25,200"),
-        ("front", "--camera=0,0,0,0,0,0,200"),
-        ("right_side", "--camera=0,0,0,0,0,90,200"),
-        ("top", "--camera=0,0,0,90,0,0,200"),
-        ("bottom", "--camera=0,0,0,-90,0,0,200"),
-    ]
+    # Angle order matches the historical 5-view contract callers rely on
+    # (kiln.plugins.generation_tools indexes the returned list
+    # positionally: isometric, front, right/side, top, bottom).
+    _MULTI_ANGLES: list[str] = ["isometric", "front", "right", "top", "bottom"]
 
     def render_multi_angle(self, stl_path: str) -> list[str]:
-        """Render an STL file from 5 different camera angles.
+        """Render an STL file from 5 standard camera angles, smooth-shaded.
 
         Produces isometric (3/4 view), front, right-side, top-down, and
-        bottom-up PNG previews using OpenSCAD.  The bottom view is
-        critical for verifying bed adhesion surface and first-layer
-        printability.
+        bottom-up PNG previews. The bottom view is critical for verifying
+        bed adhesion surface and first-layer printability.
 
         :param stl_path: Path to the STL file.
-        :returns: List of 5 PNG paths (caller is responsible for cleanup).
-        :raises GenerationError: If OpenSCAD cannot render any image.
+        :returns: List of 5 PNG paths, in isometric/front/right/top/bottom
+            order (caller is responsible for cleanup).
+        :raises GenerationError: If the STL can't be parsed or rendered.
         """
         if not os.path.isfile(stl_path):
             raise GenerationError(
@@ -219,81 +199,35 @@ class VisualVerifier:
                 code="STL_NOT_FOUND",
             )
 
-        # Build a temporary .scad wrapper once and reuse for all angles.
-        scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_verify_")
+        from kiln.colored_renderer import render_colored_mesh_multi_angle
+
+        triangles = _load_stl_as_colored_triangles(stl_path)
         try:
-            with os.fdopen(scad_fd, "w", encoding="utf-8") as fh:
-                escaped = stl_path.replace("\\", "\\\\").replace('"', '\\"')
-                fh.write(f'color("#AAAAAA") import("{escaped}");\n')
+            results = render_colored_mesh_multi_angle(
+                triangles, angles=self._MULTI_ANGLES
+            )
+        except Exception as exc:  # noqa: BLE001 — surface as GenerationError
+            raise GenerationError(
+                f"Rendering STL multi-angle preview failed: {exc}",
+                code="RENDER_FAILED",
+            ) from exc
 
-            png_paths: list[str] = []
-            for label, camera_arg in self._ANGLES:
-                fd, png_path = tempfile.mkstemp(
-                    suffix=f"_{label}.png", prefix="kiln_verify_"
+        png_paths: list[str] = []
+        for r in results:
+            path = r.get("path")
+            if not path or not os.path.isfile(path) or os.path.getsize(path) == 0:
+                raise GenerationError(
+                    f"Renderer produced no PNG output for {r.get('angle')} view.",
+                    code="RENDER_EMPTY",
                 )
-                os.close(fd)
+            logger.info(
+                "Visual verify [%s]: rendered preview -> %s",
+                r.get("angle"),
+                path,
+            )
+            png_paths.append(path)
 
-                cmd = [
-                    self._openscad,
-                    "--preview",
-                    "-o", png_path,
-                    "--imgsize=800,600",
-                    "--colorscheme=DeepOcean",
-                    camera_arg,
-                    scad_path,
-                ]
-
-                logger.debug(
-                    "Visual verify [%s]: rendering STL preview: %s",
-                    label,
-                    " ".join(cmd),
-                )
-
-                try:
-                    result = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=60,
-                    )
-                except FileNotFoundError as exc:
-                    raise GenerationError(
-                        "OpenSCAD binary not found for PNG rendering.",
-                        code="OPENSCAD_NOT_FOUND",
-                    ) from exc
-                except subprocess.TimeoutExpired as exc:
-                    raise GenerationError(
-                        f"OpenSCAD PNG rendering timed out ({label} view).",
-                        code="RENDER_TIMEOUT",
-                    ) from exc
-
-                if result.returncode != 0:
-                    stderr = (result.stderr or "").strip()[:300]
-                    raise GenerationError(
-                        f"OpenSCAD PNG render failed for {label} view "
-                        f"(exit {result.returncode}): {stderr}",
-                        code="RENDER_FAILED",
-                    )
-
-                if not os.path.isfile(png_path) or os.path.getsize(png_path) == 0:
-                    raise GenerationError(
-                        f"OpenSCAD produced no PNG output for {label} view.",
-                        code="RENDER_EMPTY",
-                    )
-
-                logger.info(
-                    "Visual verify [%s]: rendered preview -> %s (%.1f KB)",
-                    label,
-                    png_path,
-                    os.path.getsize(png_path) / 1024,
-                )
-                png_paths.append(png_path)
-
-            return png_paths
-
-        finally:
-            with contextlib.suppress(OSError):
-                os.unlink(scad_path)
+        return png_paths
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -429,20 +363,3 @@ class VisualVerifier:
             feedback=feedback,
             suggestion=suggestion,
         )
-
-    @staticmethod
-    def _find_openscad() -> str:
-        """Locate the OpenSCAD binary for PNG rendering."""
-        which = shutil.which("openscad")
-        if which:
-            return which
-
-        if (
-            _MACOS_APP_PATH
-            and os.path.isfile(_MACOS_APP_PATH)
-            and os.access(_MACOS_APP_PATH, os.X_OK)
-        ):
-            return _MACOS_APP_PATH
-
-        # Return "openscad" and let the caller handle FileNotFoundError
-        return "openscad"

@@ -123,6 +123,30 @@ class TestCrealityAdapter:
         assert status["slots"][0]["material"] == "PLA"
 
 
+class TestSetFan:
+    """set_fan() delegates straight to the Moonraker backend."""
+
+    def _adapter(self) -> CrealityAdapter:
+        with patch("kiln.printers.creality.requests.get") as mock_get:
+            mock_get.return_value = _ok_response({"result": {"klippy_state": "ready"}})
+            return CrealityAdapter("k1-max.local", timeout=5, retries=1)
+
+    def test_delegates_to_backend(self) -> None:
+        adapter = self._adapter()
+        with patch.object(
+            adapter._backend, "_send_gcode",
+        ) as mock_send_gcode:
+            ok = adapter.set_fan("part", 100)
+
+        assert ok is True
+        mock_send_gcode.assert_called_once_with("M106 S255")
+
+    def test_aux_is_rejected(self) -> None:
+        adapter = self._adapter()
+        with pytest.raises(PrinterError):
+            adapter.set_fan("aux", 100)
+
+
 class TestCrealityDiagnostics:
     def test_diagnostic_reports_resolved_port(self) -> None:
         with patch("kiln.printers.creality.requests.get") as mock_get:

@@ -1,12 +1,16 @@
 # Pinned dependencies for reproducible builds
-# Regenerate with: python3.12 -m venv /tmp/octoprint-cli-lock && /tmp/octoprint-cli-lock/bin/python -m pip install -e ".[dev]" && /tmp/octoprint-cli-lock/bin/python -m pip freeze | grep -v "^-e" | sort > requirements-lock.txt
+# Regenerate with a python3.10 venv (CI's oldest supported version — a
+# newer interpreter can silently resolve packages that drop 3.10/3.11
+# support, as happened on the kiln/ side on 2026-07-12):
+# python3.10 -m venv /tmp/octoprint-cli-lock && /tmp/octoprint-cli-lock/bin/python -m pip install -e ".[dev]" && /tmp/octoprint-cli-lock/bin/python -m pip freeze | grep -v "^-e" | sort > requirements-lock.txt
 PyYAML==6.0.3
 Pygments==2.20.0
-certifi==2026.4.22
-charset-normalizer==3.4.7
-click==8.3.3
-coverage==7.14.3
-idna==3.13
+certifi==2026.6.17
+charset-normalizer==3.4.9
+click==8.4.2
+coverage==7.15.0
+exceptiongroup==1.3.1
+idna==3.18
 iniconfig==2.3.0
 markdown-it-py==4.2.0
 mdurl==0.1.2
@@ -15,7 +19,9 @@ pluggy==1.6.0
 pytest-cov==7.1.0
 pytest-mock==3.15.1
 pytest==9.1.1
-requests==2.33.1
-responses==0.26.0
+requests==2.34.2
+responses==0.26.2
 rich==15.0.0
-urllib3==2.6.3
+tomli==2.4.1
+typing_extensions==4.16.0
+urllib3==2.7.0

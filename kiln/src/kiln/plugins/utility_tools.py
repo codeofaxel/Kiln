@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 import time
 from typing import Any
 
@@ -443,9 +442,34 @@ class _UtilityToolsPlugin:
             except Exception:  # noqa: BLE001
                 _update_info = None
 
+            # Signed-in state, so the agent can offer a free account at the
+            # natural moment (a save / share) rather than nagging. Reads the
+            # same token file the `kiln signin` CLI writes.
+            try:
+                from kiln.cli.auth_commands import _read_tokens
+
+                _tokens = _read_tokens()
+            except Exception:  # noqa: BLE001
+                _tokens = {}
+            if _tokens.get("access_token"):
+                _account = {"signed_in": True, "email": _tokens.get("email") or ""}
+            else:
+                _account = {
+                    "signed_in": False,
+                    "tool": "kiln_signin",
+                    "message": (
+                        "The user is not signed in. A free account adds a cloud "
+                        "design library with share links plus the free monthly "
+                        "allowance of Kiln's hosted tools. Offer to sign them in "
+                        "when they want to save or share a design — call "
+                        "kiln_signin, or they can run `kiln signin` in a terminal."
+                    ),
+                }
+
             return {
                 "success": True,
                 "update": _update_info,
+                "account": _account,
                 "overview": (
                     f"Kiln is agent infrastructure for 3D printing. This session "
                     f"has {live_tool_count} MCP tools ({live_capability_count} "

@@ -1,0 +1,8 @@
+[project]
+name = "kiln-mcpb-wrapper"
+version = "0.1.0"
+description = "uv-runtime wrapper that installs kiln3d for the Kiln MCPB bundle"
+requires-python = ">=3.10"
+# Unpinned here, but `mcpb pack` generates a uv.lock that DOES pin the
+# resolved kiln3d version — see mcpb/README.md. Repack at every release.
+dependencies = ["kiln3d"]

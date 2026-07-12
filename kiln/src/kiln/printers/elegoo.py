@@ -79,13 +79,38 @@ _CMD_DELETE_FILE = 257
 _CMD_LIST_FILES = 258
 _CMD_PRINT_HISTORY = 320
 _CMD_CAMERA_STREAM = 386
+# Cmd 403 is a shared "update settings" command: the effect depends on
+# which top-level key the Data.Data payload carries -- LightStatus (the
+# unused _CMD_TOGGLE_LIGHT alias below), TargetFanSpeed, or PrintSpeedPct
+# are all documented under this same command number, not three different
+# commands.  Source: the OpenCentauri SDCP v3 reference
+# (docs.opencentauri.cc/software/api/), cross-checked against two
+# independent reverse-engineering projects (github.com/WalkerFrederick/
+# sdcp-centauri-carbon, github.com/JoergSH/elegoocc) that document the
+# same TargetFanSpeed.{ModelFan,AuxiliaryFan,BoxFan} shape.
 _CMD_TOGGLE_LIGHT = 403
+_CMD_UPDATE_SETTINGS = 403
 _CMD_SET_TIMING = 512
 
 # SDCP ack codes
 _ACK_SUCCESS = 0
 _ACK_FAILURE = 1
 _ACK_FILE_NOT_FOUND = 2
+
+# This adapter also talks to resin/MSLA printers (Saturn, Mars) that have
+# no part-cooling fan concept at all, and SDCP has no machine-type enum to
+# gate on -- only the free-text Name/MachineName the printer reports at
+# connect time.  set_fan() refuses unless that name matches one of these
+# substrings (case-insensitive), so an unrecognized or undetermined machine
+# fails closed rather than risk sending a fan command to a resin printer.
+# The only FDM family this adapter documents today is Centauri Carbon.
+_FDM_MACHINE_NAME_SUBSTRINGS: tuple[str, ...] = ("centauri",)
+
+# Aliases accepted for the single part-cooling fan -- mirrors
+# PrinterAdapter._PART_COOLING_FAN_ALIASES, kept local here because SDCP's
+# TargetFanSpeed takes a 0-100 percent directly (no 0-255 PWM scaling), so
+# this adapter can't reuse _validate_part_fan's PWM-scaled return value.
+_ELEGOO_PART_FAN_ALIASES: frozenset[str] = frozenset({"part", "part_cooling", "cooling"})
 
 # SDCP print status codes → PrinterStatus mapping
 _PRINT_STATUS_MAP: dict[int, PrinterStatus] = {
@@ -1124,6 +1149,79 @@ class ElegooAdapter(PrinterAdapter):
                 )
             except PrinterError:
                 raise
+        return True
+
+    # ------------------------------------------------------------------
+    # Fan control
+    # ------------------------------------------------------------------
+
+    def _resolve_machine_name(self) -> str:
+        """Return the printer's reported Name/MachineName, fetching fresh
+        attributes if nothing is cached yet.  Returns ``""`` if it can't be
+        determined -- callers must treat that as "unknown", never as FDM.
+        """
+        with self._state_lock:
+            cached = self._last_status.get("Name") or self._last_status.get("MachineName")
+        if cached:
+            return str(cached)
+        try:
+            resp = self._send_command(_CMD_GET_ATTRIBUTES, timeout=5.0)
+        except PrinterError:
+            return ""
+        if not resp:
+            return ""
+        data = resp.get("Data", resp)
+        name = data.get("Name") or data.get("MachineName") or ""
+        return str(name)
+
+    def set_fan(self, node: str, percent: int) -> bool:
+        """Set the part-cooling fan speed via SDCP's settings command.
+
+        Only the single default part-cooling fan is supported. Refuses on
+        any machine that doesn't report an FDM-family name (this adapter
+        also talks to resin/MSLA printers with no part-cooling fan at all,
+        and SDCP has no machine-type field to gate on structurally --
+        see :data:`_FDM_MACHINE_NAME_SUBSTRINGS`).
+
+        Args:
+            node: Must be ``"part"`` (or the aliases ``"part_cooling"`` /
+                ``"cooling"``) — the part-cooling fan (SDCP's ``ModelFan``).
+            percent: Fan speed 0-100 (0 turns the fan off, 100 is full speed;
+                SDCP takes this percentage directly, no PWM scaling).
+
+        Returns:
+            ``True`` once the command is sent.
+
+        Raises:
+            PrinterError: If *node* is not the part-cooling fan, *percent* is
+                outside 0-100, or the machine isn't a recognized FDM model.
+        """
+        key = node.strip().lower()
+        if key not in _ELEGOO_PART_FAN_ALIASES:
+            raise PrinterError(
+                f"Fan node {node!r} isn't supported here. This printer only "
+                "exposes a single default part-cooling fan (node='part')."
+            )
+        try:
+            pct = int(percent)
+        except (TypeError, ValueError) as exc:
+            raise PrinterError(f"set_fan: percent must be an integer 0-100 ({exc}).") from exc
+        if not 0 <= pct <= 100:
+            raise PrinterError(f"set_fan: percent must be 0-100, got {pct}.")
+
+        machine_name = self._resolve_machine_name()
+        if not any(s in machine_name.lower() for s in _FDM_MACHINE_NAME_SUBSTRINGS):
+            raise PrinterError(
+                "Fan control isn't available on this printer. Kiln only "
+                "supports it on Elegoo's FDM line (Centauri Carbon) -- "
+                f"this machine reports as {machine_name or 'unknown'!r}, "
+                "and Elegoo's resin/MSLA printers have no part-cooling fan."
+            )
+
+        self._send_command_checked(
+            _CMD_UPDATE_SETTINGS,
+            {"TargetFanSpeed": {"ModelFan": pct}},
+        )
         return True
 
     # ------------------------------------------------------------------
