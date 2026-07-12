@@ -825,7 +825,7 @@ def _get_kb() -> _DesignKnowledgeBase:
 # ---------------------------------------------------------------------------
 
 
-def get_skin_contact_floor(material_id: str) -> "SkinContactFloor | None":
+def get_skin_contact_floor(material_id: str) -> SkinContactFloor | None:
     """The always-free skin-contact safety floor for a material, or ``None``.
 
     Worn-against-skin advisory only — never a skin-safe certification.  Returns
