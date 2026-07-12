@@ -37,7 +37,16 @@ _COLORSCHEME = re.compile(r"colorscheme", re.IGNORECASE)
 
 
 def _package_src_dir(mod_name: str) -> Path | None:
-    spec = importlib.util.find_spec(mod_name)
+    try:
+        spec = importlib.util.find_spec(mod_name)
+    except ValueError:
+        # A prior import in the same test session can leave a stub module in
+        # sys.modules with no __spec__ (e.g. kiln.server's free-tier
+        # pro-tool-stub registration for "kiln_pro") — find_spec() raises
+        # ValueError instead of returning None for that case.  Absent-or-
+        # stubbed both mean "nothing real to scan here", consistent with
+        # this file's own design intent below.
+        return None
     if spec is None or not spec.submodule_search_locations:
         return None
     return Path(next(iter(spec.submodule_search_locations)))

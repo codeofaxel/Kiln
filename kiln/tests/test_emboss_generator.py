@@ -8,6 +8,19 @@ from unittest.mock import patch
 
 import pytest
 
+
+def _openscad_available() -> bool:
+    try:
+        subprocess.run(["openscad", "--version"], capture_output=True, check=True)
+        return True
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return False
+
+
+needs_openscad = pytest.mark.skipif(
+    not _openscad_available(), reason="OpenSCAD required for real text compiles"
+)
+
 # ---------------------------------------------------------------------------
 # Tests: MATERIAL_DEPTHS and get_default_depth
 # ---------------------------------------------------------------------------
@@ -88,6 +101,7 @@ class TestGenerateEmbossScad:
         assert "import(" in scad_code
         assert "linear_extrude" in scad_code
 
+    @needs_openscad
     def test_text_content(self, tmp_path):
         from kiln.emboss_generator import generate_emboss_scad
 
@@ -136,6 +150,7 @@ class TestGenerateEmbossScad:
                 output_dir=str(tmp_path / "out"),
             )
 
+    @needs_openscad
     def test_output_paths(self, tmp_path):
         from kiln.emboss_generator import generate_emboss_scad
 
@@ -915,7 +930,13 @@ class TestOpenscadVersionWarning:
     def test_outdated_version_warns_accurately(self):
         from kiln.emboss_generator import openscad_version_warning
 
-        with patch("kiln.emboss_generator.get_openscad_version", return_value="2021.01"):
+        # install_command is platform-dependent (see test_install_command_per_platform);
+        # pin the platform so this assertion is deterministic regardless of which
+        # OS actually runs the test (Linux CI vs a macOS dev machine).
+        with (
+            patch("kiln.emboss_generator.get_openscad_version", return_value="2021.01"),
+            patch("kiln.emboss_generator.platform.system", return_value="Darwin"),
+        ):
             w = openscad_version_warning()
         assert w is not None
         assert w["version"] == "2021.01"
