@@ -171,7 +171,7 @@ def _estimate_fulfillment_cost(
     *,
     quantity: int = 1,
 ) -> dict[str, Any]:
-    """Estimate cost for fulfillment printing (Craftcloud, Sculpteo, etc.)."""
+    """Estimate cost for printing through a fulfillment provider."""
     # Fulfillment is typically 3-5x more expensive than local.
     local = _estimate_local_cost(material, quantity=quantity)
     multiplier = 4.0

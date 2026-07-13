@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1200 630" width="1200" height="630">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-labelledby="promo-title promo-description">
+  <title id="promo-title">Kiln and Craftcloud fulfillment</title>
+  <desc id="promo-description">Kiln connects AI-assisted 3D printing workflows with Craftcloud manufacturing services.</desc>
   <defs>
     <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#0a0a0f"/>
@@ -66,7 +68,7 @@
 
   <!-- ═══ Bottom tagline ═══ -->
   <text x="600" y="510" font-family="'Inter','Helvetica Neue',Arial,sans-serif" font-size="20" font-weight="500" fill="#888888" text-anchor="middle" letter-spacing="0.05em">AI-POWERED 3D PRINTING MEETS 150+ PRINT SERVICES</text>
-  <text x="600" y="545" font-family="'Inter','Helvetica Neue',Arial,sans-serif" font-size="15" font-weight="400" fill="#555555" text-anchor="middle">FDM &#x2022; SLA &#x2022; SLS &#x2022; MJF &#x2022; Metal &#x2014; No API key required</text>
+  <text x="600" y="545" font-family="'Inter','Helvetica Neue',Arial,sans-serif" font-size="15" font-weight="400" fill="#666666" text-anchor="middle">FDM &#x2022; SLA &#x2022; SLS &#x2022; MJF &#x2022; Metal &#x2014; No API key required</text>
 
   <!-- Bottom accent line -->
   <rect x="0" y="627" width="1200" height="3" fill="url(#accentLine)"/>

@@ -37,7 +37,6 @@ class SkillManifest:
             "KILN_AUTONOMY_LEVEL",
             "KILN_HEATER_TIMEOUT",
             "KILN_CRAFTCLOUD_API_KEY",
-            "KILN_SCULPTEO_API_KEY",
             "GEMINI_API_KEY",
             "KILN_MESHY_API_KEY",
             "KILN_TRIPO3D_API_KEY",

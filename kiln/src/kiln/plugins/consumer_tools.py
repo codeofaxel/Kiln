@@ -336,7 +336,7 @@ class _ConsumerToolsPlugin:
         ) -> dict:
             """Suggest a material when ordering a print from a fulfillment provider.
 
-            Use this when routing a print job to a service (Sculpteo, Craftcloud)
+            Use this when routing a print job to a fulfillment provider
             and need to pick the right material + technology for the order.
 
             **Which material tool to use:**

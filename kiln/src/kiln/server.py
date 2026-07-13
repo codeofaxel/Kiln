@@ -2219,8 +2219,7 @@ def _get_fulfillment() -> FulfillmentProvider:
     except (KeyError, RuntimeError, ValueError) as exc:
         raise RuntimeError(
             "No fulfillment provider configured.  "
-            "Set KILN_FULFILLMENT_PROVIDER and the matching API key env var "
-            "(e.g. KILN_CRAFTCLOUD_API_KEY or KILN_SCULPTEO_API_KEY)."
+            "Set KILN_FULFILLMENT_PROVIDER and its required credentials."
         ) from exc
     return _fulfillment
 
@@ -2288,7 +2287,6 @@ def _get_threedos_client() -> ThreeDOSClient:
 
 _PROVIDER_TERMS_URLS: dict[str, str] = {
     "craftcloud": "https://craftcloud3d.com/terms-and-conditions",
-    "sculpteo": "https://www.sculpteo.com/en/legal-notice/terms-of-use/",
     "3dos": "https://www.3dos.io/terms",
 }
 
@@ -9296,7 +9294,7 @@ def analyze_print_failure(job_id: str) -> dict:
             tok in loaded_material for tok in _HYGROSCOPIC_MATERIAL_HINTS
         ))
 
-        # Hybrid rule (panel-approved):
+        # Material-aware rule:
         #   - explicit moisture mention -> flag (always)
         #   - hygroscopic material -> 1 symptom suffices (moisture is the
         #     physically plausible default for these filaments)

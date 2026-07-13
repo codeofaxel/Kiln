@@ -1,7 +1,7 @@
 """Quote cache for fulfillment provider manufacturing quotes.
 
 Agents frequently request quotes from external fulfillment providers
-(Sculpteo, CraftCloud, etc.) for the same printer/material/quantity
+(Craftcloud and other providers) for the same printer/material/quantity
 combination.  This module caches those quotes with configurable TTL
 so repeated requests are served from memory (or optional SQLite
 persistence) instead of hitting external APIs.
@@ -19,10 +19,10 @@ Usage::
 
     from kiln.quote_cache import cache_quote, get_cached_quote
 
-    cached = get_cached_quote("sculpteo", "fdm_printing", "pla_white", 10)
+    cached = get_cached_quote("craftcloud", "fdm_printing", "pla_white", 10)
     if cached is None:
         quote = provider.get_quote(file, material, qty)
-        cached = cache_quote("sculpteo", "fdm_printing", "pla_white", 10,
+        cached = cache_quote("craftcloud", "fdm_printing", "pla_white", 10,
                              quote.total_price_usd, "USD", quote.lead_time_days)
 """
 
@@ -52,7 +52,7 @@ class CachedQuote:
     """A cached manufacturing quote with expiry metadata.
 
     :param quote_id: Auto-generated unique identifier.
-    :param provider_name: Machine-readable provider name (e.g. ``"sculpteo"``).
+    :param provider_name: Machine-readable provider name (e.g. ``"craftcloud"``).
     :param service_type: Printing service (e.g. ``"fdm_printing"``).
     :param material: Material identifier (e.g. ``"pla_white"``).
     :param quantity: Number of parts quoted.
@@ -341,7 +341,7 @@ class QuoteCache:
     ) -> CachedQuote:
         """Cache a fulfillment provider quote.
 
-        :param provider: Provider name (e.g. ``"sculpteo"``).
+        :param provider: Provider name (e.g. ``"craftcloud"``).
         :param service_type: Printing service type (e.g. ``"fdm_printing"``).
         :param material: Material identifier (e.g. ``"pla_white"``).
         :param quantity: Part quantity.
@@ -425,7 +425,7 @@ class QuoteCache:
         """Return all non-expired cached quotes for a service type.
 
         Useful for cross-provider comparison (e.g. all FDM printing quotes
-        across Sculpteo and CraftCloud).
+        across multiple fulfillment providers).
 
         :param service_type: Printing service type to filter by.
         :returns: List of non-expired quotes for the service.
@@ -580,7 +580,7 @@ def cache_quote(
 ) -> CachedQuote:
     """Convenience wrapper to cache a quote via the singleton.
 
-    :param provider: Provider name (e.g. ``"sculpteo"``).
+    :param provider: Provider name (e.g. ``"craftcloud"``).
     :param service_type: Printing service type.
     :param material: Material identifier.
     :param quantity: Part quantity.

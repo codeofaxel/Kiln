@@ -1,6 +1,6 @@
 """Coverage for the wet-filament hybrid rule in analyze_print_failure.
 
-The bar (panel-approved, judge-voted 4D / 1C / 1B with hybrid as the synthesis):
+The material-aware rule:
   * Explicit moisture mention ("wet"/"moisture"/"damp"/"humid")
     -> ALWAYS flags wet filament.
   * Symptom keyword + hygroscopic loaded material (nylon/PA/PVA/TPU/PC/CF/GF/etc.)
@@ -66,8 +66,7 @@ class TestHygroscopicSingleSymptomFlags:
         assert _run_wet_analysis("print failed", ["popping at the nozzle"], material) is True
 
     def test_single_stringing_on_nylon_flags(self):
-        # The exact case Prusa + Bambu flagged: newcomer hears one symptom on
-        # nylon, needs the warning even with a single keyword.
+        # One stringing symptom on hygroscopic nylon is sufficient to warn.
         assert _run_wet_analysis("", ["stringing"], "nylon") is True
 
 
@@ -77,7 +76,7 @@ class TestNonHygroscopicNeedsMultipleSymptoms:
 
     @pytest.mark.parametrize("material", ["PLA", "PETG", "ABS", "ASA"])
     def test_single_stringing_does_not_flag(self, material):
-        # The exact case Jobs/Ive/antirez flagged as noise.
+        # One symptom on a non-hygroscopic material is intentionally ignored.
         assert _run_wet_analysis("", ["stringing"], material) is False
 
     def test_two_symptoms_on_pla_flags(self):
@@ -93,14 +92,14 @@ class TestNonHygroscopicNeedsMultipleSymptoms:
 
 
 class TestNamedConstants:
-    """antirez's craft point: the bar is a named constant, not magic."""
+    """The threshold is a named constant rather than a magic number."""
 
     def test_min_hits_constant_is_two(self):
         assert server._WET_MIN_HITS == 2
 
     def test_hygroscopic_hints_contain_nylon_family(self):
         hints = server._HYGROSCOPIC_MATERIAL_HINTS
-        # The materials the SME flagged as moisture-prone must all match.
+        # Every supported hygroscopic material family must match.
         for token in ("nylon", "pa6", "pva", "tpu", "pc", "-cf", "-gf"):
             assert token in hints, f"missing hygroscopic hint: {token}"
 

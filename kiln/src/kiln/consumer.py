@@ -168,7 +168,7 @@ class MaterialRecommendation:
     weather_resistant: bool
     food_safe: bool
     typical_lead_days: int  # Typical production lead time
-    recommended_provider: str  # craftcloud, sculpteo, 3dos
+    recommended_provider: str  # fulfillment provider identifier
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -215,7 +215,7 @@ _MATERIAL_KNOWLEDGE: dict[str, list[MaterialRecommendation]] = {
             weather_resistant=False,
             food_safe=False,
             typical_lead_days=7,
-            recommended_provider="sculpteo",
+            recommended_provider="craftcloud",
         ),
         MaterialRecommendation(
             technology="MJF",
@@ -227,7 +227,7 @@ _MATERIAL_KNOWLEDGE: dict[str, list[MaterialRecommendation]] = {
             weather_resistant=True,
             food_safe=False,
             typical_lead_days=10,
-            recommended_provider="sculpteo",
+            recommended_provider="craftcloud",
         ),
     ],
     UseCase.FUNCTIONAL.value: [
@@ -253,7 +253,7 @@ _MATERIAL_KNOWLEDGE: dict[str, list[MaterialRecommendation]] = {
             weather_resistant=True,
             food_safe=False,
             typical_lead_days=8,
-            recommended_provider="sculpteo",
+            recommended_provider="craftcloud",
         ),
         MaterialRecommendation(
             technology="FDM",
@@ -279,7 +279,7 @@ _MATERIAL_KNOWLEDGE: dict[str, list[MaterialRecommendation]] = {
             weather_resistant=True,
             food_safe=False,
             typical_lead_days=8,
-            recommended_provider="sculpteo",
+            recommended_provider="craftcloud",
         ),
         MaterialRecommendation(
             technology="MJF",
@@ -291,7 +291,7 @@ _MATERIAL_KNOWLEDGE: dict[str, list[MaterialRecommendation]] = {
             weather_resistant=True,
             food_safe=False,
             typical_lead_days=10,
-            recommended_provider="sculpteo",
+            recommended_provider="craftcloud",
         ),
         MaterialRecommendation(
             technology="FDM",
@@ -329,7 +329,7 @@ _MATERIAL_KNOWLEDGE: dict[str, list[MaterialRecommendation]] = {
             weather_resistant=False,
             food_safe=False,
             typical_lead_days=5,
-            recommended_provider="sculpteo",
+            recommended_provider="craftcloud",
         ),
     ],
     UseCase.MINIATURE.value: [
@@ -343,7 +343,7 @@ _MATERIAL_KNOWLEDGE: dict[str, list[MaterialRecommendation]] = {
             weather_resistant=False,
             food_safe=False,
             typical_lead_days=7,
-            recommended_provider="sculpteo",
+            recommended_provider="craftcloud",
         ),
         MaterialRecommendation(
             technology="MJF",
@@ -355,7 +355,7 @@ _MATERIAL_KNOWLEDGE: dict[str, list[MaterialRecommendation]] = {
             weather_resistant=True,
             food_safe=False,
             typical_lead_days=10,
-            recommended_provider="sculpteo",
+            recommended_provider="craftcloud",
         ),
     ],
     UseCase.JEWELRY.value: [
@@ -369,7 +369,7 @@ _MATERIAL_KNOWLEDGE: dict[str, list[MaterialRecommendation]] = {
             weather_resistant=False,
             food_safe=False,
             typical_lead_days=10,
-            recommended_provider="sculpteo",
+            recommended_provider="craftcloud",
         ),
         MaterialRecommendation(
             technology="SLS",
@@ -381,7 +381,7 @@ _MATERIAL_KNOWLEDGE: dict[str, list[MaterialRecommendation]] = {
             weather_resistant=True,
             food_safe=False,
             typical_lead_days=8,
-            recommended_provider="sculpteo",
+            recommended_provider="craftcloud",
         ),
     ],
     UseCase.ENCLOSURE.value: [
@@ -407,7 +407,7 @@ _MATERIAL_KNOWLEDGE: dict[str, list[MaterialRecommendation]] = {
             weather_resistant=True,
             food_safe=False,
             typical_lead_days=8,
-            recommended_provider="sculpteo",
+            recommended_provider="craftcloud",
         ),
     ],
     UseCase.WEARABLE.value: [
@@ -421,7 +421,7 @@ _MATERIAL_KNOWLEDGE: dict[str, list[MaterialRecommendation]] = {
             weather_resistant=True,
             food_safe=False,
             typical_lead_days=8,
-            recommended_provider="sculpteo",
+            recommended_provider="craftcloud",
         ),
         MaterialRecommendation(
             technology="FDM",
@@ -459,7 +459,7 @@ _MATERIAL_KNOWLEDGE: dict[str, list[MaterialRecommendation]] = {
             weather_resistant=True,
             food_safe=False,
             typical_lead_days=8,
-            recommended_provider="sculpteo",
+            recommended_provider="craftcloud",
         ),
     ],
     UseCase.FOOD_SAFE.value: [
@@ -473,7 +473,7 @@ _MATERIAL_KNOWLEDGE: dict[str, list[MaterialRecommendation]] = {
             weather_resistant=True,
             food_safe=True,
             typical_lead_days=10,
-            recommended_provider="sculpteo",
+            recommended_provider="craftcloud",
         ),
         MaterialRecommendation(
             technology="FDM",

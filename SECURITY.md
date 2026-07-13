@@ -1,7 +1,7 @@
 # Security Policy
 
 Kiln is agentic infrastructure that controls physical 3D printers. Vulnerabilities in this
-software can result in hardware damage, fire, injury, or unauthorized access to physical
+infrastructure can result in hardware damage, fire, injury, or unauthorized access to physical
 machines. We take security reports seriously.
 
 ## Supported Versions

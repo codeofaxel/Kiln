@@ -1448,7 +1448,7 @@ class TestImportGuard:
 
 
 # ===========================================================================
-# ROUND 2 GAP ANALYSIS TESTS
+# ADDITIONAL SERIAL ADAPTER COVERAGE
 # ===========================================================================
 
 
@@ -1602,11 +1602,11 @@ class TestGetToolPosition:
 
 
 # ---------------------------------------------------------------------------
-# Upload edge case tests (Round 2)
+# Upload edge case tests
 # ---------------------------------------------------------------------------
 
 class TestUploadEdgeCases:
-    """Additional upload_file tests for edge cases found in gap analysis."""
+    """Additional upload_file edge-case coverage."""
 
     def test_upload_permission_error_on_read(self):
         """PermissionError reading the local file is wrapped in PrinterError."""
@@ -1658,7 +1658,7 @@ class TestUploadEdgeCases:
 
 
 # ---------------------------------------------------------------------------
-# Return type verification tests (Round 2)
+# Return type verification tests
 # ---------------------------------------------------------------------------
 
 class TestReturnTypes:
@@ -1786,7 +1786,7 @@ class TestReturnTypes:
 
 
 # ---------------------------------------------------------------------------
-# to_dict() serialisation tests (Round 2)
+# to_dict() serialisation tests
 # ---------------------------------------------------------------------------
 
 class TestSerialisation:

@@ -366,7 +366,7 @@ class TestHandleOrder:
         _seed_quote_cache(orch, "token-1", provider="craftcloud")
         with pytest.raises(FulfillmentError, match="Provider mismatch"):
             orch.handle_order(
-                "sculpteo",
+                "other_provider",
                 OrderRequest(quote_id="q-123", preview_confirmed=True, shipping_confirmed=True),
                 user_email="user@test.com",
                 user_tier=LicenseTier.FREE,

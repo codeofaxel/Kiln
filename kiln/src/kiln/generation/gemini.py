@@ -1000,13 +1000,13 @@ class GeminiDeepThinkProvider(GenerationProvider):
             )
 
         # Filter out thinking/thought parts — only collect text output.
-        # Thinking models return parts with "thought": true for their
-        # internal reasoning; we want only the final code output.
+        # Thinking models return parts with "thought": true for model
+        # reasoning; we want only the final code output.
         text_segments: list[str] = []
         thought_tokens = 0
         for part in parts:
             if part.get("thought"):
-                # This is an internal thinking part — skip but log
+                # Record the approximate size without returning the thought part.
                 thought_text = part.get("text", "")
                 thought_tokens += len(thought_text)
                 continue
@@ -1016,7 +1016,7 @@ class GeminiDeepThinkProvider(GenerationProvider):
 
         if thought_tokens > 0:
             logger.info(
-                "Gemini Deep Think: model used ~%d chars of internal reasoning",
+                "Gemini Deep Think: model used ~%d chars of reasoning",
                 thought_tokens,
             )
 

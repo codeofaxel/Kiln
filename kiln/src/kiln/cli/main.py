@@ -4292,7 +4292,7 @@ def order() -> None:
     """Outsource prints to external manufacturing services.
 
     Use subcommands to get quotes, place orders, and track shipments
-    through services like Craftcloud and Sculpteo.
+    through configured fulfillment providers.
     """
 
 
@@ -6305,7 +6305,7 @@ def estimate_before_design_cmd(
 @click.option(
     "--provider",
     default=None,
-    type=click.Choice(["craftcloud", "sculpteo", "proxy"]),
+    type=click.Choice(["craftcloud", "proxy"]),
     help="Fulfillment provider (default: auto-detect, falls back to craftcloud).",
 )
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
@@ -6546,7 +6546,7 @@ def _resolve_fulfillment_material(
 @click.option(
     "--provider",
     default=None,
-    type=click.Choice(["craftcloud", "sculpteo", "proxy"]),
+    type=click.Choice(["craftcloud", "proxy"]),
     help="Fulfillment provider (default: auto-detect).",
 )
 @click.option("--technology", "-t", default=None, help="Filter by technology (FDM, SLA, SLS, MJF, etc.).")
