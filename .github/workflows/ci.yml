@@ -6,6 +6,20 @@ on:
   pull_request:
 
 jobs:
+  public-language:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Public-language gate
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_public_language.py --range "$BASE_SHA..$HEAD_SHA"
+
   test:
     runs-on: ubuntu-latest
     strategy:
