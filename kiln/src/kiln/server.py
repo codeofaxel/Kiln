@@ -14406,12 +14406,11 @@ def decorate_surface(
     :param svg_layer: Target a specific SVG layer by ``layer`` attribute when
         using SVG ``import()`` fallback on OpenSCAD 2024+.  E.g.
         ``"foreground"`` targets a layer named ``foreground``.
-    :param template_id: Optional template ID (e.g. ``"nameplate"``).
-        When provided, auto-fills ``face``, ``depth_mm``, ``mode``,
-        ``scale``, and ``image_style`` from the template's decoration
-        profile.  Explicit values you provide override the profile.
-        Use ``list_decoratable_templates()`` to see which templates
-        have profiles.
+    :param template_id: Optional template ID (e.g. ``"nameplate"``), used
+        for provenance tracking only.  To auto-fill ``face``, ``depth_mm``,
+        ``mode``, ``scale``, and ``image_style`` from a template's curated
+        decoration profile, call ``resolve_template_decoration()`` first
+        (kiln-pro) and pass its results explicitly.
     :returns: Dict with output STL path, preview info, and metadata.
     """
     if err := _check_auth("design:decorate"):
@@ -14483,38 +14482,6 @@ def decorate_surface(
             )
     except Exception:
         logger.debug("Provenance sidecar check failed", exc_info=True)
-
-    # --- Auto-resolve from template decoration profile ---
-    template_profile_used = False
-    if template_id:
-        try:
-            from kiln.template_decoration import resolve_decoration_defaults
-
-            resolved = resolve_decoration_defaults(
-                template_id,
-                material=material,
-                face=face if face != "auto" else None,
-                depth_mm=depth_mm if depth_mm != 0.0 else None,
-                mode=mode if mode != "deboss" else None,
-                scale=scale if scale != 0.7 else None,
-                image_style=image_style if image_style != "auto" else None,
-            )
-            if resolved.get("profile_used"):
-                face = resolved["face"]
-                depth_mm = resolved["depth_mm"]
-                mode = resolved["mode"]
-                scale = resolved["scale"]
-                image_style = resolved["image_style"]
-                template_profile_used = True
-                logger.info(
-                    "Template %s decoration profile applied: face=%s depth=%.1f style=%s",
-                    template_id,
-                    face,
-                    depth_mm,
-                    image_style,
-                )
-        except Exception:
-            logger.debug("Template decoration profile lookup failed", exc_info=True)
 
     # --- Validate model ---
     if not os.path.isfile(model_path):
@@ -14912,9 +14879,6 @@ def decorate_surface(
             "compile_time_seconds": compile_result.get("compile_time_seconds"),
             "scad_path": scad_result["scad_path"],
         }
-        if template_profile_used:
-            result_dict["template_profile_used"] = True
-            result_dict["template_id"] = template_id
         if _provenance_info:
             result_dict["provenance"] = _provenance_info
         if warnings:
