@@ -1910,10 +1910,15 @@ def estimate_load_capacity(
     Orientation convention (fixed 2026-07-16 — the pair was previously
     inverted): ``load_across_layers=True`` means the load pulls the
     layer interfaces apart (load along the build/Z direction) — the
-    WEAK direction for FDM, so the table capacity is derated (0.6).
-    ``False`` means the load acts within the layer planes — the strong
-    direction (full table value).  ``True`` is the conservative
-    default.
+    WEAK direction for FDM, so the table capacity is derated (0.4, the
+    worst per-material interlayer ratio, so one conservative pair
+    covers every material).  ``False`` means the load acts within the
+    layer planes — the strong direction (full table value).  ``True``
+    is the conservative default.
+
+    The table itself is DERIVED data (square-section bending math; see
+    kiln/scripts/generate_load_tables.py) — wide or flat sections are
+    weaker than the square basis, and the reasoning says so.
     """
     kb = _get_kb()
     material_key = material_id.lower()
@@ -1989,11 +1994,20 @@ def estimate_load_capacity(
     reasoning.append(
         f"Applied layer-orientation derating ({orientation_key}) = {derating:.2f}."
     )
+    reasoning.append(
+        "Assumes a compact (square) cross-section — wide or flat sections "
+        "are weaker. For shape-aware sizing, factor of safety by "
+        "application class, and fatigue/creep checks, use Kiln Pro's "
+        "design_for_load."
+    )
     reasoning.extend(material_data.get("notes", []))
 
     return LoadEstimate(
         material=material_key,
-        max_load_n=round(max_load_n, 2),
+        # Floor, not round: a safe-load figure must never round toward
+        # MORE capacity (banker's rounding could add up to 5 mN above
+        # the derived limit).
+        max_load_n=int(max_load_n * 100) / 100.0,
         safety_factor=3.0,
         derating_applied=derating,
         reasoning=reasoning,

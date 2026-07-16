@@ -1,36 +1,36 @@
 {
   "_meta": {
-    "version": "1.0.0",
+    "version": "2.0.0",
     "domain": "fdm",
-    "description": "Per-material structural lookup tables for quick safe-load estimates on cantilevered FDM parts. Capacities are already derated with a 3x safety factor.",
-    "_orientation_convention": "layer_orientation_derating keys, fixed 2026-07-16: 'across_layers' = the load pulls the layer interfaces apart (build/Z direction — the WEAK case for FDM; factor 0.6). 'along_layers' = the load acts within the layer planes (the STRONG case; factor 1.0). A single conservative pair is used for all materials at this tier; per-material anisotropy depth lives in Kiln Pro.",
+    "description": "Per-material safe-load lookup for cantilevered FDM parts, DERIVED (not hand-authored): safe_load_N = tensile_capacity_n_per_mm2 x (A^1.5/6) / L, where tensile_capacity = catalogue tensile x 0.9 FDM print factor / 3.0 safety factor. SQUARE cross-section basis \u2014 wide or flat sections are weaker. Regenerate with kiln/scripts/generate_load_tables.py; never hand-edit values.",
+    "_orientation_convention": "layer_orientation_derating keys: 'across_layers' = the load pulls the layer interfaces apart (build/Z direction \u2014 the WEAK case for FDM; factor 0.4, the worst per-material interlayer ratio so one conservative pair covers every material). 'along_layers' = the load acts within the layer planes (the STRONG case; factor 1.0). Per-material anisotropy depth lives in Kiln Pro.",
     "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (per-material SME caveats) is available in Kiln Pro; see https://kiln3d.com/pricing."
   },
   "pla": {
-    "tensile_capacity_n_per_mm2": 16,
+    "tensile_capacity_n_per_mm2": 15.0,
     "cross_section_vs_load": [
       {
         "cantilever_length_mm": 25,
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 57.6
+            "max_load_n": 4.15
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 115.2
+            "max_load_n": 11.75
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 172.8
+            "max_load_n": 21.6
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 230.4
+            "max_load_n": 33.25
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 288.0
+            "max_load_n": 46.47
           }
         ]
       },
@@ -39,23 +39,23 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 38.4
+            "max_load_n": 2.07
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 76.8
+            "max_load_n": 5.87
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 115.2
+            "max_load_n": 10.8
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 153.6
+            "max_load_n": 16.62
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 192.0
+            "max_load_n": 23.23
           }
         ]
       },
@@ -64,23 +64,23 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 24.0
+            "max_load_n": 1.03
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 48.0
+            "max_load_n": 2.93
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 72.0
+            "max_load_n": 5.4
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 96.0
+            "max_load_n": 8.31
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 120.0
+            "max_load_n": 11.61
           }
         ]
       },
@@ -89,23 +89,23 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 18.0
+            "max_load_n": 0.69
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 36.0
+            "max_load_n": 1.95
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 54.0
+            "max_load_n": 3.6
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 72.0
+            "max_load_n": 5.54
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 90.0
+            "max_load_n": 7.74
           }
         ]
       },
@@ -114,57 +114,57 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 13.2
+            "max_load_n": 0.51
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 26.4
+            "max_load_n": 1.46
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 39.6
+            "max_load_n": 2.7
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 52.8
+            "max_load_n": 4.15
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 66.0
+            "max_load_n": 5.8
           }
         ]
       }
     ],
     "layer_orientation_derating": {
-      "across_layers": 0.6,
+      "across_layers": 0.4,
       "along_layers": 1.0
     }
   },
   "petg": {
-    "tensile_capacity_n_per_mm2": 25,
+    "tensile_capacity_n_per_mm2": 15.0,
     "cross_section_vs_load": [
       {
         "cantilever_length_mm": 25,
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 80.64
+            "max_load_n": 4.15
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 161.28
+            "max_load_n": 11.75
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 241.92
+            "max_load_n": 21.6
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 322.56
+            "max_load_n": 33.25
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 403.2
+            "max_load_n": 46.47
           }
         ]
       },
@@ -173,23 +173,23 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 53.76
+            "max_load_n": 2.07
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 107.52
+            "max_load_n": 5.87
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 161.28
+            "max_load_n": 10.8
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 215.04
+            "max_load_n": 16.62
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 268.8
+            "max_load_n": 23.23
           }
         ]
       },
@@ -198,23 +198,23 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 33.6
+            "max_load_n": 1.03
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 67.2
+            "max_load_n": 2.93
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 100.8
+            "max_load_n": 5.4
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 134.4
+            "max_load_n": 8.31
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 168.0
+            "max_load_n": 11.61
           }
         ]
       },
@@ -223,23 +223,23 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 25.2
+            "max_load_n": 0.69
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 50.4
+            "max_load_n": 1.95
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 75.6
+            "max_load_n": 3.6
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 100.8
+            "max_load_n": 5.54
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 126.0
+            "max_load_n": 7.74
           }
         ]
       },
@@ -248,57 +248,57 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 18.48
+            "max_load_n": 0.51
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 36.96
+            "max_load_n": 1.46
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 55.44
+            "max_load_n": 2.7
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 73.92
+            "max_load_n": 4.15
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 92.4
+            "max_load_n": 5.8
           }
         ]
       }
     ],
     "layer_orientation_derating": {
-      "across_layers": 0.6,
+      "across_layers": 0.4,
       "along_layers": 1.0
     }
   },
   "abs": {
-    "tensile_capacity_n_per_mm2": 20,
+    "tensile_capacity_n_per_mm2": 9.9,
     "cross_section_vs_load": [
       {
         "cantilever_length_mm": 25,
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 72.0
+            "max_load_n": 2.74
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 144.0
+            "max_load_n": 7.75
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 216.0
+            "max_load_n": 14.25
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 288.0
+            "max_load_n": 21.94
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 360.0
+            "max_load_n": 30.67
           }
         ]
       },
@@ -307,23 +307,23 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 48.0
+            "max_load_n": 1.37
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 96.0
+            "max_load_n": 3.87
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 144.0
+            "max_load_n": 7.12
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 192.0
+            "max_load_n": 10.97
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 240.0
+            "max_load_n": 15.33
           }
         ]
       },
@@ -332,23 +332,23 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 30.0
+            "max_load_n": 0.68
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 60.0
+            "max_load_n": 1.93
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 90.0
+            "max_load_n": 3.56
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 120.0
+            "max_load_n": 5.48
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 150.0
+            "max_load_n": 7.66
           }
         ]
       },
@@ -357,23 +357,23 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 22.5
+            "max_load_n": 0.45
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 45.0
+            "max_load_n": 1.29
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 67.5
+            "max_load_n": 2.37
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 90.0
+            "max_load_n": 3.65
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 112.5
+            "max_load_n": 5.11
           }
         ]
       },
@@ -382,57 +382,57 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 16.5
+            "max_load_n": 0.34
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 33.0
+            "max_load_n": 0.96
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 49.5
+            "max_load_n": 1.78
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 66.0
+            "max_load_n": 2.74
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 82.5
+            "max_load_n": 3.83
           }
         ]
       }
     ],
     "layer_orientation_derating": {
-      "across_layers": 0.6,
+      "across_layers": 0.4,
       "along_layers": 1.0
     }
   },
   "nylon": {
-    "tensile_capacity_n_per_mm2": 35,
+    "tensile_capacity_n_per_mm2": 16.5,
     "cross_section_vs_load": [
       {
         "cantilever_length_mm": 25,
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 100.8
+            "max_load_n": 4.57
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 201.6
+            "max_load_n": 12.93
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 302.4
+            "max_load_n": 23.76
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 403.2
+            "max_load_n": 36.58
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 504.0
+            "max_load_n": 51.12
           }
         ]
       },
@@ -441,23 +441,23 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 67.2
+            "max_load_n": 2.28
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 134.4
+            "max_load_n": 6.46
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 201.6
+            "max_load_n": 11.88
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 268.8
+            "max_load_n": 18.29
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 336.0
+            "max_load_n": 25.56
           }
         ]
       },
@@ -466,23 +466,23 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 42.0
+            "max_load_n": 1.14
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 84.0
+            "max_load_n": 3.23
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 126.0
+            "max_load_n": 5.94
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 168.0
+            "max_load_n": 9.14
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 210.0
+            "max_load_n": 12.78
           }
         ]
       },
@@ -491,23 +491,23 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 31.5
+            "max_load_n": 0.76
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 63.0
+            "max_load_n": 2.15
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 94.5
+            "max_load_n": 3.96
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 126.0
+            "max_load_n": 6.09
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 157.5
+            "max_load_n": 8.52
           }
         ]
       },
@@ -516,57 +516,57 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 23.1
+            "max_load_n": 0.57
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 46.2
+            "max_load_n": 1.61
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 69.3
+            "max_load_n": 2.97
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 92.4
+            "max_load_n": 4.57
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 115.5
+            "max_load_n": 6.39
           }
         ]
       }
     ],
     "layer_orientation_derating": {
-      "across_layers": 0.6,
+      "across_layers": 0.4,
       "along_layers": 1.0
     }
   },
   "polycarbonate": {
-    "tensile_capacity_n_per_mm2": 32,
+    "tensile_capacity_n_per_mm2": 18.0,
     "cross_section_vs_load": [
       {
         "cantilever_length_mm": 25,
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 92.16
+            "max_load_n": 4.98
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 184.32
+            "max_load_n": 14.1
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 276.48
+            "max_load_n": 25.92
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 368.64
+            "max_load_n": 39.9
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 460.8
+            "max_load_n": 55.77
           }
         ]
       },
@@ -575,23 +575,23 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 61.44
+            "max_load_n": 2.49
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 122.88
+            "max_load_n": 7.05
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 184.32
+            "max_load_n": 12.96
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 245.76
+            "max_load_n": 19.95
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 307.2
+            "max_load_n": 27.88
           }
         ]
       },
@@ -600,23 +600,23 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 38.4
+            "max_load_n": 1.24
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 76.8
+            "max_load_n": 3.52
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 115.2
+            "max_load_n": 6.48
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 153.6
+            "max_load_n": 9.97
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 192.0
+            "max_load_n": 13.94
           }
         ]
       },
@@ -625,23 +625,23 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 28.8
+            "max_load_n": 0.83
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 57.6
+            "max_load_n": 2.35
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 86.4
+            "max_load_n": 4.32
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 115.2
+            "max_load_n": 6.65
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 144.0
+            "max_load_n": 9.29
           }
         ]
       },
@@ -650,29 +650,29 @@
         "entries": [
           {
             "cross_section_mm2": 12,
-            "max_load_n": 21.12
+            "max_load_n": 0.62
           },
           {
             "cross_section_mm2": 24,
-            "max_load_n": 42.24
+            "max_load_n": 1.76
           },
           {
             "cross_section_mm2": 36,
-            "max_load_n": 63.36
+            "max_load_n": 3.24
           },
           {
             "cross_section_mm2": 48,
-            "max_load_n": 84.48
+            "max_load_n": 4.98
           },
           {
             "cross_section_mm2": 60,
-            "max_load_n": 105.6
+            "max_load_n": 6.97
           }
         ]
       }
     ],
     "layer_orientation_derating": {
-      "across_layers": 0.6,
+      "across_layers": 0.4,
       "along_layers": 1.0
     }
   }
