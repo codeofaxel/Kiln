@@ -3,6 +3,7 @@
     "version": "1.0.0",
     "domain": "fdm",
     "description": "Per-material structural lookup tables for quick safe-load estimates on cantilevered FDM parts. Capacities are already derated with a 3x safety factor.",
+    "_orientation_convention": "layer_orientation_derating keys, fixed 2026-07-16: 'across_layers' = the load pulls the layer interfaces apart (build/Z direction — the WEAK case for FDM; factor 0.6). 'along_layers' = the load acts within the layer planes (the STRONG case; factor 1.0). A single conservative pair is used for all materials at this tier; per-material anisotropy depth lives in Kiln Pro.",
     "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (per-material SME caveats) is available in Kiln Pro; see https://kiln3d.com/pricing."
   },
   "pla": {
@@ -135,8 +136,8 @@
       }
     ],
     "layer_orientation_derating": {
-      "across_layers": 1.0,
-      "along_layers": 0.6
+      "across_layers": 0.6,
+      "along_layers": 1.0
     }
   },
   "petg": {
@@ -269,8 +270,8 @@
       }
     ],
     "layer_orientation_derating": {
-      "across_layers": 1.0,
-      "along_layers": 0.6
+      "across_layers": 0.6,
+      "along_layers": 1.0
     }
   },
   "abs": {
@@ -403,8 +404,8 @@
       }
     ],
     "layer_orientation_derating": {
-      "across_layers": 1.0,
-      "along_layers": 0.6
+      "across_layers": 0.6,
+      "along_layers": 1.0
     }
   },
   "nylon": {
@@ -537,8 +538,8 @@
       }
     ],
     "layer_orientation_derating": {
-      "across_layers": 1.0,
-      "along_layers": 0.6
+      "across_layers": 0.6,
+      "along_layers": 1.0
     }
   },
   "polycarbonate": {
@@ -671,8 +672,8 @@
       }
     ],
     "layer_orientation_derating": {
-      "across_layers": 1.0,
-      "along_layers": 0.6
+      "across_layers": 0.6,
+      "along_layers": 1.0
     }
   }
 }

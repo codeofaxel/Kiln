@@ -468,11 +468,13 @@ class TestDesignBrief:
 
 class TestLoadEstimation:
     def test_known_petg_load_at_100mm(self):
+        # Default load_across_layers=True = load pulls the layer
+        # interfaces apart (weak direction) → table value × 0.6.
         estimate = estimate_load_capacity("petg", 24.0, 100.0)
         assert isinstance(estimate, LoadEstimate)
         assert estimate is not None
-        assert estimate.max_load_n == pytest.approx(67.2)
-        assert estimate.derating_applied == pytest.approx(1.0)
+        assert estimate.max_load_n == pytest.approx(67.2 * 0.6)
+        assert estimate.derating_applied == pytest.approx(0.6)
 
     def test_unknown_material_returns_none(self):
         assert estimate_load_capacity("unobtanium", 20.0, 100.0) is None
@@ -480,14 +482,17 @@ class TestLoadEstimation:
     def test_cross_section_interpolation(self):
         estimate = estimate_load_capacity("petg", 30.0, 100.0)
         assert estimate is not None
-        # Interpolated between 24 mm^2 (67.2N) and 36 mm^2 (100.8N)
-        assert estimate.max_load_n == pytest.approx(84.0)
+        # Interpolated between 24 mm^2 (67.2N) and 36 mm^2 (100.8N),
+        # then the default weak-orientation derate (0.6).
+        assert estimate.max_load_n == pytest.approx(84.0 * 0.6)
 
     def test_cantilever_length_interpolation(self):
         estimate = estimate_load_capacity("petg", 24.0, 75.0)
         assert estimate is not None
-        # Interpolated between 50 mm (107.52N) and 100 mm (67.2N)
-        assert estimate.max_load_n == pytest.approx(87.36)
+        # Interpolated between 50 mm (107.52N) and 100 mm (67.2N),
+        # then the default weak-orientation derate (0.6); the function
+        # rounds to 2 decimals.
+        assert estimate.max_load_n == pytest.approx(87.36 * 0.6, abs=0.01)
 
     def test_longer_cantilever_reduces_capacity(self):
         short_arm = estimate_load_capacity("nylon", 24.0, 50.0)
@@ -497,12 +502,19 @@ class TestLoadEstimation:
         assert short_arm.max_load_n > long_arm.max_load_n
 
     def test_derating_for_layer_orientation(self):
+        # Fixed 2026-07-16: the pair was previously inverted.  A load
+        # across the layer interfaces (True) is the WEAK direction and
+        # must carry the derate; in-plane loading (False) is strong.
         across = estimate_load_capacity("abs", 24.0, 100.0, load_across_layers=True)
         along = estimate_load_capacity("abs", 24.0, 100.0, load_across_layers=False)
         assert across is not None
         assert along is not None
-        assert along.max_load_n == pytest.approx(across.max_load_n * 0.6)
-        assert along.derating_applied == pytest.approx(0.6)
+        assert across.max_load_n == pytest.approx(along.max_load_n * 0.6)
+        assert across.derating_applied == pytest.approx(0.6)
+        assert along.derating_applied == pytest.approx(1.0)
+        # The weak orientation must never report more capacity than the
+        # strong one — the exact inversion the 2026-07-16 audit caught.
+        assert across.max_load_n < along.max_load_n
 
     def test_non_positive_cross_section_returns_zero(self):
         estimate = estimate_load_capacity("petg", 0.0, 100.0)

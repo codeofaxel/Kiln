@@ -1905,7 +1905,16 @@ def estimate_load_capacity(
     *,
     load_across_layers: bool = True,
 ) -> LoadEstimate | None:
-    """Estimate max safe load for a given cantilever geometry."""
+    """Estimate max safe load for a given cantilever geometry.
+
+    Orientation convention (fixed 2026-07-16 — the pair was previously
+    inverted): ``load_across_layers=True`` means the load pulls the
+    layer interfaces apart (load along the build/Z direction) — the
+    WEAK direction for FDM, so the table capacity is derated (0.6).
+    ``False`` means the load acts within the layer planes — the strong
+    direction (full table value).  ``True`` is the conservative
+    default.
+    """
     kb = _get_kb()
     material_key = material_id.lower()
     material_data = kb.load_tables.get(material_key)

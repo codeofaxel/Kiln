@@ -524,8 +524,13 @@ class _DesignToolsPlugin:
                 material: Material ID (e.g. "petg", "nylon", "polycarbonate").
                 cross_section_mm2: Effective load-bearing cross section in mm^2.
                 cantilever_length_mm: Cantilever length in mm.
-                load_across_layers: True when load is oriented across layers
-                    (stronger); False when along layer bonds (weaker).
+                load_across_layers: True when the load pulls the layer
+                    interfaces apart (load along the build/Z direction —
+                    the WEAK direction for FDM; capacity is derated).
+                    False when the load acts within the layer planes
+                    (e.g. a bracket printed lying flat — the strong
+                    direction; full table value). If unsure, leave True:
+                    it is the conservative default.
             """
             from kiln.design_intelligence import estimate_load_capacity
 
