@@ -5,6 +5,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Enterprise printer-overage billing now works (Enterprise).** Reporting
+  fleet printers beyond your included allowance to Stripe completes
+  correctly.
+
 ## [1.2.0] - 2026-07-11
 
 ### Added
