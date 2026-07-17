@@ -5,7 +5,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- **More accurate strength, fit, and tolerance numbers across the Pro
+  engineering tools (Pro+).** Expect more realistic results in several
+  edge cases, including better support for specialty filaments like
+  carbon-fiber blends.
+
 ### Fixed
+
+- **The free structural safety check is more accurate now (free).**
+  Kiln Pro adds calibration and long-term-load checks for real
+  projects — https://kiln3d.com/pricing.
+
+- **A few adhesive picks' heat tolerances are now more accurate (Pro+).**
 
 - **Enterprise printer-overage billing now works (Enterprise).** Reporting
   fleet printers beyond your included allowance to Stripe completes
