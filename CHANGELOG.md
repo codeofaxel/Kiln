@@ -5,6 +5,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Tell Kiln how your prints fit — free.** Say how a hole came out and which
+  way it printed: up, or on its side. Calipers or just plain words — either
+  works. Enough reports and Kiln settles which way holes actually shrink — a
+  thing makers argue about. *Pro turns it into fit guidance tuned to your
+  printer and material.*
+
 ### Changed
 
 - **More accurate strength, fit, and tolerance numbers across the Pro

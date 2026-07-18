@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-07-12T03:47:12.896570+00:00",
+  "generated": "2026-07-18T07:43:09.302037+00:00",
   "tool_count": 379,
   "categories": {
     "product_generators": {
@@ -7505,8 +7505,8 @@
     },
     {
       "name": "ingest_measurement",
-      "description": "Ingest a calibration measurement and update the per-machine profile.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Ingest a calibration measurement and update the per-machine profile.",
+      "tier": "free",
       "category": "engineering",
       "parameters": {
         "properties": {
