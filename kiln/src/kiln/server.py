@@ -466,6 +466,22 @@ _HEATER_TIMEOUT_MIN: float = parse_float_env("KILN_HEATER_TIMEOUT", 30.0)
 _DEFAULT_SNAPSHOT_DIR = os.path.join(os.path.expanduser("~"), ".kiln", "snapshots")
 
 
+def _key_fingerprint(key: str) -> str:
+    """Return a short non-reversible fingerprint of *key* for log output.
+
+    Logs need to answer "which key won?" and "do env and YAML disagree?"
+    without exposing key material.  A truncated prefix is not safe here:
+    Bambu LAN access codes are only 8 characters, so even a 4-character
+    prefix halves the secret.  A hash digest keeps keys comparable in
+    logs while revealing nothing about their content.
+    """
+    if not key:
+        return "(empty)"
+    import hashlib
+
+    return "sha256:" + hashlib.sha256(key.encode()).hexdigest()[:8]
+
+
 def _reload_env_config() -> None:
     """Re-read env-backed configuration globals after .env has been loaded.
 
@@ -542,20 +558,14 @@ def _reload_env_config() -> None:
         _PRINTER_SERIAL = str(_yaml_cfg.get("serial", ""))
         if not _PRINTER_MODEL:
             _PRINTER_MODEL = str(_yaml_cfg.get("printer_model", ""))
-        masked_key = (
-            _PRINTER_API_KEY[:4] + "****"
-            if len(_PRINTER_API_KEY) >= 4
-            else "(empty)"
-        )
+        masked_key = _key_fingerprint(_PRINTER_API_KEY)
         _PRINTER_CONFIG_SOURCE = (
             f"~/.kiln/config.yaml (host={_PRINTER_HOST}, "
             f"type={_PRINTER_TYPE}, api_key={masked_key}, "
             f"serial={_PRINTER_SERIAL or '(none)'})"
         )
     elif _PRINTER_HOST:
-        masked_key = (
-            _PRINTER_API_KEY[:4] + "****" if len(_PRINTER_API_KEY) >= 4 else "(empty)"
-        )
+        masked_key = _key_fingerprint(_PRINTER_API_KEY)
         _PRINTER_CONFIG_SOURCE = (
             f"env vars (KILN_PRINTER_HOST={_PRINTER_HOST}, "
             f"type={_PRINTER_TYPE}, api_key={masked_key}, "
@@ -11834,7 +11844,8 @@ def main() -> None:
                 mismatches: list[str] = []
                 if env_key and yaml_key and env_key != yaml_key:
                     mismatches.append(
-                        f"api_key (env={env_key[:4]}****, yaml={yaml_key[:4]}****)"
+                        f"api_key (env={_key_fingerprint(env_key)}, "
+                        f"yaml={_key_fingerprint(yaml_key)})"
                     )
                 if yaml_host and env_host != yaml_host:
                     mismatches.append(f"host (env={env_host}, yaml={yaml_host})")

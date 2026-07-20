@@ -152,3 +152,51 @@ class TestConfigureLogging:
         assert handler.backupCount == 3
         # Clean up
         root.handlers = [h for h in root.handlers if not isinstance(h, RotatingFileHandler)]
+
+
+class TestKeyFingerprintInLogs:
+    """Printer key material never reaches logs — only hash fingerprints.
+
+    Covers the config-source banner and env-vs-YAML mismatch warnings in
+    kiln.server, which previously embedded the first 4 characters of the
+    API key / access code (half of an 8-character Bambu LAN access code).
+    """
+
+    def test_empty_key_labelled_empty(self):
+        from kiln.server import _key_fingerprint
+
+        assert _key_fingerprint("") == "(empty)"
+
+    def test_fingerprint_contains_no_key_material(self):
+        from kiln.server import _key_fingerprint
+
+        code = "AbCd1234"  # realistic 8-char Bambu access-code shape
+        fp = _key_fingerprint(code)
+        assert code not in fp
+        assert code[:4] not in fp
+        assert fp.startswith("sha256:")
+
+    def test_fingerprint_is_stable_and_discriminating(self):
+        from kiln.server import _key_fingerprint
+
+        assert _key_fingerprint("key-one") == _key_fingerprint("key-one")
+        assert _key_fingerprint("key-one") != _key_fingerprint("key-two")
+
+    def test_config_source_banner_has_no_key_prefix(self, monkeypatch):
+        import kiln.server as server
+
+        code = "ZyXw9876"
+        monkeypatch.setenv("KILN_PRINTER_HOST", "203.0.113.10")
+        monkeypatch.setenv("KILN_PRINTER_TYPE", "bambu")
+        monkeypatch.setenv("KILN_PRINTER_API_KEY", code)
+        monkeypatch.setenv("KILN_PRINTER_CONFIG_IGNORE_YAML", "1")
+        try:
+            server._reload_env_config()
+            source = server._PRINTER_CONFIG_SOURCE
+            assert code not in source
+            assert code[:4] not in source
+            assert "sha256:" in source
+        finally:
+            # Restore module globals from the ambient environment.
+            monkeypatch.undo()
+            server._reload_env_config()
