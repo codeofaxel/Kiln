@@ -1,10 +1,10 @@
-"""Pin the auto-generated supported-printers marketing surface to its source
-of truth, so it can never silently drift.
+"""Pin the auto-generated supported-printers surface to its source of truth,
+so it can never silently drift.
 
 Three invariants:
   1. The generator's brand map stays byte-identical to the canonical map in
      ``kiln.design_intelligence`` — single source, enforced.
-  2. ``docs/site/src/data/supported_printers.json`` is not stale (regenerating
+  2. The README's auto-generated printer block is not stale (regenerating
      from the data yields identical output).
   3. Nothing incomplete is advertised — every listed model carries all the
      required sibling profiles.
@@ -16,12 +16,10 @@ stay green.
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 GEN_PATH = ROOT / "scripts" / "generate_supported_printers.py"
-SURFACE = ROOT / "docs" / "site" / "src" / "data" / "supported_printers.json"
 
 
 def _load_generator():
@@ -41,17 +39,6 @@ def test_brand_map_matches_canonical_source():
     from kiln.design_intelligence import _MANUFACTURER_PREFIXES
 
     assert gen.MANUFACTURER_PREFIXES == _MANUFACTURER_PREFIXES
-
-
-def test_surface_is_not_stale():
-    """The committed surface must match what the generator produces today."""
-    payload, _ = gen.build_surface()
-    rendered = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
-    assert SURFACE.exists(), "supported_printers.json missing — run the generator."
-    assert SURFACE.read_text() == rendered, (
-        "supported_printers.json is stale — run "
-        "`python3 scripts/generate_supported_printers.py`."
-    )
 
 
 def test_no_incomplete_model_is_advertised():
@@ -112,11 +99,11 @@ def test_public_surface_exposes_only_name_not_specs():
                 "the model dict in scripts/generate_supported_printers.py."
             )
 
-    # belt-and-suspenders: the committed JSON the site bundles must be clean too.
-    if gen.OUT.exists():
-        raw = gen.OUT.read_text().lower()
-        for banned in ("build_volume", "max_hotend", "max_bed", "nozzle", "temp"):
-            assert banned not in raw, (
-                f"supported_printers.json contains '{banned}' — specs must not ship "
-                "to the public surface. Regenerate after removing it."
-            )
+    # belt-and-suspenders: the README block is the surface this repo publishes,
+    # so it must stay spec-free too (brands + counts only, never per-model data).
+    raw = gen.render_readme_block(payload).lower()
+    for banned in ("build_volume", "max_hotend", "max_bed", "nozzle", "temp"):
+        assert banned not in raw, (
+            f"the README printer block contains '{banned}' — specs must not ship "
+            "to the public surface. Remove it from render_readme_block()."
+        )

@@ -68,7 +68,7 @@ This is a monorepo with two independent Python packages:
 
 - **`kiln/`** -- MCP server + CLI (`kiln3d` on PyPI)
 - **`octoprint-cli/`** -- Standalone OctoPrint CLI (`kiln3d-octoprint` on PyPI)
-- **`docs/`** -- Whitepaper, project docs, task tracking
+- **`docs/`** -- Project docs, safety and threat-model references, brand assets
 
 Each package has its own `pyproject.toml`, test suite, and entry point. PRs that touch both packages should have tests passing for both.
 

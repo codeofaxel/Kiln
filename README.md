@@ -29,7 +29,7 @@ pip install kiln3d
 </p>
 
 <p align="center">
-  <img src="docs/site/public/demo/ash-coaster.jpg" alt="A 3D-printed coaster with a relief portrait of a French bulldog and the name ASH along the bottom edge, held in a hand" width="640">
+  <img src="docs/assets/ash-coaster.jpg" alt="A 3D-printed coaster with a relief portrait of a French bulldog and the name ASH along the bottom edge, held in a hand" width="640">
 </p>
 
 <p align="center">

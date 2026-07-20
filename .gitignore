@@ -49,19 +49,14 @@ Dockerfile.api
 # re-include named files.  `scripts/*` (not `scripts/`) is the right
 # form: ignoring the directory rules-out re-including children.
 scripts/*
-# …with a surgical exception for the marketing site's CI-relevant
-# build helpers, which need to be tracked so .github/workflows can
-# run them and contributors can read what they do.
-!docs/site/scripts/
-!docs/site/scripts/**
-# …and for the wheel-inventory release gate, which runs in
+# …with a surgical exception for the wheel-inventory release gate, which runs in
 # publish.yml before SBOM/sign/upload to assert the wheel ships the
 # catalogs, OpenSCAD libraries, and printer g-code files that runtime
 # code depends on — prevents `package-data` glob regressions.
 !scripts/audit_wheel_inventory.py
-# …and for the supported-printers surface generator + drift gate, which
-# keeps docs/site's /printers page in sync with the printer catalog and
-# is run by tests/CI so the marketing surface can never go stale.
+# …and for the supported-printers generator + drift gate, which keeps the
+# README's printer-breadth block in sync with the printer catalog and is
+# run by tests/CI so the published surface can never go stale.
 !scripts/generate_supported_printers.py
 # …and for the moat-comment leak gate, which is run by a CI-collected
 # test so public comments can never narrate the kiln-pro overlay's
