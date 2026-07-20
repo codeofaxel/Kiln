@@ -11465,15 +11465,19 @@ def _auth_tokens_path() -> Path:
 
 
 def _paired_access_token() -> str:
-    try:
-        import json
+    """Live session bearer ('' when signed out or unrecoverable).
 
-        data = json.loads(_auth_tokens_path().read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            return str(data.get("access_token") or "").strip()
+    Delegates to :mod:`kiln.auth_session`, which transparently refreshes
+    a near-expiry token through ``/api/auth/refresh`` — reading the file
+    raw handed out hour-old dead bearers that downstream services
+    rejected with an unexplained 401 / silent free-tier fallback.
+    """
+    try:
+        from kiln.auth_session import get_paired_access_token
+
+        return get_paired_access_token()
     except Exception:
-        pass
-    return ""
+        return ""
 
 
 def _pro_api_call(tool_name: str, **kwargs) -> dict:
@@ -11491,7 +11495,29 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
     (the hosted default — paired users hit this without any env config).
     """
     api_url = (os.environ.get("KILN_API_URL") or "").strip() or _HOSTED_KILN_API_URL
-    bearer = os.environ.get("KILN_LICENSE_KEY", "").strip() or _paired_access_token()
+    bearer = os.environ.get("KILN_LICENSE_KEY", "").strip()
+    if not bearer:
+        try:
+            from kiln.auth_session import resolve_session_bearer
+
+            session = resolve_session_bearer()
+        except Exception:
+            session = None
+        if session is not None and session.token:
+            bearer = session.token
+        elif session is not None and session.state == "needs_signin":
+            # A session exists but its refresh token was rejected —
+            # distinct from never having paired, and the fix is one
+            # command.  Without this branch the stale bearer used to
+            # ride to the server and come back as an unexplained 401
+            # or a silent free-tier downgrade.
+            return {
+                "status": "error",
+                "error": session.detail,
+                "code": "KILN_SESSION_EXPIRED",
+                "tool": tool_name,
+                "setup_hint": "python3 -m kiln signin",
+            }
     if not bearer:
         return {
             "status": "error",
