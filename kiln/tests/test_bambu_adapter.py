@@ -160,6 +160,14 @@ class TestBambuAdapterInit:
                 tls_fingerprint="short",
             )
 
+    def test_tls_context_floors_at_tls12_in_all_modes(self) -> None:
+        import ssl
+
+        for mode in ("pin", "ca", "insecure"):
+            adapter = _adapter(tls_mode=mode)
+            ctx = adapter._build_tls_context()
+            assert ctx.minimum_version >= ssl.TLSVersion.TLSv1_2
+
     def test_topics_constructed_from_serial(self) -> None:
         adapter = _adapter()
         assert adapter._topic_report == f"device/{SERIAL}/report"

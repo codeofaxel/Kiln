@@ -626,6 +626,14 @@ class BambuAdapter(PrinterAdapter):
     def _build_tls_context(self) -> ssl.SSLContext:
         """Build SSL context according to configured TLS mode."""
         ctx = ssl.create_default_context()
+        # Floor the protocol at TLS 1.2.  Bambu firmware negotiates
+        # TLS 1.2+, and modern Python/OpenSSL builds already refuse
+        # anything older by default — this makes the floor explicit on
+        # older builds too.  Certificate trust is a separate axis: the
+        # printers use self-signed certs, so identity is verified via
+        # fingerprint pinning (pin mode) or a user-supplied CA (ca
+        # mode), never by the system trust store.
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         if self._tls_mode == _TLS_MODE_CA:
             ctx.check_hostname = True
             ctx.verify_mode = ssl.CERT_REQUIRED
