@@ -3,15 +3,17 @@
 Covers every state in the resolver's contract: the no-network fast path,
 the refresh exchange (rotation persisted, sibling fields preserved,
 0600 perms), the rejected-refresh path (file left intact — never
-destructive), the unreachable-endpoint degradation with backoff, and
-the double-checked-locking short-circuit when a rival process refreshes
-first.  All network I/O is monkeypatched; no test talks to a server.
+destructive), the unreachable-endpoint degradation with backoff, the
+lock's actual mutual exclusion, the post-lock re-read when a rival
+process refreshes first, and the "returns a state, never raises"
+contract.  All network I/O is monkeypatched; no test talks to a server.
 """
 
 from __future__ import annotations
 
 import base64
 import json
+import os
 import stat
 import time
 
@@ -225,7 +227,44 @@ class TestNetworkDegradation:
         assert resolve_session_bearer().state == "degraded"
 
 
-class TestDoubleCheckedLocking:
+class TestRefreshLockIsExclusive:
+    """The lock itself — that two holders cannot overlap.
+
+    Distinct from the re-read behaviour below: this proves mutual
+    exclusion, which matters because Supabase invalidates a refresh
+    token on use, so two concurrent exchanges would kill each other.
+    """
+
+    def test_second_acquirer_blocks_while_lock_is_held(self, auth_home):
+        import fcntl
+
+        lock_path = auth_session._tokens_path().with_suffix(".lock")
+        with auth_session._refresh_lock():
+            # A separate fd is what another process would get; a
+            # non-blocking exclusive take must fail while we hold it.
+            lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+            try:
+                with pytest.raises(OSError):
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            finally:
+                os.close(fd)
+
+    def test_lock_released_after_exit(self, auth_home):
+        import fcntl
+
+        lock_path = auth_session._tokens_path().with_suffix(".lock")
+        with auth_session._refresh_lock():
+            pass
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # must not raise
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
+class TestPostLockRecheck:
     def test_rival_refresh_short_circuits_under_lock(self, auth_home, monkeypatch):
         """If another process rotates the pair while we wait on the lock,
         the post-lock re-read must return its fresh token — no exchange."""
@@ -246,3 +285,52 @@ class TestDoubleCheckedLocking:
 
         result = resolve_session_bearer()
         assert result == SessionBearer(token=fresh, state="live")
+
+
+class TestNeverRaisesContract:
+    """The module promises a state, never an exception — even broken."""
+
+    def test_missing_requests_degrades_instead_of_raising(
+        self, auth_home, monkeypatch
+    ):
+        import sys
+
+        data = _write_session(auth_home, access_token=_jwt(time.time() - 10))
+        monkeypatch.setitem(sys.modules, "requests", None)  # → ImportError
+        result = resolve_session_bearer()
+        assert result.state == "degraded"
+        assert result.token == data["access_token"]
+
+
+class TestServerFallback:
+    """A broken resolver must not tell a signed-in user they never paired."""
+
+    def test_pro_api_call_falls_back_to_raw_token(self, auth_home, monkeypatch):
+        import sys
+
+        from kiln import server
+
+        data = _write_session(auth_home)
+        monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+        monkeypatch.setitem(sys.modules, "kiln.auth_session", None)  # ImportError
+
+        import urllib.request
+
+        sent = {}
+
+        def fake_urlopen(req, timeout=None):
+            sent["auth"] = req.get_header("Authorization")
+            raise RuntimeError("stop here — the bearer is what we assert")
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        result = server._pro_api_call("some_pro_tool")
+
+        # The stale-but-real bearer went out; no false "not paired".
+        assert result.get("code") != "KILN_ACCOUNT_NOT_PAIRED"
+        assert sent.get("auth") == f"Bearer {data['access_token']}"
+
+    def test_raw_helper_reads_stored_token(self, auth_home):
+        from kiln import server
+
+        data = _write_session(auth_home)
+        assert server._raw_paired_access_token() == data["access_token"]

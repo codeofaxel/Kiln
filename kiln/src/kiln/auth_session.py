@@ -46,6 +46,7 @@ import json
 import logging
 import os
 import stat
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,8 +64,28 @@ DEFAULT_REFRESH_MARGIN_S = 300.0
 
 # After a *network* failure (endpoint unreachable / 5xx), don't
 # re-attempt the exchange for this long — return ``degraded`` fast.
+# Process-local: N processes each pay one timeout before backing off,
+# which is the cost of not putting shared state on disk for a hint.
 _REFRESH_RETRY_INTERVAL_S = 60.0
 _last_network_failure_monotonic: float | None = None
+# The MCP server calls this from request threads; guard the hint so a
+# read never sees a half-written value.
+_backoff_lock = threading.Lock()
+
+
+def _backoff_active() -> bool:
+    with _backoff_lock:
+        last = _last_network_failure_monotonic
+    return (
+        last is not None
+        and time.monotonic() - last < _REFRESH_RETRY_INTERVAL_S
+    )
+
+
+def _note_network_failure() -> None:
+    global _last_network_failure_monotonic
+    with _backoff_lock:
+        _last_network_failure_monotonic = time.monotonic()
 
 
 @dataclass(frozen=True)
@@ -162,8 +183,17 @@ def _refresh_lock():
 
 
 def _post_refresh(refresh_token: str) -> tuple[int, dict]:
-    """POST the exchange; ``(0, {})`` when the endpoint is unreachable."""
-    import requests
+    """POST the exchange; ``(0, {})`` when the endpoint is unreachable.
+
+    ``requests`` is a hard dependency, but importing inside the try
+    keeps this function's "returns, never raises" contract true even on
+    a mangled install — the module's whole promise is that callers get
+    a state back, never an exception.
+    """
+    try:
+        import requests
+    except ImportError:
+        return 0, {}
 
     try:
         resp = requests.post(
@@ -197,8 +227,6 @@ def resolve_session_bearer(
     Never raises; every outcome is a :class:`SessionBearer` state the
     caller can act on.  See the module docstring for the state table.
     """
-    global _last_network_failure_monotonic
-
     stored = _read_tokens()
     token = str(stored.get("access_token") or "").strip()
     if not token:
@@ -223,11 +251,7 @@ def resolve_session_bearer(
         return SessionBearer(token=token, state="degraded")
 
     # Recent network failure → don't pay another timeout yet.
-    if (
-        _last_network_failure_monotonic is not None
-        and time.monotonic() - _last_network_failure_monotonic
-        < _REFRESH_RETRY_INTERVAL_S
-    ):
+    if _backoff_active():
         return SessionBearer(token=token, state="degraded")
 
     with _refresh_lock():
@@ -270,7 +294,7 @@ def resolve_session_bearer(
 
         # Unreachable / 5xx / rate-limited: keep the stored token in
         # play and back off.  The API's own 401 stays the final word.
-        _last_network_failure_monotonic = time.monotonic()
+        _note_network_failure()
         return SessionBearer(token=token, state="degraded")
 
 

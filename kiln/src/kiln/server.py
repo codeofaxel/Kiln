@@ -11464,6 +11464,24 @@ def _auth_tokens_path() -> Path:
     return Path(auth_home) / ".kiln" / "auth_tokens.json"
 
 
+def _raw_paired_access_token() -> str:
+    """The stored access token, unrefreshed — last-resort fallback only.
+
+    Used when :mod:`kiln.auth_session` can't be reached at all (a broken
+    install).  A possibly-stale bearer that the server may reject beats
+    telling a signed-in user they were never paired.
+    """
+    try:
+        import json
+
+        data = json.loads(_auth_tokens_path().read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return str(data.get("access_token") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
 def _paired_access_token() -> str:
     """Live session bearer ('' when signed out or unrecoverable).
 
@@ -11477,7 +11495,7 @@ def _paired_access_token() -> str:
 
         return get_paired_access_token()
     except Exception:
-        return ""
+        return _raw_paired_access_token()
 
 
 def _pro_api_call(tool_name: str, **kwargs) -> dict:
@@ -11503,9 +11521,14 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
             session = resolve_session_bearer()
         except Exception:
             session = None
-        if session is not None and session.token:
+        if session is None:
+            # Resolver unreachable (broken install).  Fall back to the
+            # raw stored token rather than claiming an unpaired account
+            # at a machine that plainly has a session on disk.
+            bearer = _raw_paired_access_token()
+        elif session.token:
             bearer = session.token
-        elif session is not None and session.state == "needs_signin":
+        elif session.state == "needs_signin":
             # A session exists but its refresh token was rejected —
             # distinct from never having paired, and the fix is one
             # command.  Without this branch the stale bearer used to
