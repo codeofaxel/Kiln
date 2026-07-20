@@ -35,7 +35,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout release tag
-        # actions/checkout v6.0.2
+        # actions/checkout v7.0.0
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           ref: ${{ github.event.inputs.ref || github.event.release.tag_name || github.ref }}
@@ -81,7 +81,7 @@ jobs:
             --source-version "${VERSION:-dev}"
 
       - name: Attest CycloneDX SBOM
-        # actions/attest-sbom v1.4.3
+        # actions/attest-sbom v2.2.0
         uses: actions/attest-sbom@115c3be05ff3974bcbd596578934b3f9ce39bf68
         with:
           subject-path: 'dist/*'
@@ -89,7 +89,7 @@ jobs:
 
       - name: Upload SBOMs as release assets
         if: github.event_name == 'release'
-        # softprops/action-gh-release v2.2.1
+        # softprops/action-gh-release v3.0.2
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
         with:
           files: |
