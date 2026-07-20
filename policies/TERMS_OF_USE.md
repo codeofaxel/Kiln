@@ -610,6 +610,16 @@ You agree **not to** use Kiln to:
     data (as defined under applicable data-protection law) unless
     that processing is covered by a **Data Processing Addendum
     (DPA)** entered into under §6.2.
+18. **Systematically extract, enumerate, or harvest Kiln's curated
+    datasets, intelligence, or knowledge base** — including our
+    material, chemical-resistance, adhesive, skin-contact, printer,
+    and post-processing data — whether by automated or scripted
+    calls, repeated queries, or bulk access, in order to
+    reconstruct, cache, aggregate, resell, redistribute, or train a
+    model on that content outside the service. Querying this data
+    through normal use of the service, for your own designs and
+    parts, is expressly permitted; building your own copy of our
+    curated data is not.
 
 We may suspend or terminate your account for violations of this
 §10 without prior notice where we believe an immediate response
