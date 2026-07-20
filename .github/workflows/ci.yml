@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+# Both jobs only read the repo; nothing here writes to GitHub.
+permissions:
+  contents: read
+
 jobs:
   public-language:
     runs-on: ubuntu-latest
