@@ -231,6 +231,13 @@ class AuthManager:
 
     @staticmethod
     def _hash_key(key: str) -> str:
+        # SHA-256 (not a slow KDF like bcrypt/argon2) is intentional:
+        # these are machine-generated API tokens with >=192 bits of
+        # entropy (secrets.token_hex/token_urlsafe), not human-chosen
+        # passwords, so offline brute force is infeasible regardless of
+        # hash speed.  Hashes live only in process memory — they are
+        # never persisted — and lookups happen per request, where a
+        # deliberately-slow hash would be pure overhead.
         return hashlib.sha256(key.encode()).hexdigest()
 
     @staticmethod
