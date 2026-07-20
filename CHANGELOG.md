@@ -20,6 +20,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   edge cases, including better support for specialty filaments like
   carbon-fiber blends.
 
+- **Sign in once, stay signed in.** Your `kiln signin` session now
+  renews itself automatically in the background, so account features
+  keep working without a re-login. If a session ever truly needs
+  refreshing, Kiln shows you the one command to run.
+
 ### Fixed
 
 - **The free structural safety check is more accurate now (free).**
