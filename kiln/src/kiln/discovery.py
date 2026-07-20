@@ -307,6 +307,10 @@ def _try_ssdp(timeout: float) -> list[DiscoveredPrinter]:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # Wildcard bind is required: multicast/broadcast NOTIFY frames
+        # are not delivered to a socket bound to a single interface
+        # address.  Receive-only, and closed as soon as the short
+        # discovery window ends.
         sock.bind(("", ssdp_port))
         try:
             mreq = struct.pack("4sl", socket.inet_aton(mcast_group), socket.INADDR_ANY)

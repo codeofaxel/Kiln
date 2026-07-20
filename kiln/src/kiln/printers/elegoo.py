@@ -1301,6 +1301,9 @@ class ElegooAdapter(PrinterAdapter):
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             sock.settimeout(timeout)
+            # Wildcard bind on an ephemeral port so broadcast replies
+            # from printers on any local interface reach us; the socket
+            # lives only for the discovery window below.
             sock.bind(("", 0))
 
             # Send discovery broadcast.
