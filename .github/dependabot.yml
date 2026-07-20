@@ -5,6 +5,27 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    ignore:
+      # pydantic-core is not ours to move. It is a transitive dependency that
+      # pydantic pins to an EXACT version (pydantic 2.13.4 requires
+      # pydantic-core==2.46.4), so a lone bump of it in requirements-lock.txt
+      # can never install — every test job fails at dependency resolution
+      # before a single test runs. Dependabot reopened that unmergeable PR
+      # weekly (#91 was the last one).
+      #
+      # It moves correctly on its own: when pydantic releases a version that
+      # wants a newer core, the pydantic bump carries it along.
+      #
+      # Scoped to version-update types on purpose — security updates use a
+      # separate path, so a real pydantic-core advisory should still surface.
+      # (GitHub's docs are explicit about this for `allow` and silent about
+      # the same interaction on `ignore`, so treat it as likely-but-unproven
+      # rather than guaranteed.)
+      - dependency-name: "pydantic-core"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
 
   - package-ecosystem: "pip"
     directory: "/octoprint-cli"
