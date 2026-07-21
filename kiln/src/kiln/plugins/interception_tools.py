@@ -208,27 +208,35 @@ def intercept_gcode_command(
     session_id: str,
     command: str,
 ) -> dict[str, Any]:
-    """Evaluate one G-code command against this session's rules.
+    """Check one line of G-code for danger before you send it to a printer.
 
-    ADVISORY, NOT ENFORCEMENT.  This returns a verdict.  It does not stop
-    anything.  Kiln does not route outbound G-code through it, so a
-    command is checked only if you call this, and prevented only if you
-    honour what it says.  Send a command you never passed here, or send
-    one that came back BLOCK, and nothing intervenes.
+    G-code is the language printers take orders in -- "heat the nozzle to
+    250C", "move to X=100".  One bad line can cook a hotend or drive the
+    nozzle into the bed.  This checks a single line against the safety
+    rules for this session (temperature ceilings, speed caps, the
+    printer's build volume) and says whether it looks safe to send.
 
-    Call it before every send, and act on the verdict:
+    It is a smoke detector, not a sprinkler.  It reports; it does not
+    intervene.  Kiln does not quietly pipe outgoing G-code through it, so
+    a line gets checked only when you call this on it, and gets stopped
+    only if you act on the answer.  A line you never checked, or one you
+    checked and sent anyway, reaches the printer untouched.
 
-    - ``allow``  -- send as-is.
-    - ``block``  -- do not send.
-    - ``modify`` -- send ``modified_command``, never the original.
+    So call it on each line before sending that line, and do what the
+    answer says:
+
+    - ``allow``  -- looks safe; send as-is.
+    - ``block``  -- dangerous; do not send.
+    - ``modify`` -- send ``modified_command`` instead, never the original.
     - ``pause``  -- hold, and ask the user before sending.
-    - ``alert``  -- may be sent; surface ``reasons`` to the user first.
+    - ``alert``  -- may be sent, but show the user ``reasons`` first.
 
-    A session may also carry ``coverage_warnings`` (see
-    ``start_gcode_interception``) meaning some checks are not active at
-    all.  An ``allow`` from a session with warnings is weaker than one
-    without, and should be reported as such rather than treated as a
-    clean bill of health.
+    A session can also come back with ``coverage_warnings`` (see
+    ``start_gcode_interception``), meaning some checks could not be set up
+    at all -- usually because Kiln does not know which printer model it is
+    guarding.  An ``allow`` from a session like that means "nothing I was
+    able to check objected", not "this is safe".  Tell the user that
+    rather than reporting a clean pass.
 
     Args:
         session_id: Active interception session ID.
