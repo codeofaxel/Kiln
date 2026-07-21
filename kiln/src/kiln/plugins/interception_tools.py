@@ -208,11 +208,27 @@ def intercept_gcode_command(
     session_id: str,
     command: str,
 ) -> dict[str, Any]:
-    """Evaluate a G-code command against interception rules.
+    """Evaluate one G-code command against this session's rules.
 
-    This is the core tool.  Pass each G-code command through this
-    before sending to the printer.  The result tells you whether to
-    ALLOW, BLOCK, MODIFY, PAUSE, or ALERT.
+    ADVISORY, NOT ENFORCEMENT.  This returns a verdict.  It does not stop
+    anything.  Kiln does not route outbound G-code through it, so a
+    command is checked only if you call this, and prevented only if you
+    honour what it says.  Send a command you never passed here, or send
+    one that came back BLOCK, and nothing intervenes.
+
+    Call it before every send, and act on the verdict:
+
+    - ``allow``  -- send as-is.
+    - ``block``  -- do not send.
+    - ``modify`` -- send ``modified_command``, never the original.
+    - ``pause``  -- hold, and ask the user before sending.
+    - ``alert``  -- may be sent; surface ``reasons`` to the user first.
+
+    A session may also carry ``coverage_warnings`` (see
+    ``start_gcode_interception``) meaning some checks are not active at
+    all.  An ``allow`` from a session with warnings is weaker than one
+    without, and should be reported as such rather than treated as a
+    clean bill of health.
 
     Args:
         session_id: Active interception session ID.
