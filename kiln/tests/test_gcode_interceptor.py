@@ -1835,3 +1835,30 @@ class TestSafetyCoverageReporting:
         # And it must inherit the ender3 ceiling, not the generic one.
         result = interceptor.intercept(session.session_id, "M104 S280")
         assert result.action == InterceptionAction.BLOCK
+
+
+class TestBedFitRulesThroughPrefix:
+    """Bed-fit patterns anchor on the command word, so a prefix must not hide it.
+
+    The generated rules match ``^G[01]\\b...``.  Stripping the prefix in the
+    command-word parser alone left these regex rules bypassable by exactly
+    the input the parser fix was written for.
+    """
+
+    @pytest.mark.parametrize("shape", TRANSPORT_VARIANTS)
+    @pytest.mark.parametrize(
+        "move", ["G1 X-5 Y10", "G1 Y-5 X10", "G1 X10 Y10 Z-1"]
+    )
+    def test_off_bed_move_blocked_through_prefix(self, interceptor, shape, move):
+        session = interceptor.create_session("ender3")
+        assert [r for r in session.rules if r.name.startswith("bed_fit_")]
+        result = interceptor.intercept(session.session_id, shape.format(cmd=move))
+        assert result.action == InterceptionAction.BLOCK
+
+    @pytest.mark.parametrize("shape", TRANSPORT_VARIANTS)
+    def test_on_bed_move_still_allowed_through_prefix(self, interceptor, shape):
+        session = interceptor.create_session("ender3")
+        result = interceptor.intercept(
+            session.session_id, shape.format(cmd="G1 X10 Y10 F1200")
+        )
+        assert result.action == InterceptionAction.ALLOW

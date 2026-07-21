@@ -552,11 +552,24 @@ def _check_pattern_match(
     rule: InterceptionRule,
     command: str,
 ) -> bool:
-    """Check if the command matches a regex pattern."""
+    """Check if the command matches a regex pattern.
+
+    Tested against both the raw line and the line with transport metadata
+    stripped.  The generated bed-fit patterns anchor on the command word
+    (``^G[01]\\b...``), so a line number in front would otherwise slide a
+    crash-inducing move straight past them.  Matching either form keeps
+    existing patterns working while closing that gap.
+    """
     if rule.pattern is None:
         return False
+
+    candidates = [command]
+    normalised = _strip_line_prefix(command.strip()).strip()
+    if normalised and normalised != command:
+        candidates.append(normalised)
+
     try:
-        return bool(re.search(rule.pattern, command, re.IGNORECASE))
+        return any(re.search(rule.pattern, c, re.IGNORECASE) for c in candidates)
     except re.error:
         logger.warning("Invalid regex pattern in rule %s: %s", rule.rule_id, rule.pattern)
         return False
