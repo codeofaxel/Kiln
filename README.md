@@ -74,6 +74,8 @@ Restart your AI app and it can run your printer. (Claude Code and Codex can even
 }
 ```
 
+**No install needed?** Swap the command for a zero-install runner — `"command": "uvx"`, `"args": ["kiln3d", "serve"]` (Python), or `"command": "npx"`, `"args": ["kiln3d"]` (Node). Same server, nothing to `pip install`.
+
 Drop this into Claude Desktop, Claude Code, Codex, Cursor, or any MCP-capable agent. Runs on the free tier until you sign in.
 </details>
 
