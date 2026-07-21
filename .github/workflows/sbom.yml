@@ -62,13 +62,37 @@ jobs:
             | sh -s -- -b /usr/local/bin v1.18.1
           syft version
 
-      # Scan the dependency lock file, NOT dist/.  syft catalogues
-      # INSTALLED python packages (it reads .dist-info directories); a
-      # built wheel is an unopened archive, so scanning dist/ produced an
-      # SBOM with zero components — a bill of materials asserting kiln3d
-      # has no dependencies at all.  The lock file is the authoritative
-      # resolved dependency set.  (dist/ is still built above: it is the
-      # attestation subject in the attest step below.)
+      # Resolve what a user ACTUALLY receives from `pip install kiln3d`.
+      #
+      # Two wrong sources were tried before this one.  Scanning dist/
+      # yields nothing: syft catalogues installed packages by reading
+      # .dist-info directories, and a built wheel is an unopened archive,
+      # so every published SBOM listed zero dependencies.  Scanning
+      # requirements-lock.txt fixes that but overshoots — the lock is a
+      # full dev freeze (it is what CI installs), so it published pytest,
+      # coverage, pytest-mock, responses and 7 more test-harness packages
+      # as though they shipped inside the product.  A reviewer scanning
+      # that gets vulnerability hits on code no user can reach.
+      #
+      # Installing the package with the lock as a CONSTRAINTS file gives
+      # both properties at once: only runtime requirements are installed,
+      # and each is pinned to the version this release was tested against.
+      # Optional extras are deliberately excluded — they are not part of a
+      # default install, and the wheel's own metadata declares them.
+      - name: Resolve the runtime dependency set
+        run: |
+          python -m venv /tmp/sbom-rt
+          /tmp/sbom-rt/bin/python -m pip install --quiet --upgrade pip
+          /tmp/sbom-rt/bin/pip install --quiet ./kiln -c kiln/requirements-lock.txt
+          # Drop the editable marker and kiln3d itself: the SBOM names the
+          # product in its metadata, and a local file:// self-reference
+          # would otherwise land in the component list.
+          /tmp/sbom-rt/bin/pip freeze \
+            | grep -v '^-e ' \
+            | grep -viE '^kiln3d([=@[:space:]]|$)' \
+            | sort > runtime-requirements.txt
+          echo "runtime packages resolved: $(wc -l < runtime-requirements.txt)"
+
       # The ref reaches the shell through env, never through direct
       # ${{ }} interpolation into the run block — a tag name is
       # attacker-chosen text, and interpolating it would let a crafted
@@ -78,7 +102,7 @@ jobs:
           RAW_REF: ${{ github.event.release.tag_name || github.event.inputs.ref }}
         run: |
           VERSION="${RAW_REF#v}"
-          syft file:kiln/requirements-lock.txt \
+          syft file:runtime-requirements.txt \
             --output cyclonedx-json=sbom.cdx.json \
             --source-name kiln3d \
             --source-version "${VERSION:-dev}"
@@ -88,7 +112,7 @@ jobs:
           RAW_REF: ${{ github.event.release.tag_name || github.event.inputs.ref }}
         run: |
           VERSION="${RAW_REF#v}"
-          syft file:kiln/requirements-lock.txt \
+          syft file:runtime-requirements.txt \
             --output spdx-json=sbom.spdx.json \
             --source-name kiln3d \
             --source-version "${VERSION:-dev}"

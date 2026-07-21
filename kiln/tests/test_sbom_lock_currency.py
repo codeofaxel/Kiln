@@ -107,25 +107,53 @@ def test_lockfile_pins_exact_versions() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "workflow_expectation",
-    [
-        # The scan target: pointing this back at dist/ silently reproduces
-        # the 2026-07-20 empty-SBOM bug, because syft cannot read package
-        # metadata out of an unopened wheel.
-        "syft file:kiln/requirements-lock.txt",
-        # The non-empty check that stops a hollow SBOM from being published.
-        "Verify the SBOMs actually list dependencies",
-    ],
-)
-def test_sbom_workflow_still_wired_to_the_lockfile(workflow_expectation: str) -> None:
-    """Pin the two properties of sbom.yml this file's guarantees depend on."""
+def _sbom_workflow_body() -> str:
     workflow = _KILN_ROOT.parent / ".github" / "workflows" / "sbom.yml"
     if not workflow.is_file():
         pytest.skip("sbom.yml not present in this checkout")
-    body = workflow.read_text(encoding="utf-8")
-    assert workflow_expectation in body, (
-        f"sbom.yml no longer contains {workflow_expectation!r}. The SBOM's "
-        "accuracy depends on it scanning the lock file and refusing to publish "
-        "an empty result — see the module docstring for what broke before."
+    return workflow.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "expected",
+    [
+        # The lock is applied as CONSTRAINTS, not as the scan target:
+        # constraints keep the tested pins while installing only what the
+        # product actually requires at runtime.
+        "-c kiln/requirements-lock.txt",
+        # The scan target is the resolved runtime set.
+        "syft file:runtime-requirements.txt",
+        # The non-empty check that stops a hollow SBOM being published.
+        "Verify the SBOMs actually list dependencies",
+    ],
+)
+def test_sbom_workflow_generates_from_the_runtime_closure(expected: str) -> None:
+    """Pin the properties of sbom.yml that this file's guarantees rest on."""
+    assert expected in _sbom_workflow_body(), (
+        f"sbom.yml no longer contains {expected!r}. The published SBOM must "
+        "describe the runtime dependency closure, pinned to the locked "
+        "versions — see the module docstring for the two ways this has gone "
+        "wrong before."
+    )
+
+
+def test_sbom_workflow_does_not_scan_the_build_output() -> None:
+    """Scanning dist/ is the original zero-component bug; keep it out."""
+    body = _sbom_workflow_body()
+    assert "syft dir:dist" not in body, (
+        "sbom.yml scans dist/ again. syft catalogues installed packages by "
+        "reading .dist-info directories, and a built wheel is an unopened "
+        "archive — this silently republishes an SBOM listing zero "
+        "dependencies."
+    )
+
+
+def test_sbom_workflow_does_not_scan_the_dev_lock_directly() -> None:
+    """Scanning the full lock republishes test tooling as shipped code."""
+    body = _sbom_workflow_body()
+    assert "syft file:kiln/requirements-lock.txt" not in body, (
+        "sbom.yml scans requirements-lock.txt directly again. That file is a "
+        "full dev freeze, so the published SBOM would once more list pytest, "
+        "coverage and other test-only packages as though they ship inside "
+        "kiln3d — giving reviewers vulnerability hits on code no user runs."
     )
