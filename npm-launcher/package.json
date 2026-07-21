@@ -1,0 +1,41 @@
+{
+  "name": "kiln3d",
+  "version": "1.2.0",
+  "description": "Launcher for Kiln — the open-source MCP server for 3D printing. Lets AI agents (Claude, Codex, or any MCP client) design, slice, print, monitor, and recover real 3D prints. Runs the Python package `kiln3d` via uv/pipx.",
+  "bin": {
+    "kiln3d": "bin/kiln3d.js"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "3d-printing",
+    "3d-printer",
+    "ai-agent",
+    "ai",
+    "bambu",
+    "octoprint",
+    "klipper",
+    "moonraker",
+    "prusa",
+    "creality",
+    "elegoo",
+    "slicer"
+  ],
+  "homepage": "https://kiln3d.com",
+  "bugs": "https://github.com/codeofaxel/Kiln/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/codeofaxel/Kiln.git",
+    "directory": "npm-launcher"
+  },
+  "license": "AGPL-3.0",
+  "author": "Kiln Contributors",
+  "files": [
+    "bin/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
