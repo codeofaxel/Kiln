@@ -223,13 +223,14 @@
     "has_enclosure": true,
     "has_direct_drive": true,
     "supported_materials": [
-      "pla",
-      "petg",
       "abs",
-      "tpu",
       "asa",
       "nylon",
-      "polycarbonate"
+      "petg",
+      "pla",
+      "polycarbonate",
+      "pps",
+      "tpu"
     ],
     "typical_tolerance_mm": 0.1,
     "max_print_speed_mm_s": 1000,
@@ -337,11 +338,10 @@
     "has_enclosure": false,
     "has_direct_drive": true,
     "supported_materials": [
-      "pla",
-      "petg",
       "abs",
-      "tpu",
-      "asa"
+      "petg",
+      "pla",
+      "tpu"
     ],
     "typical_tolerance_mm": 0.18,
     "max_print_speed_mm_s": 150,
@@ -630,7 +630,8 @@
       "abs",
       "pc",
       "petg",
-      "pla"
+      "pla",
+      "pps"
     ],
     "typical_tolerance_mm": 0.15,
     "max_print_speed_mm_s": 250,
@@ -1036,7 +1037,8 @@
       "pa-cf",
       "pc",
       "petg",
-      "pla"
+      "pla",
+      "pps"
     ],
     "typical_tolerance_mm": 0.15,
     "max_print_speed_mm_s": 250,
@@ -1420,5 +1422,194 @@
       0.2,
       0.28
     ]
+  },
+  "aon_m2_plus": {
+    "printer_id": "aon_m2_plus",
+    "display_name": "AON3D AON-M2+",
+    "manufacturer": "AON3D",
+    "build_volume_mm": {
+      "x": 450,
+      "y": 450,
+      "z": 565
+    },
+    "max_hotend_temp_c": 500,
+    "max_bed_temp_c": 200,
+    "has_enclosure": true,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "abs",
+      "asa",
+      "pa-cf",
+      "pc",
+      "peek",
+      "pekk",
+      "petg",
+      "pla",
+      "pps",
+      "tpu"
+    ],
+    "typical_tolerance_mm": 0.15,
+    "max_print_speed_mm_s": 250,
+    "default_layer_heights_mm": [
+      0.15,
+      0.2,
+      0.25,
+      0.3,
+      0.4
+    ]
+  },
+  "qidi_plus4": {
+    "printer_id": "qidi_plus4",
+    "display_name": "QIDI Plus 4",
+    "manufacturer": "QIDI",
+    "build_volume_mm": {
+      "x": 305,
+      "y": 305,
+      "z": 280
+    },
+    "max_hotend_temp_c": 370,
+    "max_bed_temp_c": 120,
+    "has_enclosure": true,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "abs",
+      "pa-cf",
+      "pc",
+      "petg",
+      "pla",
+      "pps"
+    ],
+    "typical_tolerance_mm": 0.15,
+    "max_print_speed_mm_s": 250,
+    "default_layer_heights_mm": [
+      0.08,
+      0.12,
+      0.16,
+      0.2,
+      0.28
+    ]
+  },
+  "qidi_q1_pro": {
+    "printer_id": "qidi_q1_pro",
+    "display_name": "QIDI Q1 Pro",
+    "manufacturer": "QIDI",
+    "build_volume_mm": {
+      "x": 245,
+      "y": 245,
+      "z": 240
+    },
+    "max_hotend_temp_c": 350,
+    "max_bed_temp_c": 120,
+    "has_enclosure": true,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "abs",
+      "pa-cf",
+      "pc",
+      "petg",
+      "pla",
+      "pps"
+    ],
+    "typical_tolerance_mm": 0.15,
+    "max_print_speed_mm_s": 250,
+    "default_layer_heights_mm": [
+      0.08,
+      0.12,
+      0.16,
+      0.2,
+      0.28
+    ]
+  },
+  "qidi_x_max3": {
+    "printer_id": "qidi_x_max3",
+    "display_name": "QIDI X-Max 3",
+    "manufacturer": "QIDI",
+    "build_volume_mm": {
+      "x": 325,
+      "y": 325,
+      "z": 315
+    },
+    "max_hotend_temp_c": 350,
+    "max_bed_temp_c": 120,
+    "has_enclosure": true,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "abs",
+      "pa-cf",
+      "pc",
+      "petg",
+      "pla",
+      "pps"
+    ],
+    "typical_tolerance_mm": 0.15,
+    "max_print_speed_mm_s": 250,
+    "default_layer_heights_mm": [
+      0.08,
+      0.12,
+      0.16,
+      0.2,
+      0.28
+    ]
+  },
+  "qidi_q2": {
+    "printer_id": "qidi_q2",
+    "display_name": "QIDI Q2",
+    "manufacturer": "QIDI",
+    "build_volume_mm": {
+      "x": 270,
+      "y": 270,
+      "z": 256
+    },
+    "max_hotend_temp_c": 370,
+    "max_bed_temp_c": 120,
+    "has_enclosure": true,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "abs",
+      "pa-cf",
+      "pc",
+      "petg",
+      "pla",
+      "pps"
+    ],
+    "typical_tolerance_mm": 0.15,
+    "max_print_speed_mm_s": 250,
+    "default_layer_heights_mm": [
+      0.08,
+      0.12,
+      0.16,
+      0.2,
+      0.28
+    ]
+  },
+  "ender3_s1_pro": {
+    "display_name": "Ender 3 S1 Pro",
+    "manufacturer": "Creality",
+    "build_volume_mm": {
+      "x": 220,
+      "y": 220,
+      "z": 270
+    },
+    "max_hotend_temp_c": 300,
+    "max_bed_temp_c": 110,
+    "has_enclosure": false,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "abs",
+      "asa",
+      "petg",
+      "pla",
+      "tpu"
+    ],
+    "typical_tolerance_mm": 0.18,
+    "max_print_speed_mm_s": 150,
+    "default_layer_heights_mm": [
+      0.08,
+      0.12,
+      0.16,
+      0.2,
+      0.28
+    ],
+    "printer_id": "ender3_s1_pro"
   }
 }

@@ -451,6 +451,14 @@ _SPEED_CAPABILITIES: dict[str, dict[str, Any]] = {
         "input_shaping": False,
         "quality_factor": 0.75,
     },
+    # Same frame and motion system as the S1; the Pro upgrades the
+    # extruder, hotend and bed, not the kinematics.
+    "ender3_s1_pro": {
+        "max_speed": 100,
+        "max_accel": 1500,
+        "input_shaping": False,
+        "quality_factor": 0.75,
+    },
     "k1": {
         "max_speed": 300,
         "max_accel": 12000,

@@ -358,9 +358,11 @@ class TestCommunityOverridesBundled:
 
     def test_bundled_still_available_for_non_overridden(self):
         add_community_profile("custom_only", _valid_profile())
-        # Bundled profiles should still be accessible.
+        # Bundled profiles should still be accessible. The specific value is
+        # incidental to this test — 290C is the MK4's firmware-enforced nozzle
+        # ceiling (Prusa's sheet says 300; Buddy caps at 290).
         prusa = get_profile("prusa_mk4")
-        assert prusa.max_hotend_temp == 300.0
+        assert prusa.max_hotend_temp == 290.0
 
     def test_list_profiles_includes_both(self):
         add_community_profile("community_only", _valid_profile())

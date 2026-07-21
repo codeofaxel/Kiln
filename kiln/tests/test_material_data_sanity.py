@@ -202,14 +202,21 @@ class TestMaterialSchema:
 class TestMaterialValueRanges:
     """Catch obviously wrong values that would produce bad print advice."""
 
+    # Upper bounds cover the high-performance polymers (PEI, PEEK, PEKK,
+    # PPSU, PPS), which genuinely print at 360-450 C onto beds as hot as
+    # 220 C.  The earlier 400 C / 130 C ceilings encoded an implicit
+    # "commodity + engineering polymers only" assumption and would have
+    # rejected honest, datasheet-sourced values.  They are still real
+    # guards: nothing printable exists above ~500 C (PEEK melts at 343 C
+    # and degrades well before 500), so a typo'd 4000 still fails.
     def test_print_temp_range_valid(self, materials):
         for mat_id, mat in materials.items():
             low, high = mat["thermal"]["print_temp_range_c"]
-            assert 150 <= low <= 350, (
-                f"{mat_id} print_temp low {low}C out of range [150, 350]"
+            assert 150 <= low <= 450, (
+                f"{mat_id} print_temp low {low}C out of range [150, 450]"
             )
-            assert 170 <= high <= 400, (
-                f"{mat_id} print_temp high {high}C out of range [170, 400]"
+            assert 170 <= high <= 500, (
+                f"{mat_id} print_temp high {high}C out of range [170, 500]"
             )
             assert low < high, (
                 f"{mat_id} print_temp_range_c low >= high: [{low}, {high}]"
@@ -218,11 +225,11 @@ class TestMaterialValueRanges:
     def test_bed_temp_range_valid(self, materials):
         for mat_id, mat in materials.items():
             low, high = mat["thermal"]["bed_temp_range_c"]
-            assert 0 <= low <= 130, (
-                f"{mat_id} bed_temp low {low}C out of range [0, 130]"
+            assert 0 <= low <= 230, (
+                f"{mat_id} bed_temp low {low}C out of range [0, 230]"
             )
-            assert 0 <= high <= 130, (
-                f"{mat_id} bed_temp high {high}C out of range [0, 130]"
+            assert 0 <= high <= 230, (
+                f"{mat_id} bed_temp high {high}C out of range [0, 230]"
             )
             assert low < high, (
                 f"{mat_id} bed_temp_range_c low >= high: [{low}, {high}]"
@@ -514,6 +521,13 @@ class TestCompatibilityMatrix:
         "hardened_nozzle", "all_metal_hotend", "enclosure",
         "heated_bed", "direct_drive", "dry_box",
         "pp_adhesion_sheet", "pp_build_surface",
+        # High-performance polymers (PEI, PEEK, PEKK, PPSU, PPS) need
+        # capabilities the commodity vocabulary cannot express. An all-metal
+        # hotend at 300 C still cannot reach 380-450 C, and a passive
+        # enclosure sitting at 50-60 C is not an actively heated 170-210 C
+        # chamber — folding either into the existing terms would tell an
+        # owner their machine is fine when it is not.
+        "high_temp_hotend", "heated_chamber", "high_temp_bed",
     }
 
     def test_every_printer_exists_in_printer_intelligence(

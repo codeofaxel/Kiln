@@ -1186,5 +1186,278 @@
         "strength_gain_pct": 5
       }
     ]
+  },
+  "peek": {
+    "techniques": [
+      {
+        "name": "Sanding",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "220-grit sandpaper",
+          "400-grit sandpaper",
+          "600-grit sandpaper",
+          "dust mask",
+          "water for wet sanding"
+        ]
+      },
+      {
+        "name": "Annealing",
+        "difficulty": "advanced",
+        "tools_needed": [
+          "temperature-controlled oven",
+          "flat support fixture",
+          "heat-rated gloves"
+        ]
+      },
+      {
+        "name": "Machining and drilling",
+        "difficulty": "advanced",
+        "tools_needed": [
+          "sharp carbide tooling",
+          "slow feed and speed",
+          "coolant or air blast",
+          "eye protection"
+        ]
+      },
+      {
+        "name": "Bonding and inserts",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "abrasive pad",
+          "isopropyl alcohol",
+          "two-part structural epoxy",
+          "heat-set inserts and installation tip"
+        ]
+      }
+    ],
+    "paintability": "Difficult. Requires abrasion and a primer suited to low-surface-energy plastics.",
+    "strengthening": [
+      "Annealing raises heat resistance",
+      "Increase wall count in loaded regions",
+      "Orient loads along the layers"
+    ]
+  },
+  "pei_1010": {
+    "techniques": [
+      {
+        "name": "Sanding",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "220-grit sandpaper",
+          "400-grit sandpaper",
+          "600-grit sandpaper",
+          "dust mask",
+          "water for wet sanding"
+        ]
+      },
+      {
+        "name": "Machining and drilling",
+        "difficulty": "advanced",
+        "tools_needed": [
+          "sharp carbide tooling",
+          "slow feed and speed",
+          "coolant or air blast",
+          "eye protection"
+        ]
+      },
+      {
+        "name": "Bonding and inserts",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "abrasive pad",
+          "isopropyl alcohol",
+          "two-part structural epoxy",
+          "heat-set inserts and installation tip"
+        ]
+      }
+    ],
+    "paintability": "Moderate. Abrade and prime before painting.",
+    "strengthening": [
+      "Increase wall count in loaded regions",
+      "Orient loads along the layers",
+      "Use metal inserts for threads"
+    ]
+  },
+  "pei_9085": {
+    "techniques": [
+      {
+        "name": "Sanding",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "220-grit sandpaper",
+          "400-grit sandpaper",
+          "600-grit sandpaper",
+          "dust mask",
+          "water for wet sanding"
+        ]
+      },
+      {
+        "name": "Machining and drilling",
+        "difficulty": "advanced",
+        "tools_needed": [
+          "sharp carbide tooling",
+          "slow feed and speed",
+          "coolant or air blast",
+          "eye protection"
+        ]
+      },
+      {
+        "name": "Bonding and inserts",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "abrasive pad",
+          "isopropyl alcohol",
+          "two-part structural epoxy",
+          "heat-set inserts and installation tip"
+        ]
+      }
+    ],
+    "paintability": "Moderate. Abrade and prime before painting.",
+    "strengthening": [
+      "Increase wall count in loaded regions",
+      "Orient loads along the layers",
+      "Use metal inserts for threads"
+    ]
+  },
+  "pekk": {
+    "techniques": [
+      {
+        "name": "Sanding",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "220-grit sandpaper",
+          "400-grit sandpaper",
+          "600-grit sandpaper",
+          "dust mask",
+          "water for wet sanding"
+        ]
+      },
+      {
+        "name": "Annealing",
+        "difficulty": "advanced",
+        "tools_needed": [
+          "temperature-controlled oven",
+          "flat support fixture",
+          "heat-rated gloves"
+        ]
+      },
+      {
+        "name": "Machining and drilling",
+        "difficulty": "advanced",
+        "tools_needed": [
+          "sharp carbide tooling",
+          "slow feed and speed",
+          "coolant or air blast",
+          "eye protection"
+        ]
+      },
+      {
+        "name": "Bonding and inserts",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "abrasive pad",
+          "isopropyl alcohol",
+          "two-part structural epoxy",
+          "heat-set inserts and installation tip"
+        ]
+      }
+    ],
+    "paintability": "Difficult. Requires abrasion and a primer suited to low-surface-energy plastics.",
+    "strengthening": [
+      "Annealing raises heat resistance",
+      "Increase wall count in loaded regions",
+      "Orient loads along the layers"
+    ]
+  },
+  "ppsu": {
+    "techniques": [
+      {
+        "name": "Sanding",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "220-grit sandpaper",
+          "400-grit sandpaper",
+          "600-grit sandpaper",
+          "dust mask",
+          "water for wet sanding"
+        ]
+      },
+      {
+        "name": "Machining and drilling",
+        "difficulty": "advanced",
+        "tools_needed": [
+          "sharp carbide tooling",
+          "slow feed and speed",
+          "coolant or air blast",
+          "eye protection"
+        ]
+      },
+      {
+        "name": "Bonding and inserts",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "abrasive pad",
+          "isopropyl alcohol",
+          "two-part structural epoxy",
+          "heat-set inserts and installation tip"
+        ]
+      }
+    ],
+    "paintability": "Moderate. Abrade and prime before painting.",
+    "strengthening": [
+      "Increase wall count in loaded regions",
+      "Orient loads along the layers",
+      "Use metal inserts for threads"
+    ]
+  },
+  "pps": {
+    "techniques": [
+      {
+        "name": "Sanding",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "220-grit sandpaper",
+          "400-grit sandpaper",
+          "600-grit sandpaper",
+          "dust mask",
+          "water for wet sanding"
+        ]
+      },
+      {
+        "name": "Annealing",
+        "difficulty": "advanced",
+        "tools_needed": [
+          "temperature-controlled oven",
+          "flat support fixture",
+          "heat-rated gloves"
+        ]
+      },
+      {
+        "name": "Machining and drilling",
+        "difficulty": "advanced",
+        "tools_needed": [
+          "sharp carbide tooling",
+          "slow feed and speed",
+          "coolant or air blast",
+          "eye protection"
+        ]
+      },
+      {
+        "name": "Bonding and inserts",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "abrasive pad",
+          "isopropyl alcohol",
+          "two-part structural epoxy",
+          "heat-set inserts and installation tip"
+        ]
+      }
+    ],
+    "paintability": "Difficult. Requires abrasion and a primer suited to low-surface-energy plastics.",
+    "strengthening": [
+      "Annealing raises heat resistance",
+      "Increase wall count in loaded regions",
+      "Orient loads along the layers"
+    ]
   }
 }

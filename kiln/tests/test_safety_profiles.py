@@ -173,10 +173,17 @@ class TestGetProfile:
         assert profile.build_volume == [280, 280, 270]
 
     def test_default_profile(self) -> None:
+        """The generic profile describes the LEAST capable machine, not the most.
+
+        These were 300/130 until 2026-07-20 — the loosest ceiling in the whole
+        file, applied to a printer we cannot identify and which may well have a
+        PTFE-lined hotend. An unknown machine is now treated as the weakest one
+        the registry describes (250/100), matching printer_intelligence.
+        """
         profile = get_profile("default")
         assert profile.id == "default"
-        assert profile.max_hotend_temp == 300.0
-        assert profile.max_bed_temp == 130.0
+        assert profile.max_hotend_temp == 250.0
+        assert profile.max_bed_temp == 100.0
         assert profile.max_chamber_temp == 80.0
         assert profile.max_feedrate == 10000.0
         assert profile.display_name == "Generic / Unknown Printer"
@@ -214,8 +221,11 @@ class TestGetProfile:
         assert profile.id == "ender3"
 
     def test_prusa_mk4(self) -> None:
+        # 290C, not 300C: Prusa's spec sheet says 300 but the Buddy firmware
+        # caps the nozzle at 290, so 290 is what the machine will actually
+        # accept. The ceiling tracks achievable capability, not marketing.
         profile = get_profile("prusa_mk4")
-        assert profile.max_hotend_temp == 300.0
+        assert profile.max_hotend_temp == 290.0
         assert profile.max_bed_temp == 120.0
         assert profile.max_feedrate == 15000.0
 
@@ -546,10 +556,16 @@ class TestValidateGcodeForPrinterUnknown:
     """Unknown printer should fall back to default profile validation."""
 
     def test_unknown_printer_uses_default_limits(self) -> None:
-        """Unknown printer should use default max hotend of 300C."""
-        # 290C should pass with default limits (300C max)
-        r = validate_gcode_for_printer("M104 S290", "totally_unknown_printer")
+        """Unknown printer falls back to the least-capable machine (250C).
+
+        Previously the default was 300C, so 290C passed for a printer we know
+        nothing about. That is the wrong direction for an unidentified machine:
+        240C now passes and 290C does not.
+        """
+        r = validate_gcode_for_printer("M104 S240", "totally_unknown_printer")
         assert r.valid is True
+        over = validate_gcode_for_printer("M104 S290", "totally_unknown_printer")
+        assert over.valid is False
 
     def test_unknown_printer_still_blocks_over_default(self) -> None:
         """Even with unknown printer, going over default 300C should block."""

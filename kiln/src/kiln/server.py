@@ -1238,7 +1238,11 @@ def _get_temp_limits() -> tuple:
       1. ``printer_model`` field in ``~/.kiln/config.yaml``
       2. Bambu serial-prefix inference / host-pattern inference
       3. ``KILN_PRINTER_MODEL`` environment variable
-      4. Conservative generic limits (300/130) if all of the above fail
+      4. The least-capable machine in the registry (see
+         ``_UNKNOWN_PRINTER_MAX_HOTEND_C``) if all of the above fail.
+         This was 300/130 until 2026-07-20 — described as conservative
+         while being the LOOSEST ceiling in the fleet, which let an
+         unidentified (possibly PTFE-lined) hotend be driven to 300C.
 
     PTFE-lined hotends (non-all-metal) are additionally clamped to 240°C
     regardless of the profile's stated maximum — PTFE burns above ~245°C
@@ -1291,7 +1295,11 @@ def _get_temp_limits() -> tuple:
             return max_tool, max_bed
         except (KeyError, ImportError):
             pass
-    return 300.0, 130.0
+    from kiln.safety_profiles import (
+        _UNKNOWN_PRINTER_MAX_BED_C,
+        _UNKNOWN_PRINTER_MAX_HOTEND_C,
+    )
+    return _UNKNOWN_PRINTER_MAX_HOTEND_C, _UNKNOWN_PRINTER_MAX_BED_C
 
 
 def _is_resume_mode_3mf(file_name: str) -> bool:

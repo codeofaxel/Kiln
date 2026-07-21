@@ -84,8 +84,8 @@ class TestGetTempLimits:
         )
         from kiln.server import _get_temp_limits
         max_tool, max_bed = _get_temp_limits()
-        assert max_tool == 300.0
-        assert max_bed == 130.0
+        assert max_tool == 250.0
+        assert max_bed == 100.0
 
     def test_ender3_limits(self, monkeypatch) -> None:
         """Ender 3 has PTFE hotend — max hotend should be clamped to 240
@@ -102,8 +102,13 @@ class TestGetTempLimits:
         assert max_bed == 110.0
 
     def test_unknown_model_falls_back(self, monkeypatch) -> None:
-        """Unknown model should fall back to the generic conservative
-        limits (300°C tool / 130°C bed) — same as the no-model path."""
+        """Unknown model falls back to the generic limits — same as the
+        no-model path.
+
+        Those limits were 300C/130C until 2026-07-20, described as
+        "conservative" while actually being the LOOSEST ceiling in the fleet.
+        An unidentified printer is now treated as the least capable machine
+        the registry describes (250C/100C)."""
         monkeypatch.setattr(
             "kiln.server._PRINTER_MODEL", "nonexistent_printer_xyz",
         )
@@ -113,8 +118,8 @@ class TestGetTempLimits:
         )
         from kiln.server import _get_temp_limits
         max_tool, max_bed = _get_temp_limits()
-        assert max_tool == 300.0
-        assert max_bed == 130.0
+        assert max_tool == 250.0
+        assert max_bed == 100.0
 
 
 # ===================================================================

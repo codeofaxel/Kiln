@@ -823,7 +823,16 @@ class GcodeInterceptor:
             )
 
         # -- Hotend temperature limit --
-        max_hotend = profile.max_hotend_temp if profile else 300.0
+        # No profile means an unidentified machine, so fall back to the
+        # least-capable one the registry knows rather than the loosest.
+        # These literals were 300.0 / 130.0 — the top of the whole fleet —
+        # which meant an unknown, possibly PTFE-lined hotend could be
+        # commanded to 300C by the very rule meant to stop that.
+        from kiln.safety_profiles import (
+            _UNKNOWN_PRINTER_MAX_BED_C,
+            _UNKNOWN_PRINTER_MAX_HOTEND_C,
+        )
+        max_hotend = profile.max_hotend_temp if profile else _UNKNOWN_PRINTER_MAX_HOTEND_C
         rules.append(
             InterceptionRule(
                 rule_id=str(uuid.uuid4()),
@@ -838,7 +847,7 @@ class GcodeInterceptor:
         )
 
         # -- Bed temperature limit --
-        max_bed = profile.max_bed_temp if profile else 130.0
+        max_bed = profile.max_bed_temp if profile else _UNKNOWN_PRINTER_MAX_BED_C
         rules.append(
             InterceptionRule(
                 rule_id=str(uuid.uuid4()),

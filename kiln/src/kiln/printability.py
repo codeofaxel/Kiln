@@ -402,7 +402,7 @@ _HIGH_WARP_MATERIALS: frozenset[str] = frozenset({
 # Known bed-slinger printers where Y-axis bed movement worsens adhesion.
 _BEDSLINGER_PRINTERS: frozenset[str] = frozenset({
     "bambu_a1", "bambu_a1_mini",
-    "ender3", "ender3_v2", "ender3_s1", "ender3_neo",
+    "ender3", "ender3_v2", "ender3_s1", "ender3_s1_pro", "ender3_neo",
     "cr10", "cr10_v2", "cr10_v3",
     "prusa_mk3s", "prusa_mini",
     "anycubic_mega", "anycubic_kobra",

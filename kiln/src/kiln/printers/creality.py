@@ -76,7 +76,8 @@ _UNKNOWN_STOCK_MOONRAKER_MODELS: frozenset[str] = frozenset(
     {"sparkx_i7", "k1_se", "k2_se", "ender3_v4", "ender3_v3_plus", "ender5_max"}
 )
 _LEGACY_SERIAL_MODELS: frozenset[str] = frozenset(
-    {"ender3", "ender3_v2", "ender3_s1", "ender5", "cr10", "ender3_v3_se"}
+    {"ender3", "ender3_v2", "ender3_s1", "ender3_s1_pro", "ender5", "cr10",
+     "ender3_v3_se"}
 )
 _CFS_OBJECT_KEYWORDS: tuple[str, ...] = (
     "cfs",

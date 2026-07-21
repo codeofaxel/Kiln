@@ -229,5 +229,59 @@
       "drying_temp_c": 55,
       "drying_time_hours": 4
     }
+  },
+  "peek": {
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 25,
+      "storage_method": "Sealed container with fresh desiccant, or a heated dry box feeding the printer directly. Ordinary low-temperature filament dryers cannot reach the drying temperature this material needs.",
+      "drying_temp_c": 120,
+      "drying_time_hours": 4
+    }
+  },
+  "pei_1010": {
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 20,
+      "storage_method": "Sealed container with fresh desiccant, or a heated dry box feeding the printer directly. Ordinary low-temperature filament dryers cannot reach the drying temperature this material needs.",
+      "drying_temp_c": 150,
+      "drying_time_hours": 4
+    }
+  },
+  "pei_9085": {
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 20,
+      "storage_method": "Sealed container with fresh desiccant, or a heated dry box feeding the printer directly. Ordinary low-temperature filament dryers cannot reach the drying temperature this material needs.",
+      "drying_temp_c": 120,
+      "drying_time_hours": 4
+    }
+  },
+  "pekk": {
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 20,
+      "storage_method": "Sealed container with fresh desiccant, or a heated dry box feeding the printer directly. Ordinary low-temperature filament dryers cannot reach the drying temperature this material needs.",
+      "drying_temp_c": 120,
+      "drying_time_hours": 8
+    }
+  },
+  "ppsu": {
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 20,
+      "storage_method": "Sealed container with fresh desiccant, or a heated dry box feeding the printer directly. Ordinary low-temperature filament dryers cannot reach the drying temperature this material needs.",
+      "drying_temp_c": 120,
+      "drying_time_hours": 4
+    }
+  },
+  "pps": {
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 25,
+      "storage_method": "Sealed container with fresh desiccant, or a heated dry box feeding the printer directly. Ordinary low-temperature filament dryers cannot reach the drying temperature this material needs.",
+      "drying_temp_c": 120,
+      "drying_time_hours": 4
+    }
   }
 }

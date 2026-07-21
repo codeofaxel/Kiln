@@ -277,12 +277,27 @@ def match_display_name(name: str) -> str | None:
     return None
 
 
+# Last-resort limits for when even the `default` profile cannot be loaded.
+# These are the values of the LEAST capable machine the registry describes, so
+# an unidentified printer is treated as the weakest one rather than the
+# strongest.  The previous literals here were 300/130 — described in the
+# docstring as "conservative generic limits" while actually being the LOOSEST
+# ceiling in the file, which would have let an unknown (possibly PTFE-lined)
+# hotend be driven to 300C.  Named, and named honestly, so the next reader does
+# not have to guess whether the number means anything.
+_UNKNOWN_PRINTER_MAX_HOTEND_C = 250.0
+_UNKNOWN_PRINTER_MAX_BED_C = 100.0
+
+
 def resolve_limits(printer_id: str | None = None) -> tuple:
     """Return ``(max_hotend, max_bed)`` for a printer, with fallback.
 
-    When *printer_id* is provided, loads the matching profile.  Falls back
-    to the default profile, and finally to conservative generic limits
-    (300/130) if no profile data is available at all.
+    When *printer_id* is provided, loads the matching profile.  Falls back to
+    the ``default`` profile, and finally to
+    ``_UNKNOWN_PRINTER_MAX_HOTEND_C`` / ``_UNKNOWN_PRINTER_MAX_BED_C`` — the
+    least-capable machine in the registry — if no profile data is available at
+    all.  Both limits are RATED CAPABILITY, not a guard band; safety margin is
+    applied separately and by name (see ``_PTFE_SAFE_MAX``).
     """
     if printer_id:
         try:
@@ -295,7 +310,7 @@ def resolve_limits(printer_id: str | None = None) -> tuple:
         default = get_profile("default")
         return default.max_hotend_temp, default.max_bed_temp
     except KeyError:
-        return 300.0, 130.0
+        return _UNKNOWN_PRINTER_MAX_HOTEND_C, _UNKNOWN_PRINTER_MAX_BED_C
 
 
 def profile_to_dict(profile: SafetyProfile) -> dict[str, Any]:

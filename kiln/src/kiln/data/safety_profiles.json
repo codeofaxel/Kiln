@@ -1,16 +1,16 @@
 {
   "default": {
     "display_name": "Generic / Unknown Printer",
-    "max_hotend_temp": 300.0,
-    "max_bed_temp": 130.0,
+    "max_hotend_temp": 250.0,
+    "max_bed_temp": 100.0,
     "max_chamber_temp": 80.0,
     "max_feedrate": 10000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": null,
     "build_volume": [
-      220,
-      220,
-      250
+      200,
+      200,
+      200
     ],
     "notes": "Conservative defaults suitable for most FDM printers."
   },
@@ -30,9 +30,9 @@
     "notes": "PTFE-lined hotend by default — exceeding 240C risks toxic fumes. All-metal upgrade raises safe limit to 300C."
   },
   "ender3_s1": {
-    "display_name": "Creality Ender 3 S1 / S1 Pro",
-    "max_hotend_temp": 300.0,
-    "max_bed_temp": 110.0,
+    "display_name": "Creality Ender 3 S1",
+    "max_hotend_temp": 260.0,
+    "max_bed_temp": 100.0,
     "max_chamber_temp": null,
     "max_feedrate": 8000.0,
     "min_safe_z": 0.0,
@@ -42,7 +42,7 @@
       220,
       270
     ],
-    "notes": "Sprite direct-drive extruder with all-metal hotend."
+    "notes": "Sprite direct-drive extruder with a PTFE-LINED heat break — 260C ceiling, and sustained printing near it degrades the liner. The S1 Pro is a different machine with a full-metal hotend; see ender3_s1_pro."
   },
   "ender5": {
     "display_name": "Creality Ender 5 / Ender 5 Plus",
@@ -62,7 +62,7 @@
   "cr10": {
     "display_name": "Creality CR-10 / CR-10S",
     "max_hotend_temp": 260.0,
-    "max_bed_temp": 110.0,
+    "max_bed_temp": 100.0,
     "max_chamber_temp": null,
     "max_feedrate": 8000.0,
     "min_safe_z": 0.0,
@@ -345,9 +345,15 @@
     "notes": "CR-10 SE dimensions (220x220x265). Klipper-class direct-drive open-frame printer."
   },
   "_meta": {
-    "version": "1.0.0",
-    "description": "Per-printer safety profiles for Kiln G-code validation. Each profile defines safe operating limits. The 'default' profile applies when no printer-specific profile matches.",
-    "updated": "2025-02-11"
+    "version": "1.1.0",
+    "description": "Per-printer safety profiles for Kiln G-code validation. The 'default' profile applies when no printer-specific profile matches.",
+    "updated": "2026-07-20",
+    "field_semantics": {
+      "max_hotend_temp": "THE MACHINE'S RATED CAPABILITY in C, mirrored from printer_intelligence.json (the manufacturer-spec registry). It is enforced as a CRITICAL block rule by the G-code interceptor. It is NOT a guard band: do not hand-type a margin into it. A value above the rating grants rope the machine was never rated for; a value below it silently caps hardware the owner paid for. Both directions are caught by a test.",
+      "max_bed_temp": "Same contract as max_hotend_temp, for the heated bed.",
+      "policy_margin": "Safety MARGIN lives separately and is named: _PTFE_SAFE_MAX (240C) in server.py clamps PTFE-lined hotends below their rating, because the liner degrades before the machine does. That is what a guard band should look like — one named constant derived from a material fact, not a per-printer round number. Add new margins the same way.",
+      "why_this_exists": "Until 2026-07-20 this file and the registry disagreed on 17 values. printer_intelligence had been backfilled from manufacturer specs; this file never had an equivalent pass, so it had collapsed 250/260/290-rated machines into a round 300. Nothing compared them."
+    }
   },
   "prusa_mk3s": {
     "display_name": "Prusa i3 MK3S / MK3S+",
@@ -366,7 +372,7 @@
   },
   "prusa_mk4": {
     "display_name": "Prusa MK4 / MK4S",
-    "max_hotend_temp": 300.0,
+    "max_hotend_temp": 290.0,
     "max_bed_temp": 120.0,
     "max_chamber_temp": null,
     "max_feedrate": 15000.0,
@@ -381,7 +387,7 @@
   },
   "prusa_xl": {
     "display_name": "Prusa XL",
-    "max_hotend_temp": 300.0,
+    "max_hotend_temp": 290.0,
     "max_bed_temp": 120.0,
     "max_chamber_temp": null,
     "max_feedrate": 15000.0,
@@ -442,7 +448,7 @@
   "bambu_p1s": {
     "display_name": "Bambu Lab P1S",
     "max_hotend_temp": 300.0,
-    "max_bed_temp": 120.0,
+    "max_bed_temp": 100.0,
     "max_chamber_temp": 60.0,
     "max_feedrate": 30000.0,
     "min_safe_z": 0.0,
@@ -472,7 +478,7 @@
   "bambu_p1p": {
     "display_name": "Bambu Lab P1P",
     "max_hotend_temp": 300.0,
-    "max_bed_temp": 110.0,
+    "max_bed_temp": 100.0,
     "max_chamber_temp": null,
     "max_feedrate": 30000.0,
     "min_safe_z": 0.0,
@@ -568,9 +574,9 @@
     "min_safe_z": 0.0,
     "max_volumetric_flow": 30.0,
     "build_volume": [
-      350,
-      350,
-      350
+      300,
+      300,
+      300
     ],
     "notes": "Full-size enclosed CoreXY kit. Typical configs use Dragon/Rapido hotend."
   },
@@ -592,7 +598,7 @@
   "elegoo_neptune3": {
     "display_name": "Elegoo Neptune 3 / 3 Pro / 3 Plus",
     "max_hotend_temp": 260.0,
-    "max_bed_temp": 110.0,
+    "max_bed_temp": 100.0,
     "max_chamber_temp": null,
     "max_feedrate": 8000.0,
     "min_safe_z": 0.0,
@@ -607,21 +613,21 @@
   "elegoo_neptune4": {
     "display_name": "Elegoo Neptune 4 / 4 Pro / 4 Max",
     "max_hotend_temp": 300.0,
-    "max_bed_temp": 110.0,
+    "max_bed_temp": 100.0,
     "max_chamber_temp": null,
     "max_feedrate": 20000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 25.0,
     "build_volume": [
-      235,
-      235,
+      225,
+      225,
       265
     ],
     "notes": "Klipper-based. All-metal hotend. High-speed capable."
   },
   "elegoo_centauri_carbon": {
     "display_name": "Elegoo Centauri Carbon / Carbon 2",
-    "max_hotend_temp": 300.0,
+    "max_hotend_temp": 320.0,
     "max_bed_temp": 110.0,
     "max_chamber_temp": 70.0,
     "max_feedrate": 30000.0,
@@ -632,7 +638,7 @@
       256,
       256
     ],
-    "notes": "High-speed CoreXY with SDCP protocol. Enclosed, active chamber heating. All-metal hotend."
+    "notes": "High-speed CoreXY with SDCP protocol. Enclosed, active chamber heating. All-metal hotend with a brass-hardened steel nozzle rated to 320C by the manufacturer. The ceiling here read 300C until 2026-07-20, which capped the machine 20C below its rated hotend and blocked its top of range for no stated reason; corrected to the manufacturer's figure, which the printer registry already carried."
   },
   "elegoo_orangestorm_giga": {
     "display_name": "Elegoo OrangeStorm Giga",
@@ -651,8 +657,8 @@
   },
   "anker_m5": {
     "display_name": "AnkerMake M5 / M5C",
-    "max_hotend_temp": 300.0,
-    "max_bed_temp": 110.0,
+    "max_hotend_temp": 260.0,
+    "max_bed_temp": 100.0,
     "max_chamber_temp": null,
     "max_feedrate": 30000.0,
     "min_safe_z": 0.0,
@@ -666,23 +672,23 @@
   },
   "artillery_sw_x3": {
     "display_name": "Artillery Sidewinder X3 Plus / X3 Pro",
-    "max_hotend_temp": 300.0,
+    "max_hotend_temp": 260.0,
     "max_bed_temp": 110.0,
     "max_chamber_temp": null,
     "max_feedrate": 20000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 22.0,
     "build_volume": [
-      300,
-      300,
-      400
+      240,
+      240,
+      260
     ],
     "notes": "Klipper-based. All-metal hotend. Direct drive."
   },
   "sovol_sv06": {
     "display_name": "Sovol SV06 / SV06 Plus",
     "max_hotend_temp": 300.0,
-    "max_bed_temp": 110.0,
+    "max_bed_temp": 100.0,
     "max_chamber_temp": null,
     "max_feedrate": 8000.0,
     "min_safe_z": 0.0,
@@ -756,17 +762,107 @@
   },
   "klipper_generic": {
     "display_name": "Generic Klipper Printer (Moonraker)",
-    "max_hotend_temp": 300.0,
-    "max_bed_temp": 120.0,
+    "max_hotend_temp": 260.0,
+    "max_bed_temp": 110.0,
     "max_chamber_temp": null,
     "max_feedrate": 15000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 20.0,
     "build_volume": [
-      235,
-      235,
+      220,
+      220,
       250
     ],
     "notes": "Generic Klipper/Moonraker printer with all-metal hotend. No enclosure assumed. Adjust limits to match your hardware."
+  },
+  "aon_m2_plus": {
+    "display_name": "AON3D AON-M2+",
+    "max_hotend_temp": 500.0,
+    "max_bed_temp": 200.0,
+    "max_chamber_temp": 135.0,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 30.0,
+    "build_volume": [
+      450,
+      450,
+      565
+    ],
+    "notes": "Industrial high-temperature FFF. Dual independent extruders, actively heated 135 C chamber, 500 C+ extruder, 200 C+ bed. The only genuinely open high-temp machine in this class: it runs Klipper behind a browser interface, so Kiln reaches it through the existing Moonraker adapter."
+  },
+  "qidi_plus4": {
+    "display_name": "QIDI Plus 4",
+    "max_hotend_temp": 370.0,
+    "max_bed_temp": 120.0,
+    "max_chamber_temp": 65.0,
+    "max_feedrate": 36000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 30.0,
+    "build_volume": [
+      305,
+      305,
+      280
+    ],
+    "notes": "Enclosed CoreXY with a 370 C bimetal nozzle and 65 C independent chamber heating — the highest hotend of any consumer machine here, and enough for unfilled PPS. Klipper firmware with a Fluidd web interface, so the existing Moonraker adapter reaches it."
+  },
+  "qidi_q1_pro": {
+    "display_name": "QIDI Q1 Pro",
+    "max_hotend_temp": 350.0,
+    "max_bed_temp": 120.0,
+    "max_chamber_temp": 60.0,
+    "max_feedrate": 36000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 25.0,
+    "build_volume": [
+      245,
+      245,
+      240
+    ],
+    "notes": "Compact enclosed CoreXY, 350 C ceramic-heated bimetal hotend with 60 C independent chamber heating. Klipper firmware — reachable through the existing Moonraker adapter."
+  },
+  "qidi_x_max3": {
+    "display_name": "QIDI X-Max 3",
+    "max_hotend_temp": 350.0,
+    "max_bed_temp": 120.0,
+    "max_chamber_temp": 65.0,
+    "max_feedrate": 36000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 30.0,
+    "build_volume": [
+      325,
+      325,
+      315
+    ],
+    "notes": "Large-format enclosed CoreXY, 350 C hotend, 65 C actively heated chamber, integrated dryer box. Ships both a copper-alloy and a hardened-steel hotend, so abrasive filled grades need no upgrade. Klipper firmware — existing Moonraker adapter reaches it."
+  },
+  "qidi_q2": {
+    "display_name": "QIDI Q2",
+    "max_hotend_temp": 370.0,
+    "max_bed_temp": 120.0,
+    "max_chamber_temp": 65.0,
+    "max_feedrate": 36000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 30.0,
+    "build_volume": [
+      270,
+      270,
+      256
+    ],
+    "notes": "Enclosed CoreXY with a 370 C bimetal hardened-steel nozzle and 65 C second-generation independent chamber heating — the same hotend ceiling as the Plus 4 in a smaller frame, so unfilled PPS is in range. Klipper, so the existing Moonraker adapter reaches it."
+  },
+  "ender3_s1_pro": {
+    "display_name": "Creality Ender 3 S1 Pro",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 110.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 8000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 14.0,
+    "build_volume": [
+      220,
+      220,
+      270
+    ],
+    "notes": "Sprite Pro full-metal direct-drive extruder — rated to 300C with a titanium throat and no PTFE in the hot zone, so high-temperature filaments are safe here in a way they are not on the base S1. Open-frame bed-slinger, so ABS and ASA still warp without an enclosure."
   }
 }

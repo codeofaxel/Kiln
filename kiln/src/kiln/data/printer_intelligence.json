@@ -107,10 +107,10 @@
     "has_input_shaping": false
   },
   "ender3_s1": {
-    "display_name": "Creality Ender 3 S1 / S1 Pro",
+    "display_name": "Creality Ender 3 S1",
     "firmware": "marlin",
     "extruder_type": "direct_drive",
-    "hotend_type": "all_metal",
+    "hotend_type": "ptfe_lined",
     "has_enclosure": false,
     "has_abl": true,
     "materials": {
@@ -721,6 +721,11 @@
       "PC": {
         "hotend": 295,
         "bed": 115,
+        "fan": 0
+      },
+      "PPS": {
+        "hotend": 340,
+        "bed": 120,
         "fan": 0
       }
     },
@@ -1877,6 +1882,11 @@
         "hotend": 290,
         "bed": 100,
         "fan": 30
+      },
+      "PPS": {
+        "hotend": 340,
+        "bed": 120,
+        "fan": 0
       }
     },
     "max_hotend_temp": 350,
@@ -2065,6 +2075,11 @@
       "PC": {
         "hotend": 280,
         "bed": 110,
+        "fan": 0
+      },
+      "PPS": {
+        "hotend": 340,
+        "bed": 120,
         "fan": 0
       }
     },
@@ -2681,5 +2696,343 @@
     "max_hotend_temp": 300,
     "max_bed_temp": 80,
     "has_input_shaping": true
+  },
+  "aon_m2_plus": {
+    "display_name": "AON3D AON-M2+",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "has_input_shaping": true,
+    "materials": {
+      "PPS": {
+        "hotend": 340,
+        "bed": 120,
+        "fan": 0
+      },
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 40
+      },
+      "ABS": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 0
+      },
+      "PA-CF": {
+        "hotend": 300,
+        "bed": 100,
+        "fan": 30
+      },
+      "PC": {
+        "hotend": 280,
+        "bed": 110,
+        "fan": 0
+      },
+      "PEEK": {
+        "hotend": 400,
+        "bed": 140,
+        "fan": 0
+      },
+      "PEKK": {
+        "hotend": 375,
+        "bed": 120,
+        "fan": 0
+      },
+      "ASA": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 30
+      },
+      "TPU": {
+        "hotend": 230,
+        "bed": 50,
+        "fan": 50
+      },
+      "PVA": {
+        "hotend": 240,
+        "bed": 55,
+        "fan": 50
+      }
+    },
+    "build_volume_mm": [
+      450,
+      450,
+      565
+    ],
+    "max_hotend_temp": 500,
+    "max_bed_temp": 200
+  },
+  "qidi_plus4": {
+    "display_name": "QIDI Plus 4",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "has_input_shaping": true,
+    "materials": {
+      "PPS": {
+        "hotend": 340,
+        "bed": 120,
+        "fan": 0
+      },
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 40
+      },
+      "ABS": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 0
+      },
+      "PA-CF": {
+        "hotend": 300,
+        "bed": 100,
+        "fan": 30
+      },
+      "PC": {
+        "hotend": 280,
+        "bed": 110,
+        "fan": 0
+      }
+    },
+    "build_volume_mm": [
+      305,
+      305,
+      280
+    ],
+    "max_hotend_temp": 370,
+    "max_bed_temp": 120
+  },
+  "qidi_q1_pro": {
+    "display_name": "QIDI Q1 Pro",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "has_input_shaping": true,
+    "materials": {
+      "PPS": {
+        "hotend": 340,
+        "bed": 120,
+        "fan": 0
+      },
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 40
+      },
+      "ABS": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 0
+      },
+      "PA-CF": {
+        "hotend": 300,
+        "bed": 100,
+        "fan": 30
+      },
+      "PC": {
+        "hotend": 280,
+        "bed": 110,
+        "fan": 0
+      }
+    },
+    "build_volume_mm": [
+      245,
+      245,
+      240
+    ],
+    "max_hotend_temp": 350,
+    "max_bed_temp": 120
+  },
+  "qidi_x_max3": {
+    "display_name": "QIDI X-Max 3",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "has_input_shaping": true,
+    "materials": {
+      "PPS": {
+        "hotend": 340,
+        "bed": 120,
+        "fan": 0
+      },
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 40
+      },
+      "ABS": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 0
+      },
+      "PA-CF": {
+        "hotend": 300,
+        "bed": 100,
+        "fan": 30
+      },
+      "PC": {
+        "hotend": 280,
+        "bed": 110,
+        "fan": 0
+      }
+    },
+    "build_volume_mm": [
+      325,
+      325,
+      315
+    ],
+    "max_hotend_temp": 350,
+    "max_bed_temp": 120
+  },
+  "qidi_q2": {
+    "display_name": "QIDI Q2",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "has_input_shaping": true,
+    "materials": {
+      "PPS": {
+        "hotend": 340,
+        "bed": 120,
+        "fan": 0
+      },
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 40
+      },
+      "ABS": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 0
+      },
+      "PA-CF": {
+        "hotend": 300,
+        "bed": 100,
+        "fan": 30
+      },
+      "PC": {
+        "hotend": 280,
+        "bed": 110,
+        "fan": 0
+      }
+    },
+    "build_volume_mm": [
+      270,
+      270,
+      256
+    ],
+    "max_hotend_temp": 370,
+    "max_bed_temp": 120
+  },
+  "ender3_s1_pro": {
+    "display_name": "Creality Ender 3 S1 Pro",
+    "firmware": "marlin",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 205,
+        "bed": 60,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 80,
+        "fan": 50
+      },
+      "ABS": {
+        "hotend": 245,
+        "bed": 100,
+        "fan": 0
+      },
+      "TPU": {
+        "hotend": 220,
+        "bed": 50,
+        "fan": 50
+      },
+      "ASA": {
+        "hotend": 255,
+        "bed": 100,
+        "fan": 20
+      }
+    },
+    "build_volume_mm": [
+      220,
+      220,
+      270
+    ],
+    "max_hotend_temp": 300,
+    "max_bed_temp": 110,
+    "capabilities": {
+      "capability_schema": "creality_fdm_2026_04_28",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": true,
+      "camera_options": [
+        "OctoPrint USB webcam"
+      ],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "manual_M600",
+        "Mosaic Palette 3",
+        "3D Chameleon"
+      ],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "hardened_nozzle_stock": false,
+      "input_shaping": false,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "enclosure": "open"
+    },
+    "has_input_shaping": false
   }
 }
