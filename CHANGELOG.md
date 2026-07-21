@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Tidy your workshop (Pro+).** Archive a design to hide it from your list,
+  and restore it anytime — nothing is ever lost. See
+  https://kiln3d.com/pricing.
+
 - **Tell Kiln how your prints fit — free.** Say how a hole came out and which
   way it printed: up, or on its side. Calipers or just plain words — either
   works. Enough reports and Kiln settles which way holes actually shrink — a
