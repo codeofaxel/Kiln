@@ -14445,6 +14445,17 @@ def decorate_surface(
         unaddressed by the placement fix); on ``left``/``right`` the
         carve lands but the offset axis scaling is less verified.  Prefer
         the front-facing three when exact placement matters.
+        ``"wall"`` wraps TEXT around the upright round wall of a cup,
+        vase or bowl (STL, text + deboss only).  Letters stay legible and
+        read correctly from outside; size and carve depth may be adjusted
+        to keep them readable and the wall sound, and the response
+        reports what was actually used.  On the wall, *scale* sets letter
+        height as a share of the wall and *absolute_size_mm* pins it
+        exactly; *offset_x/y_mm* and *placement* do not apply (the line
+        sits centred on the front at mid-height).  The wrap engine ships
+        with kiln-pro and is included on the hosted service
+        (api.kiln3d.com) on every tier; without it locally, use a flat
+        face.
     :param depth_mm: Emboss/deboss depth in mm.  ``0`` = auto based on
         *material* (e.g. 0.6 mm for PLA, 1.2 mm for TPU).
     :param mode: ``"deboss"`` (cut into surface) or ``"emboss"`` (raised).
@@ -14587,6 +14598,166 @@ def decorate_surface(
                     f"Cannot resolve content: {content!r}. Provide a file path or 'text:...' for text.",
                     code="INVALID_CONTENT",
                 )
+
+        # --- Curved-wall path: face="wall" wraps TEXT around the upright
+        # round wall of a cup, vase or bowl.  The wrap engine ships with
+        # kiln-pro; the hosted service (api.kiln3d.com) includes it on
+        # every tier.  Text + deboss only by design: images and repeating
+        # patterns on curved walls route through apply_image_texture /
+        # apply_procedural_texture, which own curved-surface projection.
+        if face.lower().strip() == "wall":
+            if ctype != "text":
+                return _error_dict(
+                    "face='wall' supports text content only ('text:...'). "
+                    "For images or patterns on curved walls use "
+                    "apply_image_texture or apply_procedural_texture.",
+                    code="INVALID_CONTENT",
+                )
+            if mode != "deboss":
+                return _error_dict(
+                    "face='wall' text is deboss-only (carved into the "
+                    "wall); emboss on a curved wall is not supported yet.",
+                    code="INVALID_MODE",
+                )
+            wall_text_val = content.split(":", 1)[1].strip()
+            if not wall_text_val:
+                return _error_dict(
+                    "No text to wrap — pass content='text:YOUR TEXT'.",
+                    code="INVALID_CONTENT",
+                )
+            # The wrap engine works from the mesh geometry, so it needs an
+            # STL.  The generic check above admits OBJ for the flat path.
+            if os.path.splitext(model_path)[1].lower() != ".stl":
+                return _error_dict(
+                    "face='wall' needs an STL. Convert with "
+                    "import_external_mesh, or use a flat face for this "
+                    "model.",
+                    code="UNSUPPORTED_FORMAT",
+                )
+
+            try:
+                from kiln_pro.bridge import pro_features
+
+                wall_engine = getattr(pro_features, "wall_text", None)
+                if wall_engine is None:
+                    raise ImportError("wall-text engine unavailable")
+            except ImportError:
+                return _error_dict(
+                    "Curved-wall text wrapping runs on the engine that "
+                    "ships with kiln-pro — included on the hosted service "
+                    "(api.kiln3d.com) on every tier. Locally without it, "
+                    "place text on a flat face instead (face='front', "
+                    "'top', ...).",
+                    code="ENGINE_UNAVAILABLE",
+                )
+
+            from kiln.decoration_helpers import TextDoesNotFitError
+
+            wall_depth = depth_mm if depth_mm > 0 else 1.0
+            # Placement controls that only mean something on a flat face —
+            # say so rather than accepting them and doing nothing.
+            if offset_x_mm or offset_y_mm or placement != "center":
+                warnings.append(
+                    "offset_x_mm / offset_y_mm / placement don't apply to "
+                    "wall text yet — it wraps centred on the front of the "
+                    "wall at mid-height."
+                )
+            # scale is "fraction of the face to cover"; on a wall that reads
+            # as a share of the wall's height.  The 0.5 factor keeps the
+            # default scale (0.7) on the engine's own default band share.
+            wall_kwargs: dict[str, Any] = {}
+            if absolute_size_mm > 0:
+                wall_kwargs["target_size_mm"] = absolute_size_mm
+            elif scale > 0:
+                wall_kwargs["band_fraction"] = min(0.9, scale * 0.5)
+
+            try:
+                wall_result = wall_engine.wrap_text_on_mesh_wall(
+                    model_path,
+                    wall_text_val,
+                    depth_mm=wall_depth,
+                    output_dir=work_dir,
+                    **wall_kwargs,
+                )
+            except TextDoesNotFitError as exc:
+                err = _error_dict(
+                    "Wall text won't fit legibly.  "
+                    + "; ".join(exc.verdict.get("warnings", [])),
+                    code="TEXT_DOES_NOT_FIT",
+                )
+                err["suggestions"] = exc.verdict.get("suggestions", [])
+                return err
+            except getattr(
+                wall_engine, "NoRoundWallError", ValueError
+            ) as exc:
+                return _error_dict(str(exc), code="NO_ROUND_WALL")
+            except ValueError as exc:
+                return _error_dict(str(exc), code="INVALID_MODEL")
+
+            output_stl = wall_result["stl_path"]
+            result_dict = {
+                "success": True,
+                "message": (
+                    f"Wrapped text around the wall of "
+                    f"{os.path.basename(model_path)} "
+                    f"({wall_result['wrapped_deg']:.0f}° of arc at "
+                    f"{wall_result['size_mm']:.1f}mm letters)."
+                ),
+                "output_stl": output_stl,
+                "file_size_bytes": (
+                    os.path.getsize(output_stl)
+                    if os.path.isfile(output_stl)
+                    else 0
+                ),
+                "face": {
+                    "name": "wall",
+                    "radius_mm": wall_result["radius_mm"],
+                    "z_mm": wall_result["z_mm"],
+                    "wrapped_deg": wall_result["wrapped_deg"],
+                },
+                "decoration": {
+                    "content_type": "text",
+                    "mode": "deboss",
+                    # What was actually carved, not what was asked for —
+                    # size and depth may be adjusted to keep the text
+                    # readable and the wall sound.
+                    "depth_mm": wall_result["meta"].get("depth_mm", wall_depth),
+                    "requested_depth_mm": wall_depth,
+                    "text_size_mm": wall_result["size_mm"],
+                    "material": material,
+                },
+                "compile_time_seconds": wall_result.get(
+                    "compile_time_seconds"
+                ),
+                "scad_path": wall_result["scad_path"],
+            }
+            combined_warnings = [*warnings, *wall_result.get("warnings", [])]
+            if combined_warnings:
+                result_dict["warnings"] = combined_warnings
+            if _provenance_info:
+                result_dict["provenance"] = _provenance_info
+
+            # Same tail as the flat path: telemetry, quota tile, preview.
+            try:
+                from kiln.daily_stats import record_event
+
+                record_event("decorations", detail="text_wall")
+            except Exception:
+                pass
+            try:
+                from kiln.decoration_quota import decoration_quota_status
+
+                result_dict["quota"] = decoration_quota_status()
+            except Exception:
+                pass
+            try:
+                from kiln_pro.plugins.git_render_tools import (
+                    attach_inspect_bundle,
+                )
+
+                return attach_inspect_bundle(result_dict, level="quick")
+            except ImportError:
+                return result_dict
 
         # --- Step 2: Find the target face (needed before SVG prep for sizing) ---
         from kiln.surface_intelligence import (

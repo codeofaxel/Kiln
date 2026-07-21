@@ -49,6 +49,13 @@ _PARAM_RE = re.compile(r"([A-Za-z])\s*([+-]?\d*\.?\d+)")
 # Command word regex — letter + digits at start of line.
 _CMD_RE = re.compile(r"^([A-Za-z])\s*(\d+(?:\.\d+)?)")
 
+# Leading transmission metadata that is NOT part of the command: an
+# optional block-delete slash, an optional N-word line number, and an
+# optional Marlin checksum.  Senders and firmwares strip these before
+# dispatch, so the safety layer must strip them before parsing — see
+# the matching _strip_line_number in :mod:`kiln.gcode`.
+_LINE_PREFIX_RE = re.compile(r"^\s*/?\s*(?:[Nn]\d+(?:\*\d+)?\s*)?")
+
 # Hotend temperature commands.
 _HOTEND_TEMP_COMMANDS: frozenset[str] = frozenset({"M104", "M109"})
 
@@ -197,6 +204,10 @@ class InterceptionRule:
     message: str = ""
     enabled: bool = True
     created_at: str = ""
+    # Restricts a temperature rule to one command family so a bed limit
+    # is not applied to hotend commands (and vice versa).  ``None`` keeps
+    # the historical behaviour of checking both families.
+    applies_to: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
@@ -214,6 +225,7 @@ class InterceptionRule:
             "message": self.message,
             "enabled": self.enabled,
             "created_at": self.created_at,
+            "applies_to": self.applies_to,
         }
 
 
@@ -255,12 +267,20 @@ class InterceptionSession:
     commands_paused: int = 0
     alerts_issued: int = 0
     last_telemetry: TelemetrySnapshot | None = None
+    # Model key the printer name resolved to (e.g. "bambu_a1"), and any
+    # gaps in the generated rule set.  Both are surfaced to the caller so
+    # a session running on generic limits says so out loud instead of
+    # looking identical to one running on the printer's real limits.
+    resolved_model: str | None = None
+    coverage_warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "session_id": self.session_id,
             "printer_name": self.printer_name,
+            "resolved_model": self.resolved_model,
+            "coverage_warnings": self.coverage_warnings,
             "rules": [r.to_dict() for r in self.rules],
             "active": self.active,
             "started_at": self.started_at,
@@ -278,9 +298,21 @@ class InterceptionSession:
 # ---------------------------------------------------------------------------
 
 
+def _strip_line_prefix(line: str) -> str:
+    """Strip leading transmission metadata from a G-code line.
+
+    Removes an optional block-delete ``/``, an optional ``N<digits>``
+    line number, and an optional ``*<digits>`` checksum.  None of these
+    are part of the command, but firmwares and senders accept them, so
+    a safety layer that does not strip them would evaluate the wrong
+    token (e.g. ``"N1 M104 S999"`` parsing as ``N1`` instead of ``M104``).
+    """
+    return _LINE_PREFIX_RE.sub("", line, count=1)
+
+
 def _parse_command_word(line: str) -> str | None:
     """Extract and normalise the command word from a G-code line."""
-    stripped = line.strip()
+    stripped = _strip_line_prefix(line.strip()).strip()
     if not stripped:
         return None
     m = _CMD_RE.match(stripped)
@@ -311,7 +343,7 @@ def _parse_gcode_params(command: str) -> dict[str, float]:
         return params
 
     # Skip past the command word to parse only parameters.
-    remaining = command.strip()
+    remaining = _strip_line_prefix(command.strip()).strip()
     cmd_match = _CMD_RE.match(remaining)
     if cmd_match:
         remaining = remaining[cmd_match.end() :]
@@ -367,6 +399,12 @@ def _check_temp_exceeds(
     if cmd is None:
         return False
 
+    # A rule scoped to one command family must not judge the other:
+    # a 130C bed limit applied to M104 would block every normal hotend
+    # temperature.  An unscoped rule keeps the historical behaviour.
+    if rule.applies_to is not None and cmd not in rule.applies_to:
+        return False
+
     params = _parse_gcode_params(command)
     s_val = params.get("S")
 
@@ -376,11 +414,23 @@ def _check_temp_exceeds(
     if cmd in _BED_TEMP_COMMANDS and s_val is not None:
         return s_val > rule.threshold
 
-    # Also check live telemetry if available.
+    # Also check live telemetry if available, honouring the same scoping
+    # so a bed limit is not compared against the hotend reading.
     if telemetry is not None:
-        if telemetry.hotend_temp is not None and telemetry.hotend_temp > rule.threshold:
+        scope = rule.applies_to
+        check_hotend = scope is None or bool(_HOTEND_TEMP_COMMANDS & set(scope))
+        check_bed = scope is None or bool(_BED_TEMP_COMMANDS & set(scope))
+        if (
+            check_hotend
+            and telemetry.hotend_temp is not None
+            and telemetry.hotend_temp > rule.threshold
+        ):
             return True
-        if telemetry.bed_temp is not None and telemetry.bed_temp > rule.threshold:
+        if (
+            check_bed
+            and telemetry.bed_temp is not None
+            and telemetry.bed_temp > rule.threshold
+        ):
             return True
 
     return False
@@ -502,11 +552,24 @@ def _check_pattern_match(
     rule: InterceptionRule,
     command: str,
 ) -> bool:
-    """Check if the command matches a regex pattern."""
+    """Check if the command matches a regex pattern.
+
+    Tested against both the raw line and the line with transport metadata
+    stripped.  The generated bed-fit patterns anchor on the command word
+    (``^G[01]\\b...``), so a line number in front would otherwise slide a
+    crash-inducing move straight past them.  Matching either form keeps
+    existing patterns working while closing that gap.
+    """
     if rule.pattern is None:
         return False
+
+    candidates = [command]
+    normalised = _strip_line_prefix(command.strip()).strip()
+    if normalised and normalised != command:
+        candidates.append(normalised)
+
     try:
-        return bool(re.search(rule.pattern, command, re.IGNORECASE))
+        return any(re.search(rule.pattern, c, re.IGNORECASE) for c in candidates)
     except re.error:
         logger.warning("Invalid regex pattern in rule %s: %s", rule.rule_id, rule.pattern)
         return False
@@ -515,6 +578,34 @@ def _check_pattern_match(
 def _check_layer_change(command: str) -> bool:
     """Check if the command line contains a layer-change marker."""
     return bool(_LAYER_CHANGE_RE.search(command))
+
+
+def _resolve_printer_model(printer_name: str) -> str | None:
+    """Resolve a registry printer name to its model key.
+
+    Sessions are opened with the name the user registered the printer
+    under ("default", "Garage A1"), but safety-profile and build-volume
+    lookups are keyed by model ("bambu_a1").  Without this hop those
+    lookups miss for every printer that isn't named after its own model,
+    and the session silently falls back to generic limits with no
+    bed-fit rules at all.
+
+    Returns the model key, or ``None`` when the registry has no entry
+    (in which case *printer_name* is still worth trying directly — a
+    caller may legitimately pass a model key).
+    """
+    try:
+        from kiln.registry import get_printer_registry
+
+        adapter = get_printer_registry().get(printer_name)
+    except Exception:  # noqa: BLE001 — registry absent/offline is not fatal
+        return None
+
+    model = getattr(adapter, "printer_model", None) or getattr(
+        adapter, "_printer_model", None
+    )
+    model = (model or "").strip()
+    return model or None
 
 
 def _sort_rules_by_priority(rules: list[InterceptionRule]) -> list[InterceptionRule]:
@@ -567,10 +658,15 @@ class GcodeInterceptor:
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
         initial_rules: list[InterceptionRule] = []
+        warnings: list[str] = []
+        resolved_model: str | None = None
         if rules is not None:
             initial_rules = list(rules)
         else:
-            initial_rules = self.load_safety_rules(printer_name)
+            resolved_model = _resolve_printer_model(printer_name)
+            initial_rules = self.load_safety_rules(
+                printer_name, warnings=warnings, model_key=resolved_model
+            )
 
         session = InterceptionSession(
             session_id=session_id,
@@ -578,6 +674,8 @@ class GcodeInterceptor:
             rules=initial_rules,
             active=True,
             started_at=now,
+            resolved_model=resolved_model,
+            coverage_warnings=warnings,
         )
 
         with self._lock:
@@ -734,6 +832,28 @@ class GcodeInterceptor:
                 self._history.get(session_id, deque()).append(result)
             return result
 
+        # Fail CLOSED on anything we cannot parse.  Every _check_* helper
+        # answers "rule did not trigger" for an unrecognised command word,
+        # and the default action is ALLOW — so without this guard a line
+        # the safety layer does not understand is treated as a safe line.
+        # kiln.gcode's static validator already rejects these; the
+        # real-time path must not be more permissive than the static one.
+        if _parse_command_word(cleaned) is None:
+            result = InterceptionResult(
+                original_command=command,
+                action=InterceptionAction.BLOCK,
+                reasons=["Unrecognised command format — blocked (fail-closed)"],
+                timestamp=now,
+            )
+            with self._lock:
+                session.commands_processed += 1
+                session.commands_blocked += 1
+                history = self._history.get(session_id)
+                if history is not None:
+                    history.append(result)
+            self._emit_event(session, result)
+            return result
+
         # Evaluate all enabled rules sorted by priority.
         sorted_rules = _sort_rules_by_priority([r for r in rules if r.enabled])
 
@@ -795,7 +915,13 @@ class GcodeInterceptor:
 
     # -- safety rule generation --------------------------------------------
 
-    def load_safety_rules(self, printer_name: str) -> list[InterceptionRule]:
+    def load_safety_rules(
+        self,
+        printer_name: str,
+        *,
+        warnings: list[str] | None = None,
+        model_key: str | None = None,
+    ) -> list[InterceptionRule]:
         """Auto-generate interception rules from a printer's safety profile.
 
         Creates rules for:
@@ -805,21 +931,47 @@ class GcodeInterceptor:
         - Temperature delta / thermal runaway (ALERT)
         - Default blocked commands (BLOCK)
 
-        :param printer_name: Printer model identifier for profile lookup.
+        :param printer_name: Printer name or model identifier.
+        :param warnings: Optional list; any gap in the generated rule set
+            is appended to it so the caller can surface the degradation.
+        :param model_key: Pre-resolved model key.  When omitted it is
+            resolved from the printer registry.
         :returns: List of generated rules.
         """
         rules: list[InterceptionRule] = []
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
+        # Profile and build-volume lookups are keyed by MODEL, not by the
+        # name the user registered the printer under.  Try the resolved
+        # model first and keep the raw name as the fallback.
+        if model_key is None:
+            model_key = _resolve_printer_model(printer_name)
+        lookup_key = model_key or printer_name
+
         profile = None
         try:
             from kiln.safety_profiles import get_profile
 
-            profile = get_profile(printer_name)
+            profile = get_profile(lookup_key)
         except (ImportError, KeyError):
             logger.debug(
                 "No safety profile found for '%s' -- generating default rules only",
                 printer_name,
+            )
+
+        # Falling through to the generic "default" profile means we do NOT
+        # have this printer's real ceilings — a Bambu A1's bed tops out at
+        # 100C but the generic profile allows 130C.  Say so; a session on
+        # generic limits otherwise looks identical to a fully-profiled one.
+        if (
+            warnings is not None
+            and profile is not None
+            and getattr(profile, "id", None) == "default"
+        ):
+            warnings.append(
+                f"Printer {printer_name!r} has no specific safety profile, so "
+                "temperature limits are generic rather than this printer's own. "
+                "Register the printer or pass its model key for exact limits."
             )
 
         # -- Hotend temperature limit --
@@ -841,6 +993,7 @@ class GcodeInterceptor:
                 action=InterceptionAction.BLOCK,
                 priority=RulePriority.CRITICAL,
                 threshold=max_hotend,
+                applies_to=sorted(_HOTEND_TEMP_COMMANDS),
                 message=f"Hotend temperature exceeds safety limit ({max_hotend:.0f}C)",
                 created_at=now,
             )
@@ -856,6 +1009,7 @@ class GcodeInterceptor:
                 action=InterceptionAction.BLOCK,
                 priority=RulePriority.CRITICAL,
                 threshold=max_bed,
+                applies_to=sorted(_BED_TEMP_COMMANDS),
                 message=f"Bed temperature exceeds safety limit ({max_bed:.0f}C)",
                 created_at=now,
             )
@@ -914,7 +1068,7 @@ class GcodeInterceptor:
             from kiln.safety.default_interception_rules import (
                 get_default_bed_safety_rules,
             )
-            for rule_dict in get_default_bed_safety_rules(printer_name):
+            for rule_dict in get_default_bed_safety_rules(lookup_key):
                 _action = (
                     InterceptionAction.BLOCK
                     if rule_dict.get("action") == "reject"
@@ -932,16 +1086,31 @@ class GcodeInterceptor:
                         created_at=now,
                     )
                 )
+            bed_rule_count = sum(1 for r in rules if r.name.startswith("bed_fit_"))
             logger.info(
                 "Installed %d default bed-safety rules for printer %s",
-                sum(1 for r in rules if r.name.startswith("bed_fit_")),
+                bed_rule_count,
                 printer_name,
             )
+            if bed_rule_count == 0:
+                # An unknown build volume yields no bed-fit rules by design
+                # (we don't guess a bed size).  Say so — silently shipping a
+                # session with no crash protection is the worse failure.
+                msg = (
+                    f"No bed-fit rules for {printer_name!r}: build volume unknown, "
+                    "so out-of-bounds moves will NOT be caught by this session."
+                )
+                logger.warning(msg)
+                if warnings is not None:
+                    warnings.append(msg)
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Failed to install default bed-safety rules for %s: %s",
-                printer_name, exc,
+            msg = (
+                f"Failed to install default bed-safety rules for {printer_name!r}: "
+                f"{exc}. Out-of-bounds moves will NOT be caught by this session."
             )
+            logger.warning(msg)
+            if warnings is not None:
+                warnings.append(msg)
 
         return rules
 

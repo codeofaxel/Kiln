@@ -36,16 +36,30 @@ def start_gcode_interception(
         printer_name: Target printer name (e.g. "ender3", "voron-350").
 
     Returns a session ID and initial rule set.
+
+    AGENT CONTRACT: when ``coverage_warnings`` is non-empty this session
+    is running with reduced protection (generic temperature limits, or no
+    bed-fit rules because the build volume is unknown).  Relay those
+    warnings to the user verbatim -- do not present the session as fully
+    protected.  Passing the printer's model key (e.g. "bambu_a1") instead
+    of a nickname resolves the gap.
     """
     from kiln.gcode_interceptor import get_interceptor
 
     try:
         interceptor = get_interceptor()
         session = interceptor.create_session(printer_name)
+        message = (
+            f"Interception session started for '{printer_name}' with "
+            f"{len(session.rules)} safety rules."
+        )
+        if session.coverage_warnings:
+            message += " REDUCED PROTECTION: " + " ".join(session.coverage_warnings)
         return {
             "success": True,
             "session": session.to_dict(),
-            "message": f"Interception session started for '{printer_name}' with {len(session.rules)} safety rules.",
+            "coverage_warnings": session.coverage_warnings,
+            "message": message,
         }
     except ValueError as exc:
         return {"success": False, "error": str(exc)}
@@ -194,11 +208,35 @@ def intercept_gcode_command(
     session_id: str,
     command: str,
 ) -> dict[str, Any]:
-    """Evaluate a G-code command against interception rules.
+    """Check one line of G-code for danger before you send it to a printer.
 
-    This is the core tool.  Pass each G-code command through this
-    before sending to the printer.  The result tells you whether to
-    ALLOW, BLOCK, MODIFY, PAUSE, or ALERT.
+    G-code is the language printers take orders in -- "heat the nozzle to
+    250C", "move to X=100".  One bad line can cook a hotend or drive the
+    nozzle into the bed.  This checks a single line against the safety
+    rules for this session (temperature ceilings, speed caps, the
+    printer's build volume) and says whether it looks safe to send.
+
+    It is a smoke detector, not a sprinkler.  It reports; it does not
+    intervene.  Kiln does not quietly pipe outgoing G-code through it, so
+    a line gets checked only when you call this on it, and gets stopped
+    only if you act on the answer.  A line you never checked, or one you
+    checked and sent anyway, reaches the printer untouched.
+
+    So call it on each line before sending that line, and do what the
+    answer says:
+
+    - ``allow``  -- looks safe; send as-is.
+    - ``block``  -- dangerous; do not send.
+    - ``modify`` -- send ``modified_command`` instead, never the original.
+    - ``pause``  -- hold, and ask the user before sending.
+    - ``alert``  -- may be sent, but show the user ``reasons`` first.
+
+    A session can also come back with ``coverage_warnings`` (see
+    ``start_gcode_interception``), meaning some checks could not be set up
+    at all -- usually because Kiln does not know which printer model it is
+    guarding.  An ``allow`` from a session like that means "nothing I was
+    able to check objected", not "this is safe".  Tell the user that
+    rather than reporting a clean pass.
 
     Args:
         session_id: Active interception session ID.
@@ -354,19 +392,27 @@ def load_safety_interception_rules(
     Args:
         session_id: Target session ID.
         printer_name: Printer model for safety profile lookup.
+
+    AGENT CONTRACT: relay any ``coverage_warnings`` to the user verbatim
+    -- they mean the loaded rule set protects less than a full one.
     """
     from kiln.gcode_interceptor import get_interceptor
 
     try:
         interceptor = get_interceptor()
-        rules = interceptor.load_safety_rules(printer_name)
+        warnings: list[str] = []
+        rules = interceptor.load_safety_rules(printer_name, warnings=warnings)
         for rule in rules:
             interceptor.add_rule(session_id, rule)
+        message = f"Loaded {len(rules)} safety rules for '{printer_name}'."
+        if warnings:
+            message += " REDUCED PROTECTION: " + " ".join(warnings)
         return {
             "success": True,
             "rules_added": len(rules),
             "rules": [r.to_dict() for r in rules],
-            "message": f"Loaded {len(rules)} safety rules for '{printer_name}'.",
+            "coverage_warnings": warnings,
+            "message": message,
         }
     except (KeyError, ValueError) as exc:
         return {"success": False, "error": str(exc)}

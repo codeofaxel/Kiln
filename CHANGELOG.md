@@ -15,7 +15,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   way it printed: up, or on its side. Calipers or just plain words — either
   works. Enough reports and Kiln settles which way holes actually shrink — a
   thing makers argue about. *Pro turns it into fit guidance tuned to your
-  printer and material.*
+  printer and material — and now keeps the two print directions apart, so
+  those numbers sharpen faster.*
 
 ### Changed
 
@@ -30,6 +31,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   refreshing, Kiln shows you the one command to run.
 
 ### Fixed
+
+- **The live safety check no longer misses commands with a line number in
+  front (free).** Some senders and firmwares prefix every G-code command
+  with a line number. Kiln's real-time check was reading that prefix *as*
+  the command, so a command that should have been flagged could pass. It
+  now reads the actual command every time, and anything it can't make
+  sense of is refused rather than waved through. Reported by Dmitriy
+  Filatov ([Malder](https://github.com/Malder-coder)) — thank you.
+
+- **Ordinary nozzle temperatures are no longer refused by mistake (free).**
+
+- **Kiln now tells you when it's running on generic safety limits (free).**
+  If Kiln doesn't recognise your printer it can fall back to limits looser
+  than your machine's real ones. That used to be silent; it now says so up
+  front instead of looking like full protection.
 
 - **The free structural safety check is more accurate now (free).**
   Kiln Pro adds calibration and long-term-load checks for real

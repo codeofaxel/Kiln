@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-18T07:43:09.302037+00:00",
-  "tool_count": 379,
+  "generated": "2026-07-21T07:01:53.088754+00:00",
+  "tool_count": 380,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -6251,6 +6251,28 @@
           "target_kind"
         ],
         "title": "save_featureArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_operator",
+      "description": "Declare who is working at this workstation, so changes are recorded against a PERSON instead of the computer's login.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "clear": {
+            "default": false,
+            "title": "Clear",
+            "type": "boolean"
+          }
+        },
+        "title": "set_operatorArguments",
         "type": "object"
       }
     },
