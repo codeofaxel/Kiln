@@ -15,7 +15,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   way it printed: up, or on its side. Calipers or just plain words — either
   works. Enough reports and Kiln settles which way holes actually shrink — a
   thing makers argue about. *Pro turns it into fit guidance tuned to your
-  printer and material.*
+  printer and material — and now keeps the two print directions apart, so
+  those numbers sharpen faster.*
 
 ### Changed
 
