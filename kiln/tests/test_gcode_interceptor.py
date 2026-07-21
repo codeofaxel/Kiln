@@ -1595,3 +1595,243 @@ class TestIntegration:
         # End session.
         ended = interceptor.end_session(session.session_id)
         assert ended.active is False
+
+
+# ===================================================================
+# Transport-prefix handling and fail-closed parsing
+# ===================================================================
+
+# One canonical list of ways a sender may decorate a line without
+# changing which command the firmware executes.  Every safety rule must
+# reach the same verdict for every decoration.
+TRANSPORT_VARIANTS = [
+    pytest.param("{cmd}", id="plain"),
+    pytest.param("N1 {cmd}", id="line-number"),
+    pytest.param("N100 {cmd}", id="line-number-long"),
+    pytest.param("n7 {cmd}", id="line-number-lowercase"),
+    pytest.param("N1*85 {cmd}", id="line-number-with-checksum"),
+    pytest.param("/{cmd}", id="block-delete"),
+    pytest.param("/N1 {cmd}", id="block-delete-and-line-number"),
+    pytest.param("  {cmd}", id="leading-whitespace"),
+]
+
+
+class TestTransportPrefixes:
+    """A line-number or block-delete prefix must not hide the command.
+
+    Regression for an externally reported bypass: the command-word regex
+    matched the first letter+number pair on the line, so "N1 M104 S999"
+    parsed as "N1" and every rule keyed off the command word silently
+    saw nothing to act on.
+    """
+
+    @pytest.mark.parametrize("shape", TRANSPORT_VARIANTS)
+    def test_command_word_survives_prefix(self, shape):
+        assert _parse_command_word(shape.format(cmd="M104 S280")) == "M104"
+
+    @pytest.mark.parametrize("shape", TRANSPORT_VARIANTS)
+    def test_params_survive_prefix(self, shape):
+        params = _parse_gcode_params(shape.format(cmd="M104 S280"))
+        assert params.get("S") == 280.0
+        # The line number must not be mistaken for a parameter.
+        assert "N" not in params
+
+    @pytest.mark.parametrize("shape", TRANSPORT_VARIANTS)
+    def test_hotend_limit_enforced_through_prefix(self, interceptor, shape):
+        session = interceptor.create_session("ender3")
+        result = interceptor.intercept(
+            session.session_id, shape.format(cmd="M104 S999")
+        )
+        assert result.action == InterceptionAction.BLOCK
+
+    @pytest.mark.parametrize("shape", TRANSPORT_VARIANTS)
+    def test_bed_limit_enforced_through_prefix(self, interceptor, shape):
+        session = interceptor.create_session("ender3")
+        result = interceptor.intercept(
+            session.session_id, shape.format(cmd="M140 S250")
+        )
+        assert result.action == InterceptionAction.BLOCK
+
+    @pytest.mark.parametrize("shape", TRANSPORT_VARIANTS)
+    def test_blocked_command_enforced_through_prefix(self, interceptor, shape):
+        session = interceptor.create_session("ender3")
+        result = interceptor.intercept(session.session_id, shape.format(cmd="M112"))
+        assert result.action == InterceptionAction.BLOCK
+
+    @pytest.mark.parametrize("shape", TRANSPORT_VARIANTS)
+    def test_feedrate_cap_enforced_through_prefix(self, interceptor, shape):
+        session = interceptor.create_session("ender3")
+        result = interceptor.intercept(
+            session.session_id, shape.format(cmd="G1 X10 F99999")
+        )
+        assert result.action == InterceptionAction.MODIFY
+
+    @pytest.mark.parametrize("shape", TRANSPORT_VARIANTS)
+    def test_benign_command_still_allowed_through_prefix(self, interceptor, shape):
+        session = interceptor.create_session("ender3")
+        result = interceptor.intercept(
+            session.session_id, shape.format(cmd="G1 X10 Y10 F1200")
+        )
+        assert result.action == InterceptionAction.ALLOW
+
+
+class TestFailClosedParsing:
+    """An unparseable line must be refused, never silently allowed.
+
+    Every _check_* helper reports "did not trigger" when the command word
+    will not parse, and the default action is ALLOW.  Without an explicit
+    guard that combination turns "I do not understand this line" into
+    "this line is safe".
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        ["!!!", "X", "hello world", "@M104 S999", "-42", "???G1 X10"],
+    )
+    def test_unparseable_command_is_blocked(self, interceptor, command):
+        session = interceptor.create_session("ender3")
+        result = interceptor.intercept(session.session_id, command)
+        assert result.action == InterceptionAction.BLOCK
+        assert any("nrecognised" in r for r in result.reasons)
+
+    def test_blank_and_comment_lines_still_pass(self, interceptor):
+        session = interceptor.create_session("ender3")
+        for line in ["", "   ", "; a comment", ";LAYER_CHANGE"]:
+            result = interceptor.intercept(session.session_id, line)
+            assert result.action == InterceptionAction.ALLOW, line
+
+    def test_blocked_unparseable_counts_as_blocked(self, interceptor):
+        session = interceptor.create_session("ender3")
+        interceptor.intercept(session.session_id, "!!!")
+        stats = interceptor.get_session_stats(session.session_id)
+        assert stats["commands_blocked"] == 1
+
+
+class TestParserAgreesWithStaticValidator:
+    """The real-time parser must not be more permissive than the static one.
+
+    kiln.gcode (pre-print file scan) and kiln.gcode_interceptor (live
+    command gate) parse the same language.  They were written separately
+    and drifted: the static side stripped N-word line numbers, the live
+    side did not.  This differential check pins them together so the next
+    divergence fails here instead of in the field.
+    """
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "M104 S280", "N10 G28", "N20 M104 S200", "N30 M112",
+            "N100G28", "G1 X10 Y10 F1200", "M140 S60", "m104 s210",
+            "N5 G1 X-5", "G28",
+        ],
+    )
+    def test_same_command_word_as_static_parser(self, line):
+        from kiln import gcode as static
+
+        expected = static._parse_command_word(static._strip_line_number(line.strip()))
+        assert _parse_command_word(line) == expected
+
+
+# ===================================================================
+# Temperature-rule scoping and safety coverage reporting
+# ===================================================================
+
+
+class TestTemperatureRuleScoping:
+    """A bed limit must not judge hotend commands, or vice versa.
+
+    The generated bed rule carries the bed ceiling (e.g. 110C) but was
+    compared against any temperature command, so ordinary hotend targets
+    above the BED limit were blocked with a bed-temperature reason.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        ["M104 S200", "M104 S210", "M109 S240", "M104 S250"],
+    )
+    def test_normal_hotend_temps_are_allowed(self, interceptor, command):
+        session = interceptor.create_session("bambu_a1")
+        result = interceptor.intercept(session.session_id, command)
+        assert result.action == InterceptionAction.ALLOW, result.reasons
+
+    @pytest.mark.parametrize("command", ["M140 S60", "M190 S100"])
+    def test_normal_bed_temps_are_allowed(self, interceptor, command):
+        session = interceptor.create_session("bambu_a1")
+        result = interceptor.intercept(session.session_id, command)
+        assert result.action == InterceptionAction.ALLOW, result.reasons
+
+    def test_over_limit_hotend_still_blocked(self, interceptor):
+        session = interceptor.create_session("bambu_a1")
+        result = interceptor.intercept(session.session_id, "M104 S999")
+        assert result.action == InterceptionAction.BLOCK
+
+    def test_over_limit_bed_still_blocked(self, interceptor):
+        session = interceptor.create_session("bambu_a1")
+        result = interceptor.intercept(session.session_id, "M140 S250")
+        assert result.action == InterceptionAction.BLOCK
+
+    def test_bed_rule_ignores_hotend_command(self):
+        bed_rule = _make_rule(
+            trigger=InterceptionTrigger.TEMP_EXCEEDS,
+            action=InterceptionAction.BLOCK,
+            threshold=110.0,
+        )
+        bed_rule.applies_to = ["M140", "M190"]
+        assert _check_temp_exceeds(bed_rule, "M104 S210", None) is False
+        assert _check_temp_exceeds(bed_rule, "M140 S210", None) is True
+
+    def test_unscoped_rule_keeps_legacy_behaviour(self):
+        rule = _make_rule(
+            trigger=InterceptionTrigger.TEMP_EXCEEDS,
+            action=InterceptionAction.BLOCK,
+            threshold=110.0,
+        )
+        assert rule.applies_to is None
+        assert _check_temp_exceeds(rule, "M104 S210", None) is True
+
+
+class TestSafetyCoverageReporting:
+    """A session on generic limits must say so rather than look normal.
+
+    Sessions are opened with the name a printer is registered under, but
+    profile and build-volume lookups are keyed by model.  An unresolved
+    name silently produced generic temperature limits and zero bed-fit
+    rules, which is indistinguishable from a fully protected session.
+    """
+
+    def test_unknown_printer_reports_coverage_warnings(self, interceptor):
+        session = interceptor.create_session("Some Unregistered Printer")
+        assert session.resolved_model is None
+        assert session.coverage_warnings, "degradation must be surfaced"
+        joined = " ".join(session.coverage_warnings)
+        assert "generic" in joined
+        assert "bed-fit" in joined
+
+    def test_known_model_has_bed_rules_and_no_warnings(self, interceptor):
+        session = interceptor.create_session("ender3")
+        bed_rules = [r for r in session.rules if r.name.startswith("bed_fit_")]
+        assert bed_rules, "a known model must get bed-fit rules"
+        assert session.coverage_warnings == []
+
+    def test_coverage_warnings_are_serialised(self, interceptor):
+        session = interceptor.create_session("Some Unregistered Printer")
+        payload = session.to_dict()
+        assert payload["coverage_warnings"] == session.coverage_warnings
+        assert payload["resolved_model"] is None
+
+    def test_explicit_rules_skip_coverage_checks(self, interceptor):
+        session = interceptor.create_session("anything", rules=[])
+        assert session.coverage_warnings == []
+
+    def test_registry_model_is_used_for_lookup(self, interceptor, monkeypatch):
+        """A nickname must resolve through the registry to its model key."""
+        import kiln.gcode_interceptor as gi
+
+        monkeypatch.setattr(gi, "_resolve_printer_model", lambda name: "ender3")
+        session = interceptor.create_session("Garage Printer")
+        assert session.resolved_model == "ender3"
+        assert [r for r in session.rules if r.name.startswith("bed_fit_")]
+        assert session.coverage_warnings == []
+        # And it must inherit the ender3 ceiling, not the generic one.
+        result = interceptor.intercept(session.session_id, "M104 S280")
+        assert result.action == InterceptionAction.BLOCK

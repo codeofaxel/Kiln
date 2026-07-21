@@ -36,16 +36,30 @@ def start_gcode_interception(
         printer_name: Target printer name (e.g. "ender3", "voron-350").
 
     Returns a session ID and initial rule set.
+
+    AGENT CONTRACT: when ``coverage_warnings`` is non-empty this session
+    is running with reduced protection (generic temperature limits, or no
+    bed-fit rules because the build volume is unknown).  Relay those
+    warnings to the user verbatim -- do not present the session as fully
+    protected.  Passing the printer's model key (e.g. "bambu_a1") instead
+    of a nickname resolves the gap.
     """
     from kiln.gcode_interceptor import get_interceptor
 
     try:
         interceptor = get_interceptor()
         session = interceptor.create_session(printer_name)
+        message = (
+            f"Interception session started for '{printer_name}' with "
+            f"{len(session.rules)} safety rules."
+        )
+        if session.coverage_warnings:
+            message += " REDUCED PROTECTION: " + " ".join(session.coverage_warnings)
         return {
             "success": True,
             "session": session.to_dict(),
-            "message": f"Interception session started for '{printer_name}' with {len(session.rules)} safety rules.",
+            "coverage_warnings": session.coverage_warnings,
+            "message": message,
         }
     except ValueError as exc:
         return {"success": False, "error": str(exc)}
@@ -354,19 +368,27 @@ def load_safety_interception_rules(
     Args:
         session_id: Target session ID.
         printer_name: Printer model for safety profile lookup.
+
+    AGENT CONTRACT: relay any ``coverage_warnings`` to the user verbatim
+    -- they mean the loaded rule set protects less than a full one.
     """
     from kiln.gcode_interceptor import get_interceptor
 
     try:
         interceptor = get_interceptor()
-        rules = interceptor.load_safety_rules(printer_name)
+        warnings: list[str] = []
+        rules = interceptor.load_safety_rules(printer_name, warnings=warnings)
         for rule in rules:
             interceptor.add_rule(session_id, rule)
+        message = f"Loaded {len(rules)} safety rules for '{printer_name}'."
+        if warnings:
+            message += " REDUCED PROTECTION: " + " ".join(warnings)
         return {
             "success": True,
             "rules_added": len(rules),
             "rules": [r.to_dict() for r in rules],
-            "message": f"Loaded {len(rules)} safety rules for '{printer_name}'.",
+            "coverage_warnings": warnings,
+            "message": message,
         }
     except (KeyError, ValueError) as exc:
         return {"success": False, "error": str(exc)}
