@@ -32,6 +32,7 @@ from kiln.printer_intelligence import (
     diagnose_issue,
     get_material_settings,
     get_printer_intel,
+    get_slicer_speed_overrides,
     intel_to_dict,
     list_intel_profiles,
 )
@@ -88,6 +89,18 @@ CREALITY_CAPABILITY_KEYS = {
     # (internal QA trail — stripped at the wire boundary, kept locally).
     "_source_notes",
 }
+
+EXTENDED_HARDWARE_FIELDS = {
+    "ams_slots",
+    "ams_type",
+    "camera",
+    "nozzle_options",
+    "max_nozzle_temp",
+    "max_speed_mm_s",
+    "max_acceleration_mm_s2",
+    "wifi",
+}
+NON_MODEL_PROFILES = {"default", "klipper_generic"}
 
 # ===================================================================
 # Fixtures
@@ -391,6 +404,7 @@ class TestIntelToDict:
             "hotend_type", "has_enclosure", "has_abl",
             "capabilities", "materials", "quirks", "calibration", "failure_modes",
         ]
+        expected_keys.extend(sorted(EXTENDED_HARDWARE_FIELDS))
         for key in expected_keys:
             assert key in d, f"Missing key '{key}' in serialized dict"
 
@@ -426,6 +440,18 @@ class TestIntelToDict:
         assert d["firmware"] == intel.firmware
 
 
+class TestExtendedHardwareSpeedFallback:
+    """Null hardware specs must not become integers in the speed fallback."""
+
+    def test_builder_selected_speed_returns_no_override(self) -> None:
+        assert get_slicer_speed_overrides("ratrig_vcore3") == {}
+
+    def test_published_speed_with_unpublished_acceleration_uses_safe_default(self) -> None:
+        overrides = get_slicer_speed_overrides("sovol_sv07")
+        assert overrides["max_print_speed"] == "250"
+        assert overrides["default_acceleration"] == "3500"
+
+
 # ===================================================================
 # JSON data file validity
 # ===================================================================
@@ -459,6 +485,50 @@ class TestPrinterIntelligenceJSON:
                 continue
             assert "materials" in data, f"Profile '{key}' missing 'materials'"
             assert isinstance(data["materials"], dict)
+
+    def test_marketed_fleet_has_complete_extended_hardware_shape(self) -> None:
+        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
+        marketed = {
+            key: data
+            for key, data in raw.items()
+            if not key.startswith("_") and key not in NON_MODEL_PROFILES
+        }
+        assert len(marketed) == 55
+        for printer_id, data in marketed.items():
+            missing = EXTENDED_HARDWARE_FIELDS - set(data)
+            assert not missing, f"{printer_id}: missing {sorted(missing)}"
+
+    def test_extended_hardware_schema_pins_null_meaning_and_scope(self) -> None:
+        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
+        schema = raw["_meta"]["extended_hardware_schema"]
+        assert set(schema["fields"]) == EXTENDED_HARDWARE_FIELDS
+        assert "manufacturer does not publish" in schema["null_semantics"]
+        assert "default and klipper_generic" in schema["scope"]
+        assert "not a recommended quality speed" in schema["max_speed_semantics"]
+
+    def test_extended_hardware_types_and_thermal_ceiling_agree(self) -> None:
+        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
+        for printer_id, data in raw.items():
+            if printer_id.startswith("_") or printer_id in NON_MODEL_PROFILES:
+                continue
+            assert data["ams_slots"] is None or isinstance(data["ams_slots"], int)
+            assert data["ams_type"] is None or isinstance(data["ams_type"], str)
+            assert data["camera"] is None or isinstance(data["camera"], str)
+            assert data["nozzle_options"] is None or isinstance(
+                data["nozzle_options"], list
+            )
+            assert data["max_nozzle_temp"] is None or (
+                data["max_nozzle_temp"] == data["max_hotend_temp"]
+            ), f"{printer_id}: extended and safety ceilings disagree"
+            if data["ams_slots"] == 0:
+                assert data["ams_type"] == "none"
+
+    def test_x1c_records_ams_and_camera(self) -> None:
+        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
+        x1c = raw["bambu_x1c"]
+        assert x1c["ams_type"] == "ams"
+        assert x1c["ams_slots"] == 4
+        assert "1920x1080" in x1c["camera"]
 
     def test_all_material_entries_have_required_keys(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))

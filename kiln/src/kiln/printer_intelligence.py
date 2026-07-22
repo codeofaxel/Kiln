@@ -72,6 +72,14 @@ class PrinterIntel:
         has_enclosure: Whether the printer has a stock enclosure.
         has_abl: Whether automatic bed leveling is available.
         capabilities: Extended model facts such as camera and multicolor support.
+        ams_slots: Inputs on one supported first-party material system.
+        ams_type: First-party material-system identifier, or ``"none"``.
+        camera: Manufacturer-published stock/optional camera description.
+        nozzle_options: Manufacturer-published nozzle diameter/material options.
+        max_nozzle_temp: Manufacturer-rated nozzle ceiling in degrees C.
+        max_speed_mm_s: Manufacturer-published maximum motion/print speed.
+        max_acceleration_mm_s2: Manufacturer-published maximum acceleration.
+        wifi: Manufacturer-published Wi-Fi capability.
         materials: Material compatibility map (name → settings).
         quirks: List of printer-specific gotchas and tips.
         calibration: Calibration guidance keyed by procedure name.
@@ -86,6 +94,14 @@ class PrinterIntel:
     has_enclosure: bool
     has_abl: bool
     capabilities: dict[str, Any]
+    ams_slots: int | None
+    ams_type: str | None
+    camera: str | None
+    nozzle_options: list[str] | None
+    max_nozzle_temp: int | None
+    max_speed_mm_s: int | None
+    max_acceleration_mm_s2: int | None
+    wifi: str | None
     materials: dict[str, MaterialProfile]
     quirks: list[str]
     calibration: dict[str, str]
@@ -205,6 +221,18 @@ def _load() -> None:
                 has_enclosure=bool(data.get("has_enclosure", False)),
                 has_abl=bool(data.get("has_abl", False)),
                 capabilities=dict(data.get("capabilities", {})),
+                ams_slots=data.get("ams_slots"),
+                ams_type=data.get("ams_type"),
+                camera=data.get("camera"),
+                nozzle_options=(
+                    list(data["nozzle_options"])
+                    if data.get("nozzle_options") is not None
+                    else None
+                ),
+                max_nozzle_temp=data.get("max_nozzle_temp"),
+                max_speed_mm_s=data.get("max_speed_mm_s"),
+                max_acceleration_mm_s2=data.get("max_acceleration_mm_s2"),
+                wifi=data.get("wifi"),
                 materials=materials,
                 quirks=list(data.get("quirks", [])),
                 calibration=dict(data.get("calibration", {})),
@@ -304,6 +332,14 @@ def intel_to_dict(intel: PrinterIntel) -> dict[str, Any]:
         "has_enclosure": intel.has_enclosure,
         "has_abl": intel.has_abl,
         "capabilities": intel.capabilities,
+        "ams_slots": intel.ams_slots,
+        "ams_type": intel.ams_type,
+        "camera": intel.camera,
+        "nozzle_options": intel.nozzle_options,
+        "max_nozzle_temp": intel.max_nozzle_temp,
+        "max_speed_mm_s": intel.max_speed_mm_s,
+        "max_acceleration_mm_s2": intel.max_acceleration_mm_s2,
+        "wifi": intel.wifi,
         "materials": {
             name: {"hotend": mp.hotend, "bed": mp.bed, "fan": mp.fan, "notes": mp.notes}
             for name, mp in intel.materials.items()
@@ -636,7 +672,7 @@ def _resolve_caps(printer_id: str) -> dict[str, Any] | None:
     #    (e.g. 500 mm/s for bambu_a1) so we use a lower quality_factor to
     #    derate to practical printing speeds.
     raw = _get_raw(normalised)
-    if raw and "max_speed_mm_s" in raw:
+    if raw and raw.get("max_speed_mm_s") is not None:
         # has_input_shaping is a structured textbook field on each printer
         # entry (added in the Phase 2 catalog split, 2026-05-17).  We
         # used to scan the curated quirks prose for "input shaping" — but
@@ -650,7 +686,7 @@ def _resolve_caps(printer_id: str) -> dict[str, Any] | None:
             has_is = raw.get("firmware") in ("bambu", "klipper")
         return {
             "max_speed": int(raw["max_speed_mm_s"]),
-            "max_accel": int(raw.get("max_acceleration_mm_s2", 5000)),
+            "max_accel": int(raw.get("max_acceleration_mm_s2") or 5000),
             "input_shaping": bool(has_is),
             "quality_factor": 0.50,  # conservative: hardware max != practical max
         }

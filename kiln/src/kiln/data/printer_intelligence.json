@@ -3,7 +3,25 @@
     "version": "1.0.0",
     "description": "Printer intelligence database: firmware quirks, material compatibility, calibration guidance, and known failure modes. Keyed by the same printer_id as safety_profiles.json.",
     "updated": "2025-02-11",
-    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (quirks + calibration recipes + failure_modes + per-material notes) is available in Kiln Pro; see https://kiln3d.com/pricing."
+    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (quirks + calibration recipes + failure_modes + per-material notes) is available in Kiln Pro; see https://kiln3d.com/pricing.",
+    "extended_hardware_schema": {
+      "version": "1.0.0",
+      "verified_on": "2026-07-21",
+      "fields": [
+        "ams_slots",
+        "ams_type",
+        "camera",
+        "nozzle_options",
+        "max_nozzle_temp",
+        "max_speed_mm_s",
+        "max_acceleration_mm_s2",
+        "wifi"
+      ],
+      "scope": "marketed printer models; default and klipper_generic are non-model fallbacks",
+      "null_semantics": "manufacturer does not publish a fixed value, or hardware is builder-selected",
+      "ams_slots_semantics": "inputs or tools on one supported first-party automated-material or tool-changing system; 0 means the manufacturer confirms no such system",
+      "max_speed_semantics": "manufacturer-published maximum print, motion, or travel ceiling; not a recommended quality speed"
+    }
   },
   "default": {
     "display_name": "Generic FDM Printer",
@@ -104,7 +122,20 @@
       "power_loss_recovery": true,
       "enclosure": "open"
     },
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "none",
+    "nozzle_options": [
+      "0.2mm",
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 260,
+    "max_speed_mm_s": 180,
+    "max_acceleration_mm_s2": null,
+    "wifi": "none"
   },
   "ender3_s1": {
     "display_name": "Creality Ender 3 S1",
@@ -172,7 +203,17 @@
       "power_loss_recovery": true,
       "enclosure": "open"
     },
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "none",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 260,
+    "max_speed_mm_s": 150,
+    "max_acceleration_mm_s2": null,
+    "wifi": "none"
   },
   "k1": {
     "display_name": "Creality K1",
@@ -239,7 +280,17 @@
       "power_loss_recovery": true,
       "enclosure": "passive"
     },
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 4,
+    "ams_type": "cfs_c",
+    "camera": "optional Creality AI camera",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 600,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "Wi-Fi"
   },
   "ender3_v2": {
     "display_name": "Creality Ender 3 V2",
@@ -302,7 +353,20 @@
       "power_loss_recovery": true,
       "enclosure": "open"
     },
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "none",
+    "nozzle_options": [
+      "0.2mm",
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 260,
+    "max_speed_mm_s": 180,
+    "max_acceleration_mm_s2": null,
+    "wifi": "none"
   },
   "sparkx_i7": {
     "display_name": "Creality SPARKX i7",
@@ -368,7 +432,20 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 4,
+    "ams_type": "cfs",
+    "camera": "built-in 720p AI camera",
+    "nozzle_options": [
+      "0.2mm",
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": 10000,
+    "wifi": "Wi-Fi"
   },
   "k1_max": {
     "display_name": "Creality K1 Max",
@@ -436,7 +513,17 @@
       "power_loss_recovery": true,
       "enclosure": "passive"
     },
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 4,
+    "ams_type": "cfs_c",
+    "camera": "built-in AI camera and AI LiDAR",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 600,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "Wi-Fi and Ethernet"
   },
   "k1c": {
     "display_name": "Creality K1C",
@@ -503,7 +590,17 @@
       "power_loss_recovery": true,
       "enclosure": "passive"
     },
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 4,
+    "ams_type": "cfs_c",
+    "camera": "built-in 1080p AI camera",
+    "nozzle_options": [
+      "0.4mm tri-metal (default)"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 600,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "Wi-Fi"
   },
   "k1_se": {
     "display_name": "Creality K1 SE",
@@ -563,7 +660,17 @@
       "power_loss_recovery": true,
       "enclosure": "open"
     },
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 4,
+    "ams_type": "cfs_c",
+    "camera": "none",
+    "nozzle_options": [
+      "0.4mm steel-tipped (default)"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 600,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "Wi-Fi"
   },
   "k2": {
     "display_name": "Creality K2",
@@ -625,7 +732,17 @@
       "power_loss_recovery": true,
       "enclosure": "open"
     },
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 4,
+    "ams_type": "cfs",
+    "camera": "built-in AI monitoring camera",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 600,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "2.4GHz Wi-Fi"
   },
   "k2_pro": {
     "display_name": "Creality K2 Pro",
@@ -693,7 +810,17 @@
       "power_loss_recovery": true,
       "enclosure": "heated_or_passive"
     },
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 4,
+    "ams_type": "cfs",
+    "camera": "built-in AI monitoring and nozzle cameras",
+    "nozzle_options": [
+      "0.4mm steel-tipped tri-metal (default)"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 600,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "Wi-Fi and Ethernet"
   },
   "k2_plus": {
     "display_name": "Creality K2 Plus",
@@ -766,7 +893,17 @@
       "power_loss_recovery": true,
       "enclosure": "heated_or_passive"
     },
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 4,
+    "ams_type": "cfs",
+    "camera": "built-in AI monitoring and nozzle cameras",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 350,
+    "max_speed_mm_s": 600,
+    "max_acceleration_mm_s2": 30000,
+    "wifi": "2.4GHz/5GHz Wi-Fi and Ethernet"
   },
   "k2_se": {
     "display_name": "Creality K2 SE",
@@ -833,7 +970,17 @@
       "power_loss_recovery": true,
       "enclosure": "open"
     },
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 4,
+    "ams_type": "cfs",
+    "camera": "optional Creality AI camera",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "Wi-Fi"
   },
   "creality_hi": {
     "display_name": "Creality Hi",
@@ -900,7 +1047,17 @@
       "power_loss_recovery": false,
       "enclosure": "open"
     },
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 4,
+    "ams_type": "cfs",
+    "camera": "built-in AI camera",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": 12000,
+    "wifi": "Wi-Fi"
   },
   "ender3_v4": {
     "display_name": "Creality Ender-3 V4",
@@ -970,7 +1127,17 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 4,
+    "ams_type": "cfs",
+    "camera": "none",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "Wi-Fi"
   },
   "ender3_v3": {
     "display_name": "Creality Ender-3 V3",
@@ -1036,7 +1203,17 @@
       "power_loss_recovery": true,
       "enclosure": "open"
     },
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "optional Creality AI camera",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 600,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "Wi-Fi"
   },
   "ender3_v3_ke": {
     "display_name": "Creality Ender-3 V3 KE",
@@ -1104,7 +1281,17 @@
       "power_loss_recovery": true,
       "enclosure": "open"
     },
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "optional Creality AI camera",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": 8000,
+    "wifi": "Wi-Fi"
   },
   "ender3_v3_se": {
     "display_name": "Creality Ender-3 V3 SE",
@@ -1165,7 +1352,17 @@
       "power_loss_recovery": true,
       "enclosure": "open"
     },
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "none",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 260,
+    "max_speed_mm_s": 250,
+    "max_acceleration_mm_s2": 2500,
+    "wifi": "none"
   },
   "ender3_v3_plus": {
     "display_name": "Creality Ender-3 V3 Plus",
@@ -1231,7 +1428,17 @@
       "power_loss_recovery": true,
       "enclosure": "open"
     },
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "optional Creality AI camera",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 600,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "Wi-Fi"
   },
   "ender5_max": {
     "display_name": "Creality Ender-5 Max",
@@ -1299,7 +1506,19 @@
       "power_loss_recovery": true,
       "enclosure": "open"
     },
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "optional Creality AI camera",
+    "nozzle_options": [
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 700,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "Wi-Fi"
   },
   "cr10_se": {
     "display_name": "Creality CR-10 SE",
@@ -1365,7 +1584,17 @@
       "power_loss_recovery": true,
       "enclosure": "open"
     },
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "none",
+    "nozzle_options": [
+      "0.4mm hardened steel (default)"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 600,
+    "max_acceleration_mm_s2": 8000,
+    "wifi": "Wi-Fi"
   },
   "prusa_mk3s": {
     "display_name": "Prusa i3 MK3S / MK3S+",
@@ -1408,7 +1637,20 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 120,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "ams_slots": 5,
+    "ams_type": "mmu3",
+    "camera": "optional external camera through Prusa Connect",
+    "nozzle_options": [
+      "0.25mm",
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 200,
+    "max_acceleration_mm_s2": null,
+    "wifi": "optional via Raspberry Pi"
   },
   "prusa_mk4": {
     "display_name": "Prusa MK4 / MK4S",
@@ -1446,7 +1688,20 @@
     ],
     "max_hotend_temp": 290,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 5,
+    "ams_type": "mmu3",
+    "camera": "optional 1080p Buddy3D camera",
+    "nozzle_options": [
+      "0.25mm",
+      "0.4mm CHT (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 290,
+    "max_speed_mm_s": 600,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "optional ESP Wi-Fi module included"
   },
   "prusa_mini": {
     "display_name": "Prusa Mini / Mini+",
@@ -1484,7 +1739,20 @@
     ],
     "max_hotend_temp": 280,
     "max_bed_temp": 100,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "optional external camera through Prusa Connect",
+    "nozzle_options": [
+      "0.25mm",
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 280,
+    "max_speed_mm_s": 200,
+    "max_acceleration_mm_s2": null,
+    "wifi": "optional ESP-01 Wi-Fi module"
   },
   "bambu_x1c": {
     "display_name": "Bambu Lab X1 Carbon",
@@ -1537,7 +1805,20 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 4,
+    "ams_type": "ams",
+    "camera": "built-in 1920x1080 camera",
+    "nozzle_options": [
+      "0.2mm",
+      "0.4mm hardened steel (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "2.4GHz Wi-Fi"
   },
   "bambu_x1e": {
     "display_name": "Bambu Lab X1E",
@@ -1590,7 +1871,20 @@
     ],
     "max_hotend_temp": 320,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 4,
+    "ams_type": "ams",
+    "camera": "built-in 1920x1080 camera",
+    "nozzle_options": [
+      "0.2mm",
+      "0.4mm hardened steel (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 320,
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "2.4GHz/5GHz Wi-Fi and Ethernet"
   },
   "bambu_p1s": {
     "display_name": "Bambu Lab P1S",
@@ -1623,7 +1917,20 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 4,
+    "ams_type": "ams",
+    "camera": "built-in 1280x720 camera at 0.5 fps",
+    "nozzle_options": [
+      "0.2mm",
+      "0.4mm stainless steel (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "2.4GHz Wi-Fi"
   },
   "bambu_p2s": {
     "display_name": "Bambu Lab P2S",
@@ -1676,7 +1983,20 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 110,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 4,
+    "ams_type": "ams_2_pro",
+    "camera": "built-in high-rate 1080p camera",
+    "nozzle_options": [
+      "0.2mm",
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": null,
+    "max_acceleration_mm_s2": null,
+    "wifi": null
   },
   "bambu_a1": {
     "display_name": "Bambu Lab A1",
@@ -1890,7 +2210,8 @@
       }
     },
     "max_hotend_temp": 350,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "wifi": "2.4GHz/5GHz Wi-Fi"
   },
   "voron_2": {
     "display_name": "Voron 2.4 / Trident",
@@ -1938,7 +2259,15 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": null,
+    "ams_type": null,
+    "camera": null,
+    "nozzle_options": null,
+    "max_nozzle_temp": null,
+    "max_speed_mm_s": null,
+    "max_acceleration_mm_s2": null,
+    "wifi": null
   },
   "elegoo_neptune4": {
     "display_name": "Elegoo Neptune 4 / 4 Pro",
@@ -1971,7 +2300,17 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "none",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "none (USB and LAN)"
   },
   "elegoo_centauri_carbon": {
     "display_name": "Elegoo Centauri Carbon / Carbon 2",
@@ -2014,7 +2353,17 @@
     ],
     "max_hotend_temp": 320,
     "max_bed_temp": 110,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "built-in camera",
+    "nozzle_options": [
+      "0.4mm hardened steel (default)"
+    ],
+    "max_nozzle_temp": 320,
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "Wi-Fi"
   },
   "elegoo_orangestorm_giga": {
     "display_name": "Elegoo OrangeStorm Giga",
@@ -2042,7 +2391,17 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 110,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": null,
+    "nozzle_options": [
+      "0.6mm (default)"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 300,
+    "max_acceleration_mm_s2": 5000,
+    "wifi": "Wi-Fi and LAN"
   },
   "qidi_x_plus3": {
     "display_name": "QIDI X-Plus 3",
@@ -2090,7 +2449,20 @@
     ],
     "max_hotend_temp": 350,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "none",
+    "nozzle_options": [
+      "0.2mm",
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 350,
+    "max_speed_mm_s": 600,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "2.4GHz Wi-Fi and Ethernet"
   },
   "klipper_generic": {
     "display_name": "Generic Klipper Printer (Moonraker)",
@@ -2196,7 +2568,17 @@
       "power_loss_recovery": true,
       "enclosure": "open"
     },
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "none",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 260,
+    "max_speed_mm_s": 180,
+    "max_acceleration_mm_s2": null,
+    "wifi": "none"
   },
   "cr10": {
     "display_name": "Creality CR-10 / CR-10S",
@@ -2259,7 +2641,17 @@
       "power_loss_recovery": true,
       "enclosure": "open"
     },
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "none",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 260,
+    "max_speed_mm_s": 180,
+    "max_acceleration_mm_s2": null,
+    "wifi": "none"
   },
   "voron_0": {
     "display_name": "Voron 0 / 0.2",
@@ -2297,7 +2689,15 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": null,
+    "ams_type": null,
+    "camera": null,
+    "nozzle_options": null,
+    "max_nozzle_temp": null,
+    "max_speed_mm_s": null,
+    "max_acceleration_mm_s2": null,
+    "wifi": null
   },
   "ratrig_vcore3": {
     "display_name": "Rat Rig V-Core 3 / V-Core 3.1",
@@ -2335,7 +2735,15 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 120,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": null,
+    "ams_type": null,
+    "camera": null,
+    "nozzle_options": null,
+    "max_nozzle_temp": null,
+    "max_speed_mm_s": null,
+    "max_acceleration_mm_s2": null,
+    "wifi": null
   },
   "elegoo_neptune3": {
     "display_name": "Elegoo Neptune 3 / 3 Pro / 3 Plus",
@@ -2368,7 +2776,17 @@
     ],
     "max_hotend_temp": 260,
     "max_bed_temp": 100,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "none",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 260,
+    "max_speed_mm_s": 180,
+    "max_acceleration_mm_s2": null,
+    "wifi": "none"
   },
   "anker_m5": {
     "display_name": "AnkerMake M5 / M5C",
@@ -2401,7 +2819,20 @@
     ],
     "max_hotend_temp": 260,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "M5: built-in 1080p camera; M5C: none",
+    "nozzle_options": [
+      "0.2mm",
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": null,
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": null,
+    "wifi": "Wi-Fi and Bluetooth"
   },
   "artillery_sw_x3": {
     "display_name": "Artillery Sidewinder X3 Plus / X3 Pro",
@@ -2439,7 +2870,17 @@
     ],
     "max_hotend_temp": 260,
     "max_bed_temp": 110,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "none",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 260,
+    "max_speed_mm_s": 300,
+    "max_acceleration_mm_s2": null,
+    "wifi": "none (USB-C and TF card)"
   },
   "sovol_sv06": {
     "display_name": "Sovol SV06 / SV06 Plus",
@@ -2477,7 +2918,20 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "none",
+    "nozzle_options": [
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm",
+      "1.0mm"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 150,
+    "max_acceleration_mm_s2": null,
+    "wifi": "none"
   },
   "sovol_sv07": {
     "display_name": "Sovol SV07",
@@ -2515,7 +2969,20 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 110,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "none",
+    "nozzle_options": [
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm",
+      "1.0mm"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": null,
+    "wifi": "2.4GHz Wi-Fi"
   },
   "sovol_sv07_plus": {
     "display_name": "Sovol SV07 Plus",
@@ -2553,7 +3020,20 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 110,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "none",
+    "nozzle_options": [
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm",
+      "1.0mm"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": 12000,
+    "wifi": "2.4GHz Wi-Fi"
   },
   "flashforge_adventurer5m": {
     "display_name": "FlashForge Adventurer 5M / 5M Pro",
@@ -2586,7 +3066,20 @@
     ],
     "max_hotend_temp": 280,
     "max_bed_temp": 110,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "5M: optional; 5M Pro: built-in",
+    "nozzle_options": [
+      "0.25mm",
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 280,
+    "max_speed_mm_s": 600,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "Wi-Fi and Ethernet"
   },
   "prusa_xl": {
     "display_name": "Prusa XL",
@@ -2629,7 +3122,20 @@
     ],
     "max_hotend_temp": 290,
     "max_bed_temp": 120,
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "ams_slots": 5,
+    "ams_type": "independent_tool_changer",
+    "camera": "optional 1080p Buddy3D camera",
+    "nozzle_options": [
+      "0.25mm",
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 290,
+    "max_speed_mm_s": null,
+    "max_acceleration_mm_s2": null,
+    "wifi": "built-in Wi-Fi"
   },
   "bambu_p1p": {
     "display_name": "Bambu Lab P1P",
@@ -2662,7 +3168,20 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 4,
+    "ams_type": "ams",
+    "camera": "built-in 1280x720 camera at 0.5 fps",
+    "nozzle_options": [
+      "0.2mm",
+      "0.4mm stainless steel (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "2.4GHz Wi-Fi"
   },
   "bambu_a1_mini": {
     "display_name": "Bambu Lab A1 Mini",
@@ -2695,7 +3214,20 @@
     ],
     "max_hotend_temp": 300,
     "max_bed_temp": 80,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "ams_slots": 4,
+    "ams_type": "ams_lite",
+    "camera": "1080p low-rate camera",
+    "nozzle_options": [
+      "0.2mm",
+      "0.4mm stainless steel (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": 10000,
+    "wifi": "2.4GHz Wi-Fi"
   },
   "aon_m2_plus": {
     "display_name": "AON3D AON-M2+",
@@ -2768,7 +3300,24 @@
       565
     ],
     "max_hotend_temp": 500,
-    "max_bed_temp": 200
+    "max_bed_temp": 200,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "none",
+    "nozzle_options": [
+      "0.2mm",
+      "0.25mm",
+      "0.3mm",
+      "0.4mm",
+      "0.6mm",
+      "0.8mm",
+      "1.0mm",
+      "1.2mm"
+    ],
+    "max_nozzle_temp": 500,
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": null,
+    "wifi": "Wi-Fi and Ethernet"
   },
   "qidi_plus4": {
     "display_name": "QIDI Plus 4",
@@ -2816,7 +3365,20 @@
       280
     ],
     "max_hotend_temp": 370,
-    "max_bed_temp": 120
+    "max_bed_temp": 120,
+    "ams_slots": 4,
+    "ams_type": "qidi_box",
+    "camera": "built-in 1080p camera",
+    "nozzle_options": [
+      "0.2mm",
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 370,
+    "max_speed_mm_s": 600,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "2.4GHz Wi-Fi"
   },
   "qidi_q1_pro": {
     "display_name": "QIDI Q1 Pro",
@@ -2864,7 +3426,20 @@
       240
     ],
     "max_hotend_temp": 350,
-    "max_bed_temp": 120
+    "max_bed_temp": 120,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "built-in 1080p low-rate camera",
+    "nozzle_options": [
+      "0.2mm",
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 350,
+    "max_speed_mm_s": 600,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "2.4GHz Wi-Fi"
   },
   "qidi_x_max3": {
     "display_name": "QIDI X-Max 3",
@@ -2912,7 +3487,20 @@
       315
     ],
     "max_hotend_temp": 350,
-    "max_bed_temp": 120
+    "max_bed_temp": 120,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "none",
+    "nozzle_options": [
+      "0.2mm",
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 350,
+    "max_speed_mm_s": 600,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "2.4GHz Wi-Fi and Ethernet"
   },
   "qidi_q2": {
     "display_name": "QIDI Q2",
@@ -2960,7 +3548,20 @@
       256
     ],
     "max_hotend_temp": 370,
-    "max_bed_temp": 120
+    "max_bed_temp": 120,
+    "ams_slots": 4,
+    "ams_type": "qidi_box",
+    "camera": "built-in 1080p AI camera",
+    "nozzle_options": [
+      "0.2mm",
+      "0.4mm (default)",
+      "0.6mm",
+      "0.8mm"
+    ],
+    "max_nozzle_temp": 370,
+    "max_speed_mm_s": 600,
+    "max_acceleration_mm_s2": 20000,
+    "wifi": "2.4GHz Wi-Fi"
   },
   "ender3_s1_pro": {
     "display_name": "Creality Ender 3 S1 Pro",
@@ -3033,6 +3634,16 @@
       "power_loss_recovery": true,
       "enclosure": "open"
     },
-    "has_input_shaping": false
+    "has_input_shaping": false,
+    "ams_slots": 0,
+    "ams_type": "none",
+    "camera": "none",
+    "nozzle_options": [
+      "0.4mm (default)"
+    ],
+    "max_nozzle_temp": 300,
+    "max_speed_mm_s": 160,
+    "max_acceleration_mm_s2": 1500,
+    "wifi": "none"
   }
 }
