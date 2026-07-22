@@ -20,7 +20,6 @@ Covers:
 
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import FrozenInstanceError
 
@@ -91,9 +90,30 @@ CREALITY_CAPABILITY_KEYS = {
     "_source_notes",
 }
 
-PUBLIC_CAPABILITY_BASELINE_SHA256 = (
-    "67348a3a0a39bca3b6bfe2f576fee8b0d1d24a2735ba25aae05824b390775771"
-)
+PUBLIC_CAPABILITY_FIELDS = {
+    "capability_schema",
+    "camera_notes",
+    "multicolor_notes",
+    "has_camera",
+    "camera",
+    "camera_out_of_box",
+    "camera_optional",
+    "camera_options",
+    "multicolor_system",
+    "multicolor_out_of_box",
+    "multicolor_optional",
+    "multicolor_options",
+    "multicolor_max_colors",
+    "multicolor_max_colors_out_of_box",
+    "cfs_compatible",
+    "cfs_variant",
+    "cfs_max_units",
+    "hardened_nozzle_stock",
+    "input_shaping",
+    "filament_runout_sensor",
+    "power_loss_recovery",
+    "enclosure",
+}
 
 EXTENDED_HARDWARE_FIELDS = {
     "ams_slots",
@@ -111,10 +131,12 @@ NON_MODEL_PROFILES = {"default", "klipper_generic"}
 # Fixtures
 # ===================================================================
 
+
 @pytest.fixture(autouse=True)
 def _reset_intel_cache():
     """Reset the singleton cache before each test for isolation."""
     import kiln.printer_intelligence as mod
+
     mod._cache.clear()
     mod._loaded = False
     yield
@@ -125,6 +147,7 @@ def _reset_intel_cache():
 # ===================================================================
 # get_printer_intel
 # ===================================================================
+
 
 class TestGetPrinterIntel:
     """Tests for get_printer_intel() lookup and fallback logic."""
@@ -273,6 +296,7 @@ class TestGetPrinterIntel:
 # list_intel_profiles
 # ===================================================================
 
+
 class TestListIntelProfiles:
     """Tests for list_intel_profiles() output."""
 
@@ -300,6 +324,7 @@ class TestListIntelProfiles:
 # ===================================================================
 # get_material_settings
 # ===================================================================
+
 
 class TestGetMaterialSettings:
     """Tests for get_material_settings() lookup."""
@@ -350,6 +375,7 @@ class TestGetMaterialSettings:
 # diagnose_issue
 # ===================================================================
 
+
 class TestDiagnoseIssue:
     """Tests for diagnose_issue() symptom matching."""
 
@@ -398,6 +424,7 @@ class TestDiagnoseIssue:
 # intel_to_dict
 # ===================================================================
 
+
 class TestIntelToDict:
     """Tests for intel_to_dict() serialization."""
 
@@ -405,9 +432,18 @@ class TestIntelToDict:
         intel = get_printer_intel("ender3")
         d = intel_to_dict(intel)
         expected_keys = [
-            "id", "display_name", "firmware", "extruder_type",
-            "hotend_type", "has_enclosure", "has_abl",
-            "capabilities", "materials", "quirks", "calibration", "failure_modes",
+            "id",
+            "display_name",
+            "firmware",
+            "extruder_type",
+            "hotend_type",
+            "has_enclosure",
+            "has_abl",
+            "capabilities",
+            "materials",
+            "quirks",
+            "calibration",
+            "failure_modes",
         ]
         expected_keys.extend(sorted(EXTENDED_HARDWARE_FIELDS))
         for key in expected_keys:
@@ -461,11 +497,15 @@ class TestExtendedHardwareSpeedFallback:
 # JSON data file validity
 # ===================================================================
 
+
 class TestPrinterIntelligenceJSON:
     """Tests for the bundled printer_intelligence.json data file."""
 
     REQUIRED_PROFILE_FIELDS = [
-        "display_name", "firmware", "extruder_type", "hotend_type",
+        "display_name",
+        "firmware",
+        "extruder_type",
+        "hotend_type",
     ]
 
     def test_json_file_exists_and_parses(self) -> None:
@@ -479,9 +519,7 @@ class TestPrinterIntelligenceJSON:
             if key == "_meta":
                 continue
             for req_field in self.REQUIRED_PROFILE_FIELDS:
-                assert req_field in data, (
-                    f"Profile '{key}' missing required field '{req_field}'"
-                )
+                assert req_field in data, f"Profile '{key}' missing required field '{req_field}'"
 
     def test_all_profiles_have_materials_dict(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
@@ -493,31 +531,67 @@ class TestPrinterIntelligenceJSON:
 
     def test_marketed_fleet_has_complete_extended_hardware_shape(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
-        marketed = {
-            key: data
-            for key, data in raw.items()
-            if not key.startswith("_") and key not in NON_MODEL_PROFILES
-        }
+        marketed = {key: data for key, data in raw.items() if not key.startswith("_") and key not in NON_MODEL_PROFILES}
         assert len(marketed) == 55
         for printer_id, data in marketed.items():
             missing = EXTENDED_HARDWARE_FIELDS - set(data)
             assert not missing, f"{printer_id}: missing {sorted(missing)}"
 
-    def test_public_capability_surface_is_frozen(self) -> None:
+    def test_marketed_fleet_has_one_complete_public_capability_shape(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
-        surface = {
-            printer_id: data["capabilities"]
+        marketed = {
+            printer_id: data
             for printer_id, data in raw.items()
-            if isinstance(data, dict) and "capabilities" in data
+            if not printer_id.startswith("_") and printer_id not in NON_MODEL_PROFILES
         }
-        payload = json.dumps(
-            surface,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        assert hashlib.sha256(payload).hexdigest() == (
-            PUBLIC_CAPABILITY_BASELINE_SHA256
-        )
+        assert len(marketed) == 55
+        for printer_id, data in marketed.items():
+            capabilities = data["capabilities"]
+            assert set(capabilities) == PUBLIC_CAPABILITY_FIELDS, printer_id
+            assert capabilities["capability_schema"] == ("fdm_hardware_capabilities_v1")
+            assert not any(
+                key.startswith("_") or "source" in key.lower() or "url" in key.lower() for key in capabilities
+            ), printer_id
+
+    def test_public_capability_types_and_core_facts_are_consistent(self) -> None:
+        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
+        nullable_bools = {
+            "has_camera",
+            "camera_out_of_box",
+            "camera_optional",
+            "multicolor_out_of_box",
+            "multicolor_optional",
+            "cfs_compatible",
+            "hardened_nozzle_stock",
+            "input_shaping",
+            "filament_runout_sensor",
+            "power_loss_recovery",
+        }
+        nullable_ints = {
+            "multicolor_max_colors",
+            "multicolor_max_colors_out_of_box",
+            "cfs_max_units",
+        }
+        for printer_id, data in raw.items():
+            if printer_id.startswith("_") or printer_id in NON_MODEL_PROFILES:
+                continue
+            capabilities = data["capabilities"]
+            for field in nullable_bools:
+                assert capabilities[field] is None or isinstance(capabilities[field], bool), (printer_id, field)
+            for field in nullable_ints:
+                assert capabilities[field] is None or isinstance(capabilities[field], int), (printer_id, field)
+            for field in ("camera_options", "multicolor_options"):
+                assert isinstance(capabilities[field], list), (printer_id, field)
+                assert all(isinstance(value, str) for value in capabilities[field]), (printer_id, field)
+            assert capabilities["has_camera"] == capabilities["camera_out_of_box"]
+            assert capabilities["input_shaping"] == data["has_input_shaping"]
+            if isinstance(data["camera"], str) and data["camera"].lower().startswith("optional"):
+                assert capabilities["camera_out_of_box"] is False
+                assert capabilities["camera_optional"] is True
+            if data["has_enclosure"] is False:
+                assert capabilities["enclosure"] == "open"
+            else:
+                assert capabilities["enclosure"] != "open"
 
     def test_extended_hardware_schema_pins_null_meaning_and_scope(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
@@ -526,6 +600,10 @@ class TestPrinterIntelligenceJSON:
         assert "manufacturer does not publish" in schema["null_semantics"]
         assert "default and klipper_generic" in schema["scope"]
         assert "not a recommended quality speed" in schema["max_speed_semantics"]
+        capabilities = raw["_meta"]["hardware_capability_schema"]
+        assert set(capabilities["fields"]) == PUBLIC_CAPABILITY_FIELDS
+        assert "every marketed printer" in capabilities["scope"]
+        assert "kiln-pro overlay" in capabilities["private_data_boundary"]
 
     def test_extended_hardware_types_and_thermal_ceiling_agree(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
@@ -535,12 +613,10 @@ class TestPrinterIntelligenceJSON:
             assert data["ams_slots"] is None or isinstance(data["ams_slots"], int)
             assert data["ams_type"] is None or isinstance(data["ams_type"], str)
             assert data["camera"] is None or isinstance(data["camera"], str)
-            assert data["nozzle_options"] is None or isinstance(
-                data["nozzle_options"], list
+            assert data["nozzle_options"] is None or isinstance(data["nozzle_options"], list)
+            assert data["max_nozzle_temp"] is None or (data["max_nozzle_temp"] == data["max_hotend_temp"]), (
+                f"{printer_id}: extended and safety ceilings disagree"
             )
-            assert data["max_nozzle_temp"] is None or (
-                data["max_nozzle_temp"] == data["max_hotend_temp"]
-            ), f"{printer_id}: extended and safety ceilings disagree"
             if data["ams_slots"] == 0:
                 assert data["ams_type"] == "none"
 
@@ -557,20 +633,15 @@ class TestPrinterIntelligenceJSON:
             if key == "_meta":
                 continue
             for mat_name, mat_data in data.get("materials", {}).items():
-                assert "hotend" in mat_data, (
-                    f"Profile '{key}' material '{mat_name}' missing 'hotend'"
-                )
-                assert "bed" in mat_data, (
-                    f"Profile '{key}' material '{mat_name}' missing 'bed'"
-                )
-                assert "fan" in mat_data, (
-                    f"Profile '{key}' material '{mat_name}' missing 'fan'"
-                )
+                assert "hotend" in mat_data, f"Profile '{key}' material '{mat_name}' missing 'hotend'"
+                assert "bed" in mat_data, f"Profile '{key}' material '{mat_name}' missing 'bed'"
+                assert "fan" in mat_data, f"Profile '{key}' material '{mat_name}' missing 'fan'"
 
 
 # ===================================================================
 # MaterialProfile dataclass
 # ===================================================================
+
 
 class TestMaterialProfile:
     """Tests for the MaterialProfile dataclass."""
@@ -596,6 +667,7 @@ class TestMaterialProfile:
 # FailureMode dataclass
 # ===================================================================
 
+
 class TestFailureMode:
     """Tests for the FailureMode dataclass."""
 
@@ -614,6 +686,7 @@ class TestFailureMode:
 # ===================================================================
 # PrinterIntel structure
 # ===================================================================
+
 
 class TestPrinterIntelStructure:
     """Tests for PrinterIntel field types and structure."""

@@ -21,6 +21,37 @@
       "null_semantics": "manufacturer does not publish a fixed value, or hardware is builder-selected",
       "ams_slots_semantics": "inputs or tools on one supported first-party automated-material or tool-changing system; 0 means the manufacturer confirms no such system",
       "max_speed_semantics": "manufacturer-published maximum print, motion, or travel ceiling; not a recommended quality speed"
+    },
+    "hardware_capability_schema": {
+      "version": "1.0.0",
+      "verified_on": "2026-07-21",
+      "fields": [
+        "capability_schema",
+        "camera_notes",
+        "multicolor_notes",
+        "has_camera",
+        "camera",
+        "camera_out_of_box",
+        "camera_optional",
+        "camera_options",
+        "multicolor_system",
+        "multicolor_out_of_box",
+        "multicolor_optional",
+        "multicolor_options",
+        "multicolor_max_colors",
+        "multicolor_max_colors_out_of_box",
+        "cfs_compatible",
+        "cfs_variant",
+        "cfs_max_units",
+        "hardened_nozzle_stock",
+        "input_shaping",
+        "filament_runout_sensor",
+        "power_loss_recovery",
+        "enclosure"
+      ],
+      "scope": "the same objective hardware capability shape on every marketed printer model",
+      "null_semantics": "the manufacturer does not establish one fixed value for the supported model or model family",
+      "private_data_boundary": "source trails and operational printer guidance remain in the kiln-pro overlay"
     }
   },
   "default": {
@@ -93,7 +124,7 @@
     "max_hotend_temp": 260,
     "max_bed_temp": 110,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": false,
@@ -174,7 +205,7 @@
     "max_hotend_temp": 260,
     "max_bed_temp": 100,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": false,
@@ -252,11 +283,11 @@
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": false,
-      "camera": "optional_ai_camera",
+      "camera": "optional_camera",
       "camera_out_of_box": false,
       "camera_optional": true,
       "camera_options": [
@@ -324,7 +355,7 @@
     "max_hotend_temp": 260,
     "max_bed_temp": 110,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": false,
@@ -376,7 +407,7 @@
     "has_enclosure": false,
     "has_abl": true,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": true,
@@ -484,7 +515,7 @@
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": true,
@@ -562,7 +593,7 @@
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": true,
@@ -634,7 +665,7 @@
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": false,
@@ -704,7 +735,7 @@
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": true,
@@ -781,7 +812,7 @@
     "max_hotend_temp": 300,
     "max_bed_temp": 110,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": true,
@@ -864,7 +895,7 @@
     "max_hotend_temp": 350,
     "max_bed_temp": 120,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": true,
@@ -942,11 +973,11 @@
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": false,
-      "camera": "optional_ai_camera",
+      "camera": "optional_camera",
       "camera_out_of_box": false,
       "camera_optional": true,
       "camera_options": [
@@ -1019,7 +1050,7 @@
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": true,
@@ -1067,7 +1098,7 @@
     "has_enclosure": false,
     "has_abl": true,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": false,
@@ -1176,14 +1207,16 @@
     "max_hotend_temp": 300,
     "max_bed_temp": 110,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": false,
-      "camera": "none",
+      "camera": "optional_camera",
       "camera_out_of_box": false,
-      "camera_optional": false,
-      "camera_options": [],
+      "camera_optional": true,
+      "camera_options": [
+        "optional Creality AI camera"
+      ],
       "multicolor_system": "none",
       "multicolor_out_of_box": false,
       "multicolor_optional": true,
@@ -1252,11 +1285,11 @@
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": false,
-      "camera": "optional_ai_camera",
+      "camera": "optional_camera",
       "camera_out_of_box": false,
       "camera_optional": true,
       "camera_options": [
@@ -1325,7 +1358,7 @@
     "max_hotend_temp": 260,
     "max_bed_temp": 100,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": false,
@@ -1347,7 +1380,7 @@
       "cfs_variant": null,
       "cfs_max_units": 0,
       "hardened_nozzle_stock": false,
-      "input_shaping": true,
+      "input_shaping": false,
       "filament_runout_sensor": true,
       "power_loss_recovery": true,
       "enclosure": "open"
@@ -1401,14 +1434,16 @@
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": false,
-      "camera": "none",
+      "camera": "optional_camera",
       "camera_out_of_box": false,
-      "camera_optional": false,
-      "camera_options": [],
+      "camera_optional": true,
+      "camera_options": [
+        "optional Creality AI camera"
+      ],
       "multicolor_system": "none",
       "multicolor_out_of_box": false,
       "multicolor_optional": true,
@@ -1477,11 +1512,11 @@
     "max_hotend_temp": 300,
     "max_bed_temp": 100,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": false,
-      "camera": "optional_ai_camera",
+      "camera": "optional_camera",
       "camera_out_of_box": false,
       "camera_optional": true,
       "camera_options": [
@@ -1557,7 +1592,7 @@
     "max_hotend_temp": 300,
     "max_bed_temp": 110,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": false,
@@ -1650,7 +1685,35 @@
     "max_nozzle_temp": 300,
     "max_speed_mm_s": 200,
     "max_acceleration_mm_s2": null,
-    "wifi": "optional via Raspberry Pi"
+    "wifi": "optional via Raspberry Pi",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "optional_camera",
+      "camera_out_of_box": false,
+      "camera_optional": true,
+      "camera_options": [
+        "optional external camera through Prusa Connect"
+      ],
+      "multicolor_system": "mmu3",
+      "multicolor_out_of_box": null,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "mmu3"
+      ],
+      "multicolor_max_colors": 5,
+      "multicolor_max_colors_out_of_box": null,
+      "hardened_nozzle_stock": null,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": false,
+      "enclosure": "open"
+    }
   },
   "prusa_mk4": {
     "display_name": "Prusa MK4 / MK4S",
@@ -1701,7 +1764,35 @@
     "max_nozzle_temp": 290,
     "max_speed_mm_s": 600,
     "max_acceleration_mm_s2": 20000,
-    "wifi": "optional ESP Wi-Fi module included"
+    "wifi": "optional ESP Wi-Fi module included",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "optional_camera",
+      "camera_out_of_box": false,
+      "camera_optional": true,
+      "camera_options": [
+        "optional 1080p Buddy3D camera"
+      ],
+      "multicolor_system": "mmu3",
+      "multicolor_out_of_box": null,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "mmu3"
+      ],
+      "multicolor_max_colors": 5,
+      "multicolor_max_colors_out_of_box": null,
+      "hardened_nozzle_stock": null,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "open"
+    }
   },
   "prusa_mini": {
     "display_name": "Prusa Mini / Mini+",
@@ -1752,7 +1843,33 @@
     "max_nozzle_temp": 280,
     "max_speed_mm_s": 200,
     "max_acceleration_mm_s2": null,
-    "wifi": "optional ESP-01 Wi-Fi module"
+    "wifi": "optional ESP-01 Wi-Fi module",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "optional_camera",
+      "camera_out_of_box": false,
+      "camera_optional": true,
+      "camera_options": [
+        "optional external camera through Prusa Connect"
+      ],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": false,
+      "multicolor_options": [],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "hardened_nozzle_stock": null,
+      "filament_runout_sensor": false,
+      "power_loss_recovery": false,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": false,
+      "enclosure": "open"
+    }
   },
   "bambu_x1c": {
     "display_name": "Bambu Lab X1 Carbon",
@@ -1818,7 +1935,33 @@
     "max_nozzle_temp": 300,
     "max_speed_mm_s": 500,
     "max_acceleration_mm_s2": 20000,
-    "wifi": "2.4GHz Wi-Fi"
+    "wifi": "2.4GHz Wi-Fi",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "built_in_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "ams",
+      "multicolor_out_of_box": null,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "ams"
+      ],
+      "multicolor_max_colors": 4,
+      "multicolor_max_colors_out_of_box": null,
+      "hardened_nozzle_stock": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "enclosed"
+    }
   },
   "bambu_x1e": {
     "display_name": "Bambu Lab X1E",
@@ -1884,7 +2027,33 @@
     "max_nozzle_temp": 320,
     "max_speed_mm_s": 500,
     "max_acceleration_mm_s2": 20000,
-    "wifi": "2.4GHz/5GHz Wi-Fi and Ethernet"
+    "wifi": "2.4GHz/5GHz Wi-Fi and Ethernet",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "built_in_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "ams",
+      "multicolor_out_of_box": null,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "ams"
+      ],
+      "multicolor_max_colors": 4,
+      "multicolor_max_colors_out_of_box": null,
+      "hardened_nozzle_stock": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "enclosed"
+    }
   },
   "bambu_p1s": {
     "display_name": "Bambu Lab P1S",
@@ -1930,7 +2099,33 @@
     "max_nozzle_temp": 300,
     "max_speed_mm_s": 500,
     "max_acceleration_mm_s2": 20000,
-    "wifi": "2.4GHz Wi-Fi"
+    "wifi": "2.4GHz Wi-Fi",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "built_in_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "ams",
+      "multicolor_out_of_box": null,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "ams"
+      ],
+      "multicolor_max_colors": 4,
+      "multicolor_max_colors_out_of_box": null,
+      "hardened_nozzle_stock": false,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "enclosed"
+    }
   },
   "bambu_p2s": {
     "display_name": "Bambu Lab P2S",
@@ -1996,7 +2191,33 @@
     "max_nozzle_temp": 300,
     "max_speed_mm_s": null,
     "max_acceleration_mm_s2": null,
-    "wifi": null
+    "wifi": null,
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "built_in_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "ams_2_pro",
+      "multicolor_out_of_box": null,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "ams_2_pro"
+      ],
+      "multicolor_max_colors": 4,
+      "multicolor_max_colors_out_of_box": null,
+      "hardened_nozzle_stock": null,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "enclosed"
+    }
   },
   "bambu_a1": {
     "display_name": "Bambu Lab A1",
@@ -2058,7 +2279,33 @@
       }
     },
     "max_hotend_temp": 300,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "built_in_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "ams_lite",
+      "multicolor_out_of_box": null,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "ams_lite"
+      ],
+      "multicolor_max_colors": 4,
+      "multicolor_max_colors_out_of_box": null,
+      "hardened_nozzle_stock": false,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "open"
+    }
   },
   "bambu_a2l": {
     "display_name": "Bambu Lab A2L",
@@ -2125,7 +2372,33 @@
       }
     },
     "max_hotend_temp": 300,
-    "has_input_shaping": true
+    "has_input_shaping": true,
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "built_in_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "ams_lite",
+      "multicolor_out_of_box": null,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "ams_lite"
+      ],
+      "multicolor_max_colors": 4,
+      "multicolor_max_colors_out_of_box": null,
+      "hardened_nozzle_stock": false,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": null,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "open"
+    }
   },
   "bambu_h2s": {
     "display_name": "Bambu Lab H2S",
@@ -2211,7 +2484,33 @@
     },
     "max_hotend_temp": 350,
     "has_input_shaping": true,
-    "wifi": "2.4GHz/5GHz Wi-Fi"
+    "wifi": "2.4GHz/5GHz Wi-Fi",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "built_in_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "ams_2_pro",
+      "multicolor_out_of_box": null,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "ams_2_pro"
+      ],
+      "multicolor_max_colors": 4,
+      "multicolor_max_colors_out_of_box": null,
+      "hardened_nozzle_stock": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "enclosed"
+    }
   },
   "voron_2": {
     "display_name": "Voron 2.4 / Trident",
@@ -2267,7 +2566,31 @@
     "max_nozzle_temp": null,
     "max_speed_mm_s": null,
     "max_acceleration_mm_s2": null,
-    "wifi": null
+    "wifi": null,
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": null,
+      "camera": "configuration_dependent",
+      "camera_out_of_box": null,
+      "camera_optional": null,
+      "camera_options": [],
+      "multicolor_system": null,
+      "multicolor_out_of_box": null,
+      "multicolor_optional": null,
+      "multicolor_options": [],
+      "multicolor_max_colors": null,
+      "multicolor_max_colors_out_of_box": null,
+      "hardened_nozzle_stock": null,
+      "filament_runout_sensor": null,
+      "power_loss_recovery": null,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "enclosed"
+    }
   },
   "elegoo_neptune4": {
     "display_name": "Elegoo Neptune 4 / 4 Pro",
@@ -2310,7 +2633,31 @@
     "max_nozzle_temp": 300,
     "max_speed_mm_s": 500,
     "max_acceleration_mm_s2": 20000,
-    "wifi": "none (USB and LAN)"
+    "wifi": "none (USB and LAN)",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": false,
+      "multicolor_options": [],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "hardened_nozzle_stock": false,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "open"
+    }
   },
   "elegoo_centauri_carbon": {
     "display_name": "Elegoo Centauri Carbon / Carbon 2",
@@ -2363,7 +2710,31 @@
     "max_nozzle_temp": 320,
     "max_speed_mm_s": 500,
     "max_acceleration_mm_s2": 20000,
-    "wifi": "Wi-Fi"
+    "wifi": "Wi-Fi",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "built_in_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": false,
+      "multicolor_options": [],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "hardened_nozzle_stock": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": false,
+      "enclosure": "enclosed"
+    }
   },
   "elegoo_orangestorm_giga": {
     "display_name": "Elegoo OrangeStorm Giga",
@@ -2401,7 +2772,31 @@
     "max_nozzle_temp": 300,
     "max_speed_mm_s": 300,
     "max_acceleration_mm_s2": 5000,
-    "wifi": "Wi-Fi and LAN"
+    "wifi": "Wi-Fi and LAN",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": null,
+      "camera": null,
+      "camera_out_of_box": null,
+      "camera_optional": null,
+      "camera_options": [],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": false,
+      "multicolor_options": [],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "hardened_nozzle_stock": false,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "open"
+    }
   },
   "qidi_x_plus3": {
     "display_name": "QIDI X-Plus 3",
@@ -2462,7 +2857,31 @@
     "max_nozzle_temp": 350,
     "max_speed_mm_s": 600,
     "max_acceleration_mm_s2": 20000,
-    "wifi": "2.4GHz Wi-Fi and Ethernet"
+    "wifi": "2.4GHz Wi-Fi and Ethernet",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": false,
+      "multicolor_options": [],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "hardened_nozzle_stock": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": null,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "enclosed"
+    }
   },
   "klipper_generic": {
     "display_name": "Generic Klipper Printer (Moonraker)",
@@ -2539,7 +2958,7 @@
     "max_hotend_temp": 260,
     "max_bed_temp": 110,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": false,
@@ -2612,7 +3031,7 @@
     "max_hotend_temp": 260,
     "max_bed_temp": 100,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": false,
@@ -2697,7 +3116,31 @@
     "max_nozzle_temp": null,
     "max_speed_mm_s": null,
     "max_acceleration_mm_s2": null,
-    "wifi": null
+    "wifi": null,
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": null,
+      "camera": "configuration_dependent",
+      "camera_out_of_box": null,
+      "camera_optional": null,
+      "camera_options": [],
+      "multicolor_system": null,
+      "multicolor_out_of_box": null,
+      "multicolor_optional": null,
+      "multicolor_options": [],
+      "multicolor_max_colors": null,
+      "multicolor_max_colors_out_of_box": null,
+      "hardened_nozzle_stock": null,
+      "filament_runout_sensor": null,
+      "power_loss_recovery": null,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "enclosed"
+    }
   },
   "ratrig_vcore3": {
     "display_name": "Rat Rig V-Core 3 / V-Core 3.1",
@@ -2743,7 +3186,31 @@
     "max_nozzle_temp": null,
     "max_speed_mm_s": null,
     "max_acceleration_mm_s2": null,
-    "wifi": null
+    "wifi": null,
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": null,
+      "camera": "configuration_dependent",
+      "camera_out_of_box": null,
+      "camera_optional": null,
+      "camera_options": [],
+      "multicolor_system": null,
+      "multicolor_out_of_box": null,
+      "multicolor_optional": null,
+      "multicolor_options": [],
+      "multicolor_max_colors": null,
+      "multicolor_max_colors_out_of_box": null,
+      "hardened_nozzle_stock": null,
+      "filament_runout_sensor": null,
+      "power_loss_recovery": null,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "open"
+    }
   },
   "elegoo_neptune3": {
     "display_name": "Elegoo Neptune 3 / 3 Pro / 3 Plus",
@@ -2786,7 +3253,31 @@
     "max_nozzle_temp": 260,
     "max_speed_mm_s": 180,
     "max_acceleration_mm_s2": null,
-    "wifi": "none"
+    "wifi": "none",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": false,
+      "multicolor_options": [],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "hardened_nozzle_stock": null,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": false,
+      "enclosure": "open"
+    }
   },
   "anker_m5": {
     "display_name": "AnkerMake M5 / M5C",
@@ -2832,7 +3323,33 @@
     "max_nozzle_temp": null,
     "max_speed_mm_s": 500,
     "max_acceleration_mm_s2": null,
-    "wifi": "Wi-Fi and Bluetooth"
+    "wifi": "Wi-Fi and Bluetooth",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": null,
+      "camera": "model_variant",
+      "camera_out_of_box": null,
+      "camera_optional": null,
+      "camera_options": [
+        "M5: built-in 1080p camera; M5C: none"
+      ],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": false,
+      "multicolor_options": [],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "hardened_nozzle_stock": null,
+      "filament_runout_sensor": null,
+      "power_loss_recovery": null,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "open"
+    }
   },
   "artillery_sw_x3": {
     "display_name": "Artillery Sidewinder X3 Plus / X3 Pro",
@@ -2880,7 +3397,31 @@
     "max_nozzle_temp": 260,
     "max_speed_mm_s": 300,
     "max_acceleration_mm_s2": null,
-    "wifi": "none (USB-C and TF card)"
+    "wifi": "none (USB-C and TF card)",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": false,
+      "multicolor_options": [],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "hardened_nozzle_stock": null,
+      "filament_runout_sensor": null,
+      "power_loss_recovery": null,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "open"
+    }
   },
   "sovol_sv06": {
     "display_name": "Sovol SV06 / SV06 Plus",
@@ -2931,7 +3472,31 @@
     "max_nozzle_temp": 300,
     "max_speed_mm_s": 150,
     "max_acceleration_mm_s2": null,
-    "wifi": "none"
+    "wifi": "none",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": false,
+      "multicolor_options": [],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "hardened_nozzle_stock": null,
+      "filament_runout_sensor": null,
+      "power_loss_recovery": null,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": false,
+      "enclosure": "open"
+    }
   },
   "sovol_sv07": {
     "display_name": "Sovol SV07",
@@ -2982,7 +3547,31 @@
     "max_nozzle_temp": 300,
     "max_speed_mm_s": 500,
     "max_acceleration_mm_s2": null,
-    "wifi": "2.4GHz Wi-Fi"
+    "wifi": "2.4GHz Wi-Fi",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": false,
+      "multicolor_options": [],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "hardened_nozzle_stock": null,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": null,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "open"
+    }
   },
   "sovol_sv07_plus": {
     "display_name": "Sovol SV07 Plus",
@@ -3033,7 +3622,31 @@
     "max_nozzle_temp": 300,
     "max_speed_mm_s": 500,
     "max_acceleration_mm_s2": 12000,
-    "wifi": "2.4GHz Wi-Fi"
+    "wifi": "2.4GHz Wi-Fi",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": false,
+      "multicolor_options": [],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "hardened_nozzle_stock": null,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": null,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "open"
+    }
   },
   "flashforge_adventurer5m": {
     "display_name": "FlashForge Adventurer 5M / 5M Pro",
@@ -3079,7 +3692,33 @@
     "max_nozzle_temp": 280,
     "max_speed_mm_s": 600,
     "max_acceleration_mm_s2": 20000,
-    "wifi": "Wi-Fi and Ethernet"
+    "wifi": "Wi-Fi and Ethernet",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": null,
+      "camera": "model_variant",
+      "camera_out_of_box": null,
+      "camera_optional": null,
+      "camera_options": [
+        "5M: optional; 5M Pro: built-in"
+      ],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": false,
+      "multicolor_options": [],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "hardened_nozzle_stock": null,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "enclosed"
+    }
   },
   "prusa_xl": {
     "display_name": "Prusa XL",
@@ -3135,7 +3774,35 @@
     "max_nozzle_temp": 290,
     "max_speed_mm_s": null,
     "max_acceleration_mm_s2": null,
-    "wifi": "built-in Wi-Fi"
+    "wifi": "built-in Wi-Fi",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "optional_camera",
+      "camera_out_of_box": false,
+      "camera_optional": true,
+      "camera_options": [
+        "optional 1080p Buddy3D camera"
+      ],
+      "multicolor_system": "independent_tool_changer",
+      "multicolor_out_of_box": null,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "independent_tool_changer"
+      ],
+      "multicolor_max_colors": 5,
+      "multicolor_max_colors_out_of_box": null,
+      "hardened_nozzle_stock": false,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": false,
+      "enclosure": "enclosed"
+    }
   },
   "bambu_p1p": {
     "display_name": "Bambu Lab P1P",
@@ -3181,7 +3848,33 @@
     "max_nozzle_temp": 300,
     "max_speed_mm_s": 500,
     "max_acceleration_mm_s2": 20000,
-    "wifi": "2.4GHz Wi-Fi"
+    "wifi": "2.4GHz Wi-Fi",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "built_in_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "ams",
+      "multicolor_out_of_box": null,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "ams"
+      ],
+      "multicolor_max_colors": 4,
+      "multicolor_max_colors_out_of_box": null,
+      "hardened_nozzle_stock": false,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "open"
+    }
   },
   "bambu_a1_mini": {
     "display_name": "Bambu Lab A1 Mini",
@@ -3227,7 +3920,33 @@
     "max_nozzle_temp": 300,
     "max_speed_mm_s": 500,
     "max_acceleration_mm_s2": 10000,
-    "wifi": "2.4GHz Wi-Fi"
+    "wifi": "2.4GHz Wi-Fi",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "built_in_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "ams_lite",
+      "multicolor_out_of_box": null,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "ams_lite"
+      ],
+      "multicolor_max_colors": 4,
+      "multicolor_max_colors_out_of_box": null,
+      "hardened_nozzle_stock": false,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "open"
+    }
   },
   "aon_m2_plus": {
     "display_name": "AON3D AON-M2+",
@@ -3301,8 +4020,8 @@
     ],
     "max_hotend_temp": 500,
     "max_bed_temp": 200,
-    "ams_slots": 0,
-    "ams_type": "none",
+    "ams_slots": 2,
+    "ams_type": "independent_dual_extruder",
     "camera": "none",
     "nozzle_options": [
       "0.2mm",
@@ -3317,7 +4036,33 @@
     "max_nozzle_temp": 500,
     "max_speed_mm_s": 500,
     "max_acceleration_mm_s2": null,
-    "wifi": "Wi-Fi and Ethernet"
+    "wifi": "Wi-Fi and Ethernet",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "independent_dual_extruder",
+      "multicolor_out_of_box": true,
+      "multicolor_optional": false,
+      "multicolor_options": [
+        "independent_dual_extruder"
+      ],
+      "multicolor_max_colors": 2,
+      "multicolor_max_colors_out_of_box": 2,
+      "hardened_nozzle_stock": null,
+      "filament_runout_sensor": null,
+      "power_loss_recovery": null,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "enclosed"
+    }
   },
   "qidi_plus4": {
     "display_name": "QIDI Plus 4",
@@ -3378,7 +4123,33 @@
     "max_nozzle_temp": 370,
     "max_speed_mm_s": 600,
     "max_acceleration_mm_s2": 20000,
-    "wifi": "2.4GHz Wi-Fi"
+    "wifi": "2.4GHz Wi-Fi",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "built_in_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "qidi_box",
+      "multicolor_out_of_box": null,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "qidi_box"
+      ],
+      "multicolor_max_colors": 4,
+      "multicolor_max_colors_out_of_box": null,
+      "hardened_nozzle_stock": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "enclosed"
+    }
   },
   "qidi_q1_pro": {
     "display_name": "QIDI Q1 Pro",
@@ -3439,7 +4210,31 @@
     "max_nozzle_temp": 350,
     "max_speed_mm_s": 600,
     "max_acceleration_mm_s2": 20000,
-    "wifi": "2.4GHz Wi-Fi"
+    "wifi": "2.4GHz Wi-Fi",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "built_in_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": false,
+      "multicolor_options": [],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "hardened_nozzle_stock": null,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "enclosed"
+    }
   },
   "qidi_x_max3": {
     "display_name": "QIDI X-Max 3",
@@ -3500,7 +4295,31 @@
     "max_nozzle_temp": 350,
     "max_speed_mm_s": 600,
     "max_acceleration_mm_s2": 20000,
-    "wifi": "2.4GHz Wi-Fi and Ethernet"
+    "wifi": "2.4GHz Wi-Fi and Ethernet",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": false,
+      "camera": "none",
+      "camera_out_of_box": false,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "none",
+      "multicolor_out_of_box": false,
+      "multicolor_optional": false,
+      "multicolor_options": [],
+      "multicolor_max_colors": 1,
+      "multicolor_max_colors_out_of_box": 1,
+      "hardened_nozzle_stock": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": null,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "enclosed"
+    }
   },
   "qidi_q2": {
     "display_name": "QIDI Q2",
@@ -3561,7 +4380,33 @@
     "max_nozzle_temp": 370,
     "max_speed_mm_s": 600,
     "max_acceleration_mm_s2": 20000,
-    "wifi": "2.4GHz Wi-Fi"
+    "wifi": "2.4GHz Wi-Fi",
+    "capabilities": {
+      "capability_schema": "fdm_hardware_capabilities_v1",
+      "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
+      "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
+      "has_camera": true,
+      "camera": "built_in_camera",
+      "camera_out_of_box": true,
+      "camera_optional": false,
+      "camera_options": [],
+      "multicolor_system": "qidi_box",
+      "multicolor_out_of_box": null,
+      "multicolor_optional": true,
+      "multicolor_options": [
+        "qidi_box"
+      ],
+      "multicolor_max_colors": 4,
+      "multicolor_max_colors_out_of_box": null,
+      "hardened_nozzle_stock": true,
+      "filament_runout_sensor": true,
+      "power_loss_recovery": true,
+      "cfs_compatible": false,
+      "cfs_variant": null,
+      "cfs_max_units": 0,
+      "input_shaping": true,
+      "enclosure": "enclosed"
+    }
   },
   "ender3_s1_pro": {
     "display_name": "Creality Ender 3 S1 Pro",
@@ -3605,7 +4450,7 @@
     "max_hotend_temp": 300,
     "max_bed_temp": 110,
     "capabilities": {
-      "capability_schema": "creality_fdm_2026_04_28",
+      "capability_schema": "fdm_hardware_capabilities_v1",
       "camera_notes": "Camera support is model/configuration dependent; do not assume snapshots unless camera_out_of_box is true or the user configured a camera add-on.",
       "multicolor_notes": "Multicolor support requires confirmed hardware, slot mapping, and slicer profile selection before unattended jobs.",
       "has_camera": false,
