@@ -71,7 +71,7 @@ postgres = ["psycopg2-binary>=2.9"]
 stripe = ["stripe>=15.3.0"]
 payments = ["stripe>=15.3.0", "cryptography>=41.0"]
 serial = ["pyserial>=3.5"]
-qr = ["qrcode[pil]>=7.0"]
+qr = ["qrcode[pil]>=8.2"]
 emboss = ["Pillow>=9.0", "rembg>=2.0", "onnxruntime>=1.16"]
 mesh-diagnostics = ["trimesh>=4.0", "numpy>=1.24"]
 dev = [
