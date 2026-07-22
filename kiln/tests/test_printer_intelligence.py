@@ -20,6 +20,7 @@ Covers:
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import FrozenInstanceError
 
@@ -89,6 +90,10 @@ CREALITY_CAPABILITY_KEYS = {
     # (internal QA trail — stripped at the wire boundary, kept locally).
     "_source_notes",
 }
+
+PUBLIC_CAPABILITY_BASELINE_SHA256 = (
+    "67348a3a0a39bca3b6bfe2f576fee8b0d1d24a2735ba25aae05824b390775771"
+)
 
 EXTENDED_HARDWARE_FIELDS = {
     "ams_slots",
@@ -497,6 +502,22 @@ class TestPrinterIntelligenceJSON:
         for printer_id, data in marketed.items():
             missing = EXTENDED_HARDWARE_FIELDS - set(data)
             assert not missing, f"{printer_id}: missing {sorted(missing)}"
+
+    def test_public_capability_surface_is_frozen(self) -> None:
+        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
+        surface = {
+            printer_id: data["capabilities"]
+            for printer_id, data in raw.items()
+            if isinstance(data, dict) and "capabilities" in data
+        }
+        payload = json.dumps(
+            surface,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        assert hashlib.sha256(payload).hexdigest() == (
+            PUBLIC_CAPABILITY_BASELINE_SHA256
+        )
 
     def test_extended_hardware_schema_pins_null_meaning_and_scope(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
