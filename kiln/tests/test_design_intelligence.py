@@ -22,15 +22,11 @@ Coverage areas:
 
 from __future__ import annotations
 
-import pytest
+import sys
+from types import ModuleType
+from typing import Any, Callable
 
-from .conftest import (
-    requires_engineering_overlay,
-    requires_multi_material_overlay,
-    requires_post_processing_overlay,
-    requires_printer_profiles_overlay,
-    requires_troubleshooting_overlay,
-)
+import pytest
 
 from kiln.design_intelligence import (
     DesignBrief,
@@ -43,28 +39,44 @@ from kiln.design_intelligence import (
     PrinterCompatibilityReport,
     PrinterDesignProfile,
     TroubleshootingResult,
+    _DesignKnowledgeBase,
     _get_kb,
+    _PublicMaterialProfile,
     _reset_knowledge_base,
     check_environment_compatibility,
     check_multi_material_compatibility,
     check_printer_material_compatibility,
     estimate_load_capacity,
     find_templates_for_use_case,
+    find_public_design_templates,
     get_design_constraints,
     get_design_template,
     get_material_profile,
     get_post_processing,
     get_print_diagnostic,
     get_printer_design_profile,
+    get_public_material_profile,
+    get_public_post_processing,
+    get_public_design_template,
     get_support_material_options,
     list_compatibility_printers,
     list_design_templates,
     list_material_profiles,
     list_printer_profiles,
+    list_public_material_profiles,
+    list_public_design_templates,
     list_troubleshooting_materials,
     match_requirements,
     recommend_material_for_design,
     troubleshoot_print_issue,
+)
+
+from .conftest import (
+    requires_engineering_overlay,
+    requires_multi_material_overlay,
+    requires_post_processing_overlay,
+    requires_printer_profiles_overlay,
+    requires_troubleshooting_overlay,
 )
 
 
@@ -74,6 +86,103 @@ def _reset_kb():
     _reset_knowledge_base()
     yield
     _reset_knowledge_base()
+
+
+# ---------------------------------------------------------------------------
+# Knowledge-base overlay loading
+# ---------------------------------------------------------------------------
+
+
+class TestKnowledgeBaseOverlayLoading:
+    def _install_overlay_loader(
+        self,
+        monkeypatch,
+        loader: Callable[[str], dict[str, Any]],
+    ) -> None:
+        package = ModuleType("kiln_pro")
+        package.__path__ = []  # type: ignore[attr-defined]
+        overlays = ModuleType("kiln_pro.data_overlays")
+        overlays.load_overlay = loader  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "kiln_pro", package)
+        monkeypatch.setitem(sys.modules, "kiln_pro.data_overlays", overlays)
+
+    def test_each_property_loads_only_its_matching_overlay(self, monkeypatch):
+        calls: list[str] = []
+
+        def load_overlay(kind: str) -> dict[str, Any]:
+            calls.append(kind)
+            return {}
+
+        self._install_overlay_loader(monkeypatch, load_overlay)
+        kb = _DesignKnowledgeBase()
+
+        assert "pla" in kb.materials
+        assert calls == ["materials"]
+
+        assert kb.templates
+        assert calls == ["materials", "design_templates"]
+
+    def test_cached_property_still_records_each_access_without_remerging(
+        self,
+        monkeypatch,
+    ):
+        calls: list[str] = []
+        overlays = iter(
+            (
+                {"pla": {"trace_sentinel": "first"}},
+                {"pla": {"trace_sentinel": "second"}},
+            )
+        )
+
+        def load_overlay(kind: str) -> dict[str, Any]:
+            calls.append(kind)
+            return next(overlays)
+
+        self._install_overlay_loader(monkeypatch, load_overlay)
+        kb = _DesignKnowledgeBase()
+
+        first = kb.materials
+        second = kb.materials
+
+        assert calls == ["materials", "materials"]
+        assert first is second
+        assert second["pla"]["trace_sentinel"] == "first"
+
+    def test_public_template_accessors_never_load_private_enrichment(
+        self,
+        monkeypatch,
+    ):
+        calls: list[str] = []
+
+        def load_overlay(kind: str) -> dict[str, Any]:
+            calls.append(kind)
+            return {
+                "snap_fit_cantilever": {
+                    "design_rules": {"private": True},
+                    "agent_guidance": ["private"],
+                }
+            }
+
+        self._install_overlay_loader(monkeypatch, load_overlay)
+
+        template = get_public_design_template("snap_fit_cantilever")
+        catalog = list_public_design_templates()
+        matches = find_public_design_templates("battery cover")
+
+        assert template is not None
+        assert set(template) == {
+            "template_id",
+            "display_name",
+            "description",
+            "use_cases",
+            "material_compatibility",
+            "print_orientation",
+        }
+        assert "design_rules" not in template
+        assert "agent_guidance" not in template
+        assert catalog
+        assert matches
+        assert calls == []
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +250,46 @@ class TestMaterialProfiles:
         assert d["material_id"] == "petg"
         assert isinstance(d["mechanical"], dict)
         assert isinstance(d["agent_guidance"], list)
+
+    def test_public_profile_bypasses_merged_knowledge_base(self):
+        merged = get_material_profile("pla")
+        assert merged is not None
+        merged.mechanical["private_canary"] = "must-not-escape"
+        merged.agent_guidance.append("private-canary-guidance")
+
+        public = get_public_material_profile("pla")
+
+        assert isinstance(public, _PublicMaterialProfile)
+        assert public is not None
+        result = public.to_dict()
+        assert set(result) == {
+            "material_id",
+            "display_name",
+            "category",
+            "thermal",
+            "chemical",
+            "design_limits",
+            "bonding",
+        }
+        assert "mechanical" not in result
+        assert "agent_guidance" not in result
+        assert "private_canary" not in str(result)
+
+    def test_public_profile_case_insensitive(self):
+        profile = get_public_material_profile("PETG")
+
+        assert profile is not None
+        assert profile.material_id == "petg"
+
+    def test_unknown_public_profile_returns_none(self):
+        assert get_public_material_profile("unobtainium") is None
+
+    def test_public_material_list_contains_only_public_profile_type(self):
+        profiles = list_public_material_profiles()
+
+        assert profiles
+        assert all(isinstance(profile, _PublicMaterialProfile) for profile in profiles)
+        assert all("mechanical" not in profile.to_dict() for profile in profiles)
 
     @requires_engineering_overlay
     def test_every_material_has_agent_guidance(self):
@@ -1075,6 +1224,20 @@ class TestPostProcessing:
         assert "techniques" in d
         assert "paintability" in d
         assert "strengthening" in d
+
+    def test_public_post_processing_bypasses_merged_knowledge_base(self):
+        merged = get_post_processing("pla")
+        assert merged is not None
+        merged.techniques[0]["private_canary"] = "must-not-escape"
+
+        public = get_public_post_processing("pla")
+
+        assert public is not None
+        assert "private_canary" not in str(public.to_dict())
+        assert all("procedure" not in item for item in public.techniques)
+
+    def test_unknown_public_post_processing_returns_none(self):
+        assert get_public_post_processing("unobtainium") is None
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,18 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 
+def _public_template_summary(template: dict[str, Any]) -> dict[str, Any]:
+    """Project a public template to its discovery fields."""
+    compatibility = template.get("material_compatibility") or {}
+    return {
+        "template_id": template.get("template_id"),
+        "display_name": template.get("display_name"),
+        "description": template.get("description"),
+        "use_cases": list(template.get("use_cases") or []),
+        "best_materials": list(compatibility.get("excellent") or []),
+    }
+
+
 class _DesignToolsPlugin:
     """Design intelligence tools — knowledge, constraints, recommendations.
 
@@ -29,8 +41,6 @@ class _DesignToolsPlugin:
         - recommend_design_material
         - estimate_structural_load
         - check_material_environment
-        - get_printer_design_capabilities
-        - list_printer_design_profiles
         - get_design_template_info
         - list_design_templates_catalog
         - find_design_templates
@@ -243,31 +253,23 @@ class _DesignToolsPlugin:
 
         @mcp.tool()
         def get_material_design_profile(material: str) -> dict:
-            """Get full engineering properties for a 3D printing material.
+            """Compatibility lookup for a material's public design floor.
 
-            Returns mechanical properties (tensile/flexural strength, impact
-            resistance, creep behavior), thermal limits (glass transition,
-            max service temp), chemical properties (UV/moisture resistance,
-            food safety), dimensional design limits (min wall thickness,
-            max overhang, snap-fit tolerances), use-case ratings, and
-            expert guidance notes.
-
-            Use this to understand a specific material deeply — what it's
-            good at, what it's bad at, and what design limits to respect.
+            Returns the same public safety and process fields as
+            ``get_material_properties``. For deeper engineering guidance,
+            ask one specific question with ``answer_material_question``.
 
             Args:
-                material: Material ID — one of: pla, petg, abs, tpu, asa,
-                    nylon, polycarbonate.
+                material: Material ID (for example ``"pla"`` or ``"petg"``).
             """
-            from kiln.design_intelligence import get_material_profile
+            from kiln.design_intelligence import get_public_material_profile
 
             try:
-                profile = get_material_profile(material)
+                profile = get_public_material_profile(material)
                 if profile is None:
                     return {
                         "success": False,
-                        "error": f"Unknown material: {material}. "
-                        "Available: pla, petg, abs, tpu, asa, nylon, polycarbonate.",
+                        "error": f"Unknown material: {material}.",
                     }
                 result = profile.to_dict()
                 result["success"] = True
@@ -278,17 +280,15 @@ class _DesignToolsPlugin:
 
         @mcp.tool()
         def list_design_materials() -> dict:
-            """List all available materials with summary properties.
+            """List public material identifiers and safety/process summaries.
 
-            Returns a compact overview of every material in the knowledge
-            base — name, category, key strengths, key weaknesses, and
-            best-fit use cases.  Use this to compare materials at a glance
-            before diving deeper with get_material_design_profile.
+            The list is sourced only from public Kiln data and does not
+            include optional engineering enrichment.
             """
-            from kiln.design_intelligence import list_material_profiles
+            from kiln.design_intelligence import list_public_material_profiles
 
             try:
-                profiles = list_material_profiles()
+                profiles = list_public_material_profiles()
                 summaries = []
                 for p in profiles:
                     summaries.append(
@@ -296,18 +296,9 @@ class _DesignToolsPlugin:
                             "material_id": p.material_id,
                             "display_name": p.display_name,
                             "category": p.category,
-                            "tensile_strength_mpa": p.mechanical.get(
-                                "tensile_strength_mpa"
-                            ),
                             "max_service_temp_c": p.thermal.get("max_service_temp_c"),
-                            "impact_resistance": p.mechanical.get("impact_resistance"),
-                            "layer_adhesion": p.mechanical.get("layer_adhesion"),
-                            "uv_resistance": p.chemical.get("uv_resistance"),
                             "food_safe": p.chemical.get("food_safe"),
                             "ease_of_print": p.thermal.get("warping_tendency"),
-                            "top_guidance": p.agent_guidance[0]
-                            if p.agent_guidance
-                            else "",
                         }
                     )
                 return {
@@ -607,7 +598,6 @@ class _DesignToolsPlugin:
                 )
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
         def get_printer_design_capabilities(printer_id: str) -> dict:
             """Get the design capability profile for a printer.
 
@@ -639,7 +629,6 @@ class _DesignToolsPlugin:
                 )
                 return {"success": False, "error": str(exc)}
 
-        @mcp.tool()
         def list_printer_design_profiles() -> dict:
             """List all known printer design capability profiles."""
             from kiln.design_intelligence import list_printer_profiles
@@ -661,31 +650,26 @@ class _DesignToolsPlugin:
 
         @mcp.tool()
         def get_design_template_info(template: str) -> dict:
-            """Get detailed design rules for a functional design template.
-
-            Returns dimensional constraints, material compatibility,
-            print orientation rules, and expert tips for templates like
-            snap fits, press fits, living hinges, gears, brackets, threads,
-            watertight containers, and electronics enclosures.
+            """Get one template's public discovery and safety-floor fields.
 
             Args:
-                template: Template ID — one of: snap_fit_cantilever, press_fit,
-                    living_hinge, threaded_connection, cantilever_bracket,
-                    watertight_container, enclosure_box, gear.
+                template: Template identifier.
             """
-            from kiln.design_intelligence import get_design_template
+            from kiln.design_intelligence import get_public_design_template
+            from kiln.design_intelligence import list_public_design_templates
 
             try:
-                t = get_design_template(template)
-                if t is None:
-                    from kiln.design_intelligence import list_design_templates
-
-                    available = [dt.template_id for dt in list_design_templates()]
+                record = get_public_design_template(template)
+                if record is None:
+                    available = [
+                        item["template_id"]
+                        for item in list_public_design_templates()
+                    ]
                     return {
                         "success": False,
                         "error": f"Unknown template: {template}. Available: {', '.join(available)}.",
                     }
-                result = t.to_dict()
+                result = dict(record)
                 result["success"] = True
                 return result
             except Exception as exc:
@@ -694,30 +678,14 @@ class _DesignToolsPlugin:
 
         @mcp.tool()
         def list_design_templates_catalog() -> dict:
-            """List all available design templates with descriptions.
-
-            Returns every functional design template in the knowledge base
-            with a brief description and applicable use cases.  Use this
-            to discover which templates are relevant before getting detailed
-            rules with get_design_template_info.
-            """
-            from kiln.design_intelligence import list_design_templates
+            """List public design-template discovery summaries."""
+            from kiln.design_intelligence import list_public_design_templates
 
             try:
-                templates = list_design_templates()
-                summaries = []
-                for t in templates:
-                    summaries.append(
-                        {
-                            "template_id": t.template_id,
-                            "display_name": t.display_name,
-                            "description": t.description,
-                            "use_cases": t.use_cases,
-                            "best_materials": t.material_compatibility.get(
-                                "excellent", []
-                            ),
-                        }
-                    )
+                summaries = [
+                    _public_template_summary(template)
+                    for template in list_public_design_templates()
+                ]
                 return {
                     "success": True,
                     "templates": summaries,
@@ -729,22 +697,22 @@ class _DesignToolsPlugin:
 
         @mcp.tool()
         def find_design_templates(use_case: str) -> dict:
-            """Find design templates that apply to a specific use case.
-
-            Searches the template library for templates whose use-case tags
-            match the query.  Returns matching templates with full rules.
+            """Find public design-template summaries for a use case.
 
             Args:
                 use_case: What you're designing (e.g. "enclosure",
                     "gear train", "battery cover", "vase").
             """
-            from kiln.design_intelligence import find_templates_for_use_case
+            from kiln.design_intelligence import find_public_design_templates
 
             try:
-                templates = find_templates_for_use_case(use_case)
+                templates = find_public_design_templates(use_case)
                 return {
                     "success": True,
-                    "templates": [t.to_dict() for t in templates],
+                    "templates": [
+                        _public_template_summary(template)
+                        for template in templates
+                    ],
                     "count": len(templates),
                 }
             except Exception as exc:
@@ -826,14 +794,13 @@ class _DesignToolsPlugin:
         @mcp.tool()
         def troubleshoot_print_issue(
             material: str,
-            symptom: str | None = None,
+            symptom: str,
         ) -> dict:
             """Diagnose a 3D printing problem by material and symptom.
 
             Searches the troubleshooting knowledge base for matching issues
             and returns root causes, prioritised fixes, prevention tips, and
-            storage/drying requirements.  When no symptom is given, returns
-            all known issues for the material sorted by severity.
+            storage/drying requirements for that specific symptom.
 
             Use this when a user reports a print failure, quality issue, or
             asks "why is my print doing X?"
@@ -842,18 +809,21 @@ class _DesignToolsPlugin:
                 material="pla", symptom="stringing"
                 material="petg", symptom="poor layer adhesion"
                 material="abs", symptom="warping"
-                material="nylon" (no symptom — returns all known issues)
-
             Args:
                 material: Material ID (e.g. "pla", "petg", "abs", "tpu",
                     "nylon", "polycarbonate", "asa", "cf_nylon").
-                symptom: Optional symptom keywords to search for (e.g.
+                symptom: Symptom keywords to search for (e.g.
                     "stringing", "warping", "clog", "brittle").
             """
             from kiln.design_intelligence import troubleshoot_print_issue as _troubleshoot
 
             try:
-                result = _troubleshoot(material, symptom)
+                if not isinstance(symptom, str) or not symptom.strip():
+                    return {
+                        "success": False,
+                        "error": "symptom is required for troubleshooting.",
+                    }
+                result = _troubleshoot(material, symptom.strip())
                 if result is None:
                     from kiln.design_intelligence import list_troubleshooting_materials
 
@@ -874,7 +844,7 @@ class _DesignToolsPlugin:
         @mcp.tool()
         def check_printer_material_compatibility(
             printer: str,
-            material: str | None = None,
+            material: str,
         ) -> dict:
             """Check if a specific printer can handle a material.
 
@@ -882,17 +852,13 @@ class _DesignToolsPlugin:
             not_compatible), any required hardware upgrades (enclosure,
             hardened nozzle, dry box), and practical notes.
 
-            When no material is specified, returns the full compatibility
-            matrix for the printer across all known materials.
-
             Use this when a user asks "can my Ender 3 print nylon?" or
-            "what materials work on my Bambu A1 Mini?"
+            another specific printer/material question.
 
             Args:
                 printer: Printer model ID (e.g. "ender3", "bambu_x1c",
                     "prusa_mk4", "voron_2"). Use underscores, lowercase.
-                material: Optional material to check (e.g. "nylon", "abs").
-                    If omitted, returns all materials for this printer.
+                material: Material to check (e.g. "nylon", "abs").
             """
             from kiln.design_intelligence import (
                 check_printer_material_compatibility as _check_compat,
@@ -902,7 +868,12 @@ class _DesignToolsPlugin:
             )
 
             try:
-                report = _check_compat(printer, material)
+                if not isinstance(material, str) or not material.strip():
+                    return {
+                        "success": False,
+                        "error": "material is required for compatibility checks.",
+                    }
+                report = _check_compat(printer, material.strip())
                 if report is None:
                     available = ", ".join(list_compatibility_printers())
                     return {
@@ -912,39 +883,29 @@ class _DesignToolsPlugin:
                     }
                 out = report.to_dict()
                 out["success"] = True
-
-                # Add summary counts for the full-matrix case
-                if material is None:
-                    statuses = [
-                        v.get("status", "unknown")
-                        for v in report.materials.values()
-                    ]
-                    out["summary"] = {
-                        "compatible": statuses.count("compatible"),
-                        "needs_upgrade": statuses.count("needs_upgrade"),
-                        "not_compatible": statuses.count("not_compatible"),
-                    }
                 return out
             except Exception as exc:
                 _logger.error("Compatibility check failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
 
         @mcp.tool()
-        def get_post_processing_guide(material: str) -> dict:
-            """Get post-processing techniques for finishing a 3D printed part.
+        def get_post_processing_guide(
+            material: str,
+            goal: str | None = None,
+        ) -> dict:
+            """Get bounded public post-processing help for one goal.
 
-            Returns surface finishing techniques (sanding, painting, epoxy),
-            paintability info (primer type, compatible paint types), and
-            strengthening methods (annealing, epoxy infusion) with step-by-step
-            procedures, required tools, difficulty ratings, and safety notes.
-
-            Use this when a user asks "how do I make this print look better?"
-            or "can I paint PLA?" or "how to strengthen my PETG part?"
+            Pass ``surface_finish``, ``paint``, ``strengthen``, or the name of
+            one listed technique. Omitting ``goal`` returns a compact
+            compatibility overview rather than the complete guide.
 
             Args:
                 material: Material ID (e.g. "pla", "abs", "petg", "nylon").
+                goal: Optional finishing goal or technique name.
             """
-            from kiln.design_intelligence import get_post_processing as _get_pp
+            from kiln.design_intelligence import (
+                get_public_post_processing as _get_pp,
+            )
 
             try:
                 guide = _get_pp(material)
@@ -953,9 +914,93 @@ class _DesignToolsPlugin:
                         "success": False,
                         "error": f"No post-processing data for '{material}'.",
                     }
-                out = guide.to_dict()
-                out["success"] = True
-                return out
+
+                technique_overview = [
+                    {
+                        "name": technique.get("name"),
+                        "difficulty": technique.get("difficulty"),
+                    }
+                    for technique in guide.techniques
+                    if isinstance(technique, dict)
+                ]
+                strengthening_overview = [
+                    {
+                        "method": item.get("method"),
+                        "applicable": item.get("applicable"),
+                    }
+                    if isinstance(item, dict)
+                    else {"method": str(item), "applicable": None}
+                    for item in guide.strengthening
+                ]
+
+                if goal is None:
+                    return {
+                        "success": True,
+                        "material": guide.material,
+                        "available_goals": [
+                            "surface_finish",
+                            "paint",
+                            "strengthen",
+                        ],
+                        "techniques": technique_overview,
+                        "paintability": {
+                            "available": guide.paintability is not None,
+                        },
+                        "strengthening": strengthening_overview,
+                        "upgrade_hint": guide.upgrade_hint,
+                    }
+
+                normalized_goal = goal.strip().lower().replace("-", "_").replace(" ", "_")
+                if normalized_goal in {"surface", "finish", "finishing", "surface_finish"}:
+                    answer: Any = {"techniques": guide.techniques}
+                    resolved_goal = "surface_finish"
+                elif normalized_goal in {"paint", "painting", "coat", "coating"}:
+                    answer = {"paintability": guide.paintability}
+                    resolved_goal = "paint"
+                elif normalized_goal in {
+                    "strength",
+                    "strengthen",
+                    "strengthening",
+                    "anneal",
+                    "annealing",
+                }:
+                    answer = {"strengthening": guide.strengthening}
+                    resolved_goal = "strengthen"
+                else:
+                    match = next(
+                        (
+                            technique
+                            for technique in guide.techniques
+                            if isinstance(technique, dict)
+                            and str(technique.get("name", "")).strip().lower()
+                            == goal.strip().lower()
+                        ),
+                        None,
+                    )
+                    if match is None:
+                        names = [
+                            str(item["name"])
+                            for item in technique_overview
+                            if item.get("name")
+                        ]
+                        return {
+                            "success": False,
+                            "error": (
+                                f"Unknown post-processing goal '{goal}'. "
+                                "Use surface_finish, paint, strengthen, or one "
+                                f"of: {', '.join(names)}"
+                            ),
+                        }
+                    answer = {"technique": match}
+                    resolved_goal = str(match.get("name"))
+
+                return {
+                    "success": True,
+                    "material": guide.material,
+                    "goal": resolved_goal,
+                    "answer": answer,
+                    "upgrade_hint": guide.upgrade_hint,
+                }
             except Exception as exc:
                 _logger.error("Post-processing guide failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
@@ -993,7 +1038,7 @@ class _DesignToolsPlugin:
         @mcp.tool()
         def get_print_diagnostic(
             material: str,
-            symptom: str | None = None,
+            symptom: str,
             printer: str | None = None,
         ) -> dict:
             """Get a comprehensive print diagnostic combining multiple knowledge sources.
@@ -1029,9 +1074,14 @@ class _DesignToolsPlugin:
             )
 
             try:
+                if not isinstance(symptom, str) or not symptom.strip():
+                    return {
+                        "success": False,
+                        "error": "symptom is required for print diagnostics.",
+                    }
                 result = _get_diagnostic(
                     material,
-                    symptom=symptom,
+                    symptom=symptom.strip(),
                     printer_id=printer,
                 )
                 if result is None:
@@ -1673,7 +1723,6 @@ class _DesignToolsPlugin:
         # Brand filament profiles
         # ---------------------------------------------------------------
 
-        @mcp.tool()
         def get_brand_filament_profile(profile_id: str) -> dict:
             """Get printing parameters for a specific brand filament.
 
@@ -1692,7 +1741,6 @@ class _DesignToolsPlugin:
                 return {"error": f"Brand filament profile '{profile_id}' not found", "status": "error"}
             return {"status": "success", "data": profile.to_dict()}
 
-        @mcp.tool()
         def list_brand_filament_profiles(
             brand: str = "",
             parent_material: str = "",
@@ -1759,8 +1807,32 @@ class _DesignToolsPlugin:
                 )
                 return {
                     "success": True,
-                    "filament": resolved.to_dict(),
+                    "material": resolved.material_id,
+                    "display_name": resolved.display_name,
                     "is_brand_specific": resolved.is_brand_specific,
+                    "print_settings": {
+                        "nozzle_temp_c": {
+                            "target": resolved.nozzle_temp_optimal_c,
+                            "range": list(resolved.nozzle_temp_range_c),
+                        },
+                        "bed_temp_c": {
+                            "target": resolved.bed_temp_optimal_c,
+                            "range": list(resolved.bed_temp_range_c),
+                        },
+                        "max_volumetric_speed_mm3s": (
+                            resolved.max_volumetric_speed_mm3s
+                        ),
+                        "max_print_speed_mms": resolved.max_print_speed_mms,
+                    },
+                    "preparation": {
+                        "drying_temp_c": resolved.drying_temp_c,
+                        "drying_time_hours": resolved.drying_time_hours,
+                        "enclosure_required": resolved.enclosure_required,
+                        "hardened_nozzle_required": (
+                            resolved.hardened_nozzle_required
+                        ),
+                        "ams_compatible": resolved.ams_compatible,
+                    },
                     "warnings": resolved.warnings,
                 }
             except Exception as exc:

@@ -150,6 +150,16 @@ def _merge_pro_overlay_if_available(public: dict[str, Any]) -> dict[str, Any]:
 def _load() -> None:
     global _loaded
     if _loaded:
+        # The decoded/merged profile cache is process-wide, but a hosted
+        # boundary still needs to record every logical private read. Touch the
+        # canonical loader before the cache short-circuit; it is process-cached
+        # itself, so this records access without re-reading or re-merging data.
+        try:
+            from kiln_pro.data_overlays import load_overlay  # type: ignore[import-not-found]
+
+            load_overlay("printer_intelligence")
+        except Exception:
+            pass
         return
 
     try:

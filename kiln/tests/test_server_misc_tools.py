@@ -175,7 +175,13 @@ class TestExportSafetyProfile:
 
 
 class TestGetPrinterIntelligence:
-    """Tests for get_printer_intelligence()."""
+    """Tests for the internal whole-record printer helper."""
+
+    def test_not_registered_as_mcp_tool(self):
+        from kiln.server import mcp
+
+        registered = {tool.name for tool in mcp._tool_manager.list_tools()}
+        assert "get_printer_intelligence" not in registered
 
     @patch("kiln.server.intel_to_dict")
     @patch("kiln.server.get_printer_intel")

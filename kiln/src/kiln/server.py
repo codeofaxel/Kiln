@@ -10784,7 +10784,6 @@ def export_safety_profile(printer_model: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
 def get_printer_intelligence(printer_id: str) -> dict:
     """Get operational intelligence for a printer: firmware quirks, material
     compatibility, calibration guidance, and known failure modes.
@@ -10915,16 +10914,15 @@ def troubleshoot_printer(
     try:
         matches = diagnose_issue(printer_id, symptom) if symptom.strip() else []
         intel = get_printer_intel(printer_id)
-        # Free-tier honest signal: when the kiln-pro overlay didn't merge
-        # (no license / network past grace / kiln-pro absent), per-printer
-        # quirks + failure_modes are empty arrays, so this tool returns
-        # zero diagnostic content regardless of symptom.  Surface the
-        # upgrade path verbatim so the agent can communicate it cleanly
-        # instead of inventing copy.  Empty when overlay is loaded.
-        from kiln.design_intelligence import _engineering_overlay_loaded
+        # Free-tier honest signal: the private printer overlay contributes
+        # quirks, calibration, and failure-mode playbooks. Check those fields
+        # on this printer instead of probing an unrelated material overlay.
+        has_private_depth = bool(
+            intel.quirks or intel.calibration or intel.failure_modes
+        )
         upgrade_hint = (
             ""
-            if _engineering_overlay_loaded()
+            if has_private_depth
             else (
                 "Kiln Pro adds per-printer firmware quirks + "
                 "failure-mode playbooks. See https://kiln3d.com/pricing"
@@ -12329,17 +12327,11 @@ def get_best_material_substitute(material: str) -> dict:
 
 @mcp.tool()
 def get_material_properties(material_id: str) -> dict:
-    """Get full material property sheet — thermal specs, mechanical strength,
-    chemical resistance, design limits, and agent guidance.
+    """Get a material's public safety and printing-property profile.
 
-    Returns print temperature ranges, bed temperature ranges, tensile/flexural
-    strength, overhang limits, minimum wall thickness, warping tendency,
-    food safety, UV resistance, and more. Use this before printing with an
-    unfamiliar material or when switching materials (e.g. PLA → PETG).
-
-    Supported materials: pla, pla_plus, petg, abs, tpu, asa, nylon,
-    polycarbonate, cf_pla, cf_petg, cf_nylon, pet_cf, silk_pla, wood_pla,
-    hips, pva, pc_abs, asa_plus, petg_cf, pa6_gf.
+    Returns the public thermal, chemical-safety, and process-design floor.
+    Deeper engineering questions are answered one at a time by kiln-pro
+    (https://kiln3d.com).
 
     Args:
         material_id: Material key (e.g. ``"petg"``, ``"tpu"``, ``"cf_pla"``).
@@ -12348,13 +12340,14 @@ def get_material_properties(material_id: str) -> dict:
     if err := _check_auth("intel"):
         return err
     try:
-        from kiln.design_intelligence import get_material_profile
+        from kiln.design_intelligence import (
+            get_public_material_profile,
+            list_public_material_profiles,
+        )
 
-        profile = get_material_profile(material_id)
+        profile = get_public_material_profile(material_id)
         if profile is None:
-            from kiln.design_intelligence import list_material_profiles
-
-            available = [p.material_id for p in list_material_profiles()]
+            available = [p.material_id for p in list_public_material_profiles()]
             return _error_dict(
                 f"Unknown material '{material_id}'. Available: {', '.join(available)}",
                 code="NOT_FOUND",
@@ -12381,10 +12374,9 @@ def get_material_properties(material_id: str) -> dict:
 @mcp.tool()
 def check_printer_material_support(
     printer_id: str,
-    material_id: str | None = None,
+    material_id: str,
 ) -> dict:
-    """Check if a printer supports a specific material, or list all
-    compatible materials for a printer.
+    """Check if a printer supports one specific material.
 
     Returns compatibility status (``"compatible"`` or ``"needs_upgrade"``),
     required hardware upgrades (enclosure, hardened nozzle, dry box, etc.),
@@ -12393,23 +12385,26 @@ def check_printer_material_support(
     **See also:** ``check_printer_material_compatibility`` for the same
     check with design-intelligence context and alternative suggestions.
 
-    If ``material_id`` is omitted, returns the full compatibility matrix
-    for the printer — useful for seeing everything you can print on it.
-
     Args:
         printer_id: Printer model identifier (e.g. ``"bambu_a1"``,
             ``"ender3"``, ``"prusa_mk4"``).
-        material_id: Optional material to check (e.g. ``"petg"``).
-            If omitted, returns all materials.
+        material_id: Material to check (e.g. ``"petg"``). Required so this
+            hosted surface cannot enumerate a printer's complete matrix.
     """
     if err := _check_auth("intel"):
         return err
+    if not isinstance(material_id, str) or not material_id.strip():
+        return _error_dict(
+            "Provide one material_id to check.",
+            code="INVALID_INPUT",
+        )
     try:
         from kiln.design_intelligence import (
             check_printer_material_compatibility,
             list_compatibility_printers,
         )
 
+        material_id = material_id.strip()
         report = check_printer_material_compatibility(printer_id, material_id)
         if report is None:
             available = list_compatibility_printers()
@@ -12422,15 +12417,21 @@ def check_printer_material_support(
             "printer_id": report.printer_id,
             "materials": report.materials,
         }
-        if material_id:
-            mat_lower = material_id.lower()
-            if mat_lower in report.materials:
-                mat_info = report.materials[mat_lower]
-                result["summary"] = f"{material_id.upper()} is {mat_info.get('status', 'unknown')} on {printer_id}"
-                if mat_info.get("upgrades_needed"):
-                    result["summary"] += f" (needs: {', '.join(mat_info['upgrades_needed'])})"
-            else:
-                result["summary"] = f"No compatibility data for '{material_id}' on {printer_id}"
+        mat_lower = material_id.lower()
+        if mat_lower in report.materials:
+            mat_info = report.materials[mat_lower]
+            result["summary"] = (
+                f"{material_id.upper()} is "
+                f"{mat_info.get('status', 'unknown')} on {printer_id}"
+            )
+            if mat_info.get("upgrades_needed"):
+                result["summary"] += (
+                    f" (needs: {', '.join(mat_info['upgrades_needed'])})"
+                )
+        else:
+            result["summary"] = (
+                f"No compatibility data for '{material_id}' on {printer_id}"
+            )
         return result
     except Exception as exc:
         logger.exception("Error in check_printer_material_support")
@@ -12445,13 +12446,12 @@ def compare_material_properties(
     material_a: str,
     material_b: str,
 ) -> dict:
-    """Side-by-side comparison of two materials — thermal, mechanical,
-    design limits, and practical guidance.
+    """Compare two materials using a fixed public safety/process field set.
 
     Use this when deciding between materials for a project (e.g. PLA vs PETG
-    for an outdoor bracket) or when switching materials for a reprint.
-    Highlights which material is stronger, more heat-resistant, easier to
-    print, and what settings change.
+    for an outdoor bracket) or when switching materials for a reprint. Deeper
+    engineering trade-offs are answered one question at a time by kiln-pro
+    (https://kiln3d.com).
 
     Args:
         material_a: First material (e.g. ``"pla"``).
@@ -12460,10 +12460,10 @@ def compare_material_properties(
     if err := _check_auth("intel"):
         return err
     try:
-        from kiln.design_intelligence import get_material_profile
+        from kiln.design_intelligence import get_public_material_profile
 
-        prof_a = get_material_profile(material_a)
-        prof_b = get_material_profile(material_b)
+        prof_a = get_public_material_profile(material_a)
+        prof_b = get_public_material_profile(material_b)
         if prof_a is None or prof_b is None:
             missing = material_a if prof_a is None else material_b
             return _error_dict(
@@ -12471,36 +12471,21 @@ def compare_material_properties(
                 code="NOT_FOUND",
             )
 
-        def _thermal_diff(a: dict, b: dict) -> dict:
-            keys = [
-                "print_temp_range_c",
-                "bed_temp_range_c",
-                "glass_transition_c",
-                "heat_deflection_c",
-                "max_service_temp_c",
-                "warping_tendency",
-            ]
-            return {k: {material_a: a.get(k), material_b: b.get(k)} for k in keys}
+        a_id = prof_a.material_id
+        b_id = prof_b.material_id
 
-        def _mech_diff(a: dict, b: dict) -> dict:
-            keys = [
-                "tensile_strength_mpa",
-                "flexural_strength_mpa",
-                "elongation_at_break_pct",
-                "impact_resistance",
-                "layer_adhesion",
-                "creep_resistance",
-            ]
-            return {k: {material_a: a.get(k), material_b: b.get(k)} for k in keys}
-
-        def _design_diff(a: dict, b: dict) -> dict:
-            keys = [
-                "min_wall_mm",
-                "max_overhang_deg",
-                "max_bridge_mm",
-                "min_hole_diameter_mm",
-            ]
-            return {k: {material_a: a.get(k), material_b: b.get(k)} for k in keys}
+        def _fixed_diff(
+            a: dict,
+            b: dict,
+            fields: tuple[tuple[str, str], ...],
+        ) -> dict:
+            return {
+                output_key: {
+                    a_id: a.get(source_key),
+                    b_id: b.get(source_key),
+                }
+                for output_key, source_key in fields
+            }
 
         # Build practical summary
         ta = prof_a.thermal
@@ -12527,15 +12512,30 @@ def compare_material_properties(
 
         return {
             "success": True,
-            "materials": [material_a, material_b],
-            "thermal": _thermal_diff(ta, tb),
-            "mechanical": _mech_diff(prof_a.mechanical, prof_b.mechanical),
-            "design_limits": _design_diff(prof_a.design_limits, prof_b.design_limits),
+            "materials": [a_id, b_id],
+            "thermal": _fixed_diff(
+                ta,
+                tb,
+                (
+                    ("print_temp_range_c", "print_temp_range_c"),
+                    ("bed_temp_range_c", "bed_temp_range_c"),
+                    ("glass_transition_c", "glass_transition_c"),
+                    ("heat_deflection_c", "heat_deflection_c"),
+                    ("max_service_temp_c", "max_service_temp_c"),
+                    ("warping_tendency", "warping_tendency"),
+                ),
+            ),
+            "design_limits": _fixed_diff(
+                prof_a.design_limits,
+                prof_b.design_limits,
+                (
+                    ("min_wall_mm", "min_wall_thickness_mm"),
+                    ("max_overhang_deg", "max_unsupported_overhang_deg"),
+                    ("max_bridge_mm", "max_bridge_length_mm"),
+                    ("min_hole_diameter_mm", "min_hole_diameter_mm"),
+                ),
+            ),
             "summary": summary_lines,
-            "guidance": {
-                material_a: prof_a.agent_guidance,
-                material_b: prof_b.agent_guidance,
-            },
         }
     except Exception as exc:
         logger.exception("Error in compare_material_properties")

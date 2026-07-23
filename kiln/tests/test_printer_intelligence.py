@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import FrozenInstanceError
+from unittest import mock
 
 import pytest
 
@@ -141,6 +142,16 @@ class TestGetPrinterIntel:
     def test_whitespace_stripping(self) -> None:
         intel = get_printer_intel("  bambu_x1c  ")
         assert intel.id == "bambu_x1c"
+
+    def test_cached_lookup_still_touches_canonical_overlay_loader(self) -> None:
+        """A process cache must not bypass hosted private-read tracing."""
+        get_printer_intel("bambu_x1c")
+        with mock.patch(
+            "kiln_pro.data_overlays.load_overlay",
+            return_value={},
+        ) as load_overlay:
+            get_printer_intel("bambu_x1c")
+        load_overlay.assert_called_once_with("printer_intelligence")
 
 
 # ===================================================================

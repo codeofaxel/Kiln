@@ -1,4 +1,4 @@
-"""Tests for 14 design intelligence MCP tools in design_tools plugin.
+"""Tests for design intelligence MCP tools in the design-tools plugin.
 
 Covers:
 - check_material_environment — happy path, unknown material, exception
@@ -9,12 +9,11 @@ Covers:
 - get_design_template_info — happy path, unknown pattern, exception
 - get_material_design_profile — happy path, unknown material, exception
 - get_post_processing_guide — happy path, unknown material, exception
-- get_printer_design_capabilities — happy path, unknown printer, exception
 - list_design_materials — happy path, exception
 - list_design_templates_catalog — happy path, exception
-- list_printer_design_profiles — happy path, exception
 - match_design_requirements — happy path, empty match, exception
 - recommend_design_material — happy path, exception
+- broad printer-record helpers remain off the MCP registry
 """
 
 from __future__ import annotations
@@ -73,26 +72,17 @@ def _fake_material_profile(material_id: str = "pla") -> SimpleNamespace:
     )
 
 
-def _fake_design_template(template_id: str = "snap_fit_cantilever") -> SimpleNamespace:
-    return SimpleNamespace(
-        template_id=template_id,
-        display_name="Snap-Fit Cantilever",
-        description="Flexible arm that snaps into a recess.",
-        use_cases=["enclosures", "battery covers"],
-        material_compatibility={"excellent": ["petg", "nylon"]},
-        to_dict=lambda: {
-            "template_id": template_id,
-            "display_name": "Snap-Fit Cantilever",
-            "description": "Flexible arm that snaps into a recess.",
-        },
-    )
-
-
-def _fake_printer_profile(printer_id: str = "bambu_a1") -> SimpleNamespace:
-    return SimpleNamespace(
-        printer_id=printer_id,
-        to_dict=lambda: {"printer_id": printer_id, "build_volume": [256, 256, 256]},
-    )
+def _fake_public_template(
+    template_id: str = "snap_fit_cantilever",
+) -> dict[str, object]:
+    return {
+        "template_id": template_id,
+        "display_name": "Snap-Fit Cantilever",
+        "description": "Flexible arm that snaps into a recess.",
+        "use_cases": ["enclosures", "battery covers"],
+        "material_compatibility": {"excellent": ["petg", "nylon"]},
+        "print_orientation": "arm_in_xy_plane",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -293,9 +283,9 @@ class TestEstimateStructuralLoad:
 class TestFindDesignTemplates:
     """Tests for find_design_templates MCP tool."""
 
-    @patch("kiln.design_intelligence.find_templates_for_use_case")
+    @patch("kiln.design_intelligence.find_public_design_templates")
     def test_happy_path(self, mock_fn, registered_tools):
-        mock_fn.return_value = [_fake_design_template("snap_fit_cantilever")]
+        mock_fn.return_value = [_fake_public_template("snap_fit_cantilever")]
 
         result = registered_tools["find_design_templates"]("battery cover")
 
@@ -304,7 +294,7 @@ class TestFindDesignTemplates:
         assert len(result["templates"]) == 1
         mock_fn.assert_called_once_with("battery cover")
 
-    @patch("kiln.design_intelligence.find_templates_for_use_case")
+    @patch("kiln.design_intelligence.find_public_design_templates")
     def test_empty_results(self, mock_fn, registered_tools):
         mock_fn.return_value = []
 
@@ -314,7 +304,10 @@ class TestFindDesignTemplates:
         assert result["count"] == 0
         assert result["templates"] == []
 
-    @patch("kiln.design_intelligence.find_templates_for_use_case", side_effect=RuntimeError("boom"))
+    @patch(
+        "kiln.design_intelligence.find_public_design_templates",
+        side_effect=RuntimeError("boom"),
+    )
     def test_exception(self, mock_fn, registered_tools):
         result = registered_tools["find_design_templates"]("enclosure")
 
@@ -330,21 +323,23 @@ class TestFindDesignTemplates:
 class TestGetDesignTemplateInfo:
     """Tests for get_design_template_info MCP tool."""
 
-    @patch("kiln.design_intelligence.get_design_template")
+    @patch("kiln.design_intelligence.get_public_design_template")
     def test_happy_path(self, mock_fn, registered_tools):
-        mock_fn.return_value = _fake_design_template()
+        mock_fn.return_value = _fake_public_template()
 
         result = registered_tools["get_design_template_info"]("snap_fit_cantilever")
 
         assert result["success"] is True
         assert result["template_id"] == "snap_fit_cantilever"
+        assert "design_rules" not in result
+        assert "agent_guidance" not in result
         mock_fn.assert_called_once_with("snap_fit_cantilever")
 
-    @patch("kiln.design_intelligence.list_design_templates")
-    @patch("kiln.design_intelligence.get_design_template")
+    @patch("kiln.design_intelligence.list_public_design_templates")
+    @patch("kiln.design_intelligence.get_public_design_template")
     def test_unknown_pattern(self, mock_get, mock_list, registered_tools):
         mock_get.return_value = None
-        mock_list.return_value = [_fake_design_template("snap_fit_cantilever")]
+        mock_list.return_value = [_fake_public_template("snap_fit_cantilever")]
 
         result = registered_tools["get_design_template_info"]("nonexistent")
 
@@ -352,7 +347,10 @@ class TestGetDesignTemplateInfo:
         assert "nonexistent" in result["error"]
         assert "snap_fit_cantilever" in result["error"]
 
-    @patch("kiln.design_intelligence.get_design_template", side_effect=RuntimeError("boom"))
+    @patch(
+        "kiln.design_intelligence.get_public_design_template",
+        side_effect=RuntimeError("boom"),
+    )
     def test_exception(self, mock_fn, registered_tools):
         result = registered_tools["get_design_template_info"]("snap_fit_cantilever")
 
@@ -368,17 +366,18 @@ class TestGetDesignTemplateInfo:
 class TestGetMaterialDesignProfile:
     """Tests for get_material_design_profile MCP tool."""
 
-    @patch("kiln.design_intelligence.get_material_profile")
+    @patch("kiln.design_intelligence.get_public_material_profile")
     def test_happy_path(self, mock_fn, registered_tools):
         mock_fn.return_value = _fake_material_profile()
 
         result = registered_tools["get_material_design_profile"]("pla")
 
         assert result["success"] is True
+        assert set(result) == {"material_id", "display_name", "success"}
         assert result["material_id"] == "pla"
         mock_fn.assert_called_once_with("pla")
 
-    @patch("kiln.design_intelligence.get_material_profile")
+    @patch("kiln.design_intelligence.get_public_material_profile")
     def test_unknown_material(self, mock_fn, registered_tools):
         mock_fn.return_value = None
 
@@ -387,7 +386,10 @@ class TestGetMaterialDesignProfile:
         assert result["success"] is False
         assert "unobtanium" in result["error"]
 
-    @patch("kiln.design_intelligence.get_material_profile", side_effect=RuntimeError("boom"))
+    @patch(
+        "kiln.design_intelligence.get_public_material_profile",
+        side_effect=RuntimeError("boom"),
+    )
     def test_exception(self, mock_fn, registered_tools):
         result = registered_tools["get_material_design_profile"]("pla")
 
@@ -403,19 +405,76 @@ class TestGetMaterialDesignProfile:
 class TestGetPostProcessingGuide:
     """Tests for get_post_processing_guide MCP tool."""
 
-    @patch("kiln.design_intelligence.get_post_processing")
+    @patch("kiln.design_intelligence.get_public_post_processing")
     def test_happy_path(self, mock_fn, registered_tools):
         mock_fn.return_value = SimpleNamespace(
-            to_dict=lambda: {"material": "pla", "techniques": ["sanding"]},
+            material="pla",
+            techniques=[
+                {
+                    "name": "Sanding",
+                    "difficulty": "easy",
+                    "tools_needed": ["sandpaper"],
+                },
+            ],
+            paintability={"primer_needed": True},
+            strengthening=[{"method": "Annealing", "applicable": True}],
+            upgrade_hint="Ask one focused question for more detail.",
         )
 
         result = registered_tools["get_post_processing_guide"]("pla")
 
         assert result["success"] is True
+        assert set(result) == {
+            "success",
+            "material",
+            "available_goals",
+            "techniques",
+            "paintability",
+            "strengthening",
+            "upgrade_hint",
+        }
         assert result["material"] == "pla"
+        assert result["available_goals"] == [
+            "surface_finish",
+            "paint",
+            "strengthen",
+        ]
+        assert result["techniques"] == [
+            {"name": "Sanding", "difficulty": "easy"},
+        ]
         mock_fn.assert_called_once_with("pla")
 
-    @patch("kiln.design_intelligence.get_post_processing")
+    @patch("kiln.design_intelligence.get_public_post_processing")
+    def test_goal_returns_only_requested_band(self, mock_fn, registered_tools):
+        mock_fn.return_value = SimpleNamespace(
+            material="pla",
+            techniques=[{"name": "Sanding", "difficulty": "easy"}],
+            paintability={"primer_needed": True, "paint_types": ["acrylic"]},
+            strengthening=[{"method": "Annealing", "applicable": True}],
+            upgrade_hint="",
+        )
+
+        result = registered_tools["get_post_processing_guide"]("pla", "paint")
+
+        assert result["success"] is True
+        assert set(result) == {
+            "success",
+            "material",
+            "goal",
+            "answer",
+            "upgrade_hint",
+        }
+        assert result["goal"] == "paint"
+        assert result["answer"] == {
+            "paintability": {
+                "primer_needed": True,
+                "paint_types": ["acrylic"],
+            },
+        }
+        assert "techniques" not in result
+        assert "strengthening" not in result
+
+    @patch("kiln.design_intelligence.get_public_post_processing")
     def test_unknown_material(self, mock_fn, registered_tools):
         mock_fn.return_value = None
 
@@ -424,7 +483,10 @@ class TestGetPostProcessingGuide:
         assert result["success"] is False
         assert "unobtanium" in result["error"]
 
-    @patch("kiln.design_intelligence.get_post_processing", side_effect=RuntimeError("boom"))
+    @patch(
+        "kiln.design_intelligence.get_public_post_processing",
+        side_effect=RuntimeError("boom"),
+    )
     def test_exception(self, mock_fn, registered_tools):
         result = registered_tools["get_post_processing_guide"]("pla")
 
@@ -433,41 +495,167 @@ class TestGetPostProcessingGuide:
 
 
 # ---------------------------------------------------------------------------
-# TestGetPrinterDesignCapabilities
+# TestRetiredPrinterRecordTools
 # ---------------------------------------------------------------------------
 
 
-class TestGetPrinterDesignCapabilities:
-    """Tests for get_printer_design_capabilities MCP tool."""
+class TestRetiredPrinterRecordTools:
+    def test_whole_record_tools_are_not_registered(self, registered_tools):
+        retired = {
+            "get_brand_filament_profile",
+            "get_printer_design_capabilities",
+            "list_brand_filament_profiles",
+            "list_printer_design_profiles",
+        }
+        assert retired.isdisjoint(registered_tools)
 
-    @patch("kiln.design_intelligence.get_printer_design_profile")
-    def test_happy_path(self, mock_fn, registered_tools):
-        mock_fn.return_value = _fake_printer_profile("bambu_a1")
 
-        result = registered_tools["get_printer_design_capabilities"]("bambu_a1")
+class TestQuestionScopedKnowledgeTools:
+    @patch("kiln.design_intelligence.troubleshoot_print_issue")
+    def test_troubleshooting_requires_a_real_symptom(
+        self,
+        mock_fn,
+        registered_tools,
+    ):
+        result = registered_tools["troubleshoot_print_issue"]("pla", "  ")
+
+        assert result["success"] is False
+        assert "symptom is required" in result["error"]
+        mock_fn.assert_not_called()
+
+    @patch("kiln.design_intelligence.troubleshoot_print_issue")
+    def test_troubleshooting_passes_the_named_symptom_only(
+        self,
+        mock_fn,
+        registered_tools,
+    ):
+        mock_fn.return_value = SimpleNamespace(
+            matched_issues=[{"symptom": "stringing"}],
+            to_dict=lambda: {
+                "material": "pla",
+                "symptom": "stringing",
+                "matched_issues": [{"symptom": "stringing"}],
+            },
+        )
+
+        result = registered_tools["troubleshoot_print_issue"](
+            "pla",
+            " stringing ",
+        )
 
         assert result["success"] is True
-        assert result["printer_id"] == "bambu_a1"
-        mock_fn.assert_called_once_with("bambu_a1")
+        assert result["match_count"] == 1
+        mock_fn.assert_called_once_with("pla", "stringing")
 
-    @patch("kiln.design_intelligence.list_printer_profiles")
-    @patch("kiln.design_intelligence.get_printer_design_profile")
-    def test_unknown_printer(self, mock_get, mock_list, registered_tools):
-        mock_get.return_value = None
-        mock_list.return_value = [_fake_printer_profile("bambu_a1")]
-
-        result = registered_tools["get_printer_design_capabilities"]("fake_printer")
-
-        assert result["success"] is False
-        assert "fake_printer" in result["error"]
-        assert "bambu_a1" in result["error"]
-
-    @patch("kiln.design_intelligence.get_printer_design_profile", side_effect=RuntimeError("boom"))
-    def test_exception(self, mock_fn, registered_tools):
-        result = registered_tools["get_printer_design_capabilities"]("bambu_a1")
+    @patch("kiln.design_intelligence.check_printer_material_compatibility")
+    def test_printer_compatibility_requires_a_real_material(
+        self,
+        mock_fn,
+        registered_tools,
+    ):
+        result = registered_tools["check_printer_material_compatibility"](
+            "ender3",
+            " ",
+        )
 
         assert result["success"] is False
-        assert "boom" in result["error"]
+        assert "material is required" in result["error"]
+        mock_fn.assert_not_called()
+
+    @patch("kiln.design_intelligence.check_printer_material_compatibility")
+    def test_printer_compatibility_returns_only_the_named_material(
+        self,
+        mock_fn,
+        registered_tools,
+    ):
+        mock_fn.return_value = SimpleNamespace(
+            materials={"pla": {"status": "compatible"}},
+            to_dict=lambda: {
+                "printer_id": "ender3",
+                "materials": {"pla": {"status": "compatible"}},
+            },
+        )
+
+        result = registered_tools["check_printer_material_compatibility"](
+            "ender3",
+            " pla ",
+        )
+
+        assert result == {
+            "success": True,
+            "printer_id": "ender3",
+            "materials": {"pla": {"status": "compatible"}},
+        }
+        mock_fn.assert_called_once_with("ender3", "pla")
+
+    @patch("kiln.design_intelligence.get_print_diagnostic")
+    def test_print_diagnostic_requires_a_real_symptom(
+        self,
+        mock_fn,
+        registered_tools,
+    ):
+        result = registered_tools["get_print_diagnostic"]("pla", "")
+
+        assert result["success"] is False
+        assert "symptom is required" in result["error"]
+        mock_fn.assert_not_called()
+
+
+class TestResolveFilamentProfileBoundary:
+    @patch("kiln.design_intelligence.resolve_filament")
+    def test_projects_operational_settings_not_the_private_record(
+        self,
+        mock_fn,
+        registered_tools,
+    ):
+        mock_fn.return_value = SimpleNamespace(
+            material_id="pla",
+            display_name="Example PLA",
+            is_brand_specific=True,
+            nozzle_temp_optimal_c=220,
+            nozzle_temp_range_c=[210, 230],
+            bed_temp_optimal_c=60,
+            bed_temp_range_c=[50, 70],
+            max_volumetric_speed_mm3s=18.0,
+            max_print_speed_mms=250,
+            drying_temp_c=55,
+            drying_time_hours=6,
+            enclosure_required=False,
+            hardened_nozzle_required=False,
+            ams_compatible=True,
+            warnings=[],
+            brand_profile_id="private_profile_key",
+            density_g_per_cm3=1.24,
+            cost_per_kg_usd=99.0,
+            filament_diameter_mm=1.75,
+        )
+
+        result = registered_tools["resolve_filament_profile"](
+            "example_pla",
+            "bambu_a1",
+        )
+
+        assert set(result) == {
+            "success",
+            "material",
+            "display_name",
+            "is_brand_specific",
+            "print_settings",
+            "preparation",
+            "warnings",
+        }
+        assert result["print_settings"]["nozzle_temp_c"] == {
+            "target": 220,
+            "range": [210, 230],
+        }
+        assert "brand_profile_id" not in result
+        assert "density_g_per_cm3" not in result
+        assert "cost_per_kg_usd" not in result
+        assert "filament_diameter_mm" not in result
+        mock_fn.assert_called_once_with(
+            "example_pla",
+            printer_id="bambu_a1",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -478,30 +666,42 @@ class TestGetPrinterDesignCapabilities:
 class TestListDesignMaterials:
     """Tests for list_design_materials MCP tool."""
 
-    @patch("kiln.design_intelligence.list_material_profiles")
+    @patch("kiln.design_intelligence.list_public_material_profiles")
     def test_happy_path(self, mock_fn, registered_tools):
         mock_fn.return_value = [_fake_material_profile("pla"), _fake_material_profile("petg")]
 
         result = registered_tools["list_design_materials"]()
 
         assert result["success"] is True
+        assert set(result) == {"success", "materials", "count"}
         assert result["count"] == 2
         assert len(result["materials"]) == 2
         assert result["materials"][0]["material_id"] == "pla"
 
-    @patch("kiln.design_intelligence.list_material_profiles")
+    @patch("kiln.design_intelligence.list_public_material_profiles")
     def test_summary_fields_present(self, mock_fn, registered_tools):
         mock_fn.return_value = [_fake_material_profile()]
 
         result = registered_tools["list_design_materials"]()
         mat = result["materials"][0]
 
-        assert "tensile_strength_mpa" in mat
+        assert set(mat) == {
+            "material_id",
+            "display_name",
+            "category",
+            "max_service_temp_c",
+            "food_safe",
+            "ease_of_print",
+        }
         assert "max_service_temp_c" in mat
         assert "food_safe" in mat
-        assert "top_guidance" in mat
+        assert "tensile_strength_mpa" not in mat
+        assert "top_guidance" not in mat
 
-    @patch("kiln.design_intelligence.list_material_profiles", side_effect=RuntimeError("boom"))
+    @patch(
+        "kiln.design_intelligence.list_public_material_profiles",
+        side_effect=RuntimeError("boom"),
+    )
     def test_exception(self, mock_fn, registered_tools):
         result = registered_tools["list_design_materials"]()
 
@@ -517,11 +717,11 @@ class TestListDesignMaterials:
 class TestListDesignTemplatesCatalog:
     """Tests for list_design_templates_catalog MCP tool."""
 
-    @patch("kiln.design_intelligence.list_design_templates")
+    @patch("kiln.design_intelligence.list_public_design_templates")
     def test_happy_path(self, mock_fn, registered_tools):
         mock_fn.return_value = [
-            _fake_design_template("snap_fit_cantilever"),
-            _fake_design_template("press_fit"),
+            _fake_public_template("snap_fit_cantilever"),
+            _fake_public_template("press_fit"),
         ]
 
         result = registered_tools["list_design_templates_catalog"]()
@@ -530,9 +730,9 @@ class TestListDesignTemplatesCatalog:
         assert result["count"] == 2
         assert result["templates"][0]["template_id"] == "snap_fit_cantilever"
 
-    @patch("kiln.design_intelligence.list_design_templates")
+    @patch("kiln.design_intelligence.list_public_design_templates")
     def test_summary_fields_present(self, mock_fn, registered_tools):
-        mock_fn.return_value = [_fake_design_template()]
+        mock_fn.return_value = [_fake_public_template()]
 
         result = registered_tools["list_design_templates_catalog"]()
         pat = result["templates"][0]
@@ -543,35 +743,12 @@ class TestListDesignTemplatesCatalog:
         assert "use_cases" in pat
         assert "best_materials" in pat
 
-    @patch("kiln.design_intelligence.list_design_templates", side_effect=RuntimeError("boom"))
+    @patch(
+        "kiln.design_intelligence.list_public_design_templates",
+        side_effect=RuntimeError("boom"),
+    )
     def test_exception(self, mock_fn, registered_tools):
         result = registered_tools["list_design_templates_catalog"]()
-
-        assert result["success"] is False
-        assert "boom" in result["error"]
-
-
-# ---------------------------------------------------------------------------
-# TestListPrinterDesignProfiles
-# ---------------------------------------------------------------------------
-
-
-class TestListPrinterDesignProfiles:
-    """Tests for list_printer_design_profiles MCP tool."""
-
-    @patch("kiln.design_intelligence.list_printer_profiles")
-    def test_happy_path(self, mock_fn, registered_tools):
-        mock_fn.return_value = [_fake_printer_profile("bambu_a1"), _fake_printer_profile("ender3")]
-
-        result = registered_tools["list_printer_design_profiles"]()
-
-        assert result["success"] is True
-        assert result["count"] == 2
-        assert result["profiles"][0]["printer_id"] == "bambu_a1"
-
-    @patch("kiln.design_intelligence.list_printer_profiles", side_effect=RuntimeError("boom"))
-    def test_exception(self, mock_fn, registered_tools):
-        result = registered_tools["list_printer_design_profiles"]()
 
         assert result["success"] is False
         assert "boom" in result["error"]

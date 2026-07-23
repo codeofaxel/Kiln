@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-23T02:03:53.362970+00:00",
-  "tool_count": 379,
+  "generated": "2026-07-23T22:19:31.516868+00:00",
+  "tool_count": 373,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -2216,30 +2216,6 @@
       }
     },
     {
-      "name": "get_template_decoration_profile",
-      "description": "Get the decoration profile for a design template (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "decoration",
-      "parameters": {
-        "properties": {
-          "template_id": {
-            "title": "Template Id",
-            "type": "string"
-          },
-          "material": {
-            "default": "PLA",
-            "title": "Material",
-            "type": "string"
-          }
-        },
-        "required": [
-          "template_id"
-        ],
-        "title": "get_template_decoration_profileArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "list_brand_assets",
       "description": "List all registered brand assets (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -2256,17 +2232,6 @@
           "arguments"
         ],
         "title": "list_brand_assetsArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "list_decoratable_templates",
-      "description": "List all design templates that have decoration profiles (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "decoration",
-      "parameters": {
-        "properties": {},
-        "title": "list_decoratable_templatesArguments",
         "type": "object"
       }
     },
@@ -2845,23 +2810,6 @@
           "verb"
         ],
         "title": "design_sessionArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "get_organic_idiom",
-      "description": "Look up a curated block-out pattern for the organic engine.",
-      "tier": "free",
-      "category": "design_session",
-      "parameters": {
-        "properties": {
-          "name": {
-            "default": "",
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "title": "get_organic_idiomArguments",
         "type": "object"
       }
     },
@@ -7020,6 +6968,30 @@
       }
     },
     {
+      "name": "answer_material_question",
+      "description": "Answer one specific engineering question about one material.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "material",
+          "question"
+        ],
+        "title": "answer_material_questionArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "apply_calibration_recommendations",
       "description": "Persist calibration tuning overrides as soft defaults.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -8133,54 +8105,6 @@
       }
     },
     {
-      "name": "get_adhesive_profile",
-      "description": "Look up one adhesive's cited spec -- cure schedule, service temp, what it bonds.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "engineering_intelligence",
-      "parameters": {
-        "properties": {
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "show_math": {
-            "default": false,
-            "title": "Show Math",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "get_adhesive_profileArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "get_material_chemical_profile",
-      "description": "Full chemical-durability profile for one material -- every reagent your tier unlocks.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "engineering_intelligence",
-      "parameters": {
-        "properties": {
-          "material": {
-            "title": "Material",
-            "type": "string"
-          },
-          "show_math": {
-            "default": false,
-            "title": "Show Math",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "material"
-        ],
-        "title": "get_material_chemical_profileArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "ingest_material_datasheet",
       "description": "Verify quoted datasheet values and build a structured material profile.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
@@ -8904,30 +8828,6 @@
           "material"
         ],
         "title": "check_skin_contact_suitabilityArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "get_skin_contact_profile",
-      "description": "Full skin-contact profile for one material -- verdicts across every exposure tier.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "material_safety",
-      "parameters": {
-        "properties": {
-          "material": {
-            "title": "Material",
-            "type": "string"
-          },
-          "show_math": {
-            "default": false,
-            "title": "Show Math",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "material"
-        ],
-        "title": "get_skin_contact_profileArguments",
         "type": "object"
       }
     },
@@ -13647,25 +13547,6 @@
           "product_type"
         ],
         "title": "get_product_facesArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "get_product_profile",
-      "description": "Get optimized pipeline profile for a product type (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "product_intelligence",
-      "parameters": {
-        "properties": {
-          "product_type": {
-            "title": "Product Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "product_type"
-        ],
-        "title": "get_product_profileArguments",
         "type": "object"
       }
     },

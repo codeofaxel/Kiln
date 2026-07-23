@@ -14,8 +14,6 @@ import os
 import tempfile
 from unittest.mock import patch
 
-from .conftest import requires_engineering_overlay
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -46,11 +44,20 @@ class TestGetMaterialProperties:
 
         result = get_material_properties("pla")
         assert result["success"] is True
+        assert set(result["material"]) == {
+            "material_id",
+            "display_name",
+            "category",
+            "thermal",
+            "chemical",
+            "design_limits",
+            "bonding",
+        }
         assert result["material"]["material_id"] == "pla"
         assert "thermal" in result["material"]
-        assert "mechanical" in result["material"]
         assert "design_limits" in result["material"]
-        assert "agent_guidance" in result["material"]
+        assert "mechanical" not in result["material"]
+        assert "agent_guidance" not in result["material"]
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     def test_petg_profile(self, _auth):
@@ -79,16 +86,20 @@ class TestGetMaterialProperties:
         assert "unobtainium" in result["error"]["message"]
         assert "Available" in result["error"]["message"]
 
-    @requires_engineering_overlay
     @patch("kiln.server._check_auth", side_effect=_no_auth)
-    def test_tpu_profile_has_flexibility_data(self, _auth):
+    @patch("kiln.design_intelligence.get_material_profile")
+    def test_merged_engineering_profile_is_never_serialized(
+        self,
+        merged_lookup,
+        _auth,
+    ):
         from kiln.server import get_material_properties
 
         result = get_material_properties("tpu")
         assert result["success"] is True
-        mech = result["material"]["mechanical"]
-        # TPU should have high elongation
-        assert mech.get("elongation_at_break_pct", 0) > 100
+        assert "mechanical" not in result["material"]
+        assert "agent_guidance" not in result["material"]
+        merged_lookup.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -118,24 +129,22 @@ class TestCheckPrinterMaterialSupport:
         assert "enclosure" in result["materials"]["abs"]["upgrades_needed"]
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
-    def test_all_materials_for_printer(self, _auth):
+    def test_material_is_required(self, _auth):
         from kiln.server import check_printer_material_support
 
-        result = check_printer_material_support("bambu_a1")
-        assert result["success"] is True
-        # Should have many materials
-        assert len(result["materials"]) >= 15
-        assert "summary" not in result  # no summary when querying all
+        result = check_printer_material_support("bambu_a1", "")
+        assert result["success"] is False
+        assert result["error"]["code"] == "INVALID_INPUT"
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     def test_unknown_printer_falls_back_to_default(self, _auth):
         from kiln.server import check_printer_material_support
 
-        result = check_printer_material_support("nonexistent_printer")
+        result = check_printer_material_support("nonexistent_printer", "pla")
         # Falls back to "default" profile — still succeeds
         assert result["success"] is True
         assert result["printer_id"] == "default"
-        assert len(result["materials"]) >= 15
+        assert set(result["materials"]) == {"pla"}
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     def test_a1_tpu_compatible(self, _auth):
@@ -170,6 +179,13 @@ class TestCompareMaterialProperties:
         result = compare_material_properties("pla", "petg")
         assert result["success"] is True
         assert result["materials"] == ["pla", "petg"]
+        assert set(result) == {
+            "success",
+            "materials",
+            "thermal",
+            "design_limits",
+            "summary",
+        }
 
         # Thermal comparison exists
         thermal = result["thermal"]
@@ -178,9 +194,10 @@ class TestCompareMaterialProperties:
         petg_range = thermal["print_temp_range_c"]["petg"]
         assert petg_range[0] > pla_range[0]  # PETG prints hotter
 
-        # Mechanical comparison exists
-        assert "mechanical" in result
+        # Only the fixed public comparison bands are returned.
         assert "design_limits" in result
+        assert "mechanical" not in result
+        assert "guidance" not in result
 
         # Summary highlights differences
         assert len(result["summary"]) > 0
@@ -203,14 +220,13 @@ class TestCompareMaterialProperties:
         assert len(result["summary"]) == 0
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
-    def test_guidance_included(self, _auth):
+    def test_engineering_guidance_not_included(self, _auth):
         from kiln.server import compare_material_properties
 
         result = compare_material_properties("pla", "tpu")
         assert result["success"] is True
-        assert "pla" in result["guidance"]
-        assert "tpu" in result["guidance"]
-        assert isinstance(result["guidance"]["pla"], list)
+        assert "guidance" not in result
+        assert "mechanical" not in result
 
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     def test_bed_temp_difference_in_summary(self, _auth):
@@ -479,37 +495,32 @@ class TestNewMaterialProfiles:
         # PETG-HF prints hotter
         assert thermal["print_temp_range_c"][0] >= 230
 
-    @requires_engineering_overlay
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     def test_pla_tough_profile(self, _auth):
         from kiln.server import get_material_properties
 
         result = get_material_properties("pla_tough")
         assert result["success"] is True
-        mech = result["material"]["mechanical"]
-        assert mech.get("tensile_strength_mpa", 0) >= 40
+        assert result["material"]["material_id"] == "pla_tough"
+        assert "mechanical" not in result["material"]
 
-    @requires_engineering_overlay
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     def test_tpu_95a_profile(self, _auth):
         from kiln.server import get_material_properties
 
         result = get_material_properties("tpu_95a")
         assert result["success"] is True
-        mech = result["material"]["mechanical"]
-        # Should have high elongation like TPU
-        assert mech.get("elongation_at_break_pct", 0) >= 300
+        assert result["material"]["material_id"] == "tpu_95a"
+        assert "mechanical" not in result["material"]
 
-    @requires_engineering_overlay
     @patch("kiln.server._check_auth", side_effect=_no_auth)
     def test_tpu_85a_profile(self, _auth):
         from kiln.server import get_material_properties
 
         result = get_material_properties("tpu_85a")
         assert result["success"] is True
-        mech = result["material"]["mechanical"]
-        # 85A is softer, even higher elongation
-        assert mech.get("elongation_at_break_pct", 0) >= 400
+        assert result["material"]["material_id"] == "tpu_85a"
+        assert "mechanical" not in result["material"]
 
 
 # ---------------------------------------------------------------------------
@@ -608,10 +619,12 @@ class TestNewMaterialCompatibility:
         from kiln.server import check_printer_material_support
 
         new_mats = ["pla_matte", "petg_hf", "pla_tough", "tpu_95a", "tpu_85a"]
-        result = check_printer_material_support("bambu_a1")
-        assert result["success"] is True
         for mat in new_mats:
-            assert mat in result["materials"], f"{mat} missing from bambu_a1"
+            result = check_printer_material_support("bambu_a1", mat)
+            assert result["success"] is True
+            assert set(result["materials"]) == {mat}, (
+                f"{mat} missing from bambu_a1"
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -46,43 +46,15 @@ _DATA_DIR = Path(__file__).parent / "data" / "design_knowledge"
 # ---------------------------------------------------------------------------
 
 
-def _merge_pro_overlay_if_available(
-    public_data: dict[str, dict[str, Any]],
-    kind: str,
-) -> dict[str, dict[str, Any]]:
-    """Merge the kiln-pro overlay into ``public_data``.
-
-    When kiln-pro is not installed, returns ``public_data`` as-is.
-    When kiln-pro is installed and the license is valid, kiln-pro
-    fetches the overlay from
-    ``api.kiln3d.com/api/internal/overlay/<kind>`` at runtime,
-    deep-merges it into each material/pattern record, and restores
-    the full record (mechanical, design_limits, use_case_ratings,
-    agent_guidance, brand-tunings, curated guidance).
-
-    The overlay is NOT bundled in the kiln-pro wheel (closes the
-    on-disk-grep leak vector for installs that carry kiln-pro on
-    disk); it lives server-side and is fetched per process with an
-    encrypted local cache.  See ``kiln_pro.data_overlays`` for the
-    full caching behavior (24h TTL, 7d offline grace, license-key-
-    derived cache encryption).  We never import kiln-pro at module
-    load — only on first use — so the public package keeps working
-    when kiln-pro isn't installed.
-
-    :param public_data: Safety-floor data loaded from public Kiln's
-        ``data/design_knowledge/<kind>.json``.
-    :param kind: ``"materials"`` or ``"design_patterns"`` — selects
-        which overlay file to load.
-    :returns: Either the unmodified safety-floor dict (no overlay)
-        or the deep-merged full record (overlay loaded).
-    """
+def _load_pro_overlay_if_available(kind: str) -> dict[str, Any] | None:
+    """Load one optional kiln-pro overlay without importing it eagerly."""
     try:
         from kiln_pro.data_overlays import load_overlay  # type: ignore[import-not-found]
     except ImportError:
-        return public_data
+        return None
 
     try:
-        overlay = load_overlay(kind)
+        return load_overlay(kind)
     except KeyError as exc:
         # Unknown overlay kind — programming error, not a runtime
         # failure.  Log loudly so we catch it early.
@@ -91,7 +63,7 @@ def _merge_pro_overlay_if_available(
             "Update _OVERLAY_FILES in kiln_pro/data_overlays.py?",
             kind, exc,
         )
-        return public_data
+        return None
     except Exception as exc:
         # Catches OverlayUnavailableError (network / license / cache),
         # FileNotFoundError, ValueError, anything else.  No-overlay
@@ -101,13 +73,32 @@ def _merge_pro_overlay_if_available(
             "kiln-pro %s overlay unavailable, falling back to safety-floor: %s",
             kind, exc,
         )
+        return None
+
+
+def _merge_pro_overlay_if_available(
+    public_data: dict[str, dict[str, Any]],
+    kind: str,
+) -> dict[str, dict[str, Any]]:
+    """Merge one optional kiln-pro overlay into public safety-floor data.
+
+    The overlay is loaded only when a consumer asks for the corresponding
+    table. It is not bundled in the public package or imported at module load.
+
+    :param public_data: Public records keyed by entity identifier.
+    :param kind: Overlay kind understood by kiln-pro.
+    :returns: The public records unchanged when enrichment is unavailable,
+        otherwise a deep-merged copy.
+    """
+    overlay = _load_pro_overlay_if_available(kind)
+    if overlay is None:
         return public_data
 
     return _deep_merge_dicts(public_data, overlay)
 
 
-def _engineering_overlay_loaded() -> bool:
-    """Probe whether the kiln-pro engineering overlay actually merged.
+def _engineering_overlay_loaded(kind: str = "materials") -> bool:
+    """Probe whether one kiln-pro engineering overlay actually merged.
 
     Used by free-tier-honest consumer tools (``troubleshoot_print_issue``,
     ``get_post_processing``, ``check_environment_compatibility``, the
@@ -117,17 +108,26 @@ def _engineering_overlay_loaded() -> bool:
     honest "here's where to find the depth" signal instead of an empty
     array with no context.
 
-    Returns False when kiln-pro is absent, the license is invalid, the
-    network is past the offline-grace window, or the overlay endpoint
-    is down.  Returns True only when the merge actually produced the
-    curated content — verified structurally via ``pla.agent_guidance``,
-    which only exists in the overlay-merged record.
+    The default retains the historical materials probe. Consumer tools pass
+    their own table kind so checking an upgrade hint never reads an unrelated
+    private dataset.
 
-    Cheap: a single dict lookup.  No I/O on the hot path.
+    Returns False when kiln-pro is absent, the license is invalid, the
+    network is past the offline-grace window, or the overlay endpoint is down.
     """
     try:
         kb = _get_kb()
-        return bool(kb.materials.get("pla", {}).get("agent_guidance"))
+        property_by_kind = {
+            "materials": "materials",
+            "environment_compatibility": "environment",
+            "material_troubleshooting": "troubleshooting",
+            "post_processing": "post_processing",
+        }
+        attr = property_by_kind.get(kind)
+        if attr is None:
+            return False
+        getattr(kb, attr)
+        return kb.has_private_overlay(kind)
     except Exception:
         return False
 
@@ -315,6 +315,27 @@ class MaterialProfile:
         if self.bonding.get("hard_to_bond"):
             return _BONDING_FLOOR_NUDGE.format(name=self.display_name)
         return ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class _PublicMaterialProfile:
+    """Public safety and process floor for one material.
+
+    This type is built directly from public Kiln's on-disk catalog. It never
+    reads optional enrichment, so broad lookups serialize only public contract
+    fields.
+    """
+
+    material_id: str
+    display_name: str
+    category: str
+    thermal: dict[str, Any]
+    chemical: dict[str, Any]
+    design_limits: dict[str, Any]
+    bonding: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -653,6 +674,7 @@ class _DesignKnowledgeBase:
         self._post_processing: dict[str, dict[str, Any]] = {}
         self._multi_material: dict[str, Any] = {}
         self._skin_contact: dict[str, dict[str, Any]] = {}
+        self._merged_overlay_kinds: set[str] = set()
         self._loaded = False
 
     def _load(self) -> None:
@@ -679,64 +701,6 @@ class _DesignKnowledgeBase:
                 raw = json.loads(path.read_text(encoding="utf-8"))
                 setattr(self, attr, {k: v for k, v in raw.items() if not k.startswith("_")})
 
-        # Single choke point: merge the kiln-pro overlays
-        # if present.  Without the overlay, the loader sees safety-floor
-        # + discovery only; with the overlay, the full record
-        # (mechanical + design_limits + use_case_ratings + agent_guidance
-        # + brand-tuning + curated guidance for materials; design_rules
-        # + agent_guidance + failure_modes + sources + variant tables
-        # + Phase 4 depth for design_patterns) is restored via deep
-        # merge.  Curated content is in kiln-pro; this loader never
-        # imports kiln-pro at module load — only at first use.
-        self._materials = _merge_pro_overlay_if_available(
-            self._materials, "materials"
-        )
-        self._templates = _merge_pro_overlay_if_available(
-            self._templates, "design_templates"
-        )
-
-        # Phase 2 catalog splits (2026-05-17) — public files carry the
-        # safety floor + textbook math / spec sheets; the curated SME prose
-        # (troubleshooting playbooks, post-processing procedures, per-(printer,
-        # material) notes, environment notes, requirement worked examples,
-        # load-table caveats, multi-material chemistry notes, printer
-        # agent_notes) ships via these overlays when kiln-pro is installed.
-        # See kiln_pro/data/DESIGN_KNOWLEDGE_LEAK_AUDIT.md for the field-by-
-        # field classification.  printer_intelligence.json has its own loader
-        # (kiln/printer_intelligence.py); its merge call lives there.
-        self._troubleshooting = _merge_pro_overlay_if_available(
-            self._troubleshooting, "material_troubleshooting"
-        )
-        self._post_processing = _merge_pro_overlay_if_available(
-            self._post_processing, "post_processing"
-        )
-        self._printer_compatibility = _merge_pro_overlay_if_available(
-            self._printer_compatibility, "printer_material_compatibility"
-        )
-        self._environment = _merge_pro_overlay_if_available(
-            self._environment, "environment_compatibility"
-        )
-        self._requirements = _merge_pro_overlay_if_available(
-            self._requirements, "functional_requirements"
-        )
-        self._load_tables = _merge_pro_overlay_if_available(
-            self._load_tables, "load_tables"
-        )
-        self._multi_material = _merge_pro_overlay_if_available(
-            self._multi_material, "multi_material_pairing"
-        )
-        self._printers = _merge_pro_overlay_if_available(
-            self._printers, "printer_profiles"
-        )
-        # skin_contact's deeper analysis is a Kiln Pro feature delivered by the
-        # skin-contact tools, not through this design-knowledge merge.  The
-        # merge is wired for uniformity with every other kind; for skin_contact
-        # it adds nothing to the public floor, and the SkinContactFloor
-        # consumer exposes free-floor fields only.
-        self._skin_contact = _merge_pro_overlay_if_available(
-            self._skin_contact, "skin_contact"
-        )
-
         self._loaded = True
         logger.info(
             "Design knowledge loaded: %d materials, %d templates, %d requirements, "
@@ -753,60 +717,75 @@ class _DesignKnowledgeBase:
             len(self._post_processing),
         )
 
+    def _table(
+        self,
+        attr: str,
+        overlay_kind: str,
+    ) -> dict[str, Any]:
+        """Return one table, loading only its matching private overlay.
+
+        The canonical overlay loader is called on every property access so a
+        hosted request records the dataset even when both the public table and
+        private overlay are already cached. The deep merge itself happens once.
+        """
+        self._load()
+        overlay = _load_pro_overlay_if_available(overlay_kind)
+        if overlay_kind not in self._merged_overlay_kinds and overlay:
+            public_data = getattr(self, attr)
+            setattr(self, attr, _deep_merge_dicts(public_data, overlay))
+            self._merged_overlay_kinds.add(overlay_kind)
+        return getattr(self, attr)
+
+    def has_private_overlay(self, overlay_kind: str) -> bool:
+        """Whether this knowledge table actually merged private depth."""
+        return overlay_kind in self._merged_overlay_kinds
+
     @property
     def materials(self) -> dict[str, dict[str, Any]]:
-        self._load()
-        return self._materials
+        return self._table("_materials", "materials")
 
     @property
     def templates(self) -> dict[str, dict[str, Any]]:
-        self._load()
-        return self._templates
+        return self._table("_templates", "design_templates")
 
     @property
     def requirements(self) -> dict[str, dict[str, Any]]:
-        self._load()
-        return self._requirements
+        return self._table("_requirements", "functional_requirements")
 
     @property
     def load_tables(self) -> dict[str, dict[str, Any]]:
-        self._load()
-        return self._load_tables
+        return self._table("_load_tables", "load_tables")
 
     @property
     def environment(self) -> dict[str, dict[str, Any]]:
-        self._load()
-        return self._environment
+        return self._table("_environment", "environment_compatibility")
 
     @property
     def printers(self) -> dict[str, dict[str, Any]]:
-        self._load()
-        return self._printers
+        return self._table("_printers", "printer_profiles")
 
     @property
     def troubleshooting(self) -> dict[str, dict[str, Any]]:
-        self._load()
-        return self._troubleshooting
+        return self._table("_troubleshooting", "material_troubleshooting")
 
     @property
     def printer_compatibility(self) -> dict[str, dict[str, Any]]:
-        self._load()
-        return self._printer_compatibility
+        return self._table(
+            "_printer_compatibility",
+            "printer_material_compatibility",
+        )
 
     @property
     def post_processing(self) -> dict[str, dict[str, Any]]:
-        self._load()
-        return self._post_processing
+        return self._table("_post_processing", "post_processing")
 
     @property
     def multi_material(self) -> dict[str, Any]:
-        self._load()
-        return self._multi_material
+        return self._table("_multi_material", "multi_material_pairing")
 
     @property
     def skin_contact(self) -> dict[str, dict[str, Any]]:
-        self._load()
-        return self._skin_contact
+        return self._table("_skin_contact", "skin_contact")
 
 
 # Module-level lazy singleton
@@ -916,6 +895,42 @@ def get_material_profile(material_id: str) -> MaterialProfile | None:
     )
 
 
+def _public_material_profile_from_data(
+    material_id: str,
+    data: dict[str, Any],
+) -> _PublicMaterialProfile:
+    bonding = data.get("bonding") or {}
+    bonding_floor = (
+        {"hard_to_bond": bool(bonding.get("hard_to_bond"))}
+        if "hard_to_bond" in bonding
+        else {}
+    )
+    return _PublicMaterialProfile(
+        material_id=material_id.lower(),
+        display_name=data["display_name"],
+        category=data["category"],
+        thermal=dict(data.get("thermal") or {}),
+        chemical=dict(data.get("chemical") or {}),
+        design_limits=dict(data.get("design_limits") or {}),
+        bonding=bonding_floor,
+    )
+
+
+def get_public_material_profile(material_id: str) -> _PublicMaterialProfile | None:
+    """Get the public safety and process profile for one material.
+
+    Unlike :func:`get_material_profile`, this accessor deliberately bypasses
+    the merged knowledge-base singleton and reads only the public catalog.
+    """
+    raw = json.loads(
+        (_DATA_DIR / "materials.json").read_text(encoding="utf-8")
+    )
+    data = raw.get(material_id.lower())
+    if not isinstance(data, dict):
+        return None
+    return _public_material_profile_from_data(material_id.lower(), data)
+
+
 def list_material_profiles() -> list[MaterialProfile]:
     """Return all material profiles sorted by name."""
     kb = _get_kb()
@@ -935,6 +950,19 @@ def list_material_profiles() -> list[MaterialProfile]:
                 bonding=data.get("bonding", {}),
             )
         )
+    return profiles
+
+
+def list_public_material_profiles() -> list[_PublicMaterialProfile]:
+    """Return all public material profiles sorted by identifier."""
+    raw = json.loads(
+        (_DATA_DIR / "materials.json").read_text(encoding="utf-8")
+    )
+    profiles: list[_PublicMaterialProfile] = []
+    for material_id in sorted(k for k in raw if not k.startswith("_")):
+        data = raw[material_id]
+        if isinstance(data, dict):
+            profiles.append(_public_material_profile_from_data(material_id, data))
     return profiles
 
 
@@ -2157,7 +2185,11 @@ def check_environment_compatibility(
         per_category_ratings=per_category,
         warnings=warnings,
         overall_verdict=verdict,
-        upgrade_hint="" if _engineering_overlay_loaded() else _UPGRADE_HINT_ENVIRONMENT,
+        upgrade_hint=(
+            ""
+            if _engineering_overlay_loaded("environment_compatibility")
+            else _UPGRADE_HINT_ENVIRONMENT
+        ),
     )
 
 
@@ -2303,6 +2335,72 @@ def list_printer_profiles() -> list[PrinterDesignProfile]:
 # ---------------------------------------------------------------------------
 # Public API — Design Templates
 # ---------------------------------------------------------------------------
+
+
+def _public_design_template_records() -> dict[str, dict[str, Any]]:
+    """Load the public discovery and safety-floor template records."""
+    raw = json.loads(
+        (_DATA_DIR / "design_templates.json").read_text(encoding="utf-8")
+    )
+    return {
+        template_id: data
+        for template_id, data in raw.items()
+        if not template_id.startswith("_") and isinstance(data, dict)
+    }
+
+
+def get_public_design_template(template_id: str) -> dict[str, Any] | None:
+    """Return one public template record without optional enrichment."""
+    data = _public_design_template_records().get(template_id.lower())
+    if data is None:
+        return None
+    return {
+        "template_id": template_id.lower(),
+        "display_name": data.get("display_name", ""),
+        "description": data.get("description", ""),
+        "use_cases": list(data.get("use_cases") or []),
+        "material_compatibility": dict(
+            data.get("material_compatibility") or {}
+        ),
+        "print_orientation": data.get("print_orientation", ""),
+    }
+
+
+def list_public_design_templates() -> list[dict[str, Any]]:
+    """Return public template records sorted by identifier."""
+    return [
+        {
+            "template_id": template_id,
+            "display_name": data.get("display_name", ""),
+            "description": data.get("description", ""),
+            "use_cases": list(data.get("use_cases") or []),
+            "material_compatibility": dict(
+                data.get("material_compatibility") or {}
+            ),
+            "print_orientation": data.get("print_orientation", ""),
+        }
+        for template_id, data in sorted(_public_design_template_records().items())
+    ]
+
+
+def find_public_design_templates(use_case: str) -> list[dict[str, Any]]:
+    """Find matching templates using only public discovery tags."""
+    query = use_case.strip().lower()
+    if not query:
+        return []
+    matches: list[dict[str, Any]] = []
+    for template in list_public_design_templates():
+        cases = [
+            str(case).lower().replace("_", " ")
+            for case in template["use_cases"]
+        ]
+        display_name = str(template["display_name"]).lower()
+        if (
+            any(query in case or case in query for case in cases)
+            or query in display_name
+        ):
+            matches.append(template)
+    return matches
 
 
 def get_design_template(template_id: str) -> DesignTemplate | None:
@@ -2605,7 +2703,11 @@ def troubleshoot_print_issue(
         matched_issues=issues,
         storage_requirements=data.get("storage_requirements"),
         break_in_tips=data.get("break_in_tips", []),
-        upgrade_hint="" if _engineering_overlay_loaded() else _UPGRADE_HINT_TROUBLESHOOTING,
+        upgrade_hint=(
+            ""
+            if _engineering_overlay_loaded("material_troubleshooting")
+            else _UPGRADE_HINT_TROUBLESHOOTING
+        ),
     )
 
 
@@ -2693,7 +2795,57 @@ def get_post_processing(material_id: str) -> PostProcessingGuide | None:
         techniques=data.get("techniques", []),
         paintability=data.get("paintability"),
         strengthening=data.get("strengthening", []),
-        upgrade_hint="" if _engineering_overlay_loaded() else _UPGRADE_HINT_POST_PROCESSING,
+        upgrade_hint=(
+            ""
+            if _engineering_overlay_loaded("post_processing")
+            else _UPGRADE_HINT_POST_PROCESSING
+        ),
+    )
+
+
+def get_public_post_processing(material_id: str) -> PostProcessingGuide | None:
+    """Get the public post-processing floor without optional enrichment."""
+    raw = json.loads(
+        (_DATA_DIR / "post_processing.json").read_text(encoding="utf-8")
+    )
+    material_key = material_id.lower()
+    data = raw.get(material_key)
+    if not isinstance(data, dict):
+        return None
+
+    techniques = [
+        {
+            key: item[key]
+            for key in ("name", "difficulty", "tools_needed")
+            if key in item
+        }
+        for item in (data.get("techniques") or [])
+        if isinstance(item, dict)
+    ]
+    paintability = data.get("paintability")
+    if isinstance(paintability, dict):
+        paintability = {
+            key: paintability[key]
+            for key in ("primer_needed", "paint_types")
+            if key in paintability
+        }
+    strengthening = [
+        {
+            key: item[key]
+            for key in ("method", "applicable", "strength_gain_pct")
+            if key in item
+        }
+        if isinstance(item, dict)
+        else {"method": str(item), "applicable": None}
+        for item in (data.get("strengthening") or [])
+    ]
+
+    return PostProcessingGuide(
+        material=material_key,
+        techniques=techniques,
+        paintability=paintability,
+        strengthening=strengthening,
+        upgrade_hint=_UPGRADE_HINT_POST_PROCESSING,
     )
 
 
