@@ -7,6 +7,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **High-temperature engineering plastics, now first-class (free).** Kiln
+  recognizes six advanced polymers — PEEK, PEI (1010 and 9085), PEKK, PPSU,
+  and PPS — the materials used for parts that face real heat, load, and
+  harsh chemicals. It knows their safe handling and tells you when a printer
+  simply can't reach the temperatures they need.
+
+- **Six more printers (free).** Added the AON3D AON-M2+, QIDI Plus 4 / Q1
+  Pro / Q2 / X-Max 3, and the Creality Ender 3 S1 Pro — from the household
+  desktop up to the industrial heated-chamber class, each with advice that
+  fits what your machine can actually do. Full list:
+  https://kiln3d.com/printers
+
+- **Straight answers for demanding materials (Pro+).** For the new
+  high-temperature polymers, Kiln Pro adds engineering-grade properties and
+  printer-specific guidance — ask what a part will hold or how to run it, and
+  the answer is tuned to your exact printer and material instead of a generic
+  spec.
+
 - **Tidy your workshop (Pro+).** Archive a design to hide it from your list,
   and restore it anytime — nothing is ever lost. See
   https://kiln3d.com/pricing.
