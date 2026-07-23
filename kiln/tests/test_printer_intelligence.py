@@ -36,107 +36,31 @@ from kiln.printer_intelligence import (
     intel_to_dict,
     list_intel_profiles,
 )
-from kiln.slicer_profiles import _DATA_FILE as _SLICER_DATA_FILE
 
 from .conftest import requires_printer_intelligence_overlay
 
-CREALITY_PROFILE_IDS = {
-    "ender3",
-    "ender3_s1",
-    "ender5",
-    "cr10",
-    "ender3_v2",
-    "sparkx_i7",
-    "k1",
-    "k1_max",
-    "k1c",
-    "k1_se",
-    "k2",
-    "k2_pro",
-    "k2_plus",
-    "k2_se",
-    "creality_hi",
-    "ender3_v4",
-    "ender3_v3",
-    "ender3_v3_ke",
-    "ender3_v3_se",
-    "ender3_v3_plus",
-    "ender5_max",
-    "cr10_se",
+PUBLIC_PROFILE_FIELDS = {
+    "display_name",
+    "firmware",
+    "extruder_type",
+    "hotend_type",
+    "has_enclosure",
+    "has_abl",
+    "has_input_shaping",
+    "build_volume_mm",
+    "max_hotend_temp",
+    "max_bed_temp",
+    "materials",
 }
-
-CREALITY_CAPABILITY_KEYS = {
-    "has_camera",
-    "camera",
-    "camera_out_of_box",
-    "camera_optional",
-    "camera_options",
-    "multicolor_system",
-    "multicolor_out_of_box",
-    "multicolor_optional",
-    "multicolor_options",
-    "multicolor_max_colors",
-    "multicolor_max_colors_out_of_box",
-    "cfs_compatible",
-    "cfs_variant",
-    "cfs_max_units",
-    "hardened_nozzle_stock",
-    "input_shaping",
-    "filament_runout_sensor",
-    "power_loss_recovery",
-    "enclosure",
-    # Sourcing rides the merged overlay under the underscore convention
-    # (internal QA trail — stripped at the wire boundary, kept locally).
-    "_source_notes",
-}
-
-PUBLIC_CAPABILITY_FIELDS = {
-    "capability_schema",
-    "camera_notes",
-    "multicolor_notes",
-    "has_camera",
-    "camera",
-    "camera_out_of_box",
-    "camera_optional",
-    "camera_options",
-    "multicolor_system",
-    "multicolor_out_of_box",
-    "multicolor_optional",
-    "multicolor_options",
-    "multicolor_max_colors",
-    "multicolor_max_colors_out_of_box",
-    "cfs_compatible",
-    "cfs_variant",
-    "cfs_max_units",
-    "hardened_nozzle_stock",
-    "input_shaping",
-    "filament_runout_sensor",
-    "power_loss_recovery",
-    "enclosure",
-}
-
-EXTENDED_HARDWARE_FIELDS = {
-    "ams_slots",
-    "ams_type",
-    "camera",
-    "nozzle_options",
-    "max_nozzle_temp",
-    "max_speed_mm_s",
-    "max_acceleration_mm_s2",
-    "wifi",
-}
-NON_MODEL_PROFILES = {"default", "klipper_generic"}
 
 # ===================================================================
 # Fixtures
 # ===================================================================
 
-
 @pytest.fixture(autouse=True)
 def _reset_intel_cache():
     """Reset the singleton cache before each test for isolation."""
     import kiln.printer_intelligence as mod
-
     mod._cache.clear()
     mod._loaded = False
     yield
@@ -147,7 +71,6 @@ def _reset_intel_cache():
 # ===================================================================
 # get_printer_intel
 # ===================================================================
-
 
 class TestGetPrinterIntel:
     """Tests for get_printer_intel() lookup and fallback logic."""
@@ -187,12 +110,6 @@ class TestGetPrinterIntel:
         assert intel.firmware == "klipper"
         assert intel.has_enclosure is True
         assert intel.materials["PLA"].bed == 55
-        assert intel.capabilities["has_camera"] is True
-        assert intel.capabilities["camera_out_of_box"] is True
-        assert intel.capabilities["multicolor_system"] == "cfs_c"
-        assert intel.capabilities["multicolor_out_of_box"] is False
-        assert intel.capabilities["multicolor_optional"] is True
-        assert intel.capabilities["multicolor_max_colors"] == 4
 
     def test_creality_brand_prefixed_alias(self) -> None:
         intel = get_printer_intel("creality_k1_max")
@@ -202,72 +119,6 @@ class TestGetPrinterIntel:
         intel = get_printer_intel("ender3_v3_ke")
         assert intel.firmware == "klipper"
         assert intel.has_enclosure is False
-
-    def test_sparkx_i7_multicolor_capabilities(self) -> None:
-        intel = get_printer_intel("sparkx_i7")
-        assert intel.capabilities["multicolor_system"] == "cfs"
-        assert intel.capabilities["multicolor_out_of_box"] is True
-        assert intel.capabilities["multicolor_max_colors"] == 4
-        assert intel.capabilities["camera_out_of_box"] is True
-
-    def test_ender3_v4_cfs_capability(self) -> None:
-        intel = get_printer_intel("ender3_v4")
-        assert intel.capabilities["cfs_compatible"] is True
-        assert intel.capabilities["multicolor_out_of_box"] is False
-        assert intel.capabilities["multicolor_optional"] is True
-        assert intel.capabilities["camera_out_of_box"] is False
-
-    def test_k1_series_cfs_c_optional_capabilities(self) -> None:
-        for printer_id in ("k1", "k1_max", "k1c", "k1_se"):
-            intel = get_printer_intel(printer_id)
-            assert intel.capabilities["multicolor_system"] == "cfs_c"
-            assert intel.capabilities["cfs_variant"] == "CFS-C"
-            assert intel.capabilities["cfs_max_units"] == 1
-            assert intel.capabilities["multicolor_max_colors"] == 4
-            assert intel.capabilities["multicolor_out_of_box"] is False
-
-    def test_k2_se_camera_is_optional(self) -> None:
-        intel = get_printer_intel("k2_se")
-        assert intel.capabilities["has_camera"] is False
-        assert intel.capabilities["camera_out_of_box"] is False
-        assert intel.capabilities["camera_optional"] is True
-        assert intel.capabilities["multicolor_system"] == "cfs"
-        assert intel.capabilities["multicolor_max_colors"] == 16
-
-    def test_k2_family_hardened_nozzle_claims(self) -> None:
-        for printer_id in ("k2", "k2_pro", "k2_plus"):
-            intel = get_printer_intel(printer_id)
-            assert intel.capabilities["hardened_nozzle_stock"] is True
-
-    def test_ender5_max_optional_camera_no_cfs(self) -> None:
-        intel = get_printer_intel("ender5_max")
-        assert intel.capabilities["camera_optional"] is True
-        assert intel.capabilities["cfs_compatible"] is False
-        assert intel.capabilities["multicolor_system"] == "none"
-
-    @requires_printer_intelligence_overlay
-    def test_all_creality_profiles_have_capability_schema(self) -> None:
-        for printer_id in CREALITY_PROFILE_IDS:
-            intel = get_printer_intel(printer_id)
-            assert set(intel.capabilities) >= CREALITY_CAPABILITY_KEYS, printer_id
-            assert len(intel.quirks) >= 3, printer_id
-            assert len(intel.failure_modes) >= 3, printer_id
-
-    def test_creality_cfs_claims_align_with_slicer_tooling(self) -> None:
-        slicer = json.loads(_SLICER_DATA_FILE.read_text())
-        addon_compatible = set(
-            slicer["_multi_material_addons"]["creality_cfs"]["compatible_printers"],
-        )
-
-        for printer_id in CREALITY_PROFILE_IDS:
-            intel = get_printer_intel(printer_id)
-            if not intel.capabilities["cfs_compatible"]:
-                continue
-
-            tool_change = slicer[printer_id]["tool_change"]
-            covered_by_profile = tool_change["tool_changer"] == "cfs"
-            covered_by_addon = printer_id in addon_compatible
-            assert covered_by_profile or covered_by_addon, printer_id
 
     def test_nonexistent_falls_back_to_default(self) -> None:
         intel = get_printer_intel("nonexistent_printer_xyz")
@@ -296,7 +147,6 @@ class TestGetPrinterIntel:
 # list_intel_profiles
 # ===================================================================
 
-
 class TestListIntelProfiles:
     """Tests for list_intel_profiles() output."""
 
@@ -320,11 +170,15 @@ class TestListIntelProfiles:
         profiles = list_intel_profiles()
         assert "_meta" not in profiles
 
+    def test_a2l_speed_behavior_survives_public_field_removal(self) -> None:
+        overrides = get_slicer_speed_overrides("bambu_a2l")
+        assert overrides["max_print_speed"] == "187"
+        assert overrides["default_acceleration"] == "7000"
+
 
 # ===================================================================
 # get_material_settings
 # ===================================================================
-
 
 class TestGetMaterialSettings:
     """Tests for get_material_settings() lookup."""
@@ -375,7 +229,6 @@ class TestGetMaterialSettings:
 # diagnose_issue
 # ===================================================================
 
-
 class TestDiagnoseIssue:
     """Tests for diagnose_issue() symptom matching."""
 
@@ -424,7 +277,6 @@ class TestDiagnoseIssue:
 # intel_to_dict
 # ===================================================================
 
-
 class TestIntelToDict:
     """Tests for intel_to_dict() serialization."""
 
@@ -432,20 +284,10 @@ class TestIntelToDict:
         intel = get_printer_intel("ender3")
         d = intel_to_dict(intel)
         expected_keys = [
-            "id",
-            "display_name",
-            "firmware",
-            "extruder_type",
-            "hotend_type",
-            "has_enclosure",
-            "has_abl",
-            "capabilities",
-            "materials",
-            "quirks",
-            "calibration",
-            "failure_modes",
+            "id", "display_name", "firmware", "extruder_type",
+            "hotend_type", "has_enclosure", "has_abl",
+            "capabilities", "materials", "quirks", "calibration", "failure_modes",
         ]
-        expected_keys.extend(sorted(EXTENDED_HARDWARE_FIELDS))
         for key in expected_keys:
             assert key in d, f"Missing key '{key}' in serialized dict"
 
@@ -481,31 +323,15 @@ class TestIntelToDict:
         assert d["firmware"] == intel.firmware
 
 
-class TestExtendedHardwareSpeedFallback:
-    """Null hardware specs must not become integers in the speed fallback."""
-
-    def test_builder_selected_speed_returns_no_override(self) -> None:
-        assert get_slicer_speed_overrides("ratrig_vcore3") == {}
-
-    def test_published_speed_with_unpublished_acceleration_uses_safe_default(self) -> None:
-        overrides = get_slicer_speed_overrides("sovol_sv07")
-        assert overrides["max_print_speed"] == "250"
-        assert overrides["default_acceleration"] == "3500"
-
-
 # ===================================================================
 # JSON data file validity
 # ===================================================================
-
 
 class TestPrinterIntelligenceJSON:
     """Tests for the bundled printer_intelligence.json data file."""
 
     REQUIRED_PROFILE_FIELDS = [
-        "display_name",
-        "firmware",
-        "extruder_type",
-        "hotend_type",
+        "display_name", "firmware", "extruder_type", "hotend_type",
     ]
 
     def test_json_file_exists_and_parses(self) -> None:
@@ -519,7 +345,40 @@ class TestPrinterIntelligenceJSON:
             if key == "_meta":
                 continue
             for req_field in self.REQUIRED_PROFILE_FIELDS:
-                assert req_field in data, f"Profile '{key}' missing required field '{req_field}'"
+                assert req_field in data, (
+                    f"Profile '{key}' missing required field '{req_field}'"
+                )
+
+    def test_all_profiles_have_the_exact_public_floor(self) -> None:
+        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
+        for key, data in raw.items():
+            if key == "_meta":
+                continue
+            assert set(data) == PUBLIC_PROFILE_FIELDS, key
+
+    def test_private_hardware_shape_and_schema_ids_are_absent(self) -> None:
+        raw_text = _DATA_FILE.read_text(encoding="utf-8")
+        raw = json.loads(raw_text)
+        for private_field in (
+            "ams_slots",
+            "ams_type",
+            "camera",
+            "nozzle_options",
+            "max_nozzle_temp",
+            "max_speed_mm_s",
+            "max_acceleration_mm_s2",
+            "wifi",
+            "capabilities",
+        ):
+            assert f'"{private_field}"' not in raw_text
+        assert "fdm_hardware_capabilities_v1" not in raw_text
+        assert "fdm_operational_capabilities_v1" not in raw_text
+        assert not {
+            key
+            for key in raw.get("_meta", {})
+            if "schema" in key.lower()
+            and ("hardware" in key.lower() or "capability" in key.lower())
+        }
 
     def test_all_profiles_have_materials_dict(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
@@ -529,119 +388,26 @@ class TestPrinterIntelligenceJSON:
             assert "materials" in data, f"Profile '{key}' missing 'materials'"
             assert isinstance(data["materials"], dict)
 
-    def test_marketed_fleet_has_complete_extended_hardware_shape(self) -> None:
-        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
-        marketed = {key: data for key, data in raw.items() if not key.startswith("_") and key not in NON_MODEL_PROFILES}
-        assert len(marketed) == 55
-        for printer_id, data in marketed.items():
-            missing = EXTENDED_HARDWARE_FIELDS - set(data)
-            assert not missing, f"{printer_id}: missing {sorted(missing)}"
-
-    def test_marketed_fleet_has_one_complete_public_capability_shape(self) -> None:
-        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
-        marketed = {
-            printer_id: data
-            for printer_id, data in raw.items()
-            if not printer_id.startswith("_") and printer_id not in NON_MODEL_PROFILES
-        }
-        assert len(marketed) == 55
-        for printer_id, data in marketed.items():
-            capabilities = data["capabilities"]
-            assert set(capabilities) == PUBLIC_CAPABILITY_FIELDS, printer_id
-            assert capabilities["capability_schema"] == ("fdm_hardware_capabilities_v1")
-            assert not any(
-                key.startswith("_") or "source" in key.lower() or "url" in key.lower() for key in capabilities
-            ), printer_id
-
-    def test_public_capability_types_and_core_facts_are_consistent(self) -> None:
-        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
-        nullable_bools = {
-            "has_camera",
-            "camera_out_of_box",
-            "camera_optional",
-            "multicolor_out_of_box",
-            "multicolor_optional",
-            "cfs_compatible",
-            "hardened_nozzle_stock",
-            "input_shaping",
-            "filament_runout_sensor",
-            "power_loss_recovery",
-        }
-        nullable_ints = {
-            "multicolor_max_colors",
-            "multicolor_max_colors_out_of_box",
-            "cfs_max_units",
-        }
-        for printer_id, data in raw.items():
-            if printer_id.startswith("_") or printer_id in NON_MODEL_PROFILES:
-                continue
-            capabilities = data["capabilities"]
-            for field in nullable_bools:
-                assert capabilities[field] is None or isinstance(capabilities[field], bool), (printer_id, field)
-            for field in nullable_ints:
-                assert capabilities[field] is None or isinstance(capabilities[field], int), (printer_id, field)
-            for field in ("camera_options", "multicolor_options"):
-                assert isinstance(capabilities[field], list), (printer_id, field)
-                assert all(isinstance(value, str) for value in capabilities[field]), (printer_id, field)
-            assert capabilities["has_camera"] == capabilities["camera_out_of_box"]
-            assert capabilities["input_shaping"] == data["has_input_shaping"]
-            if isinstance(data["camera"], str) and data["camera"].lower().startswith("optional"):
-                assert capabilities["camera_out_of_box"] is False
-                assert capabilities["camera_optional"] is True
-            if data["has_enclosure"] is False:
-                assert capabilities["enclosure"] == "open"
-            else:
-                assert capabilities["enclosure"] != "open"
-
-    def test_extended_hardware_schema_pins_null_meaning_and_scope(self) -> None:
-        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
-        schema = raw["_meta"]["extended_hardware_schema"]
-        assert set(schema["fields"]) == EXTENDED_HARDWARE_FIELDS
-        assert "manufacturer does not publish" in schema["null_semantics"]
-        assert "default and klipper_generic" in schema["scope"]
-        assert "not a recommended quality speed" in schema["max_speed_semantics"]
-        capabilities = raw["_meta"]["hardware_capability_schema"]
-        assert set(capabilities["fields"]) == PUBLIC_CAPABILITY_FIELDS
-        assert "every marketed printer" in capabilities["scope"]
-        assert "kiln-pro overlay" in capabilities["private_data_boundary"]
-
-    def test_extended_hardware_types_and_thermal_ceiling_agree(self) -> None:
-        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
-        for printer_id, data in raw.items():
-            if printer_id.startswith("_") or printer_id in NON_MODEL_PROFILES:
-                continue
-            assert data["ams_slots"] is None or isinstance(data["ams_slots"], int)
-            assert data["ams_type"] is None or isinstance(data["ams_type"], str)
-            assert data["camera"] is None or isinstance(data["camera"], str)
-            assert data["nozzle_options"] is None or isinstance(data["nozzle_options"], list)
-            assert data["max_nozzle_temp"] is None or (data["max_nozzle_temp"] == data["max_hotend_temp"]), (
-                f"{printer_id}: extended and safety ceilings disagree"
-            )
-            if data["ams_slots"] == 0:
-                assert data["ams_type"] == "none"
-
-    def test_x1c_records_ams_and_camera(self) -> None:
-        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
-        x1c = raw["bambu_x1c"]
-        assert x1c["ams_type"] == "ams"
-        assert x1c["ams_slots"] == 4
-        assert "1920x1080" in x1c["camera"]
-
     def test_all_material_entries_have_required_keys(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
         for key, data in raw.items():
             if key == "_meta":
                 continue
             for mat_name, mat_data in data.get("materials", {}).items():
-                assert "hotend" in mat_data, f"Profile '{key}' material '{mat_name}' missing 'hotend'"
-                assert "bed" in mat_data, f"Profile '{key}' material '{mat_name}' missing 'bed'"
-                assert "fan" in mat_data, f"Profile '{key}' material '{mat_name}' missing 'fan'"
+                assert "hotend" in mat_data, (
+                    f"Profile '{key}' material '{mat_name}' missing 'hotend'"
+                )
+                assert "bed" in mat_data, (
+                    f"Profile '{key}' material '{mat_name}' missing 'bed'"
+                )
+                assert "fan" in mat_data, (
+                    f"Profile '{key}' material '{mat_name}' missing 'fan'"
+                )
 
 
 # ===================================================================
 # MaterialProfile dataclass
 # ===================================================================
-
 
 class TestMaterialProfile:
     """Tests for the MaterialProfile dataclass."""
@@ -667,7 +433,6 @@ class TestMaterialProfile:
 # FailureMode dataclass
 # ===================================================================
 
-
 class TestFailureMode:
     """Tests for the FailureMode dataclass."""
 
@@ -686,7 +451,6 @@ class TestFailureMode:
 # ===================================================================
 # PrinterIntel structure
 # ===================================================================
-
 
 class TestPrinterIntelStructure:
     """Tests for PrinterIntel field types and structure."""

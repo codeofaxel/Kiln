@@ -428,6 +428,7 @@ class TestTroubleshootPrinter:
 
         assert result["success"] is True
         assert result["count"] == 1
+        assert "quirks" not in result
 
     @patch("kiln.server.diagnose_issue")
     def test_not_found(self, mock_diagnose):

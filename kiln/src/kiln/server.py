@@ -10936,7 +10936,6 @@ def troubleshoot_printer(
             "symptom": symptom,
             "matches": matches,
             "count": len(matches),
-            "quirks": intel.quirks,
             "upgrade_hint": upgrade_hint,
         }
         # Bambu HMS code lookup: the normalized raw code + a wiki pointer are

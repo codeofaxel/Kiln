@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-21T07:01:53.088754+00:00",
-  "tool_count": 380,
+  "generated": "2026-07-23T02:03:53.362970+00:00",
+  "tool_count": 379,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -9716,6 +9716,30 @@
       }
     },
     {
+      "name": "answer_printer_question",
+      "description": "Answer one factual question about one supported printer.",
+      "tier": "free",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id",
+          "question"
+        ],
+        "title": "answer_printer_questionArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "apply_mid_print_decoration_plan",
       "description": "Commit a planned mid-print decoration (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -10899,25 +10923,6 @@
       }
     },
     {
-      "name": "get_printer_profile",
-      "description": "Get the canonical tier-aware printer profile.",
-      "tier": "free",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {
-          "printer_id": {
-            "title": "Printer Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "printer_id"
-        ],
-        "title": "get_printer_profileArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "get_recovery_recommendations",
       "description": "Return the historically best recovery strategy (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -11002,17 +11007,6 @@
       "parameters": {
         "properties": {},
         "title": "list_nozzle_statesArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "list_printer_profiles",
-      "description": "List canonical tier-aware printer profiles.",
-      "tier": "free",
-      "category": "print_intelligence",
-      "parameters": {
-        "properties": {},
-        "title": "list_printer_profilesArguments",
         "type": "object"
       }
     },
