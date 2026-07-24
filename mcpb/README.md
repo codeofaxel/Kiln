@@ -79,6 +79,37 @@ the pack output before publishing: package size should be ~50-60 KB and
 "total files" should be 5 — anything dramatically larger means a build
 artifact leaked in.
 
+## Distribution (going live)
+
+The manual pack above is for local testing. In production the bundle ships
+two ways, and **neither goes live until a release is cut**:
+
+1. **GitHub release asset (canonical download).** `.github/workflows/attach-mcpb.yml`
+   fires on `release: published`, packs the bundle, and attaches it as a
+   **stable-named** asset so the site can link one always-current URL:
+
+   ```
+   https://github.com/codeofaxel/Kiln/releases/latest/download/kiln.mcpb
+   ```
+
+   That workflow is isolated from `publish.yml` (packing is just a zip — no
+   uv, no PyPI), so a pack failure can never block the package publish.
+
+2. **Smithery (local-bundle listing).** Publish with Smithery's CLI from a
+   packed bundle; the manifest's `server.type` is already the Smithery-
+   compatible `"python"` label (see the note above). This is a listing on
+   Smithery's registry, separate from Anthropic's Connectors Directory.
+
+**Anthropic Connectors Directory** listing is a THIRD, later path with a
+higher bar: the desktop-extension review requires a `title` +
+`readOnly`/`destructive` annotation on **every** tool the bundle exposes —
+the full local Kiln registry (hundreds of tools), not the curated remote
+slice. Distribute via (1) and (2) first; take on the directory annotation
+pass only when it's worth it.
+
+**Go-live order:** cut the `kiln3d` release (asset auto-attaches) →
+publish to Smithery → deploy the site section that links the download.
+
 ## Manual smoke test
 
 ```bash
