@@ -19,18 +19,37 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Ensure kiln_pro.tax is importable so @patch("kiln_pro.tax.TaxCalculator") can
-# resolve the module path.  The actual TaxCalculator class lives in kiln-pro
-# which may or may not be installed; we only need the module chain to exist in
-# sys.modules so unittest.mock can traverse it.
-if "kiln_pro" not in sys.modules:
-    _fake_pro = types.ModuleType("kiln_pro")
-    sys.modules["kiln_pro"] = _fake_pro
-if "kiln_pro.tax" not in sys.modules:
-    _fake_tax = types.ModuleType("kiln_pro.tax")
-    _fake_tax.TaxCalculator = type("TaxCalculator", (), {})  # type: ignore[attr-defined]
-    sys.modules["kiln_pro.tax"] = _fake_tax
-    sys.modules["kiln_pro"].tax = _fake_tax  # type: ignore[attr-defined]
+
+@pytest.fixture(autouse=True)
+def _stub_kiln_pro_tax():
+    """Make ``kiln_pro.tax`` resolvable for ``@patch("kiln_pro.tax.TaxCalculator")``.
+
+    The real ``TaxCalculator`` lives in kiln-pro, which may or may not be
+    installed; unittest.mock only needs the module chain to exist in
+    ``sys.modules`` to traverse it.
+
+    This runs as a fixture rather than at module scope on purpose.  Building
+    the chain at import time put a *bare* ``kiln_pro`` module into
+    ``sys.modules`` for the rest of the session whenever kiln-pro was absent
+    (i.e. in public CI), so a later test that patches a different pro
+    submodule — ``kiln_pro.data_overlays`` in test_printer_intelligence —
+    failed with ``AttributeError`` against this stand-in.  Scoping it to the
+    tests that need it, and removing only what we added, keeps the stub from
+    leaking.
+    """
+    added: list[str] = []
+    if "kiln_pro" not in sys.modules:
+        sys.modules["kiln_pro"] = types.ModuleType("kiln_pro")
+        added.append("kiln_pro")
+    if "kiln_pro.tax" not in sys.modules:
+        fake_tax = types.ModuleType("kiln_pro.tax")
+        fake_tax.TaxCalculator = type("TaxCalculator", (), {})  # type: ignore[attr-defined]
+        sys.modules["kiln_pro.tax"] = fake_tax
+        sys.modules["kiln_pro"].tax = fake_tax  # type: ignore[attr-defined]
+        added.append("kiln_pro.tax")
+    yield
+    for name in reversed(added):
+        sys.modules.pop(name, None)
 
 # ---------------------------------------------------------------------------
 # Helpers — register tools and capture them

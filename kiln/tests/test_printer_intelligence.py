@@ -143,6 +143,7 @@ class TestGetPrinterIntel:
         intel = get_printer_intel("  bambu_x1c  ")
         assert intel.id == "bambu_x1c"
 
+    @requires_printer_intelligence_overlay
     def test_cached_lookup_still_touches_canonical_overlay_loader(self) -> None:
         """A process cache must not bypass hosted private-read tracing."""
         get_printer_intel("bambu_x1c")
