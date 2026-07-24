@@ -137,7 +137,7 @@ try:
             max_printers_for_tier,
         )
     except ImportError:
-        PRO_TIER_MAX_PRINTERS = 5
+        PRO_TIER_MAX_PRINTERS = 1
         BUSINESS_TIER_MAX_PRINTERS = 50
 
         def max_printers_for_tier(tier: object) -> int | None:
@@ -151,10 +151,16 @@ try:
             return None  # enterprise → unlimited
 
 except ImportError:
-    # Free-tier fallback when kiln-pro is not installed.  Matches the
-    # "Up to 2 printers" marketing on the Free tier of /pricing.
-    FREE_TIER_MAX_PRINTERS = 2
-    PRO_TIER_MAX_PRINTERS = 5
+    # Free-tier fallback when kiln-pro is not installed — which is nearly every
+    # install, so THIS is the cap most users actually run under, not the branch
+    # above.  That asymmetry is what let it rot: the numbers here read 2 and 5
+    # against an enforced 1 and 1 for months, and could not be noticed locally
+    # by anyone who HAD kiln-pro installed, because they never execute there.
+    # Public CI runs this branch on every job and asserted nothing about it.
+    # Pinned now by kiln-pro's scripts/audit_tier_claims.py, which compares
+    # these literals to the licensing constants across the repo boundary.
+    FREE_TIER_MAX_PRINTERS = 1
+    PRO_TIER_MAX_PRINTERS = 1
     BUSINESS_TIER_MAX_PRINTERS = 50
 
     def max_printers_for_tier(tier: object) -> int | None:  # type: ignore[no-redef]
@@ -6995,8 +7001,8 @@ def register_printer(
 ) -> dict:
     """Register a new printer in the fleet.
 
-    Free tier allows up to 2 printers with independent control.
-    Pro tier unlocks unlimited printers with fleet orchestration.
+    Free and Pro each allow 1 printer. Fleet starts at Business (3 printers
+    included, $15/mo per additional to a cap of 50); Enterprise is uncapped.
 
     Args:
         name: Unique human-readable name (e.g. "voron-350", "bambu-x1c").
@@ -7024,9 +7030,10 @@ def register_printer(
     if err := _check_auth("admin"):
         return err
     try:
-        # Tier-aware printer cap: Free → 2, Pro → 5, Business → 50,
-        # Enterprise → unlimited.  Replacing an existing printer doesn't
-        # count against the limit (only NEW registrations do).
+        # Tier-aware printer cap, read from the licensing constants rather
+        # than restated here: Free and Pro are 1, Business 50, Enterprise
+        # uncapped.  Replacing an existing printer doesn't count against the
+        # limit (only NEW registrations do).
         current_tier = get_tier()
         tier_cap = max_printers_for_tier(current_tier)
         tier_label = str(
@@ -7037,11 +7044,16 @@ def register_printer(
             and name not in _get_registry()
             and _get_registry().count >= tier_cap
         ):
-            # Recommend the next tier up so the upgrade message is
-            # concrete, not just "upgrade."
+            # Recommend the tier that actually solves THIS problem. Pro adds no
+            # printers over Free, so a second printer is a Business upgrade
+            # from either — recommending Pro here sold an upgrade that would
+            # not have lifted the cap the user just hit.
+            #
+            # tier-claims: business — keys are the caller's CURRENT tier, but
+            # every count below describes the tier being RECOMMENDED.
             upgrade_hint = {
-                "Free": "Kiln Pro unlocks up to 5 printers with fleet orchestration",
-                "Pro": "Kiln Business unlocks up to 50 printers with team seats",
+                "Free": "Kiln Business adds fleet — 3 printers included, up to 50",
+                "Pro": "Kiln Business adds fleet — 3 printers included, up to 50",
                 "Business": "Kiln Enterprise removes the printer cap",
             }.get(tier_label, "Upgrade at https://kiln3d.com/pricing")
             return {

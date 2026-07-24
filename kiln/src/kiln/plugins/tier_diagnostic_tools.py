@@ -180,13 +180,13 @@ def _build_response(
         agent_summary = (
             f"You're on the Pro tier. Source: {matched_detail}. "
             "All Pro+ features are unlocked, including cloud sync, design versioning, mid-print modification, "
-            "the texture engine, and 5-printer fleet."
+            "and the texture engine. Pro stays at 1 printer — fleet starts at Business."
         )
     elif effective_tier.lower() == "business":
         agent_summary = (
             f"You're on the Business tier. Source: {matched_detail}. "
-            "Pro features plus team collaboration (PRs, approval gates, cross-org transfer, "
-            "50-printer fleet, 5 team seats) are all unlocked."
+            "Pro features plus team collaboration (PRs, approval gates, cross-org transfer, and "
+            "the fleet: 3 printers and 3 seats included, metered to caps of 50 and 10) are all unlocked."
         )
     elif effective_tier.lower() == "enterprise":
         agent_summary = (

@@ -71,26 +71,29 @@ class SkillManifest:
     tiers: dict[str, Any] = field(
         default_factory=lambda: {
             "free": (
-                "Local printing, slicing, basic marketplace search, up to 2 "
-                "printers. Free agents can still discover Pro/Business stubs "
+                "Local printing, slicing, basic marketplace search, 1 "
+                "printer. Free agents can still discover Pro/Business stubs "
                 "via ToolSearch for upgrade messaging."
             ),
             "pro": (
                 "Product generators (coasters, keychains, ornaments, etc.), "
                 "decoration, procedural textures, cloud sync, design "
-                "versioning, manual speed control, print learning. "
+                "versioning, manual speed control, print learning. Still 1 "
+                "printer — fleet starts at Business. "
                 "$49/mo. https://kiln3d.com/pricing"
             ),
             "business": (
-                "Everything in Pro + fleet-wide ops (up to 50 printers, 5 "
-                "team seats), layer-scheduled speed adjustments, material "
+                "Everything in Pro + fleet-wide ops (3 printers and 3 team "
+                "seats included, metered to caps of 50 and 10), "
+                "layer-scheduled speed adjustments, material "
                 "compliance tracking, custom safety profiles, webhooks. "
-                "$99/mo. https://kiln3d.com/pricing"
+                "$199/mo. https://kiln3d.com/pricing"
             ),
             "enterprise": (
-                "Everything in Business + unlimited printers, SSO, RBAC, "
-                "audit trails, lockable safety profiles, 99.9% uptime SLA. "
-                "$499/mo base. https://kiln3d.com/enterprise"
+                "Everything in Business + an uncapped fleet (50 printers "
+                "included), SSO, RBAC, audit trails, lockable safety "
+                "profiles, 99.9% uptime SLA. "
+                "Custom-quoted. https://kiln3d.com/enterprise"
             ),
         }
     )
