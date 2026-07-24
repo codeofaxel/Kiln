@@ -801,11 +801,13 @@
     },
     "abs": {
       "status": "not_compatible",
-      "upgrades_needed": []
+      "upgrades_needed": [],
+      "notes": "ABS cannot run on this printer: it needs about a 90C bed and this machine reaches 80C. The bed ceiling is not something an upgrade changes, which is why no upgrade is listed."
     },
     "asa": {
       "status": "not_compatible",
-      "upgrades_needed": []
+      "upgrades_needed": [],
+      "notes": "ASA cannot run on this printer: it needs about a 90C bed and this machine reaches 80C. The bed ceiling is not something an upgrade changes, which is why no upgrade is listed."
     },
     "tpu": {
       "status": "compatible",
@@ -840,11 +842,13 @@
     },
     "polycarbonate": {
       "status": "not_compatible",
-      "upgrades_needed": []
+      "upgrades_needed": [],
+      "notes": "Polycarbonate cannot run on this printer: it needs about a 100C bed and this machine reaches 80C. The bed ceiling is not something an upgrade changes, which is why no upgrade is listed."
     },
     "pc_abs": {
       "status": "not_compatible",
-      "upgrades_needed": []
+      "upgrades_needed": [],
+      "notes": "PC-ABS cannot run on this printer: it needs about a 100C bed and this machine reaches 80C. The bed ceiling is not something an upgrade changes, which is why no upgrade is listed."
     },
     "pet_cf": {
       "status": "needs_upgrade",
