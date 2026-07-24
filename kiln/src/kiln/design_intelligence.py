@@ -932,15 +932,43 @@ def get_public_material_profile(material_id: str) -> _PublicMaterialProfile | No
 
 
 def list_material_profiles() -> list[MaterialProfile]:
-    """Return all material profiles sorted by name."""
+    """Return all material profiles sorted by name.
+
+    Entries the engineering overlay contributes but the public catalog does
+    not carry are SKIPPED rather than listed.  Two reasons, and the second
+    matters more than the first:
+
+    * ``display_name`` and ``category`` live in the public catalog by the
+      design-knowledge split, so an overlay-only entry has neither.  Reading
+      them positionally raised ``KeyError`` and took down the whole listing
+      over one unpaired material.
+    * More importantly, the public catalog is where the SAFETY floor lives —
+      food-contact status, handling warnings, thermal limits.  An overlay-only
+      entry is curated depth with no safety floor attached, and callers of this
+      function recommend from what it returns (see the material-swap
+      suggester).  Offering a material whose safety floor has not shipped yet
+      is worse than not offering it, so it waits for its public half.
+
+    This is reachable in the normal course of a two-repo release: kiln-pro can
+    carry a material for the window before the matching ``kiln3d`` publishes.
+    """
     kb = _get_kb()
     profiles = []
     for mid, data in sorted(kb.materials.items()):
+        display_name = data.get("display_name")
+        category = data.get("category")
+        if not display_name or not category:
+            logger.debug(
+                "material %r has engineering data but no public catalog record; "
+                "omitting from the listing until its public half lands",
+                mid,
+            )
+            continue
         profiles.append(
             MaterialProfile(
                 material_id=mid,
-                display_name=data["display_name"],
-                category=data["category"],
+                display_name=display_name,
+                category=category,
                 thermal=data.get("thermal", {}),
                 chemical=data.get("chemical", {}),
                 mechanical=data.get("mechanical", {}),

@@ -231,6 +231,41 @@ class TestMaterialProfiles:
         assert get_material_profile("PLA") is not None
         assert get_material_profile("Petg") is not None
 
+    def test_overlay_only_material_is_skipped_not_crashed_on(self):
+        """A material the overlay has and the public catalog lacks is omitted.
+
+        This is reachable in the normal course of a two-repo release: kiln-pro
+        can carry a material for the window before the matching kiln3d
+        publishes, and the overlay deep-merges its keys in. Reading
+        ``display_name`` positionally used to raise KeyError and take down the
+        WHOLE listing over one unpaired material -- on the hosted server that
+        broke material recommendations for every caller, not just the one who
+        asked about that material.
+
+        Skipping (rather than substituting a name) is deliberate: the public
+        catalog is where the safety floor lives, and this function's callers
+        recommend from what it returns. A material whose food-contact status
+        and handling warnings have not shipped must not be recommended.
+        """
+        import kiln.design_intelligence as di
+
+        kb = di._get_kb()
+        sentinel = "unshipped_grade_probe"
+        assert sentinel not in kb.materials
+        kb.materials[sentinel] = {
+            "mechanical": {"tensile_strength_mpa": 42},
+            "agent_guidance": ["curated depth with no public safety floor"],
+        }
+        try:
+            profiles = list_material_profiles()  # must not raise
+            ids = {p.material_id for p in profiles}
+            assert sentinel not in ids, (
+                "a material with no public safety floor must not be offered"
+            )
+            assert "pla" in ids, "the rest of the catalog must survive intact"
+        finally:
+            kb.materials.pop(sentinel, None)
+
     def test_list_materials_returns_all(self):
         profiles = list_material_profiles()
         assert len(profiles) >= 7
