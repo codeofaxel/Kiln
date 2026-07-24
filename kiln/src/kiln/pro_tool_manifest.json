@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-24T23:00:42.038379+00:00",
-  "tool_count": 374,
+  "generated": "2026-07-24T23:26:35.577348+00:00",
+  "tool_count": 375,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -8718,6 +8718,67 @@
           "result"
         ],
         "title": "record_chemical_outcomeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_esd_measurement",
+      "description": "Log a measured surface resistance for a printed dissipative part.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "ohms": {
+            "title": "Ohms",
+            "type": "number"
+          },
+          "nozzle_temp_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nozzle Temp C"
+          },
+          "surface": {
+            "default": "contact",
+            "title": "Surface",
+            "type": "string"
+          },
+          "method": {
+            "default": "",
+            "title": "Method",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "material",
+          "ohms"
+        ],
+        "title": "record_esd_measurementArguments",
         "type": "object"
       }
     },
