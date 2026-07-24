@@ -7,6 +7,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Wrap your own image around any model.** Hand Kiln a photo or pattern and it
+  becomes real, printable surface texture across the whole object — curved,
+  organic, or imported, not just a flat face. Kiln sizes it to print at a
+  believable scale and tells you plainly when a pattern is too big for the
+  object to show it properly.
+
+- **Finishes you can shape.** Flip which parts of a pattern stand proud, deepen
+  the carve, soften it, or fade it out near the edges so it blends into the
+  surface — and round things like balls and ornaments now wrap properly instead
+  of seaming.
+
 - **High-temperature engineering plastics, now first-class.** Kiln
   recognizes six advanced polymers — PEEK, PEI (1010 and 9085), PEKK, PPSU,
   and PPS — the materials used for parts that face real heat, load, and
@@ -37,6 +48,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   those numbers sharpen faster.*
 
 ### Changed
+
+- **Iterating is free — a design is only spent when you keep it.** Try as many
+  looks as you like; your free monthly designs are spent only when you download,
+  print, or save one. *Kiln Pro makes them unlimited.*
+
 
 - **More accurate strength, fit, and tolerance numbers across the Pro
   engineering tools (Pro+).** Expect more realistic results in several
