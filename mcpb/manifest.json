@@ -17,6 +17,7 @@
     "url": "https://github.com/codeofaxel/Kiln"
   },
   "license": "AGPL-3.0-or-later",
+  "privacy_policies": ["https://www.kiln3d.com/privacy"],
   "keywords": [
     "3d-printing", "3d-printer", "bambu-lab", "prusa", "creality", "elegoo",
     "octoprint", "moonraker", "klipper", "gcode", "slicer", "fabrication",

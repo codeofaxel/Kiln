@@ -4,6 +4,21 @@ Packages Kiln as an [MCPB](https://github.com/modelcontextprotocol/mcpb)
 extension — a one-click local install for MCP clients that support the
 format (Claude Desktop, Smithery's local-bundle path, etc.).
 
+## Privacy Policy
+
+Full policy: **https://www.kiln3d.com/privacy**
+
+Kiln is local-first. This bundle runs on your own machine and talks
+directly to printers on your network; printer hosts, API keys, and the
+models you make stay on your device. Kiln contacts its own services
+(operated by Hadron Labs Inc.) only for the optional account-backed
+features you choose to use — signing in, cloud sync, licensed Pro
+tools, and professional print fulfillment — and, when enabled, sends
+only what those features need. The linked policy covers what is
+collected, how it is used and stored, third-party subprocessors
+(including the fulfillment and payment partners), retention periods,
+and how to contact us. Questions: **adam@kiln3d.com**.
+
 ## Why `uv`, not a vendored bundle
 
 Kiln has three compiled dependencies (`pydantic` via the MCP SDK, `numpy`,
