@@ -655,8 +655,7 @@ class _DesignToolsPlugin:
             Args:
                 template: Template identifier.
             """
-            from kiln.design_intelligence import get_public_design_template
-            from kiln.design_intelligence import list_public_design_templates
+            from kiln.design_intelligence import get_public_design_template, list_public_design_templates
 
             try:
                 record = get_public_design_template(template)
