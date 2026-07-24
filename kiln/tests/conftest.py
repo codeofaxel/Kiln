@@ -13,6 +13,7 @@ loaded by the test suite without modification.
 from __future__ import annotations
 
 import functools
+import sys
 
 # ---------------------------------------------------------------------------
 # Monkey-patch FastMCP to accept unknown kwargs (like ``description``)
@@ -808,3 +809,66 @@ def _bypass_terms_gate(monkeypatch):
         monkeypatch.setattr("kiln.terms.is_current", lambda *a, **k: True)
     except (ImportError, AttributeError):
         pass  # terms module absent; nothing to bypass
+
+
+@pytest.fixture(autouse=True)
+def _isolate_decoration_quota(tmp_path_factory, monkeypatch):
+    """Give every test its own decoration-quota file and a fresh singleton.
+
+    ``DecorationQuota`` defaults to ``~/.kiln/decoration_usage.json`` and is
+    handed out through a module-level singleton, so without this the free-tier
+    allowance (3/month) is *shared by the whole suite* and written to the real
+    home directory.  Once three decoration tests have run, every later call to
+    ``decorate_surface`` short-circuits with ``DECORATION_QUOTA_EXCEEDED``
+    before reaching the check under test — which made the ``face="wall"``
+    validation tests fail in a full run while passing in isolation.
+
+    Tests that exercise quota behaviour directly construct
+    ``DecorationQuota(quota_path=...)`` with their own path and are unaffected.
+    """
+    try:
+        from kiln import decoration_quota
+    except ImportError:  # pragma: no cover — module absent
+        yield
+        return
+
+    qdir = tmp_path_factory.getbasetemp() / "decoration_quota"
+    qdir.mkdir(exist_ok=True)
+    qpath = qdir / "decoration_usage.json"
+    if qpath.exists():
+        qpath.unlink()  # fresh allowance per test
+
+    monkeypatch.setattr(decoration_quota, "DEFAULT_QUOTA_PATH", qpath)
+    monkeypatch.setattr(decoration_quota, "_quota", None)
+    yield
+    # Never leave a singleton bound to this test's temp path behind.
+    decoration_quota._quota = None  # noqa: SLF001 — module-level test seam
+
+
+@pytest.fixture(autouse=True)
+def _restore_kiln_pro_stubs():
+    """Undo ``kiln_pro`` stubs a test installs directly into ``sys.modules``.
+
+    Several suites inject fake pro modules with a bare
+    ``sys.modules["kiln_pro"] = fake`` instead of ``monkeypatch.setitem``, so
+    the stub outlives the test.  A fake package that omits an attribute then
+    breaks an unrelated test that imports it for real — e.g. a ``kiln_pro``
+    without ``data_overlays`` made the printer-intelligence overlay lookup
+    raise ``AttributeError`` in a full run but not in isolation.
+
+    Snapshot the ``kiln_pro*`` entries and restore them afterwards so no test
+    can leak a partial pro package into the next one.
+    """
+    def _snapshot() -> dict:
+        return {
+            name: mod
+            for name, mod in sys.modules.items()
+            if name == "kiln_pro" or name.startswith("kiln_pro.")
+        }
+
+    saved = _snapshot()
+    yield
+    for name in list(_snapshot()):
+        if name not in saved:
+            del sys.modules[name]
+    sys.modules.update(saved)
