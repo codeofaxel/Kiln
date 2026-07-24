@@ -1459,5 +1459,174 @@
       "Increase wall count in loaded regions",
       "Orient loads along the layers"
     ]
+  },
+  "petg_esd": {
+    "techniques": [
+      {
+        "name": "Wet Sanding",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "220-grit sandpaper",
+          "400-grit sandpaper",
+          "water",
+          "nitrile gloves",
+          "N95 respirator"
+        ]
+      },
+      {
+        "name": "Painting",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "plastic-specific primer",
+          "spray paint",
+          "masking film",
+          "fine sandpaper"
+        ]
+      },
+      {
+        "name": "Heat-set inserts",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "heat-set inserts",
+          "temperature-controlled installation tip",
+          "press or vice"
+        ]
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "paint_types": [
+        "spray_paint",
+        "acrylic",
+        "enamel"
+      ]
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": false,
+        "strength_gain_pct": 0
+      }
+    ]
+  },
+  "abs_esd": {
+    "techniques": [
+      {
+        "name": "Acetone vapour smoothing",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "acetone",
+          "sealed chamber",
+          "suspension rig",
+          "nitrile gloves",
+          "respirator"
+        ]
+      },
+      {
+        "name": "Solvent welding",
+        "difficulty": "easy",
+        "tools_needed": [
+          "acetone",
+          "brush or syringe",
+          "clamps",
+          "nitrile gloves"
+        ]
+      },
+      {
+        "name": "Wet Sanding",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "220-grit sandpaper",
+          "400-grit sandpaper",
+          "water",
+          "nitrile gloves",
+          "N95 respirator"
+        ]
+      },
+      {
+        "name": "Painting",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "plastic-specific primer",
+          "spray paint",
+          "masking film"
+        ]
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "paint_types": [
+        "spray_paint",
+        "acrylic",
+        "enamel",
+        "lacquer"
+      ]
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": false,
+        "strength_gain_pct": 0
+      }
+    ]
+  },
+  "pa612_esd": {
+    "techniques": [
+      {
+        "name": "Wet Sanding",
+        "difficulty": "advanced",
+        "tools_needed": [
+          "220-grit sandpaper",
+          "400-grit sandpaper",
+          "600-grit sandpaper",
+          "water",
+          "nitrile gloves",
+          "N95 respirator"
+        ]
+      },
+      {
+        "name": "Machining and drilling",
+        "difficulty": "advanced",
+        "tools_needed": [
+          "sharp carbide tooling",
+          "slow feed and speed",
+          "air blast",
+          "eye protection"
+        ]
+      },
+      {
+        "name": "Annealing",
+        "difficulty": "advanced",
+        "tools_needed": [
+          "oven with accurate control",
+          "fixture or support for the part"
+        ]
+      },
+      {
+        "name": "Heat-set inserts and bonding",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "heat-set inserts",
+          "temperature-controlled tip",
+          "abrasive pad",
+          "polyamide primer",
+          "two-part epoxy"
+        ]
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "paint_types": [
+        "acrylic",
+        "enamel"
+      ]
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "strength_gain_pct": 0
+      }
+    ]
   }
 }

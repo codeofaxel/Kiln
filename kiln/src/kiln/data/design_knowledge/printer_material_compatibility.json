@@ -209,6 +209,30 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 260C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle"
+      ],
+      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
     }
   },
   "artillery_sw_x3": {
@@ -403,6 +427,27 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 260C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ],
+      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
     }
   },
   "bambu_a1": {
@@ -598,6 +643,26 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "bambu_a2l": {
@@ -784,6 +849,27 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 80C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ],
+      "notes": "ABS-ESD cannot run on this printer: it needs a 90C bed and this machine reaches 80C."
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "bambu_h2s": {
@@ -956,6 +1042,22 @@
         "dry_box"
       ],
       "notes": "PPS is within this printer's thermal range. It still needs dry filament, and results depend on holding the nozzle temperature continuously rather than peaking to it."
+    },
+    "petg_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
     }
   },
   "bambu_a1_mini": {
@@ -1152,6 +1254,27 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 80C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ],
+      "notes": "ABS-ESD cannot run on this printer: it needs a 90C bed and this machine reaches 80C."
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "bambu_p1p": {
@@ -1347,6 +1470,26 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "bambu_p1s": {
@@ -1532,6 +1675,25 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "bambu_x1c": {
@@ -1706,6 +1868,22 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C."
+    },
+    "petg_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
     }
   },
   "bambu_x1e": {
@@ -1880,6 +2058,22 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 320C."
+    },
+    "petg_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
     }
   },
   "bambu_p2s": {
@@ -2054,6 +2248,22 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C."
+    },
+    "petg_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
     }
   },
   "cr10": {
@@ -2266,6 +2476,30 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 260C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle"
+      ],
+      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
     }
   },
   "cr10_se": {
@@ -2460,6 +2694,26 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "creality_hi": {
@@ -2645,6 +2899,23 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
     }
   },
   "default": {
@@ -2843,6 +3114,26 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 250C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "elegoo_centauri_carbon": {
@@ -3026,6 +3317,25 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 320C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "elegoo_neptune3": {
@@ -3237,6 +3547,30 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 260C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle"
+      ],
+      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
     }
   },
   "elegoo_neptune4": {
@@ -3432,6 +3766,26 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "elegoo_orangestorm_giga": {
@@ -3626,6 +3980,26 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "ender3": {
@@ -3837,6 +4211,30 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 260C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle"
+      ],
+      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
     }
   },
   "ender3_s1": {
@@ -4032,6 +4430,27 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 260C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ],
+      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
     }
   },
   "ender3_v2": {
@@ -4238,6 +4657,30 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 260C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle"
+      ],
+      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
     }
   },
   "ender3_v3": {
@@ -4422,6 +4865,23 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C."
+    },
+    "petg_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
     }
   },
   "ender3_v3_ke": {
@@ -4617,6 +5077,26 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "ender3_v3_plus": {
@@ -4802,6 +5282,23 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
     }
   },
   "ender3_v3_se": {
@@ -5007,6 +5504,30 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 260C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle"
+      ],
+      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
     }
   },
   "ender3_v4": {
@@ -5192,6 +5713,23 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
     }
   },
   "ender5": {
@@ -5403,6 +5941,30 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 260C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle"
+      ],
+      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
     }
   },
   "ender5_max": {
@@ -5588,6 +6150,23 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
     }
   },
   "flashforge_adventurer5m": {
@@ -5784,6 +6363,29 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 280C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle"
+      ],
+      "notes": "PA612-ESD cannot run on this printer: it needs about 300C for a normal build and this machine reaches 280C."
     }
   },
   "k1": {
@@ -5969,6 +6571,25 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "k1_max": {
@@ -6154,6 +6775,25 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "k1_se": {
@@ -6349,6 +6989,26 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "k1c": {
@@ -6524,6 +7184,22 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
     }
   },
   "k2": {
@@ -6711,6 +7387,24 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "k2_plus": {
@@ -6883,6 +7577,22 @@
         "dry_box"
       ],
       "notes": "PPS is within this printer's thermal range. It still needs dry filament, and results depend on holding the nozzle temperature continuously rather than peaking to it."
+    },
+    "petg_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
     }
   },
   "k2_pro": {
@@ -7058,6 +7768,22 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C."
+    },
+    "petg_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
     }
   },
   "k2_se": {
@@ -7243,6 +7969,23 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
     }
   },
   "klipper_generic": {
@@ -7437,6 +8180,27 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 260C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ],
+      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
     }
   },
   "prusa_mini": {
@@ -7649,6 +8413,30 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 280C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle"
+      ],
+      "notes": "PA612-ESD cannot run on this printer: it needs about 300C for a normal build and this machine reaches 280C."
     }
   },
   "prusa_mk3s": {
@@ -7843,6 +8631,26 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "prusa_mk4": {
@@ -8037,6 +8845,27 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 290C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ],
+      "notes": "PA612-ESD cannot run on this printer: it needs about 300C for a normal build and this machine reaches 290C."
     }
   },
   "prusa_xl": {
@@ -8231,6 +9060,27 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 290C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ],
+      "notes": "PA612-ESD cannot run on this printer: it needs about 300C for a normal build and this machine reaches 290C."
     }
   },
   "qidi_x_plus3": {
@@ -8413,6 +9263,25 @@
         "dry_box"
       ],
       "notes": "PPS is within this printer's thermal range. It still needs dry filament, and results depend on holding the nozzle temperature continuously rather than peaking to it."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "ratrig_vcore3": {
@@ -8607,6 +9476,26 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "sovol_sv06": {
@@ -8802,6 +9691,26 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "sovol_sv07": {
@@ -8996,6 +9905,26 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "sovol_sv07_plus": {
@@ -9190,6 +10119,26 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "sparkx_i7": {
@@ -9385,6 +10334,26 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "voron_0": {
@@ -9569,6 +10538,25 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "voron_2": {
@@ -9753,6 +10741,25 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "aon_m2_plus": {
@@ -9924,6 +10931,25 @@
       "upgrades_needed": [
         "pp_build_surface",
         "dry_box"
+      ]
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
       ]
     }
   },
@@ -10105,6 +11131,25 @@
       "upgrades_needed": [
         "pp_build_surface",
         "dry_box"
+      ]
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
       ]
     }
   },
@@ -10288,6 +11333,25 @@
         "pp_build_surface",
         "dry_box"
       ]
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "qidi_x_max3": {
@@ -10470,6 +11534,25 @@
         "pp_build_surface",
         "dry_box"
       ]
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "qidi_q2": {
@@ -10650,6 +11733,25 @@
       "upgrades_needed": [
         "pp_build_surface",
         "dry_box"
+      ]
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
       ]
     }
   },
@@ -10846,6 +11948,26 @@
         "dry_box"
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 260C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "aon_hylo": {

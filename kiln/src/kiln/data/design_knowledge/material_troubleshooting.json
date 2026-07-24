@@ -283,5 +283,32 @@
       "drying_temp_c": 120,
       "drying_time_hours": 4
     }
+  },
+  "petg_esd": {
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 40,
+      "storage_method": "Sealed container with desiccant or a dry box.",
+      "drying_temp_c": 65,
+      "drying_time_hours": 6
+    }
+  },
+  "abs_esd": {
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 30,
+      "storage_method": "Sealed container with desiccant. Ordinary low-temperature dryers cover the cooler grades; the 80-85C recipes need a higher-temperature unit.",
+      "drying_temp_c": 80,
+      "drying_time_hours": 4
+    }
+  },
+  "pa612_esd": {
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 20,
+      "storage_method": "Sealed with fresh desiccant, and fed from a heated dryer during the build. Neither AMS unit reaches the 100C this material needs.",
+      "drying_temp_c": 100,
+      "drying_time_hours": 10
+    }
   }
 }

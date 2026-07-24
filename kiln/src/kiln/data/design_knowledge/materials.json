@@ -2180,5 +2180,235 @@
         "ams_compatible": false
       }
     }
+  },
+  "petg_esd": {
+    "display_name": "PETG-ESD (Static-Dissipative PETG)",
+    "category": "composite",
+    "thermal": {
+      "glass_transition_c": 77,
+      "max_service_temp_c": 60,
+      "print_temp_range_c": [
+        230,
+        290
+      ],
+      "bed_temp_range_c": [
+        60,
+        90
+      ],
+      "requires_heated_chamber": false,
+      "warping_tendency": "low"
+    },
+    "chemical": {
+      "uv_resistance": "moderate",
+      "moisture_absorption": "low",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "low",
+      "esd_classification": "static_dissipative",
+      "esd_published_range": "Published figures span roughly 1.0e4 to 1.0e9 ohms across vendors -- about five decades, so a single number for 'PETG-ESD' does not exist. Read the grade you actually bought.",
+      "esd_band_reference": "ANSI/ESD S541 classifies a static-dissipative material as a surface or volume resistance of at least 1.0e4 and under 1.0e11 ohms. Note the unit: S541 moved off resistivity (ohms/square, ohm-cm) to resistance (ohms) in 2003, so a datasheet quoting ohms/square is not quoting the quantity the standard classifies, and the conversion factor between them depends on the test fixture's electrode geometry.",
+      "esd_grounding_required": true,
+      "esd_grounding_note": "A dissipative part only works if charge has somewhere to go. ANSI/ESD S20.20 requires a worksurface to measure under 1.0e9 ohms both across itself and from itself to ground; meeting only the first is not compliance. A fixture with no bonding feature is a resistor, not a drain.",
+      "esd_charge_generation_note": "Being dissipative controls how charge LEAVES the part. It says nothing about whether the part GENERATES charge -- ANSI/ESD S541 states plainly that there is no correlation between resistance and low-charging behaviour, and no ANSI-approved pass/fail triboelectric test for a material exists, so this property cannot be certified by any vendor.",
+      "esd_qualification_note": "The number on a spool describes the filament, not your part. Printed resistance moves with nozzle temperature, layer height, wall count and build orientation, and it is measurably worse across the layers than along them. Qualify a coupon printed with your production settings on your production machine; a datasheet value narrows the candidate list, it does not qualify the part.",
+      "esd_process_sensitivity_note": "Resistance falls as nozzle temperature rises -- roughly three decades across a 40C window, documented independently by three compounders. One anchor grade drops below 1.0e4 ohms at 290C, which is out of the dissipative band and into the CONDUCTIVE one. Running hotter for better layer adhesion can therefore cost you the ESD classification in the direction nobody warns about, and a floating conductive fixture can dump charge into a device in a single fast discharge. Pick a temperature, qualify at it, and hold it.",
+      "service_temp_note": "60C is a continuous service temperature published by one vendor against IEC 60216. Most vendors publish none at all. Heat-deflection figures for this family sit around 65-76C at 0.45 MPa, which is a short-term deflection test and not a service rating."
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.5,
+      "max_unsupported_overhang_deg": 50,
+      "max_bridge_length_mm": 10,
+      "min_hole_diameter_mm": 2.5,
+      "min_embossed_text_height_mm": 0.8,
+      "min_engraved_text_depth_mm": 0.5,
+      "thread_min_pitch_mm": 1.5,
+      "min_pin_diameter_mm": 3.5,
+      "min_wall_thickness_note": "1.5 mm is an ESD floor, not a strength floor. A vendor on this platform specifies a 1.5 mm minimum wall for the electrical property as well as for interlayer bonding -- thin walls degrade dissipation, not just stiffness."
+    },
+    "brand_profiles": {
+      "polymaker_fiberon_petg_esd": {
+        "brand": "Polymaker",
+        "product_name": "Fiberon PETG-ESD",
+        "nozzle_temp_range_c": [
+          250,
+          290
+        ],
+        "nozzle_temp_optimal_c": 270,
+        "bed_temp_range_c": [
+          70,
+          80
+        ],
+        "bed_temp_optimal_c": 75,
+        "enclosure_required": false,
+        "hardened_nozzle_required": true,
+        "ams_compatible": true
+      },
+      "3dxtech_3dxstat_esd_petg": {
+        "brand": "3DXTech",
+        "product_name": "3DXSTAT ESD-PETG",
+        "nozzle_temp_range_c": [
+          230,
+          260
+        ],
+        "nozzle_temp_optimal_c": 250,
+        "bed_temp_range_c": [
+          60,
+          90
+        ],
+        "bed_temp_optimal_c": 70,
+        "enclosure_required": false,
+        "hardened_nozzle_required": true,
+        "ams_compatible": false
+      }
+    }
+  },
+  "abs_esd": {
+    "display_name": "ABS-ESD (Static-Dissipative ABS)",
+    "category": "composite",
+    "thermal": {
+      "glass_transition_c": 105,
+      "max_service_temp_c": 80,
+      "print_temp_range_c": [
+        220,
+        280
+      ],
+      "bed_temp_range_c": [
+        90,
+        110
+      ],
+      "requires_heated_chamber": true,
+      "warping_tendency": "high"
+    },
+    "chemical": {
+      "uv_resistance": "poor",
+      "moisture_absorption": "low",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "moderate",
+      "ventilation_required": true,
+      "esd_classification": "static_dissipative",
+      "esd_published_range": "The best-supported cluster is 1.0e7 to 1.0e9 ohms, published by four vendors under ASTM D257, with one vendor's measured band (3.8e7 to 8.1e7) sitting inside it. A minority of grades publish open-ended figures below 1.0e6 that cannot be told apart from conductive -- those are a different class and should not be pooled with the cluster.",
+      "esd_band_reference": "ANSI/ESD S541 classifies a static-dissipative material as a surface or volume resistance of at least 1.0e4 and under 1.0e11 ohms. Note the unit: S541 moved off resistivity (ohms/square, ohm-cm) to resistance (ohms) in 2003, so a datasheet quoting ohms/square is not quoting the quantity the standard classifies, and the conversion factor between them depends on the test fixture's electrode geometry.",
+      "esd_grounding_required": true,
+      "esd_grounding_note": "A dissipative part only works if charge has somewhere to go. ANSI/ESD S20.20 requires a worksurface to measure under 1.0e9 ohms both across itself and from itself to ground; meeting only the first is not compliance. A fixture with no bonding feature is a resistor, not a drain.",
+      "esd_charge_generation_note": "Being dissipative controls how charge LEAVES the part. It says nothing about whether the part GENERATES charge -- ANSI/ESD S541 states plainly that there is no correlation between resistance and low-charging behaviour, and no ANSI-approved pass/fail triboelectric test for a material exists, so this property cannot be certified by any vendor.",
+      "esd_qualification_note": "The number on a spool describes the filament, not your part. Printed resistance moves with nozzle temperature, layer height, wall count and build orientation, and it is measurably worse across the layers than along them. Qualify a coupon printed with your production settings on your production machine; a datasheet value narrows the candidate list, it does not qualify the part.",
+      "esd_process_sensitivity_note": "One industrial vendor tested this material class across geometries and orientations per ANSI/ESD S20.20, S11.11 and STM11.12 and measured a five-decade spread (1.0e4 to 1.0e9 ohms), with extra variability on thin-walled cylinders. That spread is the honest picture of a printed part; a compound specification is not.",
+      "service_temp_note": "80C is published by a single vendor against IEC 60216 and is the only continuous service temperature published for this material anywhere. One vendor explicitly prints N/A rather than claim one. It sits about 20-25C below the 100-107C glass transition, a normal derate. Do not push toward 90C for load-bearing or dimensionally critical fixtures -- that is within about 10C of heat deflection.",
+      "handling_warning": "Styrene-family material printed hot in a closed chamber. Ventilate the working area. Enclosure is not optional here: a warped tray does not sit flat under a board, which is the entire reason the tray exists."
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.2,
+      "max_unsupported_overhang_deg": 45,
+      "max_bridge_length_mm": 10,
+      "min_hole_diameter_mm": 2.0,
+      "min_embossed_text_height_mm": 0.8,
+      "min_engraved_text_depth_mm": 0.5,
+      "thread_min_pitch_mm": 1.5,
+      "min_pin_diameter_mm": 3.0
+    },
+    "brand_profiles": {
+      "3dxtech_3dxstat_esd_abs": {
+        "brand": "3DXTech",
+        "product_name": "3DXSTAT ESD-ABS",
+        "nozzle_temp_range_c": [
+          220,
+          240
+        ],
+        "nozzle_temp_optimal_c": 230,
+        "bed_temp_range_c": [
+          100,
+          110
+        ],
+        "bed_temp_optimal_c": 105,
+        "enclosure_required": true,
+        "hardened_nozzle_required": false,
+        "ams_compatible": false
+      },
+      "fiberlogy_esd_abs": {
+        "brand": "Fiberlogy",
+        "product_name": "ESD ABS",
+        "nozzle_temp_range_c": [
+          250,
+          265
+        ],
+        "nozzle_temp_optimal_c": 255,
+        "bed_temp_range_c": [
+          90,
+          110
+        ],
+        "bed_temp_optimal_c": 100,
+        "enclosure_required": true,
+        "hardened_nozzle_required": false,
+        "ams_compatible": false
+      }
+    }
+  },
+  "pa612_esd": {
+    "display_name": "PA612-ESD (Static-Dissipative Nylon 612)",
+    "category": "composite",
+    "thermal": {
+      "glass_transition_c": 41.8,
+      "max_service_temp_c": 125,
+      "print_temp_range_c": [
+        280,
+        300
+      ],
+      "bed_temp_range_c": [
+        40,
+        50
+      ],
+      "requires_heated_chamber": false,
+      "warping_tendency": "moderate"
+    },
+    "chemical": {
+      "uv_resistance": "moderate",
+      "moisture_absorption": "high",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "low",
+      "esd_classification": "static_dissipative",
+      "esd_published_range": "The sole vendor publishes a matrix, not a number: roughly 1.0e3 to 7.7e7 ohms depending on nozzle temperature and part orientation. Its own marketed band of 1.0e4 to 1.0e7 is exceeded at BOTH ends by its own published table -- 7.7e7 at 280C in one orientation is above the marketed ceiling, and under 1.0e3 at 320C is below the conductive floor. No ESD test standard is cited for this grade at all.",
+      "esd_band_reference": "ANSI/ESD S541 classifies a static-dissipative material as a surface or volume resistance of at least 1.0e4 and under 1.0e11 ohms. Note the unit: S541 moved off resistivity (ohms/square, ohm-cm) to resistance (ohms) in 2003, so a datasheet quoting ohms/square is not quoting the quantity the standard classifies, and the conversion factor between them depends on the test fixture's electrode geometry.",
+      "esd_grounding_required": true,
+      "esd_grounding_note": "A dissipative part only works if charge has somewhere to go. ANSI/ESD S20.20 requires a worksurface to measure under 1.0e9 ohms both across itself and from itself to ground; meeting only the first is not compliance. A fixture with no bonding feature is a resistor, not a drain.",
+      "esd_charge_generation_note": "Being dissipative controls how charge LEAVES the part. It says nothing about whether the part GENERATES charge -- ANSI/ESD S541 states plainly that there is no correlation between resistance and low-charging behaviour, and no ANSI-approved pass/fail triboelectric test for a material exists, so this property cannot be certified by any vendor.",
+      "esd_qualification_note": "The number on a spool describes the filament, not your part. Printed resistance moves with nozzle temperature, layer height, wall count and build orientation, and it is measurably worse across the layers than along them. Qualify a coupon printed with your production settings on your production machine; a datasheet value narrows the candidate list, it does not qualify the part.",
+      "esd_process_sensitivity_note": "This is the clearest published case of resistance being a process variable rather than a material constant. At a fixed 280C nozzle, part orientation alone moves the published figure about two decades. Across 280-320C it moves about four. A part printed hot enough to bond well can land in the CONDUCTIVE band, which for a fixture in contact with a device is its own hazard, not a bonus.",
+      "service_temp_note": "No vendor publishes a continuous service temperature for this material. 125C is the heat-deflection figure at 1.8 MPa, the conservative of the two published loads, used here as a load-bearing proxy. The widely quoted 157C is the SAME test at 0.45 MPa and is not a service rating. Both sit far above the 41.8C glass transition -- this polymer is semi-crystalline so it serves above Tg, but stiffness and creep resistance fall away well before either deflection figure.",
+      "moisture_note": "Absorbs moisture readily and it costs real strength: the vendor publishes a wet set of mechanical values alongside the dry set, and in-plane tensile drops about 13 percent at 4.6 percent moisture content. Dry hard and keep it dry. The vendor wants a heated dryer feeding the printer DURING the build, not only before it. No vendor publishes how moisture affects the electrical property."
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.5,
+      "max_unsupported_overhang_deg": 45,
+      "max_bridge_length_mm": 8,
+      "min_hole_diameter_mm": 2.5,
+      "min_embossed_text_height_mm": 1.0,
+      "min_engraved_text_depth_mm": 0.6,
+      "thread_min_pitch_mm": 1.5,
+      "min_pin_diameter_mm": 3.5
+    },
+    "bonding": {
+      "hard_to_bond": true
+    },
+    "brand_profiles": {
+      "polymaker_fiberon_pa612_esd": {
+        "brand": "Polymaker",
+        "product_name": "Fiberon PA612-ESD",
+        "nozzle_temp_range_c": [
+          280,
+          300
+        ],
+        "nozzle_temp_optimal_c": 300,
+        "bed_temp_range_c": [
+          40,
+          50
+        ],
+        "bed_temp_optimal_c": 50,
+        "enclosure_required": false,
+        "hardened_nozzle_required": true,
+        "ams_compatible": true
+      }
+    }
   }
 }
