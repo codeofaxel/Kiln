@@ -479,6 +479,13 @@ def _key_fingerprint(key: str) -> str:
         return "(empty)"
     import hashlib
 
+    # SHA-256 (not a slow KDF like bcrypt/argon2) is intentional and safe
+    # here: this is a log-correlation fingerprint, not password storage.
+    # The digest is never persisted and never used to authenticate — it
+    # only masks a key in logs and lets us compare whether env and YAML
+    # resolved to the same key.  A salted slow hash would be
+    # non-deterministic and break that comparison, for no security gain.
+    # (Same rationale as auth.py:_hash_key.)
     return "sha256:" + hashlib.sha256(key.encode()).hexdigest()[:8]
 
 
