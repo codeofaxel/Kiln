@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-23T22:19:31.516868+00:00",
-  "tool_count": 373,
+  "generated": "2026-07-24T23:00:42.038379+00:00",
+  "tool_count": 374,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -8570,6 +8570,45 @@
       }
     },
     {
+      "name": "recommend_static_dissipative_material",
+      "description": "Which static-dissipative material for this job -- or whether the one you named fits.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "application": {
+            "default": "",
+            "title": "Application",
+            "type": "string"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          },
+          "max_service_temp_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Service Temp C"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          }
+        },
+        "title": "recommend_static_dissipative_materialArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "record_bond_outcome",
       "description": "Record whether a glued joint held or failed \u2014 so Kiln learns over time.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -15145,6 +15184,64 @@
             "default": null,
             "title": "Surface"
           },
+          "invert": {
+            "default": false,
+            "title": "Invert",
+            "type": "boolean"
+          },
+          "symmetric": {
+            "default": false,
+            "title": "Symmetric",
+            "type": "boolean"
+          },
+          "smoothing": {
+            "default": 0.0,
+            "title": "Smoothing",
+            "type": "number"
+          },
+          "prevent_overhangs": {
+            "default": false,
+            "title": "Prevent Overhangs",
+            "type": "boolean"
+          },
+          "projection": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "planar",
+              "cylindrical",
+              "spherical"
+            ],
+            "title": "Projection",
+            "type": "string"
+          },
+          "angle_limit_deg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Angle Limit Deg"
+          },
+          "edge_falloff_mm": {
+            "default": 0.0,
+            "title": "Edge Falloff Mm",
+            "type": "number"
+          },
+          "falloff_curve": {
+            "default": "smoothstep",
+            "enum": [
+              "linear",
+              "smoothstep",
+              "ease"
+            ],
+            "title": "Falloff Curve",
+            "type": "string"
+          },
           "mark_image_path": {
             "anyOf": [
               {
@@ -15263,6 +15360,82 @@
           "style": {
             "default": "posterized",
             "title": "Style",
+            "type": "string"
+          },
+          "surface": {
+            "anyOf": [
+              {
+                "enum": [
+                  "all",
+                  "outside",
+                  "walls",
+                  "caps"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Surface"
+          },
+          "invert": {
+            "default": false,
+            "title": "Invert",
+            "type": "boolean"
+          },
+          "symmetric": {
+            "default": false,
+            "title": "Symmetric",
+            "type": "boolean"
+          },
+          "smoothing": {
+            "default": 0.0,
+            "title": "Smoothing",
+            "type": "number"
+          },
+          "prevent_overhangs": {
+            "default": false,
+            "title": "Prevent Overhangs",
+            "type": "boolean"
+          },
+          "projection": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "planar",
+              "cylindrical",
+              "spherical"
+            ],
+            "title": "Projection",
+            "type": "string"
+          },
+          "angle_limit_deg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Angle Limit Deg"
+          },
+          "edge_falloff_mm": {
+            "default": 0.0,
+            "title": "Edge Falloff Mm",
+            "type": "number"
+          },
+          "falloff_curve": {
+            "default": "smoothstep",
+            "enum": [
+              "linear",
+              "smoothstep",
+              "ease"
+            ],
+            "title": "Falloff Curve",
             "type": "string"
           }
         },
