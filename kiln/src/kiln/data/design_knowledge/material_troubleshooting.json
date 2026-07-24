@@ -310,5 +310,41 @@
       "drying_temp_c": 100,
       "drying_time_hours": 10
     }
+  },
+  "pc_esd": {
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 20,
+      "storage_method": "Sealed with fresh desiccant. Drying needs an oven-class unit; ordinary low-temperature filament dryers cannot reach the temperature this material needs.",
+      "drying_temp_c": 120,
+      "drying_time_hours": 4
+    }
+  },
+  "pei_esd": {
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 15,
+      "storage_method": "Sealed with fresh desiccant, or a heated dry box feeding the printer. Ordinary filament dryers cannot reach the temperature this material needs.",
+      "drying_temp_c": 120,
+      "drying_time_hours": 4
+    }
+  },
+  "pekk_esd": {
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 15,
+      "storage_method": "Sealed with fresh desiccant. The machine-locked grade ships in a sealed canister and the printer handles conditioning.",
+      "drying_temp_c": 120,
+      "drying_time_hours": 4
+    }
+  },
+  "pla_esd": {
+    "storage_requirements": {
+      "humidity_sensitive": false,
+      "max_humidity_pct": 40,
+      "storage_method": "Sealed container with desiccant. Drying is often unnecessary; when it is needed use 55C, NOT 65C -- 65C is above this polymer's glass transition and can soften the spool.",
+      "drying_temp_c": 55,
+      "drying_time_hours": 6
+    }
   }
 }

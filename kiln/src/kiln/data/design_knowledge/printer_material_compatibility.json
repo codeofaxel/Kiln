@@ -241,6 +241,33 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C; and it needs about 295C for a normal build and this machine reaches 260C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 260C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 260C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "artillery_sw_x3": {
@@ -464,6 +491,31 @@
         "dry_box",
         "enclosure"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 110C; and it needs 360C at the nozzle and this machine reaches 260C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 110C; and it needs 355C at the nozzle and this machine reaches 260C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "bambu_a1": {
@@ -687,6 +739,31 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "bambu_a2l": {
@@ -899,6 +976,32 @@
       "status": "not_compatible",
       "upgrades_needed": [],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 80C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 80C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 80C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "bambu_h2s": {
@@ -1093,6 +1196,27 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs 360C at the nozzle and this machine reaches 350C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "heated_chamber"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs 355C at the nozzle and this machine reaches 350C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "bambu_a1_mini": {
@@ -1318,6 +1442,32 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 80C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 80C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 80C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "bambu_p1p": {
@@ -1541,6 +1691,31 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "bambu_p1s": {
@@ -1752,6 +1927,30 @@
         "dry_box"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "bambu_x1c": {
@@ -1948,6 +2147,28 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "bambu_x1e": {
@@ -2144,6 +2365,28 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs 360C at the nozzle and this machine reaches 320C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs 355C at the nozzle and this machine reaches 320C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "bambu_p2s": {
@@ -2340,6 +2583,28 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 110C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 110C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "cr10": {
@@ -2584,6 +2849,33 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C; and it needs about 295C for a normal build and this machine reaches 260C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 260C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 260C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "cr10_se": {
@@ -2805,6 +3097,31 @@
         "dry_box",
         "enclosure"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 110C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 110C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "creality_hi": {
@@ -3015,6 +3332,29 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "default": {
@@ -3231,6 +3571,7 @@
       "status": "needs_upgrade",
       "upgrades_needed": [
         "dry_box",
+        "enclosure",
         "hardened_nozzle"
       ]
     },
@@ -3240,6 +3581,31 @@
         "dry_box",
         "enclosure"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer, for the same reason its base polymer cannot: this machine is outside the thermal envelope the material needs."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer, for the same reason its base polymer cannot: this machine is outside the thermal envelope the material needs."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "elegoo_centauri_carbon": {
@@ -3448,6 +3814,30 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 110C; and it needs 360C at the nozzle and this machine reaches 320C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 110C; and it needs 355C at the nozzle and this machine reaches 320C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "elegoo_neptune3": {
@@ -3691,6 +4081,33 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C; and it needs about 295C for a normal build and this machine reaches 260C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 260C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 260C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "elegoo_neptune4": {
@@ -3914,6 +4331,31 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "elegoo_orangestorm_giga": {
@@ -4135,6 +4577,31 @@
         "dry_box",
         "enclosure"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 110C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 110C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "ender3": {
@@ -4377,6 +4844,33 @@
         "dry_box",
         "enclosure"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 110C; and it needs 360C at the nozzle and this machine reaches 260C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 110C; and it needs 355C at the nozzle and this machine reaches 260C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "ender3_s1": {
@@ -4601,6 +5095,31 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C; and it needs about 295C for a normal build and this machine reaches 260C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 260C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 260C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "ender3_v2": {
@@ -4839,6 +5358,33 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C; and it needs about 295C for a normal build and this machine reaches 260C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 260C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 260C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "ender3_v3": {
@@ -5047,6 +5593,29 @@
         "dry_box",
         "enclosure"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 110C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 110C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "ender3_v3_ke": {
@@ -5270,6 +5839,31 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "ender3_v3_plus": {
@@ -5480,6 +6074,29 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "ender3_v3_se": {
@@ -5717,6 +6334,33 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C; and it needs about 295C for a normal build and this machine reaches 260C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 260C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 260C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "ender3_v4": {
@@ -5927,6 +6571,29 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "ender5": {
@@ -6169,6 +6836,33 @@
         "dry_box",
         "enclosure"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 110C; and it needs 360C at the nozzle and this machine reaches 260C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 110C; and it needs 355C at the nozzle and this machine reaches 260C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "ender5_max": {
@@ -6379,6 +7073,29 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "flashforge_adventurer5m": {
@@ -6604,6 +7321,32 @@
         "all_metal_hotend",
         "dry_box"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 110C; and it needs 360C at the nozzle and this machine reaches 280C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 110C; and it needs 355C at the nozzle and this machine reaches 280C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "k1": {
@@ -6815,6 +7558,30 @@
         "dry_box"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "k1_max": {
@@ -7026,6 +7793,30 @@
         "dry_box"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "k1_se": {
@@ -7249,6 +8040,31 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "k1c": {
@@ -7447,6 +8263,28 @@
         "dry_box"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "k2": {
@@ -7660,6 +8498,29 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "k2_plus": {
@@ -7854,6 +8715,27 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs 360C at the nozzle and this machine reaches 350C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "heated_chamber"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs 355C at the nozzle and this machine reaches 350C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "k2_pro": {
@@ -8051,6 +8933,28 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 110C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 110C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "k2_se": {
@@ -8261,6 +9165,29 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "klipper_generic": {
@@ -8484,6 +9411,31 @@
         "dry_box",
         "enclosure"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 110C; and it needs 360C at the nozzle and this machine reaches 260C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 110C; and it needs 355C at the nozzle and this machine reaches 260C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "prusa_mini": {
@@ -8728,6 +9680,33 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C; and it needs about 295C for a normal build and this machine reaches 280C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 280C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 280C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "prusa_mk3s": {
@@ -8949,6 +9928,31 @@
         "dry_box",
         "enclosure"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "prusa_mk4": {
@@ -9172,6 +10176,31 @@
         "dry_box",
         "enclosure"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs 360C at the nozzle and this machine reaches 290C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs 355C at the nozzle and this machine reaches 290C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "prusa_xl": {
@@ -9395,6 +10424,30 @@
         "dry_box",
         "enclosure"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs 360C at the nozzle and this machine reaches 290C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs 355C at the nozzle and this machine reaches 290C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "qidi_x_plus3": {
@@ -9602,6 +10655,29 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs 360C at the nozzle and this machine reaches 350C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs 355C at the nozzle and this machine reaches 350C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "ratrig_vcore3": {
@@ -9823,6 +10899,31 @@
         "dry_box",
         "enclosure"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "sovol_sv06": {
@@ -10046,6 +11147,31 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "sovol_sv07": {
@@ -10267,6 +11393,31 @@
         "dry_box",
         "enclosure"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 110C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 110C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "sovol_sv07_plus": {
@@ -10479,6 +11630,7 @@
       "status": "needs_upgrade",
       "upgrades_needed": [
         "dry_box",
+        "enclosure",
         "hardened_nozzle"
       ]
     },
@@ -10488,6 +11640,31 @@
         "dry_box",
         "enclosure"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer, for the same reason its base polymer cannot: this machine is outside the thermal envelope the material needs."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer, for the same reason its base polymer cannot: this machine is outside the thermal envelope the material needs."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "sparkx_i7": {
@@ -10711,6 +11888,31 @@
         "enclosure"
       ],
       "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "voron_0": {
@@ -10920,6 +12122,30 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "voron_2": {
@@ -11129,6 +12355,30 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "aon_m2_plus": {
@@ -11326,6 +12576,24 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pei_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
+    },
+    "pekk_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "qidi_plus4": {
@@ -11532,6 +12800,29 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs about 375C for a normal build and this machine reaches 370C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs about 375C for a normal build and this machine reaches 370C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "qidi_q1_pro": {
@@ -11739,6 +13030,29 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs 360C at the nozzle and this machine reaches 350C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs 355C at the nozzle and this machine reaches 350C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "qidi_x_max3": {
@@ -11946,6 +13260,29 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs 360C at the nozzle and this machine reaches 350C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs 355C at the nozzle and this machine reaches 350C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "qidi_q2": {
@@ -12152,6 +13489,29 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 120C; and it needs about 375C for a normal build and this machine reaches 370C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "heated_chamber"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs about 375C for a normal build and this machine reaches 370C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "ender3_s1_pro": {
@@ -12374,6 +13734,31 @@
         "dry_box",
         "enclosure"
       ]
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 110C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 110C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
     }
   },
   "aon_hylo": {

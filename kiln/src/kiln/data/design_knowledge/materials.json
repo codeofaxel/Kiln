@@ -2479,5 +2479,227 @@
         "ams_compatible": false
       }
     }
+  },
+  "pei_esd": {
+    "display_name": "PEI-ESD (Static-Dissipative Polyetherimide)",
+    "category": "composite",
+    "thermal": {
+      "glass_transition_c": 217,
+      "max_service_temp_c": 170,
+      "print_temp_range_c": [
+        360,
+        390
+      ],
+      "bed_temp_range_c": [
+        140,
+        160
+      ],
+      "requires_heated_chamber": false,
+      "warping_tendency": "very_high"
+    },
+    "chemical": {
+      "uv_resistance": "good",
+      "moisture_absorption": "moderate",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "low",
+      "ventilation_required": true,
+      "esd_classification": "static_dissipative",
+      "esd_published_range": "Above 1.0e7 to 1.0e9 ohms per square, per ASTM D257, from the only purchasable static-dissipative grade of this polymer. The same vendor's product page quotes a different band in a different unit; the datasheet figure is the one used here.",
+      "esd_band_reference": "ANSI/ESD S541 classifies a static-dissipative material as a surface or volume resistance of at least 1.0e4 and under 1.0e11 ohms. Note the unit: S541 moved off resistivity (ohms/square, ohm-cm) to resistance (ohms) in 2003, so a datasheet quoting ohms/square is not quoting the quantity the standard classifies, and the conversion factor between them depends on the test fixture's electrode geometry.",
+      "esd_grounding_required": true,
+      "esd_grounding_note": "A dissipative part only works if charge has somewhere to go. ANSI/ESD S20.20 requires a worksurface to measure under 1.0e9 ohms both across itself and from itself to ground; meeting only the first is not compliance. A fixture with no bonding feature is a resistor, not a drain.",
+      "esd_charge_generation_note": "Being dissipative controls how charge LEAVES the part. It says nothing about whether the part GENERATES charge -- ANSI/ESD S541 states plainly that there is no correlation between resistance and low-charging behaviour, and no ANSI-approved pass/fail triboelectric test for a material exists, so this property cannot be certified by any vendor.",
+      "esd_qualification_note": "The number on a spool describes the filament, not your part. Printed resistance moves with nozzle temperature, layer height, wall count and build orientation, and it is measurably worse across the layers than along them. Qualify a coupon printed with your production settings on your production machine; a datasheet value narrows the candidate list, it does not qualify the part.",
+      "esd_process_sensitivity_note": "The vendor states outright that this compound's resistance can be tuned by extruder temperature. That makes the electrical property a process output rather than something delivered on the spool. Fix an extruder temperature, qualify a part printed at it, and re-qualify whenever the profile changes.",
+      "flame_rating_note": "This grade publishes NO flame or fire-smoke-toxicity rating. The certified fire performance associated with this polymer family belongs to a different grade and to the unfilled resin, and such certification is awarded to a part at a thickness by an approved laboratory, not to a filament. Carbon loading changes burn behaviour. Do not assume this material carries a fire rating; if a programme requires one, it must be tested on the actual printed part.",
+      "chamber_note": "No chamber temperature is published for this grade. The vendor calls a chamber 'Recommended' without a number, and its own published test coupons were produced on an open-frame machine with no chamber stated. Higher chamber temperatures quoted elsewhere for this polymer come from sources selling equipment at those temperatures, and are not a vendor requirement for this material.",
+      "service_temp_note": "No vendor publishes a continuous service temperature. The 170C figure is derived, not measured: it carries a conservative margin below the 217C glass transition. The published 205C is heat deflection at the lighter 0.45 MPa load, a short-term test rather than a service rating, and no figure is published at the heavier load.",
+      "handling_warning": "Extruded near 390C, far above commodity filaments. Ventilate; thermal decomposition products of this polymer family are hazardous to inhale, and parts leave the machine hot enough to burn."
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.5,
+      "max_unsupported_overhang_deg": 45,
+      "max_bridge_length_mm": 8,
+      "min_hole_diameter_mm": 2.0,
+      "min_embossed_text_height_mm": 1.0,
+      "min_engraved_text_depth_mm": 0.6,
+      "thread_min_pitch_mm": 2.0,
+      "min_pin_diameter_mm": 3.0
+    },
+    "bonding": {
+      "hard_to_bond": true
+    },
+    "brand_profiles": {
+      "3dxtech_3dxstat_esd_pei_1010": {
+        "brand": "3DXTech",
+        "product_name": "3DXSTAT ESD-PEI Ultem 1010",
+        "nozzle_temp_range_c": [
+          360,
+          390
+        ],
+        "nozzle_temp_optimal_c": 375,
+        "bed_temp_range_c": [
+          140,
+          160
+        ],
+        "bed_temp_optimal_c": 150,
+        "enclosure_required": false,
+        "hardened_nozzle_required": true,
+        "ams_compatible": false
+      }
+    }
+  },
+  "pla_esd": {
+    "display_name": "PLA-ESD (Static-Dissipative PLA)",
+    "category": "composite",
+    "thermal": {
+      "glass_transition_c": 60,
+      "max_service_temp_c": 40,
+      "print_temp_range_c": [
+        210,
+        260
+      ],
+      "bed_temp_range_c": [
+        55,
+        60
+      ],
+      "requires_heated_chamber": false,
+      "warping_tendency": "low"
+    },
+    "chemical": {
+      "uv_resistance": "poor",
+      "moisture_absorption": "low",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "low",
+      "esd_classification": "static_dissipative",
+      "esd_published_range": "Published figures span roughly 1.0e4 to 1.0e9 ohms across vendors, and the units are inconsistent between them -- some quote ohms, some ohms per square, and at least one uses a unit that is not valid for any of these quantities. Read the specific grade's own datasheet and check which quantity it states.",
+      "esd_band_reference": "ANSI/ESD S541 classifies a static-dissipative material as a surface or volume resistance of at least 1.0e4 and under 1.0e11 ohms. Note the unit: S541 moved off resistivity (ohms/square, ohm-cm) to resistance (ohms) in 2003, so a datasheet quoting ohms/square is not quoting the quantity the standard classifies, and the conversion factor between them depends on the test fixture's electrode geometry.",
+      "esd_grounding_required": true,
+      "esd_grounding_note": "A dissipative part only works if charge has somewhere to go. ANSI/ESD S20.20 requires a worksurface to measure under 1.0e9 ohms both across itself and from itself to ground; meeting only the first is not compliance. A fixture with no bonding feature is a resistor, not a drain.",
+      "esd_charge_generation_note": "Being dissipative controls how charge LEAVES the part. It says nothing about whether the part GENERATES charge -- ANSI/ESD S541 states plainly that there is no correlation between resistance and low-charging behaviour, and no ANSI-approved pass/fail triboelectric test for a material exists, so this property cannot be certified by any vendor.",
+      "esd_qualification_note": "The number on a spool describes the filament, not your part. Printed resistance moves with nozzle temperature, layer height, wall count and build orientation, and it is measurably worse across the layers than along them. Qualify a coupon printed with your production settings on your production machine; a datasheet value narrows the candidate list, it does not qualify the part.",
+      "esd_process_sensitivity_note": "Orientation matters more on this material than on any other dissipative grade. Measured data shows resistance markedly worse across the layers than along them, and the carbon-fibre version of this material measures a full decade worse when printed upright. On a grade already specified near the insulative end, that penalty is enough to take a vertically printed face out of the dissipative band entirely -- while the part still looks correct and a flat test coupon still passes. Print faces that must dissipate FLAT.",
+      "sustained_load_note": "No vendor in this material class publishes any creep data. This polymer creeps measurably at room temperature under sustained load, and creep accelerates as it approaches its 60C glass transition. A fixture's job is holding dimension under load for months, so the property that governs its actual duty is uncharacterised. The failure is silent drift out of tolerance rather than a visible crack. Do not use this material for a permanently clamped or loaded fixture.",
+      "annealing_note": "Do not anneal a static-dissipative part. Annealing is the usual remedy for this polymer's low heat resistance, but the published literature indicates annealing conductive composites reduces conductivity by breaking down the percolation pathways that make the material dissipative, and no vendor has measured the effect on these grades. The mechanical fix plausibly breaks the electrical function.",
+      "service_temp_note": "40C is a deliberately conservative working figure, not a published one -- no vendor publishes a continuous service temperature. Heat deflection is 55C at the lighter 0.45 MPa load and glass transition is 60C, so a bench near an oven, a sunlit workshop or a closed vehicle consumes the margin. This is the least thermally capable static-dissipative material available."
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.2,
+      "max_unsupported_overhang_deg": 45,
+      "max_bridge_length_mm": 10,
+      "min_hole_diameter_mm": 2.0,
+      "min_embossed_text_height_mm": 0.8,
+      "min_engraved_text_depth_mm": 0.4,
+      "thread_min_pitch_mm": 1.5,
+      "min_pin_diameter_mm": 3.0
+    },
+    "brand_profiles": {
+      "3dxtech_3dxstat_esd_pla": {
+        "brand": "3DXTech",
+        "product_name": "3DXSTAT ESD-PLA",
+        "nozzle_temp_range_c": [
+          230,
+          260
+        ],
+        "nozzle_temp_optimal_c": 240,
+        "bed_temp_range_c": [
+          55,
+          80
+        ],
+        "bed_temp_optimal_c": 60,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "ams_compatible": true
+      },
+      "protopasta_static_dissipative_pla": {
+        "brand": "Proto-Pasta",
+        "product_name": "Static Dissipative PLA",
+        "nozzle_temp_range_c": [
+          210,
+          230
+        ],
+        "nozzle_temp_optimal_c": 220,
+        "bed_temp_range_c": [
+          55,
+          60
+        ],
+        "bed_temp_optimal_c": 60,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "ams_compatible": true
+      }
+    }
+  },
+  "pekk_esd": {
+    "display_name": "PEKK-ESD (Static-Dissipative Polyetherketoneketone)",
+    "category": "composite",
+    "thermal": {
+      "glass_transition_c": 157.6,
+      "max_service_temp_c": 150,
+      "print_temp_range_c": [
+        355,
+        385
+      ],
+      "bed_temp_range_c": [
+        120,
+        140
+      ],
+      "requires_heated_chamber": true,
+      "warping_tendency": "very_high"
+    },
+    "chemical": {
+      "uv_resistance": "good",
+      "moisture_absorption": "low",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "low",
+      "ventilation_required": true,
+      "esd_classification": "static_dissipative",
+      "esd_published_range": "Resistance in the 1.0e4 to 1.0e9 ohm band, tested to the ESD Association's own methods rather than a generic resistivity standard -- the only material here whose electrical testing cites them. Note the vendor publishes that same range under four different quantities across its own documents, including one unit that is not valid for any electrostatic measurement; only the resistance figure is carried.",
+      "esd_band_reference": "ANSI/ESD S541 classifies a static-dissipative material as a surface or volume resistance of at least 1.0e4 and under 1.0e11 ohms. Note the unit: S541 moved off resistivity (ohms/square, ohm-cm) to resistance (ohms) in 2003, so a datasheet quoting ohms/square is not quoting the quantity the standard classifies, and the conversion factor between them depends on the test fixture's electrode geometry.",
+      "esd_grounding_required": true,
+      "esd_grounding_note": "A dissipative part only works if charge has somewhere to go. ANSI/ESD S20.20 requires a worksurface to measure under 1.0e9 ohms both across itself and from itself to ground; meeting only the first is not compliance. A fixture with no bonding feature is a resistor, not a drain.",
+      "esd_charge_generation_note": "Being dissipative controls how charge LEAVES the part. It says nothing about whether the part GENERATES charge -- ANSI/ESD S541 states plainly that there is no correlation between resistance and low-charging behaviour, and no ANSI-approved pass/fail triboelectric test for a material exists, so this property cannot be certified by any vendor.",
+      "esd_qualification_note": "The number on a spool describes the filament, not your part. Printed resistance moves with nozzle temperature, layer height, wall count and build orientation, and it is measurably worse across the layers than along them. Qualify a coupon printed with your production settings on your production machine; a datasheet value narrows the candidate list, it does not qualify the part.",
+      "availability_note": "Check the machine and the supply route before designing around this material. The best-documented grade is a licensed canister that runs only on two industrial machine families and additionally requires a hardened machine upgrade and hardened head. The open-market alternative has been withdrawn from its manufacturer's own catalogue and survives only as a reseller special order.",
+      "peek_esd_note": "If you are looking for static-dissipative PEEK, it does not exist as a filament. Every major PEEK filament supplier was checked; dissipative PEEK is sold only as machined rod, plate and tube, or as injection-moulding granules whose properties do not describe a printed part. PEEK needs either a very hot chamber or a mandatory post-print anneal to crystallise, and that combination has not reached the open filament market. This ketone polymer crystallises far more slowly, which is why it exists as a dissipative filament and PEEK does not.",
+      "orientation_note": "Orientation matters more on this material than on any other dissipative grade. Between the two published build directions, tensile strength falls to about 59 percent and unnotched impact falls by a factor of thirty, while stiffness does not fall at all. A deflection check will look correct in both directions and will not reveal either loss.",
+      "service_temp_note": "150C is a conservative working figure below the 157.6C glass transition; no vendor publishes a continuous service temperature for a dissipative grade of this polymer. The heat-deflection data is unusually trustworthy: measured on printed parts, barely moving between the light and heavy test loads, and higher printed than moulded.",
+      "handling_warning": "Extruded near 385C in a heated chamber. Ventilate the working area and expect parts to leave the machine hot enough to burn."
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.5,
+      "max_unsupported_overhang_deg": 45,
+      "max_bridge_length_mm": 8,
+      "min_hole_diameter_mm": 2.0,
+      "min_embossed_text_height_mm": 1.0,
+      "min_engraved_text_depth_mm": 0.6,
+      "thread_min_pitch_mm": 2.0,
+      "min_pin_diameter_mm": 3.0
+    },
+    "bonding": {
+      "hard_to_bond": true
+    },
+    "brand_profiles": {
+      "3dxtech_3dxstat_esd_pekk": {
+        "brand": "3DXTech",
+        "product_name": "3DXSTAT ESD-PEKK",
+        "nozzle_temp_range_c": [
+          355,
+          385
+        ],
+        "nozzle_temp_optimal_c": 375,
+        "bed_temp_range_c": [
+          120,
+          140
+        ],
+        "bed_temp_optimal_c": 140,
+        "enclosure_required": true,
+        "hardened_nozzle_required": true,
+        "ams_compatible": false
+      }
+    }
   }
 }

@@ -1628,5 +1628,202 @@
         "strength_gain_pct": 0
       }
     ]
+  },
+  "pc_esd": {
+    "techniques": [
+      {
+        "name": "Wet Sanding",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "220-grit sandpaper",
+          "400-grit sandpaper",
+          "water",
+          "nitrile gloves",
+          "N95 respirator"
+        ]
+      },
+      {
+        "name": "Machining and drilling",
+        "difficulty": "advanced",
+        "tools_needed": [
+          "sharp carbide tooling",
+          "slow feed and speed",
+          "air blast",
+          "eye protection"
+        ]
+      },
+      {
+        "name": "Heat-set inserts",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "heat-set inserts",
+          "temperature-controlled installation tip",
+          "press or vice"
+        ]
+      },
+      {
+        "name": "Painting",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "plastic-specific primer",
+          "spray paint",
+          "masking film"
+        ]
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "paint_types": [
+        "spray_paint",
+        "acrylic",
+        "enamel"
+      ]
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": false,
+        "strength_gain_pct": 0
+      }
+    ]
+  },
+  "pei_esd": {
+    "techniques": [
+      {
+        "name": "Sanding",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "220-grit sandpaper",
+          "400-grit sandpaper",
+          "600-grit sandpaper",
+          "water",
+          "nitrile gloves",
+          "N95 respirator"
+        ]
+      },
+      {
+        "name": "Machining and drilling",
+        "difficulty": "advanced",
+        "tools_needed": [
+          "sharp carbide tooling",
+          "slow feed and speed",
+          "coolant or air blast",
+          "eye protection"
+        ]
+      },
+      {
+        "name": "Bonding and inserts",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "heat-set inserts",
+          "temperature-controlled installation tip",
+          "abrasive pad",
+          "two-part epoxy"
+        ]
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "paint_types": [
+        "acrylic",
+        "enamel"
+      ]
+    },
+    "strengthening": [
+      "Orient loads along the layers",
+      "Increase wall count in loaded regions",
+      "Use metal inserts for threads"
+    ]
+  },
+  "pekk_esd": {
+    "techniques": [
+      {
+        "name": "Sanding",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "220-grit sandpaper",
+          "400-grit sandpaper",
+          "600-grit sandpaper",
+          "water",
+          "nitrile gloves",
+          "N95 respirator"
+        ]
+      },
+      {
+        "name": "Machining and drilling",
+        "difficulty": "advanced",
+        "tools_needed": [
+          "sharp carbide tooling",
+          "slow feed and speed",
+          "coolant or air blast",
+          "eye protection"
+        ]
+      },
+      {
+        "name": "Bonding and inserts",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "heat-set inserts",
+          "temperature-controlled installation tip",
+          "abrasive pad",
+          "two-part epoxy"
+        ]
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "paint_types": [
+        "acrylic",
+        "enamel"
+      ]
+    },
+    "strengthening": [
+      "Orient loads along the layers",
+      "Increase wall count in loaded regions",
+      "Use metal inserts for threads"
+    ]
+  },
+  "pla_esd": {
+    "techniques": [
+      {
+        "name": "Wet Sanding",
+        "difficulty": "easy",
+        "tools_needed": [
+          "220-grit sandpaper",
+          "400-grit sandpaper",
+          "water",
+          "nitrile gloves",
+          "N95 respirator"
+        ]
+      },
+      {
+        "name": "Painting",
+        "difficulty": "easy",
+        "tools_needed": [
+          "plastic primer",
+          "spray paint",
+          "masking film"
+        ]
+      },
+      {
+        "name": "Heat-set inserts",
+        "difficulty": "easy",
+        "tools_needed": [
+          "heat-set inserts",
+          "temperature-controlled tip"
+        ]
+      }
+    ],
+    "paintability": {
+      "recommended_primer": "standard plastic primer; this polymer takes paint readily",
+      "notes": "The easiest dissipative grade to finish. The whole caution is electrical — coatings insulate, and this is also the material most likely to be used for a cosmetic part where someone paints it without thinking."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": false,
+        "strength_gain_pct": 0
+      }
+    ]
   }
 }

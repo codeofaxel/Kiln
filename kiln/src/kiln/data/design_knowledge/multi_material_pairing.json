@@ -98,6 +98,14 @@
       "pa612_esd": {
         "compatible": false,
         "interface_adhesion": "poor"
+      },
+      "pc_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": true,
+        "interface_adhesion": "good"
       }
     },
     "abs": {
@@ -190,6 +198,10 @@
       "pla": {
         "compatible": false,
         "interface_adhesion": "none"
+      },
+      "pc_esd": {
+        "compatible": true,
+        "interface_adhesion": "good"
       }
     },
     "nylon": {
@@ -230,6 +242,14 @@
       "pa612_esd": {
         "compatible": false,
         "interface_adhesion": "poor"
+      },
+      "pc_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
       }
     },
     "cf_pla": {
@@ -266,6 +286,10 @@
       "polycarbonate": {
         "compatible": true,
         "interface_adhesion": "excellent"
+      },
+      "pc_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
       }
     },
     "pvb": {
@@ -326,6 +350,14 @@
       "pa612_esd": {
         "compatible": false,
         "interface_adhesion": "poor"
+      },
+      "pc_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
       }
     },
     "abs_esd": {
@@ -356,6 +388,14 @@
       "pa612_esd": {
         "compatible": false,
         "interface_adhesion": "poor"
+      },
+      "pc_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
       }
     },
     "pa612_esd": {
@@ -380,6 +420,66 @@
         "interface_adhesion": "poor"
       },
       "pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      }
+    },
+    "pc_esd": {
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pc_abs": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      }
+    },
+    "pla_esd": {
+      "pla": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla_plus": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pva": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "petg_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu": {
         "compatible": false,
         "interface_adhesion": "poor"
       }
