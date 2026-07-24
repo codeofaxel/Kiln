@@ -145,6 +145,10 @@ class TestGetPrinterIntel:
 
     def test_cached_lookup_still_touches_canonical_overlay_loader(self) -> None:
         """A process cache must not bypass hosted private-read tracing."""
+        # The overlay loader ships with kiln-pro, which public CI asserts is
+        # NOT installed — without it there is no loader to patch, so this
+        # contract can only be exercised where the pro package is present.
+        pytest.importorskip("kiln_pro.data_overlays")
         get_printer_intel("bambu_x1c")
         with mock.patch(
             "kiln_pro.data_overlays.load_overlay",
