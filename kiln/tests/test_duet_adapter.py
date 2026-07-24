@@ -676,6 +676,40 @@ def test_upload_sends_a_crc32_the_board_can_verify(tmp_path: Any) -> None:
     assert upload.params["crc32"] == format(zlib.crc32(payload) & 0xFFFFFFFF, "08x")
 
 
+def test_retried_upload_resends_the_whole_file(tmp_path: Any) -> None:
+    """A retry must rewind the handle, not send an empty body.
+
+    RRF answers 503 when it is briefly short of RAM, which is retryable -- but
+    the previous attempt left the file at EOF, so without a rewind the board
+    would receive nothing while Content-Length still promised the full file.
+    """
+    payload = b"G28\nG1 X10 Y10\n"
+    src = tmp_path / "big.gcode"
+    src.write_bytes(payload)
+
+    seen: list[bytes] = []
+    attempts = {"n": 0}
+
+    def _upload(_params: dict[str, Any], kwargs: dict[str, Any]) -> Any:
+        attempts["n"] += 1
+        handle = kwargs.get("data")
+        seen.append(handle.read() if hasattr(handle, "read") else b"")
+        if attempts["n"] == 1:
+            return (503, "Insufficient RAM")
+        return {"err": 0}
+
+    fake = _rrf3(rr_upload=_upload)
+    adapter = fake.install(_adapter(retries=3))
+
+    with mock.patch("kiln.printers.duet.time.sleep"):
+        result = adapter.upload_file(str(src))
+
+    assert result.success is True
+    assert attempts["n"] == 2
+    # Both attempts carried the complete file, not an empty tail.
+    assert seen == [payload, payload]
+
+
 def test_upload_raises_when_the_board_rejects_it(tmp_path: Any) -> None:
     src = tmp_path / "x.gcode"
     src.write_bytes(b"G28\n")
@@ -829,6 +863,74 @@ def test_cancel_raises_rather_than_sending_a_doomed_m0() -> None:
     assert "M0" not in fake.gcodes()
 
 
+def test_cancel_raises_when_the_board_cannot_be_reached() -> None:
+    """Never report "nothing to cancel" when we simply could not ask.
+
+    A print that is still running would otherwise look stopped.
+    """
+    fake = _rrf3()
+    adapter = fake.install(_adapter())
+    adapter.get_state()  # establish the session first
+    adapter._session.request.side_effect = ReqConnectionError("cable pulled")
+
+    with pytest.raises(PrinterError):
+        adapter.cancel_print()
+
+
+def test_waiting_for_a_pause_costs_one_request_per_poll() -> None:
+    """The poll loop must not drag a temperature read along with it."""
+    statuses = iter(["processing", "pausing", "paused"])
+
+    def _model(params: dict[str, Any], _kw: dict[str, Any]) -> Any:
+        key = params.get("key")
+        if key == "state.status":
+            return {"key": key, "result": next(statuses, "paused")}
+        return {"key": key, "result": {}}
+
+    fake = _rrf3(rr_model=_model)
+    adapter = fake.install(_adapter())
+
+    with mock.patch("kiln.printers.duet.time.sleep"):
+        adapter.cancel_print()
+
+    # Only status was ever queried -- never the heat block.
+    queried = [c.params.get("key") for c in fake.calls if c.path == "rr_model"]
+    assert set(queried) == {"state.status"}
+
+
+def test_disconnect_releases_the_session() -> None:
+    """Sessions are a scarce resource; err=2 locks people out of the board."""
+    fake = _rrf3(rr_disconnect={"err": 0})
+    adapter = fake.install(_adapter())
+    adapter.get_state()
+    assert fake.session_headers.get("X-Session-Key") == "4242"
+
+    adapter.disconnect()
+
+    assert "rr_disconnect" in fake.paths()
+    assert "X-Session-Key" not in fake.session_headers
+
+
+def test_disconnect_without_a_session_is_a_no_op() -> None:
+    fake = _rrf3(rr_disconnect={"err": 0})
+    adapter = fake.install(_adapter())
+
+    adapter.disconnect()
+
+    assert fake.paths() == []
+
+
+def test_disconnect_never_raises_at_teardown() -> None:
+    """A caller that is finished should not be handed an error for tidying up."""
+    fake = _rrf3(rr_disconnect=(500, "boom"))
+    adapter = fake.install(_adapter())
+    adapter.get_state()
+
+    adapter.disconnect()  # must not raise
+
+    assert adapter._connected is False
+
+
 def test_emergency_stop_sends_m112_and_does_not_auto_reset() -> None:
     """M999 would un-latch the stop; clearing it is a separate deliberate act."""
     fake = _rrf3()
@@ -978,6 +1080,126 @@ def test_adapter_is_free_tier_and_needs_no_pro_package() -> None:
 
     source = inspect.getsource(duet_module)
     assert "kiln_pro" not in source
+
+
+def test_rrf2_filelist_success_omits_err_and_must_still_paginate() -> None:
+    """RRF 2 deliberately leaves ``err`` out of a *successful* file listing.
+
+    RepRap.cpp in 2.05.1 does this on purpose ("if we do then DWC thinks there
+    has been an error"), so success is signalled by the absence of the key.
+    Treating a missing ``err`` as a failure would break listing on every RRF 2
+    board; ``next`` still carries the pagination cursor.
+    """
+    pages = {
+        0: {"dir": "0:/gcodes", "files": [{"type": "f", "name": "a.gcode"}], "next": 1},
+        1: {"dir": "0:/gcodes", "files": [{"type": "f", "name": "b.gcode"}], "next": 0},
+    }
+    fake = _rrf3(
+        rr_model=(404, "no"),
+        rr_status={"status": "I", "temps": {}},
+        rr_filelist=lambda params, _kw: pages[int(params.get("first", 0))],
+    )
+    adapter = fake.install(_adapter())
+
+    files = adapter.list_files()
+
+    assert [f.name for f in files] == ["a.gcode", "b.gcode"]
+
+
+def test_start_print_surfaces_a_busy_board() -> None:
+    """M32 on a printing board replies with an error the caller must see.
+
+    RepRapFirmware answers "Cannot set file to print, because a file is
+    already being printed", and Platform.cpp prefixes any error reply with
+    "Error: " -- so this must raise rather than report a start that never
+    happened.
+    """
+    fake = _rrf3(rr_reply="Error: Cannot set file to print, because a file is already being printed")
+    adapter = fake.install(_adapter())
+
+    with pytest.raises(PrinterError, match="already being printed"):
+        adapter._start_print_impl("part.gcode")
+
+
+def test_cancel_surfaces_the_firmware_refusal_if_it_ever_fires() -> None:
+    """Belt and braces: if M0 is somehow refused, the reply must not be eaten."""
+    fake = _rrf3(
+        rr_model=_model_router({"state.status": "paused", "heat": {}}),
+        rr_reply="Error: Pause the print before attempting to cancel it",
+    )
+    adapter = fake.install(_adapter())
+
+    with pytest.raises(PrinterError, match="Pause the print"):
+        adapter.cancel_print()
+
+
+# ---------------------------------------------------------------------------
+# Wiring -- the dispatch sites that make the adapter reachable
+# ---------------------------------------------------------------------------
+
+
+def test_duet_is_exported_from_the_printers_package() -> None:
+    import kiln.printers as printers
+
+    assert printers.DuetAdapter is DuetAdapter
+    assert "DuetAdapter" in printers.__all__
+
+
+def test_config_validation_accepts_a_duet_entry() -> None:
+    """A duet entry must not be rejected as an unknown printer type."""
+    from kiln.cli.config import validate_printer_config
+
+    ok, error = validate_printer_config({"type": "duet", "host": "http://duet.local"})
+
+    assert ok is True, error
+
+
+def test_cli_adapter_factory_builds_a_duet_adapter() -> None:
+    from kiln.cli.main import _make_adapter
+
+    adapter = _make_adapter({"type": "duet", "host": "http://duet.local"})
+
+    assert isinstance(adapter, DuetAdapter)
+
+
+def test_cli_adapter_factory_passes_the_machine_password() -> None:
+    from kiln.cli.main import _make_adapter
+
+    adapter = _make_adapter(
+        {"type": "duet", "host": "http://duet.local", "api_key": "hunter2"}
+    )
+
+    assert adapter._password == "hunter2"
+
+
+def test_cli_adapter_factory_defaults_the_password_when_absent() -> None:
+    """An entry with no password must fall back to the firmware default."""
+    from kiln.cli.main import _make_adapter
+
+    adapter = _make_adapter({"type": "duet", "host": "http://duet.local"})
+
+    # DEFAULT_PASSWORD in the firmware's Configuration.h.
+    assert adapter._password == "reprap"
+
+
+def test_server_builds_a_duet_adapter_from_a_config_entry() -> None:
+    from kiln.server import _build_adapter_from_config_entry
+
+    adapter = _build_adapter_from_config_entry(
+        "shop-duet", {"type": "duet", "host": "http://duet.local"}
+    )
+
+    assert isinstance(adapter, DuetAdapter)
+
+
+def test_discovery_probes_for_duet_on_port_80() -> None:
+    from kiln.discovery import _PROBE_TARGETS
+
+    duet = [t for t in _PROBE_TARGETS if t[3] == "duet"]
+
+    assert len(duet) == 1
+    port, path, key, _ = duet[0]
+    assert (port, path, key) == (80, "/rr_connect", "boardType")
 
 
 def test_adapter_writes_no_local_state() -> None:

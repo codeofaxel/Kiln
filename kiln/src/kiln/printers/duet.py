@@ -19,7 +19,11 @@ Both firmware generations are supported, and the difference is explicit:
 The generation is detected once per adapter instance (see
 :meth:`DuetAdapter._generation`) and cached; every other difference between
 the two is confined to :meth:`get_state` and :meth:`get_job`.  Print control,
-file transfer and G-code are identical on both.
+file transfer and G-code are identical on both: RRF 2.05.1 serves
+``connect``, ``disconnect``, ``status``, ``filelist``, ``files``,
+``fileinfo``, ``gcode``, ``upload``, ``download``, ``delete`` and ``reply``,
+and notably *not* ``model`` -- which is what makes the absence of
+``rr_model`` a sound generation test.
 
 Sources consulted when writing this adapter (all opened directly):
 
@@ -35,6 +39,12 @@ Sources consulted when writing this adapter (all opened directly):
   (see :func:`_escape_rrf_string`).
 * ``src/PrintMonitor/PrintMonitor.cpp`` and ``src/Heating/Heat.cpp`` --
   the ``job`` and ``heat`` object-model key names.
+* ``src/Platform/Platform.cpp`` -- error replies are prefixed ``"Error: "``,
+  which is what makes the reply check in :meth:`_run_gcode` reliable.
+* ``src/Config/Configuration.h`` -- ``DEFAULT_PASSWORD`` is ``"reprap"``.
+* At tag ``2.05.1``: ``src/Networking/HttpResponder.cpp`` and
+  ``src/RepRap.cpp`` -- the RRF 2 endpoint set, and the deliberate omission
+  of ``err`` from a successful ``rr_filelist`` (see :meth:`list_files`).
 """
 
 from __future__ import annotations
@@ -410,6 +420,13 @@ class DuetAdapter(PrinterAdapter):
 
         while attempt < self._retries:
             try:
+                # An upload streams from a file handle, which a previous
+                # attempt will have left at EOF.  Without this rewind a
+                # retried upload sends an empty body while Content-Length
+                # still promises the full file.
+                if hasattr(data, "seek"):
+                    data.seek(0)  # type: ignore[union-attr]
+
                 response = self._session.request(
                     method,
                     url,
@@ -601,6 +618,45 @@ class DuetAdapter(PrinterAdapter):
         """Query one object-model *key* (RRF 3 only) and return its ``result``."""
         body = self._get_json("/rr_model", params={"key": key, "flags": "d99"})
         return body.get("result")
+
+    def _current_status(self) -> PrinterStatus:
+        """Fetch just the machine status, without temperatures.
+
+        :meth:`get_state` needs a second request for the heaters, which is
+        wasted work when only the status matters -- and :meth:`_wait_for_paused`
+        polls in a loop, so the difference is a doubled request count against a
+        board that is busy decelerating a print.
+        """
+        if self._generation() == 3:
+            raw = self._model("state.status")
+            return _RRF3_STATUS_MAP.get(
+                raw if isinstance(raw, str) else "", PrinterStatus.UNKNOWN
+            )
+
+        payload = self._get_json("/rr_status", params={"type": 1})
+        raw = payload.get("status")
+        return _RRF2_STATUS_MAP.get(
+            raw if isinstance(raw, str) else "", PrinterStatus.UNKNOWN
+        )
+
+    def disconnect(self) -> None:
+        """Release this adapter's session on the board (``rr_disconnect``).
+
+        RepRapFirmware supports only a small number of concurrent sessions and
+        answers ``err=2`` once they are gone, which locks people out of Duet
+        Web Control.  Sessions do time out on their own, so this is best-effort
+        tidiness rather than a correctness requirement, and a failure to
+        disconnect is never worth raising to a caller who is finished anyway.
+        """
+        if not self._connected:
+            return
+        try:
+            self._request("GET", "/rr_disconnect")
+        except PrinterError:
+            logger.debug("rr_disconnect failed; the session will time out", exc_info=True)
+        finally:
+            self._connected = False
+            self._session.headers.pop("X-Session-Key", None)
 
     # ------------------------------------------------------------------
     # G-code transport
@@ -890,6 +946,10 @@ class DuetAdapter(PrinterAdapter):
                 "/rr_filelist", params={"dir": _GCODE_DIR, "first": first}
             )
 
+            # RRF 2 omits `err` entirely from a *successful* listing -- a
+            # deliberate choice in RepRap.cpp, because emitting err:0 made
+            # Duet Web Control read it as a failure.  So absence means
+            # success here, and only an explicit code is an error.
             err = body.get("err")
             if err == 1:
                 raise PrinterError(
@@ -1105,15 +1165,19 @@ class DuetAdapter(PrinterAdapter):
         cancels.
 
         Raises:
-            PrinterError: If the printer cannot be paused within
-                :data:`_PAUSE_SETTLE_TIMEOUT_S`, or the cancel is refused.
+            PrinterError: If the printer cannot be reached, cannot be paused
+                within :data:`_PAUSE_SETTLE_TIMEOUT_S`, or the cancel is
+                refused.
         """
-        state = self.get_state()
+        # Deliberately not get_state(): an unreachable board must raise here.
+        # Reporting "nothing to cancel" when we simply could not ask would
+        # tell the user their print stopped when it may still be running.
+        status = self._current_status()
 
-        if state.state in (PrinterStatus.IDLE, PrinterStatus.OFFLINE):
+        if status in (PrinterStatus.IDLE, PrinterStatus.OFFLINE):
             return PrintResult(success=True, message="No active print job to cancel.")
 
-        if state.state != PrinterStatus.PAUSED:
+        if status != PrinterStatus.PAUSED:
             self._run_gcode("M25")
             if not self._wait_for_paused():
                 raise PrinterError(
@@ -1131,7 +1195,7 @@ class DuetAdapter(PrinterAdapter):
         deadline = time.monotonic() + _PAUSE_SETTLE_TIMEOUT_S
         while time.monotonic() < deadline:
             time.sleep(_PAUSE_POLL_INTERVAL_S)
-            status = self.get_state().state
+            status = self._current_status()
             if status == PrinterStatus.PAUSED:
                 return True
             if status in (PrinterStatus.IDLE, PrinterStatus.OFFLINE, PrinterStatus.ERROR):
