@@ -226,13 +226,21 @@
       ]
     },
     "pa612_esd": {
-      "status": "not_compatible",
+      "status": "needs_upgrade",
       "upgrades_needed": [
         "all_metal_hotend",
         "dry_box",
         "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
       ],
-      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C; and it needs about 295C for a normal build and this machine reaches 260C."
     }
   },
   "artillery_sw_x3": {
@@ -442,12 +450,20 @@
       ]
     },
     "pa612_esd": {
-      "status": "not_compatible",
+      "status": "needs_upgrade",
       "upgrades_needed": [
+        "all_metal_hotend",
         "dry_box",
         "hardened_nozzle"
-      ],
-      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
+      ]
     }
   },
   "bambu_a1": {
@@ -663,6 +679,14 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
     }
   },
   "bambu_a2l": {
@@ -870,6 +894,11 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 80C."
     }
   },
   "bambu_h2s": {
@@ -1054,6 +1083,12 @@
       ]
     },
     "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pc_esd": {
       "status": "needs_upgrade",
       "upgrades_needed": [
         "dry_box"
@@ -1275,6 +1310,14 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 80C."
     }
   },
   "bambu_p1p": {
@@ -1490,6 +1533,14 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
     }
   },
   "bambu_p1s": {
@@ -1694,6 +1745,13 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
     }
   },
   "bambu_x1c": {
@@ -1880,6 +1938,12 @@
       ]
     },
     "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pc_esd": {
       "status": "needs_upgrade",
       "upgrades_needed": [
         "dry_box"
@@ -2074,6 +2138,12 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
     }
   },
   "bambu_p2s": {
@@ -2260,6 +2330,12 @@
       ]
     },
     "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pc_esd": {
       "status": "needs_upgrade",
       "upgrades_needed": [
         "dry_box"
@@ -2493,13 +2569,21 @@
       ]
     },
     "pa612_esd": {
-      "status": "not_compatible",
+      "status": "needs_upgrade",
       "upgrades_needed": [
         "all_metal_hotend",
         "dry_box",
         "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
       ],
-      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C; and it needs about 295C for a normal build and this machine reaches 260C."
     }
   },
   "cr10_se": {
@@ -2714,6 +2798,13 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
     }
   },
   "creality_hi": {
@@ -2916,6 +3007,14 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
     }
   },
   "default": {
@@ -3134,6 +3233,13 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
     }
   },
   "elegoo_centauri_carbon": {
@@ -3335,6 +3441,12 @@
       "upgrades_needed": [
         "dry_box",
         "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
       ]
     }
   },
@@ -3564,13 +3676,21 @@
       ]
     },
     "pa612_esd": {
-      "status": "not_compatible",
+      "status": "needs_upgrade",
       "upgrades_needed": [
         "all_metal_hotend",
         "dry_box",
         "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
       ],
-      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C; and it needs about 295C for a normal build and this machine reaches 260C."
     }
   },
   "elegoo_neptune4": {
@@ -3786,6 +3906,14 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
     }
   },
   "elegoo_orangestorm_giga": {
@@ -3999,6 +4127,13 @@
       "upgrades_needed": [
         "dry_box",
         "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
       ]
     }
   },
@@ -4228,13 +4363,20 @@
       ]
     },
     "pa612_esd": {
-      "status": "not_compatible",
+      "status": "needs_upgrade",
       "upgrades_needed": [
         "all_metal_hotend",
         "dry_box",
         "hardened_nozzle"
-      ],
-      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
+      ]
     }
   },
   "ender3_s1": {
@@ -4445,12 +4587,20 @@
       ]
     },
     "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
       "status": "not_compatible",
       "upgrades_needed": [
         "dry_box",
-        "hardened_nozzle"
+        "enclosure"
       ],
-      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C; and it needs about 295C for a normal build and this machine reaches 260C."
     }
   },
   "ender3_v2": {
@@ -4674,13 +4824,21 @@
       ]
     },
     "pa612_esd": {
-      "status": "not_compatible",
+      "status": "needs_upgrade",
       "upgrades_needed": [
         "all_metal_hotend",
         "dry_box",
         "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
       ],
-      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C; and it needs about 295C for a normal build and this machine reaches 260C."
     }
   },
   "ender3_v3": {
@@ -4881,6 +5039,13 @@
       "status": "needs_upgrade",
       "upgrades_needed": [
         "dry_box"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
       ]
     }
   },
@@ -5097,6 +5262,14 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
     }
   },
   "ender3_v3_plus": {
@@ -5299,6 +5472,14 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
     }
   },
   "ender3_v3_se": {
@@ -5521,13 +5702,21 @@
       ]
     },
     "pa612_esd": {
-      "status": "not_compatible",
+      "status": "needs_upgrade",
       "upgrades_needed": [
         "all_metal_hotend",
         "dry_box",
         "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
       ],
-      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C; and it needs about 295C for a normal build and this machine reaches 260C."
     }
   },
   "ender3_v4": {
@@ -5730,6 +5919,14 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
     }
   },
   "ender5": {
@@ -5958,13 +6155,20 @@
       ]
     },
     "pa612_esd": {
-      "status": "not_compatible",
+      "status": "needs_upgrade",
       "upgrades_needed": [
         "all_metal_hotend",
         "dry_box",
         "hardened_nozzle"
-      ],
-      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
+      ]
     }
   },
   "ender5_max": {
@@ -6167,6 +6371,14 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
     }
   },
   "flashforge_adventurer5m": {
@@ -6379,13 +6591,19 @@
       ]
     },
     "pa612_esd": {
-      "status": "not_compatible",
+      "status": "needs_upgrade",
       "upgrades_needed": [
         "all_metal_hotend",
         "dry_box",
         "hardened_nozzle"
-      ],
-      "notes": "PA612-ESD cannot run on this printer: it needs about 300C for a normal build and this machine reaches 280C."
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box"
+      ]
     }
   },
   "k1": {
@@ -6590,6 +6808,13 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
     }
   },
   "k1_max": {
@@ -6794,6 +7019,13 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
     }
   },
   "k1_se": {
@@ -7009,6 +7241,14 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
     }
   },
   "k1c": {
@@ -7200,6 +7440,13 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
     }
   },
   "k2": {
@@ -7405,6 +7652,14 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
     }
   },
   "k2_plus": {
@@ -7589,6 +7844,12 @@
       ]
     },
     "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pc_esd": {
       "status": "needs_upgrade",
       "upgrades_needed": [
         "dry_box"
@@ -7780,6 +8041,12 @@
       ]
     },
     "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pc_esd": {
       "status": "needs_upgrade",
       "upgrades_needed": [
         "dry_box"
@@ -7986,6 +8253,14 @@
       "upgrades_needed": [
         "dry_box"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
     }
   },
   "klipper_generic": {
@@ -8195,12 +8470,20 @@
       ]
     },
     "pa612_esd": {
-      "status": "not_compatible",
+      "status": "needs_upgrade",
       "upgrades_needed": [
+        "all_metal_hotend",
         "dry_box",
         "hardened_nozzle"
-      ],
-      "notes": "PA612-ESD cannot run on this printer: it needs 280C at the nozzle and this machine reaches 260C."
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
+      ]
     }
   },
   "prusa_mini": {
@@ -8430,13 +8713,21 @@
       ]
     },
     "pa612_esd": {
-      "status": "not_compatible",
+      "status": "needs_upgrade",
       "upgrades_needed": [
         "all_metal_hotend",
         "dry_box",
         "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
       ],
-      "notes": "PA612-ESD cannot run on this printer: it needs about 300C for a normal build and this machine reaches 280C."
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C; and it needs about 295C for a normal build and this machine reaches 280C."
     }
   },
   "prusa_mk3s": {
@@ -8651,6 +8942,13 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
     }
   },
   "prusa_mk4": {
@@ -8860,12 +9158,20 @@
       ]
     },
     "pa612_esd": {
-      "status": "not_compatible",
+      "status": "needs_upgrade",
       "upgrades_needed": [
+        "all_metal_hotend",
         "dry_box",
         "hardened_nozzle"
-      ],
-      "notes": "PA612-ESD cannot run on this printer: it needs about 300C for a normal build and this machine reaches 290C."
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
+      ]
     }
   },
   "prusa_xl": {
@@ -9075,12 +9381,20 @@
       ]
     },
     "pa612_esd": {
-      "status": "not_compatible",
+      "status": "needs_upgrade",
       "upgrades_needed": [
+        "all_metal_hotend",
         "dry_box",
         "hardened_nozzle"
-      ],
-      "notes": "PA612-ESD cannot run on this printer: it needs about 300C for a normal build and this machine reaches 290C."
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box",
+        "enclosure"
+      ]
     }
   },
   "qidi_x_plus3": {
@@ -9281,6 +9595,12 @@
       "upgrades_needed": [
         "dry_box",
         "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
       ]
     }
   },
@@ -9495,6 +9815,13 @@
       "upgrades_needed": [
         "dry_box",
         "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
       ]
     }
   },
@@ -9711,6 +10038,14 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
     }
   },
   "sovol_sv07": {
@@ -9925,6 +10260,13 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
     }
   },
   "sovol_sv07_plus": {
@@ -10138,6 +10480,13 @@
       "upgrades_needed": [
         "dry_box",
         "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
       ]
     }
   },
@@ -10354,6 +10703,14 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
     }
   },
   "voron_0": {
@@ -10556,6 +10913,12 @@
       "upgrades_needed": [
         "dry_box",
         "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
       ]
     }
   },
@@ -10760,6 +11123,12 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
     }
   },
   "aon_m2_plus": {
@@ -10950,6 +11319,12 @@
       "upgrades_needed": [
         "dry_box",
         "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
       ]
     }
   },
@@ -11150,6 +11525,12 @@
       "upgrades_needed": [
         "dry_box",
         "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
       ]
     }
   },
@@ -11352,6 +11733,12 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
     }
   },
   "qidi_x_max3": {
@@ -11553,6 +11940,12 @@
         "dry_box",
         "hardened_nozzle"
       ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
     }
   },
   "qidi_q2": {
@@ -11752,6 +12145,12 @@
       "upgrades_needed": [
         "dry_box",
         "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
       ]
     }
   },
@@ -11967,6 +12366,13 @@
       "upgrades_needed": [
         "dry_box",
         "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
       ]
     }
   },
