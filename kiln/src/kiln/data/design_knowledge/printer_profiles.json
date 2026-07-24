@@ -30,7 +30,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "bambu_x1c": {
     "display_name": "Bambu Lab X1 Carbon",
@@ -61,7 +63,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "bambu_x1e": {
     "display_name": "Bambu Lab X1E",
@@ -92,7 +96,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "bambu_p2s": {
     "display_name": "Bambu Lab P2S",
@@ -123,7 +129,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "bambu_p1s": {
     "display_name": "Bambu Lab P1S",
@@ -154,7 +162,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "bambu_a1": {
     "display_name": "Bambu Lab A1",
@@ -181,7 +191,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "bambu_a2l": {
     "display_name": "Bambu Lab A2L",
@@ -208,7 +220,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "bambu_h2s": {
     "display_name": "Bambu Lab H2S",
@@ -240,7 +254,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": 65,
+    "chamber_heated": true
   },
   "prusa_mk4": {
     "display_name": "Prusa MK4",
@@ -270,7 +286,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "prusa_mini": {
     "display_name": "Prusa MINI+",
@@ -296,7 +314,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "ender3_v2": {
     "display_name": "Ender 3 V2",
@@ -323,7 +343,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "ender3_s1": {
     "display_name": "Ender 3 S1",
@@ -351,7 +373,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "voron_2": {
     "display_name": "Voron 2.4",
@@ -382,7 +406,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "ender3": {
     "printer_id": "ender3",
@@ -410,7 +436,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "k1": {
     "printer_id": "k1",
@@ -439,7 +467,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "sparkx_i7": {
     "printer_id": "sparkx_i7",
@@ -468,7 +498,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "k1_max": {
     "printer_id": "k1_max",
@@ -497,7 +529,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "k1c": {
     "printer_id": "k1c",
@@ -526,7 +560,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "k1_se": {
     "printer_id": "k1_se",
@@ -554,7 +590,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "k2": {
     "printer_id": "k2",
@@ -582,7 +620,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "k2_pro": {
     "printer_id": "k2_pro",
@@ -611,7 +651,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "k2_plus": {
     "printer_id": "k2_plus",
@@ -641,7 +683,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": 60,
+    "chamber_heated": true
   },
   "k2_se": {
     "printer_id": "k2_se",
@@ -670,7 +714,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "creality_hi": {
     "printer_id": "creality_hi",
@@ -699,7 +745,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "ender3_v4": {
     "printer_id": "ender3_v4",
@@ -729,7 +777,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "ender3_v3": {
     "printer_id": "ender3_v3",
@@ -758,7 +808,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "ender3_v3_ke": {
     "printer_id": "ender3_v3_ke",
@@ -787,7 +839,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "ender3_v3_se": {
     "printer_id": "ender3_v3_se",
@@ -815,7 +869,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "ender3_v3_plus": {
     "printer_id": "ender3_v3_plus",
@@ -844,7 +900,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "ender5_max": {
     "printer_id": "ender5_max",
@@ -873,7 +931,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "cr10_se": {
     "printer_id": "cr10_se",
@@ -902,7 +962,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "prusa_mk3s": {
     "printer_id": "prusa_mk3s",
@@ -932,7 +994,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "elegoo_neptune4": {
     "printer_id": "elegoo_neptune4",
@@ -960,7 +1024,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "elegoo_centauri_carbon": {
     "printer_id": "elegoo_centauri_carbon",
@@ -990,7 +1056,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "elegoo_orangestorm_giga": {
     "printer_id": "elegoo_orangestorm_giga",
@@ -1017,7 +1085,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "qidi_x_plus3": {
     "printer_id": "qidi_x_plus3",
@@ -1048,7 +1118,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": 65,
+    "chamber_heated": true
   },
   "klipper_generic": {
     "printer_id": "klipper_generic",
@@ -1078,7 +1150,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "ender5": {
     "printer_id": "ender5",
@@ -1106,7 +1180,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "cr10": {
     "printer_id": "cr10",
@@ -1134,7 +1210,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "voron_0": {
     "printer_id": "voron_0",
@@ -1163,7 +1241,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "ratrig_vcore3": {
     "printer_id": "ratrig_vcore3",
@@ -1192,7 +1272,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "elegoo_neptune3": {
     "printer_id": "elegoo_neptune3",
@@ -1220,7 +1302,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "anker_m5": {
     "printer_id": "anker_m5",
@@ -1248,7 +1332,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "artillery_sw_x3": {
     "printer_id": "artillery_sw_x3",
@@ -1277,7 +1363,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "sovol_sv06": {
     "printer_id": "sovol_sv06",
@@ -1306,7 +1394,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "sovol_sv07": {
     "printer_id": "sovol_sv07",
@@ -1335,7 +1425,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "flashforge_adventurer5m": {
     "printer_id": "flashforge_adventurer5m",
@@ -1363,7 +1455,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "prusa_xl": {
     "printer_id": "prusa_xl",
@@ -1393,7 +1487,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "bambu_p1p": {
     "printer_id": "bambu_p1p",
@@ -1421,7 +1517,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "aon_m2_plus": {
     "printer_id": "aon_m2_plus",
@@ -1456,7 +1554,9 @@
       0.25,
       0.3,
       0.4
-    ]
+    ],
+    "chamber_temp_c": 135,
+    "chamber_heated": true
   },
   "qidi_plus4": {
     "printer_id": "qidi_plus4",
@@ -1487,7 +1587,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": 65,
+    "chamber_heated": true
   },
   "qidi_q1_pro": {
     "printer_id": "qidi_q1_pro",
@@ -1518,7 +1620,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": 60,
+    "chamber_heated": true
   },
   "qidi_x_max3": {
     "printer_id": "qidi_x_max3",
@@ -1549,7 +1653,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": 65,
+    "chamber_heated": true
   },
   "qidi_q2": {
     "printer_id": "qidi_q2",
@@ -1580,7 +1686,9 @@
       0.16,
       0.2,
       0.28
-    ]
+    ],
+    "chamber_temp_c": 65,
+    "chamber_heated": true
   },
   "ender3_s1_pro": {
     "display_name": "Ender 3 S1 Pro",
@@ -1610,7 +1718,9 @@
       0.2,
       0.28
     ],
-    "printer_id": "ender3_s1_pro"
+    "printer_id": "ender3_s1_pro",
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "aon_hylo": {
     "printer_id": "aon_hylo",
@@ -1648,7 +1758,9 @@
       0.3,
       0.4,
       0.6
-    ]
+    ],
+    "chamber_temp_c": 250,
+    "chamber_heated": true
   },
   "intamsys_610ht": {
     "printer_id": "intamsys_610ht",
@@ -1686,7 +1798,9 @@
       0.3,
       0.4,
       0.5
-    ]
+    ],
+    "chamber_temp_c": 300,
+    "chamber_heated": true
   },
   "visionminer_22idex_v4": {
     "printer_id": "visionminer_22idex_v4",
@@ -1718,6 +1832,8 @@
       0.15,
       0.2,
       0.3
-    ]
+    ],
+    "chamber_temp_c": 100,
+    "chamber_heated": true
   }
 }
