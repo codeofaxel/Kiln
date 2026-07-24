@@ -63,18 +63,17 @@ _BAMBU_PREFIX_SUGGESTIONS: dict[str, str] = {
 # Top-N common models per backend type, shown as examples in the prompt.
 _EXAMPLES_BY_TYPE: dict[str, list[str]] = {
     "prusa":     ["prusa_mk4", "prusa_mini", "prusa_mk3s", "prusa_xl"],
-    "moonraker": ["klipper_generic", "voron_24", "voron_trident", "qidi_x_plus3", "k1_max"],
+    "moonraker": ["klipper_generic", "voron_2", "voron_0", "qidi_x_plus3", "k1_max"],
     "creality":  ["sparkx_i7", "k1_max", "k1c", "ender3_v4", "ender3_v3_ke"],
     "octoprint": ["ender3", "ender3_v2", "ender5", "prusa_mk3s"],
     "serial":    ["ender3", "ender3_v2", "cr10", "prusa_mk3s"],
-    "elegoo":    ["elegoo_centauri", "elegoo_centauri_carbon"],
+    "elegoo":    ["elegoo_centauri_carbon", "elegoo_neptune4"],
     "bambu":     ["bambu_a1", "bambu_a1_mini", "bambu_x1c",
                   "bambu_p1s", "bambu_p1p", "bambu_x1e"],
-    # No "duet" entry yet: the model catalogue currently contains no
-    # Duet-controlled machine, and every id here must name a real one -- a
-    # made-up example would send the user to a profile that does not exist.
-    # Add the key alongside the first Duet machine that lands in
-    # data/printer_intelligence.json.
+    # Every id here must name a real profile in
+    # data/printer_intelligence.json; extend this as more RepRapFirmware
+    # machines land there.
+    "duet":      ["visionminer_22idex_v4"],
 }
 
 

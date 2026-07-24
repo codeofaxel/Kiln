@@ -1192,6 +1192,63 @@ def test_server_builds_a_duet_adapter_from_a_config_entry() -> None:
     assert isinstance(adapter, DuetAdapter)
 
 
+def test_every_suggested_model_example_actually_exists() -> None:
+    """The setup prompt must never suggest a profile the catalogue lacks.
+
+    These ids are what a user types to switch on Kiln's safety checks, so a
+    stale or invented one sends them to a profile that does not exist. Guards
+    every backend, not just this one.
+    """
+    from kiln.cli.printer_model_prompt import _EXAMPLES_BY_TYPE
+    from kiln.printer_intelligence import list_intel_profiles
+
+    known = set(list_intel_profiles())
+    missing = [
+        f"{backend}:{model_id}"
+        for backend, examples in _EXAMPLES_BY_TYPE.items()
+        for model_id in examples
+        if model_id not in known
+    ]
+
+    assert not missing, f"suggested printer models that do not exist: {missing}"
+
+
+def test_duet_examples_name_a_reprapfirmware_machine() -> None:
+    """A Duet example must actually be a RepRapFirmware machine."""
+    import json
+    from pathlib import Path
+
+    from kiln.cli.printer_model_prompt import _EXAMPLES_BY_TYPE
+
+    data = json.loads(
+        (Path(__file__).parent.parent / "src/kiln/data/printer_intelligence.json").read_text()
+    )
+    printers = data.get("printers", data)
+
+    for model_id in _EXAMPLES_BY_TYPE["duet"]:
+        firmware = str(printers[model_id].get("firmware", "")).lower()
+        assert "reprap" in firmware, f"{model_id} is not a RepRapFirmware machine"
+
+
+def test_real_safety_profile_clamps_the_adapter_ceiling() -> None:
+    """End-to-end: a catalogued Duet machine's real limits must bind.
+
+    The adapter's own ceiling is the widest the backend class allows; the
+    bound profile is what narrows it to this machine.
+    """
+    fake = _rrf3()
+    adapter = fake.install(_adapter())
+    adapter.set_safety_profile("visionminer_22idex_v4")
+
+    # Within the machine's real envelope (500 C hotend / 200 C bed).
+    assert adapter.set_tool_temp(480) is True
+    assert adapter.set_bed_temp(190) is True
+
+    # Beyond it, the profile refuses even though the class ceiling is 500.
+    with pytest.raises(PrinterError, match="exceeds safety limit"):
+        adapter.set_bed_temp(250)
+
+
 def test_discovery_probes_for_duet_on_port_80() -> None:
     from kiln.discovery import _PROBE_TARGETS
 
