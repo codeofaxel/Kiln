@@ -3,7 +3,37 @@
     "version": "1.0.0",
     "domain": "fdm",
     "description": "Desktop printer capability profiles for material feasibility and design-for-manufacturing decisions.",
-    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (agent_notes positioning prose) is available in Kiln Pro; see https://kiln3d.com/pricing."
+    "_split_note": "Safety-floor profile for AI-controlled FDM printing.  Engineering depth (agent_notes positioning prose) is available in Kiln Pro; see https://kiln3d.com/pricing.",
+    "_default_profile_note": "The 'default' entry is the deliberately conservative stand-in for a printer Kiln has no profile for. Its numbers are the floor a commodity FDM machine can be assumed to meet, NOT a measurement of any product, so a feasibility answer given against it is the answer for the least capable plausible machine. Register the real printer to get a real answer."
+  },
+  "default": {
+    "printer_id": "default",
+    "display_name": "Generic FDM Printer",
+    "manufacturer": "Unknown",
+    "build_volume_mm": {
+      "x": 200,
+      "y": 200,
+      "z": 200
+    },
+    "max_hotend_temp_c": 250,
+    "max_bed_temp_c": 100,
+    "has_enclosure": false,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "petg",
+      "pla",
+      "tpu"
+    ],
+    "typical_tolerance_mm": 0.3,
+    "max_print_speed_mm_s": 100,
+    "default_layer_heights_mm": [
+      0.12,
+      0.16,
+      0.2,
+      0.28
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
   },
   "bambu_a1_mini": {
     "display_name": "Bambu Lab A1 Mini",
@@ -412,7 +442,7 @@
   },
   "ender3": {
     "printer_id": "ender3",
-    "display_name": "Creality Ender 3 / Ender 3 Pro / Ender 3 V2",
+    "display_name": "Creality Ender 3 / Ender 3 Pro",
     "manufacturer": "Creality",
     "build_volume_mm": {
       "x": 220,
@@ -1400,15 +1430,46 @@
   },
   "sovol_sv07": {
     "printer_id": "sovol_sv07",
-    "display_name": "Sovol SV07 / SV07 Plus",
+    "display_name": "Sovol SV07",
     "manufacturer": "Sovol",
     "build_volume_mm": {
-      "x": 250,
-      "y": 250,
-      "z": 240
+      "x": 220,
+      "y": 220,
+      "z": 250
     },
     "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 110,
+    "max_bed_temp_c": 100,
+    "has_enclosure": false,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "abs",
+      "petg",
+      "pla",
+      "tpu"
+    ],
+    "typical_tolerance_mm": 0.15,
+    "max_print_speed_mm_s": 250,
+    "default_layer_heights_mm": [
+      0.08,
+      0.12,
+      0.16,
+      0.2,
+      0.28
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
+  },
+  "sovol_sv07_plus": {
+    "printer_id": "sovol_sv07_plus",
+    "display_name": "Sovol SV07 Plus",
+    "manufacturer": "Sovol",
+    "build_volume_mm": {
+      "x": 300,
+      "y": 300,
+      "z": 350
+    },
+    "max_hotend_temp_c": 300,
+    "max_bed_temp_c": 100,
     "has_enclosure": false,
     "has_direct_drive": true,
     "supported_materials": [
