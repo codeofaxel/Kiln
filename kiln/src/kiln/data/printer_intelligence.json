@@ -1835,7 +1835,7 @@
       250
     ],
     "max_hotend_temp": 300,
-    "max_bed_temp": 110,
+    "max_bed_temp": 100,
     "has_input_shaping": true
   },
   "sovol_sv07_plus": {
@@ -1873,7 +1873,7 @@
       350
     ],
     "max_hotend_temp": 300,
-    "max_bed_temp": 110,
+    "max_bed_temp": 100,
     "has_input_shaping": true
   },
   "flashforge_adventurer5m": {

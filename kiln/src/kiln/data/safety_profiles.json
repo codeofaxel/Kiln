@@ -703,7 +703,7 @@
   "sovol_sv07": {
     "display_name": "Sovol SV07 / SV07 Plus",
     "max_hotend_temp": 300.0,
-    "max_bed_temp": 110.0,
+    "max_bed_temp": 100.0,
     "max_chamber_temp": null,
     "max_feedrate": 20000.0,
     "min_safe_z": 0.0,
@@ -718,7 +718,7 @@
   "sovol_sv07_plus": {
     "display_name": "Sovol SV07 Plus",
     "max_hotend_temp": 300.0,
-    "max_bed_temp": 110.0,
+    "max_bed_temp": 100.0,
     "max_chamber_temp": null,
     "max_feedrate": 20000.0,
     "min_safe_z": 0.0,
