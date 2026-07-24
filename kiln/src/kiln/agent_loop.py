@@ -42,6 +42,8 @@ from typing import Any
 import requests
 from requests.exceptions import ConnectionError, ReadTimeout, RequestException
 
+from kiln.tiers_and_terms import TIERS_AND_TERMS
+
 logger = logging.getLogger(__name__)
 
 
@@ -619,7 +621,11 @@ def _get_default_system_prompt() -> str:
     """Return Kiln's default agent system prompt.
 
     Mirrors the MCP instructions registered on the FastMCP server so that
-    non-MCP models receive the same operational guidance.
+    non-MCP models receive the same operational guidance — including the
+    tiers-and-terms block, which is imported from its canonical home rather
+    than restated here.  This prompt is what the hosted ``POST /api/agent``
+    endpoint runs on (it builds an ``AgentConfig`` with no ``system_prompt``),
+    so an omission here means every hosted agent run is uninstructed.
     """
     return (
         "You are a 3D printing assistant powered by Kiln — agentic infrastructure "
@@ -639,7 +645,8 @@ def _get_default_system_prompt() -> str:
         "- Use `fulfillment_materials` and `fulfillment_quote` to outsource "
         "prints to external services when local printers lack the material or capacity.\n\n"
         "Always explain what you're doing before executing tool calls. "
-        "If a tool returns an error, explain the issue clearly and suggest next steps."
+        "If a tool returns an error, explain the issue clearly and suggest next steps.\n\n"
+        + TIERS_AND_TERMS
     )
 
 

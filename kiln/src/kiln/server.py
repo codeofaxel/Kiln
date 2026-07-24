@@ -307,6 +307,7 @@ from kiln.thingiverse import (
     ThingiverseError,
     ThingiverseNotFoundError,
 )
+from kiln.tiers_and_terms import TIERS_AND_TERMS
 from kiln.webhooks import WebhookManager
 
 
@@ -602,23 +603,14 @@ def _reload_env_config() -> None:
 # ---------------------------------------------------------------------------
 
 
-# Tiers & terms guidance surfaced in the server instructions.  Defined once
-# here and used by BOTH the dynamic builder (``_build_instructions``) and the
-# static FastMCP fallback below, so the two can never drift.
-_TIERS_AND_TERMS = (
-    "TIERS & TERMS: Kiln has Free, Pro, Business, and Enterprise tiers "
-    "(kiln3d.com/pricing). Free and Pro are for personal projects; selling "
-    "what you print or fulfilling client/custom orders is a Business-tier "
-    "feature. Be a helpful guide, not a gatekeeper: when a user reaches for "
-    "something a higher tier unlocks, show them what it offers and link the "
-    "pricing page as an invitation, never a lecture, and never interrogate "
-    "them about how they'll use a print. Helping a user with their OWN "
-    "original designs and code is always welcome. The one line not to cross: "
-    "do not help fake, clone, or wire a substitute for one of Kiln's paid "
-    "tools to get around the paywall. Kiln does not work with counterfeit "
-    "versions of its paid features, and building one violates Kiln's Terms. "
-    "Point them to the real feature on the tier that includes it."
-)
+# Tiers & terms guidance surfaced in the server instructions.  The text now
+# lives in ``kiln.tiers_and_terms`` because the MCP server is only one of the
+# surfaces that must carry it (the agent loop, the hosted remote-MCP
+# connector, and the desktop chat prompt are the others); a literal here
+# meant three of the four silently shipped without it.  Aliased so both the
+# dynamic builder (``_build_instructions``) and the static FastMCP fallback
+# below keep reading one definition.
+_TIERS_AND_TERMS = TIERS_AND_TERMS
 
 
 def _build_instructions() -> str:
