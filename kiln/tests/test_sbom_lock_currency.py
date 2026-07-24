@@ -24,10 +24,15 @@ Regeneration command lives in the header of ``requirements-lock.txt``.
 from __future__ import annotations
 
 import re
-import tomllib
 from pathlib import Path
 
 import pytest
+
+# ``tomllib`` is stdlib only on Python 3.11+, but kiln supports 3.10.
+# These tests compare repo file contents (pyproject vs the lock file),
+# so running them on 3.11+ already gives full coverage — skipping the
+# module on 3.10 loses nothing and avoids a tomli dependency.
+tomllib = pytest.importorskip("tomllib")
 
 _KILN_ROOT = Path(__file__).resolve().parent.parent
 _PYPROJECT = _KILN_ROOT / "pyproject.toml"
