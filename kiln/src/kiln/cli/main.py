@@ -400,6 +400,7 @@ def _make_adapter(cfg: dict[str, Any]):
     from kiln.printers import (
         BambuAdapter,
         CrealityAdapter,
+        DuetAdapter,
         ElegooAdapter,
         MoonrakerAdapter,
         OctoPrintAdapter,
@@ -413,6 +414,11 @@ def _make_adapter(cfg: dict[str, Any]):
         return OctoPrintAdapter(host=host, api_key=cfg.get("api_key", ""))
     elif ptype == "moonraker":
         return MoonrakerAdapter(host=host, api_key=cfg.get("api_key") or None)
+    elif ptype == "duet":
+        # The machine password (M551) travels in the generic api_key slot;
+        # omit it entirely so the adapter applies the firmware default.
+        _password = cfg.get("api_key") or None
+        return DuetAdapter(host=host, **({"password": _password} if _password else {}))
     elif ptype == "creality":
         return CrealityAdapter(
             host=host,
@@ -1640,10 +1646,14 @@ def discover(timeout: float, subnet: str | None, methods: tuple, json_mode: bool
     "--type",
     "printer_type",
     required=True,
-    type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink"]),
+    type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink", "duet"]),
     help="Printer backend type.",
 )
-@click.option("--api-key", default=None, help="API key (OctoPrint/Moonraker/Creality/Prusa Link).")
+@click.option(
+    "--api-key",
+    default=None,
+    help="API key (OctoPrint/Moonraker/Creality/Prusa Link), or machine password (Duet).",
+)
 @click.option("--access-code", default=None, help="LAN access code (Bambu).")
 @click.option("--serial", default=None, help="Printer serial number (Bambu) or mainboard ID (Elegoo).")
 @click.option("--printer-model", default=None, help="Printer model profile (e.g. k1_max, sparkx_i7, ender3_v4).")
@@ -7278,6 +7288,7 @@ _PRINTER_TYPE_LABELS = {
     "bambu": "Bambu Lab",
     "elegoo": "Elegoo (SDCP)",
     "prusalink": "Prusa Link",
+    "duet": "Duet (RepRapFirmware)",
 }
 
 
@@ -7402,7 +7413,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         if printer_type == "unknown":
             printer_type = click.prompt(
                 "  Printer type could not be auto-detected. Select type",
-                type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink"]),
+                type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink", "duet"]),
             )
         suggested_name = (selected.name or printer_type).lower().replace(" ", "-").replace(".", "-")
     else:
@@ -7425,7 +7436,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                 click.echo("  Could not auto-detect printer type.")
                 printer_type = click.prompt(
                     "  Select printer type",
-                    type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink"]),
+                    type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink", "duet"]),
                 )
                 suggested_name = printer_type
         except Exception as exc:
@@ -7433,7 +7444,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
             click.echo("  Probe failed. Enter type manually.")
             printer_type = click.prompt(
                 "  Select printer type",
-                type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink"]),
+                type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink", "duet"]),
             )
             suggested_name = printer_type
 
@@ -7447,9 +7458,13 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     access_code = None
     serial = None
 
-    if printer_type in ("octoprint", "moonraker", "creality", "prusalink"):
+    if printer_type in ("octoprint", "moonraker", "creality", "prusalink", "duet"):
+        # RepRapFirmware authenticates with a machine password (set by M551),
+        # not an API key -- asking for the wrong thing by name sends people
+        # hunting for a key their printer never issues.
+        credential = "Machine password" if printer_type == "duet" else "API key"
         api_key = click.prompt(
-            f"  API key for {_PRINTER_TYPE_LABELS.get(printer_type, printer_type)}",
+            f"  {credential} for {_PRINTER_TYPE_LABELS.get(printer_type, printer_type)}",
             default="",
             show_default=False,
         )
@@ -9168,6 +9183,10 @@ def _deep_network_diagnostics(host: str, printer_cfg: dict) -> list[dict]:
         "moonraker": [
             (7125, "Moonraker API"),
             (80, "HTTP"),
+        ],
+        "duet": [
+            (80, "HTTP"),
+            (443, "HTTPS"),
         ],
         "creality": [
             (7125, "Moonraker API"),

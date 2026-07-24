@@ -15,7 +15,7 @@ Environment variables
 ``KILN_PRINTER_TYPE``
     Printer backend type.  Supported values: ``"octoprint"``,
     ``"moonraker"``, ``"creality"``, ``"bambu"``, ``"elegoo"``,
-    ``"prusalink"``, and ``"serial"``.
+    ``"prusalink"``, ``"duet"``, and ``"serial"``.
     Defaults to ``"octoprint"``.
 ``KILN_PRINTER_PORT``
     Serial port path for USB printers (required when ``KILN_PRINTER_TYPE``
@@ -285,6 +285,7 @@ from kiln.printer_intelligence import (
 from kiln.printers import (
     BambuAdapter,
     CrealityAdapter,
+    DuetAdapter,
     ElegooAdapter,
     MoonrakerAdapter,
     OctoPrintAdapter,
@@ -1157,6 +1158,11 @@ def _get_adapter() -> PrinterAdapter:
         # Moonraker typically does not require an API key, but one can
         # optionally be provided via KILN_PRINTER_API_KEY.
         _adapter = MoonrakerAdapter(host=host, api_key=api_key or None)
+    elif printer_type == "duet":
+        # RepRapFirmware authenticates with a machine password (set by M551),
+        # carried in the generic API-key slot.  Boards with no password
+        # configured accept the firmware default, which the adapter supplies.
+        _adapter = DuetAdapter(host=host, **({"password": api_key} if api_key else {}))
     elif printer_type == "creality":
         _adapter = CrealityAdapter(
             host=host,
@@ -1405,6 +1411,8 @@ def _build_adapter_from_config_entry(name: str, entry: dict[str, Any]) -> Printe
         adapter = OctoPrintAdapter(host=host, api_key=api_key)
     elif printer_type == "moonraker":
         adapter = MoonrakerAdapter(host=host, api_key=api_key or None)
+    elif printer_type == "duet":
+        adapter = DuetAdapter(host=host, **({"password": api_key} if api_key else {}))
     elif printer_type == "creality":
         adapter = CrealityAdapter(host=host, api_key=api_key or None, model=printer_model or None)
     elif printer_type == "bambu":
@@ -7009,7 +7017,7 @@ def register_printer(
     Args:
         name: Unique human-readable name (e.g. "voron-350", "bambu-x1c").
         printer_type: Backend type -- "octoprint", "moonraker", "bambu",
-            "creality", "elegoo", "prusalink", or "serial".
+            "creality", "elegoo", "prusalink", "duet", or "serial".
         host: Base URL or IP address of the printer.  For serial printers,
             this is the port path (e.g. "/dev/ttyUSB0", "COM3").
         api_key: API key (required for OctoPrint and Bambu, optional for
@@ -7084,6 +7092,12 @@ def register_printer(
             adapter = OctoPrintAdapter(host=host, api_key=api_key, verify_ssl=verify_ssl)
         elif printer_type == "moonraker":
             adapter = MoonrakerAdapter(host=host, api_key=api_key or None, verify_ssl=verify_ssl)
+        elif printer_type == "duet":
+            adapter = DuetAdapter(
+                host=host,
+                verify_ssl=verify_ssl,
+                **({"password": api_key} if api_key else {}),
+            )
         elif printer_type == "creality":
             adapter = CrealityAdapter(
                 host=host,

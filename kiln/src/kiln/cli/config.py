@@ -109,7 +109,7 @@ def _validate_printer_url(url: str, *, printer_type: str = "octoprint") -> tuple
 
     :param url: Raw printer URL or hostname.
     :param printer_type: Backend type (``"octoprint"``, ``"moonraker"``,
-        ``"creality"``, ``"bambu"``, ``"prusalink"``).
+        ``"creality"``, ``"bambu"``, ``"prusalink"``, ``"duet"``).
     :returns: ``(cleaned_url, warnings)`` where *warnings* is a list of
         human-readable strings (empty if everything looks good).
     """
@@ -386,7 +386,8 @@ def save_printer(
         "type": printer_type,
         "host": cleaned_host,
     }
-    if printer_type in ("octoprint", "moonraker", "creality"):
+    # Duet carries the machine password (M551) in the generic api_key slot.
+    if printer_type in ("octoprint", "moonraker", "creality", "duet"):
         if api_key:
             entry["api_key"] = api_key
     elif printer_type == "bambu":
@@ -505,7 +506,9 @@ def validate_printer_config(cfg: dict[str, Any]) -> tuple[bool, str | None]:
     Returns ``(True, None)`` or ``(False, error_message)``.
     """
     ptype = _normalize_printer_type(cfg.get("type", ""))
-    if ptype not in ("octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink", "serial"):
+    if ptype not in (
+        "octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink", "duet", "serial"
+    ):
         return False, f"Unknown printer type: {ptype!r}"
 
     host = cfg.get("host", "")

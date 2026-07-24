@@ -70,6 +70,11 @@ _EXAMPLES_BY_TYPE: dict[str, list[str]] = {
     "elegoo":    ["elegoo_centauri", "elegoo_centauri_carbon"],
     "bambu":     ["bambu_a1", "bambu_a1_mini", "bambu_x1c",
                   "bambu_p1s", "bambu_p1p", "bambu_x1e"],
+    # No "duet" entry yet: the model catalogue currently contains no
+    # Duet-controlled machine, and every id here must name a real one -- a
+    # made-up example would send the user to a profile that does not exist.
+    # Add the key alongside the first Duet machine that lands in
+    # data/printer_intelligence.json.
 }
 
 

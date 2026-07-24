@@ -35,6 +35,7 @@ except ImportError:
     ElegooAdapter = None  # type: ignore[assignment,misc]
 
 from kiln.printers.creality import CrealityAdapter
+from kiln.printers.duet import DuetAdapter
 from kiln.printers.moonraker import MoonrakerAdapter
 from kiln.printers.octoprint import OctoPrintAdapter
 from kiln.printers.prusalink import PrusaLinkAdapter
@@ -45,6 +46,7 @@ __all__ = [
     "CrealityAdapter",
     "DeviceAdapter",
     "DeviceType",
+    "DuetAdapter",
     "ElegooAdapter",
     "FirmwareComponent",
     "FirmwareStatus",

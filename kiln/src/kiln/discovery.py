@@ -41,7 +41,7 @@ class DiscoveredPrinter:
 
     host: str
     port: int
-    printer_type: str  # "octoprint", "moonraker", "bambu", "elegoo", "prusalink", "unknown"
+    printer_type: str  # "octoprint", "moonraker", "bambu", "elegoo", "prusalink", "duet", "unknown"
     name: str = ""
     version: str = ""
     serial: str = ""
@@ -62,6 +62,12 @@ _PROBE_TARGETS = [
     (7125, "/server/info", "klippy_state", "moonraker"),
     (80, "/server/info", "klippy_state", "moonraker"),
     (4408, "/server/info", "klippy_state", "moonraker"),  # Elegoo Neptune 4 / OrangeStorm Giga Fluidd port
+    # RepRapFirmware serves its web interface on port 80.  rr_connect is the
+    # only endpoint that answers without a session, and boardType appears
+    # nowhere else, so it is the cheapest unambiguous Duet fingerprint.
+    # A board with a machine password set (M551) answers err=1 and is not
+    # discovered; register those manually.
+    (80, "/rr_connect", "boardType", "duet"),
     (80, "/api/v1/status", "printer", "prusalink"),  # PrusaLink on default port
     (8080, "/api/v1/status", "printer", "prusalink"),  # PrusaLink alternate port
     (8883, None, None, "bambu"),  # Bambu MQTT port (no HTTP probe)
@@ -190,6 +196,10 @@ def probe_host(host: str, timeout: float = 3.0) -> list[DiscoveredPrinter]:
                         printer_data = data.get("printer", {})
                         name = printer_data.get("state", "PrusaLink")
                         version = ""
+                    elif printer_type == "duet":
+                        # rr_connect reports the controller model, which is the
+                        # only human-readable identity the board offers here.
+                        name = data.get("boardType", "Duet")
 
                     results.append(
                         DiscoveredPrinter(
@@ -388,6 +398,8 @@ def _try_http_probe(subnet: str, timeout: float) -> list[DiscoveredPrinter]:
                             printer_data = data.get("printer", {})
                             name = printer_data.get("state", "PrusaLink")
                             version = ""
+                        elif printer_type == "duet":
+                            name = data.get("boardType", "Duet")
 
                         found.append(
                             DiscoveredPrinter(
