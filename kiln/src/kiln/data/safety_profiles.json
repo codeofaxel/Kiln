@@ -788,7 +788,7 @@
       450,
       565
     ],
-    "notes": "Industrial high-temperature FFF. Dual independent extruders, actively heated 135 C chamber, 500 C+ extruder, 200 C+ bed. The only genuinely open high-temp machine in this class: it runs Klipper behind a browser interface, so Kiln reaches it through the existing Moonraker adapter."
+    "notes": "Industrial high-temperature FFF. Dual independent extruders, actively heated 135 C chamber, 500 C+ extruder, 200 C+ bed. AON3D ships a Klipper-based firmware on current machines (units at or below application version v2022.07.04.21.14 run Marlin) behind AON3D's own browser interface. They document no Moonraker port or third-party control endpoint, so Kiln does not claim a control path to it — the intelligence here is advisory until a machine is tested."
   },
   "qidi_plus4": {
     "display_name": "QIDI Plus 4",
@@ -864,5 +864,50 @@
       270
     ],
     "notes": "Sprite Pro full-metal direct-drive extruder — rated to 300C with a titanium throat and no PTFE in the hot zone, so high-temperature filaments are safe here in a way they are not on the base S1. Open-frame bed-slinger, so ABS and ASA still warp without an enclosure."
+  },
+  "aon_hylo": {
+    "display_name": "AON3D Hylo",
+    "max_hotend_temp": 500.0,
+    "max_bed_temp": 250.0,
+    "max_chamber_temp": 250.0,
+    "max_feedrate": 36000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 100.0,
+    "build_volume": [
+      650,
+      450,
+      450
+    ],
+    "notes": "Industrial high-temperature FFF. Dual independent extruders, actively heated 250 C chamber, 250 C bed, 500 C nozzle — enough to hold ULTEM 9085/1010 and PPSU at the chamber temperature their properties depend on, which the AON-M2+ cannot. Ships HEPA/activated-carbon emission filtration; even so, these polymers decompose into hazardous products and the chamber runs far above skin-burn temperature, so let it cool before opening and keep room ventilation independent of the filter. Needs 208-240VAC 50A single phase and 75-135 psig compressed air for the vacuum chuck. Kiln does not control this printer: USB is file upload only and management is through AON3D's cloud, so there is no third-party control path — Kiln advises, it does not drive."
+  },
+  "intamsys_610ht": {
+    "display_name": "INTAMSYS FUNMAT PRO 610HT",
+    "max_hotend_temp": 500.0,
+    "max_bed_temp": 300.0,
+    "max_chamber_temp": 300.0,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": null,
+    "build_volume": [
+      610,
+      508,
+      508
+    ],
+    "notes": "Industrial high-temperature FFF. Dual nozzles, actively heated 300 C chamber, 300 C platform, 500 C extruder — the widest thermal envelope in the registry, clearing ULTEM 9085/1010 and PPSU with margin. INTAMSYS publishes NO onboard fume filtration for this model; their own safety data sheets for ULTEM and PPSU require exhaust ventilation where the material is molten, so facility extraction is the operator's responsibility here, not the machine's. Front and top doors carry electromagnetic safety locks driven by an independent safety PLC, with a chamber temperature sensor and a separate temperature limiter as redundant sensing, designed against EN60204. Treat the interlocks as load-bearing: a 300 C chamber is a burn hazard consumer printers do not have. Kiln does not control this printer: INTAMSYS markets an SDK but publishes no API, so there is no verified third-party control path — Kiln advises, it does not drive."
+  },
+  "visionminer_22idex_v4": {
+    "display_name": "Vision Miner 22 IDEX v4",
+    "max_hotend_temp": 500.0,
+    "max_bed_temp": 200.0,
+    "max_chamber_temp": 100.0,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": null,
+    "build_volume": [
+      350,
+      350,
+      450
+    ],
+    "notes": "Industrial IDEX with a 500 C hotend and 200 C bed but only a 100 C actively heated chamber. Vision Miner's sales list names PEEK, PEKK, ULTEM 9085/1010 and PPSU; their own temperature guide is more careful, capping the chamber at 100 C for every one of them and telling you to verify each material's real requirement. Kiln does that verification: the hotend and bed clear these polymers, the chamber does not, so they are refused here. Everything up to PPS, PC and PA-CF runs comfortably at the vendor's 30-200 mm/s high-temperature range. Hold the documented 15-minute heat soak before starting, and never pre-heat the nozzle during it. Ships built-in HEPA and activated-carbon filtration with an optional external fume-extraction port. Runs RepRapFirmware on a Duet 3 with Duet Web Control and accepts standard RepRap G-code, so it slices in PrusaSlicer or OrcaSlicer today; Kiln has no Duet adapter yet, so it advises rather than drives."
   }
 }

@@ -10847,5 +10847,505 @@
       ],
       "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 260C; needs a 110C bed, this printer tops out at 100C."
     }
+  },
+  "aon_hylo": {
+    "peek": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PEEK is within this printer's thermal range. It still needs dry filament, and results depend on holding the nozzle temperature continuously rather than peaking to it."
+    },
+    "pei_1010": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pei_9085": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pekk": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PEKK is within this printer's thermal range. It still needs dry filament, and results depend on holding the nozzle temperature continuously rather than peaking to it."
+    },
+    "ppsu": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pps": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PPS is within this printer's thermal range. It still needs dry filament, and results depend on holding the nozzle temperature continuously rather than peaking to it."
+    },
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "asa": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ]
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ]
+    },
+    "pla_matte": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_hf": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_tough": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_95a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_85a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pvb": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "pp_build_surface",
+        "dry_box"
+      ]
+    }
+  },
+  "intamsys_610ht": {
+    "peek": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PEEK is within this printer's thermal range. It still needs dry filament, and results depend on holding the nozzle temperature continuously rather than peaking to it."
+    },
+    "pei_1010": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pei_9085": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pekk": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PEKK is within this printer's thermal range. It still needs dry filament, and results depend on holding the nozzle temperature continuously rather than peaking to it."
+    },
+    "ppsu": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pps": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PPS is within this printer's thermal range. It still needs dry filament, and results depend on holding the nozzle temperature continuously rather than peaking to it."
+    },
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "asa": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ]
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ]
+    },
+    "pla_matte": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_hf": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_tough": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_95a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_85a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pvb": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "pp_build_surface",
+        "dry_box"
+      ]
+    }
+  },
+  "visionminer_22idex_v4": {
+    "peek": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "heated_chamber",
+        "dry_box"
+      ]
+    },
+    "pei_1010": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "heated_chamber",
+        "dry_box"
+      ]
+    },
+    "pei_9085": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "heated_chamber",
+        "dry_box"
+      ]
+    },
+    "pekk": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "heated_chamber",
+        "dry_box"
+      ]
+    },
+    "ppsu": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "heated_chamber",
+        "dry_box"
+      ]
+    },
+    "pps": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "asa": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ]
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ]
+    },
+    "pla_matte": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_hf": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_tough": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_95a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_85a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pvb": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "pp_build_surface",
+        "dry_box"
+      ]
+    }
   }
 }

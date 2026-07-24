@@ -1611,5 +1611,113 @@
       0.28
     ],
     "printer_id": "ender3_s1_pro"
+  },
+  "aon_hylo": {
+    "printer_id": "aon_hylo",
+    "display_name": "AON3D Hylo",
+    "manufacturer": "AON3D",
+    "build_volume_mm": {
+      "x": 650,
+      "y": 450,
+      "z": 450
+    },
+    "max_hotend_temp_c": 500,
+    "max_bed_temp_c": 250,
+    "has_enclosure": true,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "abs",
+      "asa",
+      "pa-cf",
+      "pc",
+      "peek",
+      "pei_1010",
+      "pei_9085",
+      "pekk",
+      "petg",
+      "pla",
+      "pps",
+      "ppsu",
+      "tpu"
+    ],
+    "typical_tolerance_mm": 0.15,
+    "max_print_speed_mm_s": 500,
+    "default_layer_heights_mm": [
+      0.15,
+      0.2,
+      0.3,
+      0.4,
+      0.6
+    ]
+  },
+  "intamsys_610ht": {
+    "printer_id": "intamsys_610ht",
+    "display_name": "INTAMSYS FUNMAT PRO 610HT",
+    "manufacturer": "INTAMSYS",
+    "build_volume_mm": {
+      "x": 610,
+      "y": 508,
+      "z": 508
+    },
+    "max_hotend_temp_c": 500,
+    "max_bed_temp_c": 300,
+    "has_enclosure": true,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "abs",
+      "asa",
+      "pa-cf",
+      "pc",
+      "peek",
+      "pei_1010",
+      "pei_9085",
+      "pekk",
+      "petg",
+      "pla",
+      "pps",
+      "ppsu",
+      "tpu"
+    ],
+    "typical_tolerance_mm": 0.15,
+    "max_print_speed_mm_s": 500,
+    "default_layer_heights_mm": [
+      0.15,
+      0.2,
+      0.3,
+      0.4,
+      0.5
+    ]
+  },
+  "visionminer_22idex_v4": {
+    "printer_id": "visionminer_22idex_v4",
+    "display_name": "Vision Miner 22 IDEX v4",
+    "manufacturer": "Vision Miner",
+    "build_volume_mm": {
+      "x": 350,
+      "y": 350,
+      "z": 450
+    },
+    "max_hotend_temp_c": 500,
+    "max_bed_temp_c": 200,
+    "has_enclosure": true,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "abs",
+      "asa",
+      "pa-cf",
+      "pc",
+      "petg",
+      "pla",
+      "pps",
+      "tpu"
+    ],
+    "typical_tolerance_mm": 0.15,
+    "max_print_speed_mm_s": 200,
+    "default_layer_heights_mm": [
+      0.1,
+      0.15,
+      0.2,
+      0.3
+    ]
   }
 }

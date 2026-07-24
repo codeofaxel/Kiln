@@ -71,6 +71,7 @@ MANUFACTURER_PREFIXES: list[tuple[str, str]] = [
     ("k1", "Creality"),
     ("k2", "Creality"),
     ("sparkx", "SparkX"),
+    ("visionminer", "Vision Miner"),
     ("klipper_generic", "Generic"),
 ]
 

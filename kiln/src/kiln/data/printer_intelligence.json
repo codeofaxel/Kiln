@@ -2325,5 +2325,249 @@
     "max_hotend_temp": 300,
     "max_bed_temp": 110,
     "has_input_shaping": false
+  },
+  "aon_hylo": {
+    "display_name": "AON3D Hylo",
+    "firmware": "proprietary",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "has_input_shaping": false,
+    "materials": {
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 40
+      },
+      "ABS": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 0
+      },
+      "ASA": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 30
+      },
+      "PC": {
+        "hotend": 280,
+        "bed": 110,
+        "fan": 0
+      },
+      "PA-CF": {
+        "hotend": 300,
+        "bed": 100,
+        "fan": 30
+      },
+      "PPS": {
+        "hotend": 340,
+        "bed": 120,
+        "fan": 0
+      },
+      "PEKK": {
+        "hotend": 375,
+        "bed": 120,
+        "fan": 0
+      },
+      "PEEK": {
+        "hotend": 400,
+        "bed": 140,
+        "fan": 0
+      },
+      "PEI 9085": {
+        "hotend": 360,
+        "bed": 190,
+        "fan": 0
+      },
+      "PEI 1010": {
+        "hotend": 360,
+        "bed": 190,
+        "fan": 0
+      },
+      "PPSU": {
+        "hotend": 380,
+        "bed": 190,
+        "fan": 0
+      },
+      "TPU": {
+        "hotend": 230,
+        "bed": 50,
+        "fan": 50
+      },
+      "PVA": {
+        "hotend": 240,
+        "bed": 55,
+        "fan": 50
+      }
+    },
+    "build_volume_mm": [
+      650,
+      450,
+      450
+    ],
+    "max_hotend_temp": 500,
+    "max_bed_temp": 250
+  },
+  "intamsys_610ht": {
+    "display_name": "INTAMSYS FUNMAT PRO 610HT",
+    "firmware": "proprietary",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "has_input_shaping": false,
+    "materials": {
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 40
+      },
+      "ABS": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 0
+      },
+      "ASA": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 30
+      },
+      "PC": {
+        "hotend": 280,
+        "bed": 110,
+        "fan": 0
+      },
+      "PA-CF": {
+        "hotend": 300,
+        "bed": 100,
+        "fan": 30
+      },
+      "PPS": {
+        "hotend": 340,
+        "bed": 120,
+        "fan": 0
+      },
+      "PEKK": {
+        "hotend": 375,
+        "bed": 120,
+        "fan": 0
+      },
+      "PEEK": {
+        "hotend": 400,
+        "bed": 140,
+        "fan": 0
+      },
+      "PEI 9085": {
+        "hotend": 360,
+        "bed": 190,
+        "fan": 0
+      },
+      "PEI 1010": {
+        "hotend": 360,
+        "bed": 190,
+        "fan": 0
+      },
+      "PPSU": {
+        "hotend": 380,
+        "bed": 190,
+        "fan": 0
+      },
+      "HIPS": {
+        "hotend": 240,
+        "bed": 100,
+        "fan": 30
+      },
+      "TPU": {
+        "hotend": 230,
+        "bed": 50,
+        "fan": 50
+      },
+      "PVA": {
+        "hotend": 240,
+        "bed": 55,
+        "fan": 50
+      }
+    },
+    "build_volume_mm": [
+      610,
+      508,
+      508
+    ],
+    "max_hotend_temp": 500,
+    "max_bed_temp": 300
+  },
+  "visionminer_22idex_v4": {
+    "display_name": "Vision Miner 22 IDEX v4",
+    "firmware": "reprapfirmware",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "has_input_shaping": false,
+    "materials": {
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 40
+      },
+      "ABS": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 0
+      },
+      "ASA": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 30
+      },
+      "PC": {
+        "hotend": 280,
+        "bed": 110,
+        "fan": 0
+      },
+      "PA-CF": {
+        "hotend": 300,
+        "bed": 100,
+        "fan": 30
+      },
+      "PPS": {
+        "hotend": 340,
+        "bed": 120,
+        "fan": 0
+      },
+      "TPU": {
+        "hotend": 230,
+        "bed": 50,
+        "fan": 50
+      },
+      "PVA": {
+        "hotend": 240,
+        "bed": 55,
+        "fan": 50
+      }
+    },
+    "build_volume_mm": [
+      350,
+      350,
+      450
+    ],
+    "max_hotend_temp": 500,
+    "max_bed_temp": 200
   }
 }
