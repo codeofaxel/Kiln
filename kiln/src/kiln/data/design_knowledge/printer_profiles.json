@@ -36,6 +36,7 @@
     "chamber_heated": false
   },
   "bambu_a1_mini": {
+    "printer_id": "bambu_a1_mini",
     "display_name": "Bambu Lab A1 Mini",
     "manufacturer": "Bambu Lab",
     "build_volume_mm": {
@@ -65,6 +66,7 @@
     "chamber_heated": false
   },
   "bambu_x1c": {
+    "printer_id": "bambu_x1c",
     "display_name": "Bambu Lab X1 Carbon",
     "manufacturer": "Bambu Lab",
     "build_volume_mm": {
@@ -98,6 +100,7 @@
     "chamber_heated": false
   },
   "bambu_x1e": {
+    "printer_id": "bambu_x1e",
     "display_name": "Bambu Lab X1E",
     "manufacturer": "Bambu Lab",
     "build_volume_mm": {
@@ -131,6 +134,7 @@
     "chamber_heated": false
   },
   "bambu_p2s": {
+    "printer_id": "bambu_p2s",
     "display_name": "Bambu Lab P2S",
     "manufacturer": "Bambu Lab",
     "build_volume_mm": {
@@ -164,6 +168,7 @@
     "chamber_heated": false
   },
   "bambu_p1s": {
+    "printer_id": "bambu_p1s",
     "display_name": "Bambu Lab P1S",
     "manufacturer": "Bambu Lab",
     "build_volume_mm": {
@@ -197,6 +202,7 @@
     "chamber_heated": false
   },
   "bambu_a1": {
+    "printer_id": "bambu_a1",
     "display_name": "Bambu Lab A1",
     "manufacturer": "Bambu Lab",
     "build_volume_mm": {
@@ -226,6 +232,7 @@
     "chamber_heated": false
   },
   "bambu_a2l": {
+    "printer_id": "bambu_a2l",
     "display_name": "Bambu Lab A2L",
     "manufacturer": "Bambu Lab",
     "build_volume_mm": {
@@ -255,6 +262,7 @@
     "chamber_heated": false
   },
   "bambu_h2s": {
+    "printer_id": "bambu_h2s",
     "display_name": "Bambu Lab H2S",
     "manufacturer": "Bambu Lab",
     "build_volume_mm": {
@@ -289,6 +297,7 @@
     "chamber_heated": true
   },
   "prusa_mk4": {
+    "printer_id": "prusa_mk4",
     "display_name": "Prusa MK4",
     "manufacturer": "Prusa Research",
     "build_volume_mm": {
@@ -321,6 +330,7 @@
     "chamber_heated": false
   },
   "prusa_mini": {
+    "printer_id": "prusa_mini",
     "display_name": "Prusa MINI+",
     "manufacturer": "Prusa Research",
     "build_volume_mm": {
@@ -349,6 +359,7 @@
     "chamber_heated": false
   },
   "ender3_v2": {
+    "printer_id": "ender3_v2",
     "display_name": "Ender 3 V2",
     "manufacturer": "Creality",
     "build_volume_mm": {
@@ -378,6 +389,7 @@
     "chamber_heated": false
   },
   "ender3_s1": {
+    "printer_id": "ender3_s1",
     "display_name": "Ender 3 S1",
     "manufacturer": "Creality",
     "build_volume_mm": {
@@ -408,6 +420,7 @@
     "chamber_heated": false
   },
   "voron_2": {
+    "printer_id": "voron_2",
     "display_name": "Voron 2.4",
     "manufacturer": "Voron Design",
     "build_volume_mm": {
@@ -1399,12 +1412,43 @@
   },
   "sovol_sv06": {
     "printer_id": "sovol_sv06",
-    "display_name": "Sovol SV06 / SV06 Plus",
+    "display_name": "Sovol SV06",
     "manufacturer": "Sovol",
     "build_volume_mm": {
       "x": 220,
       "y": 220,
       "z": 250
+    },
+    "max_hotend_temp_c": 300,
+    "max_bed_temp_c": 100,
+    "has_enclosure": false,
+    "has_direct_drive": true,
+    "supported_materials": [
+      "abs",
+      "petg",
+      "pla",
+      "tpu"
+    ],
+    "typical_tolerance_mm": 0.2,
+    "max_print_speed_mm_s": 150,
+    "default_layer_heights_mm": [
+      0.08,
+      0.12,
+      0.16,
+      0.2,
+      0.28
+    ],
+    "chamber_temp_c": null,
+    "chamber_heated": false
+  },
+  "sovol_sv06_plus": {
+    "printer_id": "sovol_sv06_plus",
+    "display_name": "Sovol SV06 Plus",
+    "manufacturer": "Sovol",
+    "build_volume_mm": {
+      "x": 300,
+      "y": 300,
+      "z": 340
     },
     "max_hotend_temp_c": 300,
     "max_bed_temp_c": 100,

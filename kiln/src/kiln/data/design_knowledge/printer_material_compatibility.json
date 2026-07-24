@@ -11178,6 +11178,254 @@
       "upgrades_needed": []
     }
   },
+  "sovol_sv06_plus": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ]
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ]
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ]
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ]
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ]
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ]
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ]
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ]
+    },
+    "pla_matte": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "petg_hf": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pla_tough": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_95a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "tpu_85a": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pvb": {
+      "status": "compatible",
+      "upgrades_needed": []
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_build_surface",
+        "dry_box"
+      ]
+    },
+    "peek": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PEEK cannot run on this printer: needs a 380C hotend, this printer tops out at 300C; needs an actively heated chamber at 70C, this printer has no heated chamber; needs a 130C bed, this printer tops out at 100C."
+    },
+    "pei_1010": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PEI 1010 cannot run on this printer: needs a 380C hotend, this printer tops out at 300C; needs an actively heated chamber at 160C, this printer has no heated chamber; needs a 130C bed, this printer tops out at 100C."
+    },
+    "pei_9085": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PEI 9085 cannot run on this printer: needs a 365C hotend, this printer tops out at 300C; needs an actively heated chamber at 160C, this printer has no heated chamber; needs a 130C bed, this printer tops out at 100C."
+    },
+    "pekk": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "heated_chamber",
+        "dry_box"
+      ],
+      "notes": "PEKK cannot run on this printer: needs a 350C hotend, this printer tops out at 300C; needs an actively heated chamber at 90C, this printer has no heated chamber."
+    },
+    "ppsu": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "heated_chamber",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PPSU cannot run on this printer: needs a 390C hotend, this printer tops out at 300C; needs an actively heated chamber at 170C, this printer has no heated chamber; needs a 130C bed, this printer tops out at 100C."
+    },
+    "pps": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "high_temp_hotend",
+        "high_temp_bed",
+        "dry_box"
+      ],
+      "notes": "PPS cannot run on this printer: needs a 335C hotend, this printer tops out at 300C; needs a 110C bed, this printer tops out at 100C."
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure"
+      ],
+      "notes": "PC-ESD cannot run on this printer: it needs a 110C bed and this machine reaches 100C."
+    },
+    "pei_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle",
+        "high_temp_bed",
+        "high_temp_hotend"
+      ],
+      "notes": "PEI-ESD cannot run on this printer: it needs a 140C bed and this machine reaches 100C; and it needs 360C at the nozzle and this machine reaches 300C."
+    },
+    "pekk_esd": {
+      "status": "not_compatible",
+      "upgrades_needed": [
+        "dry_box",
+        "enclosure",
+        "hardened_nozzle",
+        "heated_chamber",
+        "high_temp_hotend"
+      ],
+      "notes": "PEKK-ESD cannot run on this printer: it needs a 120C bed and this machine reaches 100C; and it needs 355C at the nozzle and this machine reaches 300C."
+    },
+    "pla_esd": {
+      "status": "compatible",
+      "upgrades_needed": []
+    }
+  },
   "sovol_sv07": {
     "pla": {
       "status": "compatible",

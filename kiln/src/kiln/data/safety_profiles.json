@@ -686,7 +686,7 @@
     "notes": "Klipper-based. All-metal hotend. Direct drive."
   },
   "sovol_sv06": {
-    "display_name": "Sovol SV06 / SV06 Plus",
+    "display_name": "Sovol SV06",
     "max_hotend_temp": 300.0,
     "max_bed_temp": 100.0,
     "max_chamber_temp": null,
@@ -697,6 +697,21 @@
       220,
       220,
       250
+    ],
+    "notes": "Prusa MK3S clone. All-metal hotend. Planetary gear extruder."
+  },
+  "sovol_sv06_plus": {
+    "display_name": "Sovol SV06 Plus",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 100.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 8000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 12.0,
+    "build_volume": [
+      300,
+      300,
+      340
     ],
     "notes": "Prusa MK3S clone. All-metal hotend. Planetary gear extruder."
   },
