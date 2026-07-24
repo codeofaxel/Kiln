@@ -1609,8 +1609,8 @@
       "retract_length": "0.8",
       "retract_speed": "40",
       "retract_lift": "0.2",
-      "bed_shape": "0x0,220x0,220x220,0x220",
-      "max_print_height": "250",
+      "bed_shape": "0x0,300x0,300x300,0x300",
+      "max_print_height": "340",
       "gcode_flavor": "marlin"
     },
     "tool_change": {
