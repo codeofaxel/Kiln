@@ -180,7 +180,8 @@ class _EnterpriseToolsPlugin:
             """Add, remove, or update a team member.
 
             Enterprise feature. Manages team seats and role assignments.
-            Business tier supports up to 5 seats; Enterprise is unlimited.
+            Business includes 3 seats and meters to a cap of 10; Enterprise is
+            unlimited.
 
             Args:
                 action: One of ``"add"``, ``"remove"``, ``"set_role"``, ``"list"``.
