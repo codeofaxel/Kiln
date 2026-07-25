@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-07-25T18:49:45.892679+00:00",
+  "generated": "2026-07-25T19:03:26.277719+00:00",
   "tool_count": 377,
   "categories": {
     "product_generators": {
@@ -12131,27 +12131,50 @@
     },
     {
       "name": "verify_mesh_fit",
-      "description": "Prove that separate mesh parts can PHYSICALLY assemble \u2014 exact shared-material math, not a picture.",
+      "description": "Prove that separate parts can PHYSICALLY assemble \u2014 the ONE fit check, exact shared-material math, not a picture.",
       "tier": "free",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
           "part_paths": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Part Paths",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Part Paths"
           },
           "tolerance_mm": {
             "default": 0.2,
             "title": "Tolerance Mm",
             "type": "number"
+          },
+          "units": {
+            "default": "auto",
+            "title": "Units",
+            "type": "string"
+          },
+          "recipe": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Recipe"
           }
         },
-        "required": [
-          "part_paths"
-        ],
         "title": "verify_mesh_fitArguments",
         "type": "object"
       }
