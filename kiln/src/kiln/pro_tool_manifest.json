@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-07-25T08:49:14.721039+00:00",
+  "generated": "2026-07-25T09:35:09.763424+00:00",
   "tool_count": 377,
   "categories": {
     "product_generators": {
@@ -12131,8 +12131,8 @@
     },
     {
       "name": "verify_mesh_fit",
-      "description": "Prove that separate mesh parts can PHYSICALLY assemble \u2014 real shared-material math, not a picture.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Prove that separate mesh parts can PHYSICALLY assemble \u2014 exact shared-material math, not a picture.",
+      "tier": "free",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
@@ -12142,11 +12142,6 @@
             },
             "title": "Part Paths",
             "type": "array"
-          },
-          "step_mm": {
-            "default": 0.4,
-            "title": "Step Mm",
-            "type": "number"
           },
           "tolerance_mm": {
             "default": 0.2,
