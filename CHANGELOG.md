@@ -45,6 +45,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   the answer is tuned to your exact printer and material instead of a generic
   spec.
 
+- **Chemical answers for the high-temperature plastics.** Ask whether a
+  printed PEEK, PEI or PPSU part (and other high-temp plastics) survives a
+  solvent, fuel, cleaner, oil, sunlight or food contact — answered for a real
+  printed part, and flagged honestly when no test exists. Everyday chemicals
+  are Kiln Business; the ones that carry legal weight are Kiln Enterprise.
+  Warnings are free for everyone. See https://kiln3d.com/pricing.
+
+- **ESD-safe filaments, matched to your job.** ESD-safe (anti-static)
+  filaments drain off static so a printed tray or fixture won't zap the boards
+  it holds. Kiln Business picks and sources the right grade for your printer;
+  Kiln Enterprise adds what a shop needs to prove its parts pass an ESD audit.
+  The safety basics are free for everyone. See https://kiln3d.com/pricing.
+
 - **Tidy your workshop (Pro+).** Archive a design to hide it from your list,
   and restore it anytime — nothing is ever lost. See
   https://kiln3d.com/pricing.
@@ -67,6 +80,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   engineering tools (Pro+).** Expect more realistic results in several
   edge cases, including better support for specialty filaments like
   carbon-fiber blends.
+
+- **When a material won't run, Kiln names what stops it — nozzle, bed or
+  chamber.**
 
 - **Sign in once, stay signed in.** Your `kiln signin` session now
   renews itself automatically in the background, so account features
