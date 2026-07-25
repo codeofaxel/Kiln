@@ -89,18 +89,31 @@ def test_a_chamber_needs_an_enclosure_to_heat():
 
 
 def test_chamber_setpoints_are_physically_sane():
-    """Catch a unit slip or a stray bed temperature in the chamber field."""
+    """Catch a unit slip or a stray temperature in the chamber field.
+
+    The upper bound is RELATIONAL, not a magic number, because a fixed ceiling
+    goes stale the moment a hotter machine is added — this test originally
+    capped at 250C when the hottest chamber in the catalogue was 135C, and a
+    real 300C industrial machine then tripped it. A chamber hotter than the
+    machine's own nozzle is the actual impossibility, and it is the shape a unit
+    slip or a mis-filed nozzle temperature takes.
+    """
     bad: list[str] = []
     for pid, entry in _profiles().items():
         temp = entry.get("chamber_temp_c")
         if temp is None:
             continue
-        if not isinstance(temp, (int, float)) or not (30 <= temp <= 250):
-            bad.append(f"{pid}={temp!r}")
+        if not isinstance(temp, (int, float)) or temp < 30:
+            bad.append(f"{pid}={temp!r} (below 30C is not a heated chamber)")
+            continue
+        nozzle = entry.get("max_hotend_temp_c")
+        if isinstance(nozzle, (int, float)) and temp > nozzle:
+            bad.append(
+                f"{pid}: chamber {temp}C exceeds its own nozzle ceiling {nozzle}C"
+            )
     assert not bad, (
-        "chamber setpoints outside a plausible range — below 30C is not a heated "
-        "chamber, and above 250C exceeds any FDM machine on the market, so this is "
-        f"most likely a unit slip or a bed temperature in the wrong field: {bad}"
+        "chamber setpoints that cannot be real — a chamber hotter than the "
+        f"machine's own nozzle is a unit slip or the wrong field: {bad}"
     )
 
 

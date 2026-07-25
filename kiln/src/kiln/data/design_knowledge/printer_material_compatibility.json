@@ -14180,6 +14180,52 @@
         "pp_build_surface",
         "dry_box"
       ]
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
+    },
+    "pla_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "pei_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
+    },
+    "pekk_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
     }
   },
   "intamsys_610ht": {
@@ -14345,6 +14391,52 @@
       "upgrades_needed": [
         "pp_build_surface",
         "dry_box"
+      ]
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
+    },
+    "pla_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "pei_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
+    },
+    "pekk_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
       ]
     }
   },
@@ -14513,6 +14605,52 @@
       "upgrades_needed": [
         "pp_build_surface",
         "dry_box"
+      ]
+    },
+    "petg_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "abs_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "pa612_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
+    },
+    "pc_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
+    },
+    "pla_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ]
+    },
+    "pei_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
+      ]
+    },
+    "pekk_esd": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box",
+        "hardened_nozzle"
       ]
     }
   }
