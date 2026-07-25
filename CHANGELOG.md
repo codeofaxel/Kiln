@@ -26,7 +26,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Finishes you can shape.** Flip which parts of a pattern stand proud, deepen
   the carve, soften it, or fade it out near the edges so it blends into the
   surface — and round things like balls and ornaments now wrap properly instead
-  of seaming.
+  of seaming. The same controls are now in the web studio at kiln3d.com, behind
+  an "Advanced finish" panel.
 
 - **High-temperature engineering plastics, now first-class.** Kiln
   recognizes six advanced polymers — PEEK, PEI (1010 and 9085), PEKK, PPSU,
