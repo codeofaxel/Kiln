@@ -1006,6 +1006,38 @@ class TestBambuAdapterTemperature:
         # Should truncate to int
         assert "M104 S210" in payload["print"]["param"]
 
+    def test_unprofiled_hotend_net_matches_hottest_bambu(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        # With no model profile bound, the adapter's own ceiling is the fallback.
+        # It must not sit below the hottest Bambu (H2S, 350C): at the old 300C
+        # net, registering an H2S with no model would refuse a 340C PPA print
+        # the firmware allows.
+        assert adapter_with_mqtt.set_tool_temp(350.0) is True
+        with pytest.raises(PrinterError, match="exceeds safety limit"):
+            adapter_with_mqtt.set_tool_temp(351.0)
+
+    def test_bound_profile_lets_each_model_reach_its_rating(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        # The per-model profile TIGHTENS the net to the machine's real rating.
+        # The X1E is rated 320C; before the net was raised it was clamped to
+        # 300 and could not reach its own firmware ceiling.
+        adapter_with_mqtt.set_safety_profile("bambu_x1e")
+        assert adapter_with_mqtt.set_tool_temp(320.0) is True
+        with pytest.raises(PrinterError, match="exceeds safety limit"):
+            adapter_with_mqtt.set_tool_temp(321.0)
+
+    def test_bound_profile_still_tightens_below_the_net(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        # Raising the net must not loosen a cooler machine: the A1 profile
+        # (300C hotend) still caps at 300 even though the net is now 350.
+        adapter_with_mqtt.set_safety_profile("bambu_a1")
+        assert adapter_with_mqtt.set_tool_temp(300.0) is True
+        with pytest.raises(PrinterError, match="exceeds safety limit"):
+            adapter_with_mqtt.set_tool_temp(320.0)
+
 
 # ---------------------------------------------------------------------------
 # send_gcode tests

@@ -2707,9 +2707,20 @@ class BambuAdapter(PrinterAdapter):
     # PrinterAdapter -- temperature control
     # ------------------------------------------------------------------
 
+    #: Coarse adapter-side hotend ceiling. A bound per-model safety profile
+    #: TIGHTENS this to the specific machine's rating (PrinterAdapter.
+    #: _validate_temp takes the min), so this is only the fallback for a
+    #: Bambu registered with no model. Set to the hottest current Bambu
+    #: hotend -- the H2S at 350C -- so the net never sits BELOW a real
+    #: machine's rating and clamps it: at 300 it silently capped the X1E
+    #: (rated 320) and the H2S (rated 350) below what their own firmware
+    #: allows. The firmware is the real backstop; Kiln should not be
+    #: stricter than the printer.
+    _MAX_HOTEND_C: float = 350.0
+
     def set_tool_temp(self, target: float) -> bool:
         """Set the hotend target temperature via G-code over MQTT."""
-        self._validate_temp(target, 300.0, "Hotend")
+        self._validate_temp(target, self._MAX_HOTEND_C, "Hotend")
         self.send_gcode([f"M104 S{int(target)}"])
         return True
 
