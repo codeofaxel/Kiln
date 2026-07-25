@@ -7,6 +7,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Duet printers now work with Kiln (beta).** If your machine runs on a
+  Duet board, just tell your AI — Kiln connects it and drives it like any
+  other printer: print, pause, cancel, upload, set temperatures. Works
+  with both current and older RepRapFirmware.
+
 - **Wrap your own image around any model.** Hand Kiln a photo or pattern and it
   becomes real, printable surface texture across the whole object — curved,
   organic, or imported, not just a flat face. Kiln sizes it to print at a
