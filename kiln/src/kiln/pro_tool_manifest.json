@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-25T19:03:26.277719+00:00",
-  "tool_count": 377,
+  "generated": "2026-07-25T19:20:57.571130+00:00",
+  "tool_count": 378,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -15989,6 +15989,50 @@
       "parameters": {
         "properties": {},
         "title": "push_palettes_to_cloudArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "recover_texture_detail",
+      "description": "Turn a model's painted-on detail into REAL printable relief.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "category": "textures",
+      "parameters": {
+        "properties": {
+          "model_path": {
+            "title": "Model Path",
+            "type": "string"
+          },
+          "output_path": {
+            "default": "",
+            "title": "Output Path",
+            "type": "string"
+          },
+          "depth_mm": {
+            "default": 0.6,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "target_edge_mm": {
+            "default": 1.0,
+            "title": "Target Edge Mm",
+            "type": "number"
+          },
+          "invert": {
+            "default": false,
+            "title": "Invert",
+            "type": "boolean"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_path"
+        ],
+        "title": "recover_texture_detailArguments",
         "type": "object"
       }
     },
