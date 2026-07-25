@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **How to glue the high-temperature plastics (Pro+).** Adhesive intelligence
+  now covers PPS and Ultem (PEI 1010 and 9085) — surface prep and which
+  adhesive actually holds.
+
 - **Bambu X1E and H2S reach their full nozzle temperature.** Kiln now
   respects each printer's real limit, so high-temp filaments print
   without a false "too hot" error.
@@ -73,6 +77,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   those numbers sharpen faster.*
 
 ### Changed
+
+- **Material intelligence now answers for every filament Kiln knows.** Skin
+  contact, durability, multi-material bonding and safe-load guidance used to
+  go quiet on less common materials — including everyday ones like TPU 95A,
+  wood-fill and matte PLA. They answer across the catalogue now.
 
 - **Iterating is free — a design is only spent when you keep it.** Try as many
   looks as you like; your free monthly designs are spent only when you download,
