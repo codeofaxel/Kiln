@@ -121,6 +121,35 @@ def _read_printer_model_from_config() -> str | None:
     return None
 
 
+def resolve_all_printer_models() -> list[str]:
+    """Return the ``printer_model`` of EVERY printer entry in
+    ``~/.kiln/config.yaml`` (active or not), deduped, order-stable.
+
+    The single-model :func:`resolve_printer_model` answers "what is the
+    ACTIVE printer" for the safety stack; this answers "what hardware
+    does this install have" for fleet-shaped consumers (usage
+    telemetry, fleet views).  Same single source of truth — the config
+    file — same defensive posture: malformed config returns ``[]``,
+    never raises.  Not memoised: callers are cold paths (a once-daily
+    heartbeat), and skipping the cache avoids a second mtime ledger.
+    """
+    cfg = _load_yaml_config()
+    if not cfg:
+        return []
+    models: list[str] = []
+    printers = cfg.get("printers")
+    entries = list(printers.values()) if isinstance(printers, dict) else []
+    # Legacy single-printer configs carry a top-level printer_model.
+    entries.append(cfg)
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        model = str(entry.get("printer_model") or "").strip()
+        if model and model not in models:
+            models.append(model)
+    return models
+
+
 def _load_yaml_config() -> dict[str, Any]:
     """Load ~/.kiln/config.yaml defensively.  Returns empty dict on any
     error — resolution must never raise just because the config is

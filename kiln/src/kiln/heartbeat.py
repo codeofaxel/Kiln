@@ -85,6 +85,37 @@ def _mark_sent() -> None:
         pass
 
 
+def _adapter_model(adapter: object) -> str | None:
+    """Best-effort model name for one adapter.
+
+    Resolution order matters — this function replaces a call to
+    ``adapter.get_printer_info()``, a method NO adapter has ever
+    implemented: every call raised AttributeError into a bare except,
+    so production heartbeats carried a NULL model for every install
+    whose registry was otherwise fine (2026-07-25: 630 of 670 rows
+    NULL while adapter_type resolved for hundreds of them).
+
+    1. ``get_printer_info()`` — kept first, guarded, so an adapter that
+       grows a live-probe method someday wins automatically.
+    2. The ``printer_model`` / ``_printer_model`` attribute — the same
+       source the registry's own fleet view reads (``_model_for`` in
+       kiln/registry.py); Bambu carries it when configured.
+    """
+    try:
+        info = adapter.get_printer_info()  # type: ignore[attr-defined]
+        model = getattr(info, "model", None) or getattr(info, "printer_model", None)
+        model = str(model or "").strip()
+        if model:
+            return model
+    except Exception:
+        pass
+    model = getattr(adapter, "printer_model", None) or getattr(
+        adapter, "_printer_model", None
+    )
+    model = str(model or "").strip()
+    return model or None
+
+
 def _get_printer_info() -> tuple[str | None, str | None, int]:
     """Best-effort resolve of printer model, adapter type, and printer count."""
     model: str | None = None
@@ -97,13 +128,17 @@ def _get_printer_info() -> tuple[str | None, str | None, int]:
         printer_count = reg.count
         adapter = reg.get("default")
         if adapter is not None:
-            # Try get_printer_info first, fall back to env vars
-            try:
-                info = adapter.get_printer_info()
-                model = getattr(info, "model", None) or getattr(info, "printer_model", None)
-            except Exception:
-                pass
-            # Fall back to env var if model still unknown
+            model = _adapter_model(adapter)
+            # config.yaml is the canonical model source when the
+            # adapter doesn't track one (see printer_model_resolver).
+            if not model:
+                try:
+                    from kiln.printer_model_resolver import resolve_printer_model
+
+                    model = resolve_printer_model()
+                except Exception:
+                    pass
+            # Legacy env override — last resort only.
             if not model:
                 model = os.environ.get("KILN_PRINTER_MODEL", None)
             # Derive adapter type from class name
@@ -143,6 +178,12 @@ def _get_all_printer_models() -> list[str]:
     no printer ids, no addresses, no serials.
     """
     models: list[str] = []
+
+    def _add(model: str | None) -> None:
+        model = str(model or "").strip()[:60]
+        if model and model not in models and len(models) < _MAX_HEARTBEAT_PRINTER_MODELS:
+            models.append(model)
+
     try:
         from kiln.registry import get_registry
 
@@ -151,16 +192,18 @@ def _get_all_printer_models() -> list[str]:
             if len(models) >= _MAX_HEARTBEAT_PRINTER_MODELS:
                 break
             try:
-                adapter = reg.get(name)
-                info = adapter.get_printer_info()
-                model = getattr(info, "model", None) or getattr(
-                    info, "printer_model", None
-                )
+                _add(_adapter_model(reg.get(name)))
             except Exception:
                 continue
-            model = str(model or "").strip()[:60]
-            if model and model not in models:
-                models.append(model)
+    except Exception:
+        pass
+    # config.yaml carries a printer_model per configured printer — the
+    # canonical source when adapters don't track a model themselves.
+    try:
+        from kiln.printer_model_resolver import resolve_all_printer_models
+
+        for model in resolve_all_printer_models():
+            _add(model)
     except Exception:
         pass
     return models
