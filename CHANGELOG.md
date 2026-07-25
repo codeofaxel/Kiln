@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Bambu X1E and H2S reach their full nozzle temperature.** Kiln now
+  respects each printer's real limit, so high-temp filaments print
+  without a false "too hot" error.
+
 - **Duet printers now work with Kiln (beta).** If your machine runs on a
   Duet board, just tell your AI — Kiln connects it and drives it like any
   other printer: print, pause, cancel, upload, set temperatures. Works
