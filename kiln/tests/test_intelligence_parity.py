@@ -45,11 +45,13 @@ MATERIALS_FILE = DATA_DIR / "materials.json"
 # ---------------------------------------------------------------------------
 
 KNOWN_GAPS: dict[str, set[str]] = {
+    # Ten entries were curated 2026-07-24 from sourced research and removed.
+    # The rest are correctly served by family inheritance meanwhile (see
+    # get_skin_contact_floor), which is why they are gaps and not silence.
     "skin_contact": {
-        "abs_esd", "cf_petg", "cf_pla", "pa612_esd", "pa6_gf", "pc_abs",
-        "pc_esd", "pei_1010", "pei_9085", "pei_esd", "pekk", "pekk_esd",
-        "pet_cf", "petg_cf", "petg_esd", "petg_hf", "pla_esd", "pla_matte",
-        "pla_tough", "pps", "ppsu", "pvb", "tpu_85a", "tpu_95a", "wood_pla",
+        "cf_petg", "cf_pla", "pei_1010", "pei_9085", "pekk", "pet_cf",
+        "petg_cf", "petg_hf", "pla_matte", "pla_tough", "pps", "ppsu",
+        "tpu_85a", "tpu_95a", "wood_pla",
     },
     "environment_compatibility": {
         "abs_esd", "cf_nylon", "cf_petg", "cf_pla", "pa612_esd", "pa6_gf",
