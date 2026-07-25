@@ -47,13 +47,58 @@ OUT_PATH = (
 )
 
 # Catalogue tensile strength, MPa (= N/mm^2).
+#
+# Covers every RIGID material in the catalogue.  It was five entries until
+# 2026-07-25, which quietly meant a user asking what a PEEK or carbon-filled
+# bracket would hold got nothing at all — the same silent-gap shape the rest of
+# this catalogue has been closing.  Values are the catalogue tensile figures,
+# all from public vendor datasheets; kiln-pro pins them against its own
+# materials overlay so the two cannot drift apart.
 SIGMA_T_MPA = {
     "pla": 50.0,
+    "pla_plus": 55.0,
+    "pla_matte": 45.0,
+    "pla_tough": 45.0,
+    "silk_pla": 40.0,
+    "wood_pla": 35.0,
+    "cf_pla": 38.0,
+    "pla_esd": 41.0,
     "petg": 50.0,
+    "petg_hf": 34.0,
+    "cf_petg": 40.0,
+    "petg_cf": 42.0,
+    "pet_cf": 60.0,
+    "petg_esd": 36.1,
     "abs": 33.0,
-    "nylon": 55.0,
+    "abs_esd": 38.0,
+    "asa": 35.0,
+    "pc_abs": 45.0,
     "polycarbonate": 60.0,
+    "pc_esd": 68.0,
+    "nylon": 55.0,
+    "cf_nylon": 90.0,
+    "pa6_gf": 85.0,
+    "pa612_esd": 84.3,
+    "peek": 73.0,
+    "pekk": 90.6,
+    "pekk_esd": 94.9,
+    "pei_1010": 79.2,
+    "pei_9085": 69.2,
+    "pei_esd": 62.0,
+    "pps": 50.0,
+    "ppsu": 55.0,
+    "pp": 25.0,
+    "pva": 15.0,
+    "pvb": 40.0,
 }
+
+# The three elastomer grades are EXCLUDED on physics, not on effort.  This
+# table derives a safe load from tensile capacity at a cantilever root, which
+# assumes the part fails in bending rather than deflecting.  An elastomer does
+# the opposite: it bends out of the way long before it breaks, so a "safe load"
+# derived this way would describe a failure mode TPU does not have.  A load
+# question about TPU is a deflection question and needs a different model.
+_EXCLUDED_ELASTOMERS = ("tpu", "tpu_85a", "tpu_95a")
 
 SAFETY_FACTOR = 3.0
 FDM_PRINT_FACTOR = 0.9          # printed vs datasheet-bar strength

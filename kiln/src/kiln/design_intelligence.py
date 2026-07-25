@@ -409,6 +409,13 @@ class SkinContactFloor:
     honesty_note: str = ""
     named_hazards: list[str] = field(default_factory=list)
     refer_to_medical: str = ""
+    # Set when this floor came from a related family rather than a record for
+    # this exact grade, so a caller can say so instead of implying the answer
+    # was written about the material the user actually chose.
+    inherited_from: str | None = None
+    # Set when no family matched at all and this is the generic floor: the
+    # honest "nobody has characterised this" answer, never a clearance.
+    is_uncharacterized: bool = False
 
     def has_engineering_data(self) -> bool:
         # The free floor never carries the deeper analysis (a Kiln Pro
@@ -674,6 +681,11 @@ class _DesignKnowledgeBase:
         self._post_processing: dict[str, dict[str, Any]] = {}
         self._multi_material: dict[str, Any] = {}
         self._skin_contact: dict[str, dict[str, Any]] = {}
+        # Each table's ``_meta`` block, keyed by table attribute.  The tables
+        # themselves drop every underscore key (that rule keeps meta and moat
+        # out of the merged material dicts), so curated table-level policy —
+        # which is legitimately public — would otherwise be unreachable.
+        self._table_meta: dict[str, dict[str, Any]] = {}
         self._merged_overlay_kinds: set[str] = set()
         self._loaded = False
 
@@ -700,6 +712,9 @@ class _DesignKnowledgeBase:
             if path.exists():
                 raw = json.loads(path.read_text(encoding="utf-8"))
                 setattr(self, attr, {k: v for k, v in raw.items() if not k.startswith("_")})
+                meta = raw.get("_meta")
+                if isinstance(meta, dict):
+                    self._table_meta[attr] = meta
 
         self._loaded = True
         logger.info(
@@ -787,6 +802,13 @@ class _DesignKnowledgeBase:
     def skin_contact(self) -> dict[str, dict[str, Any]]:
         return self._table("_skin_contact", "skin_contact")
 
+    @property
+    def skin_contact_meta(self) -> dict[str, Any]:
+        """Table-level skin-contact policy: family inheritance + the generic
+        uncharacterized floor.  Public curated copy, not moat."""
+        self._load()
+        return self._table_meta.get("_skin_contact", {})
+
 
 # Module-level lazy singleton
 _kb: _DesignKnowledgeBase | None = None
@@ -804,28 +826,123 @@ def _get_kb() -> _DesignKnowledgeBase:
 # ---------------------------------------------------------------------------
 
 
+# How restrictive each honesty-state is.  Used ONLY to pick between inherited
+# candidates, and it resolves upward: when a grade could inherit from more than
+# one family, the more restrictive family wins.  A safety floor is allowed to
+# be too cautious; it is never allowed to be too permissive.
+_FLOOR_STATE_RANK = {
+    "no_evidence_untested": 1,
+    "chemistry_of_concern": 2,
+    "wrong_material": 3,
+    "out_of_scope_industrial": 3,
+}
+_FLOOR_CONCERN_RANK = {"untested": 0, "elevated": 1, "high": 2, "not_applicable": 3}
+
+
+def _is_floor_record(rec: Any) -> bool:
+    """A real material record, not a merged non-material key (e.g. a standards
+    cross-reference) that carries no floor."""
+    return isinstance(rec, dict) and "safety_floor" in rec
+
+
+def _floor_restrictiveness(rec: dict[str, Any]) -> tuple[int, int]:
+    return (
+        _FLOOR_STATE_RANK.get(str(rec.get("base_state") or ""), 1),
+        _FLOOR_CONCERN_RANK.get(str(rec.get("concern_level") or ""), 0),
+    )
+
+
+def _inheritance_candidates(
+    material_id: str, table: dict[str, Any], meta: dict[str, Any]
+) -> list[str]:
+    """Record ids a grade may inherit its floor from.
+
+    Derived from the material id's own tokens against the curated
+    ``_meta.family_inheritance.token_families`` map, so a NEW grade inherits
+    with no code change: ``petg_esd`` yields ``petg``, ``cf_pla`` yields the
+    fibre record (and plain PLA), and the caller takes the most restrictive.
+    """
+    families = ((meta.get("family_inheritance") or {}).get("token_families") or {})
+    tokens = [t for t in re.split(r"[^a-z0-9]+", material_id.lower()) if t]
+    seen: list[str] = []
+    for token in tokens:
+        for target in (token, families.get(token)):
+            if (
+                target
+                and target != material_id
+                and target not in seen
+                and _is_floor_record(table.get(target))
+            ):
+                seen.append(target)
+    return seen
+
+
 def get_skin_contact_floor(material_id: str) -> SkinContactFloor | None:
-    """The always-free skin-contact safety floor for a material, or ``None``.
+    """The always-free skin-contact safety floor for a material.
 
     Worn-against-skin advisory only — never a skin-safe certification.  Returns
     only the free floor fields (honesty note, named hazards, refer-to-medical).
+
+    Resolves in three tiers, because SILENCE IS NOT AN ACCEPTABLE ANSWER for a
+    part worn against skin — an empty return reads as "no concern" when the
+    truth is "untested", and that is the one direction this must never fail in:
+
+      1. a record for this exact material;
+      2. failing that, the most RESTRICTIVE related family record, flagged via
+         ``inherited_from`` so the caller can say the answer is inherited;
+      3. failing that, the generic uncharacterized floor, flagged via
+         ``is_uncharacterized``.
+
+    Returns ``None`` only when the data itself is unavailable (no table on
+    disk), which is a different condition from "this material is unknown".
     """
     kb = _get_kb()
-    rec = kb.skin_contact.get((material_id or "").lower())
-    # Require a real material record: a merged overlay may add non-material
-    # top-level keys (e.g. a standards cross-reference) that carry no floor.
-    if not isinstance(rec, dict) or "safety_floor" not in rec:
+    table = kb.skin_contact
+    if not table:
         return None
-    floor = rec.get("safety_floor") or {}
-    return SkinContactFloor(
-        material_id=(material_id or "").lower(),
-        display_name=rec.get("display_name") or material_id,
-        concern_level=rec.get("concern_level") or "",
-        concern_basis=rec.get("concern_basis") or "",
-        honesty_note=floor.get("honesty_note") or "",
-        named_hazards=list(floor.get("named_hazards") or []),
-        refer_to_medical=floor.get("refer_to_medical") or "",
-    )
+    meta = kb.skin_contact_meta
+    mid = (material_id or "").lower().strip()
+    # No material named at all is a different condition from a material we do
+    # not recognise: the caller has nothing to warn about, so there is nothing
+    # to say.  Only an actual unrecognised material gets the generic floor.
+    if not mid:
+        return None
+
+    def _build(rec: dict[str, Any], *, as_id: str, inherited: str | None,
+               uncharacterized: bool = False) -> SkinContactFloor:
+        floor = rec.get("safety_floor") or {}
+        return SkinContactFloor(
+            material_id=as_id,
+            display_name=rec.get("display_name") or as_id,
+            concern_level=rec.get("concern_level") or "",
+            concern_basis=rec.get("concern_basis") or "",
+            honesty_note=floor.get("honesty_note") or "",
+            named_hazards=list(floor.get("named_hazards") or []),
+            refer_to_medical=floor.get("refer_to_medical") or "",
+            inherited_from=inherited,
+            is_uncharacterized=uncharacterized,
+        )
+
+    # 1. An exact record always wins — inheritance never overrides curation.
+    rec = table.get(mid)
+    if _is_floor_record(rec):
+        return _build(rec, as_id=mid, inherited=None)
+
+    # 2. The most restrictive related family.
+    candidates = _inheritance_candidates(mid, table, meta) if mid else []
+    if candidates:
+        best = max(
+            candidates,
+            key=lambda cid: (_floor_restrictiveness(table[cid]), cid),
+        )
+        return _build(table[best], as_id=mid, inherited=best)
+
+    # 3. The generic floor — untested, stated as such, never a clearance.
+    generic = meta.get("uncharacterized_floor") or {}
+    if _is_floor_record(generic):
+        return _build(generic, as_id=mid or "unknown", inherited=None,
+                      uncharacterized=True)
+    return None
 
 
 def use_case_implies_skin_contact(use_case: str) -> bool:

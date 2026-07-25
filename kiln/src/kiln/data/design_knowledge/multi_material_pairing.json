@@ -106,6 +106,58 @@
       "pla_esd": {
         "compatible": true,
         "interface_adhesion": "good"
+      },
+      "polycarbonate": {
+        "compatible": false,
+        "interface_adhesion": "none"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "none"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla_tough": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
       }
     },
     "abs": {
@@ -136,6 +188,90 @@
       "abs_esd": {
         "compatible": true,
         "interface_adhesion": "good"
+      },
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pvb": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "cf_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pet_cf": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "petg_cf": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "petg_hf": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_plus": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_tough": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "tpu_95a": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "wood_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
       }
     },
     "asa": {
@@ -146,6 +282,58 @@
       "abs_esd": {
         "compatible": true,
         "interface_adhesion": "moderate"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pet_cf": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "petg": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "petg_cf": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "petg_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "petg_hf": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
       }
     },
     "petg": {
@@ -184,6 +372,86 @@
       "abs_esd": {
         "compatible": false,
         "interface_adhesion": "poor"
+      },
+      "pvb": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "asa": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_abs": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pc_esd": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "petg_hf": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "pla_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_plus": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_tough": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pva": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
       }
     },
     "polycarbonate": {
@@ -202,6 +470,98 @@
       "pc_esd": {
         "compatible": true,
         "interface_adhesion": "good"
+      },
+      "abs_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "asa": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "cf_pla": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pet_cf": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "petg": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "petg_cf": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "petg_esd": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "petg_hf": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "pla_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pla_matte": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pla_plus": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla_tough": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
       }
     },
     "nylon": {
@@ -220,6 +580,94 @@
       "pa612_esd": {
         "compatible": true,
         "interface_adhesion": "moderate"
+      },
+      "abs": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "asa": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pc_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_plus": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_tough": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "polycarbonate": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "tpu_85a": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "tpu_95a": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "wood_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
       }
     },
     "tpu": {
@@ -250,12 +698,192 @@
       "pla_esd": {
         "compatible": false,
         "interface_adhesion": "poor"
+      },
+      "abs": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pvb": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "nylon": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_plus": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_tough": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "polycarbonate": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "tpu_95a": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "wood_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
       }
     },
     "cf_pla": {
       "pla": {
         "compatible": true,
         "interface_adhesion": "good"
+      },
+      "abs": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pla_matte": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pla_plus": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla_tough": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pva": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pvb": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "silk_pla": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
       }
     },
     "cf_petg": {
@@ -266,6 +894,114 @@
       "petg_esd": {
         "compatible": true,
         "interface_adhesion": "good"
+      },
+      "abs": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "asa": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_abs": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pc_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pet_cf": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "petg_cf": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "petg_hf": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_plus": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_tough": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pva": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pvb": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
       }
     },
     "cf_nylon": {
@@ -276,6 +1012,102 @@
       "pa612_esd": {
         "compatible": true,
         "interface_adhesion": "moderate"
+      },
+      "abs": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "asa": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pc_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_plus": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_tough": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "polycarbonate": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
       }
     },
     "pc_abs": {
@@ -290,6 +1122,38 @@
       "pc_esd": {
         "compatible": true,
         "interface_adhesion": "moderate"
+      },
+      "abs_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "cf_petg": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pet_cf": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "petg": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "petg_cf": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "petg_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "petg_hf": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
       }
     },
     "pvb": {
@@ -314,6 +1178,66 @@
         "interface_adhesion": "poor"
       },
       "tpu": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pla_matte": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pla_tough": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "tpu_85a": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "tpu_95a": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "wood_pla": {
         "compatible": true,
         "interface_adhesion": "moderate"
       }
@@ -358,6 +1282,82 @@
       "pla_esd": {
         "compatible": false,
         "interface_adhesion": "poor"
+      },
+      "asa": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_abs": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pet_cf": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "petg_hf": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla_matte": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_plus": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_tough": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pva": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pvb": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
       }
     },
     "abs_esd": {
@@ -396,6 +1396,82 @@
       "pla_esd": {
         "compatible": false,
         "interface_adhesion": "poor"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_abs": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pla_matte": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_plus": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_tough": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pvb": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
       }
     },
     "pa612_esd": {
@@ -424,6 +1500,82 @@
         "interface_adhesion": "poor"
       },
       "pc_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "abs": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "asa": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_plus": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_tough": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "polycarbonate": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
         "compatible": false,
         "interface_adhesion": "poor"
       }
@@ -456,6 +1608,86 @@
       "pla": {
         "compatible": false,
         "interface_adhesion": "poor"
+      },
+      "abs": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "asa": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "cf_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pet_cf": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "petg": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "petg_cf": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "petg_hf": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_plus": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pla_tough": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
       }
     },
     "pla_esd": {
@@ -480,6 +1712,1654 @@
         "interface_adhesion": "poor"
       },
       "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "abs": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pla_tough": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pvb": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "silk_pla": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      }
+    },
+    "pa6_gf": {
+      "abs": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "asa": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_nylon": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "nylon": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pa612_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pc_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_plus": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_tough": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "polycarbonate": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      }
+    },
+    "pet_cf": {
+      "abs": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "asa": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "cf_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_abs": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pc_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "petg_cf": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "petg_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "petg_hf": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_plus": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_tough": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pva": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pvb": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      }
+    },
+    "petg_cf": {
+      "abs": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "asa": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "cf_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_abs": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pc_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pet_cf": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "petg_hf": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_plus": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_tough": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pva": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pvb": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "petg_esd": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      }
+    },
+    "petg_hf": {
+      "abs": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "abs_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "asa": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "cf_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_abs": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pc_esd": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pet_cf": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "petg": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "petg_cf": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "petg_esd": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_plus": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_tough": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pva": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pvb": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      }
+    },
+    "pla_matte": {
+      "abs": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pla_plus": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla_tough": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pva": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pvb": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "silk_pla": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      }
+    },
+    "pla_plus": {
+      "abs": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla_tough": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pva": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "silk_pla": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "pvb": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla_esd": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      }
+    },
+    "pla_tough": {
+      "abs": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "pla_esd": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla_matte": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla_plus": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pva": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pvb": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "silk_pla": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      }
+    },
+    "pp": {
+      "abs": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "asa": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_abs": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_plus": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_tough": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "polycarbonate": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pva": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pvb": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      }
+    },
+    "silk_pla": {
+      "abs": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla_matte": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla_plus": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "pla_tough": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pva": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pvb": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "wood_pla": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      }
+    },
+    "tpu_85a": {
+      "abs": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "nylon": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_plus": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_tough": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "polycarbonate": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pvb": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "silk_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "tpu_95a": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "wood_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      }
+    },
+    "tpu_95a": {
+      "abs": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "nylon": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_plus": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_tough": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "polycarbonate": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pvb": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "silk_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "tpu_85a": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "wood_pla": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      }
+    },
+    "wood_pla": {
+      "abs": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "abs_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa612_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pa6_gf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pc_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_esd": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pla_matte": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pla_plus": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla_tough": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pva": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pvb": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "silk_pla": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_85a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "tpu_95a": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      }
+    },
+    "pva": {
+      "cf_petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "cf_pla": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pet_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_cf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "petg_hf": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pla_matte": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pla_plus": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pla_tough": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "silk_pla": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "wood_pla": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pla": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "pvb": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "pla_esd": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      }
+    },
+    "peek": {
+      "pei_1010": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pei_9085": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pei_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pekk": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "pekk_esd": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      }
+    },
+    "pei_1010": {
+      "peek": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pei_9085": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "pei_esd": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pekk": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pekk_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "ppsu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      }
+    },
+    "pei_9085": {
+      "peek": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pei_1010": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "pei_esd": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pekk": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pekk_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "ppsu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      }
+    },
+    "pei_esd": {
+      "peek": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pei_1010": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pei_9085": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pekk": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pekk_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "ppsu": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      }
+    },
+    "pekk": {
+      "peek": {
+        "compatible": true,
+        "interface_adhesion": "excellent"
+      },
+      "pei_1010": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pei_9085": {
+        "compatible": true,
+        "interface_adhesion": "moderate"
+      },
+      "pei_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pekk_esd": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      }
+    },
+    "pekk_esd": {
+      "peek": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      },
+      "pei_1010": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pei_9085": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pei_esd": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pekk": {
+        "compatible": true,
+        "interface_adhesion": "good"
+      }
+    },
+    "ppsu": {
+      "pei_1010": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pei_9085": {
+        "compatible": false,
+        "interface_adhesion": "poor"
+      },
+      "pei_esd": {
         "compatible": false,
         "interface_adhesion": "poor"
       }

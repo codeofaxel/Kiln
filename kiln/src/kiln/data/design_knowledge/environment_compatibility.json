@@ -236,5 +236,875 @@
     "abrasion_resistance": {
       "rating": "poor"
     }
+  },
+  "pla_plus": {
+    "uv_resistance": {
+      "rating": "poor",
+      "hours_to_noticeable_degradation": 80
+    },
+    "temperature_range": {
+      "min_service_c": -10,
+      "max_service_c": 50
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": false,
+      "absorption_pct": 0.4,
+      "swelling_risk": "low"
+    },
+    "chemicals": {
+      "household_cleaners": "moderate",
+      "oils_greases": "poor",
+      "fuels": "poor",
+      "solvents": "poor",
+      "acids": "poor"
+    },
+    "vibration_fatigue": {
+      "rating": "poor"
+    },
+    "abrasion_resistance": {
+      "rating": "poor"
+    }
+  },
+  "pla_matte": {
+    "uv_resistance": {
+      "rating": "poor",
+      "hours_to_noticeable_degradation": 80
+    },
+    "temperature_range": {
+      "min_service_c": -10,
+      "max_service_c": 50
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": false,
+      "absorption_pct": 0.4,
+      "swelling_risk": "low"
+    },
+    "chemicals": {
+      "household_cleaners": "moderate",
+      "oils_greases": "poor",
+      "fuels": "poor",
+      "solvents": "poor",
+      "acids": "poor"
+    },
+    "vibration_fatigue": {
+      "rating": "poor"
+    },
+    "abrasion_resistance": {
+      "rating": "moderate"
+    }
+  },
+  "pla_tough": {
+    "uv_resistance": {
+      "rating": "poor",
+      "hours_to_noticeable_degradation": 80
+    },
+    "temperature_range": {
+      "min_service_c": -10,
+      "max_service_c": 50
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": false,
+      "absorption_pct": 0.4,
+      "swelling_risk": "low"
+    },
+    "chemicals": {
+      "household_cleaners": "moderate",
+      "oils_greases": "poor",
+      "fuels": "poor",
+      "solvents": "poor",
+      "acids": "poor"
+    },
+    "vibration_fatigue": {
+      "rating": "poor"
+    },
+    "abrasion_resistance": {
+      "rating": "poor"
+    }
+  },
+  "silk_pla": {
+    "uv_resistance": {
+      "rating": "poor",
+      "hours_to_noticeable_degradation": 80
+    },
+    "temperature_range": {
+      "min_service_c": -10,
+      "max_service_c": 47
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": false,
+      "absorption_pct": 0.5,
+      "swelling_risk": "low"
+    },
+    "chemicals": {
+      "household_cleaners": "moderate",
+      "oils_greases": "poor",
+      "fuels": "poor",
+      "solvents": "poor",
+      "acids": "poor"
+    },
+    "vibration_fatigue": {
+      "rating": "poor"
+    },
+    "abrasion_resistance": {
+      "rating": "poor"
+    }
+  },
+  "wood_pla": {
+    "uv_resistance": {
+      "rating": "poor",
+      "hours_to_noticeable_degradation": 60
+    },
+    "temperature_range": {
+      "min_service_c": -10,
+      "max_service_c": 45
+    },
+    "moisture": {
+      "rating": "poor",
+      "immersion_safe": false,
+      "absorption_pct": 1.25,
+      "swelling_risk": "high"
+    },
+    "chemicals": {
+      "household_cleaners": "moderate",
+      "oils_greases": "poor",
+      "fuels": "poor",
+      "solvents": "poor",
+      "acids": "poor"
+    },
+    "vibration_fatigue": {
+      "rating": "poor"
+    },
+    "abrasion_resistance": {
+      "rating": "poor"
+    }
+  },
+  "cf_pla": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 300
+    },
+    "temperature_range": {
+      "min_service_c": -10,
+      "max_service_c": 50
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": false,
+      "absorption_pct": 0.4,
+      "swelling_risk": "low"
+    },
+    "chemicals": {
+      "household_cleaners": "moderate",
+      "oils_greases": "poor",
+      "fuels": "poor",
+      "solvents": "poor",
+      "acids": "poor"
+    },
+    "vibration_fatigue": {
+      "rating": "poor"
+    },
+    "abrasion_resistance": {
+      "rating": "good"
+    }
+  },
+  "pla_esd": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 300
+    },
+    "temperature_range": {
+      "min_service_c": -10,
+      "max_service_c": 50
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": false,
+      "absorption_pct": 0.4,
+      "swelling_risk": "low"
+    },
+    "chemicals": {
+      "household_cleaners": "moderate",
+      "oils_greases": "poor",
+      "fuels": "poor",
+      "solvents": "poor",
+      "acids": "poor"
+    },
+    "vibration_fatigue": {
+      "rating": "poor"
+    },
+    "abrasion_resistance": {
+      "rating": "poor"
+    }
+  },
+  "petg_hf": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 500
+    },
+    "temperature_range": {
+      "min_service_c": -20,
+      "max_service_c": 60
+    },
+    "moisture": {
+      "rating": "good",
+      "immersion_safe": true,
+      "absorption_pct": 0.2,
+      "swelling_risk": "low"
+    },
+    "chemicals": {
+      "household_cleaners": "good",
+      "oils_greases": "good",
+      "fuels": "moderate",
+      "solvents": "conditional",
+      "acids": "moderate"
+    },
+    "vibration_fatigue": {
+      "rating": "moderate"
+    },
+    "abrasion_resistance": {
+      "rating": "moderate"
+    }
+  },
+  "cf_petg": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 500
+    },
+    "temperature_range": {
+      "min_service_c": -20,
+      "max_service_c": 65
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": true,
+      "absorption_pct": 0.8,
+      "swelling_risk": "low"
+    },
+    "chemicals": {
+      "household_cleaners": "good",
+      "oils_greases": "good",
+      "fuels": "moderate",
+      "solvents": "conditional",
+      "acids": "moderate"
+    },
+    "vibration_fatigue": {
+      "rating": "poor"
+    },
+    "abrasion_resistance": {
+      "rating": "good"
+    }
+  },
+  "petg_cf": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 500
+    },
+    "temperature_range": {
+      "min_service_c": -20,
+      "max_service_c": 65
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": true,
+      "absorption_pct": 0.8,
+      "swelling_risk": "low"
+    },
+    "chemicals": {
+      "household_cleaners": "good",
+      "oils_greases": "good",
+      "fuels": "moderate",
+      "solvents": "conditional",
+      "acids": "moderate"
+    },
+    "vibration_fatigue": {
+      "rating": "poor"
+    },
+    "abrasion_resistance": {
+      "rating": "good"
+    }
+  },
+  "pet_cf": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 500
+    },
+    "temperature_range": {
+      "min_service_c": -20,
+      "max_service_c": 75
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": false,
+      "absorption_pct": 0.2,
+      "swelling_risk": "low"
+    },
+    "chemicals": {
+      "household_cleaners": "good",
+      "oils_greases": "good",
+      "fuels": "moderate",
+      "solvents": "conditional",
+      "acids": "moderate"
+    },
+    "vibration_fatigue": {
+      "rating": "poor"
+    },
+    "abrasion_resistance": {
+      "rating": "good"
+    }
+  },
+  "petg_esd": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 500
+    },
+    "temperature_range": {
+      "min_service_c": -20,
+      "max_service_c": 60
+    },
+    "moisture": {
+      "rating": "good",
+      "immersion_safe": true,
+      "absorption_pct": 0.2,
+      "swelling_risk": "low"
+    },
+    "chemicals": {
+      "household_cleaners": "good",
+      "oils_greases": "good",
+      "fuels": "moderate",
+      "solvents": "conditional",
+      "acids": "moderate"
+    },
+    "vibration_fatigue": {
+      "rating": "moderate"
+    },
+    "abrasion_resistance": {
+      "rating": "moderate"
+    }
+  },
+  "abs_esd": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 1000
+    },
+    "temperature_range": {
+      "min_service_c": -20,
+      "max_service_c": 85
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": true,
+      "absorption_pct": 0.4,
+      "swelling_risk": "moderate"
+    },
+    "chemicals": {
+      "household_cleaners": "moderate",
+      "oils_greases": "good",
+      "fuels": "moderate",
+      "solvents": "poor",
+      "acids": "conditional"
+    },
+    "vibration_fatigue": {
+      "rating": "good"
+    },
+    "abrasion_resistance": {
+      "rating": "good"
+    }
+  },
+  "pc_abs": {
+    "uv_resistance": {
+      "rating": "poor",
+      "hours_to_noticeable_degradation": 200
+    },
+    "temperature_range": {
+      "min_service_c": -30,
+      "max_service_c": 85
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": true,
+      "absorption_pct": 0.4,
+      "swelling_risk": "moderate"
+    },
+    "chemicals": {
+      "household_cleaners": "conditional",
+      "oils_greases": "good",
+      "fuels": "conditional",
+      "solvents": "poor",
+      "acids": "poor"
+    },
+    "vibration_fatigue": {
+      "rating": "good"
+    },
+    "abrasion_resistance": {
+      "rating": "good"
+    }
+  },
+  "pc_esd": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 800
+    },
+    "temperature_range": {
+      "min_service_c": -40,
+      "max_service_c": 120
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": true,
+      "absorption_pct": 0.7,
+      "swelling_risk": "moderate"
+    },
+    "chemicals": {
+      "household_cleaners": "conditional",
+      "oils_greases": "good",
+      "fuels": "good",
+      "solvents": "poor",
+      "acids": "poor"
+    },
+    "vibration_fatigue": {
+      "rating": "excellent"
+    },
+    "abrasion_resistance": {
+      "rating": "excellent"
+    }
+  },
+  "cf_nylon": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 1000
+    },
+    "temperature_range": {
+      "min_service_c": -40,
+      "max_service_c": 80
+    },
+    "moisture": {
+      "rating": "poor",
+      "immersion_safe": false,
+      "absorption_pct": 2.5,
+      "swelling_risk": "high"
+    },
+    "chemicals": {
+      "household_cleaners": "good",
+      "oils_greases": "excellent",
+      "fuels": "excellent",
+      "solvents": "good",
+      "acids": "conditional"
+    },
+    "vibration_fatigue": {
+      "rating": "good"
+    },
+    "abrasion_resistance": {
+      "rating": "good"
+    }
+  },
+  "pa6_gf": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 700
+    },
+    "temperature_range": {
+      "min_service_c": -40,
+      "max_service_c": 80
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": false,
+      "absorption_pct": 2.1,
+      "swelling_risk": "moderate"
+    },
+    "chemicals": {
+      "household_cleaners": "conditional",
+      "oils_greases": "excellent",
+      "fuels": "excellent",
+      "solvents": "good",
+      "acids": "conditional"
+    },
+    "vibration_fatigue": {
+      "rating": "good"
+    },
+    "abrasion_resistance": {
+      "rating": "good"
+    }
+  },
+  "pa612_esd": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 700
+    },
+    "temperature_range": {
+      "min_service_c": -40,
+      "max_service_c": 80
+    },
+    "moisture": {
+      "rating": "good",
+      "immersion_safe": false,
+      "absorption_pct": 1.3,
+      "swelling_risk": "low"
+    },
+    "chemicals": {
+      "household_cleaners": "good",
+      "oils_greases": "excellent",
+      "fuels": "excellent",
+      "solvents": "good",
+      "acids": "conditional"
+    },
+    "vibration_fatigue": {
+      "rating": "good"
+    },
+    "abrasion_resistance": {
+      "rating": "good"
+    }
+  },
+  "tpu_85a": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 600
+    },
+    "temperature_range": {
+      "min_service_c": -30,
+      "max_service_c": 80
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": true,
+      "absorption_pct": 1.0,
+      "swelling_risk": "high"
+    },
+    "chemicals": {
+      "household_cleaners": "good",
+      "oils_greases": "good",
+      "fuels": "conditional",
+      "solvents": "poor",
+      "acids": "poor"
+    },
+    "vibration_fatigue": {
+      "rating": "outstanding"
+    },
+    "abrasion_resistance": {
+      "rating": "excellent"
+    }
+  },
+  "tpu_95a": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 600
+    },
+    "temperature_range": {
+      "min_service_c": -30,
+      "max_service_c": 80
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": true,
+      "absorption_pct": 1.0,
+      "swelling_risk": "moderate"
+    },
+    "chemicals": {
+      "household_cleaners": "good",
+      "oils_greases": "good",
+      "fuels": "conditional",
+      "solvents": "poor",
+      "acids": "poor"
+    },
+    "vibration_fatigue": {
+      "rating": "outstanding"
+    },
+    "abrasion_resistance": {
+      "rating": "excellent"
+    }
+  },
+  "pp": {
+    "uv_resistance": {
+      "rating": "poor",
+      "hours_to_noticeable_degradation": 150
+    },
+    "temperature_range": {
+      "min_service_c": 0,
+      "max_service_c": 100
+    },
+    "moisture": {
+      "rating": "good",
+      "immersion_safe": true,
+      "absorption_pct": 0.01,
+      "swelling_risk": "low"
+    },
+    "chemicals": {
+      "household_cleaners": "excellent",
+      "oils_greases": "good",
+      "fuels": "conditional",
+      "solvents": "conditional",
+      "acids": "good"
+    },
+    "vibration_fatigue": {
+      "rating": "good"
+    },
+    "abrasion_resistance": {
+      "rating": "moderate"
+    }
+  },
+  "pva": {
+    "uv_resistance": {
+      "rating": "poor",
+      "hours_to_noticeable_degradation": 100
+    },
+    "temperature_range": {
+      "min_service_c": -10,
+      "max_service_c": 50
+    },
+    "moisture": {
+      "rating": "poor",
+      "immersion_safe": false,
+      "absorption_pct": 2.1,
+      "swelling_risk": "high"
+    },
+    "chemicals": {
+      "household_cleaners": "poor",
+      "oils_greases": "moderate",
+      "fuels": "moderate",
+      "solvents": "good",
+      "acids": "poor"
+    },
+    "vibration_fatigue": {
+      "rating": "poor"
+    },
+    "abrasion_resistance": {
+      "rating": "poor"
+    }
+  },
+  "peek": {
+    "uv_resistance": {
+      "rating": "poor",
+      "hours_to_noticeable_degradation": 300
+    },
+    "temperature_range": {
+      "min_service_c": -40,
+      "max_service_c": 150
+    },
+    "moisture": {
+      "rating": "good",
+      "immersion_safe": true,
+      "absorption_pct": 0.45,
+      "swelling_risk": "low"
+    },
+    "chemicals": {
+      "household_cleaners": "excellent",
+      "oils_greases": "excellent",
+      "fuels": "excellent",
+      "solvents": "excellent",
+      "acids": "conditional"
+    },
+    "vibration_fatigue": {
+      "rating": "outstanding"
+    },
+    "abrasion_resistance": {
+      "rating": "good"
+    }
+  },
+  "pei_1010": {
+    "uv_resistance": {
+      "rating": "excellent",
+      "hours_to_noticeable_degradation": 1000
+    },
+    "temperature_range": {
+      "min_service_c": -40,
+      "max_service_c": 170
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": true,
+      "absorption_pct": 1.25,
+      "swelling_risk": "moderate"
+    },
+    "chemicals": {
+      "household_cleaners": "conditional",
+      "oils_greases": "good",
+      "fuels": "conditional",
+      "solvents": "poor",
+      "acids": "conditional"
+    },
+    "vibration_fatigue": {
+      "rating": "good"
+    },
+    "abrasion_resistance": {
+      "rating": "good"
+    }
+  },
+  "pei_9085": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 800
+    },
+    "temperature_range": {
+      "min_service_c": -40,
+      "max_service_c": 155
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": true,
+      "absorption_pct": 1.25,
+      "swelling_risk": "moderate"
+    },
+    "chemicals": {
+      "household_cleaners": "conditional",
+      "oils_greases": "good",
+      "fuels": "conditional",
+      "solvents": "poor",
+      "acids": "conditional"
+    },
+    "vibration_fatigue": {
+      "rating": "good"
+    },
+    "abrasion_resistance": {
+      "rating": "good"
+    }
+  },
+  "pei_esd": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 800
+    },
+    "temperature_range": {
+      "min_service_c": -40,
+      "max_service_c": 165
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": true,
+      "absorption_pct": 1.25,
+      "swelling_risk": "moderate"
+    },
+    "chemicals": {
+      "household_cleaners": "conditional",
+      "oils_greases": "good",
+      "fuels": "conditional",
+      "solvents": "poor",
+      "acids": "conditional"
+    },
+    "vibration_fatigue": {
+      "rating": "good"
+    },
+    "abrasion_resistance": {
+      "rating": "good"
+    }
+  },
+  "pekk": {
+    "uv_resistance": {
+      "rating": "excellent",
+      "hours_to_noticeable_degradation": 1000
+    },
+    "temperature_range": {
+      "min_service_c": -54,
+      "max_service_c": 150
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": true,
+      "absorption_pct": 0.44,
+      "swelling_risk": "moderate"
+    },
+    "chemicals": {
+      "household_cleaners": "excellent",
+      "oils_greases": "good",
+      "fuels": "good",
+      "solvents": "conditional",
+      "acids": "good"
+    },
+    "vibration_fatigue": {
+      "rating": "good"
+    },
+    "abrasion_resistance": {
+      "rating": "good"
+    }
+  },
+  "pekk_esd": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 800
+    },
+    "temperature_range": {
+      "min_service_c": -54,
+      "max_service_c": 148
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": true,
+      "absorption_pct": 0.44,
+      "swelling_risk": "moderate"
+    },
+    "chemicals": {
+      "household_cleaners": "excellent",
+      "oils_greases": "excellent",
+      "fuels": "excellent",
+      "solvents": "conditional",
+      "acids": "conditional"
+    },
+    "vibration_fatigue": {
+      "rating": "good"
+    },
+    "abrasion_resistance": {
+      "rating": "good"
+    }
+  },
+  "pps": {
+    "uv_resistance": {
+      "rating": "poor",
+      "hours_to_noticeable_degradation": 300
+    },
+    "temperature_range": {
+      "min_service_c": -40,
+      "max_service_c": 180
+    },
+    "moisture": {
+      "rating": "good",
+      "immersion_safe": true,
+      "absorption_pct": 0.02,
+      "swelling_risk": "low"
+    },
+    "chemicals": {
+      "household_cleaners": "excellent",
+      "oils_greases": "excellent",
+      "fuels": "excellent",
+      "solvents": "excellent",
+      "acids": "conditional"
+    },
+    "vibration_fatigue": {
+      "rating": "good"
+    },
+    "abrasion_resistance": {
+      "rating": "good"
+    }
+  },
+  "ppsu": {
+    "uv_resistance": {
+      "rating": "poor",
+      "hours_to_noticeable_degradation": 300
+    },
+    "temperature_range": {
+      "min_service_c": -40,
+      "max_service_c": 160
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": true,
+      "absorption_pct": 1.1,
+      "swelling_risk": "moderate"
+    },
+    "chemicals": {
+      "household_cleaners": "good",
+      "oils_greases": "good",
+      "fuels": "good",
+      "solvents": "poor",
+      "acids": "conditional"
+    },
+    "vibration_fatigue": {
+      "rating": "good"
+    },
+    "abrasion_resistance": {
+      "rating": "good"
+    }
   }
 }

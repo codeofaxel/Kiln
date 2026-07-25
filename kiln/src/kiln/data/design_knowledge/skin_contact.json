@@ -16,6 +16,46 @@
    "prolonged": "surface / intact skin, prolonged (>24h) — worn items",
    "mucosal": "mucosal membrane — out of intact-skin scope",
    "broken_implant": "breached surface / implant / permanent — out of scope"
+  },
+  "family_inheritance": {
+   "_why": "A worn part must never be met with SILENCE. A material with no record of its own used to return nothing, and nothing reads as 'no concern' — the opposite of the truth, which is 'untested'. An unmatched grade now inherits the closest characterised family and is labelled as inherited, so the caution reaches the user without ever being passed off as a record for their exact grade.",
+   "_direction": "Inheritance resolves to the MOST RESTRICTIVE candidate, never the most convenient. In a filled grade the FILLER is usually the hazard, so a carbon-filled PLA inherits the fibre record, not plain PLA's. Resolving to the unfilled base would understate the risk, which is the one direction a safety floor must never fail in.",
+   "token_families": {
+    "cf": "cf_nylon",
+    "gf": "cf_nylon",
+    "carbon": "cf_nylon",
+    "glass": "cf_nylon",
+    "wood": "wood_fill",
+    "metal": "metal_fill",
+    "bronze": "metal_fill",
+    "pc": "polycarbonate",
+    "pet": "petg",
+    "pa": "nylon",
+    "pa6": "nylon",
+    "pa66": "nylon",
+    "pa612": "nylon",
+    "pa11": "nylon",
+    "pekk": "peek",
+    "pei": "peek",
+    "ultem": "peek",
+    "paek": "peek"
+   }
+  },
+  "uncharacterized_floor": {
+   "_why": "The last resort, and the reason silence is now impossible: a material we have never characterised still gets the honest floor. This is NOT a clearance — it is the statement that nobody has tested it, which is the most common truth in this domain.",
+   "display_name": "this material",
+   "base_state": "no_evidence_untested",
+   "concern_level": "untested",
+   "concern_basis": "no skin-contact record for this material — untested, which is not the same as low-risk",
+   "safety_floor": {
+    "honesty_note": "Kiln has no skin-contact record for this material. That is not a clearance: it means nobody has characterised it for wear against skin, and no 3D-printed part is skin-safe, hypoallergenic, or biocompatible in any case. Treat prolonged wear as unevaluated, and prefer a material Kiln does characterise for anything worn all day.",
+    "named_hazards": [
+     "no published skin-contact characterisation for this material",
+     "undisclosed colorant and additive load (the dominant unlabelled variable in every consumer filament)",
+     "as-printed layer lines wick sweat and are far harder to clean than a moulded surface"
+    ],
+    "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+   }
   }
  },
  "pla": {
@@ -237,6 +277,428 @@
     "real biocompatible grades exist but require industrial printers (>350 C, heated chamber)"
    ],
    "refer_to_medical": "PEEK/PEI implant- and medical-grade materials are real but industrial-only. For any certified skin-contact or medical need, see a medical professional and a certified medical-grade supplier; a desktop-printed part is not a substitute."
+  }
+ },
+ "pvb": {
+  "display_name": "PVB (Polyvinyl Butyral)",
+  "base_state": "wrong_material",
+  "concern_level": "not_applicable",
+  "concern_basis": "dissolved by the alcohol used to clean and sanitise a worn part — unsuitable before toxicology is even reached",
+  "safety_floor": {
+   "honesty_note": "PVB is the wrong material for anything worn, and the reason is upstream of toxicology. Its own resin maker specifies it as a 10% solution in aqueous ethanol at 20 C, and IPA smoothing is the filament's advertised feature — so hand sanitiser, alcohol wipes and sweat attack the part under exactly the conditions of wear. No skin assessment of the intact part would describe the part a wearer actually ends up with.",
+   "named_hazards": [
+    "soluble in room-temperature aqueous ethanol — hand sanitiser and alcohol wipes attack the worn surface",
+    "absorbs 4-6% water within 24 h and softens near body heat (Tg 63-73 C)",
+    "undisclosed additive package, exposed as the surface degrades",
+    "the filament maker's own SDS advises avoiding prolonged and repeated skin contact"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pc_abs": {
+  "display_name": "PC-ABS (Polycarbonate/ABS Blend)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "high",
+  "concern_basis": "dual-parent residual load — bisphenol A and phenolics from the PC phase, styrene and acrylonitrile from the ABS phase, all manufacturer-declared for the blend itself",
+  "safety_floor": {
+   "honesty_note": "PC-ABS carries both parents' chemistry, and this is not an inference: the manufacturer's own SDS names bisphenol A, styrene and acrylonitrile as residues of the blend. What is NOT known is whether any of it reaches skin — every migration dataset that exists is food-simulant, beverage or saliva, and none is sweat — so the concern is declared composition, never a measured skin dose.",
+   "named_hazards": [
+    "bisphenol A (CAS 80-05-7), manufacturer-declared blend residue, classified a skin sensitiser (H317)",
+    "residual styrene monomer (CAS 100-42-5), skin irritant (H315); IARC Group 2A on the inhalation route",
+    "acrylonitrile (CAS 107-13-1), the SDS itself notes dermal absorption is possible",
+    "phenol and 4-tert-butylphenol, PC-side residues, both dermally active",
+    "no sweat-migration study exists for PC or PC-ABS — dermal migration is plausible, not demonstrated"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pa6_gf": {
+  "display_name": "PA6-GF (Glass-Filled Nylon 6)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "elevated",
+  "concern_basis": "25-50% glass fibre in a filament its own manufacturer restricts to industrial use; fibreglass dermatitis is a documented mechanical-irritant condition",
+  "safety_floor": {
+   "honesty_note": "The manufacturer's own SDS both names mechanical skin irritation and states the product has not been tested for it, while restricting the filament to industrial use only. Fibreglass dermatitis is a real, documented condition caused by fibre fragments piercing the outer skin layer — but whether fibre ends actually protrude from a printed surface has never been measured, so the mechanism is established for loose fibre and unquantified for the part you would wear.",
+   "named_hazards": [
+    "glass fibre at 25-50% w/w, carried as a hazardous ingredient on the manufacturer's own SDS",
+    "fibreglass dermatitis — mechanical irritant contact dermatitis from fibre fragments piercing the stratum corneum",
+    "the manufacturer restricts this filament to industrial use only, which a worn part sits outside",
+    "nylon's own moisture uptake, which swells and softens the part against sweat",
+    "fibre protrusion at a printed surface is unmeasured — the load-bearing unknown for any worn part"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pla_esd": {
+  "display_name": "PLA-ESD (Static-Dissipative PLA)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "elevated",
+  "concern_basis": "a conductive carbon filler of undisclosed identity, on top of PLA's own undisclosed colorant load",
+  "safety_floor": {
+   "honesty_note": "PLA's benign reputation belongs to characterised medical-grade resin, and it does not extend to a carbon-loaded dissipative compound. A dissipative grade is its base polymer plus a conductive carbon whose identity the vendor usually withholds. The published hazard record for that carbon is inhalation-based, drawn from free powder rather than a printed part worn against skin, and no maker publishes skin testing for these grades — so the skin risk of an ESD part is not established as low, it is unmeasured.",
+   "named_hazards": [
+    "undisclosed colorant/additive load (the dominant, unlabelled variable in the base polymer)",
+    "low softening temperature (Tg ~55-65 C) under warm, prolonged wear",
+    "conductive filler not disclosed — the SDS declares only generic \"carbon additives\", and whether that is carbon black, carbon nanotube or carbon fibre decides which hazard applies",
+    "carbon-nanotube grades are in real market use, and NIOSH states dermal data for CNT are limited and advises particular care against abraded skin",
+    "abrasion of carbon-nanotube composites is a demonstrated filler-release mechanism, measured only on epoxy and only as airborne, never as skin dose",
+    "no static-dissipative filament carries ISO 10993 skin testing"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "petg_esd": {
+  "display_name": "PETG-ESD (Static-Dissipative PETG)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "elevated",
+  "concern_basis": "a conductive carbon filler of undisclosed identity, on top of PETG's own undisclosed additive package",
+  "safety_floor": {
+   "honesty_note": "PETG is a reasonable lower-concern base among consumer filaments, but a carbon-loaded dissipative grade is a different material from the plain spool that reputation was built on. A dissipative grade is its base polymer plus a conductive carbon whose identity the vendor usually withholds. The published hazard record for that carbon is inhalation-based, drawn from free powder rather than a printed part worn against skin, and no maker publishes skin testing for these grades — so the skin risk of an ESD part is not established as low, it is unmeasured.",
+   "named_hazards": [
+    "undisclosed colorant/additive package (often the real sensitizer)",
+    "antimony trioxide polycondensation catalyst residue",
+    "conductive filler not disclosed — the SDS declares only generic \"carbon additives\", and whether that is carbon black, carbon nanotube or carbon fibre decides which hazard applies",
+    "carbon-nanotube grades are in real market use, and NIOSH states dermal data for CNT are limited and advises particular care against abraded skin",
+    "abrasion of carbon-nanotube composites is a demonstrated filler-release mechanism, measured only on epoxy and only as airborne, never as skin dose",
+    "no static-dissipative filament carries ISO 10993 skin testing"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "abs_esd": {
+  "display_name": "ABS-ESD (Static-Dissipative ABS)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "high",
+  "concern_basis": "a conductive carbon filler of undisclosed identity, on top of ABS's own residual styrene",
+  "safety_floor": {
+   "honesty_note": "ABS already carries a named residual-monomer concern before any filler is added, and the dissipative grade adds a second undisclosed one. A dissipative grade is its base polymer plus a conductive carbon whose identity the vendor usually withholds. The published hazard record for that carbon is inhalation-based, drawn from free powder rather than a printed part worn against skin, and no maker publishes skin testing for these grades — so the skin risk of an ESD part is not established as low, it is unmeasured.",
+   "named_hazards": [
+    "residual styrene monomer, a skin irritant and IARC Group 2A by inhalation",
+    "acrylonitrile residue, for which dermal absorption is documented",
+    "conductive filler not disclosed — the SDS declares only generic \"carbon additives\", and whether that is carbon black, carbon nanotube or carbon fibre decides which hazard applies",
+    "carbon-nanotube grades are in real market use, and NIOSH states dermal data for CNT are limited and advises particular care against abraded skin",
+    "abrasion of carbon-nanotube composites is a demonstrated filler-release mechanism, measured only on epoxy and only as airborne, never as skin dose",
+    "no static-dissipative filament carries ISO 10993 skin testing"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pc_esd": {
+  "display_name": "PC-ESD (Static-Dissipative Polycarbonate)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "high",
+  "concern_basis": "a conductive carbon filler of undisclosed identity, on top of polycarbonate's bisphenol A concern",
+  "safety_floor": {
+   "honesty_note": "Polycarbonate already carries a bisphenol A concern before any filler is added, and the dissipative grade adds an undisclosed conductive carbon to it. A dissipative grade is its base polymer plus a conductive carbon whose identity the vendor usually withholds. The published hazard record for that carbon is inhalation-based, drawn from free powder rather than a printed part worn against skin, and no maker publishes skin testing for these grades — so the skin risk of an ESD part is not established as low, it is unmeasured.",
+   "named_hazards": [
+    "bisphenol A, a documented skin sensitiser and the polymer's own building block",
+    "no sweat-migration study exists for polycarbonate — dermal migration is plausible, not demonstrated",
+    "conductive filler not disclosed — the SDS declares only generic \"carbon additives\", and whether that is carbon black, carbon nanotube or carbon fibre decides which hazard applies",
+    "carbon-nanotube grades are in real market use, and NIOSH states dermal data for CNT are limited and advises particular care against abraded skin",
+    "abrasion of carbon-nanotube composites is a demonstrated filler-release mechanism, measured only on epoxy and only as airborne, never as skin dose",
+    "no static-dissipative filament carries ISO 10993 skin testing"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pa612_esd": {
+  "display_name": "PA612-ESD (Static-Dissipative Nylon 612)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "elevated",
+  "concern_basis": "a dual filler system — carbon nanotube plus chopped carbon fibre in at least one market grade — on a nylon base",
+  "safety_floor": {
+   "honesty_note": "This grade is the clearest case of a stacked filler system: a market product combines carbon nanotubes with chopped carbon fibre, so both hazard profiles apply at once. A dissipative grade is its base polymer plus a conductive carbon whose identity the vendor usually withholds. The published hazard record for that carbon is inhalation-based, drawn from free powder rather than a printed part worn against skin, and no maker publishes skin testing for these grades — so the skin risk of an ESD part is not established as low, it is unmeasured.",
+   "named_hazards": [
+    "at least one market grade combines carbon nanotube with 10% chopped carbon fibre, stacking a nanomaterial and a fibre hazard",
+    "nylon's own moisture uptake, which swells and softens the part against sweat",
+    "conductive filler not disclosed — the SDS declares only generic \"carbon additives\", and whether that is carbon black, carbon nanotube or carbon fibre decides which hazard applies",
+    "carbon-nanotube grades are in real market use, and NIOSH states dermal data for CNT are limited and advises particular care against abraded skin",
+    "abrasion of carbon-nanotube composites is a demonstrated filler-release mechanism, measured only on epoxy and only as airborne, never as skin dose",
+    "no static-dissipative filament carries ISO 10993 skin testing"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pei_esd": {
+  "display_name": "PEI-ESD (Static-Dissipative Polyetherimide)",
+  "base_state": "out_of_scope_industrial",
+  "concern_level": "not_applicable",
+  "concern_basis": "an industrial high-temperature polymer with an undisclosed conductive filler — outside consumer skin-contact scope in both respects",
+  "safety_floor": {
+   "honesty_note": "PEI is an industrial polymer whose certified grades exist for industrial and medical device manufacture, not for printed wearables, and the dissipative version withholds its filler identity entirely. A dissipative grade is its base polymer plus a conductive carbon whose identity the vendor usually withholds. The published hazard record for that carbon is inhalation-based, drawn from free powder rather than a printed part worn against skin, and no maker publishes skin testing for these grades — so the skin risk of an ESD part is not established as low, it is unmeasured.",
+   "named_hazards": [
+    "an industrial-scope polymer, not a consumer wearable material",
+    "the vendor SDS for this grade withholds even the filler's CAS number, declaring it 'Proprietary'",
+    "conductive filler not disclosed — the SDS declares only generic \"carbon additives\", and whether that is carbon black, carbon nanotube or carbon fibre decides which hazard applies",
+    "carbon-nanotube grades are in real market use, and NIOSH states dermal data for CNT are limited and advises particular care against abraded skin",
+    "abrasion of carbon-nanotube composites is a demonstrated filler-release mechanism, measured only on epoxy and only as airborne, never as skin dose",
+    "no static-dissipative filament carries ISO 10993 skin testing"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pekk_esd": {
+  "display_name": "PEKK-ESD (Static-Dissipative Polyetherketoneketone)",
+  "base_state": "out_of_scope_industrial",
+  "concern_level": "not_applicable",
+  "concern_basis": "an industrial high-temperature polymer with an undisclosed conductive filler — outside consumer skin-contact scope in both respects",
+  "safety_floor": {
+   "honesty_note": "PEKK is an industrial PAEK polymer whose certified grades exist for industrial and medical device manufacture, not for printed wearables. A dissipative grade is its base polymer plus a conductive carbon whose identity the vendor usually withholds. The published hazard record for that carbon is inhalation-based, drawn from free powder rather than a printed part worn against skin, and no maker publishes skin testing for these grades — so the skin risk of an ESD part is not established as low, it is unmeasured.",
+   "named_hazards": [
+    "an industrial-scope polymer, not a consumer wearable material",
+    "no dermal characterisation exists for the PAEK family as a printed consumer part",
+    "conductive filler not disclosed — the SDS declares only generic \"carbon additives\", and whether that is carbon black, carbon nanotube or carbon fibre decides which hazard applies",
+    "carbon-nanotube grades are in real market use, and NIOSH states dermal data for CNT are limited and advises particular care against abraded skin",
+    "abrasion of carbon-nanotube composites is a demonstrated filler-release mechanism, measured only on epoxy and only as airborne, never as skin dose",
+    "no static-dissipative filament carries ISO 10993 skin testing"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "cf_pla": {
+  "display_name": "CF-PLA (Carbon-Fibre PLA)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "elevated",
+  "concern_basis": "chopped carbon fibre at the printed surface, on a benign base polymer",
+  "safety_floor": {
+   "honesty_note": "The base polymer is the benign part; the fibre is not. Raw carbon fibre is documented to cause transient skin itch, its sizing can include a classified sensitiser, and the filament's own SDS states no toxicological information exists. What nobody has measured is whether fibre ends protrude from a printed surface — which is exactly the question a worn part turns on.",
+   "named_hazards": [
+    "chopped fibre ends at printed surfaces and cut edges — mechanical irritation, documented as transient skin itch on carbon fibre and as fibreglass dermatitis on glass",
+    "undisclosed fibre sizing, which in at least one commercial carbon fibre includes BADGE, a classified skin sensitiser",
+    "fibre protrusion from an as-printed surface is UNMEASURED — the load-bearing unknown for a worn part",
+    "no fibre-filled filament of any kind carries ISO 10993 skin testing",
+    "PLA's own low softening temperature (Tg ~55-65 C) under warm, prolonged wear"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "cf_petg": {
+  "display_name": "CF-PETG (Carbon-Fibre PETG)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "elevated",
+  "concern_basis": "chopped carbon fibre at the printed surface, plus a vendor skin claim with no test behind it",
+  "safety_floor": {
+   "honesty_note": "The only skin statement any maker offers for this material is 'no hazard', published in a table that cites a test standard for every mechanical row and none for that one. That is an absence of evidence, not evidence of safety, and the fibre hazard underneath it is real.",
+   "named_hazards": [
+    "chopped fibre ends at printed surfaces and cut edges — mechanical irritation, documented as transient skin itch on carbon fibre and as fibreglass dermatitis on glass",
+    "undisclosed fibre sizing, which in at least one commercial carbon fibre includes BADGE, a classified skin sensitiser",
+    "fibre protrusion from an as-printed surface is UNMEASURED — the load-bearing unknown for a worn part",
+    "no fibre-filled filament of any kind carries ISO 10993 skin testing",
+    "a vendor 'Skin Hazards: No hazard' claim published with no test method, standard or laboratory"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "petg_cf": {
+  "display_name": "PETG-CF (Carbon-Fibre PETG)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "elevated",
+  "concern_basis": "chopped carbon fibre at the printed surface, plus a vendor skin claim with no test behind it",
+  "safety_floor": {
+   "honesty_note": "Same compound family as the CF-PETG entry and the same evidentiary position: a vendor 'no hazard' line with no method behind it, over a fibre whose skin effects are documented and whose protrusion from a printed surface is not.",
+   "named_hazards": [
+    "chopped fibre ends at printed surfaces and cut edges — mechanical irritation, documented as transient skin itch on carbon fibre and as fibreglass dermatitis on glass",
+    "undisclosed fibre sizing, which in at least one commercial carbon fibre includes BADGE, a classified skin sensitiser",
+    "fibre protrusion from an as-printed surface is UNMEASURED — the load-bearing unknown for a worn part",
+    "no fibre-filled filament of any kind carries ISO 10993 skin testing",
+    "a vendor 'Skin Hazards: No hazard' claim published with no test method, standard or laboratory"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pet_cf": {
+  "display_name": "PET-CF (Carbon-Fibre PET)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "elevated",
+  "concern_basis": "chopped carbon fibre at the printed surface, on the thinnest evidence base of the fibre-filled set",
+  "safety_floor": {
+   "honesty_note": "The thinnest record of the fibre-filled grades: no dermal testing, no SDS obtainable, and the nearest regulatory decision — a food-contact clearance for chopped carbon fibre — is explicitly restricted to a different polymer and a different exposure route entirely.",
+   "named_hazards": [
+    "chopped fibre ends at printed surfaces and cut edges — mechanical irritation, documented as transient skin itch on carbon fibre and as fibreglass dermatitis on glass",
+    "undisclosed fibre sizing, which in at least one commercial carbon fibre includes BADGE, a classified skin sensitiser",
+    "fibre protrusion from an as-printed surface is UNMEASURED — the load-bearing unknown for a worn part",
+    "no fibre-filled filament of any kind carries ISO 10993 skin testing",
+    "the only regulatory clearance for chopped carbon fibre in a polymer covers PEEK, by the oral route, and does not transfer to this material or to skin"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "wood_pla": {
+  "display_name": "Wood-Filled PLA",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "elevated",
+  "concern_basis": "a 40 percent lignocellulosic fraction that is both a documented skin sensitiser in free form and a moisture and microbial substrate at the part surface",
+  "safety_floor": {
+   "honesty_note": "Wood flour at 40 percent is disclosed on the filament's own SDS, and free wood dust is documented to cause both irritant and allergic contact dermatitis. The widely-quoted wood-dust cancer classification is an INHALATION finding and says nothing about wearing a printed part — but the dermatitis finding and the moisture behaviour are real and do apply.",
+   "named_hazards": [
+    "wood flour at 40 percent w/w, disclosed on the manufacturer's own SDS",
+    "wood dust causes irritant and allergic contact dermatitis (dermal route) — documented for free dust, not demonstrated for flour bound in a printed part",
+    "lignocellulosic filler degrades the composite's moisture resistance: 90 percent of a PLA-composite surface was mould-covered after 7 days in a laboratory test",
+    "the IARC Group 1 wood-dust classification is INHALATION-only and must not be read as a skin-contact finding"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pla_matte": {
+  "display_name": "Matte PLA (Mineral-Filled)",
+  "base_state": "no_evidence_untested",
+  "concern_level": "untested",
+  "concern_basis": "an identified and unremarkable mineral filler, over PLA's own undisclosed colorant load",
+  "safety_floor": {
+   "honesty_note": "The matte effect comes from calcium carbonate, named with CAS number and weight percent on two independent SDSs, and it carries no dermal classification in bound form. No talc was found in any matte filament SDS, so the talc contamination history does not apply here. The colorant package remains the real unknown, as it is for every PLA.",
+   "named_hazards": [
+    "calcium carbonate filler at 8-15 percent (one vendor) and 16.8-17.9 percent (another), named with CAS and unclassified for skin in bound form",
+    "undisclosed colorant/additive load — the dominant unlabelled variable, unchanged from plain PLA",
+    "low softening temperature (Tg ~55-65 C) under warm, prolonged wear",
+    "vendor SDS returns 'no available data' for both skin irritation and sensitisation"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pla_tough": {
+  "display_name": "Tough PLA (Impact-Modified)",
+  "base_state": "no_evidence_untested",
+  "concern_level": "untested",
+  "concern_basis": "an undisclosed impact-modifier fraction of 10-20 percent, of unstated chemistry",
+  "safety_floor": {
+   "honesty_note": "No vendor discloses the impact modifier by CAS or concentration, so no specific hazardous constituent can be named. The acrylate sensitisation literature belongs to residual monomer in uncured resin systems — nail and dental products — and does not transfer to a melt-processed thermoplastic, so it is deliberately not carried here.",
+   "named_hazards": [
+    "undisclosed impact modifier at 10-20 percent w/w, named by one vendor only as 'acrylic polymer' with no CAS",
+    "undisclosed colorant/additive load on top of it, as for every PLA",
+    "low softening temperature (Tg ~55-65 C) under warm, prolonged wear",
+    "no vendor publishes skin-sensitisation testing on a printed tough-PLA part"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "tpu_85a": {
+  "display_name": "TPU 85A (Flexible)",
+  "base_state": "no_evidence_untested",
+  "concern_level": "untested",
+  "concern_basis": "an undisclosed additive package on the material most likely of any here to be worn all day",
+  "safety_floor": {
+   "honesty_note": "TPU is the most likely material in this catalogue to end up as a watch strap, and it is untested in that use. The isocyanate chemistry that gets quoted about polyurethanes is a processing hazard to whoever prints and dries it; migration from finished polyurethane was looked for in artificial sweat and not found. What remains genuinely unknown is the additive package and the printed part.",
+   "named_hazards": [
+    "undisclosed additive package — composition declared only as 'polyurethane with stabilising agents and additives', with up to roughly 10 percent of the mass undeclared on one vendor's SDS",
+    "sensitisation status is asserted by structural read-across, not by testing: 'the chemical structure does not suggest a sensitizing effect'",
+    "no consumer TPU filament carries grade-resolved ISO 10993 testing; the one certificate located names only 'Flex TPU' with no shore grade and does not state whether the coupon was printed or moulded",
+    "process-generated isocyanate is a PRINTING and DRYING hazard to the operator, not a demonstrated hazard of the finished worn part",
+    "as printed, the softer 85A grade takes up more physiological fluid than harder grades — up to about 1.8 percent against 1.2-1.4 percent for 89A-98A"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "tpu_95a": {
+  "display_name": "TPU 95A (Semi-Rigid)",
+  "base_state": "no_evidence_untested",
+  "concern_level": "untested",
+  "concern_basis": "an undisclosed additive package; chemically identical to the softer grade, differing only in fluid uptake as printed",
+  "safety_floor": {
+   "honesty_note": "Chemically this is the same story as the softer grade — the same undisclosed additive package and the same absence of grade-resolved testing. The one measured difference favours this grade: as printed it takes up less physiological fluid. That is a physical finding, not a safety clearance.",
+   "named_hazards": [
+    "undisclosed additive package — composition declared only as 'polyurethane with stabilising agents and additives', with up to roughly 10 percent of the mass undeclared on one vendor's SDS",
+    "sensitisation status is asserted by structural read-across, not by testing: 'the chemical structure does not suggest a sensitizing effect'",
+    "no consumer TPU filament carries grade-resolved ISO 10993 testing; the one certificate located names only 'Flex TPU' with no shore grade and does not state whether the coupon was printed or moulded",
+    "process-generated isocyanate is a PRINTING and DRYING hazard to the operator, not a demonstrated hazard of the finished worn part",
+    "as printed, this harder grade takes up less physiological fluid than the softer grades — about 1.2-1.4 percent against up to 1.8 percent"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "petg_hf": {
+  "display_name": "PETG-HF (High-Flow PETG)",
+  "base_state": "no_evidence_untested",
+  "concern_level": "untested",
+  "concern_basis": "the same polymer as PETG at a larger declared additive fraction, in an untested skin-contact context",
+  "safety_floor": {
+   "honesty_note": "'High flow' is a process claim, not a disclosed chemistry change: the vendor's own SDSs give the SAME CAS and EINECS numbers for this and for its standard PETG. The one real difference is the declared additive fraction, which is up to roughly fifteen times larger and entirely unnamed.",
+   "named_hazards": [
+    "identical polymer to standard PETG by the vendor's own CAS and EINECS declarations — the 'high flow' claim is about process, not chemistry",
+    "declared additive fraction of 1-15 percent by weight with no CAS number, against under 1 percent on the same vendor's standard PETG",
+    "the marketing data sheet asserts 'Skin Hazards: No hazard' with no test method, while the vendor's own SDS states 'no data available' for skin sensitisation",
+    "antimony trioxide catalyst residue is plausible from PET chemistry but has never been measured in PETG filament or a printed part"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pei_1010": {
+  "display_name": "PEI / Ultem 1010",
+  "base_state": "out_of_scope_industrial",
+  "concern_level": "not_applicable",
+  "concern_basis": "grade substitution — the certified article and the purchasable article share a name, not a certification",
+  "safety_floor": {
+   "honesty_note": "A food-contact and ISO 10993 certified Ultem 1010 FILAMENT genuinely exists, which makes this the easiest record in the catalogue to misread. That certification belongs to a specific certified grade that runs on industrial machines with lot traceability — not to the spool in a desktop printer, which makes no biocompatibility claim at all, and never to the printed part. The material's own maker declines to close that last gap.",
+   "named_hazards": [
+    "the certified grade and the consumer spool share a name but not a certification — desktop Ultem 1010 filament makes no biocompatibility, food-contact or NSF claim",
+    "material certification does not transfer to the printed part, stated by the equipment maker itself: a finished part must still be validated for its use, process and cleaning regime",
+    "thermal decomposition products during printing include hydrogen cyanide — an INHALATION hazard while printing, not a dermal hazard of the finished part",
+    "the resin maker's own healthcare policy excludes applications implanted longer than 29 days"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pei_9085": {
+  "display_name": "PEI / Ultem 9085",
+  "base_state": "out_of_scope_industrial",
+  "concern_level": "not_applicable",
+  "concern_basis": "a certification label that means lot traceability being mistaken for biocompatibility",
+  "safety_floor": {
+   "honesty_note": "This material has no body-contact grade in existence — its entire pedigree is flame, smoke and toxicity performance for aircraft interiors. If you have seen 'Ultem 9085 CG', that is a paperwork trail from filament back to raw-material lot and says nothing whatsoever about contact with a person. The same two letters on Ultem 1010 mean NSF 51 and ISO 10993, which is exactly why this one is worth stating out loud.",
+   "named_hazards": [
+    "'CG' on Ultem 9085 means documented lot traceability, NOT biocompatibility — the 1010 grade's identical 'CG' label means NSF 51 plus ISO 10993 / USP Class VI, and confusing the two produces false safety copy",
+    "no ISO 10993, USP Class VI, food-contact or biocompatibility claim appears anywhere in this material's datasheet — its certifications are UL94 V-0, rail and aerospace fire performance",
+    "printed 9085 carries 7.34-10.50 percent areal porosity and over 7 percent water uptake, substantially more than the injection-moulded equivalent — a sweat-exposed surface that cannot be validated as cleanable",
+    "the polycarbonate component hydrolyses after aqueous ageing; no leaching study exists, so release to skin is unestablished rather than ruled out"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pekk": {
+  "display_name": "PEKK",
+  "base_state": "out_of_scope_industrial",
+  "concern_level": "not_applicable",
+  "concern_basis": "process and feedstock substitution — the cleared implant pedigree is laser-sintered powder, not filament",
+  "safety_floor": {
+   "honesty_note": "PEKK really is in FDA-cleared cranial and facial implants, and that fact is easy to borrow wrongly. Those devices are laser-sintered from a specific implant-grade powder under a medical quality system; an FDM filament spool of PEKK shares a polymer family with them and nothing else. The filament resin's own producer publishes no biocompatibility certification at all.",
+   "named_hazards": [
+    "the implant clearances are for laser-sintered devices from a specific implant-grade powder — a different feedstock and a different process from filament extrusion",
+    "the filament resin producer publishes no ISO 10993, USP Class VI or medical claim for its PEKK product family",
+    "no dermal toxicology for PEKK could be retrieved from any source — absence of data is not absence of hazard",
+    "an implant clearance attaches to a finished device made on qualified equipment, never to a polymer class"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pps": {
+  "display_name": "PPS (Polyphenylene Sulfide)",
+  "base_state": "out_of_scope_industrial",
+  "concern_level": "not_applicable",
+  "concern_basis": "reinforcing fillers plus a complete absence of dermal data, on a polymer whose real pedigree is hot-food equipment rather than skin",
+  "safety_floor": {
+   "honesty_note": "PPS does hold genuine FDA and EU food-contact compliance — but only for specific glass-filled injection-moulding compounds used in coffee makers and food-processing equipment. That is a different material in a different form, and it was never a skin-contact clearance. Every dermal endpoint on the producer's safety data sheet reads 'no data available'.",
+   "named_hazards": [
+    "glass fibre at 30-40 percent is carried as a HAZARDOUS ingredient on the producer's safety data sheet, with the named effect being mechanical irritation from particulates generated by the product",
+    "every dermal endpoint on that sheet reads 'no data available' — acute dermal toxicity, skin corrosion and irritation, and skin sensitisation alike",
+    "a filament vendor publishes 'Skin Hazards: No hazard' in a properties table citing no test method and no standard, while every mechanical row on the same sheet cites one, and the document disclaims responsibility for safety",
+    "carbon black in the filled compound is IARC Group 2B by INHALATION of dust during sanding or machining — not a dermal finding for filler bound in a solid part"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "ppsu": {
+  "display_name": "PPSU (Polyphenylsulfone)",
+  "base_state": "out_of_scope_industrial",
+  "concern_level": "not_applicable",
+  "concern_basis": "a real medical and infant-feeding pedigree attaching to named resin grades, not to the printed article",
+  "safety_floor": {
+   "honesty_note": "This is the hardest record here to read correctly, because the pedigree is real: PPSU genuinely is the BPA-free baby-bottle and autoclavable surgical-tray plastic, and the BPA-free part is backbone chemistry rather than marketing — the polymer simply has no bisphenol-A unit in its chain. But every one of those credentials belongs to a named moulding or extrusion grade, the producer itself caps sanctioned tissue contact at 24 hours outside a separate biomaterials line, and none of it survives the trip through a nozzle onto a porous printed surface.",
+   "named_hazards": [
+    "the producer restricts contact with bodily fluids or tissues beyond 24 hours to a separate biomaterials family only — prolonged wear sits outside the sanctioned envelope of every ordinary grade",
+    "the certified grades are named injection-moulding and extrusion grades; the producer states that the user alone must finally determine suitability, and a printed part is not a certified article",
+    "open porosity in extrusion-printed parts admits body fluids and disinfectant, with published work finding no manufacturing settings that provide sufficient sealing against fluid intake",
+    "no PPSU-specific dermal irritation or sensitisation study was located"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
   }
  }
 }
