@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-07-25T00:48:19.139443+00:00",
+  "generated": "2026-07-25T01:14:09.143738+00:00",
   "tool_count": 376,
   "categories": {
     "product_generators": {
@@ -15300,9 +15300,17 @@
             "type": "number"
           },
           "prevent_overhangs": {
-            "default": false,
-            "title": "Prevent Overhangs",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "const": "auto",
+                "type": "string"
+              }
+            ],
+            "default": "auto",
+            "title": "Prevent Overhangs"
           },
           "projection": {
             "default": "auto",
@@ -15496,9 +15504,17 @@
             "type": "number"
           },
           "prevent_overhangs": {
-            "default": false,
-            "title": "Prevent Overhangs",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "const": "auto",
+                "type": "string"
+              }
+            ],
+            "default": "auto",
+            "title": "Prevent Overhangs"
           },
           "projection": {
             "default": "auto",
