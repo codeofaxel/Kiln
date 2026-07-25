@@ -440,6 +440,15 @@ class _DesignToolsPlugin:
                             "refer_to_medical": floor.refer_to_medical,
                             "never_skin_safe": True,
                         }
+                        # Say when the caution is inherited rather than written
+                        # about this exact grade — the user should know which
+                        # they are reading, and an inherited answer is still
+                        # infinitely better than the silence this replaced.
+                        if floor.is_uncharacterized:
+                            sc["record_basis"] = "uncharacterized"
+                        elif floor.inherited_from:
+                            sc["record_basis"] = "inherited"
+                            sc["inherited_from"] = floor.inherited_from
                         # Pro enrichment: the per-exposure verdict when
                         # kiln-pro is installed; free tier stops at the floor.
                         try:

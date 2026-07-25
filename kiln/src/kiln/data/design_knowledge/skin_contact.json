@@ -16,6 +16,46 @@
    "prolonged": "surface / intact skin, prolonged (>24h) — worn items",
    "mucosal": "mucosal membrane — out of intact-skin scope",
    "broken_implant": "breached surface / implant / permanent — out of scope"
+  },
+  "family_inheritance": {
+   "_why": "A worn part must never be met with SILENCE. A material with no record of its own used to return nothing, and nothing reads as 'no concern' — the opposite of the truth, which is 'untested'. An unmatched grade now inherits the closest characterised family and is labelled as inherited, so the caution reaches the user without ever being passed off as a record for their exact grade.",
+   "_direction": "Inheritance resolves to the MOST RESTRICTIVE candidate, never the most convenient. In a filled grade the FILLER is usually the hazard, so a carbon-filled PLA inherits the fibre record, not plain PLA's. Resolving to the unfilled base would understate the risk, which is the one direction a safety floor must never fail in.",
+   "token_families": {
+    "cf": "cf_nylon",
+    "gf": "cf_nylon",
+    "carbon": "cf_nylon",
+    "glass": "cf_nylon",
+    "wood": "wood_fill",
+    "metal": "metal_fill",
+    "bronze": "metal_fill",
+    "pc": "polycarbonate",
+    "pet": "petg",
+    "pa": "nylon",
+    "pa6": "nylon",
+    "pa66": "nylon",
+    "pa612": "nylon",
+    "pa11": "nylon",
+    "pekk": "peek",
+    "pei": "peek",
+    "ultem": "peek",
+    "paek": "peek"
+   }
+  },
+  "uncharacterized_floor": {
+   "_why": "The last resort, and the reason silence is now impossible: a material we have never characterised still gets the honest floor. This is NOT a clearance — it is the statement that nobody has tested it, which is the most common truth in this domain.",
+   "display_name": "this material",
+   "base_state": "no_evidence_untested",
+   "concern_level": "untested",
+   "concern_basis": "no skin-contact record for this material — untested, which is not the same as low-risk",
+   "safety_floor": {
+    "honesty_note": "Kiln has no skin-contact record for this material. That is not a clearance: it means nobody has characterised it for wear against skin, and no 3D-printed part is skin-safe, hypoallergenic, or biocompatible in any case. Treat prolonged wear as unevaluated, and prefer a material Kiln does characterise for anything worn all day.",
+    "named_hazards": [
+     "no published skin-contact characterisation for this material",
+     "undisclosed colorant and additive load (the dominant unlabelled variable in every consumer filament)",
+     "as-printed layer lines wick sweat and are far harder to clean than a moulded surface"
+    ],
+    "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+   }
   }
  },
  "pla": {
@@ -237,6 +277,182 @@
     "real biocompatible grades exist but require industrial printers (>350 C, heated chamber)"
    ],
    "refer_to_medical": "PEEK/PEI implant- and medical-grade materials are real but industrial-only. For any certified skin-contact or medical need, see a medical professional and a certified medical-grade supplier; a desktop-printed part is not a substitute."
+  }
+ },
+ "pvb": {
+  "display_name": "PVB (Polyvinyl Butyral)",
+  "base_state": "wrong_material",
+  "concern_level": "not_applicable",
+  "concern_basis": "dissolved by the alcohol used to clean and sanitise a worn part — unsuitable before toxicology is even reached",
+  "safety_floor": {
+   "honesty_note": "PVB is the wrong material for anything worn, and the reason is upstream of toxicology. Its own resin maker specifies it as a 10% solution in aqueous ethanol at 20 C, and IPA smoothing is the filament's advertised feature — so hand sanitiser, alcohol wipes and sweat attack the part under exactly the conditions of wear. No skin assessment of the intact part would describe the part a wearer actually ends up with.",
+   "named_hazards": [
+    "soluble in room-temperature aqueous ethanol — hand sanitiser and alcohol wipes attack the worn surface",
+    "absorbs 4-6% water within 24 h and softens near body heat (Tg 63-73 C)",
+    "undisclosed additive package, exposed as the surface degrades",
+    "the filament maker's own SDS advises avoiding prolonged and repeated skin contact"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pc_abs": {
+  "display_name": "PC-ABS (Polycarbonate/ABS Blend)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "high",
+  "concern_basis": "dual-parent residual load — bisphenol A and phenolics from the PC phase, styrene and acrylonitrile from the ABS phase, all manufacturer-declared for the blend itself",
+  "safety_floor": {
+   "honesty_note": "PC-ABS carries both parents' chemistry, and this is not an inference: the manufacturer's own SDS names bisphenol A, styrene and acrylonitrile as residues of the blend. What is NOT known is whether any of it reaches skin — every migration dataset that exists is food-simulant, beverage or saliva, and none is sweat — so the concern is declared composition, never a measured skin dose.",
+   "named_hazards": [
+    "bisphenol A (CAS 80-05-7), manufacturer-declared blend residue, classified a skin sensitiser (H317)",
+    "residual styrene monomer (CAS 100-42-5), skin irritant (H315); IARC Group 2A on the inhalation route",
+    "acrylonitrile (CAS 107-13-1), the SDS itself notes dermal absorption is possible",
+    "phenol and 4-tert-butylphenol, PC-side residues, both dermally active",
+    "no sweat-migration study exists for PC or PC-ABS — dermal migration is plausible, not demonstrated"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pa6_gf": {
+  "display_name": "PA6-GF (Glass-Filled Nylon 6)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "elevated",
+  "concern_basis": "25-50% glass fibre in a filament its own manufacturer restricts to industrial use; fibreglass dermatitis is a documented mechanical-irritant condition",
+  "safety_floor": {
+   "honesty_note": "The manufacturer's own SDS both names mechanical skin irritation and states the product has not been tested for it, while restricting the filament to industrial use only. Fibreglass dermatitis is a real, documented condition caused by fibre fragments piercing the outer skin layer — but whether fibre ends actually protrude from a printed surface has never been measured, so the mechanism is established for loose fibre and unquantified for the part you would wear.",
+   "named_hazards": [
+    "glass fibre at 25-50% w/w, carried as a hazardous ingredient on the manufacturer's own SDS",
+    "fibreglass dermatitis — mechanical irritant contact dermatitis from fibre fragments piercing the stratum corneum",
+    "the manufacturer restricts this filament to industrial use only, which a worn part sits outside",
+    "nylon's own moisture uptake, which swells and softens the part against sweat",
+    "fibre protrusion at a printed surface is unmeasured — the load-bearing unknown for any worn part"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pla_esd": {
+  "display_name": "PLA-ESD (Static-Dissipative PLA)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "elevated",
+  "concern_basis": "a conductive carbon filler of undisclosed identity, on top of PLA's own undisclosed colorant load",
+  "safety_floor": {
+   "honesty_note": "PLA's benign reputation belongs to characterised medical-grade resin, and it does not extend to a carbon-loaded dissipative compound. A dissipative grade is its base polymer plus a conductive carbon whose identity the vendor usually withholds. The published hazard record for that carbon is inhalation-based, drawn from free powder rather than a printed part worn against skin, and no maker publishes skin testing for these grades — so the skin risk of an ESD part is not established as low, it is unmeasured.",
+   "named_hazards": [
+    "undisclosed colorant/additive load (the dominant, unlabelled variable in the base polymer)",
+    "low softening temperature (Tg ~55-65 C) under warm, prolonged wear",
+    "conductive filler not disclosed — the SDS declares only generic \"carbon additives\", and whether that is carbon black, carbon nanotube or carbon fibre decides which hazard applies",
+    "carbon-nanotube grades are in real market use, and NIOSH states dermal data for CNT are limited and advises particular care against abraded skin",
+    "abrasion of carbon-nanotube composites is a demonstrated filler-release mechanism, measured only on epoxy and only as airborne, never as skin dose",
+    "no static-dissipative filament carries ISO 10993 skin testing"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "petg_esd": {
+  "display_name": "PETG-ESD (Static-Dissipative PETG)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "elevated",
+  "concern_basis": "a conductive carbon filler of undisclosed identity, on top of PETG's own undisclosed additive package",
+  "safety_floor": {
+   "honesty_note": "PETG is a reasonable lower-concern base among consumer filaments, but a carbon-loaded dissipative grade is a different material from the plain spool that reputation was built on. A dissipative grade is its base polymer plus a conductive carbon whose identity the vendor usually withholds. The published hazard record for that carbon is inhalation-based, drawn from free powder rather than a printed part worn against skin, and no maker publishes skin testing for these grades — so the skin risk of an ESD part is not established as low, it is unmeasured.",
+   "named_hazards": [
+    "undisclosed colorant/additive package (often the real sensitizer)",
+    "antimony trioxide polycondensation catalyst residue",
+    "conductive filler not disclosed — the SDS declares only generic \"carbon additives\", and whether that is carbon black, carbon nanotube or carbon fibre decides which hazard applies",
+    "carbon-nanotube grades are in real market use, and NIOSH states dermal data for CNT are limited and advises particular care against abraded skin",
+    "abrasion of carbon-nanotube composites is a demonstrated filler-release mechanism, measured only on epoxy and only as airborne, never as skin dose",
+    "no static-dissipative filament carries ISO 10993 skin testing"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "abs_esd": {
+  "display_name": "ABS-ESD (Static-Dissipative ABS)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "high",
+  "concern_basis": "a conductive carbon filler of undisclosed identity, on top of ABS's own residual styrene",
+  "safety_floor": {
+   "honesty_note": "ABS already carries a named residual-monomer concern before any filler is added, and the dissipative grade adds a second undisclosed one. A dissipative grade is its base polymer plus a conductive carbon whose identity the vendor usually withholds. The published hazard record for that carbon is inhalation-based, drawn from free powder rather than a printed part worn against skin, and no maker publishes skin testing for these grades — so the skin risk of an ESD part is not established as low, it is unmeasured.",
+   "named_hazards": [
+    "residual styrene monomer, a skin irritant and IARC Group 2A by inhalation",
+    "acrylonitrile residue, for which dermal absorption is documented",
+    "conductive filler not disclosed — the SDS declares only generic \"carbon additives\", and whether that is carbon black, carbon nanotube or carbon fibre decides which hazard applies",
+    "carbon-nanotube grades are in real market use, and NIOSH states dermal data for CNT are limited and advises particular care against abraded skin",
+    "abrasion of carbon-nanotube composites is a demonstrated filler-release mechanism, measured only on epoxy and only as airborne, never as skin dose",
+    "no static-dissipative filament carries ISO 10993 skin testing"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pc_esd": {
+  "display_name": "PC-ESD (Static-Dissipative Polycarbonate)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "high",
+  "concern_basis": "a conductive carbon filler of undisclosed identity, on top of polycarbonate's bisphenol A concern",
+  "safety_floor": {
+   "honesty_note": "Polycarbonate already carries a bisphenol A concern before any filler is added, and the dissipative grade adds an undisclosed conductive carbon to it. A dissipative grade is its base polymer plus a conductive carbon whose identity the vendor usually withholds. The published hazard record for that carbon is inhalation-based, drawn from free powder rather than a printed part worn against skin, and no maker publishes skin testing for these grades — so the skin risk of an ESD part is not established as low, it is unmeasured.",
+   "named_hazards": [
+    "bisphenol A, a documented skin sensitiser and the polymer's own building block",
+    "no sweat-migration study exists for polycarbonate — dermal migration is plausible, not demonstrated",
+    "conductive filler not disclosed — the SDS declares only generic \"carbon additives\", and whether that is carbon black, carbon nanotube or carbon fibre decides which hazard applies",
+    "carbon-nanotube grades are in real market use, and NIOSH states dermal data for CNT are limited and advises particular care against abraded skin",
+    "abrasion of carbon-nanotube composites is a demonstrated filler-release mechanism, measured only on epoxy and only as airborne, never as skin dose",
+    "no static-dissipative filament carries ISO 10993 skin testing"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pa612_esd": {
+  "display_name": "PA612-ESD (Static-Dissipative Nylon 612)",
+  "base_state": "chemistry_of_concern",
+  "concern_level": "elevated",
+  "concern_basis": "a dual filler system — carbon nanotube plus chopped carbon fibre in at least one market grade — on a nylon base",
+  "safety_floor": {
+   "honesty_note": "This grade is the clearest case of a stacked filler system: a market product combines carbon nanotubes with chopped carbon fibre, so both hazard profiles apply at once. A dissipative grade is its base polymer plus a conductive carbon whose identity the vendor usually withholds. The published hazard record for that carbon is inhalation-based, drawn from free powder rather than a printed part worn against skin, and no maker publishes skin testing for these grades — so the skin risk of an ESD part is not established as low, it is unmeasured.",
+   "named_hazards": [
+    "at least one market grade combines carbon nanotube with 10% chopped carbon fibre, stacking a nanomaterial and a fibre hazard",
+    "nylon's own moisture uptake, which swells and softens the part against sweat",
+    "conductive filler not disclosed — the SDS declares only generic \"carbon additives\", and whether that is carbon black, carbon nanotube or carbon fibre decides which hazard applies",
+    "carbon-nanotube grades are in real market use, and NIOSH states dermal data for CNT are limited and advises particular care against abraded skin",
+    "abrasion of carbon-nanotube composites is a demonstrated filler-release mechanism, measured only on epoxy and only as airborne, never as skin dose",
+    "no static-dissipative filament carries ISO 10993 skin testing"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pei_esd": {
+  "display_name": "PEI-ESD (Static-Dissipative Polyetherimide)",
+  "base_state": "out_of_scope_industrial",
+  "concern_level": "not_applicable",
+  "concern_basis": "an industrial high-temperature polymer with an undisclosed conductive filler — outside consumer skin-contact scope in both respects",
+  "safety_floor": {
+   "honesty_note": "PEI is an industrial polymer whose certified grades exist for industrial and medical device manufacture, not for printed wearables, and the dissipative version withholds its filler identity entirely. A dissipative grade is its base polymer plus a conductive carbon whose identity the vendor usually withholds. The published hazard record for that carbon is inhalation-based, drawn from free powder rather than a printed part worn against skin, and no maker publishes skin testing for these grades — so the skin risk of an ESD part is not established as low, it is unmeasured.",
+   "named_hazards": [
+    "an industrial-scope polymer, not a consumer wearable material",
+    "the vendor SDS for this grade withholds even the filler's CAS number, declaring it 'Proprietary'",
+    "conductive filler not disclosed — the SDS declares only generic \"carbon additives\", and whether that is carbon black, carbon nanotube or carbon fibre decides which hazard applies",
+    "carbon-nanotube grades are in real market use, and NIOSH states dermal data for CNT are limited and advises particular care against abraded skin",
+    "abrasion of carbon-nanotube composites is a demonstrated filler-release mechanism, measured only on epoxy and only as airborne, never as skin dose",
+    "no static-dissipative filament carries ISO 10993 skin testing"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pekk_esd": {
+  "display_name": "PEKK-ESD (Static-Dissipative Polyetherketoneketone)",
+  "base_state": "out_of_scope_industrial",
+  "concern_level": "not_applicable",
+  "concern_basis": "an industrial high-temperature polymer with an undisclosed conductive filler — outside consumer skin-contact scope in both respects",
+  "safety_floor": {
+   "honesty_note": "PEKK is an industrial PAEK polymer whose certified grades exist for industrial and medical device manufacture, not for printed wearables. A dissipative grade is its base polymer plus a conductive carbon whose identity the vendor usually withholds. The published hazard record for that carbon is inhalation-based, drawn from free powder rather than a printed part worn against skin, and no maker publishes skin testing for these grades — so the skin risk of an ESD part is not established as low, it is unmeasured.",
+   "named_hazards": [
+    "an industrial-scope polymer, not a consumer wearable material",
+    "no dermal characterisation exists for the PAEK family as a printed consumer part",
+    "conductive filler not disclosed — the SDS declares only generic \"carbon additives\", and whether that is carbon black, carbon nanotube or carbon fibre decides which hazard applies",
+    "carbon-nanotube grades are in real market use, and NIOSH states dermal data for CNT are limited and advises particular care against abraded skin",
+    "abrasion of carbon-nanotube composites is a demonstrated filler-release mechanism, measured only on epoxy and only as airborne, never as skin dose",
+    "no static-dissipative filament carries ISO 10993 skin testing"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
   }
  }
 }

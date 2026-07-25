@@ -94,12 +94,68 @@ def test_get_skin_contact_floor_per_material_honesty():
                for h in abs_floor.named_hazards)
 
 
-def test_get_skin_contact_floor_unknown_is_none():
-    assert di.get_skin_contact_floor("unobtanium") is None
+def test_no_material_named_is_none():
+    """Nothing to warn about is still nothing to say.
+
+    An empty material is the caller having no material at all — distinct from
+    a material we do not recognise, which now gets the generic floor below.
+    """
     assert di.get_skin_contact_floor("") is None
-    # A non-material key merged in from the overlay (e.g. a standards
-    # cross-reference) is not a floor — it must never yield a pseudo-record.
-    assert di.get_skin_contact_floor("standards_reference") is None
+    assert di.get_skin_contact_floor("   ") is None
+
+
+def test_unknown_material_gets_the_floor_never_silence():
+    """An unrecognised material must NOT return nothing.
+
+    This reverses the previous contract deliberately.  Returning ``None``
+    made the caller skip the whole skin-contact block, and a worn part with
+    no warning reads as "no concern" when the truth is "untested" — the one
+    direction a safety floor must never fail in.  Thirteen materials shipped
+    in v1.2.0 were silent this way.
+    """
+    floor = di.get_skin_contact_floor("unobtanium")
+    assert floor is not None
+    assert floor.is_uncharacterized
+    assert floor.honesty_note, "the generic floor must still say something real"
+    assert floor.refer_to_medical
+    # Untested is stated as untested — never as a clearance.
+    assert "clearance" in floor.honesty_note.lower()
+    assert floor.concern_level == "untested"
+
+
+def test_non_material_key_never_yields_a_pseudo_record():
+    """A merged non-material key (e.g. a standards cross-reference) is not a
+    floor: it may only ever fall through to the generic floor, never be
+    dressed up as a record about itself."""
+    floor = di.get_skin_contact_floor("standards_reference")
+    assert floor is not None and floor.is_uncharacterized
+
+
+def test_filled_grades_inherit_the_more_restrictive_family():
+    """A filled grade inherits the FILLER's record, not the unfilled base's.
+
+    cf_pla resolving to plain PLA understated a fibre hazard on a material
+    shipped in v1.2.0; the fibre record is the correct, more restrictive
+    parent.
+    """
+    for mid in ("cf_pla", "cf_petg", "petg_cf", "pet_cf"):
+        floor = di.get_skin_contact_floor(mid)
+        assert floor is not None, mid
+        assert floor.inherited_from == "cf_nylon", (
+            f"{mid} inherited {floor.inherited_from!r}; a fibre-filled grade "
+            "must not borrow the unfilled base polymer's lower concern"
+        )
+        assert not floor.is_uncharacterized
+
+    wood = di.get_skin_contact_floor("wood_pla")
+    assert wood is not None and wood.inherited_from == "wood_fill"
+
+
+def test_exact_records_are_never_overridden_by_inheritance():
+    for mid in ("pla", "abs", "tpu", "peek", "pva"):
+        floor = di.get_skin_contact_floor(mid)
+        assert floor is not None and floor.inherited_from is None, mid
+        assert not floor.is_uncharacterized, mid
 
 
 def test_floor_works_without_kiln_pro(monkeypatch):
