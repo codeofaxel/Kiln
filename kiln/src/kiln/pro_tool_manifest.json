@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-25T22:41:53.048508+00:00",
-  "tool_count": 379,
+  "generated": "2026-07-25T23:10:56.655794+00:00",
+  "tool_count": 380,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -290,6 +290,53 @@
           "assembly_json"
         ],
         "title": "auto_generate_manual_for_printArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "derive_assembly_plan",
+      "description": "Derive an assembly plan from part GEOMETRY \u2014 no hand declaration needed.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "assembly_manuals",
+      "parameters": {
+        "properties": {
+          "part_paths": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Part Paths",
+            "type": "array"
+          },
+          "part_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Part Names"
+          },
+          "assembly_name": {
+            "default": "derived-assembly",
+            "title": "Assembly Name",
+            "type": "string"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_paths"
+        ],
+        "title": "derive_assembly_planArguments",
         "type": "object"
       }
     },
