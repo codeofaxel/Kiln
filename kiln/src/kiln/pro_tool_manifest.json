@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-24T23:26:35.577348+00:00",
-  "tool_count": 375,
+  "generated": "2026-07-25T00:48:19.139443+00:00",
+  "tool_count": 376,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -8947,6 +8947,45 @@
           "use"
         ],
         "title": "recommend_material_for_skin_contactArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_skin_contact_outcome",
+      "description": "Log what happened when someone actually wore or handled a printed part.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "category": "material_safety",
+      "parameters": {
+        "properties": {
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "exposure": {
+            "title": "Exposure",
+            "type": "string"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "material",
+          "exposure",
+          "outcome"
+        ],
+        "title": "record_skin_contact_outcomeArguments",
         "type": "object"
       }
     },
