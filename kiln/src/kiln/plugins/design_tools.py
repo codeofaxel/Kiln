@@ -542,10 +542,35 @@ class _DesignToolsPlugin:
                     load_across_layers=load_across_layers,
                 )
                 if estimate is None:
+                    # An elastomer is not "unknown" — it is governed by a
+                    # different limit. It deflects out of the way long before
+                    # it breaks, so answer the question that actually applies
+                    # instead of returning nothing.
+                    from kiln.design_intelligence import (
+                        estimate_deflection_limited_load,
+                        load_table_materials,
+                    )
+
+                    flex = estimate_deflection_limited_load(
+                        material, cross_section_mm2, cantilever_length_mm
+                    )
+                    if flex is not None:
+                        flex["success"] = True
+                        flex["safety_basis"] = (
+                            "This is a SERVICEABILITY limit, not a strength "
+                            "limit: the load at which the section bends "
+                            f"{flex['allowable_deflection_mm']} mm (L/10). "
+                            "The part will not break here — it will simply "
+                            "bend too far to do its job. If it must hold its "
+                            "shape under load, use a rigid material; an "
+                            "elastomer is made stiffer by changing geometry, "
+                            "not by expecting more of the polymer."
+                        )
+                        return flex
                     return {
                         "success": False,
                         "error": f"Unknown load table material: {material}. "
-                        "Available: pla, petg, abs, nylon, polycarbonate.",
+                        f"Available: {', '.join(load_table_materials())}.",
                     }
                 result = estimate.to_dict()
                 result["success"] = True

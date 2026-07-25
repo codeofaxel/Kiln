@@ -4695,5 +4695,428 @@
       "across_layers": 0.4,
       "along_layers": 1.0
     }
+  },
+  "tpu": {
+    "limit_mode": "deflection",
+    "youngs_modulus_mpa": 80.0,
+    "deflection_limit_ratio": 10.0,
+    "cross_section_vs_deflection_load": [
+      {
+        "cantilever_length_mm": 25,
+        "allowable_deflection_mm": 2.5,
+        "entries": [
+          {
+            "cross_section_mm2": 12,
+            "load_at_deflection_limit_n": 0.4608
+          },
+          {
+            "cross_section_mm2": 24,
+            "load_at_deflection_limit_n": 1.8432
+          },
+          {
+            "cross_section_mm2": 36,
+            "load_at_deflection_limit_n": 4.1472
+          },
+          {
+            "cross_section_mm2": 48,
+            "load_at_deflection_limit_n": 7.3728
+          },
+          {
+            "cross_section_mm2": 60,
+            "load_at_deflection_limit_n": 11.52
+          }
+        ]
+      },
+      {
+        "cantilever_length_mm": 50,
+        "allowable_deflection_mm": 5.0,
+        "entries": [
+          {
+            "cross_section_mm2": 12,
+            "load_at_deflection_limit_n": 0.1152
+          },
+          {
+            "cross_section_mm2": 24,
+            "load_at_deflection_limit_n": 0.4608
+          },
+          {
+            "cross_section_mm2": 36,
+            "load_at_deflection_limit_n": 1.0368
+          },
+          {
+            "cross_section_mm2": 48,
+            "load_at_deflection_limit_n": 1.8432
+          },
+          {
+            "cross_section_mm2": 60,
+            "load_at_deflection_limit_n": 2.88
+          }
+        ]
+      },
+      {
+        "cantilever_length_mm": 100,
+        "allowable_deflection_mm": 10.0,
+        "entries": [
+          {
+            "cross_section_mm2": 12,
+            "load_at_deflection_limit_n": 0.0288
+          },
+          {
+            "cross_section_mm2": 24,
+            "load_at_deflection_limit_n": 0.1152
+          },
+          {
+            "cross_section_mm2": 36,
+            "load_at_deflection_limit_n": 0.2592
+          },
+          {
+            "cross_section_mm2": 48,
+            "load_at_deflection_limit_n": 0.4608
+          },
+          {
+            "cross_section_mm2": 60,
+            "load_at_deflection_limit_n": 0.72
+          }
+        ]
+      },
+      {
+        "cantilever_length_mm": 150,
+        "allowable_deflection_mm": 15.0,
+        "entries": [
+          {
+            "cross_section_mm2": 12,
+            "load_at_deflection_limit_n": 0.0128
+          },
+          {
+            "cross_section_mm2": 24,
+            "load_at_deflection_limit_n": 0.0512
+          },
+          {
+            "cross_section_mm2": 36,
+            "load_at_deflection_limit_n": 0.1152
+          },
+          {
+            "cross_section_mm2": 48,
+            "load_at_deflection_limit_n": 0.2048
+          },
+          {
+            "cross_section_mm2": 60,
+            "load_at_deflection_limit_n": 0.32
+          }
+        ]
+      },
+      {
+        "cantilever_length_mm": 200,
+        "allowable_deflection_mm": 20.0,
+        "entries": [
+          {
+            "cross_section_mm2": 12,
+            "load_at_deflection_limit_n": 0.0072
+          },
+          {
+            "cross_section_mm2": 24,
+            "load_at_deflection_limit_n": 0.0288
+          },
+          {
+            "cross_section_mm2": 36,
+            "load_at_deflection_limit_n": 0.0648
+          },
+          {
+            "cross_section_mm2": 48,
+            "load_at_deflection_limit_n": 0.1152
+          },
+          {
+            "cross_section_mm2": 60,
+            "load_at_deflection_limit_n": 0.18
+          }
+        ]
+      }
+    ],
+    "notes": [
+      "This material does not fail in bending at these loads \u2014 it deflects. The figures are the load at which the part bends L/10, which is what stops it doing its job.",
+      "For a part that must hold its shape under load, choose a rigid material; sizing an elastomer for stiffness means changing geometry, not expecting more from the polymer."
+    ]
+  },
+  "tpu_85a": {
+    "limit_mode": "deflection",
+    "youngs_modulus_mpa": 18.0,
+    "deflection_limit_ratio": 10.0,
+    "cross_section_vs_deflection_load": [
+      {
+        "cantilever_length_mm": 25,
+        "allowable_deflection_mm": 2.5,
+        "entries": [
+          {
+            "cross_section_mm2": 12,
+            "load_at_deflection_limit_n": 0.1036
+          },
+          {
+            "cross_section_mm2": 24,
+            "load_at_deflection_limit_n": 0.4147
+          },
+          {
+            "cross_section_mm2": 36,
+            "load_at_deflection_limit_n": 0.9331
+          },
+          {
+            "cross_section_mm2": 48,
+            "load_at_deflection_limit_n": 1.6588
+          },
+          {
+            "cross_section_mm2": 60,
+            "load_at_deflection_limit_n": 2.592
+          }
+        ]
+      },
+      {
+        "cantilever_length_mm": 50,
+        "allowable_deflection_mm": 5.0,
+        "entries": [
+          {
+            "cross_section_mm2": 12,
+            "load_at_deflection_limit_n": 0.0259
+          },
+          {
+            "cross_section_mm2": 24,
+            "load_at_deflection_limit_n": 0.1036
+          },
+          {
+            "cross_section_mm2": 36,
+            "load_at_deflection_limit_n": 0.2332
+          },
+          {
+            "cross_section_mm2": 48,
+            "load_at_deflection_limit_n": 0.4147
+          },
+          {
+            "cross_section_mm2": 60,
+            "load_at_deflection_limit_n": 0.648
+          }
+        ]
+      },
+      {
+        "cantilever_length_mm": 100,
+        "allowable_deflection_mm": 10.0,
+        "entries": [
+          {
+            "cross_section_mm2": 12,
+            "load_at_deflection_limit_n": 0.0064
+          },
+          {
+            "cross_section_mm2": 24,
+            "load_at_deflection_limit_n": 0.0259
+          },
+          {
+            "cross_section_mm2": 36,
+            "load_at_deflection_limit_n": 0.0583
+          },
+          {
+            "cross_section_mm2": 48,
+            "load_at_deflection_limit_n": 0.1036
+          },
+          {
+            "cross_section_mm2": 60,
+            "load_at_deflection_limit_n": 0.162
+          }
+        ]
+      },
+      {
+        "cantilever_length_mm": 150,
+        "allowable_deflection_mm": 15.0,
+        "entries": [
+          {
+            "cross_section_mm2": 12,
+            "load_at_deflection_limit_n": 0.0028
+          },
+          {
+            "cross_section_mm2": 24,
+            "load_at_deflection_limit_n": 0.0115
+          },
+          {
+            "cross_section_mm2": 36,
+            "load_at_deflection_limit_n": 0.0259
+          },
+          {
+            "cross_section_mm2": 48,
+            "load_at_deflection_limit_n": 0.046
+          },
+          {
+            "cross_section_mm2": 60,
+            "load_at_deflection_limit_n": 0.072
+          }
+        ]
+      },
+      {
+        "cantilever_length_mm": 200,
+        "allowable_deflection_mm": 20.0,
+        "entries": [
+          {
+            "cross_section_mm2": 12,
+            "load_at_deflection_limit_n": 0.0016
+          },
+          {
+            "cross_section_mm2": 24,
+            "load_at_deflection_limit_n": 0.0064
+          },
+          {
+            "cross_section_mm2": 36,
+            "load_at_deflection_limit_n": 0.0145
+          },
+          {
+            "cross_section_mm2": 48,
+            "load_at_deflection_limit_n": 0.0259
+          },
+          {
+            "cross_section_mm2": 60,
+            "load_at_deflection_limit_n": 0.0405
+          }
+        ]
+      }
+    ],
+    "notes": [
+      "This material does not fail in bending at these loads \u2014 it deflects. The figures are the load at which the part bends L/10, which is what stops it doing its job.",
+      "For a part that must hold its shape under load, choose a rigid material; sizing an elastomer for stiffness means changing geometry, not expecting more from the polymer."
+    ]
+  },
+  "tpu_95a": {
+    "limit_mode": "deflection",
+    "youngs_modulus_mpa": 80.0,
+    "deflection_limit_ratio": 10.0,
+    "cross_section_vs_deflection_load": [
+      {
+        "cantilever_length_mm": 25,
+        "allowable_deflection_mm": 2.5,
+        "entries": [
+          {
+            "cross_section_mm2": 12,
+            "load_at_deflection_limit_n": 0.4608
+          },
+          {
+            "cross_section_mm2": 24,
+            "load_at_deflection_limit_n": 1.8432
+          },
+          {
+            "cross_section_mm2": 36,
+            "load_at_deflection_limit_n": 4.1472
+          },
+          {
+            "cross_section_mm2": 48,
+            "load_at_deflection_limit_n": 7.3728
+          },
+          {
+            "cross_section_mm2": 60,
+            "load_at_deflection_limit_n": 11.52
+          }
+        ]
+      },
+      {
+        "cantilever_length_mm": 50,
+        "allowable_deflection_mm": 5.0,
+        "entries": [
+          {
+            "cross_section_mm2": 12,
+            "load_at_deflection_limit_n": 0.1152
+          },
+          {
+            "cross_section_mm2": 24,
+            "load_at_deflection_limit_n": 0.4608
+          },
+          {
+            "cross_section_mm2": 36,
+            "load_at_deflection_limit_n": 1.0368
+          },
+          {
+            "cross_section_mm2": 48,
+            "load_at_deflection_limit_n": 1.8432
+          },
+          {
+            "cross_section_mm2": 60,
+            "load_at_deflection_limit_n": 2.88
+          }
+        ]
+      },
+      {
+        "cantilever_length_mm": 100,
+        "allowable_deflection_mm": 10.0,
+        "entries": [
+          {
+            "cross_section_mm2": 12,
+            "load_at_deflection_limit_n": 0.0288
+          },
+          {
+            "cross_section_mm2": 24,
+            "load_at_deflection_limit_n": 0.1152
+          },
+          {
+            "cross_section_mm2": 36,
+            "load_at_deflection_limit_n": 0.2592
+          },
+          {
+            "cross_section_mm2": 48,
+            "load_at_deflection_limit_n": 0.4608
+          },
+          {
+            "cross_section_mm2": 60,
+            "load_at_deflection_limit_n": 0.72
+          }
+        ]
+      },
+      {
+        "cantilever_length_mm": 150,
+        "allowable_deflection_mm": 15.0,
+        "entries": [
+          {
+            "cross_section_mm2": 12,
+            "load_at_deflection_limit_n": 0.0128
+          },
+          {
+            "cross_section_mm2": 24,
+            "load_at_deflection_limit_n": 0.0512
+          },
+          {
+            "cross_section_mm2": 36,
+            "load_at_deflection_limit_n": 0.1152
+          },
+          {
+            "cross_section_mm2": 48,
+            "load_at_deflection_limit_n": 0.2048
+          },
+          {
+            "cross_section_mm2": 60,
+            "load_at_deflection_limit_n": 0.32
+          }
+        ]
+      },
+      {
+        "cantilever_length_mm": 200,
+        "allowable_deflection_mm": 20.0,
+        "entries": [
+          {
+            "cross_section_mm2": 12,
+            "load_at_deflection_limit_n": 0.0072
+          },
+          {
+            "cross_section_mm2": 24,
+            "load_at_deflection_limit_n": 0.0288
+          },
+          {
+            "cross_section_mm2": 36,
+            "load_at_deflection_limit_n": 0.0648
+          },
+          {
+            "cross_section_mm2": 48,
+            "load_at_deflection_limit_n": 0.1152
+          },
+          {
+            "cross_section_mm2": 60,
+            "load_at_deflection_limit_n": 0.18
+          }
+        ]
+      }
+    ],
+    "notes": [
+      "This material does not fail in bending at these loads \u2014 it deflects. The figures are the load at which the part bends L/10, which is what stops it doing its job.",
+      "For a part that must hold its shape under load, choose a rigid material; sizing an elastomer for stiffness means changing geometry, not expecting more from the polymer."
+    ]
   }
 }

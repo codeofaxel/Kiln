@@ -92,13 +92,34 @@ SIGMA_T_MPA = {
     "pvb": 40.0,
 }
 
-# The three elastomer grades are EXCLUDED on physics, not on effort.  This
-# table derives a safe load from tensile capacity at a cantilever root, which
-# assumes the part fails in bending rather than deflecting.  An elastomer does
-# the opposite: it bends out of the way long before it breaks, so a "safe load"
-# derived this way would describe a failure mode TPU does not have.  A load
-# question about TPU is a deflection question and needs a different model.
-_EXCLUDED_ELASTOMERS = ("tpu", "tpu_85a", "tpu_95a")
+# The three elastomer grades are answered by a DIFFERENT MODEL, not left blank.
+# The strength table above derives a safe load from tensile capacity at a
+# cantilever root, which assumes the part fails in bending.  An elastomer does
+# the opposite: it bends out of the way long before it breaks (TPU stretches
+# 450-600% before rupture), so a strength-derived "safe load" would describe a
+# failure mode TPU does not have.
+#
+# The honest question for an elastomer is serviceability: at what load does it
+# deflect so far it stops doing its job?  That is standard cantilever
+# deflection, d = F L^3 / (3 E I), solved for the load at an allowable
+# deflection.  Using a square section (I = A^2/12, matching the strength
+# table's basis) and an allowable deflection of L/10:
+#
+#     F = 3 E I d / L^3  ->  F = E * A^2 / (40 * L^2)
+#
+# These are SERVICEABILITY loads, not strength loads, and they are published
+# under their own key with their own units so the two can never be confused.
+_ELASTOMERS = ("tpu", "tpu_85a", "tpu_95a")
+
+# Young's modulus, MPa (= N/mm^2). Mirrors kiln-pro's materials overlay, which
+# pins these values so the two cannot drift.
+E_MODULUS_MPA = {
+    "tpu": 80.0,
+    "tpu_85a": 18.0,
+    "tpu_95a": 80.0,
+}
+
+DEFLECTION_LIMIT_RATIO = 10.0   # allowable deflection = L / 10
 
 SAFETY_FACTOR = 3.0
 FDM_PRINT_FACTOR = 0.9          # printed vs datasheet-bar strength
@@ -119,6 +140,23 @@ def tensile_capacity(material: str) -> float:
 def safe_load_n(material: str, area_mm2: float, length_mm: float) -> float:
     z_mm3 = area_mm2 ** 1.5 / 6.0
     return _floor2(tensile_capacity(material) * z_mm3 / length_mm)
+
+
+def _floor4(x: float) -> float:
+    """Round DOWN to 4 decimals. Deflection loads on a soft elastomer at a long
+    span are fractions of a gram; two decimals collapses distinct geometries to
+    a meaningless 0.0, and rounding must never add capacity."""
+    return math.floor(x * 10000.0) / 10000.0
+
+
+def deflection_limited_load_n(material: str, area_mm2: float, length_mm: float) -> float:
+    """Load at which a square elastomer cantilever deflects L/10.
+
+    Serviceability, not strength: an elastomer reaches an unusable deflection
+    long before it ruptures, so this is the number that actually governs.
+    """
+    e_mpa = E_MODULUS_MPA[material]
+    return _floor4(e_mpa * (area_mm2 ** 2) / (40.0 * (length_mm ** 2)))
 
 
 def build() -> dict:
@@ -171,6 +209,40 @@ def build() -> dict:
                 "across_layers": ACROSS_LAYER_DERATE,
                 "along_layers": 1.0,
             },
+        }
+
+    # Elastomers, answered by the serviceability model. Deliberately a
+    # DIFFERENT key with DIFFERENT field names: these are deflection-limited
+    # loads, and nothing should be able to read them as strength values.
+    for material in _ELASTOMERS:
+        doc[material] = {
+            "limit_mode": "deflection",
+            "youngs_modulus_mpa": E_MODULUS_MPA[material],
+            "deflection_limit_ratio": DEFLECTION_LIMIT_RATIO,
+            "cross_section_vs_deflection_load": [
+                {
+                    "cantilever_length_mm": length,
+                    "allowable_deflection_mm": round(length / DEFLECTION_LIMIT_RATIO, 2),
+                    "entries": [
+                        {
+                            "cross_section_mm2": area,
+                            "load_at_deflection_limit_n": deflection_limited_load_n(
+                                material, area, length
+                            ),
+                        }
+                        for area in CROSS_SECTIONS_MM2
+                    ],
+                }
+                for length in CANTILEVER_LENGTHS_MM
+            ],
+            "notes": [
+                "This material does not fail in bending at these loads — it "
+                "deflects. The figures are the load at which the part bends "
+                "L/10, which is what stops it doing its job.",
+                "For a part that must hold its shape under load, choose a "
+                "rigid material; sizing an elastomer for stiffness means "
+                "changing geometry, not expecting more from the polymer.",
+            ],
         }
     return doc
 

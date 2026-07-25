@@ -57,13 +57,9 @@ KNOWN_GAPS: dict[str, set[str]] = {
     # rating there would be noise dressed as coverage.
     "co_print_compatibility": {"pps"},
     "post_processing": set(),
-    # Closed 2026-07-25 by extending the generator from five materials to
-    # every RIGID one. The three that remain are a deliberate physics
-    # exclusion, not debt: this table derives a safe load from tensile
-    # capacity at a cantilever root, which assumes the part fails in bending.
-    # An elastomer deflects out of the way instead, so the figure would
-    # describe a failure mode TPU does not have.
-    "load_tables": {"tpu", "tpu_85a", "tpu_95a"},
+    # Closed entirely: the 35 rigid materials by the bending model, the 3
+    # elastomers by the deflection model. Every material is answerable.
+    "load_tables": set(),
 }
 
 # Table keys that are legitimately NOT catalog materials.  skin_contact

@@ -27,6 +27,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import math
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -2069,6 +2070,53 @@ def _check_filament_printer_compat(
 # ---------------------------------------------------------------------------
 # Public API — Structural and environmental reasoning
 # ---------------------------------------------------------------------------
+
+
+def load_table_materials() -> list[str]:
+    """Every material the load lookup can answer for, strength or deflection.
+
+    Derived from the table so it can never drift from reality — a hardcoded
+    list here told users only five materials were available long after the
+    table carried thirty-five.
+    """
+    return sorted(k for k in _get_kb().load_tables if not k.startswith("_"))
+
+
+def estimate_deflection_limited_load(
+    material_id: str,
+    cross_section_mm2: float,
+    cantilever_length_mm: float,
+) -> dict[str, Any] | None:
+    """Serviceability answer for an elastomer, or ``None`` if not one.
+
+    An elastomer does not fail in bending at these loads — it deflects out of
+    the way. This returns the load at which the section bends L/10, which is
+    the limit that actually governs, clearly labelled so it can never be read
+    as a strength value.
+    """
+    rec = _get_kb().load_tables.get((material_id or "").lower())
+    if not isinstance(rec, dict) or rec.get("limit_mode") != "deflection":
+        return None
+    rows = sorted(
+        rec.get("cross_section_vs_deflection_load", []),
+        key=lambda r: float(r.get("cantilever_length_mm", 0.0)),
+    )
+    if not rows or cross_section_mm2 <= 0 or cantilever_length_mm <= 0:
+        return None
+    e_mpa = float(rec.get("youngs_modulus_mpa", 0.0))
+    ratio = float(rec.get("deflection_limit_ratio", 10.0))
+    if e_mpa <= 0:
+        return None
+    # Same closed form the generator uses: F = E * A^2 / (4 * ratio * L^2)
+    load = e_mpa * (cross_section_mm2 ** 2) / (4.0 * ratio * (cantilever_length_mm ** 2))
+    return {
+        "material": (material_id or "").lower(),
+        "limit_mode": "deflection",
+        "load_at_deflection_limit_n": math.floor(load * 10000.0) / 10000.0,
+        "allowable_deflection_mm": round(cantilever_length_mm / ratio, 2),
+        "youngs_modulus_mpa": e_mpa,
+        "reasoning": list(rec.get("notes", [])),
+    }
 
 
 def estimate_load_capacity(
