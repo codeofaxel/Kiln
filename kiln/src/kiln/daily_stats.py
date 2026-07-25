@@ -77,13 +77,46 @@ def _empty_day() -> dict[str, Any]:
     }
 
 
+# Counter keys carried forward when a day rolls over, so the daily
+# heartbeat can report a COMPLETE day instead of a partial one.
+_ROLLOVER_COUNTERS = (
+    "prints", "generations", "decorations",
+    "textures", "slices", "downloads", "print_hours",
+)
+
+
+def _archive_completed_day(data: dict[str, Any]) -> dict[str, Any]:
+    """Return a fresh day that remembers the day that just ended.
+
+    The heartbeat fires ONCE, when the Kiln server starts, and reads
+    whatever counters exist at that instant.  Since you must start the
+    server to do anything with Kiln, today's counters are ~always zero
+    at that moment — so the reported activity systematically undercounts
+    (2026-07-25: 17 of 671 production heartbeats carried any print at
+    all, which read as "nobody prints" rather than "we sample before the
+    work happens").  Preserving the finished day lets the heartbeat send
+    a whole day's real numbers, one day behind.
+    """
+    fresh = _empty_day()
+    previous = {"date": data.get("date")}
+    for key in _ROLLOVER_COUNTERS:
+        previous[key] = data.get(key, 0)
+    if previous["date"]:
+        fresh["previous"] = previous
+    return fresh
+
+
 def _read() -> dict[str, Any]:
-    """Read today's stats, resetting if the date rolled over."""
+    """Read today's stats, archiving the prior day if it rolled over."""
     try:
         if _STATS_PATH.is_file():
             data = json.loads(_STATS_PATH.read_text(encoding="utf-8"))
-            if isinstance(data, dict) and data.get("date") == str(date.today()):
-                return data
+            if isinstance(data, dict):
+                if data.get("date") == str(date.today()):
+                    return data
+                # A day ended: keep its totals so the next heartbeat can
+                # report a complete day rather than an empty one.
+                return _archive_completed_day(data)
     except (OSError, json.JSONDecodeError, ValueError):
         pass
     return _empty_day()
@@ -247,4 +280,8 @@ def get_daily_stats() -> dict[str, Any]:
         "marketplace_sources": data.get("marketplace_sources", {}),
         "tier_denials": data.get("tier_denials", {}),
         "tool_calls": data.get("tool_calls", {}),
+        # The last COMPLETE day's counters (see _archive_completed_day).
+        # The heartbeat reports these because the same-day counters it
+        # can see at server startup are structurally near-empty.
+        "previous_day": data.get("previous") or {},
     }

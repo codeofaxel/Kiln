@@ -331,6 +331,13 @@ def _send_heartbeat() -> None:
                 # invisible in aggregate stats.  Names only: no ids,
                 # addresses, or serials.
                 "printer_models": _get_all_printer_models(),
+                # The last COMPLETE day's activity counters.  The
+                # ``*_today`` fields above are sampled when the server
+                # starts — before that day's work has happened — so they
+                # systematically read near-zero.  This carries a whole
+                # finished day instead, one day behind.  Same counters,
+                # same privacy posture; the date says which day it is.
+                "previous_day": stats.get("previous_day", {}),
             },
         }).encode()
 
