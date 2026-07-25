@@ -49,6 +49,8 @@ def test_every_load_rederives_from_the_bending_formula():
     for material, entry in doc.items():
         if material.startswith("_"):
             continue
+        if entry.get("limit_mode") == "deflection":
+            continue  # a different model — re-derived in its own test below
         cap = entry["tensile_capacity_n_per_mm2"]
         # The capacity field itself re-derives from the declared basis.
         expected_cap = round(
@@ -71,6 +73,8 @@ def test_orientation_pair_is_weak_below_strong_everywhere():
     for material, entry in _table().items():
         if material.startswith("_"):
             continue
+        if entry.get("limit_mode") == "deflection":
+            continue  # deflection is a stiffness limit; no strength derate applies
         od = entry["layer_orientation_derating"]
         assert od["across_layers"] < od["along_layers"], material
         assert 0.0 < od["across_layers"] <= 0.6, material
@@ -81,13 +85,41 @@ def test_table_monotonic_in_area_and_length():
     for material, entry in _table().items():
         if material.startswith("_"):
             continue
-        rows = sorted(entry["cross_section_vs_load"],
-                      key=lambda r: r["cantilever_length_mm"])
+        deflection = entry.get("limit_mode") == "deflection"
+        key = "cross_section_vs_deflection_load" if deflection else "cross_section_vs_load"
+        load_key = "load_at_deflection_limit_n" if deflection else "max_load_n"
+        rows = sorted(entry[key], key=lambda r: r["cantilever_length_mm"])
         for row in rows:
-            loads = [c["max_load_n"] for c in row["entries"]]
+            loads = [c[load_key] for c in row["entries"]]
             assert loads == sorted(loads) and len(set(loads)) == len(loads), (
                 material, row["cantilever_length_mm"])
         for r1, r2 in zip(rows, rows[1:]):
             for c1, c2 in zip(r1["entries"], r2["entries"]):
-                assert c2["max_load_n"] < c1["max_load_n"], (
+                assert c2[load_key] < c1[load_key], (
                     material, r1["cantilever_length_mm"], r2["cantilever_length_mm"])
+
+
+def test_every_deflection_load_rederives_from_the_stiffness_formula():
+    """The elastomer entries re-derive too — a different model, equally pinned.
+
+    F = E * A^2 / (4 * ratio * L^2), the cantilever deflection equation
+    d = F L^3 / (3 E I) solved for the load at an allowable deflection, with
+    a square section (I = A^2/12) to match the strength table's basis.
+    """
+    gen = _load_generator()
+    for material, entry in _table().items():
+        if material.startswith("_") or entry.get("limit_mode") != "deflection":
+            continue
+        e_mpa = entry["youngs_modulus_mpa"]
+        assert e_mpa == gen.E_MODULUS_MPA[material], material
+        ratio = entry["deflection_limit_ratio"]
+        for row in entry["cross_section_vs_deflection_load"]:
+            length = row["cantilever_length_mm"]
+            assert row["allowable_deflection_mm"] == round(length / ratio, 2), material
+            for cell in row["entries"]:
+                area = cell["cross_section_mm2"]
+                exact = e_mpa * (area ** 2) / (4.0 * ratio * (length ** 2))
+                stored = cell["load_at_deflection_limit_n"]
+                # floor-rounded: never above the formula, never a full step below
+                assert stored <= exact + 1e-9, (material, length, area)
+                assert stored >= exact - 0.0001, (material, length, area)
