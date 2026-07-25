@@ -14,7 +14,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Duet printers now work with Kiln (beta).** If your machine runs on a
   Duet board, just tell your AI — Kiln connects it and drives it like any
   other printer: print, pause, cancel, upload, set temperatures. Works
-  with both current and older RepRapFirmware.
+  with both current and older RepRapFirmware — including the Vision Miner
+  22 IDEX v4.
 
 - **Wrap your own image around any model.** Hand Kiln a photo or pattern and it
   becomes real, printable surface texture across the whole object — curved,
@@ -33,8 +34,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   harsh chemicals. It knows their safe handling and tells you when a printer
   simply can't reach the temperatures they need.
 
-- **Six more printers.** Added the AON3D AON-M2+, QIDI Plus 4 / Q1
-  Pro / Q2 / X-Max 3, and the Creality Ender 3 S1 Pro — from the household
+- **Nine more printers.** Added the AON3D AON-M2+ and Hylo, INTAMSYS
+  FUNMAT PRO 610HT, Vision Miner 22 IDEX v4, QIDI Plus 4 / Q1 Pro / Q2 /
+  X-Max 3, and the Creality Ender 3 S1 Pro — from the household
   desktop up to the industrial heated-chamber class, each with advice that
   fits what your machine can actually do. Full list:
   https://kiln3d.com/printers
