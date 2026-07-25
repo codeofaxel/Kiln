@@ -48,8 +48,7 @@ KNOWN_GAPS: dict[str, set[str]] = {
     # Ten entries were curated 2026-07-24 from sourced research and removed.
     # The rest are correctly served by family inheritance meanwhile (see
     # get_skin_contact_floor), which is why they are gaps and not silence.
-    # Ten more curated 2026-07-25; the five industrial polymers remain.
-    "skin_contact": {"pei_1010", "pei_9085", "pekk", "pps", "ppsu"},
+    "skin_contact": set(),  # closed 2026-07-25 — all 38 materials curated
     "environment_compatibility": {
         "abs_esd", "cf_nylon", "cf_petg", "cf_pla", "pa612_esd", "pa6_gf",
         "pc_abs", "pc_esd", "peek", "pei_1010", "pei_9085", "pei_esd",

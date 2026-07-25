@@ -620,5 +620,85 @@
    ],
    "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
   }
+ },
+ "pei_1010": {
+  "display_name": "PEI / Ultem 1010",
+  "base_state": "out_of_scope_industrial",
+  "concern_level": "not_applicable",
+  "concern_basis": "grade substitution — the certified article and the purchasable article share a name, not a certification",
+  "safety_floor": {
+   "honesty_note": "A food-contact and ISO 10993 certified Ultem 1010 FILAMENT genuinely exists, which makes this the easiest record in the catalogue to misread. That certification belongs to a specific certified grade that runs on industrial machines with lot traceability — not to the spool in a desktop printer, which makes no biocompatibility claim at all, and never to the printed part. The material's own maker declines to close that last gap.",
+   "named_hazards": [
+    "the certified grade and the consumer spool share a name but not a certification — desktop Ultem 1010 filament makes no biocompatibility, food-contact or NSF claim",
+    "material certification does not transfer to the printed part, stated by the equipment maker itself: a finished part must still be validated for its use, process and cleaning regime",
+    "thermal decomposition products during printing include hydrogen cyanide — an INHALATION hazard while printing, not a dermal hazard of the finished part",
+    "the resin maker's own healthcare policy excludes applications implanted longer than 29 days"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pei_9085": {
+  "display_name": "PEI / Ultem 9085",
+  "base_state": "out_of_scope_industrial",
+  "concern_level": "not_applicable",
+  "concern_basis": "a certification label that means lot traceability being mistaken for biocompatibility",
+  "safety_floor": {
+   "honesty_note": "This material has no body-contact grade in existence — its entire pedigree is flame, smoke and toxicity performance for aircraft interiors. If you have seen 'Ultem 9085 CG', that is a paperwork trail from filament back to raw-material lot and says nothing whatsoever about contact with a person. The same two letters on Ultem 1010 mean NSF 51 and ISO 10993, which is exactly why this one is worth stating out loud.",
+   "named_hazards": [
+    "'CG' on Ultem 9085 means documented lot traceability, NOT biocompatibility — the 1010 grade's identical 'CG' label means NSF 51 plus ISO 10993 / USP Class VI, and confusing the two produces false safety copy",
+    "no ISO 10993, USP Class VI, food-contact or biocompatibility claim appears anywhere in this material's datasheet — its certifications are UL94 V-0, rail and aerospace fire performance",
+    "printed 9085 carries 7.34-10.50 percent areal porosity and over 7 percent water uptake, substantially more than the injection-moulded equivalent — a sweat-exposed surface that cannot be validated as cleanable",
+    "the polycarbonate component hydrolyses after aqueous ageing; no leaching study exists, so release to skin is unestablished rather than ruled out"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pekk": {
+  "display_name": "PEKK",
+  "base_state": "out_of_scope_industrial",
+  "concern_level": "not_applicable",
+  "concern_basis": "process and feedstock substitution — the cleared implant pedigree is laser-sintered powder, not filament",
+  "safety_floor": {
+   "honesty_note": "PEKK really is in FDA-cleared cranial and facial implants, and that fact is easy to borrow wrongly. Those devices are laser-sintered from a specific implant-grade powder under a medical quality system; an FDM filament spool of PEKK shares a polymer family with them and nothing else. The filament resin's own producer publishes no biocompatibility certification at all.",
+   "named_hazards": [
+    "the implant clearances are for laser-sintered devices from a specific implant-grade powder — a different feedstock and a different process from filament extrusion",
+    "the filament resin producer publishes no ISO 10993, USP Class VI or medical claim for its PEKK product family",
+    "no dermal toxicology for PEKK could be retrieved from any source — absence of data is not absence of hazard",
+    "an implant clearance attaches to a finished device made on qualified equipment, never to a polymer class"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "pps": {
+  "display_name": "PPS (Polyphenylene Sulfide)",
+  "base_state": "out_of_scope_industrial",
+  "concern_level": "not_applicable",
+  "concern_basis": "reinforcing fillers plus a complete absence of dermal data, on a polymer whose real pedigree is hot-food equipment rather than skin",
+  "safety_floor": {
+   "honesty_note": "PPS does hold genuine FDA and EU food-contact compliance — but only for specific glass-filled injection-moulding compounds used in coffee makers and food-processing equipment. That is a different material in a different form, and it was never a skin-contact clearance. Every dermal endpoint on the producer's safety data sheet reads 'no data available'.",
+   "named_hazards": [
+    "glass fibre at 30-40 percent is carried as a HAZARDOUS ingredient on the producer's safety data sheet, with the named effect being mechanical irritation from particulates generated by the product",
+    "every dermal endpoint on that sheet reads 'no data available' — acute dermal toxicity, skin corrosion and irritation, and skin sensitisation alike",
+    "a filament vendor publishes 'Skin Hazards: No hazard' in a properties table citing no test method and no standard, while every mechanical row on the same sheet cites one, and the document disclaims responsibility for safety",
+    "carbon black in the filled compound is IARC Group 2B by INHALATION of dust during sanding or machining — not a dermal finding for filler bound in a solid part"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
+ },
+ "ppsu": {
+  "display_name": "PPSU (Polyphenylsulfone)",
+  "base_state": "out_of_scope_industrial",
+  "concern_level": "not_applicable",
+  "concern_basis": "a real medical and infant-feeding pedigree attaching to named resin grades, not to the printed article",
+  "safety_floor": {
+   "honesty_note": "This is the hardest record here to read correctly, because the pedigree is real: PPSU genuinely is the BPA-free baby-bottle and autoclavable surgical-tray plastic, and the BPA-free part is backbone chemistry rather than marketing — the polymer simply has no bisphenol-A unit in its chain. But every one of those credentials belongs to a named moulding or extrusion grade, the producer itself caps sanctioned tissue contact at 24 hours outside a separate biomaterials line, and none of it survives the trip through a nozzle onto a porous printed surface.",
+   "named_hazards": [
+    "the producer restricts contact with bodily fluids or tissues beyond 24 hours to a separate biomaterials family only — prolonged wear sits outside the sanctioned envelope of every ordinary grade",
+    "the certified grades are named injection-moulding and extrusion grades; the producer states that the user alone must finally determine suitability, and a printed part is not a certified article",
+    "open porosity in extrusion-printed parts admits body fluids and disinfectant, with published work finding no manufacturing settings that provide sufficient sealing against fluid intake",
+    "no PPSU-specific dermal irritation or sensitisation study was located"
+   ],
+   "refer_to_medical": "For implanted, broken-skin, mucosal (mouth/eye/in-canal), piercing-post, or children's-mouthing use, stop: this is out of scope for a printed part. See a medical professional and use a certified medical-grade material."
+  }
  }
 }
