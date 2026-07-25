@@ -128,6 +128,44 @@ def _get_printer_info() -> tuple[str | None, str | None, int]:
     return model, adapter_type, printer_count
 
 
+# Bound the per-heartbeat model list: home fleets are 1-3 printers;
+# anything past 8 is a farm and the fleet tools already cover it.
+_MAX_HEARTBEAT_PRINTER_MODELS = 8
+
+
+def _get_all_printer_models() -> list[str]:
+    """Best-effort model names of EVERY registered printer.
+
+    ``_get_printer_info`` reports only the "default" printer, so a
+    two-printer setup was invisible beyond its default machine.  This
+    walks the whole registry (deduped, order-stable, capped) so the
+    aggregate telemetry reflects the real fleet.  Model names only —
+    no printer ids, no addresses, no serials.
+    """
+    models: list[str] = []
+    try:
+        from kiln.registry import get_registry
+
+        reg = get_registry()
+        for name in reg.list_names():
+            if len(models) >= _MAX_HEARTBEAT_PRINTER_MODELS:
+                break
+            try:
+                adapter = reg.get(name)
+                info = adapter.get_printer_info()
+                model = getattr(info, "model", None) or getattr(
+                    info, "printer_model", None
+                )
+            except Exception:
+                continue
+            model = str(model or "").strip()[:60]
+            if model and model not in models:
+                models.append(model)
+    except Exception:
+        pass
+    return models
+
+
 def _get_daily_counts() -> dict[str, int]:
     """Read today's event counters from daily_stats."""
     try:
@@ -244,6 +282,12 @@ def _send_heartbeat() -> None:
                 # actually does.  Capped to the busiest tools so the
                 # payload stays small; names + counts only, never args.
                 "tool_calls": _top_n(stats.get("tool_calls", {}), 100),
+                # Model names of EVERY registered printer (deduped,
+                # capped) — the top-level printer_model field only ever
+                # names the default machine, which made second printers
+                # invisible in aggregate stats.  Names only: no ids,
+                # addresses, or serials.
+                "printer_models": _get_all_printer_models(),
             },
         }).encode()
 
