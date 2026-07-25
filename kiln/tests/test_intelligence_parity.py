@@ -49,20 +49,13 @@ KNOWN_GAPS: dict[str, set[str]] = {
     # The rest are correctly served by family inheritance meanwhile (see
     # get_skin_contact_floor), which is why they are gaps and not silence.
     "skin_contact": set(),  # closed 2026-07-25 — all 38 materials curated
-    "environment_compatibility": {
-        "abs_esd", "cf_nylon", "cf_petg", "cf_pla", "pa612_esd", "pa6_gf",
-        "pc_abs", "pc_esd", "peek", "pei_1010", "pei_9085", "pei_esd",
-        "pekk", "pekk_esd", "pet_cf", "petg_cf", "petg_esd", "petg_hf",
-        "pla_esd", "pla_matte", "pla_plus", "pla_tough", "pp", "pps",
-        "ppsu", "pva", "silk_pla", "tpu_85a", "tpu_95a", "wood_pla",
-    },
+    "environment_compatibility": set(),  # closed 2026-07-25 from vendor TDS research
     "material_troubleshooting": set(),
-    "co_print_compatibility": {
-        "pa6_gf", "peek", "pei_1010", "pei_9085", "pei_esd", "pekk",
-        "pekk_esd", "pet_cf", "petg_cf", "petg_hf", "pla_matte", "pla_plus",
-        "pla_tough", "pp", "pps", "ppsu", "pva", "silk_pla", "tpu_85a",
-        "tpu_95a", "wood_pla",
-    },
+    # Closed 2026-07-25 except PPS: the SME pass found NO published data for a
+    # single PPS cross-pair, and no support strategy for it either — it is the
+    # one high-temperature polymer with no documented partner. An invented
+    # rating there would be noise dressed as coverage.
+    "co_print_compatibility": {"pps"},
     "post_processing": set(),
     # Closed 2026-07-25 by extending the generator from five materials to
     # every RIGID one. The three that remain are a deliberate physics
