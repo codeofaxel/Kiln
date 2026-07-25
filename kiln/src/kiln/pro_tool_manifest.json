@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-25T01:14:09.143738+00:00",
-  "tool_count": 376,
+  "generated": "2026-07-25T08:49:14.721039+00:00",
+  "tool_count": 377,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -4476,7 +4476,7 @@
     },
     {
       "name": "import_external_mesh",
-      "description": "Import an external STL/3MF as a first-class design version.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Import an external mesh (STL / OBJ / PLY / GLB / glTF / 3MF) as a first-class design version.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -12126,6 +12126,38 @@
           "category"
         ],
         "title": "set_telemetry_preferenceArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "verify_mesh_fit",
+      "description": "Prove that separate mesh parts can PHYSICALLY assemble \u2014 real shared-material math, not a picture.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "part_paths": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Part Paths",
+            "type": "array"
+          },
+          "step_mm": {
+            "default": 0.4,
+            "title": "Step Mm",
+            "type": "number"
+          },
+          "tolerance_mm": {
+            "default": 0.2,
+            "title": "Tolerance Mm",
+            "type": "number"
+          }
+        },
+        "required": [
+          "part_paths"
+        ],
+        "title": "verify_mesh_fitArguments",
         "type": "object"
       }
     },
