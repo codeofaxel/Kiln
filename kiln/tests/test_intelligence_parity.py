@@ -48,11 +48,8 @@ KNOWN_GAPS: dict[str, set[str]] = {
     # Ten entries were curated 2026-07-24 from sourced research and removed.
     # The rest are correctly served by family inheritance meanwhile (see
     # get_skin_contact_floor), which is why they are gaps and not silence.
-    "skin_contact": {
-        "cf_petg", "cf_pla", "pei_1010", "pei_9085", "pekk", "pet_cf",
-        "petg_cf", "petg_hf", "pla_matte", "pla_tough", "pps", "ppsu",
-        "tpu_85a", "tpu_95a", "wood_pla",
-    },
+    # Ten more curated 2026-07-25; the five industrial polymers remain.
+    "skin_contact": {"pei_1010", "pei_9085", "pekk", "pps", "ppsu"},
     "environment_compatibility": {
         "abs_esd", "cf_nylon", "cf_petg", "cf_pla", "pa612_esd", "pa6_gf",
         "pc_abs", "pc_esd", "peek", "pei_1010", "pei_9085", "pei_esd",
@@ -68,14 +65,13 @@ KNOWN_GAPS: dict[str, set[str]] = {
         "tpu_95a", "wood_pla",
     },
     "post_processing": set(),
-    "load_tables": {
-        "abs_esd", "asa", "cf_nylon", "cf_petg", "cf_pla", "pa612_esd",
-        "pa6_gf", "pc_abs", "pc_esd", "peek", "pei_1010", "pei_9085",
-        "pei_esd", "pekk", "pekk_esd", "pet_cf", "petg_cf", "petg_esd",
-        "petg_hf", "pla_esd", "pla_matte", "pla_plus", "pla_tough", "pp",
-        "pps", "ppsu", "pva", "pvb", "silk_pla", "tpu", "tpu_85a",
-        "tpu_95a", "wood_pla",
-    },
+    # Closed 2026-07-25 by extending the generator from five materials to
+    # every RIGID one. The three that remain are a deliberate physics
+    # exclusion, not debt: this table derives a safe load from tensile
+    # capacity at a cantilever root, which assumes the part fails in bending.
+    # An elastomer deflects out of the way instead, so the figure would
+    # describe a failure mode TPU does not have.
+    "load_tables": {"tpu", "tpu_85a", "tpu_95a"},
 }
 
 # Table keys that are legitimately NOT catalog materials.  skin_contact

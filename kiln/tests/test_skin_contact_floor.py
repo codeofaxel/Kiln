@@ -131,24 +131,34 @@ def test_non_material_key_never_yields_a_pseudo_record():
     assert floor is not None and floor.is_uncharacterized
 
 
-def test_filled_grades_inherit_the_more_restrictive_family():
-    """A filled grade inherits the FILLER's record, not the unfilled base's.
+def test_filled_grades_never_answer_softer_than_the_filler_family():
+    """A filled grade must never carry LESS concern than its filler's record.
 
     cf_pla resolving to plain PLA understated a fibre hazard on a material
-    shipped in v1.2.0; the fibre record is the correct, more restrictive
-    parent.
+    shipped in v1.2.0.  The guard is deliberately written against the
+    ANSWER rather than the mechanism: these grades were served by
+    inheritance from the fibre record until 2026-07-25 and by curated
+    records of their own afterwards, and the property that matters —
+    never softer than the filler — has to hold either way.
     """
+    rank = {"untested": 0, "elevated": 1, "high": 2, "not_applicable": 3}
+    fibre = di.get_skin_contact_floor("cf_nylon")
+    assert fibre is not None
+
     for mid in ("cf_pla", "cf_petg", "petg_cf", "pet_cf"):
         floor = di.get_skin_contact_floor(mid)
         assert floor is not None, mid
-        assert floor.inherited_from == "cf_nylon", (
-            f"{mid} inherited {floor.inherited_from!r}; a fibre-filled grade "
-            "must not borrow the unfilled base polymer's lower concern"
+        assert not floor.is_uncharacterized, mid
+        assert rank[floor.concern_level] >= rank[fibre.concern_level], (
+            f"{mid} answers {floor.concern_level!r} against the fibre record's "
+            f"{fibre.concern_level!r} — a fibre-filled grade must not be the "
+            "softer answer"
         )
-        assert not floor.is_uncharacterized
 
+    wood_fill = di.get_skin_contact_floor("wood_fill")
     wood = di.get_skin_contact_floor("wood_pla")
-    assert wood is not None and wood.inherited_from == "wood_fill"
+    assert wood is not None and wood_fill is not None
+    assert rank[wood.concern_level] >= rank[wood_fill.concern_level]
 
 
 def test_exact_records_are_never_overridden_by_inheritance():
