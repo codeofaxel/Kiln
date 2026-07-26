@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-26T21:52:03.205554+00:00",
-  "tool_count": 378,
+  "generated": "2026-07-26T22:24:46.262227+00:00",
+  "tool_count": 383,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -290,6 +290,53 @@
           "assembly_json"
         ],
         "title": "auto_generate_manual_for_printArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "derive_assembly_plan",
+      "description": "Derive an assembly plan from part GEOMETRY \u2014 no hand declaration needed.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "category": "assembly_manuals",
+      "parameters": {
+        "properties": {
+          "part_paths": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Part Paths",
+            "type": "array"
+          },
+          "part_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Part Names"
+          },
+          "assembly_name": {
+            "default": "derived-assembly",
+            "title": "Assembly Name",
+            "type": "string"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_paths"
+        ],
+        "title": "derive_assembly_planArguments",
         "type": "object"
       }
     },
@@ -749,8 +796,8 @@
     },
     {
       "name": "get_build_history",
-      "description": "Show what prior builds of a design have taught us (Enterprise) \u2014 the read side of the closed loop.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Show what prior builds of a design have taught us (Enterprise) \u2014 the read side of the closed loop.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "enterprise",
       "category": "assembly_manuals",
       "parameters": {
         "properties": {
@@ -857,8 +904,8 @@
     },
     {
       "name": "record_build_outcome",
-      "description": "Record what actually happened building a unit from a factory work instruction (Enterprise) \u2014 the write side of the closed loop.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Record what actually happened building a unit from a factory work instruction (Enterprise) \u2014 the write side of the closed loop.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "enterprise",
       "category": "assembly_manuals",
       "parameters": {
         "properties": {
@@ -4529,6 +4576,35 @@
           "mesh_path"
         ],
         "title": "import_external_meshArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "import_model_parts",
+      "description": "Import a MULTI-PART model with its named parts intact.",
+      "tier": "free",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "model_path": {
+            "title": "Model Path",
+            "type": "string"
+          },
+          "output_dir": {
+            "default": "",
+            "title": "Output Dir",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_path"
+        ],
+        "title": "import_model_partsArguments",
         "type": "object"
       }
     },
@@ -9827,8 +9903,8 @@
     },
     {
       "name": "add_feature_during_print_fleet",
-      "description": "Add the same feature (e.g. a hat) to N paused printers (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Add the same feature (e.g. a hat) to N paused printers (Pro).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
@@ -9880,6 +9956,107 @@
           "printers"
         ],
         "title": "add_feature_during_print_fleetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "add_pin_joints",
+      "description": "Give two touching parts a REAL pin-and-socket joint.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "part_a_path": {
+            "title": "Part A Path",
+            "type": "string"
+          },
+          "part_b_path": {
+            "title": "Part B Path",
+            "type": "string"
+          },
+          "output_dir": {
+            "default": "",
+            "title": "Output Dir",
+            "type": "string"
+          },
+          "pin_diameter_mm": {
+            "default": 0.0,
+            "title": "Pin Diameter Mm",
+            "type": "number"
+          },
+          "clearance_mm": {
+            "default": 0.2,
+            "title": "Clearance Mm",
+            "type": "number"
+          },
+          "scale": {
+            "default": 1.0,
+            "title": "Scale",
+            "type": "number"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "application_class": {
+            "default": "consumer_product",
+            "title": "Application Class",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_a_path",
+          "part_b_path"
+        ],
+        "title": "add_pin_jointsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "advise_kit_scale",
+      "description": "Find the largest scale at which EVERY part of a kit prints.",
+      "tier": "free",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "part_paths": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Part Paths",
+            "type": "array"
+          },
+          "bed_x_mm": {
+            "default": 256.0,
+            "title": "Bed X Mm",
+            "type": "number"
+          },
+          "bed_y_mm": {
+            "default": 256.0,
+            "title": "Bed Y Mm",
+            "type": "number"
+          },
+          "bed_z_mm": {
+            "default": 256.0,
+            "title": "Bed Z Mm",
+            "type": "number"
+          },
+          "nozzle_mm": {
+            "default": 0.4,
+            "title": "Nozzle Mm",
+            "type": "number"
+          }
+        },
+        "required": [
+          "part_paths"
+        ],
+        "title": "advise_kit_scaleArguments",
         "type": "object"
       }
     },
@@ -10598,8 +10775,8 @@
     },
     {
       "name": "decorate_during_print_fleet",
-      "description": "Apply the same decoration to N paused printers at once (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Apply the same decoration to N paused printers at once (Pro).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
@@ -10671,8 +10848,8 @@
     },
     {
       "name": "evaluate_fleet_reroute",
-      "description": "Decide whether a failed FDM job should move to another printer (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Decide whether a failed FDM job should move to another printer (Pro).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
@@ -11355,8 +11532,8 @@
     },
     {
       "name": "plan_fleet_material_change",
-      "description": "Plan future-object material/color changes across a fleet (Business).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Plan future-object material/color changes across a fleet (Business).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
@@ -12171,8 +12348,8 @@
     },
     {
       "name": "revert_mid_print_fleet",
-      "description": "Revert mid-print transforms on N printers at once (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Revert mid-print transforms on N printers at once (Pro).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
@@ -12292,27 +12469,50 @@
     },
     {
       "name": "verify_mesh_fit",
-      "description": "Prove that separate mesh parts can PHYSICALLY assemble \u2014 exact shared-material math, not a picture.",
+      "description": "Prove that separate parts can PHYSICALLY assemble \u2014 the ONE fit check, exact shared-material math, not a picture.",
       "tier": "free",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
           "part_paths": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Part Paths",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Part Paths"
           },
           "tolerance_mm": {
             "default": 0.2,
             "title": "Tolerance Mm",
             "type": "number"
+          },
+          "units": {
+            "default": "auto",
+            "title": "Units",
+            "type": "string"
+          },
+          "recipe": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Recipe"
           }
         },
-        "required": [
-          "part_paths"
-        ],
         "title": "verify_mesh_fitArguments",
         "type": "object"
       }
@@ -14268,8 +14468,8 @@
     },
     {
       "name": "add_org_member",
-      "description": "Add *tenant_id* to *org_id*.  ``role`` is one of ``owner``, ``admin``, ``member``, ``viewer``.  Already- enrolled members get their role updated in place.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Add *tenant_id* to *org_id*.  ``role`` is one of ``owner``, ``admin``, ``member``, ``viewer``.  Already- enrolled members get their role updated in place.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -14309,8 +14509,8 @@
     },
     {
       "name": "add_team_member",
-      "description": "Add *tenant_id* to *team_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Add *tenant_id* to *team_id*.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -14350,8 +14550,8 @@
     },
     {
       "name": "apply_role_template",
-      "description": "Grant every scope in a role template to a tenant or team in a single call.  Composes repeated ``grant_scope`` under the hood \u2014 no new primitive, just ergonomic bundling.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Grant every scope in a role template to a tenant or team in a single call.  Composes repeated ``grant_scope`` under the hood \u2014 no new primitive, just ergonomic bundling.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -14403,8 +14603,8 @@
     },
     {
       "name": "assign_artifact_to_org",
-      "description": "Mark a local artifact as owned by *org_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Mark a local artifact as owned by *org_id*.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -14473,8 +14673,8 @@
     },
     {
       "name": "create_org",
-      "description": "Create a new org.  Owner is auto-enrolled as an owner-role member so permission checks never need a special case.  ``tier`` is one of ``pro``, ``business``, ``enterprise``.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Create a new org.  Owner is auto-enrolled as an owner-role member so permission checks never need a special case.  ``tier`` is one of ``pro``, ``business``, ``enterprise``.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -14507,8 +14707,8 @@
     },
     {
       "name": "create_team",
-      "description": "Create a team (sub-group) inside an org.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Create a team (sub-group) inside an org.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -14565,8 +14765,8 @@
     },
     {
       "name": "delete_team",
-      "description": "Delete a team, its memberships, and its scope grants.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Delete a team, its memberships, and its scope grants.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -14677,8 +14877,8 @@
     },
     {
       "name": "grant_scope",
-      "description": "Grant *capability* on *scope_key* to a tenant OR a team.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Grant *capability* on *scope_key* to a tenant OR a team.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -14747,8 +14947,8 @@
     },
     {
       "name": "list_approval_gates",
-      "description": "List every configured approval gate, optionally filtered. Business+ tier.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "List every configured approval gate, optionally filtered. Business+ tier.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -14937,8 +15137,8 @@
     },
     {
       "name": "remove_approval_gate",
-      "description": "Remove an approval gate.  Merges on the target branch return to unprotected.  Business+ tier.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Remove an approval gate.  Merges on the target branch return to unprotected.  Business+ tier.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -14966,8 +15166,8 @@
     },
     {
       "name": "remove_org_member",
-      "description": "Remove a member and every permission scope they held inside *org_id*.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Remove a member and every permission scope they held inside *org_id*.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -14990,8 +15190,8 @@
     },
     {
       "name": "remove_team_member",
-      "description": "Remove a tenant from a team.  Their personal org membership is unaffected; only team-targeted scope grants stop applying to them.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Remove a tenant from a team.  Their personal org membership is unaffected; only team-targeted scope grants stop applying to them.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -15038,8 +15238,8 @@
     },
     {
       "name": "revoke_scope",
-      "description": "Revoke a scope grant.  Supply either ``tenant_id`` (to remove a personal grant) or ``team_id`` (to remove a team-targeted grant).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Revoke a scope grant.  Supply either ``tenant_id`` (to remove a personal grant) or ``team_id`` (to remove a team-targeted grant).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -15091,8 +15291,8 @@
     },
     {
       "name": "set_approval_gate",
-      "description": "Create or update an approval gate on a target branch.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Create or update an approval gate on a target branch.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -15166,8 +15366,8 @@
     },
     {
       "name": "setup_team",
-      "description": "One-shot team onboarding: create an org, invite members, and optionally migrate existing artifacts into it.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "One-shot team onboarding: create an org, invite members, and optionally migrate existing artifacts into it.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -15235,8 +15435,8 @@
     },
     {
       "name": "transfer_artifact_between_orgs",
-      "description": "Move an artifact from one org's ownership to another.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Move an artifact from one org's ownership to another.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -15269,8 +15469,8 @@
     },
     {
       "name": "unassign_artifact",
-      "description": "Remove the local org-ownership marker for an artifact.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Remove the local org-ownership marker for an artifact.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "teams",
       "parameters": {
         "properties": {
@@ -16127,6 +16327,50 @@
       "parameters": {
         "properties": {},
         "title": "push_palettes_to_cloudArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "recover_texture_detail",
+      "description": "Turn a model's painted-on detail into REAL printable relief.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "category": "textures",
+      "parameters": {
+        "properties": {
+          "model_path": {
+            "title": "Model Path",
+            "type": "string"
+          },
+          "output_path": {
+            "default": "",
+            "title": "Output Path",
+            "type": "string"
+          },
+          "depth_mm": {
+            "default": 0.6,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "target_edge_mm": {
+            "default": 1.0,
+            "title": "Target Edge Mm",
+            "type": "number"
+          },
+          "invert": {
+            "default": false,
+            "title": "Invert",
+            "type": "boolean"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_path"
+        ],
+        "title": "recover_texture_detailArguments",
         "type": "object"
       }
     },
