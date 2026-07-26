@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-25T23:10:56.655794+00:00",
-  "tool_count": 380,
+  "generated": "2026-07-26T21:52:03.205554+00:00",
+  "tool_count": 378,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -290,53 +290,6 @@
           "assembly_json"
         ],
         "title": "auto_generate_manual_for_printArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "derive_assembly_plan",
-      "description": "Derive an assembly plan from part GEOMETRY \u2014 no hand declaration needed.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "assembly_manuals",
-      "parameters": {
-        "properties": {
-          "part_paths": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Part Paths",
-            "type": "array"
-          },
-          "part_names": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Part Names"
-          },
-          "assembly_name": {
-            "default": "derived-assembly",
-            "title": "Assembly Name",
-            "type": "string"
-          },
-          "material": {
-            "default": "PLA",
-            "title": "Material",
-            "type": "string"
-          }
-        },
-        "required": [
-          "part_paths"
-        ],
-        "title": "derive_assembly_planArguments",
         "type": "object"
       }
     },
@@ -4580,35 +4533,6 @@
       }
     },
     {
-      "name": "import_model_parts",
-      "description": "Import a MULTI-PART model with its named parts intact.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "design_versioning",
-      "parameters": {
-        "properties": {
-          "model_path": {
-            "title": "Model Path",
-            "type": "string"
-          },
-          "output_dir": {
-            "default": "",
-            "title": "Output Dir",
-            "type": "string"
-          },
-          "design_id": {
-            "default": "",
-            "title": "Design Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "model_path"
-        ],
-        "title": "import_model_partsArguments",
-        "type": "object"
-      }
-    },
-    {
       "name": "list_bisect_sessions",
       "description": "List active bisect sessions, optionally filtered by artifact type (``design`` / ``preset`` / ``feature``).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -7040,6 +6964,167 @@
           "artifact_id"
         ],
         "title": "visualize_branch_treeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "analyze_frame_bracing",
+      "description": "Where the diagonals go in a shelf, rack, frame, or lattice.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {
+          "rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Rows"
+          },
+          "cols": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cols"
+          },
+          "braces": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Braces"
+          },
+          "panels": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Panels"
+          },
+          "brace_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "rigid",
+                  "tension_only"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Brace Kind"
+          },
+          "bay_width_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Bay Width Mm"
+          },
+          "bay_height_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Bay Height Mm"
+          },
+          "joints": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Joints"
+          },
+          "members": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Members"
+          },
+          "brief": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Brief"
+          },
+          "mode": {
+            "default": "auto",
+            "enum": [
+              "normie",
+              "engineer",
+              "auto"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "title": "analyze_frame_bracingArguments",
         "type": "object"
       }
     },
@@ -12207,50 +12292,27 @@
     },
     {
       "name": "verify_mesh_fit",
-      "description": "Prove that separate parts can PHYSICALLY assemble \u2014 the ONE fit check, exact shared-material math, not a picture.",
+      "description": "Prove that separate mesh parts can PHYSICALLY assemble \u2014 exact shared-material math, not a picture.",
       "tier": "free",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
           "part_paths": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Part Paths"
+            "items": {
+              "type": "string"
+            },
+            "title": "Part Paths",
+            "type": "array"
           },
           "tolerance_mm": {
             "default": 0.2,
             "title": "Tolerance Mm",
             "type": "number"
-          },
-          "units": {
-            "default": "auto",
-            "title": "Units",
-            "type": "string"
-          },
-          "recipe": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Recipe"
           }
         },
+        "required": [
+          "part_paths"
+        ],
         "title": "verify_mesh_fitArguments",
         "type": "object"
       }
@@ -16065,50 +16127,6 @@
       "parameters": {
         "properties": {},
         "title": "push_palettes_to_cloudArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "recover_texture_detail",
-      "description": "Turn a model's painted-on detail into REAL printable relief.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "free",
-      "category": "textures",
-      "parameters": {
-        "properties": {
-          "model_path": {
-            "title": "Model Path",
-            "type": "string"
-          },
-          "output_path": {
-            "default": "",
-            "title": "Output Path",
-            "type": "string"
-          },
-          "depth_mm": {
-            "default": 0.6,
-            "title": "Depth Mm",
-            "type": "number"
-          },
-          "target_edge_mm": {
-            "default": 1.0,
-            "title": "Target Edge Mm",
-            "type": "number"
-          },
-          "invert": {
-            "default": false,
-            "title": "Invert",
-            "type": "boolean"
-          },
-          "design_id": {
-            "default": "",
-            "title": "Design Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "model_path"
-        ],
-        "title": "recover_texture_detailArguments",
         "type": "object"
       }
     },
