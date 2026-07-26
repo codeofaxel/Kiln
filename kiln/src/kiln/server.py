@@ -923,7 +923,7 @@ _current_mcp_request_context: ContextVar[Any | None] = ContextVar(
 )
 
 
-def _record_local_tool_call(name: str) -> None:
+def _record_local_tool_call(name: str, result: Any = None) -> None:
     """Best-effort: feed the on-device usage ledger after a tool call.
 
     Exactly one recorder fires per machine, so local agent work counts on
@@ -951,6 +951,16 @@ def _record_local_tool_call(name: str) -> None:
         from kiln.daily_stats import record_tool_call
 
         record_tool_call(name)
+
+    # Category counters (generations / decorations / textures /
+    # downloads) for tools in daily_stats.TOOL_EVENT_MAP — the dispatch
+    # chokepoint counts whole tool families, kiln-pro's included, so a
+    # counter can't silently cover only the one tool that remembered to
+    # record itself.  Failure-shaped results are skipped inside.
+    with contextlib.suppress(Exception):
+        from kiln.daily_stats import record_tool_event
+
+        record_tool_event(name, result)
 
     try:
         from kiln_pro.bridge import pro_features
@@ -1097,8 +1107,9 @@ def _install_mcp_request_context_capture() -> None:
             )
             # Best-effort usage tally — only after a call that returned
             # (a tool that raised is not counted); cannot affect the
-            # result and cannot raise.
-            _record_local_tool_call(name)
+            # result and cannot raise.  The result rides along so mapped
+            # outcome counters can skip failure-shaped returns.
+            _record_local_tool_call(name, result)
             return result
         finally:
             _current_mcp_request_context.reset(token)
@@ -1316,30 +1327,14 @@ def _get_temp_limits() -> tuple:
 def _is_resume_mode_3mf(file_name: str) -> bool:
     """Return True if ``file_name`` looks like a mid-print resume 3MF.
 
-    Resume 3MFs are produced by ``decorate_during_print`` and
-    ``revert_mid_print``.  They strip Bambu's proprietary start-gcode
-    (homing, bed probe, AMS load, calibration, M140/M190 pre-heat) and
-    carry their own resume preamble that picks up where the paused
-    print left off.
-
-    Detection is filename-based for now (no in-3MF marker exists yet).
-    The convention from kiln-pro's mid_print_engine is:
-
-        ``transformed_resume_<sid>.3mf``  — user's modification applied
-        ``original_resume_<sid>.3mf``     — unchanged remainder
-
-    Both contain the substring ``_resume_`` (case-insensitive).  We
-    also match files whose basename starts with ``transformed_resume``
-    or ``original_resume`` for older sessions that didn't carry a sid.
+    Thin alias — the definition lives in :mod:`kiln.printers.base`, which
+    the adapter layer also reads so a resumed print isn't counted as a
+    second print.  See :func:`kiln.printers.base.is_resume_mode_3mf` for
+    the naming convention this matches.
     """
-    if not file_name:
-        return False
-    base = os.path.basename(str(file_name)).lower()
-    if not base.endswith(".3mf"):
-        return False
-    if "_resume_" in base:
-        return True
-    return base.startswith(("transformed_resume", "original_resume"))
+    from kiln.printers.base import is_resume_mode_3mf
+
+    return is_resume_mode_3mf(file_name)
 
 
 def _resolve_effective_printer_name(printer_name: str | None = None) -> str:
@@ -8839,6 +8834,9 @@ def await_print_completion(
     start = time.time()
     progress_log: list[dict] = []
     last_pct: float | None = None
+    # True once this call has seen the printer actively printing —
+    # the gate on recording print-hours at the terminal transition.
+    _saw_active_print = False
     # B10 + D3: resolve once at entry — the brief context is stable for
     # the lifetime of this poll loop.  We attach the same dict to every
     # terminal-state response so the agent always sees the goal
@@ -8963,7 +8961,30 @@ def await_print_completion(
                 )
                 last_pct = pct
 
+            if state.state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+                _saw_active_print = True
+
             if state.state == PrinterStatus.IDLE:
+                # Telemetry: hours for a print WE watched finish.  Only
+                # when this call actually observed the print running —
+                # re-awaiting an idle printer re-reads the firmware's
+                # most-recent-job stats and would count the same hours
+                # twice.  No queue job record exists on this path, so
+                # record_print_outcome can't double-report it later
+                # (its hours read requires one).
+                if _saw_active_print:
+                    try:
+                        _elapsed_print_s = job_progress.print_time_seconds
+                        if _elapsed_print_s and _elapsed_print_s > 0:
+                            from kiln.daily_stats import record_print_hours
+
+                            record_print_hours(_elapsed_print_s / 3600.0)
+                    except Exception:
+                        logger.debug(
+                            "await_print_completion: print-hours telemetry "
+                            "skipped",
+                            exc_info=True,
+                        )
                 return _attach_goal({
                     "success": True,
                     "outcome": "completed",
@@ -12062,11 +12083,13 @@ def main() -> None:
         logger.warning(msg)
         print(f"\n  ⚠  {msg}\n", file=sys.stderr)
 
-    # Anonymous daily heartbeat (one ping per day, daemon thread)
+    # Anonymous daily heartbeat (one ping per day, daemon thread).  The
+    # scheduler — not the one-shot — so a server kept alive across days
+    # reports each day instead of only its startup day.
     try:
-        from kiln.heartbeat import send_heartbeat_async
+        from kiln.heartbeat import start_heartbeat_scheduler
 
-        send_heartbeat_async()
+        start_heartbeat_scheduler()
     except Exception:
         pass  # Never let telemetry failure affect startup
 

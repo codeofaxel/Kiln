@@ -322,6 +322,23 @@ def slice_file(
             f"stdout: {(result.stdout or '').strip()[:200]}"
         )
 
+    # Telemetry: one successful slicer run = one slice.  Counted here —
+    # the single function every slicing path funnels through (the
+    # slice_model tool, slice_and_print, reslice_with_overrides,
+    # pipelines, estimates, CLI, kiln-pro batch flows) — because the
+    # count used to live in the slice_model tool body alone, and every
+    # OTHER path reported zero.  Detail is the profile filename stem;
+    # profiles are named for printers, never for users' models.
+    try:
+        from kiln.daily_stats import record_event
+
+        record_event(
+            "slices",
+            detail=Path(profile).stem[:64] if profile else "unknown",
+        )
+    except Exception:  # noqa: BLE001 — stats must never fail a slice
+        logger.debug("slice telemetry recording failed", exc_info=True)
+
     return SliceResult(
         success=True,
         output_path=out_file,

@@ -11,9 +11,45 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import enum
+import os
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from typing import Any
+
+
+def is_resume_mode_3mf(file_name: str) -> bool:
+    """Return True if ``file_name`` looks like a mid-print resume 3MF.
+
+    Resume 3MFs are produced by ``decorate_during_print`` and
+    ``revert_mid_print``.  They strip Bambu's proprietary start-gcode
+    (homing, bed probe, AMS load, calibration, M140/M190 pre-heat) and
+    carry their own resume preamble that picks up where the paused
+    print left off.
+
+    Detection is filename-based for now (no in-3MF marker exists yet).
+    The convention from kiln-pro's mid_print_engine is:
+
+        ``transformed_resume_<sid>.3mf``  — user's modification applied
+        ``original_resume_<sid>.3mf``     — unchanged remainder
+
+    Both contain the substring ``_resume_`` (case-insensitive).  We
+    also match files whose basename starts with ``transformed_resume``
+    or ``original_resume`` for older sessions that didn't carry a sid.
+
+    Lives here rather than in the server so both the tool layer (which
+    relaxes its idle pre-flight for these) and the adapter layer (which
+    must not count a resumed print as a second print) read one
+    definition.
+    """
+    if not file_name:
+        return False
+    base = os.path.basename(str(file_name)).lower()
+    if not base.endswith(".3mf"):
+        return False
+    if "_resume_" in base:
+        return True
+    return base.startswith(("transformed_resume", "original_resume"))
+
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -411,7 +447,14 @@ class PrinterAdapter(ABC):
         TEMPLATE METHOD — adapters must NOT override this.  It runs the
         universal pre-print impossibility gate (build-volume + hotend-temp
         ceilings) that no entry point — MCP tool, scheduler, CLI, recovery —
-        can bypass, then delegates to the adapter's :meth:`_start_print_impl`.
+        can bypass, then delegates to the adapter's :meth:`_start_print_impl`,
+        and counts the print for local usage stats on the way out.
+
+        Counting here is deliberate: this is the single point every entry
+        point and every adapter passes through, so all backends are counted
+        the same way.  The previous signal — an agent remembering to call
+        ``record_print_outcome`` — reported prints for whichever adapter had
+        the auto-record hook wired and zero for the other seven.
 
         The gate soft-passes whenever fit/temperature can't be determined, so
         it never false-blocks a valid print; it refuses only prints that are
@@ -445,7 +488,21 @@ class PrinterAdapter(ABC):
                 success=False,
                 message=reason + (" " + hint if hint else ""),
             )
-        return self._start_print_impl(file_name, **kwargs)
+        result = self._start_print_impl(file_name, **kwargs)
+        if getattr(result, "success", False) and not is_resume_mode_3mf(file_name):
+            # A resume 3MF continues the print that's already running (a
+            # mid-print swap), so it isn't a new print to count.
+            try:
+                from kiln.daily_stats import record_print_start
+
+                record_print_start(self.name, file_name)
+            except Exception:  # noqa: BLE001 — stats must never affect a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "print-start stat recording failed", exc_info=True
+                )
+        return result
 
     @abstractmethod
     def _start_print_impl(self, file_name: str, **kwargs: Any) -> PrintResult:

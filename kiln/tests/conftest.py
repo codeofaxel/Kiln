@@ -846,6 +846,35 @@ def _isolate_decoration_quota(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_daily_stats(tmp_path, monkeypatch):
+    """Point telemetry counters at a per-test file, never the real one.
+
+    ``daily_stats`` writes ``~/.kiln/daily_stats.json``, and its counters
+    now fire from engine chokepoints (adapter ``start_print``,
+    ``slicer.slice_file``, the tool-dispatch hook) — so ordinary tests
+    exercise them constantly.  Without isolation a suite run pollutes the
+    developer's real counters and the next heartbeat ships phantom
+    activity to the founder dashboard (2026-07-26: 47 phantom prints from
+    one adapter-suite run).  ``daily_stats._recording_suppressed`` is the
+    belt (no writes under CI env at the default path); this is the
+    suspenders, and it also means a test that wants to ASSERT on counters
+    just works — a custom path records normally.
+
+    Tests that need their own path (most daily-stats tests) still set it
+    themselves; this default only catches the ones that never think about
+    telemetry.
+    """
+    try:
+        from kiln import daily_stats
+    except ImportError:  # pragma: no cover — module absent
+        yield
+        return
+
+    monkeypatch.setattr(daily_stats, "_STATS_PATH", tmp_path / "daily_stats.json")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _restore_kiln_pro_stubs():
     """Undo ``kiln_pro`` stubs a test installs directly into ``sys.modules``.
 

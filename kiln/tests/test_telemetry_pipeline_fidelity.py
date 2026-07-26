@@ -1,0 +1,114 @@
+"""End-to-end: a day of real activity becomes that day's heartbeat row.
+
+Every piece of the telemetry pipeline has unit tests, and for months the
+pipeline was still wrong at every layer — because telemetry never raises,
+so only a test of the WHOLE chain can go red when a link quietly dies.
+This is that test: record activity on day N, cross midnight, and assert
+day N's complete counters arrive in the payload the dashboard reads —
+then assert day N+1 gets its own send (the startup-only heartbeat lost
+every day after the first for long-running servers).
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import date as real_date
+from datetime import timedelta
+from unittest import mock
+
+import pytest
+
+from kiln import daily_stats, heartbeat
+
+
+class _FakeDate(real_date):
+    """date.today() under our control, so the test can cross midnight."""
+
+    _today = real_date(2026, 7, 25)
+
+    @classmethod
+    def today(cls):
+        return cls._today
+
+
+@pytest.fixture
+def pipeline(tmp_path, monkeypatch):
+    """Wire a controllable clock through daily_stats + heartbeat and
+    capture what would have been sent to Supabase."""
+    monkeypatch.setattr(daily_stats, "_STATS_PATH", tmp_path / "stats.json")
+    monkeypatch.setattr(daily_stats, "date", _FakeDate)
+    monkeypatch.setattr(heartbeat, "date", _FakeDate)
+    monkeypatch.setattr(heartbeat, "_is_ci_environment", lambda: False)
+    monkeypatch.setattr(heartbeat, "_sent_on", None)
+    monkeypatch.setattr(
+        heartbeat, "_LAST_BEAT_PATH", tmp_path / ".last_heartbeat",
+    )
+    _FakeDate._today = real_date(2026, 7, 25)
+
+    sent: list[dict] = []
+
+    class _Resp:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _fake_urlopen(req, timeout=None):
+        sent.append(json.loads(req.data.decode()))
+        return _Resp()
+
+    with mock.patch("urllib.request.urlopen", _fake_urlopen):
+        yield sent
+
+
+def test_a_days_activity_reaches_the_dashboard_complete(pipeline):
+    sent = pipeline
+
+    # Day N: a non-Bambu install does real work through the engine
+    # chokepoints — no tool remembered to phone anything in.
+    daily_stats.record_print_start("moonraker", "benchy.gcode")
+    daily_stats.record_print_start("moonraker", "vase.gcode")
+    daily_stats.record_event("slices", detail="profile")
+    daily_stats.record_tool_event("generate_coaster", {"success": True})
+    daily_stats.record_print_hours_for_job("job-1", 3.5)
+
+    # Midnight passes; the server (still running) beats on day N+1.
+    _FakeDate._today = real_date(2026, 7, 26)
+    heartbeat._send_heartbeat()
+
+    assert len(sent) == 1
+    prev = sent[0]["p_details"]["previous_day"]
+    assert prev["date"] == "2026-07-25", "filed under the day the work happened"
+    assert prev["prints"] == 2
+    assert prev["slices"] == 1
+    assert prev["generations"] == 1
+    assert prev["print_hours"] == 3.5
+
+
+def test_every_day_of_a_long_running_server_reports(pipeline):
+    """The original failure: one heartbeat at startup, six days lost."""
+    sent = pipeline
+
+    heartbeat._send_heartbeat()          # day N startup beat
+    heartbeat._send_heartbeat()          # same day — daily guard holds
+    assert len(sent) == 1
+
+    for offset in (1, 2, 3):             # server never restarts
+        _FakeDate._today = real_date(2026, 7, 25) + timedelta(days=offset)
+        heartbeat._send_heartbeat()
+    assert len(sent) == 4, "each new day must produce its own row"
+
+
+def test_every_counter_field_the_dashboard_reads_is_in_the_payload(pipeline):
+    sent = pipeline
+    heartbeat._send_heartbeat()
+
+    payload = sent[0]
+    for counter in daily_stats._VALID_EVENTS:
+        assert f"p_{counter}_today" in payload, (
+            f"{counter} is recorded locally but never transmitted"
+        )
+    assert "previous_day" in payload["p_details"]

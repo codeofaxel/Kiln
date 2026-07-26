@@ -7,6 +7,13 @@ event counts.  No PII, no file paths, no user identity.  Runs in a
 daemon thread on server startup — never blocks, never errors
 visibly, never delays anything.
 
+The scheduler re-checks periodically, because "one per day" used to
+mean "one per server START": an MCP server that a desktop client
+keeps alive for a week fired exactly one heartbeat and the other six
+days vanished (the daily archive holds only the most recent finished
+day, so they were unrecoverable).  The re-check sends nothing new —
+the same once-a-day row, now from long-running servers too.
+
 Disable with ``KILN_TELEMETRY=false`` in environment.
 """
 
@@ -15,6 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from datetime import date
 from pathlib import Path
 
@@ -25,7 +33,16 @@ _SUPABASE_ANON_KEY = "sb_publishable_ZCJyEL0qeveSwgqv7dry3A_YI26Yw6S"
 
 _LAST_BEAT_PATH = Path.home() / ".kiln" / ".last_heartbeat"
 _lock = threading.Lock()
-_sent_today = False
+# Date string of the last successful in-process send.  A date, not a
+# boolean: a bool set at first send would block every later day of a
+# long-running server, which is exactly the bug the scheduler fixes.
+_sent_on: str | None = None
+_scheduler_started = False
+
+# How often the scheduler re-checks whether a new day needs its beat.
+# Half an hour keeps the post-midnight gap short while costing nothing;
+# every check but the first of each day exits on the date guard.
+_SCHEDULER_INTERVAL_S = 30 * 60
 
 
 def _telemetry_enabled() -> bool:
@@ -63,6 +80,22 @@ _CI_ENV_VARS: tuple[str, ...] = (
 def _is_ci_environment() -> bool:
     """True if any well-known CI / build / test env var is set."""
     return any(os.environ.get(name) for name in _CI_ENV_VARS)
+
+
+def _is_hosted_multitenant() -> bool:
+    """True on a hosted multi-tenant deploy (api.kiln3d.com's Fly box).
+
+    The heartbeat measures INSTALLS — one machine, one user, one row a
+    day.  The hosted server is hundreds of users behind one process
+    whose disk (and therefore ``installation_id``) resets every deploy,
+    so its row is a phantom install carrying every tenant's aggregate
+    activity.  Hosted usage is already measured properly, per tenant,
+    in the cloud ledgers; sending this row too would double-report it
+    into a dashboard tile it can only distort.
+    """
+    return os.environ.get("KILN_HOSTED_MULTITENANT", "").strip() in (
+        "1", "true", "yes",
+    )
 
 
 def _already_sent_today() -> bool:
@@ -248,14 +281,14 @@ def _is_pro_installed() -> bool:
 
 def _send_heartbeat() -> None:
     """Send a single heartbeat to Supabase."""
-    global _sent_today  # noqa: PLW0603
+    global _sent_on  # noqa: PLW0603
 
-    if _is_ci_environment():
+    if _is_ci_environment() or _is_hosted_multitenant():
         return
 
     with _lock:
-        if _sent_today or _already_sent_today():
-            _sent_today = True
+        if _sent_on == str(date.today()) or _already_sent_today():
+            _sent_on = str(date.today())
             return
 
     try:
@@ -356,20 +389,60 @@ def _send_heartbeat() -> None:
             if resp.status < 300:
                 _mark_sent()
                 with _lock:
-                    _sent_today = True
+                    _sent_on = str(date.today())
                 _logger.debug("Heartbeat sent (install=%s)", installation_id[:8])
 
     except Exception as exc:
         _logger.debug("Heartbeat failed (non-fatal): %s", exc)
 
 
-def send_heartbeat_async() -> None:
-    """Fire the heartbeat in a daemon thread — never blocks startup."""
+def _scheduler_loop() -> None:
+    """Send now, then re-check on an interval forever.
+
+    ``_send_heartbeat`` owns the once-per-day guard, so every iteration
+    after a day's first send is a date comparison and an early return.
+    A failed send (offline, Supabase down) is retried at the next
+    iteration for free because nothing was marked sent.
+    """
+    while True:
+        try:
+            _send_heartbeat()
+        except Exception as exc:  # pragma: no cover — belt over its braces
+            _logger.debug("Heartbeat scheduler iteration failed: %s", exc)
+        time.sleep(_SCHEDULER_INTERVAL_S)
+
+
+def start_heartbeat_scheduler() -> None:
+    """Start the daily-heartbeat daemon thread.  Idempotent, never blocks.
+
+    The server calls this once at startup.  Unlike the one-shot
+    :func:`send_heartbeat_async` it survives the day boundary: a server
+    left running sends each new day's row when that day arrives.
+    """
+    global _scheduler_started  # noqa: PLW0603
     if not _telemetry_enabled():
         return
-    if _is_ci_environment():
+    if _is_ci_environment() or _is_hosted_multitenant():
         return
-    if _sent_today or _already_sent_today():
+    with _lock:
+        if _scheduler_started:
+            return
+        _scheduler_started = True
+    t = threading.Thread(target=_scheduler_loop, daemon=True, name="kiln-heartbeat")
+    t.start()
+
+
+def send_heartbeat_async() -> None:
+    """Fire one heartbeat in a daemon thread — never blocks.
+
+    Kept for callers that want a single opportunistic beat (CLI one-shots);
+    the long-running server uses :func:`start_heartbeat_scheduler`.
+    """
+    if not _telemetry_enabled():
+        return
+    if _is_ci_environment() or _is_hosted_multitenant():
+        return
+    if _sent_on == str(date.today()) or _already_sent_today():
         return
     t = threading.Thread(target=_send_heartbeat, daemon=True, name="kiln-heartbeat")
     t.start()

@@ -278,13 +278,29 @@ def record_print_outcome(
                 "created_at": time.time(),
             }
         )
-        # Telemetry: count completed print + print hours
+        # Telemetry: count completed print + print hours.
+        #
+        # Prints Kiln started are already counted at start (see
+        # PrinterAdapter.start_print) — this call consumes that pending
+        # token rather than counting again.  It only adds a print when
+        # there's no start to pair with, which is the print a user ran
+        # from the printer's own screen and then asked us to record.
         try:
-            from kiln.daily_stats import record_event, record_print_hours
-            record_event("prints")
-            # Try to get print time from the job record
+            from kiln.daily_stats import (
+                record_print_hours_for_job,
+                record_print_outcome_event,
+            )
+            record_print_outcome_event(
+                job_id, printer_name=printer_name, file_name=file_name,
+            )
+            # Print time from the job record, deduped by job id —
+            # record_print_outcome is re-callable for the same job (an
+            # agent refining an auto-recorded outcome) and the hours
+            # must not add up again on each refinement.
             if job_record and job_record.get("print_time_seconds"):
-                record_print_hours(job_record["print_time_seconds"] / 3600.0)
+                record_print_hours_for_job(
+                    job_id, job_record["print_time_seconds"] / 3600.0,
+                )
         except Exception:
             pass
 
