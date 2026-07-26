@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Know if a shelf will lean before you print it (Pro+).** Kiln says which
+  openings need a diagonal and how few will do. Back panels count, and you
+  get each brace's length to print, cut, or buy.
+
 - **How to glue the high-temperature plastics (Pro+).** Adhesive intelligence
   now covers PPS and Ultem (PEI 1010 and 9085) — surface prep and which
   adhesive actually holds.
