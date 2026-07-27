@@ -69,3 +69,29 @@ def test_mcpb_manifest_version_matches_package() -> None:
         f"pyproject {pkg_version!r}. Bump manifest.json and repack the bundle "
         "(see mcpb/README.md) in the same commit."
     )
+
+
+def test_claude_code_plugin_version_matches_package() -> None:
+    """The Claude Code plugin manifest must not drift from the package version.
+
+    Same drift class as mcpb/manifest.json and server.json above: the plugin
+    at ``plugins/kiln/.claude-plugin/plugin.json`` declares its own ``version``
+    and Claude Code only serves updates when that field is bumped (an explicit
+    version pins the release channel — see the plugins reference). Nothing
+    structural ties it to ``kiln3d``'s pyproject version, so this test is the
+    tie. The launch command (``uvx kiln3d serve``) is unpinned and always runs
+    the latest published ``kiln3d``, so no repack is needed — only this field.
+    """
+    root = Path(__file__).resolve().parents[2]
+    pyproject_text = (root / "kiln" / "pyproject.toml").read_text(encoding="utf-8")
+    match = re.search(r'(?m)^\s*version\s*=\s*"([^"]+)"\s*$', pyproject_text)
+    assert match, "could not find version in kiln/pyproject.toml"
+    pkg_version = match.group(1)
+
+    plugin_path = root / "plugins" / "kiln" / ".claude-plugin" / "plugin.json"
+    plugin = json.loads(plugin_path.read_text(encoding="utf-8"))
+    assert plugin.get("version") == pkg_version, (
+        f"plugins/kiln/.claude-plugin/plugin.json version {plugin.get('version')!r} "
+        f"drifted from pyproject {pkg_version!r}. Bump the plugin manifest version "
+        "in the same commit so Claude Code serves the update."
+    )

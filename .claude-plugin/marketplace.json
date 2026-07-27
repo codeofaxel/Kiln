@@ -1,0 +1,28 @@
+{
+  "name": "kiln",
+  "owner": {
+    "name": "Hadron Labs Inc.",
+    "url": "https://kiln3d.com"
+  },
+  "metadata": {
+    "description": "Kiln — AI agent infrastructure for 3D printing. Design, slice, print, monitor, and recover across Bambu Lab, Creality, Prusa, Elegoo, OctoPrint, Moonraker/Klipper and more.",
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "kiln",
+      "source": "./kiln",
+      "description": "Wire the full Kiln MCP server into Claude Code in one command — design, slice, print, monitor, and recover on real 3D printers on your own network. Requires uv (astral.sh/uv).",
+      "author": {
+        "name": "Hadron Labs Inc.",
+        "url": "https://kiln3d.com"
+      },
+      "homepage": "https://kiln3d.com",
+      "license": "AGPL-3.0-or-later",
+      "keywords": [
+        "3d-printing", "3d-printer", "bambu-lab", "prusa", "creality",
+        "elegoo", "octoprint", "moonraker", "klipper", "slicer", "fabrication"
+      ]
+    }
+  ]
+}
