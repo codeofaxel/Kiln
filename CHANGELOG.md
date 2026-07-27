@@ -7,6 +7,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Add Kiln to Claude Code in one command — free.** Kiln now ships as a
+  Claude Code plugin. Run `claude plugin marketplace add codeofaxel/Kiln`,
+  then `claude plugin install kiln@kiln`, and every Kiln tool — design,
+  slice, print, monitor, recover — is wired into your Claude Code session
+  with no manual setup. Requires [uv](https://astral.sh/uv); Kiln updates
+  itself automatically from there.
+
 - **Turn a model that came in pieces into a kit you can build.** Drop in a
   multi-part model and the parts keep their names and places. Kiln finds the
   biggest size everything prints at, proves the pieces really fit, and tells
