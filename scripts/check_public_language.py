@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -147,11 +148,25 @@ def find_violations(
     return findings
 
 
+# Git exports these into hook environments to pin a command to the invoking
+# repository, and every one of them OUTRANKS `git -C <dir>`.  This module is
+# imported by kiln/tests/test_public_language.py, so it runs inside the test
+# suite — and the suite is started from the pre-push hook.  Inherited, they
+# would make every read below resolve against whichever repo git pinned
+# instead of _ROOT: the checks would silently grade the wrong tree.
+_GIT_ENV_OVERRIDES = (
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE",
+    "GIT_PREFIX", "GIT_INDEX_VERSION", "GIT_QUARANTINE_PATH",
+)
+
+
 def _git(*args: str) -> bytes:
     result = subprocess.run(
         ["git", "-C", str(_ROOT), *args],
         check=True,
         stdout=subprocess.PIPE,
+        env={k: v for k, v in os.environ.items() if k not in _GIT_ENV_OVERRIDES},
     )
     return result.stdout
 
