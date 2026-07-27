@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-26T22:44:08.746689+00:00",
-  "tool_count": 383,
+  "generated": "2026-07-27T02:45:13.018006+00:00",
+  "tool_count": 386,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -785,6 +785,21 @@
             ],
             "default": null,
             "title": "Work Instruction"
+          },
+          "strict_certainty": {
+            "default": true,
+            "title": "Strict Certainty",
+            "type": "boolean"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "version_id": {
+            "default": "",
+            "title": "Version Id",
+            "type": "string"
           }
         },
         "required": [
@@ -1692,6 +1707,30 @@
       }
     },
     {
+      "name": "cloud_pull_manual_history",
+      "description": "Merge a design's remote manual-revision history into local.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "cloud_pull_manual_historyArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "cloud_pull_preset_branch",
       "description": "Pull one decoration-preset branch's new versions from a remote.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -1830,6 +1869,30 @@
           "release_id"
         ],
         "title": "cloud_push_feature_releaseArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_push_manual_history",
+      "description": "Push a design's assembly-manual revision history to a remote.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "cloud_push_manual_historyArguments",
         "type": "object"
       }
     },
@@ -11615,6 +11678,119 @@
           "targets"
         ],
         "title": "plan_fleet_material_changeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "plan_kit_plates",
+      "description": "Pack a kit's parts onto print plates \u2014 and, with a fleet, answer \"which plate on which printer, finishing when.\".\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "part_paths": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Part Paths",
+            "type": "array"
+          },
+          "part_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Part Names"
+          },
+          "scale": {
+            "default": 1.0,
+            "title": "Scale",
+            "type": "number"
+          },
+          "bed_x_mm": {
+            "default": 0.0,
+            "title": "Bed X Mm",
+            "type": "number"
+          },
+          "bed_y_mm": {
+            "default": 0.0,
+            "title": "Bed Y Mm",
+            "type": "number"
+          },
+          "bed_z_mm": {
+            "default": 0.0,
+            "title": "Bed Z Mm",
+            "type": "number"
+          },
+          "gap_mm": {
+            "default": 3.0,
+            "title": "Gap Mm",
+            "type": "number"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "part_materials": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Part Materials"
+          },
+          "orientation": {
+            "default": "flat",
+            "title": "Orientation",
+            "type": "string"
+          },
+          "printers": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printers"
+          },
+          "layer_height_mm": {
+            "default": 0.2,
+            "title": "Layer Height Mm",
+            "type": "number"
+          },
+          "print_speed_mm_s": {
+            "default": 60.0,
+            "title": "Print Speed Mm S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "part_paths"
+        ],
+        "title": "plan_kit_platesArguments",
         "type": "object"
       }
     },
