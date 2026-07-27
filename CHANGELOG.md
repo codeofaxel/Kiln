@@ -7,6 +7,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Turn a model that came in pieces into a kit you can build.** Drop in a
+  multi-part model and the parts keep their names and places. Kiln finds the
+  biggest size everything prints at, proves the pieces really fit, and tells
+  you what any overlap means.
+
+- **Kiln packs your print plates (Pro).** How many plates a kit takes, and
+  what goes on each one. With more than one printer, Kiln splits the work
+  between them and tells you when the last plate finishes (Business+). See
+  https://kiln3d.com/pricing.
+
+- **Better assembly booklets that generate quicker (Business+).**
+
+- **Manuals are kept, versioned, and synced (Business+).** Every booklet lands
+  in your library with revision history, cloud sync, and proof of
+  authenticity.
+
 - **Know if a shelf will lean before you print it (Pro+).** Kiln says which
   openings need a diagonal and how few will do. Back panels count, and you
   get each brace's length to print, cut, or buy.
