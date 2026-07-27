@@ -129,3 +129,60 @@ def test_resolve_all_printer_models_defensive(monkeypatch, tmp_path):
     legacy.write_text("printer_model: ender3\n")
     monkeypatch.setattr(printer_model_resolver, "_CONFIG_PATH", legacy)
     assert printer_model_resolver.resolve_all_printer_models() == ["ender3"]
+
+
+# ---------------------------------------------------------------------------
+# Adapter families of the WHOLE fleet — the sibling of the models fix
+# ---------------------------------------------------------------------------
+
+
+class _BambuAdapter:
+    """Class name is the family signal, like the real adapters."""
+
+
+class _MoonrakerAdapter:
+    pass
+
+
+class _OctoPrintAdapter:
+    pass
+
+
+def test_all_adapter_types_sees_every_family(monkeypatch):
+    """The top-level adapter_type names only the default printer, so a
+    Bambu-default install with a Klipper second machine reported plain
+    "bambu" — the mixed fleet's second family was invisible."""
+    _install_registry(monkeypatch, {
+        "default": _BambuAdapter(),
+        "workhorse": _MoonrakerAdapter(),
+        "old-faithful": _OctoPrintAdapter(),
+    })
+    assert heartbeat._get_all_adapter_types() == [
+        "bambu", "moonraker", "octoprint",
+    ]
+
+
+def test_all_adapter_types_dedupes_same_family_fleet(monkeypatch):
+    _install_registry(monkeypatch, {
+        "left": _BambuAdapter(),
+        "right": _BambuAdapter(),
+    })
+    assert heartbeat._get_all_adapter_types() == ["bambu"]
+
+
+def test_all_adapter_types_and_default_classifier_agree(monkeypatch):
+    """One classifier serves both the top-level field and the fleet
+    list; if they ever diverge, the dashboard would count the same
+    machine under two names."""
+    adapter = _MoonrakerAdapter()
+    _install_registry(monkeypatch, {"default": adapter})
+    monkeypatch.delenv("KILN_PRINTER_TYPE", raising=False)
+    monkeypatch.delenv("KILN_PRINTER_MODEL", raising=False)
+    _model, adapter_type, _count = heartbeat._get_printer_info()
+    assert adapter_type == "moonraker"
+    assert heartbeat._get_all_adapter_types() == [adapter_type]
+
+
+def test_empty_registry_yields_no_families(monkeypatch):
+    _install_registry(monkeypatch, {})
+    assert heartbeat._get_all_adapter_types() == []

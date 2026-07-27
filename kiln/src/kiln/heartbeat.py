@@ -149,6 +149,20 @@ def _adapter_model(adapter: object) -> str | None:
     return model or None
 
 
+def _adapter_family(adapter: object) -> str | None:
+    """Adapter family name ("bambu", "moonraker", …) from the class name.
+
+    One definition for both the top-level ``adapter_type`` (default
+    printer) and the ``details.adapter_types`` fleet list — the two must
+    never classify the same adapter differently.
+    """
+    cls_name = type(adapter).__name__.lower()
+    for family in ("creality", "bambu", "octoprint", "moonraker", "serial"):
+        if family in cls_name:
+            return family
+    return cls_name.replace("adapter", "").strip("_") or None
+
+
 def _get_printer_info() -> tuple[str | None, str | None, int]:
     """Best-effort resolve of printer model, adapter type, and printer count."""
     model: str | None = None
@@ -174,20 +188,7 @@ def _get_printer_info() -> tuple[str | None, str | None, int]:
             # Legacy env override — last resort only.
             if not model:
                 model = os.environ.get("KILN_PRINTER_MODEL", None)
-            # Derive adapter type from class name
-            cls_name = type(adapter).__name__.lower()
-            if "creality" in cls_name:
-                adapter_type = "creality"
-            elif "bambu" in cls_name:
-                adapter_type = "bambu"
-            elif "octoprint" in cls_name:
-                adapter_type = "octoprint"
-            elif "moonraker" in cls_name:
-                adapter_type = "moonraker"
-            elif "serial" in cls_name:
-                adapter_type = "serial"
-            else:
-                adapter_type = cls_name.replace("adapter", "").strip("_") or None
+            adapter_type = _adapter_family(adapter)
     except Exception:
         pass
     # Last resort: derive adapter type from env
@@ -240,6 +241,36 @@ def _get_all_printer_models() -> list[str]:
     except Exception:
         pass
     return models
+
+
+def _get_all_adapter_types() -> list[str]:
+    """Adapter families of EVERY registered printer, deduped.
+
+    The top-level ``adapter_type`` field classifies only the "default"
+    printer, so a Bambu-default install with a Klipper second machine
+    reported plain "bambu" — the second family was invisible in the
+    dashboard's adapter view even though ``printer_models`` (the fix's
+    sibling) already carried the machine's model name.  Families only —
+    no printer ids, no addresses.
+    """
+    families: list[str] = []
+    try:
+        from kiln.registry import get_registry
+
+        reg = get_registry()
+        for name in reg.list_names():
+            if len(families) >= _MAX_HEARTBEAT_PRINTER_MODELS:
+                break
+            try:
+                adapter = reg.get(name)
+                family = _adapter_family(adapter) if adapter is not None else None
+            except Exception:
+                continue
+            if family and family not in families:
+                families.append(family)
+    except Exception:
+        pass
+    return families
 
 
 def _get_daily_counts() -> dict[str, int]:
@@ -364,6 +395,10 @@ def _send_heartbeat() -> None:
                 # invisible in aggregate stats.  Names only: no ids,
                 # addresses, or serials.
                 "printer_models": _get_all_printer_models(),
+                # Adapter family of EVERY registered printer — the
+                # top-level adapter_type names only the default machine,
+                # which hid the second family of every mixed fleet.
+                "adapter_types": _get_all_adapter_types(),
                 # The last COMPLETE day's activity counters.  The
                 # ``*_today`` fields above are sampled when the server
                 # starts — before that day's work has happened — so they
