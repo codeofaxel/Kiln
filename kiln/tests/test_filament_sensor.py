@@ -203,63 +203,105 @@ class TestOctoPrintFilamentStatus:
 
 
 class TestMoonrakerFilamentStatus:
+    """Fixtures mirror payloads captured from a real Klipper instance.
 
-    @responses.activate
-    def test_filament_detected(self):
-        adapter = MoonrakerAdapter(host=MOONRAKER_HOST, retries=1)
+    Klipper registers every runout sensor under its full config section name
+    (``"<type> <name>"``) -- both sensor modules are ``load_config_prefix``-only,
+    so a bare ``[filament_switch_sensor]`` section cannot exist.  Fixtures that
+    use a bare, un-namespaced key describe a printer that cannot exist, which is
+    how a broken query passed its tests while never matching real hardware.
+    """
+
+    @staticmethod
+    def _mock(sensors: dict[str, dict], *, extra_objects: list[str] | None = None) -> None:
+        """Register objects/list + objects/query the way Moonraker answers them."""
+        objects = ["gcode", "toolhead", "extruder", *(extra_objects or []), *sensors]
+        responses.add(
+            responses.GET,
+            f"{MOONRAKER_HOST}/printer/objects/list",
+            json={"result": {"objects": objects}},
+            status=200,
+        )
         responses.add(
             responses.GET,
             f"{MOONRAKER_HOST}/printer/objects/query",
-            json={
-                "result": {
-                    "status": {
-                        "filament_switch_sensor": {
-                            "filament_detected": True,
-                            "enabled": True,
-                        }
-                    }
-                }
-            },
+            json={"result": {"eventtime": 1234.5, "status": dict(sensors)},
+                  },
             status=200,
         )
+
+    @responses.activate
+    def test_named_switch_sensor_detected(self):
+        adapter = MoonrakerAdapter(host=MOONRAKER_HOST, retries=1)
+        self._mock({"filament_switch_sensor runout": {"filament_detected": True, "enabled": True}})
         result = adapter.get_filament_status()
         assert result is not None
         assert result["detected"] is True
         assert result["sensor_enabled"] is True
+        assert result["sensor_name"] == "filament_switch_sensor runout"
         assert result["source"] == "klipper_filament_switch_sensor"
+
+    @responses.activate
+    def test_named_motion_sensor_detected(self):
+        """Regression: encoder sensors were invisible -- only switches were queried.
+
+        Payload captured verbatim from a live Klipper instance.
+        """
+        adapter = MoonrakerAdapter(host=MOONRAKER_HOST, retries=1)
+        self._mock({"filament_motion_sensor runout_sensor": {"filament_detected": True, "enabled": True}})
+        result = adapter.get_filament_status()
+        assert result is not None
+        assert result["detected"] is True
+        assert result["sensor_enabled"] is True
+        assert result["sensor_name"] == "filament_motion_sensor runout_sensor"
+        assert result["source"] == "klipper_filament_motion_sensor"
 
     @responses.activate
     def test_filament_not_detected(self):
         adapter = MoonrakerAdapter(host=MOONRAKER_HOST, retries=1)
-        responses.add(
-            responses.GET,
-            f"{MOONRAKER_HOST}/printer/objects/query",
-            json={
-                "result": {
-                    "status": {
-                        "filament_switch_sensor": {
-                            "filament_detected": False,
-                            "enabled": True,
-                        }
-                    }
-                }
-            },
-            status=200,
-        )
+        self._mock({"filament_switch_sensor runout": {"filament_detected": False, "enabled": True}})
         result = adapter.get_filament_status()
         assert result is not None
         assert result["detected"] is False
         assert result["sensor_enabled"] is True
 
     @responses.activate
-    def test_sensor_not_configured_returns_none(self):
+    def test_any_armed_sensor_reporting_runout_wins(self):
+        """Two sensors, one out of filament -- must report runout, not average it away."""
         adapter = MoonrakerAdapter(host=MOONRAKER_HOST, retries=1)
-        responses.add(
-            responses.GET,
-            f"{MOONRAKER_HOST}/printer/objects/query",
-            json={"result": {"status": {}}},
-            status=200,
+        self._mock(
+            {
+                "filament_switch_sensor left": {"filament_detected": True, "enabled": True},
+                "filament_motion_sensor right": {"filament_detected": False, "enabled": True},
+            }
         )
+        result = adapter.get_filament_status()
+        assert result is not None
+        assert result["detected"] is False
+        assert result["sensor_name"] == "filament_motion_sensor right"
+        assert len(result["sensors"]) == 2
+
+    @responses.activate
+    def test_disabled_sensor_still_reports_its_reading(self):
+        adapter = MoonrakerAdapter(host=MOONRAKER_HOST, retries=1)
+        self._mock({"filament_switch_sensor runout": {"filament_detected": True, "enabled": False}})
+        result = adapter.get_filament_status()
+        assert result is not None
+        assert result["sensor_enabled"] is False
+        assert result["detected"] is True
+
+    @responses.activate
+    def test_no_sensor_configured_returns_none(self):
+        adapter = MoonrakerAdapter(host=MOONRAKER_HOST, retries=1)
+        self._mock({})
+        result = adapter.get_filament_status()
+        assert result is None
+
+    @responses.activate
+    def test_unrelated_filament_objects_are_not_sensors(self):
+        """``filament_switch_sensor`` must match as a section prefix, not a substring."""
+        adapter = MoonrakerAdapter(host=MOONRAKER_HOST, retries=1)
+        self._mock({}, extra_objects=["filament_switch_sensor_helper", "tmc2209 extruder"])
         result = adapter.get_filament_status()
         assert result is None
 
