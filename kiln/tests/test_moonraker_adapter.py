@@ -26,7 +26,9 @@ from kiln.printers.base import (
 )
 from kiln.printers.moonraker import (
     MoonrakerAdapter,
+    MoonrakerWebSocketMonitor,
     _map_moonraker_state,
+    _merge_status_into,
     _safe_get,
 )
 
@@ -1128,3 +1130,107 @@ class TestResumeNotPausedHonest:
         result = adapter.resume_print()
         assert result.success is True
         adapter._post.assert_called_once_with("/printer/print/resume")
+
+
+# ---------------------------------------------------------------------------
+# WebSocket push cache -- Klipper pushes deltas, not snapshots
+# ---------------------------------------------------------------------------
+
+
+def _monitor() -> MoonrakerWebSocketMonitor:
+    """A monitor that believes it is connected, without opening a socket."""
+    mon = MoonrakerWebSocketMonitor(HOST, printer_name="moonraker")
+    mon._connected = True
+    return mon
+
+
+def _frame(status: dict[str, Any]) -> str:
+    """A notify_status_update frame exactly as Moonraker sends it."""
+    return json.dumps(
+        {"jsonrpc": "2.0", "method": "notify_status_update", "params": [status, 1234.5]}
+    )
+
+
+class TestPushCacheMerge:
+    """Klipper's subscriptions send only fields whose value CHANGED.
+
+    Measured against a live Klipper instance during a print: 116 of 117 frames
+    carried ``print_stats`` holding only ``total_duration`` -- ``state`` changed
+    once, at the start.  A flat ``dict.update`` drops it and the printer reads
+    as idle mid-print.
+    """
+
+    def test_merge_keeps_fields_absent_from_the_delta(self):
+        cache: dict[str, Any] = {}
+        _merge_status_into(cache, {"print_stats": {"state": "printing", "filename": "a.gcode"}})
+        _merge_status_into(cache, {"print_stats": {"total_duration": 12.3}})
+        assert cache["print_stats"]["state"] == "printing"
+        assert cache["print_stats"]["filename"] == "a.gcode"
+        assert cache["print_stats"]["total_duration"] == 12.3
+
+    def test_merge_overwrites_changed_fields(self):
+        cache: dict[str, Any] = {"extruder": {"temperature": 20.0, "target": 0.0}}
+        _merge_status_into(cache, {"extruder": {"temperature": 210.5}})
+        assert cache["extruder"]["temperature"] == 210.5
+        assert cache["extruder"]["target"] == 0.0
+
+    def test_merge_does_not_mutate_a_handed_out_snapshot(self):
+        cache: dict[str, Any] = {"extruder": {"temperature": 20.0}}
+        snapshot = {k: v for k, v in cache.items()}
+        _merge_status_into(cache, {"extruder": {"temperature": 210.5}})
+        assert snapshot["extruder"]["temperature"] == 20.0
+
+    def test_state_survives_a_stream_of_deltas(self):
+        mon = _monitor()
+        # initial subscribe response: full objects
+        mon._on_message(
+            None,
+            json.dumps(
+                {
+                    "result": {
+                        "status": {
+                            "print_stats": {"state": "printing", "filename": "a.gcode"},
+                            "extruder": {"temperature": 210.0, "target": 210.0},
+                        }
+                    }
+                }
+            ),
+        )
+        # then the deltas a real print emits
+        for i in range(20):
+            mon._on_message(None, _frame({"print_stats": {"total_duration": float(i)}}))
+
+        cached = mon.get_cached_state()
+        assert cached is not None
+        assert cached["print_stats"]["state"] == "printing"
+        assert cached["extruder"]["target"] == 210.0
+
+    def test_get_state_reports_printing_from_the_push_cache(self):
+        """The user-visible bug: idle reported while the printer prints."""
+        adapter = _adapter()
+        mon = _monitor()
+        mon._on_message(
+            None,
+            json.dumps({"result": {"status": {"print_stats": {"state": "printing"}}}}),
+        )
+        for i in range(10):
+            mon._on_message(None, _frame({"print_stats": {"total_duration": float(i)}}))
+        adapter._ws_monitor = mon
+
+        assert adapter.get_state().state == PrinterStatus.PRINTING
+
+
+class TestJobElapsedTime:
+    def test_sub_second_elapsed_does_not_read_as_zero(self):
+        adapter = _adapter()
+        adapter._get_json = mock.Mock(
+            return_value={
+                "result": {
+                    "status": {
+                        "print_stats": {"filename": "a.gcode", "print_duration": 0.6},
+                        "virtual_sdcard": {"progress": 0.5},
+                    }
+                }
+            }
+        )
+        assert adapter.get_job().print_time_seconds == 1

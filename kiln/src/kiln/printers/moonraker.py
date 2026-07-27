@@ -93,6 +93,31 @@ def _safe_get(data: Any, *keys: str, default: Any = None) -> Any:
     return current
 
 
+def _merge_status_into(cache: dict[str, Any], status: dict[str, Any]) -> None:
+    """Merge a Moonraker status payload into *cache*, per printer object.
+
+    Klipper's subscriptions push **deltas**, not snapshots: for each subscribed
+    object it compares every requested field against the previous poll and sends
+    only what changed.  During a live print that means a steady stream of
+    ``{"print_stats": {"total_duration": 12.3}}`` -- ``state`` changed once, at
+    the start, so it is absent from nearly every later frame.
+
+    A flat ``cache.update(status)`` would replace the whole cached object with
+    that one-key delta and discard every field that simply had not changed,
+    leaving ``print_stats`` with no ``state`` and the printer reported idle
+    mid-print.  Merging one level down keeps the unchanged fields.
+
+    Each object is replaced with a *new* dict rather than mutated in place, so
+    snapshots already handed out by ``get_cached_state()`` stay unchanged.
+    """
+    for obj_name, value in status.items():
+        existing = cache.get(obj_name)
+        if isinstance(value, dict) and isinstance(existing, dict):
+            cache[obj_name] = {**existing, **value}
+        else:
+            cache[obj_name] = value
+
+
 def _map_moonraker_state(state_string: str, print_state: str | None = None) -> PrinterStatus:
     """Translate a Moonraker state string to a :class:`PrinterStatus`.
 
@@ -395,7 +420,7 @@ class MoonrakerWebSocketMonitor:
             if params and isinstance(params, list) and isinstance(params[0], dict):
                 status = params[0]
                 with self._cache_lock:
-                    self._cache.update(status)
+                    _merge_status_into(self._cache, status)
                 self._maybe_record_flow_anomaly(status)
                 if self._on_state_update:
                     try:
@@ -410,7 +435,7 @@ class MoonrakerWebSocketMonitor:
             status = result["status"]
             if isinstance(status, dict):
                 with self._cache_lock:
-                    self._cache.update(status)
+                    _merge_status_into(self._cache, status)
 
     def _maybe_record_flow_anomaly(self, status: dict[str, Any]) -> None:
         """Feed flow / extrusion signals into the kiln-pro wear cross-check.
@@ -919,7 +944,6 @@ class MoonrakerAdapter(PrinterAdapter):
         print_stats = _safe_get(status, "print_stats", default={})
         file_name = print_stats.get("filename") if isinstance(print_stats, dict) else None
         print_duration = print_stats.get("print_duration") if isinstance(print_stats, dict) else None
-        print_stats.get("total_duration") if isinstance(print_stats, dict) else None
 
         # virtual_sdcard
         vsd = _safe_get(status, "virtual_sdcard", default={})
@@ -936,7 +960,9 @@ class MoonrakerAdapter(PrinterAdapter):
         print_time_left_seconds: int | None = None
 
         if print_duration is not None:
-            print_time_seconds = int(print_duration)
+            # Round rather than truncate: a print a fraction of a second in
+            # otherwise reports 0 s elapsed, which reads as "not started".
+            print_time_seconds = round(float(print_duration))
 
         if print_time_seconds is not None and completion is not None and completion > 0:
             # total_estimated = elapsed / (completion / 100)
