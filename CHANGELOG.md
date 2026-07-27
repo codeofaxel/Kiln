@@ -107,6 +107,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Filament runout sensors now work on Klipper printers.**
+
 - **The live safety check no longer misses commands with a line number in
   front (free).** Some senders and firmwares prefix every G-code command
   with a line number. Kiln's real-time check was reading that prefix *as*
