@@ -414,6 +414,103 @@ def _is_resume_print(file_name: str, kwargs: dict[str, Any]) -> bool:
     )
 
 
+def _concurrent_fleet_verdict(adapter: Any) -> dict[str, Any] | None:
+    """Block a print that would run a SECOND machine at once below Business.
+
+    Kiln's fleet tier sells *parallelism*, not possession.  Owning two
+    printers and using them one at a time is honest single-machine use and
+    stays free forever; driving two at once is a fleet, and a fleet is
+    Business.  Gating here — the one chokepoint every entry point reaches
+    (tool, CLI, scheduler, pipelines, recovery) — is what makes that true
+    at every door, instead of only at ``register_printer`` where the cap
+    used to live while the CLI and config.yaml loaded printers uncapped
+    (2026-07-27).
+
+    Deliberately NOT gated: registering, listing, or *watching* printers,
+    and every safety and control path — status, pause, cancel, emergency
+    stop work on every machine at every tier, always.  A licensing rule
+    must never cost a user visibility or control of a hot machine.
+
+    Soft-passes on anything it cannot prove: unknown tier, unreachable
+    peers, any error.  A network hiccup must never block a print.
+    """
+    try:
+        from kiln.registry import get_registry
+
+        registry = get_registry()
+        # Fast path — one machine can never be a fleet.  Costs no network,
+        # which is what nearly every install pays here.
+        if registry.count <= 1:
+            return None
+
+        try:
+            from kiln.licensing import get_tier, max_printers_for_tier
+
+            cap = max_printers_for_tier(get_tier())
+        except Exception:
+            cap = 1  # free-tier fallback: kiln-pro absent
+        if cap is None or cap <= 0 or registry.count <= cap:
+            return None
+
+        # Which OTHER machines are busy right now?  Queried in parallel with
+        # the registry's own bounded-timeout helper; unreachable peers read
+        # as "not busy" so an offline printer can't wedge a valid print.
+        from kiln.printers.base import PrinterStatus
+
+        this_machine = _machine_id(adapter)
+        busy: list[str] = []
+        for name, state in _peer_states(registry, this_machine).items():
+            if state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+                busy.append(name)
+
+        if len(busy) < cap:
+            return None
+
+        others = ", ".join(sorted(busy)[:3])
+        return {
+            "blocked": True,
+            "reason": (
+                f"Kiln runs one printer at a time on this plan, and "
+                f"{others} is already printing."
+            ),
+            "override_hint": (
+                "Wait for it to finish, or start it after this one. "
+                "Kiln Business runs your printers in parallel — "
+                "https://kiln3d.com/pricing"
+            ),
+            "code": "TIER_CONCURRENT_PRINT_LIMIT",
+        }
+    except Exception:  # noqa: BLE001 — a licensing check never breaks a print
+        _logger.debug("concurrent-fleet gate soft-passed", exc_info=True)
+        return None
+
+
+def _machine_id(adapter: Any) -> str:
+    """Fingerprint for *adapter*, or ``""`` when the registry can't say."""
+    try:
+        from kiln.registry import machine_fingerprint
+
+        return machine_fingerprint(adapter)
+    except Exception:
+        return ""
+
+
+def _peer_states(registry: Any, this_machine: str) -> dict[str, Any]:
+    """State of every registered machine EXCEPT this one, aliases collapsed."""
+    from kiln.registry import machine_fingerprint
+
+    out: dict[str, Any] = {}
+    for name in registry.list_machines():
+        try:
+            peer = registry.get(name)
+            if this_machine and machine_fingerprint(peer) == this_machine:
+                continue
+            out[name] = peer.get_state().state
+        except Exception:
+            continue  # unreachable peer reads as not-busy, never blocks
+    return out
+
+
 def run_adapter_gate(
     adapter: Any, file_name: str, kwargs: dict[str, Any],
 ) -> dict[str, Any] | None:
@@ -427,6 +524,11 @@ def run_adapter_gate(
     # Resume-mode prints are committed continuations — never re-gate them.
     if _is_resume_print(file_name, kwargs):
         return None
+
+    # Fleet concurrency (tier), before the physical checks: it needs no file
+    # parsing and answers instantly for the single-machine case.
+    if fleet_blocked := _concurrent_fleet_verdict(adapter):
+        return fleet_blocked
 
     printer_id = _resolve_printer_model(adapter)
     job = _resolve_local_job(file_name, kwargs)

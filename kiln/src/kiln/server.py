@@ -7042,38 +7042,29 @@ def register_printer(
         tier_label = str(
             getattr(current_tier, "value", current_tier) or "free"
         ).title()
+        # Registering a printer is FREE at every tier — what the fleet tier
+        # sells is running printers in PARALLEL, and that is enforced at
+        # print start (``printers/print_gate._concurrent_fleet_verdict``),
+        # the one chokepoint every entry point reaches.  Refusing the
+        # registration here instead was both too strict and too loose: it
+        # blocked a user who simply owns two machines and uses them one at
+        # a time, while `kiln config add-printer` and config.yaml auto-load
+        # registered as many printers as they liked, uncapped (2026-07-27).
+        #
+        # tier-claims: business — the note names the tier being RECOMMENDED.
+        fleet_note: str | None = None
         if (
             tier_cap is not None
             and name not in _get_registry()
             and _get_registry().count >= tier_cap
         ):
-            # Recommend the tier that actually solves THIS problem. Pro adds no
-            # printers over Free, so a second printer is a Business upgrade
-            # from either — recommending Pro here sold an upgrade that would
-            # not have lifted the cap the user just hit.
-            #
-            # tier-claims: business — keys are the caller's CURRENT tier, but
-            # every count below describes the tier being RECOMMENDED.
-            upgrade_hint = {
-                "Free": "Kiln Business adds fleet — 3 printers included, up to 50",
-                "Pro": "Kiln Business adds fleet — 3 printers included, up to 50",
-                "Business": "Kiln Enterprise removes the printer cap",
-            }.get(tier_label, "Upgrade at https://kiln3d.com/pricing")
-            return {
-                "success": False,
-                "error": (
-                    f"Fleet registration is limited to {tier_cap} printers "
-                    f"on the {tier_label} tier "
-                    f"(you have {_get_registry().count}). "
-                    f"{upgrade_hint}. "
-                    "Upgrade at https://kiln3d.com/pricing or run 'kiln upgrade'."
-                ),
-                "code": "TIER_PRINTER_LIMIT",
-                "current_tier": tier_label.lower(),
-                "current_count": _get_registry().count,
-                "max_allowed": tier_cap,
-                "upgrade_url": "https://kiln3d.com/pricing",
-            }
+            fleet_note = (
+                f"Registered. On the {tier_label} tier Kiln runs "
+                f"{tier_cap} printer at a time — this machine is ready to "
+                "use whenever your others are idle. Kiln Business runs "
+                "printers in parallel (3 included, up to 50): "
+                "https://kiln3d.com/pricing"
+            )
         # Validate and clean the printer URL
         host, url_warnings = _validate_printer_url(host, printer_type=printer_type)
         if not host:
@@ -7197,6 +7188,9 @@ def register_printer(
             "message": f"Registered printer {name!r} ({printer_type} @ {host}).",
             "name": name,
         }
+        if fleet_note:
+            result["fleet_note"] = fleet_note
+            result["upgrade_url"] = "https://kiln3d.com/pricing"
         if persisted_path:
             result["persisted"] = True
             result["config_path"] = persisted_path

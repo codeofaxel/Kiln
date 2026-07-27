@@ -55,6 +55,51 @@ class PrinterMetadata:
         }
 
 
+def _normalize_host(host: str) -> str:
+    """Reduce a printer address to a comparable form.
+
+    ``http://192.168.1.6:7125/`` and ``192.168.1.6:7125`` address the same
+    machine.  The port is KEPT — two print servers on one box (two
+    Moonraker instances behind one Pi) are genuinely two printers.
+    """
+    text = str(host or "").strip().lower()
+    for scheme in ("https://", "http://"):
+        if text.startswith(scheme):
+            text = text[len(scheme):]
+            break
+    return text.rstrip("/")
+
+
+def machine_fingerprint(adapter: PrinterAdapter) -> str:
+    """Return a stable identity for the physical machine behind *adapter*.
+
+    Names are labels, not identity: the server registers the active
+    printer as ``"default"`` AND again under its config.yaml name, so one
+    machine occupied two registry slots and counted twice.  That inflated
+    ``printer_count`` telemetry, showed the user their printer twice, and
+    corrupted the tier cap's arithmetic — a single-printer free user
+    already "used" two of one allowed slot (2026-07-27).
+
+    Serial wins when the backend reports one (Bambu): it survives a DHCP
+    lease change.  Otherwise the normalized address identifies the box.
+    An adapter that exposes neither is unidentifiable, so it falls back to
+    its own object identity — distinct by definition, never merged with
+    another machine on a guess.
+    """
+    family = str(getattr(adapter, "name", "") or type(adapter).__name__).lower()
+    serial = str(
+        getattr(adapter, "serial", None) or getattr(adapter, "_serial", None) or ""
+    ).strip()
+    if serial:
+        return f"{family}:serial:{serial.lower()}"
+    host = _normalize_host(
+        getattr(adapter, "host", None) or getattr(adapter, "_host", None) or ""
+    )
+    if host:
+        return f"{family}:host:{host}"
+    return f"{family}:object:{id(adapter):x}"
+
+
 def _disconnect_adapter(adapter: PrinterAdapter, name: str = "") -> None:
     """Safely disconnect an adapter if it supports it.
 
@@ -174,9 +219,55 @@ class PrinterRegistry:
 
     @property
     def count(self) -> int:
-        """Number of registered printers."""
+        """Number of distinct physical MACHINES registered.
+
+        Counts machines, not names — two names for one printer (the
+        ``"default"`` alias the server registers alongside the config.yaml
+        name) is one machine.  Everything that asks "how many printers does
+        this install have" — the tier cap, the usage heartbeat, the startup
+        bootstrap — means machines, and got a name count until 2026-07-27.
+        """
+        with self._lock:
+            return len({
+                machine_fingerprint(a) for a in self._printers.values()
+            })
+
+    @property
+    def name_count(self) -> int:
+        """Number of registered NAMES, aliases included.
+
+        The bookkeeping view — use :attr:`count` for anything a user or a
+        price is measured against.
+        """
         with self._lock:
             return len(self._printers)
+
+    def list_machines(self) -> list[str]:
+        """Return one canonical name per distinct machine, sorted.
+
+        The name a user chose beats the ``"default"`` alias the bootstrap
+        adds, so a fleet view shows "my-voron", not the same printer twice.
+        """
+        with self._lock:
+            by_machine: dict[str, str] = {}
+            for name in sorted(self._printers):
+                fp = machine_fingerprint(self._printers[name])
+                current = by_machine.get(fp)
+                if current is None or (current == "default" and name != "default"):
+                    by_machine[fp] = name
+            return sorted(by_machine.values())
+
+    def aliases_of(self, name: str) -> list[str]:
+        """Return every registered name pointing at *name*'s machine."""
+        with self._lock:
+            adapter = self._printers.get(name)
+            if adapter is None:
+                return []
+            target = machine_fingerprint(adapter)
+            return sorted(
+                other for other, a in self._printers.items()
+                if machine_fingerprint(a) == target
+            )
 
     def __contains__(self, name: str) -> bool:
         with self._lock:
@@ -234,9 +325,16 @@ class PrinterRegistry:
         state.  Printers that fail to respond are reported as OFFLINE
         rather than raising.
 
+        One row per MACHINE, not per name — the bootstrap's ``"default"``
+        alias would otherwise list the user's single printer twice, and
+        double every parallel query against it.
+
         Queries are executed in parallel for speed.
         """
-        printers = self.list_all()
+        canonical = set(self.list_machines())
+        printers = {
+            n: a for n, a in self.list_all().items() if n in canonical
+        }
         with self._lock:
             metadata_snapshot = dict(self._metadata)
 

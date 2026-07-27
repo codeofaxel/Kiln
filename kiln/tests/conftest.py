@@ -13,7 +13,29 @@ loaded by the test suite without modification.
 from __future__ import annotations
 
 import functools
+import os
 import sys
+import tempfile
+
+# ---------------------------------------------------------------------------
+# Relocate HOME before anything imports kiln.  MUST stay first.
+# ---------------------------------------------------------------------------
+# Kiln keeps its whole per-user world under ``~/.kiln`` — config.yaml,
+# kiln.db, daily_stats.json, credentials, calibration.  Tests reach that
+# world through a dozen different readers, several of which resolve the
+# path at import time, so patching them one by one always leaves one
+# behind.  Two real costs, both paid: a suite run wrote phantom activity
+# into the developer's telemetry that the next heartbeat would have
+# shipped, and test-ORDER pollution made a printer-registry test find a
+# real Bambu plus 448 real queued jobs and fail on a clean branch.
+#
+# Moving the root fixes every reader at once, including the ones nobody
+# has enumerated — a new store added next year is isolated for free.
+_TEST_HOME = tempfile.mkdtemp(prefix="kiln-test-home-")
+os.makedirs(os.path.join(_TEST_HOME, ".kiln"), exist_ok=True)
+os.environ["HOME"] = _TEST_HOME
+os.environ.pop("KILN_PRINTER_HOST", None)  # no real printer leaks in either
+os.environ.pop("KILN_PRINTER_TYPE", None)
 
 # ---------------------------------------------------------------------------
 # Monkey-patch FastMCP to accept unknown kwargs (like ``description``)
