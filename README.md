@@ -121,7 +121,14 @@ Global option: `--printer <name>` targets a specific printer per command. The fu
 <details>
 <summary><strong>Connect a specific agent (Claude Code, Claude Desktop, env vars)</strong></summary>
 
-**Claude Code** — add to `.claude/settings.json` (project) or `~/.claude/settings.json` (global):
+**Claude Code** — install the plugin (one-time: install [uv](https://astral.sh/uv) first if you don't have it — it's free and takes one line):
+
+```bash
+claude plugin marketplace add codeofaxel/Kiln
+claude plugin install kiln@kiln
+```
+
+Or wire it by hand — add to `.claude/settings.json` (project) or `~/.claude/settings.json` (global):
 
 ```json
 {
