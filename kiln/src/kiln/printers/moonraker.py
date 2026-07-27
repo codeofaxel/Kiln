@@ -69,6 +69,14 @@ _STATE_MAP: dict[str, PrinterStatus] = {
     "cancelled": PrinterStatus.IDLE,
 }
 
+# Klipper's two filament runout sensor modules.  Both are registered under
+# "<type> <name>" (see get_filament_status), so these are section-name
+# prefixes to match against, never queryable object names on their own.
+_FILAMENT_SENSOR_TYPES: tuple[str, ...] = (
+    "filament_switch_sensor",
+    "filament_motion_sensor",
+)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1412,32 +1420,73 @@ class MoonrakerAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_filament_status(self) -> dict[str, Any] | None:
-        """Query Klipper for filament switch sensor status via Moonraker.
+        """Query Klipper for filament runout sensor status via Moonraker.
 
-        Uses ``GET /printer/objects/query?filament_switch_sensor`` to check
-        whether a filament runout sensor is configured and whether filament
-        is currently detected.  Returns ``None`` if no sensor is configured.
+        Klipper registers each sensor under its **full config section name** --
+        ``"<type> <name>"``, e.g. ``"filament_switch_sensor runout"`` -- because
+        both sensor modules are ``load_config_prefix``-only, so a bare
+        ``[filament_switch_sensor]`` section cannot exist.  Querying the bare
+        type therefore never matches on a real printer; the sensor names have to
+        be discovered from ``GET /printer/objects/list`` first, then queried.
+
+        Both Klipper sensor types are covered: ``filament_switch_sensor``
+        (mechanical switch) and ``filament_motion_sensor`` (encoder).
+
+        Returns ``None`` if no sensor is configured.
         """
         try:
-            payload = self._get_json(
-                "/printer/objects/query",
-                params={"filament_switch_sensor": ""},
-            )
-            sensor_data = _safe_get(
-                payload,
-                "result",
-                "status",
-                "filament_switch_sensor",
-                default=None,
-            )
-            if not sensor_data or not isinstance(sensor_data, dict):
+            listing = self._get_json("/printer/objects/list")
+            objects = _safe_get(listing, "result", "objects", default=[])
+            if not isinstance(objects, list):
                 return None
 
-            # Klipper reports: enabled (bool), filament_detected (bool)
+            names = [
+                obj
+                for obj in objects
+                if isinstance(obj, str)
+                and any(obj == t or obj.startswith(f"{t} ") for t in _FILAMENT_SENSOR_TYPES)
+            ]
+            if not names:
+                return None
+
+            payload = self._get_json(
+                "/printer/objects/query",
+                params=dict.fromkeys(names, ""),
+            )
+            status = _safe_get(payload, "result", "status", default={})
+            if not isinstance(status, dict):
+                return None
+
+            # Klipper reports per sensor: enabled (bool), filament_detected (bool)
+            sensors: list[dict[str, Any]] = []
+            for name in names:
+                data = status.get(name)
+                if isinstance(data, dict) and data:
+                    sensors.append(
+                        {
+                            "name": name,
+                            "detected": bool(data.get("filament_detected", False)),
+                            "enabled": bool(data.get("enabled", False)),
+                        }
+                    )
+            if not sensors:
+                return None
+
+            # Prefer the sensors actually armed; fall back to all of them so a
+            # disabled sensor still reports its reading rather than a bare False.
+            considered = [s for s in sensors if s["enabled"]] or sensors
+
+            # Any armed sensor reporting no filament means runout: a spurious
+            # "check your filament" is cheap, a missed runout is not.
+            detected = all(s["detected"] for s in considered)
+            primary = next((s for s in considered if not s["detected"]), considered[0])
+
             return {
-                "detected": bool(sensor_data.get("filament_detected", False)),
-                "sensor_enabled": bool(sensor_data.get("enabled", False)),
-                "source": "klipper_filament_switch_sensor",
+                "detected": detected,
+                "sensor_enabled": any(s["enabled"] for s in sensors),
+                "sensor_name": primary["name"],
+                "source": f"klipper_{primary['name'].split()[0]}",
+                "sensors": sensors,
             }
         except Exception:
             logger.debug("Filament sensor query failed", exc_info=True)
