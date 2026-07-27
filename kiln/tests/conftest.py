@@ -762,6 +762,53 @@ requires_printer_compatibility_overlay = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
+def _isolate_printer_registry():
+    """No test may inherit printers registered by an earlier test.
+
+    ``kiln.registry`` keeps a process-wide singleton, so a test that
+    registers a printer and does not clean up leaves it visible to every
+    later test.  That is currently red on main two different ways:
+    ``test_server_tools.py::TestKilnHealth::test_registry_count_reflected``
+    fails ``assert 2 == 0`` on somebody else's entries, and
+    ``test_resources.py::TestResourcePrinters::test_empty`` times out
+    because the leaked entries are queried over the NETWORK — a unit-test
+    run reaching for real hardware, and ~20 minutes of CI spent waiting.
+
+    Cleared as TEARDOWN, so a test that registers and then reads within
+    itself is unaffected; only the leak across the boundary is stopped.
+    ``unregister`` (not a bare dict clear) so adapters disconnect instead
+    of piling up MQTT threads.  The registry OBJECT is emptied rather than
+    replaced, because ``kiln.server`` holds its own reference to the same
+    instance.  No-op when ``kiln.registry`` was never imported.
+    """
+    yield
+    mod = sys.modules.get("kiln.registry")
+    registry = getattr(mod, "_registry_singleton", None) if mod else None
+    if registry is not None:
+        for name in registry.list_names():
+            try:
+                registry.unregister(name)
+            except Exception:  # noqa: BLE001 - teardown must never mask a failure
+                pass
+
+    # ``kiln.server`` caches the active adapter in a module global, and
+    # ``_get_adapter`` returns it without consulting config.  A test that
+    # calls ``register_printer`` leaves a LIVE adapter there — and
+    # ``resource_printers`` resurrects it whenever the registry is empty,
+    # registering it as "default" and querying it over the network.  That
+    # is how ``test_resources.py::TestResourcePrinters::test_empty`` ends
+    # up dialling 192.0.2.11 for 98 seconds after the fleet-gate tests run.
+    # Clearing the registry alone does not stop it; the cached adapter has
+    # to go too, or an empty registry just refills itself.
+    srv = sys.modules.get("kiln.server")
+    if srv is not None and getattr(srv, "_adapter", None) is not None:
+        try:
+            srv._adapter = None
+        except Exception:  # noqa: BLE001 - teardown must never mask a failure
+            pass
+
+
+@pytest.fixture(autouse=True)
 def _bypass_license_tier(monkeypatch, tmp_path):
     """Ensure all tests run with tier checks bypassed by default.
 

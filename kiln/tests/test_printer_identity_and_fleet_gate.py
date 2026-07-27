@@ -17,6 +17,9 @@ is honest single-machine use and stays free.
 
 from __future__ import annotations
 
+import sys
+import types
+
 import pytest
 
 from kiln.printers.base import (
@@ -151,8 +154,18 @@ def fleet(monkeypatch):
         monkeypatch.setattr(
             registry_mod, "get_registry", lambda: _FakeRegistry(machines)
         )
-        import kiln.licensing as lic
-
+        # `kiln.licensing` is an ALIAS kiln_pro installs at import time
+        # (kiln_pro/__init__.py maps it to kiln_pro.enterprise.licensing).
+        # It therefore exists on a dev machine with kiln-pro installed and
+        # does NOT exist in public Kiln's CI — where a bare import made all
+        # nine of these fail. The gate itself already tolerates that
+        # (`except Exception: cap = 1`), so the test must too: stand up a
+        # stub when the alias is absent, and the cap stays controlled by
+        # this fixture either way.
+        lic = sys.modules.get("kiln.licensing")
+        if lic is None:
+            lic = types.ModuleType("kiln.licensing")
+            monkeypatch.setitem(sys.modules, "kiln.licensing", lic)
         monkeypatch.setattr(lic, "get_tier", lambda: "free", raising=False)
         monkeypatch.setattr(
             lic, "max_printers_for_tier", lambda _t: cap, raising=False
