@@ -46,17 +46,22 @@ class _StepToolsPlugin:
         @mcp.tool()
         def import_step_file(
             file_path: str,
-            output_format: str = "stl",
+            output_format: str = "auto",
             merge_bodies: bool = True,
             output_dir: str | None = None,
         ) -> dict:
-            """Import a STEP (.step/.stp) CAD file and convert it to STL for Kiln's mesh pipeline.
+            """Import a STEP (.step/.stp) CAD file and convert it for Kiln's mesh pipeline.
 
             Converts STEP files using whichever backend is available (the
             OCCT kernel that ``kiln install-step-backend`` sets up, or an
-            existing FreeCAD / Gmsh / CadQuery install).  Multi-body STEP
-            files can be merged into a single STL or split into separate
-            files per body.
+            existing FreeCAD / Gmsh / CadQuery install).
+
+            **The output format follows what the file carries.**  A plain
+            single-solid STEP becomes an STL.  A STEP with part colours or
+            multiple bodies becomes ONE 3MF that keeps each part's colour,
+            name, and position — so a coloured CAD assembly arrives ready
+            for a multi-material print instead of flattened grey.  Pass
+            ``output_format="stl"`` or ``"3mf"`` to force either.
 
             Use ``check_step_support`` first to verify that a conversion
             backend is installed.  After conversion, use ``diagnose_mesh``
@@ -72,32 +77,42 @@ class _StepToolsPlugin:
 
             Args:
                 file_path: Path to the STEP/STP file.
-                output_format: Output format (currently only ``"stl"`` supported).
-                merge_bodies: If True, merge all bodies into one STL.
-                    If False, export each body as a separate file.
+                output_format: ``"auto"`` (default — 3MF when colour or
+                    multiple bodies are present, else STL), ``"stl"``, or
+                    ``"3mf"``.
+                merge_bodies: STL output only: if True, merge all bodies
+                    into one STL; if False, export each body separately.
+                    (3MF keeps bodies as separate named objects either way.)
                 output_dir: Directory for output files.  Defaults to
                     the STEP file's parent directory.
             """
-            if output_format != "stl":
+            if output_format not in ("auto", "stl", "3mf"):
                 return {
-                    "error": f"Unsupported output format: {output_format!r}. Only 'stl' is currently supported.",
+                    "error": (
+                        f"Unsupported output format: {output_format!r}. "
+                        "Use 'auto', 'stl', or '3mf'."
+                    ),
                     "code": "UNSUPPORTED_FORMAT",
                 }
 
             try:
-                from kiln.step_import import convert_step_to_stl
+                from kiln.step_import import convert_step
 
-                result = convert_step_to_stl(
+                result = convert_step(
                     file_path,
                     output_dir=output_dir,
                     merge_bodies=merge_bodies,
+                    output_format=output_format,
                 )
 
                 response = {
                     "status": "ok",
                     "output_path": result.output_path,
                     "output_paths": result.output_paths,
+                    "output_format": result.output_format,
                     "body_count": result.body_count,
+                    "part_names": result.part_names,
+                    "part_colors": result.part_colors,
                     "file_size_bytes": result.file_size_bytes,
                     "conversion_time_s": result.conversion_time_s,
                     "warnings": result.warnings,

@@ -1432,3 +1432,196 @@ def test_validate_and_prepare_mesh_converts_a_real_step(real_kernel, tmp_dir):
     assert result["success"] is True
     assert result["passed"] is True, result.get("message")
     assert "Converted from STEP" in result.get("step_conversion", "")
+
+
+# ---------------------------------------------------------------------------
+# 32. Colour + part identity survive import (STEP → 3MF).
+#
+#     STL by format cannot carry colour or part names.  convert_step's auto
+#     mode emits a core-spec 3MF when the STEP carries either, read back
+#     here with Kiln's OWN 3MF parser — the same one the preview renderer
+#     uses — so "the colours survived" is proven against the consumer, not
+#     against the writer's opinion of itself.
+# ---------------------------------------------------------------------------
+
+
+def _tiny_binary_stl(path: Path, offset_x: float = 0.0) -> None:
+    """One right triangle at z=0, optionally shifted in X."""
+    import struct as _struct
+
+    tri = [
+        (0.0 + offset_x, 0.0, 0.0),
+        (10.0 + offset_x, 0.0, 0.0),
+        (0.0 + offset_x, 10.0, 0.0),
+    ]
+    data = b"\x00" * 80 + _struct.pack("<I", 1)
+    data += _struct.pack("<3f", 0.0, 0.0, 1.0)
+    for v in tri:
+        data += _struct.pack("<3f", *v)
+    data += b"\x00\x00"
+    path.write_bytes(data)
+
+
+def test_write_3mf_colours_read_back_by_kilns_own_parser(tmp_dir):
+    from kiln.step_import import _write_3mf
+    from kiln.threemf_parser import parse_colored_3mf
+
+    a, b = tmp_dir / "a.stl", tmp_dir / "b.stl"
+    _tiny_binary_stl(a)
+    _tiny_binary_stl(b, offset_x=20.0)
+
+    out = str(tmp_dir / "two_parts.3mf")
+    _write_3mf(
+        [
+            {"stl_path": str(a), "name": "base_plate", "color": "#D82626"},
+            {"stl_path": str(b), "name": "lid", "color": None},
+        ],
+        out,
+    )
+
+    mesh = parse_colored_3mf(out)
+    assert mesh.colors_found
+    assert len(mesh.triangles) == 2
+    colors = {tuple(t.color) for t in mesh.triangles}
+    # The coloured part reads back exactly; the uncoloured one gets the
+    # parser's default, NOT the other part's colour.
+    assert (0xD8, 0x26, 0x26) in colors
+    assert len(colors) == 2
+
+    import zipfile
+
+    with zipfile.ZipFile(out) as zf:
+        model = zf.read("3D/3dmodel.model").decode("utf-8")
+    assert "Kiln — kiln3d.com" in model, "the provenance stamp must ride every 3MF"
+    assert 'name="base_plate"' in model
+
+
+def test_write_3mf_escapes_hostile_part_names(tmp_dir):
+    from kiln.step_import import _write_3mf
+    from kiln.threemf_parser import parse_colored_3mf
+
+    a = tmp_dir / "a.stl"
+    _tiny_binary_stl(a)
+    out = str(tmp_dir / "hostile.3mf")
+    _write_3mf(
+        [{"stl_path": str(a), "name": 'x"/><script>', "color": "#112233"}],
+        out,
+    )
+    # Parses as valid XML — the hostile name did not break the document.
+    mesh = parse_colored_3mf(out)
+    assert mesh.colors_found
+
+
+def _write_colored_two_body_step(path: Path) -> None:
+    """A 2-body coloured STEP authored through XCAF (kernel required)."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+    from OCP.IFSelect import IFSelect_ReturnStatus
+    from OCP.Quantity import Quantity_Color, Quantity_TOC_RGB
+    from OCP.STEPCAFControl import STEPCAFControl_Writer
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDataStd import TDataStd_Name
+    from OCP.TDocStd import TDocStd_Document
+    from OCP.XCAFApp import XCAFApp_Application
+    from OCP.XCAFDoc import XCAFDoc_ColorType, XCAFDoc_DocumentTool
+
+    app = XCAFApp_Application.GetApplication_s()
+    doc = TDocStd_Document(TCollection_ExtendedString("MDTV-XCAF"))
+    app.NewDocument(TCollection_ExtendedString("MDTV-XCAF"), doc)
+    shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
+    color_tool = XCAFDoc_DocumentTool.ColorTool_s(doc.Main())
+
+    for name, x0, rgb in (
+        ("base_plate", 0.0, (0.85, 0.15, 0.15)),
+        ("lid", 50.0, (0.10, 0.35, 0.85)),
+    ):
+        shape = BRepPrimAPI_MakeBox(gp_Pnt(x0, 0, 0), 40.0, 30.0, 5.0).Shape()
+        label = shape_tool.AddShape(shape, False)
+        TDataStd_Name.Set_s(label, TCollection_ExtendedString(name))
+        color_tool.SetColor(
+            label,
+            Quantity_Color(*rgb, Quantity_TOC_RGB),
+            XCAFDoc_ColorType.XCAFDoc_ColorGen,
+        )
+
+    writer = STEPCAFControl_Writer()
+    writer.Transfer(doc)
+    assert writer.Write(str(path)) == IFSelect_ReturnStatus.IFSelect_RetDone
+
+
+def test_convert_step_auto_keeps_colour_and_names(real_kernel, tmp_dir):
+    from kiln.step_import import convert_step
+    from kiln.threemf_parser import parse_colored_3mf
+
+    step = tmp_dir / "assembly.step"
+    _write_colored_two_body_step(step)
+
+    out_dir = tmp_dir / "out"
+    out_dir.mkdir()
+    result = convert_step(str(step), output_dir=str(out_dir))
+
+    assert result.output_format == "3mf"
+    assert result.output_path.endswith(".3mf")
+    assert result.body_count == 2
+    assert set(result.part_names) == {"base_plate", "lid"}
+    assert "#D92626" in result.part_colors or "#D82626" in result.part_colors
+
+    mesh = parse_colored_3mf(result.output_path)
+    assert mesh.colors_found
+    xs = [v[0] for t in mesh.triangles for v in (t.v0, t.v1, t.v2)]
+    assert max(xs) > 80.0, "second body must keep its STEP position"
+
+
+def test_convert_step_auto_plain_solid_stays_classic_stl(real_kernel, tmp_dir):
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    from kiln.step_import import convert_step
+
+    step = tmp_dir / "box.step"
+    writer = STEPControl_Writer()
+    writer.Transfer(
+        BRepPrimAPI_MakeBox(20.0, 10.0, 5.0).Shape(),
+        STEPControl_StepModelType.STEPControl_AsIs,
+    )
+    writer.Write(str(step))
+
+    out_dir = tmp_dir / "out"
+    out_dir.mkdir()
+    result = convert_step(str(step), output_dir=str(out_dir))
+
+    assert result.output_format == "stl"
+    assert result.output_path.endswith("merged.stl")
+    assert result.body_count == 1
+    # And explicit 3MF is honoured even for a plain part.
+    result3 = convert_step(
+        str(step), output_dir=str(out_dir), output_format="3mf"
+    )
+    assert result3.output_format == "3mf"
+
+
+def test_convert_step_auto_without_kernel_uses_classic_path(
+    monkeypatch, sample_step_file, tmp_dir
+):
+    """FreeCAD/Gmsh installs can't see colour — auto degrades to the
+    classic STL chain instead of failing or pretending."""
+    from kiln import step_import
+
+    sentinel = step_import.StepImportResult(
+        output_path="classic.stl", file_size_bytes=1, body_count=1,
+        conversion_time_s=0.0,
+    )
+    monkeypatch.setattr(step_import, "_ocp_available", lambda: False)
+    monkeypatch.setattr(
+        step_import, "convert_step_to_stl", lambda *a, **k: sentinel
+    )
+
+    result = step_import.convert_step(str(sample_step_file))
+    assert result is sentinel
+
+
+def test_convert_step_rejects_unknown_format(sample_step_file):
+    from kiln.step_import import convert_step
+
+    with pytest.raises(ValueError):
+        convert_step(str(sample_step_file), output_format="obj")

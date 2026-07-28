@@ -235,6 +235,15 @@ class StepImportResult:
     output_paths: list[str] = field(default_factory=list)
     """All output STL paths (relevant for multi-body split)."""
 
+    output_format: str = "stl"
+    """``"stl"`` or ``"3mf"`` — what :attr:`output_path` actually is."""
+
+    part_names: list[str] = field(default_factory=list)
+    """Per-part names from the STEP, when the colour-aware path ran."""
+
+    part_colors: list[str | None] = field(default_factory=list)
+    """Per-part ``#RRGGBB`` colours (or ``None``), same order as names."""
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-friendly dictionary."""
         return asdict(self)
@@ -552,6 +561,108 @@ print("KILN_RESULT:" + json.dumps({{"outputs": outputs, "body_count": body_count
 '''
 
 
+# The colour-aware sibling of _OCP_SCRIPT_TEMPLATE, used when the caller
+# wants part colours and names preserved (see convert_step).  A separate
+# template rather than a flag fork: the two scripts share only the meshing
+# helper, and keeping the plain one byte-stable means its tests and its
+# behavior cannot drift while this one evolves.
+#
+# XCAF is OCCT's document layer — STEPCAFControl_Reader reads the same file
+# as STEPControl_Reader but ALSO populates colour and name attributes.  Each
+# top-level ("free") shape label is one part.  Colours nested deeper than
+# the per-part level (a sub-face painted differently inside one part) are
+# out of scope here and fall back to the part's own colour.
+#
+# Binding gotcha that cost a probe cycle (2026-07-28): in this OCP build,
+# ColorTool.GetColor takes the TopoDS_Shape (via ShapeTool.GetShape_s), not
+# the label — the label overload expects a label OUT-param.
+_OCP_XCAF_SCRIPT_TEMPLATE = r'''
+import json, os, sys
+
+from OCP.BRepMesh import BRepMesh_IncrementalMesh
+from OCP.IFSelect import IFSelect_ReturnStatus
+from OCP.Quantity import Quantity_Color
+from OCP.STEPCAFControl import STEPCAFControl_Reader
+from OCP.StlAPI import StlAPI_Writer
+from OCP.TCollection import TCollection_ExtendedString
+from OCP.TDataStd import TDataStd_Name
+from OCP.TDF import TDF_LabelSequence
+from OCP.TDocStd import TDocStd_Document
+from OCP.XCAFApp import XCAFApp_Application
+from OCP.XCAFDoc import XCAFDoc_ColorType, XCAFDoc_DocumentTool
+
+step_path = {step_path!r}
+output_dir = {output_dir!r}
+linear = {linear!r}
+angular = {angular!r}
+
+app = XCAFApp_Application.GetApplication_s()
+doc = TDocStd_Document(TCollection_ExtendedString("MDTV-XCAF"))
+app.NewDocument(TCollection_ExtendedString("MDTV-XCAF"), doc)
+
+reader = STEPCAFControl_Reader()
+reader.SetColorMode(True)
+reader.SetNameMode(True)
+if reader.ReadFile(step_path) != IFSelect_ReturnStatus.IFSelect_RetDone:
+    sys.stderr.write("OCCT could not read the STEP file\n")
+    raise SystemExit(3)
+reader.Transfer(doc)
+
+shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
+color_tool = XCAFDoc_DocumentTool.ColorTool_s(doc.Main())
+labels = TDF_LabelSequence()
+shape_tool.GetFreeShapes(labels)
+if labels.Length() == 0:
+    sys.stderr.write("XCAF transfer produced no shapes\n")
+    raise SystemExit(4)
+
+
+def write(target, path):
+    # Tessellate in place, then write: an untriangulated shape writes an
+    # EMPTY stl rather than failing, so meshing first is not optional.
+    BRepMesh_IncrementalMesh(target, linear, False, angular, True)
+    writer = StlAPI_Writer()
+    writer.ASCIIMode = False
+    writer.Write(target, path)
+
+
+outputs, names, colors = [], [], []
+for i in range(1, labels.Length() + 1):
+    label = labels.Value(i)
+    shape = shape_tool.GetShape_s(label)
+
+    name_attr = TDataStd_Name()
+    name = "part_%d" % (i - 1)
+    if label.FindAttribute(TDataStd_Name.GetID_s(), name_attr):
+        got = name_attr.Get().ToExtString().strip()
+        if got:
+            name = got
+
+    col = Quantity_Color()
+    color = None
+    for kind in (XCAFDoc_ColorType.XCAFDoc_ColorGen,
+                 XCAFDoc_ColorType.XCAFDoc_ColorSurf):
+        if color_tool.GetColor(shape, kind, col):
+            color = "#%02X%02X%02X" % (
+                round(col.Red() * 255),
+                round(col.Green() * 255),
+                round(col.Blue() * 255),
+            )
+            break
+
+    out = os.path.join(output_dir, "xcaf_part_%d.stl" % (i - 1))
+    write(shape, out)
+    outputs.append(out)
+    names.append(name)
+    colors.append(color)
+
+print("KILN_RESULT:" + json.dumps({{
+    "outputs": outputs, "body_count": len(outputs),
+    "names": names, "colors": colors,
+}}))
+'''
+
+
 def _convert_via_ocp(
     step_path: Path,
     output_dir: Path,
@@ -656,14 +767,11 @@ def _convert_via_cadquery(
         return outputs, body_count
 
 
-def _parse_subprocess_result(
+def _parse_kiln_result(
     result: subprocess.CompletedProcess[str],
     backend_name: str,
-) -> tuple[list[str], int]:
-    """Extract KILN_RESULT JSON from subprocess stdout.
-
-    Returns:
-        (list of output paths, body_count)
+) -> dict[str, Any]:
+    """Extract the KILN_RESULT JSON dict from subprocess stdout.
 
     Raises:
         StepImportError: If the subprocess failed or result not found.
@@ -687,12 +795,197 @@ def _parse_subprocess_result(
                     f"{backend_name} result missing required keys "
                     f"('outputs', 'body_count'): {data!r}"
                 )
-            return data["outputs"], data["body_count"]
+            return data
 
     raise StepImportError(
         f"{backend_name} conversion produced no result. "
         f"stdout: {(result.stdout or '')[:300]}"
     )
+
+
+def _parse_subprocess_result(
+    result: subprocess.CompletedProcess[str],
+    backend_name: str,
+) -> tuple[list[str], int]:
+    """Extract KILN_RESULT JSON from subprocess stdout.
+
+    Returns:
+        (list of output paths, body_count)
+
+    Raises:
+        StepImportError: If the subprocess failed or result not found.
+    """
+    data = _parse_kiln_result(result, backend_name)
+    return data["outputs"], data["body_count"]
+
+
+def _convert_via_ocp_xcaf(
+    step_path: Path,
+    output_dir: Path,
+) -> dict[str, Any]:
+    """Colour-aware OCCT conversion: one STL per part, plus names + colours.
+
+    Same child-process discipline as :func:`_convert_via_ocp` (timeout, OOM
+    isolation), different reader: XCAF sees the STEP's colour and name
+    attributes that the plain reader discards.  The caller decides what to
+    assemble from the parts — see :func:`convert_step`.
+
+    Returns:
+        The child's result dict: ``outputs``, ``body_count``, ``names``,
+        ``colors`` (hex string or ``None`` per part).
+    """
+    script = _OCP_XCAF_SCRIPT_TEMPLATE.format(
+        step_path=str(step_path),
+        output_dir=str(output_dir),
+        linear=_OCP_LINEAR_DEFLECTION,
+        angular=_OCP_ANGULAR_DEFLECTION,
+    )
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        f.write(script)
+        script_path = f.name
+
+    try:
+        result = subprocess.run(
+            [sys.executable, script_path],
+            capture_output=True,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise StepImportError(
+            f"STEP conversion timed out after {SUBPROCESS_TIMEOUT_S}s. "
+            "The file is probably a large assembly — try converting a single "
+            "part, or simplify it in your CAD tool first."
+        ) from exc
+    finally:
+        os.unlink(script_path)
+
+    data = _parse_kiln_result(result, "OCCT")
+    n = len(data["outputs"])
+    data.setdefault("names", [f"part_{i}" for i in range(n)])
+    data.setdefault("colors", [None] * n)
+    return data
+
+
+def _read_binary_stl(path: str) -> list[tuple[tuple[float, float, float], ...]]:
+    """Read a binary STL into a list of triangles (3 vertices each)."""
+    import struct
+
+    data = Path(path).read_bytes()
+    if len(data) < 84:
+        raise StepImportError(f"Not a binary STL (too short): {path}")
+    (count,) = struct.unpack_from("<I", data, 80)
+    expected = 84 + count * 50
+    if len(data) < expected:
+        raise StepImportError(
+            f"Truncated binary STL ({len(data)} bytes, expected {expected}): {path}"
+        )
+    triangles = []
+    for i in range(count):
+        off = 84 + i * 50 + 12  # skip the normal; recomputed by consumers
+        v = struct.unpack_from("<9f", data, off)
+        triangles.append(((v[0], v[1], v[2]), (v[3], v[4], v[5]), (v[6], v[7], v[8])))
+    return triangles
+
+
+def _write_3mf(
+    parts: list[dict[str, Any]],
+    out_path: str,
+) -> None:
+    """Write parts as a core-spec 3MF with per-object colour and name.
+
+    ``parts``: dicts with ``stl_path`` (binary STL), ``name``, and ``color``
+    (``#RRGGBB`` or ``None``).  Colour rides the core spec's
+    ``<basematerials>`` + ``displaycolor``, referenced object-level via
+    ``pid``/``pindex`` — the one encoding Kiln's own
+    :mod:`kiln.threemf_parser`, BambuStudio, and PrusaSlicer all read.  A
+    part without a colour gets no ``pid`` and renders in each viewer's
+    default, which is honest: the STEP didn't say.
+
+    Pure stdlib (zipfile + string XML) by design — this module must import
+    with no third-party dependencies installed.
+    """
+    import zipfile
+    from xml.sax.saxutils import quoteattr
+
+    colored = [p for p in parts if p.get("color")]
+    color_index = {id(p): i for i, p in enumerate(colored)}
+
+    xml: list[str] = [
+        '<?xml version="1.0" encoding="UTF-8"?>\n',
+        '<model unit="millimeter" xml:lang="en-US" '
+        'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">\n',
+        # Same provenance stamp the STL header and the Bambu wrap carry.
+        " <metadata name=\"CreatedBy\">Kiln — kiln3d.com</metadata>\n",
+        " <resources>\n",
+    ]
+    if colored:
+        xml.append('  <basematerials id="1">\n')
+        for p in colored:
+            xml.append(
+                f"   <base name={quoteattr(p['name'])} "
+                f"displaycolor=\"{p['color']}\"/>\n"
+            )
+        xml.append("  </basematerials>\n")
+
+    build_items: list[str] = []
+    for obj_index, part in enumerate(parts):
+        obj_id = obj_index + 2  # id 1 is the basematerials group
+        triangles = _read_binary_stl(part["stl_path"])
+
+        vertex_ids: dict[tuple[float, float, float], int] = {}
+        tri_rows: list[tuple[int, int, int]] = []
+        for tri in triangles:
+            ids = []
+            for v in tri:
+                if v not in vertex_ids:
+                    vertex_ids[v] = len(vertex_ids)
+                ids.append(vertex_ids[v])
+            tri_rows.append(tuple(ids))
+
+        pid_attr = ""
+        if part.get("color"):
+            pid_attr = f' pid="1" pindex="{color_index[id(part)]}"'
+        xml.append(
+            f"  <object id=\"{obj_id}\" type=\"model\" "
+            f"name={quoteattr(part['name'])}{pid_attr}>\n   <mesh>\n"
+            "    <vertices>\n"
+        )
+        for v, _ in sorted(vertex_ids.items(), key=lambda kv: kv[1]):
+            xml.append(
+                f'     <vertex x="{v[0]:.6f}" y="{v[1]:.6f}" z="{v[2]:.6f}"/>\n'
+            )
+        xml.append("    </vertices>\n    <triangles>\n")
+        for a, b, c in tri_rows:
+            xml.append(f'     <triangle v1="{a}" v2="{b}" v3="{c}"/>\n')
+        xml.append("    </triangles>\n   </mesh>\n  </object>\n")
+        build_items.append(f'  <item objectid="{obj_id}"/>\n')
+
+    xml.append(" </resources>\n <build>\n")
+    xml.extend(build_items)
+    xml.append(" </build>\n</model>\n")
+
+    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(
+            "[Content_Types].xml",
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
+            '  <Default Extension="rels" ContentType='
+            '"application/vnd.openxmlformats-package.relationships+xml"/>\n'
+            '  <Default Extension="model" ContentType='
+            '"application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>\n'
+            "</Types>\n",
+        )
+        zf.writestr(
+            "_rels/.rels",
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n'
+            '  <Relationship Target="/3D/3dmodel.model" Id="rel0" Type='
+            '"http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>\n'
+            "</Relationships>\n",
+        )
+        zf.writestr("3D/3dmodel.model", "".join(xml))
 
 
 # ---------------------------------------------------------------------------
@@ -860,6 +1153,111 @@ def convert_step_to_stl(
         conversion_time_s=round(elapsed, 3),
         warnings=warnings,
         output_paths=outputs,
+    )
+
+
+def convert_step(
+    step_path: str,
+    output_dir: str | None = None,
+    *,
+    merge_bodies: bool = True,
+    output_format: str = "auto",
+) -> StepImportResult:
+    """Convert a STEP file, choosing the output format by what it CARRIES.
+
+    STL by format cannot hold colour or part identity.  When the STEP has
+    either — a coloured part, or a multi-body assembly whose parts have
+    names — flattening to STL silently throws information away that the
+    engineer put there.  So:
+
+    - ``"auto"`` (default): colour or multiple bodies present → one 3MF
+      with per-part colour and name (readable by Kiln's own preview,
+      BambuStudio, and PrusaSlicer); a plain single solid → STL, exactly
+      as before.  Colour detection needs the OCCT kernel; on a FreeCAD/
+      Gmsh-only install auto falls back to the classic STL path.
+    - ``"stl"``: the classic path, byte-for-byte (:func:`convert_step_to_stl`).
+    - ``"3mf"``: force 3MF even for a plain part.  Requires the OCCT kernel.
+
+    Note ``ensure_mesh_path`` deliberately does NOT use auto: pipelines that
+    only analyze geometry get STL, the format every mesh tool reads.  This
+    door is for the artifact a user KEEPS.
+
+    Raises:
+        NoBackendError: no converter available at all.
+        StepImportError: ``output_format="3mf"`` without the OCCT kernel,
+            or the conversion itself failed.
+    """
+    if output_format not in ("auto", "stl", "3mf"):
+        raise ValueError(
+            f"output_format must be 'auto', 'stl' or '3mf', got {output_format!r}"
+        )
+
+    if output_format == "stl":
+        return convert_step_to_stl(
+            step_path, output_dir, merge_bodies=merge_bodies
+        )
+
+    if not _ocp_available():
+        if output_format == "3mf":
+            if not check_step_support()["any_available"]:
+                raise NoBackendError()
+            raise StepImportError(
+                "3MF output (colour + part names) needs the OCCT kernel. "
+                f"Install it with: {INSTALL_COMMAND}"
+            )
+        # auto without the kernel: the FreeCAD/Gmsh chain can convert but
+        # cannot see colours — classic STL is the honest result.
+        return convert_step_to_stl(
+            step_path, output_dir, merge_bodies=merge_bodies
+        )
+
+    validated_path = _validate_step_path(step_path)
+    out_dir = _validate_output_dir(output_dir, validated_path)
+
+    t0 = time.monotonic()
+    data = _convert_via_ocp_xcaf(validated_path, out_dir)
+    parts = [
+        {"stl_path": p, "name": n, "color": c}
+        for p, n, c in zip(data["outputs"], data["names"], data["colors"])
+    ]
+
+    has_color = any(p["color"] for p in parts)
+    wants_3mf = output_format == "3mf" or has_color or len(parts) > 1
+
+    if not wants_3mf:
+        # A plain single solid: keep the classic contract (merged.stl).
+        final = str(out_dir / "merged.stl")
+        os.replace(parts[0]["stl_path"], final)
+        elapsed = time.monotonic() - t0
+        return StepImportResult(
+            output_path=final,
+            file_size_bytes=Path(final).stat().st_size,
+            body_count=1,
+            conversion_time_s=round(elapsed, 3),
+            output_paths=[final],
+            output_format="stl",
+            part_names=data["names"],
+            part_colors=data["colors"],
+        )
+
+    out_3mf = str(out_dir / f"{validated_path.stem}.3mf")
+    _write_3mf(parts, out_3mf)
+    for p in parts:  # the per-part STLs were scaffolding, not output
+        try:
+            os.unlink(p["stl_path"])
+        except OSError:
+            pass
+    elapsed = time.monotonic() - t0
+
+    return StepImportResult(
+        output_path=out_3mf,
+        file_size_bytes=Path(out_3mf).stat().st_size,
+        body_count=len(parts),
+        conversion_time_s=round(elapsed, 3),
+        output_paths=[out_3mf],
+        output_format="3mf",
+        part_names=data["names"],
+        part_colors=data["colors"],
     )
 
 
