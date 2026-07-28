@@ -31,6 +31,7 @@ from kiln.decoration_library import (
     get_library_dir,
     iterate_decoration,
     list_decorations,
+    record_decoration_failure,
     record_decoration_success,
     resolve_decoration_settings,
     rollback_decoration,
@@ -389,6 +390,120 @@ class TestRecordDecorationSuccess:
             record_decoration_success(
                 "ghost", material="PLA", depth_mm=0.5
             )
+
+
+# ---------------------------------------------------------------------------
+# Idempotency — one physical print counts once
+#
+# The counters are blind ``+= 1`` increments.  Two doors reach them (the
+# outcome tool and the pro decoration tool), so an agent that used both for
+# one print doubled its proven-settings evidence.
+# ---------------------------------------------------------------------------
+
+
+class TestProvenSettingsIdempotency:
+
+    def test_same_job_twice_increments_once(self, tmp_path: Path):
+        _save_simple(tmp_path, name="Idem Success")
+        record_decoration_success(
+            "idem-success", material="PLA", depth_mm=0.6, source_job_id="job-77"
+        )
+        dec = record_decoration_success(
+            "idem-success", material="PLA", depth_mm=0.6, source_job_id="job-77"
+        )
+        assert dec.proven_settings["PLA"].success_count == 1
+        assert dec.print_count == 1
+
+    def test_failure_polarity_is_keyed_too(self, tmp_path: Path):
+        _save_simple(tmp_path, name="Idem Failure")
+        record_decoration_failure(
+            "idem-failure",
+            material="PETG",
+            depth_mm=0.5,
+            failure_mode="warping",
+            source_job_id="job-88",
+        )
+        dec = record_decoration_failure(
+            "idem-failure",
+            material="PETG",
+            depth_mm=0.5,
+            failure_mode="warping",
+            source_job_id="job-88",
+        )
+        assert dec.proven_settings["PETG"].failure_count == 1
+        assert dec.print_count == 1
+
+    def test_one_print_has_one_outcome_across_polarities(self, tmp_path: Path):
+        """A success and a failure for the SAME job is a correction, not two
+        prints — the first verdict is the counted one and nothing doubles."""
+        _save_simple(tmp_path, name="Idem Mixed")
+        record_decoration_success(
+            "idem-mixed", material="PLA", depth_mm=0.6, source_job_id="job-99"
+        )
+        dec = record_decoration_failure(
+            "idem-mixed", material="PLA", depth_mm=0.6, source_job_id="job-99"
+        )
+        assert dec.proven_settings["PLA"].success_count == 1
+        assert dec.proven_settings["PLA"].failure_count == 0
+        assert dec.print_count == 1
+
+    def test_different_jobs_both_count(self, tmp_path: Path):
+        """The key must not swallow real repeat prints."""
+        _save_simple(tmp_path, name="Two Prints")
+        record_decoration_success(
+            "two-prints", material="PLA", depth_mm=0.6, source_job_id="job-1"
+        )
+        dec = record_decoration_success(
+            "two-prints", material="PLA", depth_mm=0.6, source_job_id="job-2"
+        )
+        assert dec.proven_settings["PLA"].success_count == 2
+
+    def test_same_job_different_material_both_count(self, tmp_path: Path):
+        """A multi-material print records once per material, not once total."""
+        _save_simple(tmp_path, name="Two Materials")
+        record_decoration_success(
+            "two-materials", material="PLA", depth_mm=0.6, source_job_id="job-5"
+        )
+        dec = record_decoration_success(
+            "two-materials", material="PETG", depth_mm=0.6, source_job_id="job-5"
+        )
+        assert dec.proven_settings["PLA"].success_count == 1
+        assert dec.proven_settings["PETG"].success_count == 1
+
+    def test_keyless_calls_preserve_blind_increment(self, tmp_path: Path):
+        """No job id → today's behavior, unchanged: the caller owns dedupe."""
+        _save_simple(tmp_path, name="No Key")
+        record_decoration_success("no-key", material="PLA", depth_mm=0.6)
+        dec = record_decoration_success("no-key", material="PLA", depth_mm=0.6)
+        assert dec.proven_settings["PLA"].success_count == 2
+        assert dec.counted_jobs == []
+
+    def test_ledger_survives_a_manifest_round_trip(self, tmp_path: Path):
+        """The ledger lives in the manifest — a repeat call in a LATER
+        process (the real double-count shape) must still no-op."""
+        _save_simple(tmp_path, name="Round Trip")
+        record_decoration_success(
+            "round-trip", material="PLA", depth_mm=0.6, source_job_id="job-42"
+        )
+        reloaded = get_decoration("round-trip")
+        assert reloaded is not None
+        assert reloaded.counted_jobs == ["job-42:PLA"]
+
+        dec = record_decoration_success(
+            "round-trip", material="PLA", depth_mm=0.6, source_job_id="job-42"
+        )
+        assert dec.proven_settings["PLA"].success_count == 1
+
+    def test_ledger_is_bounded(self, tmp_path: Path):
+        """Oldest-dropped at the cap, so a manifest can't grow forever."""
+        from kiln.decoration_library import _COUNTED_JOBS_MAX, _remember_counted
+
+        dec = _save_simple(tmp_path, name="Bounded")
+        for i in range(_COUNTED_JOBS_MAX + 5):
+            _remember_counted(dec, f"job-{i}:PLA")
+        assert len(dec.counted_jobs) == _COUNTED_JOBS_MAX
+        assert dec.counted_jobs[-1] == f"job-{_COUNTED_JOBS_MAX + 4}:PLA"
+        assert dec.counted_jobs[0] == "job-5:PLA"
 
 
 # ---------------------------------------------------------------------------
@@ -886,3 +1001,46 @@ class TestListByCategory:
         save_decoration("tex3", content_type="procedural_texture", content_data="lava")
         results = list_decorations()
         assert len(results) == 2
+
+
+# ---------------------------------------------------------------------------
+# The counted-prints ledger survives versioning
+# ---------------------------------------------------------------------------
+
+
+class TestCountedLedgerAcrossVersions:
+    """The counters carry forward across an iterate/rollback, so the ledger
+    that keeps them honest has to carry forward too."""
+
+    def test_iterate_carries_the_ledger_forward(self, tmp_path: Path):
+        _save_simple(tmp_path, name="Iter Ledger")
+        record_decoration_success(
+            "iter-ledger", material="PLA", depth_mm=0.6, source_job_id="job-11"
+        )
+        iterate_decoration("iter-ledger", depth_mm=0.8)
+
+        dec = record_decoration_success(
+            "iter-ledger", material="PLA", depth_mm=0.8, source_job_id="job-11"
+        )
+        assert dec.proven_settings["PLA"].success_count == 1
+
+    def test_rollback_keeps_prints_counted_since_the_archive(self, tmp_path: Path):
+        _save_simple(tmp_path, name="Roll Ledger")
+        iterate_decoration("roll-ledger", depth_mm=0.8)  # archives v1
+        record_decoration_success(
+            "roll-ledger", material="PLA", depth_mm=0.8, source_job_id="job-22"
+        )
+        rollback_decoration("roll-ledger", version=1)
+
+        dec = record_decoration_success(
+            "roll-ledger", material="PLA", depth_mm=0.6, source_job_id="job-22"
+        )
+        assert dec.proven_settings.get("PLA") is None, (
+            "a print counted before the rollback must not be countable again"
+        )
+        # ...while a genuinely new print still counts, so the ledger is a
+        # filter, not a freeze.
+        fresh = record_decoration_success(
+            "roll-ledger", material="PLA", depth_mm=0.6, source_job_id="job-33"
+        )
+        assert fresh.proven_settings["PLA"].success_count == 1

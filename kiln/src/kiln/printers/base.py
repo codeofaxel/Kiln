@@ -543,7 +543,20 @@ class PrinterAdapter(ABC):
             try:
                 from kiln.auto_record_hook import open_pending_outcome
 
-                open_pending_outcome(self.name, file_name)
+                # The material Kiln COMMANDED at start is the strongest
+                # honest source — it survives even when the outcome is
+                # settled days later, when today's loaded spool is no
+                # longer evidence.  Adapter kwargs carry it under either
+                # generic key; absent both, the record-time backfill
+                # (job metadata, live AMS on watched endings) covers it.
+                commanded_material = kwargs.get("material_type") or kwargs.get("material")
+                open_pending_outcome(
+                    self.name,
+                    file_name,
+                    material_type=(
+                        str(commanded_material) if commanded_material else None
+                    ),
+                )
             except Exception:  # noqa: BLE001 — bookkeeping must never affect a print
                 import logging as _logging
 

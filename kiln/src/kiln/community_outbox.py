@@ -469,6 +469,141 @@ def contribute(
         return {"queued": False, "error": str(exc)}
 
 
+# ---------------------------------------------------------------------------
+# Print-outcome contributions — ONE key, ONE vocabulary, both callers
+# ---------------------------------------------------------------------------
+#
+# Two paths ship a finished print to the community pool: the monitors
+# (``community_autofire``, watching a print end) and ``record_print_outcome``
+# (an agent recording it).  They each carried their own dedupe key and their
+# own outcome map — the monitor said ``completed``, the tool said ``success``
+# — so a print that was WATCHED and then RECORDED shipped twice, under two
+# different words, to a federation endpoint with no server-side dedupe.  The
+# aggregate counted one print as two.
+#
+# The fix is not a check in either caller: it is that neither caller mints a
+# key or translates a word any more.  Both call
+# :func:`contribute_print_outcome`, which owns both, and the outbox's
+# existing dedupe-by-key collapses the pair.
+
+#: Every outcome vocabulary that reaches the community pool, mapped to the DB
+#: vocabulary in exactly one place.  Absent from this map ⇒ contributes
+#: nothing (see :func:`translate_outcome`).
+_OUTCOME_TRANSLATION: dict[str, str] = {
+    "success": "success",
+    "completed": "success",   # monitor vocabulary
+    "failed": "failed",
+    "partial": "partial",
+}
+
+
+def translate_outcome(outcome: str | None) -> str | None:
+    """Map a caller's outcome word to the community DB vocabulary.
+
+    Returns ``None`` — meaning *contribute nothing* — for every word that
+    carries no verdict on the print: ``cancelled`` and ``timeout`` (clock and
+    user events, not model-quality signals), ``pending`` and ``unknown`` (the
+    print is still owed an answer), a mid-print state word, or a vocabulary
+    this function has never heard of.  Unknown words fail CLOSED rather than
+    defaulting to success: an aggregate that invents a grade is worse than one
+    that never saw the print.
+    """
+    if not outcome:
+        return None
+    return _OUTCOME_TRANSLATION.get(str(outcome).strip().lower())
+
+
+def print_contribution_key(
+    job_id: str | None,
+    geometric_signature: str,
+    printer_file_name: str | None = None,
+) -> str:
+    """The canonical dedupe key for ONE physical print.
+
+    The **job id is the identity** whenever there is one: a job is one print
+    run, and it is the single field both contribution paths carry verbatim
+    (the monitor reads it off the job, the outcome tool is called with it).
+    Keying on anything either path DERIVES — each computes the geometric
+    signature by a different route — would leave the double-ship in place,
+    which is the whole reason this key exists.
+
+    The geometric signature identifies the MODEL, not the run, so it can only
+    be the FALLBACK: a printer driven directly, with nothing in Kiln's queue,
+    has no job id.  There it is paired with the printer's file name so two
+    different files can't collide.  The known cost: two runs of the same file
+    with no job id collapse into one contribution while the first row is still
+    on disk.  That is the deliberate direction to err — this endpoint has no
+    server-side dedupe, so an over-report is permanent in the aggregate while
+    an under-report is one missed sample.
+    """
+    job = (job_id or "").strip()
+    if job:
+        return f"print:{job}"
+    fallback = (printer_file_name or "").strip() or geometric_signature
+    return f"print:sig:{fallback}:{geometric_signature}"
+
+
+def contribute_print_outcome(
+    *,
+    outcome: str,
+    geometric_signature: str,
+    job_id: str | None = None,
+    printer_file_name: str | None = None,
+    printer_model: str | None = None,
+    material: str | None = None,
+    print_time_seconds: int | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Contribute one finished print to the community pool.
+
+    The single door for print-outcome contributions: it translates the
+    caller's vocabulary, mints the canonical dedupe key, and hands the record
+    to :func:`contribute` (durable, opt-in-gated, non-blocking).
+
+    ``extra`` carries a caller's own richer fields (settings, quality grade,
+    failure mode) and is applied UNDER the fields this function owns, so no
+    caller can smuggle a different outcome word or signature into the payload
+    — the translation stays in one place by construction.
+
+    :returns: ``{"contributed": False, "reason": ...}`` when the outcome
+        carries no verdict, the geometry is unknown, the user is opted out,
+        or the enqueue failed; else ``{"contributed": True, ...}`` merged
+        with the outbox result (``queued`` False there means an identical
+        print was already queued — the double-ship, collapsed).
+    """
+    mapped = translate_outcome(outcome)
+    if mapped is None:
+        return {"contributed": False, "reason": "non_quality_outcome"}
+    signature = str(geometric_signature or "").strip()
+    if not signature:
+        return {"contributed": False, "reason": "no_geometry"}
+
+    record: dict[str, Any] = dict(extra or {})
+    record.update(
+        {
+            "geometric_signature": signature,
+            "printer_model": printer_model or "unknown",
+            "material": material or "unknown",
+            "outcome": mapped,
+            "print_time_seconds": int(print_time_seconds) if print_time_seconds else 0,
+        }
+    )
+    result = contribute(
+        print_contribution_key(job_id, signature, printer_file_name), record
+    )
+    # A row already on disk under this key IS contributed (by the path that
+    # got here first) — that is the collapse working.  Opted out or a failed
+    # enqueue is not, and this dict is the only place a maintainer would ever
+    # see the difference.
+    contributed = not (result.get("opted_out") or result.get("error"))
+    return {
+        "contributed": contributed,
+        "signature": signature,
+        "outcome": mapped,
+        **result,
+    }
+
+
 def status() -> dict[str, int]:
     """Maintainer-only health view: contribution counts by state (across all
     kinds).  Never user-facing.  ``stuck`` > 0 means sends are failing past

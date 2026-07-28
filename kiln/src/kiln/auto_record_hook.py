@@ -397,6 +397,7 @@ def observe_state(printer_name: str, current_state: str) -> str | None:
 def open_pending_outcome(
     printer_name: str,
     file_name: str | None,
+    material_type: str | None = None,
 ) -> str | None:
     """Open a ``pending`` outcome row the moment a print starts.
 
@@ -417,6 +418,7 @@ def open_pending_outcome(
             job_id=job_id,
             printer_name=printer_name,
             file_name=file_name,
+            material_type=material_type,
         )
         return job_id if row_id is not None else None
     except Exception as exc:

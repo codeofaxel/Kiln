@@ -7,6 +7,7 @@ the stuck cap, and the opt-out gate.
 """
 from __future__ import annotations
 
+import json
 import threading
 import time
 from unittest import mock
@@ -354,6 +355,154 @@ def test_dead_rows_outlive_delivered_ones(ob):
     assert ob.purge_delivered() == 0, "a day-old dead row must survive"
 
 
+# ---------------------------------------------------------------------------
+# One print, one row — the two contribution paths share a key and a vocabulary
+# ---------------------------------------------------------------------------
+#
+# The monitors (community_autofire) and record_print_outcome both ship a
+# finished print here.  Each used to mint its own dedupe key and translate
+# outcomes with its own private map, so a print that was WATCHED and then
+# RECORDED shipped twice — under two different words — to an endpoint with no
+# server-side dedupe.  The aggregate counted one print as two.
+
+
+def test_translate_outcome_maps_every_learning_vocabulary():
+    assert_map = {
+        "completed": "success",   # monitor vocabulary
+        "success": "success",     # DB vocabulary
+        "SUCCESS": "success",     # case/whitespace tolerant
+        " failed ": "failed",
+        "partial": "partial",
+    }
+    from kiln.community_outbox import translate_outcome
+
+    for word, expected in assert_map.items():
+        assert translate_outcome(word) == expected, word
+
+
+def test_translate_outcome_contributes_nothing_without_a_verdict():
+    """cancelled / timeout / pending / unknown say nothing about the print;
+    an unrecognised word fails CLOSED rather than defaulting to success."""
+    from kiln.community_outbox import translate_outcome
+
+    for word in (
+        "cancelled", "timeout", "pending", "unknown", "paused", "running",
+        "finished", "", None,
+    ):
+        assert translate_outcome(word) is None, word
+
+
+def test_key_is_anchored_on_the_job_not_the_derived_signature():
+    """The job id is the one identity both paths carry verbatim; each DERIVES
+    its signature by a different route (fingerprint vs. caller-supplied
+    hash), so a signature-bearing key would not collapse the double-ship."""
+    from kiln.community_outbox import print_contribution_key
+
+    assert print_contribution_key("job-7", "geo-from-fingerprint") == (
+        print_contribution_key("job-7", "hash-from-caller")
+    )
+    assert print_contribution_key("job-7", "g") != print_contribution_key("job-8", "g")
+
+
+def test_key_falls_back_to_geometry_with_no_job():
+    """A printer driven directly has no job id — the model's signature plus
+    its file is the strongest identity left."""
+    from kiln.community_outbox import print_contribution_key
+
+    keyed = print_contribution_key(None, "geo-aaa", "plate.gcode")
+    assert "geo-aaa" in keyed
+    assert keyed != print_contribution_key(None, "geo-bbb", "plate.gcode")
+    assert keyed != print_contribution_key(None, "geo-aaa", "other.gcode")
+
+
+def test_non_learning_outcome_contributes_nothing(ob):
+    from kiln.community_outbox import contribute_print_outcome
+
+    result = contribute_print_outcome(
+        outcome="cancelled", geometric_signature="geo16char0000000", job_id="j1"
+    )
+    assert result == {"contributed": False, "reason": "non_quality_outcome"}
+    assert ob.status()["total"] == 0
+
+
+def test_caller_extras_cannot_override_the_translated_outcome(ob):
+    """Payload richness is preserved, but the vocabulary stays in one place."""
+    from kiln.community_outbox import contribute_print_outcome
+
+    contribute_print_outcome(
+        outcome="completed",
+        geometric_signature="geo16char0000000",
+        job_id="j2",
+        extra={"outcome": "smuggled", "settings": {"temp_tool": 210}},
+    )
+    row = ob._db().execute(
+        "SELECT payload FROM community_outbox WHERE dedupe_key = 'print:j2'"
+    ).fetchone()
+    payload = json.loads(row["payload"])
+    assert payload["outcome"] == "success"
+    assert payload["settings"] == {"temp_tool": 210}  # richness preserved
+
+
+def test_watched_then_recorded_print_lands_one_row(ob, monkeypatch):
+    """The double-ship, collapsed: the same physical print through BOTH
+    contribution paths leaves exactly one row in the outbox."""
+    monkeypatch.setenv("KILN_COMMUNITY_OPT_IN", "true")
+    import kiln.persistence as _p
+    monkeypatch.setattr(_p, "_db", None, raising=False)
+
+    from kiln import community_autofire as ca
+    from kiln.plugins.learning_tools import record_print_outcome
+
+    # 1) A monitor watches the print end.
+    with mock.patch(
+        "kiln.community_autofire.geometric_signature_for",
+        return_value="geo16char0000000",
+    ):
+        watched = ca.auto_contribute_completion(
+            outcome="completed",
+            printer_file_name="plate.gcode",
+            job_id="job-dup",
+            printer_model="Bambu A1",
+            material="PLA",
+            print_time_seconds=1200,
+        )
+    assert watched["contributed"] is True
+    assert watched["outcome"] == "success"
+    assert ob.status()["total"] == 1
+
+    # 2) The agent then records the same print by hand.
+    with mock.patch("kiln.server._check_auth", return_value=None):
+        recorded = record_print_outcome(
+            job_id="job-dup",
+            outcome="success",
+            printer_name="bambu-01",
+            file_name="plate.gcode",
+            file_hash="filehash00000000",
+            material_type="PLA",
+            quality_grade="good",
+        )
+    assert recorded.get("success") is True
+    assert ob.status()["total"] == 1, "one physical print must ship once"
+
+    monkeypatch.setattr(_p, "_db", None, raising=False)
+
+
+def test_a_second_real_print_still_ships(ob, monkeypatch):
+    """The collapse must not swallow a genuine repeat print."""
+    monkeypatch.setenv("KILN_COMMUNITY_OPT_IN", "true")
+    from kiln import community_autofire as ca
+
+    with mock.patch(
+        "kiln.community_autofire.geometric_signature_for",
+        return_value="geo16char0000000",
+    ):
+        for job in ("job-a", "job-b"):
+            ca.auto_contribute_completion(
+                outcome="completed", printer_file_name="plate.gcode", job_id=job,
+            )
+    assert ob.status()["total"] == 2
+
+
 def test_registration_is_suppressed_under_test_runners(ob):
     """A registered sender POSTs to production.
 
@@ -366,3 +515,19 @@ def test_registration_is_suppressed_under_test_runners(ob):
     called = []
     ob.ensure_senders()  # must not reach the bridge at all
     assert called == []
+
+
+def test_opted_out_print_is_not_reported_as_contributed(ob):
+    """The status dict is the only place a maintainer sees the difference
+    between 'shipped' and 'the user opted out'."""
+    from kiln.community_outbox import contribute_print_outcome
+
+    with mock.patch(
+        "kiln.community_sync.community_opt_in_enabled", return_value=False
+    ):
+        result = contribute_print_outcome(
+            outcome="completed", geometric_signature="geo16char0000000", job_id="j3",
+        )
+    assert result["contributed"] is False
+    assert result["opted_out"] is True
+    assert ob.status()["total"] == 0

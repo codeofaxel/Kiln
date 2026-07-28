@@ -104,7 +104,10 @@ def test_completed_contributes_success_with_geo_signature():
         )
     assert r["contributed"] is True
     key, record = contrib.call_args.args
-    assert key.startswith("auto:job-7:")
+    # The canonical per-print key, minted by community_outbox for BOTH
+    # contribution paths — record_print_outcome mints this same key for this
+    # job, which is what collapses the double-ship.
+    assert key == "print:job-7"
     assert record["geometric_signature"] == "geo16char0000000"
     assert record["outcome"] == "success"  # completed -> success
     assert record["printer_model"] == "Bambu A1"

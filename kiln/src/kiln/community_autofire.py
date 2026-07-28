@@ -9,9 +9,14 @@ same model re-exported still aggregates with its siblings.
 Best-effort + non-blocking throughout: a missing manifest entry, a non-STL
 source, or an offline federation endpoint never affects the print path.  The
 geometry lookup is fail-safe (returns ``""`` → the contribution is skipped
-rather than sending a file-hash stand-in), and the actual send goes through
-:func:`kiln.community_outbox.contribute`, which persists locally first and
-retries later, and is itself opt-in-gated.
+rather than sending a file-hash stand-in).
+
+This module resolves the GEOMETRY and nothing else.  The outcome vocabulary
+and the dedupe key belong to
+:func:`kiln.community_outbox.contribute_print_outcome`, the single door both
+contribution paths go through — when this module owned a private copy of
+both, a print that was watched AND recorded shipped twice, under two
+different words.
 """
 from __future__ import annotations
 
@@ -20,11 +25,6 @@ import os
 from typing import Any
 
 logger = logging.getLogger(__name__)
-
-# Only outcomes that say something about whether the geometry+settings printed
-# well are worth aggregating.  cancelled / timeout / paused are user/clock
-# events, not model-quality signals — skip them.
-_TERMINAL_OUTCOME_MAP = {"completed": "success", "failed": "failed"}
 
 
 def geometric_signature_for(printer_file_name: str | None) -> str:
@@ -116,30 +116,32 @@ def auto_contribute_completion(
     Silent, non-blocking, never raises.  Returns a small status dict for
     tests/maintainers (never surfaced to the user).  Skips non-quality
     outcomes and any print whose geometry can't be fingerprinted.
+
+    Dedupe spans BOTH contribution paths, not just the two monitors
+    (``await_print_completion`` + ``watch_print_status``) that can watch the
+    same job: ``contribute_print_outcome`` mints the same key
+    ``record_print_outcome`` will mint for this print, so a print that is
+    watched and then recorded lands ONE outbox row.
     """
     try:
-        mapped = _TERMINAL_OUTCOME_MAP.get(outcome)
-        if mapped is None:
+        from kiln import community_outbox
+
+        # Translate first: fingerprinting loads and hashes the mesh, and a
+        # cancelled print never needed it.
+        if community_outbox.translate_outcome(outcome) is None:
             return {"contributed": False, "reason": "non_quality_outcome"}
         signature = geometric_signature_for(printer_file_name)
         if not signature:
             return {"contributed": False, "reason": "no_geometry"}
-        record = {
-            "geometric_signature": signature,
-            "printer_model": printer_model or "unknown",
-            "material": material or "unknown",
-            "outcome": mapped,
-            "print_time_seconds": int(print_time_seconds) if print_time_seconds else 0,
-        }
-        # Dedupe across the two monitors (await_print_completion +
-        # watch_print_status) observing the same job: job_id is stable per
-        # print; fall back to the file name / signature when monitoring the
-        # printer directly with no queued job.
-        dedupe_key = f"auto:{job_id or printer_file_name or signature}:{signature}"
-        from kiln import community_outbox
-
-        result = community_outbox.contribute(dedupe_key, record)
-        return {"contributed": True, "signature": signature, **result}
+        return community_outbox.contribute_print_outcome(
+            outcome=outcome,
+            geometric_signature=signature,
+            job_id=job_id,
+            printer_file_name=printer_file_name,
+            printer_model=printer_model,
+            material=material,
+            print_time_seconds=print_time_seconds,
+        )
     except Exception:
         logger.debug("auto community contribution skipped (best-effort)", exc_info=True)
         return {"contributed": False, "reason": "error"}
