@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 
-from mcp.server.fastmcp import FastMCP
+from kiln.mcp_compat import FastMCP
 
 import kiln.plugins.auth_tools as at
 
