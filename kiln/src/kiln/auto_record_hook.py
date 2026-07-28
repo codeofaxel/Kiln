@@ -102,10 +102,14 @@ _TERMINAL_STATE_DEBOUNCE_S: float = 2.5
 # cancel intent can't bleed into an unrelated subsequent print.
 _CANCEL_INTENT_TTL_S: float = 5.0
 
-# Which gcode_state values count as "actively printing" (so a
-# transition OUT of one into a terminal state is the trigger).  Case-
-# insensitive — upper A1 sometimes emits "RUNNING", lowercase X1 sends
-# "running".  Callers should ``.lower()`` before passing in.
+# Which state values count as "actively printing" (so a transition OUT
+# of one into a terminal state is the trigger).  Case-insensitive —
+# upper A1 sometimes emits "RUNNING", lowercase X1 sends "running".
+# Callers should ``.lower()`` before passing in.  Two vocabularies feed
+# this set: Bambu's firmware gcode_state values AND the normalized
+# ``PrinterStatus`` values every adapter's ``get_state()`` reports
+# ("printing" / "cancelling") — both must read as active or the
+# adapter-generic wiring would resolve rows for a print still running.
 _ACTIVE_STATES: frozenset[str] = frozenset({
     "running",
     "pause",
@@ -114,13 +118,16 @@ _ACTIVE_STATES: frozenset[str] = frozenset({
     "slicing",
     "init",
     "busy",
+    "printing",    # normalized PrinterStatus vocabulary
+    "cancelling",  # a cancel in flight is still an active job
 })
 
 # gcode_state that means "the print finished cleanly".
 _FINISH_STATES: frozenset[str] = frozenset({"finish"})
 
-# gcode_state that means "the print failed with an error".
-_FAILED_STATES: frozenset[str] = frozenset({"failed"})
+# State that means "the print failed": Bambu's firmware "failed" plus
+# the normalized PrinterStatus "error".
+_FAILED_STATES: frozenset[str] = frozenset({"failed", "error"})
 
 # Neutral idle — could mean finished naturally, cancelled, or startup.
 # The cancel-intent table disambiguates.
@@ -264,6 +271,21 @@ def _infer_outcome(
     return None
 
 
+def is_terminal_transition(prev_state: str | None, new_state: str | None) -> bool:
+    """Cheap predicate: could this edge produce an outcome record?
+
+    Callers that must pay for job identity (a ``get_job()`` network round
+    trip) before firing use this to skip the cost on benign transitions.
+    """
+    if not prev_state or not new_state:
+        return False
+    prev = prev_state.lower().strip()
+    new = new_state.lower().strip()
+    return prev in _ACTIVE_STATES and (
+        new in _FINISH_STATES or new in _FAILED_STATES or new in _IDLE_STATES
+    )
+
+
 def fire_terminal_state_hook(
     *,
     prev_state: str | None,
@@ -305,6 +327,12 @@ def fire_terminal_state_hook(
         return None
 
     outcome, failure_mode = outcome_info
+
+    # A job that was CANCELLING and then settled did not finish — it was
+    # cancelled, whether or not our side registered the intent (the
+    # touchscreen or another client may have issued it).
+    if outcome == "success" and prev_lc == "cancelling":
+        outcome = "cancelled"
 
     # Lazy import to avoid circulars at module load.  learning_tools
     # depends on server which depends on many adapters, one of which

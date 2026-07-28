@@ -929,9 +929,25 @@ def _isolate_kiln_db(tmp_path, monkeypatch):
     is refused under CI env at the source); this is the suspenders, and it
     gives each test its own file so a test that WANTS to assert on
     persistence just works.
+
+    The singleton reset is part of the isolation: ``get_db()`` caches the
+    first instance it builds, so without the reset every later test reads
+    whichever tmp DB the FIRST caller bound — rows written by one test
+    (e.g. pending outcome rows opened by a start_print exercise) leak
+    into unrelated tests' assertions in whatever order the worker ran.
     """
+    import kiln.persistence as _persistence
+    from kiln import auto_record_hook as _hook
+
     monkeypatch.setenv("KILN_DB_PATH", str(tmp_path / "kiln.db"))
+    monkeypatch.setattr(_persistence, "_db", None)
+    # The outcome hook's observation ledger (previous state per printer,
+    # cancel intents, recorded-job dedupe) is process state of the same
+    # class as the DB singleton: one test's observed "printing" must not
+    # become the next test's phantom terminal transition.
+    monkeypatch.setattr(_hook, "_HOOK_STATE", _hook._HookState())
     yield
+    monkeypatch.setattr(_persistence, "_db", None)
 
 
 @pytest.fixture(autouse=True)

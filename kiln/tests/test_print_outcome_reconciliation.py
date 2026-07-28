@@ -358,6 +358,125 @@ class TestReconnectReconciliation:
 
 
 # ---------------------------------------------------------------------------
+# Adapter-generic wiring — EVERY adapter's get_state feeds the lifecycle.
+# ---------------------------------------------------------------------------
+
+
+class TestAdapterGenericWiring:
+    """The base class wraps get_state so all seven adapters — not just
+    the one with push wiring — observe transitions, reconcile pending
+    rows on first status, and record watched endings.  A new adapter
+    inherits this without knowing it exists."""
+
+    def _adapter(self, label="benchy.gcode"):
+        from kiln.printers.base import (
+            JobProgress,
+            PrinterAdapter,
+            PrinterState,
+            PrinterStatus,
+        )
+
+        class _PollAdapter(PrinterAdapter):
+            name = "poll-printer"
+
+            def __init__(self):
+                self._status = PrinterStatus.IDLE
+                self._label = label
+
+            def get_state(self):
+                return PrinterState(connected=True, state=self._status)
+
+            def get_job(self):
+                return JobProgress(file_name=self._label, completion=None)
+
+            def _start_print_impl(self, file_name, **kwargs): ...
+            def connect(self): ...
+            def disconnect(self): ...
+            def get_status(self): ...
+            def get_printer_info(self): ...
+            def list_files(self): ...
+            def upload_file(self, file_path): ...
+            def cancel_print(self): ...
+            def pause_print(self): ...
+            def resume_print(self): ...
+
+        _PollAdapter.__abstractmethods__ = frozenset()
+        return _PollAdapter()
+
+    def test_watched_printing_to_idle_resolves_success(self, tmp_kiln_env):
+        from kiln.persistence import get_db
+        from kiln.printers.base import PrinterStatus
+
+        hook.open_pending_outcome("poll-printer", "benchy.gcode")
+        adapter = self._adapter()
+        adapter._status = PrinterStatus.PRINTING
+        adapter.get_state()  # observes printing (also runs the one-shot reconcile — active state leaves rows alone)
+        adapter._status = PrinterStatus.IDLE
+        adapter.get_state()
+
+        rows = get_db().list_print_outcomes(printer_name="poll-printer", include_all=True)
+        assert len(rows) == 1
+        assert rows[0]["outcome"] == "success"
+        assert rows[0]["determined_by"] == "observed"
+
+    def test_printing_to_error_resolves_failed(self, tmp_kiln_env):
+        from kiln.persistence import get_db
+        from kiln.printers.base import PrinterStatus
+
+        hook.open_pending_outcome("poll-printer", "benchy.gcode")
+        adapter = self._adapter()
+        adapter._status = PrinterStatus.PRINTING
+        adapter.get_state()
+        adapter._status = PrinterStatus.ERROR
+        adapter.get_state()
+
+        rows = get_db().list_print_outcomes(printer_name="poll-printer")
+        assert len(rows) == 1 and rows[0]["outcome"] == "failed"
+
+    def test_cancelling_to_idle_resolves_cancelled(self, tmp_kiln_env):
+        from kiln.persistence import get_db
+        from kiln.printers.base import PrinterStatus
+
+        hook.open_pending_outcome("poll-printer", "benchy.gcode")
+        adapter = self._adapter()
+        adapter._status = PrinterStatus.PRINTING
+        adapter.get_state()
+        adapter._status = PrinterStatus.CANCELLING
+        adapter.get_state()
+        adapter._status = PrinterStatus.IDLE
+        adapter.get_state()
+
+        rows = get_db().list_print_outcomes(
+            printer_name="poll-printer", include_all=True,
+        )
+        assert len(rows) == 1 and rows[0]["outcome"] == "cancelled"
+
+    def test_first_status_reconciles_stale_pending_to_unknown(self, tmp_kiln_env):
+        from kiln.persistence import get_db
+
+        hook.open_pending_outcome("poll-printer", "ashtray.3mf")
+        adapter = self._adapter(label=None)
+        adapter.get_state()  # idle, job gone — the honest answer is unknown
+
+        rows = get_db().list_unresolved_outcomes(printer_name="poll-printer")
+        assert len(rows) == 1 and rows[0]["outcome"] == "unknown"
+
+    def test_unnamed_ending_stays_pending_never_guessed(self, tmp_kiln_env):
+        from kiln.persistence import get_db
+        from kiln.printers.base import PrinterStatus
+
+        hook.open_pending_outcome("poll-printer", "benchy.gcode")
+        adapter = self._adapter(label=None)
+        adapter._status = PrinterStatus.PRINTING
+        adapter.get_state()
+        adapter._status = PrinterStatus.IDLE
+        adapter.get_state()
+
+        rows = get_db().list_unresolved_outcomes(printer_name="poll-printer")
+        assert len(rows) == 1 and rows[0]["outcome"] == "pending"
+
+
+# ---------------------------------------------------------------------------
 # The adapter wire — first status after connect runs the reconcile, once.
 # ---------------------------------------------------------------------------
 
@@ -589,3 +708,259 @@ class TestMigration:
             "determined_by": "observed",
         })
         assert db.get_print_outcome("new-1")["determined_by"] == "observed"
+
+
+# ---------------------------------------------------------------------------
+# Layer 5 — the material dimension of the row.
+#
+# The lifecycle's primary capture path (the terminal-state hook) knows the
+# printer, the job and the file, and nothing else — so every auto-recorded
+# row saved material_type=None, and per-material success rates, dna_autofill
+# and the community payload all skipped or defaulted the prints they were
+# built to learn from.  Backfill obeys the same rule as everything else here:
+# an honest source or an honest absence, never a guess.
+# ---------------------------------------------------------------------------
+
+
+def _ams(tray_now: str, trays: list[dict[str, Any]]) -> dict[str, Any]:
+    """Shape an AMS status report the way the adapters do."""
+    return {"tray_now": tray_now, "units": [{"trays": trays}]}
+
+
+class _FakeRegistry:
+    """Stands in for kiln.server._registry with one AMS-capable printer."""
+
+    def __init__(self, ams: dict[str, Any] | None):
+        self._ams = ams
+
+    def get(self, _name: str) -> Any:
+        if self._ams is None:
+            return None
+
+        class _Adapter:
+            def get_ams_status(_self) -> dict[str, Any]:
+                return self._ams
+
+        return _Adapter()
+
+
+class TestMaterialCapture:
+    def _record(self, **kwargs: Any) -> dict[str, Any]:
+        from kiln.plugins.learning_tools import record_print_outcome
+
+        return record_print_outcome(**kwargs)
+
+    def _material_of(self, job_id: str) -> str | None:
+        from kiln.persistence import get_db
+
+        row = get_db().get_print_outcome(job_id)
+        assert row is not None
+        return row["material_type"]
+
+    def test_backfilled_from_the_print_history_row(self, tmp_kiln_env):
+        from kiln.persistence import get_db
+
+        get_db().save_print_record({
+            "job_id": "job-hist", "printer_name": "bambu-a1",
+            "file_name": "vase.3mf", "status": "completed",
+            "material_type": "PETG",
+        })
+        result = self._record(
+            job_id="job-hist", outcome="success",
+            printer_name="bambu-a1", auto_recorded=True,
+        )
+        assert result["material_type"] == "PETG"
+        assert self._material_of("job-hist") == "PETG"
+
+    def test_backfilled_from_the_job_metadata_payload(self, tmp_kiln_env):
+        """A job whose material rode in the event payload rather than the
+        column still names its material."""
+        from kiln.persistence import get_db
+
+        get_db().save_print_record({
+            "job_id": "job-meta", "printer_name": "bambu-a1",
+            "file_name": "vase.3mf", "status": "completed",
+            "metadata": {"material_type": "ASA", "slicer": "prusa"},
+        })
+        self._record(
+            job_id="job-meta", outcome="success",
+            printer_name="bambu-a1", auto_recorded=True,
+        )
+        assert self._material_of("job-meta") == "ASA"
+
+    def test_backfilled_from_the_queue_job(self, tmp_kiln_env, monkeypatch):
+        """A queued job carries the material the scheduler routed it on —
+        no print-history row needed."""
+        import kiln.server as srv
+
+        class _Job:
+            metadata = {"material_type": "TPU"}
+
+        class _Queue:
+            def get_job(self, _job_id):
+                return _Job()
+
+        monkeypatch.setattr(srv, "_get_queue", lambda: _Queue())
+        self._record(
+            job_id="job-queued", outcome="success",
+            printer_name="bambu-a1", auto_recorded=True,
+        )
+        assert self._material_of("job-queued") == "TPU"
+
+    def test_backfilled_from_the_loaded_spool_when_watched_live(
+        self, tmp_kiln_env, monkeypatch
+    ):
+        """No job record at all — the terminal-state hook's normal case.  A
+        live process watched this print end, so the spool in the machine is
+        the spool that just ran."""
+        import kiln.server as srv
+
+        monkeypatch.setattr(
+            srv, "_registry",
+            _FakeRegistry(_ams("1", [{"slot": 1, "tray_type": "PLA"}])),
+        )
+        self._record(
+            job_id="job-live", outcome="success",
+            printer_name="bambu-a1", auto_recorded=True,
+        )
+        assert self._material_of("job-live") == "PLA"
+
+    def test_unreported_slot_with_one_loaded_material_is_still_honest(
+        self, tmp_kiln_env, monkeypatch
+    ):
+        """A1/AMS Lite firmware can report tray_now=255 with trays loaded.
+        When every loaded tray holds the same material, that material ran the
+        print whichever slot fed it."""
+        import kiln.server as srv
+
+        monkeypatch.setattr(
+            srv, "_registry",
+            _FakeRegistry(_ams("255", [
+                {"slot": 0, "tray_type": "PLA"},
+                {"slot": 1, "tray_type": "PLA"},
+            ])),
+        )
+        self._record(
+            job_id="job-lite", outcome="success",
+            printer_name="bambu-a1", auto_recorded=True,
+        )
+        assert self._material_of("job-lite") == "PLA"
+
+    def test_ambiguous_trays_stay_unknown(self, tmp_kiln_env, monkeypatch):
+        """Several materials loaded and no reported slot: which one printed
+        is a coin flip, and a coin flip is not evidence."""
+        import kiln.server as srv
+
+        monkeypatch.setattr(
+            srv, "_registry",
+            _FakeRegistry(_ams("255", [
+                {"slot": 0, "tray_type": "PLA"},
+                {"slot": 1, "tray_type": "PETG"},
+            ])),
+        )
+        self._record(
+            job_id="job-mixed", outcome="success",
+            printer_name="bambu-a1", auto_recorded=True,
+        )
+        assert self._material_of("job-mixed") is None
+
+    def test_external_spool_is_not_a_material(self, tmp_kiln_env, monkeypatch):
+        """tray_now=255 with nothing loaded means an untagged external spool
+        — the printer genuinely does not know."""
+        import kiln.server as srv
+
+        monkeypatch.setattr(srv, "_registry", _FakeRegistry(_ams("255", [])))
+        self._record(
+            job_id="job-external", outcome="success",
+            printer_name="bambu-a1", auto_recorded=True,
+        )
+        assert self._material_of("job-external") is None
+
+    def test_todays_spool_is_not_evidence_about_an_older_print(
+        self, tmp_kiln_env, monkeypatch
+    ):
+        """A user settling a print after the fact gets no material from the
+        machine: whatever is loaded now was not necessarily loaded then, and
+        a stale attribution poisons every per-material read that trusts it."""
+        import kiln.server as srv
+
+        monkeypatch.setattr(
+            srv, "_registry",
+            _FakeRegistry(_ams("1", [{"slot": 1, "tray_type": "PLA"}])),
+        )
+        result = self._record(
+            job_id="job-stale", outcome="success",
+            printer_name="bambu-a1", determined_by="user_reported",
+        )
+        assert "material_type" not in result
+        assert self._material_of("job-stale") is None
+
+    def test_stays_unset_when_no_source_knows(self, tmp_kiln_env, monkeypatch):
+        import kiln.server as srv
+
+        monkeypatch.setattr(srv, "_registry", _FakeRegistry(None))
+        self._record(
+            job_id="job-blind", outcome="success",
+            printer_name="bambu-a1", auto_recorded=True,
+        )
+        assert self._material_of("job-blind") is None
+
+    def test_caller_supplied_material_is_never_overwritten(
+        self, tmp_kiln_env, monkeypatch
+    ):
+        import kiln.server as srv
+
+        monkeypatch.setattr(
+            srv, "_registry",
+            _FakeRegistry(_ams("1", [{"slot": 1, "tray_type": "PLA"}])),
+        )
+        self._record(
+            job_id="job-explicit", outcome="success",
+            printer_name="bambu-a1", auto_recorded=True, material_type="PETG",
+        )
+        assert self._material_of("job-explicit") == "PETG"
+
+    def test_pending_row_gains_the_material_its_ending_knew(
+        self, tmp_kiln_env, monkeypatch
+    ):
+        """The row opened at print start has no material (start_print doesn't
+        pass one).  The ending resolves that row IN PLACE and the backfilled
+        material must land on it — not on a second row, not nowhere."""
+        import kiln.server as srv
+        from kiln.persistence import get_db
+
+        monkeypatch.setattr(
+            srv, "_registry",
+            _FakeRegistry(_ams("1", [{"slot": 1, "tray_type": "PLA"}])),
+        )
+        hook.open_pending_outcome("bambu-a1", "/tmp/ashtray.gcode.3mf")
+        assert get_db().list_unresolved_outcomes(printer_name="bambu-a1")[0][
+            "material_type"
+        ] is None
+
+        self._record(
+            job_id="ashtray", outcome="success",
+            printer_name="bambu-a1", auto_recorded=True,
+        )
+        rows = get_db().list_print_outcomes(printer_name="bambu-a1", include_all=True)
+        assert len(rows) == 1, "the ending resolves the pending row, not a new one"
+        assert rows[0]["material_type"] == "PLA"
+
+    def test_backfilled_material_reaches_the_per_material_read(self, tmp_kiln_env):
+        """The point of the whole fix: auto-recorded prints show up in the
+        per-material success rates, which filter material_type IS NOT NULL."""
+        from kiln.persistence import get_db
+
+        db = get_db()
+        for i in range(3):
+            db.save_print_record({
+                "job_id": f"job-rate-{i}", "printer_name": "bambu-a1",
+                "file_name": "vase.3mf", "status": "completed",
+                "material_type": "PLA",
+            })
+            self._record(
+                job_id=f"job-rate-{i}", outcome="success",
+                printer_name="bambu-a1", auto_recorded=True,
+            )
+        stats = db.get_printer_learning_insights("bambu-a1")["material_stats"]
+        assert stats["PLA"] == {"count": 3, "success_rate": 1.0}

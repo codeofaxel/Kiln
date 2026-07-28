@@ -210,15 +210,38 @@ class JobScheduler:
         if not self._persistence:
             return
         try:
+            # Try to get job metadata for richer outcome data
+            job = self._queue.get_job(job_id)
+
             # Check if a DECIDED outcome is already recorded (an agent may
             # have beaten us).  An unresolved row (pending — opened at
             # print start) is exactly what this call should settle.
             existing = self._persistence.get_print_outcome(job_id)
             if existing is not None and existing.get("outcome") not in ("pending", "unknown"):
                 return  # decided already — don't overwrite
+            if existing is None:
+                # The scheduler is a RESOLVER, never a second author.  The
+                # adapter layer (start_print + the get_state wiring) owns
+                # the row: it opens 'pending' at start and may already have
+                # recorded the watched ending under the printer's own job
+                # label.  Writing here without an unresolved row to settle
+                # would author a duplicate of an ending someone else
+                # recorded — so if nothing is owed, say nothing.
+                from kiln.persistence import _file_stem_token
 
-            # Try to get job metadata for richer outcome data
-            job = self._queue.get_job(job_id)
+                unresolved = self._persistence.list_unresolved_outcomes(
+                    printer_name=printer_name, limit=50,
+                )
+                tokens = {
+                    _file_stem_token(job.file_name if job else None),
+                    _file_stem_token(job_id),
+                } - {""}
+                claimable = [
+                    row for row in unresolved
+                    if _file_stem_token(row.get("file_name")) in tokens
+                ] or (unresolved if len(unresolved) == 1 else [])
+                if not claimable:
+                    return
 
             self._persistence.save_print_outcome(
                 {

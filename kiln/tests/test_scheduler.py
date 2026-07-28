@@ -1169,6 +1169,12 @@ class TestAutoOutcomeRecording:
         """Complete a job and verify save_print_outcome is called with outcome='success'."""
         mock_persistence = MagicMock()
         mock_persistence.get_print_outcome.return_value = None
+        # The adapter layer opened this row at print start; the scheduler
+        # only ever RESOLVES such a row — with none open it stays silent.
+        mock_persistence.list_unresolved_outcomes.return_value = [
+            {"job_id": "start:printer-1:1", "file_name": "benchy.gcode",
+             "outcome": "pending"},
+        ]
         scheduler = JobScheduler(
             queue, registry, event_bus,
             poll_interval=0.1, max_retries=0,
@@ -1210,6 +1216,10 @@ class TestAutoOutcomeRecording:
         """Exhaust retries and verify outcome='failed' is recorded."""
         mock_persistence = MagicMock()
         mock_persistence.get_print_outcome.return_value = None
+        mock_persistence.list_unresolved_outcomes.return_value = [
+            {"job_id": "start:printer-1:1", "file_name": "benchy.gcode",
+             "outcome": "pending"},
+        ]
         scheduler = JobScheduler(
             queue, registry, event_bus,
             poll_interval=0.1, max_retries=0,
@@ -1362,6 +1372,12 @@ class TestOutcomeHonesty:
             max_retries=0, persistence=db,
         ), db
 
+    def _open_pending(self, db, file_name="benchy.gcode"):
+        """What the adapter layer does at print start.  The scheduler is a
+        RESOLVER: with no pending row open it stays silent, so each flow
+        seeds the row a real start_print would have opened."""
+        db.open_pending_outcome("start:printer-1:1", "printer-1", file_name)
+
     def test_watched_job_going_idle_is_observed_success(
         self, queue, registry, event_bus, tmp_path,
     ):
@@ -1370,6 +1386,7 @@ class TestOutcomeHonesty:
         registry.register("printer-1", adapter)
         job_id = queue.submit(file_name="benchy.gcode")
         scheduler.tick()  # dispatch
+        self._open_pending(db)
 
         adapter.get_state.return_value = PrinterState(
             connected=True, state=PrinterStatus.PRINTING
@@ -1394,6 +1411,7 @@ class TestOutcomeHonesty:
         registry.register("printer-1", adapter)
         job_id = queue.submit(file_name="benchy.gcode")
         scheduler.tick()  # dispatch; adapter still reports IDLE
+        self._open_pending(db)
 
         result = scheduler.tick()
 
@@ -1413,6 +1431,7 @@ class TestOutcomeHonesty:
         registry.register("printer-1", adapter)
         job_id = queue.submit(file_name="benchy.gcode")
         scheduler.tick()
+        self._open_pending(db)
 
         adapter.get_state.return_value = PrinterState(
             connected=True, state=PrinterStatus.ERROR
