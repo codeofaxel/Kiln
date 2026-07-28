@@ -1117,3 +1117,53 @@ class TestAddMeshChamfer:
 
         assert result["success"] is False
         assert "chamfer error" in result["error"]["message"]
+
+
+# ---------------------------------------------------------------------------
+# analyze_mesh_geometry — a read failure is an error, never an analysis
+# ---------------------------------------------------------------------------
+
+
+class TestAnalyzeMeshGeometryHonesty:
+    """Found 2026-07-27: any file the analyzer could not read came back as
+    success:True with 0 triangles / "not manifold" — a valid input reported
+    as an empty, broken mesh.  The engine records the real reason in
+    printability_issues; the tool must surface it as an ERROR."""
+
+    def test_garbage_file_is_an_error_not_an_empty_mesh(self, mesh_tools, tmp_path):
+        bad = tmp_path / "not_a_mesh.stl"
+        bad.write_text("this is not a mesh\n")
+
+        result = mesh_tools["analyze_mesh_geometry"](file_path=str(bad))
+
+        assert result["success"] is False
+        assert result["error"]["code"] == "UNREADABLE_INPUT"
+
+    def test_step_input_error_names_the_conversion_path(self, mesh_tools, tmp_path):
+        step = tmp_path / "part.step"
+        step.write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n")
+
+        result = mesh_tools["analyze_mesh_geometry"](file_path=str(step))
+
+        assert result["success"] is False
+        assert result["error"]["code"] == "UNREADABLE_INPUT"
+        assert "import_step_file" in result["error"]["message"]
+
+    def test_real_mesh_still_analyzes(self, mesh_tools, tmp_path):
+        stl = tmp_path / "tri.stl"
+        stl.write_text(
+            "solid tri\n"
+            " facet normal 0 0 1\n"
+            "  outer loop\n"
+            "   vertex 0 0 0\n"
+            "   vertex 10 0 0\n"
+            "   vertex 0 10 0\n"
+            "  endloop\n"
+            " endfacet\n"
+            "endsolid tri\n"
+        )
+
+        result = mesh_tools["analyze_mesh_geometry"](file_path=str(stl))
+
+        assert result["success"] is True
+        assert result["triangle_count"] == 1

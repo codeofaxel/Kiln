@@ -136,6 +136,19 @@ class MeshAnalysis:
     printability_score: int = 0
     printability_issues: list[str] = field(default_factory=list)
 
+    def has_geometry(self) -> bool:
+        """True when the analysis is about an actual mesh.
+
+        ``analyze_mesh`` never raises — a file it cannot read comes back as
+        this dataclass zeroed out, with the reason in
+        :attr:`printability_issues`.  Callers that treat such a result as a
+        real analysis end up reporting a valid file as an empty, broken
+        mesh (0 triangles, "not manifold"), which is a misdiagnosis.  Check
+        this first: False means "the INPUT could not be read," not "the
+        mesh is bad."
+        """
+        return self.triangle_count > 0
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 

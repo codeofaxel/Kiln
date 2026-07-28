@@ -187,7 +187,9 @@ class _MeshToolsPlugin:
             Use this after generating a model to understand its geometry and
             identify printability issues before sending to the slicer.
 
-            :param file_path: Path to .stl, .obj, or .glb file.
+            :param file_path: Path to .stl, .obj, or .glb file.  For a
+                STEP/STP CAD file, convert it first with ``import_step_file``
+                and analyze the resulting mesh.
             :returns: Dict with full mesh analysis metrics.
             """
             from kiln.server import _error_dict
@@ -196,6 +198,22 @@ class _MeshToolsPlugin:
                 from kiln.generation.validation import analyze_mesh
 
                 result = analyze_mesh(file_path)
+                # A file the analyzer could not read used to come back as
+                # success:True with a zeroed mesh — an agent read that as
+                # "your part is empty and broken."  A read failure is an
+                # ERROR about the input, never an analysis of it.
+                if not result.has_geometry():
+                    reason = "; ".join(result.printability_issues) or "no geometry found"
+                    if str(file_path).lower().endswith((".step", ".stp")):
+                        reason += (
+                            ". STEP is CAD geometry, not a mesh — run "
+                            "import_step_file on it first, then analyze the "
+                            "converted mesh."
+                        )
+                    return _error_dict(
+                        f"Could not read a mesh from this file: {reason}",
+                        code="UNREADABLE_INPUT",
+                    )
                 return {"success": True, **result.to_dict()}
             except Exception as exc:
                 return _error_dict(f"Mesh analysis failed: {exc}", code="ANALYSIS_ERROR")
