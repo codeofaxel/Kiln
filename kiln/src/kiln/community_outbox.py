@@ -126,6 +126,11 @@ def _community_gate() -> bool:
 register_sender(DEFAULT_KIND, _community_sender, gate=_community_gate)
 
 
+def _default_db_path() -> str:
+    """Where the REAL per-user outbox lives, ignoring any override."""
+    return os.path.join(os.path.expanduser("~"), ".kiln", "community_outbox.db")
+
+
 def _db_path() -> str:
     """Co-locate the outbox with kiln.db, honoring the KILN_DB_PATH override
     (so tests can point it at a tmp dir)."""
@@ -133,6 +138,36 @@ def _db_path() -> str:
         os.path.expanduser("~"), ".kiln", "kiln.db"
     )
     return os.path.join(os.path.dirname(base) or ".", "community_outbox.db")
+
+
+def _suppressed_under_test() -> bool:
+    """True when a test/CI runner would otherwise touch the REAL outbox.
+
+    The outbox is the one local store that reaches OTHER PEOPLE: queued
+    rows are sent to the shared community corpus, which every user reads
+    for "what worked for people like you".  A suite that enqueues into
+    the real file therefore doesn't just pollute one machine — it ships
+    fabricated prints and recoveries to everybody (2026-07-28: 48,523
+    fixture rows — ``strategy_a``, ``voron_2_4_350``, ``sig123`` — were
+    found queued on a developer machine, 21,536 of them already sent,
+    against exactly ONE real print).
+
+    Same shape as ``daily_stats._recording_suppressed``, applied at BOTH
+    ends: nothing is enqueued and nothing is sent.  A test that points
+    ``KILN_DB_PATH`` at its own directory is asking to exercise the
+    outbox and is never suppressed — only the real per-user file is
+    protected.
+    """
+    if _db_path() != _default_db_path():
+        return False
+    try:
+        from kiln.heartbeat import _is_ci_environment
+
+        return _is_ci_environment()
+    except Exception:  # noqa: BLE001 — heartbeat absent, fall back to env
+        return any(
+            os.environ.get(var) for var in ("CI", "PYTEST_CURRENT_TEST")
+        )
 
 
 def _db() -> sqlite3.Connection:
@@ -198,7 +233,12 @@ def enqueue(dedupe_key: str, record: dict[str, Any], *, kind: str = DEFAULT_KIND
     ignored.  Returns True if newly queued, False if already present.
 
     Holds ``_db_lock`` only for the local INSERT, so it never blocks behind a
-    drain's network I/O."""
+    drain's network I/O.
+
+    No-ops under a test/CI runner still pointed at the real per-user
+    outbox — see :func:`_suppressed_under_test`."""
+    if _suppressed_under_test():
+        return False
     with _db_lock:
         conn = _db()
         cur = _retry_on_locked(
@@ -336,6 +376,11 @@ def drain(batch: int = _DRAIN_BATCH, *, max_rows: int = _DRAIN_MAX_ROWS) -> dict
     replays at most one row).  ``_drain_lock`` admits a single drain at a time;
     a second concurrent caller returns ``sent=0`` immediately.
     """
+    if _suppressed_under_test():
+        # A test runner pointed at the REAL outbox: ensure_senders() below
+        # imports the live senders, which POST to the shared production
+        # corpus.  Refuse — a suite must never publish to other users.
+        return {"sent": 0, "failed": 0, "remaining": 0, "purged": 0}
     if not _drain_lock.acquire(blocking=False):
         # Another drain owns the queue right now — don't double-send.
         return {"sent": 0, "failed": 0, "remaining": _count_pending(), "purged": 0}

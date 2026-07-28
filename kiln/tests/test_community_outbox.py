@@ -531,3 +531,52 @@ def test_opted_out_print_is_not_reported_as_contributed(ob):
     assert result["contributed"] is False
     assert result["opted_out"] is True
     assert ob.status()["total"] == 0
+
+
+# ---------------------------------------------------------------------------
+# The real outbox is never touched by a test runner
+# ---------------------------------------------------------------------------
+
+
+class TestRealOutboxIsProtected:
+    """The outbox is the one local store that reaches OTHER PEOPLE.
+
+    A suite that enqueues into the real file ships fabricated prints and
+    recoveries to the shared community corpus every user reads — which is
+    exactly what happened: 48,523 fixture rows queued on a developer
+    machine and 21,536 already sent, against one real print.  Both ends
+    are guarded, and these tests prove the guard REFUSES rather than
+    merely existing.
+    """
+
+    def test_enqueue_into_the_real_outbox_is_refused_under_test(self, monkeypatch):
+        import kiln.community_outbox as ob
+
+        real = ob._default_db_path()
+        monkeypatch.delenv("KILN_DB_PATH", raising=False)
+        monkeypatch.setenv("PYTEST_CURRENT_TEST", "guard-check")
+        assert ob._db_path() == real, "precondition: resolving to the real file"
+        assert ob._suppressed_under_test() is True
+        assert ob.enqueue("guard:should-not-persist", {"x": 1}) is False
+
+    def test_drain_of_the_real_outbox_is_refused_under_test(self, monkeypatch):
+        """ensure_senders() imports the live senders, which POST to
+        production — a drain here would publish to other users."""
+        import kiln.community_outbox as ob
+
+        monkeypatch.delenv("KILN_DB_PATH", raising=False)
+        monkeypatch.setenv("PYTEST_CURRENT_TEST", "guard-check")
+        called = []
+        monkeypatch.setattr(ob, "ensure_senders", lambda: called.append(1))
+        assert ob.drain() == {"sent": 0, "failed": 0, "remaining": 0, "purged": 0}
+        assert called == [], "senders must never be resolved against the real outbox"
+
+    def test_a_test_owned_path_is_never_suppressed(self, tmp_path, monkeypatch):
+        """A suite pointing KILN_DB_PATH at its own directory is asking to
+        exercise the outbox and must keep working."""
+        import kiln.community_outbox as ob
+
+        monkeypatch.setenv("KILN_DB_PATH", str(tmp_path / "kiln.db"))
+        monkeypatch.setattr(ob, "_conn", None)
+        assert ob._suppressed_under_test() is False
+        assert ob.enqueue("guard:own-path", {"x": 1}) is True
