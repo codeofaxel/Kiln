@@ -177,9 +177,40 @@ def consult_nozzle_summary(printer_id: str) -> dict[str, Any] | None:
     }
 
 
+def record_print_odometer(
+    printer_id: str,
+    file_name: str | None,
+    *,
+    grams: float | None = None,
+) -> dict[str, Any] | None:
+    """Advance the pro nozzle odometer for one started print.
+
+    Called from ``PrinterAdapter.start_print`` — the chokepoint every
+    print passes through, success OR failure — so nozzle wear counts
+    for every print, not just the ones something watched to completion.
+    A cancelled print over-counts its planned filament; that is the
+    safe direction (a nozzle retired early beats a worn nozzle read as
+    fresh).  No-op without kiln-pro.
+    """
+    try:
+        from kiln_pro.nozzle_intelligence.odometer import record_print_filament
+    except ImportError:
+        return None
+    try:
+        return record_print_filament(
+            printer_id,
+            file_path=file_name,
+            grams=grams,
+            dedupe_key=file_name,
+        )
+    except Exception:  # noqa: BLE001 — wear bookkeeping never blocks a print
+        return None
+
+
 __all__ = [
     "available",
     "consult_capacity",
     "consult_abrasive_escalation",
     "consult_nozzle_summary",
+    "record_print_odometer",
 ]

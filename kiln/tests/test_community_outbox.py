@@ -7,6 +7,7 @@ the stuck cap, and the opt-out gate.
 """
 from __future__ import annotations
 
+import json
 import threading
 import time
 from unittest import mock
@@ -60,7 +61,10 @@ def test_drain_sends_and_marks_sent(ob):
     with mock.patch("kiln.community_sync.sync_community_print", return_value=True) as send:
         result = ob.drain()
     send.assert_called_once()
-    assert result == {"sent": 1, "failed": 0, "remaining": 0}
+    # ``purged`` joined the result when the drain started reclaiming
+    # delivered rows; a row sent just now is well inside the retention
+    # window, so nothing is reclaimed here.
+    assert result == {"sent": 1, "failed": 0, "remaining": 0, "purged": 0}
     assert ob.status() == {"pending": 0, "sent": 1, "stuck": 0, "total": 1}
 
 
@@ -263,3 +267,316 @@ def test_unknown_kind_counts_as_failed_not_silently_looped(ob):
     assert result["sent"] == 0
     assert result["failed"] == 1
     assert ob.status()["pending"] == 1
+
+
+# ---------------------------------------------------------------------------
+# The 2026-07-28 stall — a queue that grew for two months and never drained
+# ---------------------------------------------------------------------------
+#
+# 69,004 rows, 47,809 never delivered.  Two bugs compounded: the drain sent
+# one batch of 50 per server start (so most rows were never even claimed),
+# and kiln-pro's federation senders register as an import side effect of
+# modules nothing imported at boot (so every row it DID claim failed).
+
+
+def test_drain_clears_a_backlog_bigger_than_one_batch(ob):
+    """One batch per call is why 47,809 rows sat for two months."""
+    ob.register_sender("bulk", lambda payload, send_id: True)
+    for i in range(320):  # > 6 batches of 50
+        ob.enqueue(f"bulk-{i}", {"i": i}, kind="bulk")
+
+    result = ob.drain()
+
+    assert result["sent"] == 320
+    assert result["remaining"] == 0
+
+
+def test_drain_backs_off_instead_of_burning_every_retry(ob):
+    """An outage must not spend the whole backlog's retry budget in one pass.
+
+    Walking a failing queue to the end is how a transient outage turned into
+    7,020 permanently-dead rows.  One failed batch, then stop.
+    """
+    ob.register_sender("down", lambda payload, send_id: False)
+    for i in range(300):
+        ob.enqueue(f"down-{i}", {"i": i}, kind="down")
+
+    result = ob.drain(batch=50)
+
+    assert result["sent"] == 0
+    assert result["failed"] == 50, "should stop after one failed batch, not walk 300"
+    assert result["remaining"] == 300  # still queued, retryable
+
+
+def test_a_kind_with_no_sender_does_not_strand_other_kinds(ob):
+    """The rows that failed were recovery rows; print rows had a sender."""
+    ob.register_sender("has_sender", lambda payload, send_id: True)
+    for i in range(10):
+        ob.enqueue(f"orphan-{i}", {"i": i}, kind="no_sender_registered")
+        ob.enqueue(f"fine-{i}", {"i": i}, kind="has_sender")
+
+    result = ob.drain()
+
+    assert result["sent"] == 10, "rows with a sender must still ship"
+
+
+def test_delivered_rows_are_reclaimed(ob):
+    """The outbox is a queue, not an archive — 21,195 shipped rows on disk."""
+    ob.register_sender("bulk", lambda payload, send_id: True)
+    for i in range(5):
+        ob.enqueue(f"old-{i}", {"i": i}, kind="bulk")
+    ob.drain()
+
+    # Age the delivered rows past the retention window.
+    with ob._db_lock:
+        conn = ob._db()
+        conn.execute(
+            "UPDATE community_outbox SET sent_at = ?",
+            (time.time() - ob._DELIVERED_RETENTION_S - 60,),
+        )
+        conn.commit()
+
+    assert ob.purge_delivered() == 5
+    assert ob.status()["total"] == 0
+
+
+def test_dead_rows_outlive_delivered_ones(ob):
+    """A dead row is the evidence sends were failing — don't erase it fast."""
+    ob.register_sender("down", lambda payload, send_id: False)
+    ob.enqueue("stuck", {"i": 1}, kind="down")
+    with ob._db_lock:
+        conn = ob._db()
+        conn.execute(
+            "UPDATE community_outbox SET attempts = ?, created_at = ?",
+            (ob._MAX_ATTEMPTS, time.time() - ob._DELIVERED_RETENTION_S - 60),
+        )
+        conn.commit()
+
+    assert ob.purge_delivered() == 0, "a day-old dead row must survive"
+
+
+# ---------------------------------------------------------------------------
+# One print, one row — the two contribution paths share a key and a vocabulary
+# ---------------------------------------------------------------------------
+#
+# The monitors (community_autofire) and record_print_outcome both ship a
+# finished print here.  Each used to mint its own dedupe key and translate
+# outcomes with its own private map, so a print that was WATCHED and then
+# RECORDED shipped twice — under two different words — to an endpoint with no
+# server-side dedupe.  The aggregate counted one print as two.
+
+
+def test_translate_outcome_maps_every_learning_vocabulary():
+    assert_map = {
+        "completed": "success",   # monitor vocabulary
+        "success": "success",     # DB vocabulary
+        "SUCCESS": "success",     # case/whitespace tolerant
+        " failed ": "failed",
+        "partial": "partial",
+    }
+    from kiln.community_outbox import translate_outcome
+
+    for word, expected in assert_map.items():
+        assert translate_outcome(word) == expected, word
+
+
+def test_translate_outcome_contributes_nothing_without_a_verdict():
+    """cancelled / timeout / pending / unknown say nothing about the print;
+    an unrecognised word fails CLOSED rather than defaulting to success."""
+    from kiln.community_outbox import translate_outcome
+
+    for word in (
+        "cancelled", "timeout", "pending", "unknown", "paused", "running",
+        "finished", "", None,
+    ):
+        assert translate_outcome(word) is None, word
+
+
+def test_key_is_anchored_on_the_job_not_the_derived_signature():
+    """The job id is the one identity both paths carry verbatim; each DERIVES
+    its signature by a different route (fingerprint vs. caller-supplied
+    hash), so a signature-bearing key would not collapse the double-ship."""
+    from kiln.community_outbox import print_contribution_key
+
+    assert print_contribution_key("job-7", "geo-from-fingerprint") == (
+        print_contribution_key("job-7", "hash-from-caller")
+    )
+    assert print_contribution_key("job-7", "g") != print_contribution_key("job-8", "g")
+
+
+def test_key_falls_back_to_geometry_with_no_job():
+    """A printer driven directly has no job id — the model's signature plus
+    its file is the strongest identity left."""
+    from kiln.community_outbox import print_contribution_key
+
+    keyed = print_contribution_key(None, "geo-aaa", "plate.gcode")
+    assert "geo-aaa" in keyed
+    assert keyed != print_contribution_key(None, "geo-bbb", "plate.gcode")
+    assert keyed != print_contribution_key(None, "geo-aaa", "other.gcode")
+
+
+def test_non_learning_outcome_contributes_nothing(ob):
+    from kiln.community_outbox import contribute_print_outcome
+
+    result = contribute_print_outcome(
+        outcome="cancelled", geometric_signature="geo16char0000000", job_id="j1"
+    )
+    assert result == {"contributed": False, "reason": "non_quality_outcome"}
+    assert ob.status()["total"] == 0
+
+
+def test_caller_extras_cannot_override_the_translated_outcome(ob):
+    """Payload richness is preserved, but the vocabulary stays in one place."""
+    from kiln.community_outbox import contribute_print_outcome
+
+    contribute_print_outcome(
+        outcome="completed",
+        geometric_signature="geo16char0000000",
+        job_id="j2",
+        extra={"outcome": "smuggled", "settings": {"temp_tool": 210}},
+    )
+    row = ob._db().execute(
+        "SELECT payload FROM community_outbox WHERE dedupe_key = 'print:j2'"
+    ).fetchone()
+    payload = json.loads(row["payload"])
+    assert payload["outcome"] == "success"
+    assert payload["settings"] == {"temp_tool": 210}  # richness preserved
+
+
+def test_watched_then_recorded_print_lands_one_row(ob, monkeypatch):
+    """The double-ship, collapsed: the same physical print through BOTH
+    contribution paths leaves exactly one row in the outbox."""
+    monkeypatch.setenv("KILN_COMMUNITY_OPT_IN", "true")
+    import kiln.persistence as _p
+    monkeypatch.setattr(_p, "_db", None, raising=False)
+
+    from kiln import community_autofire as ca
+    from kiln.plugins.learning_tools import record_print_outcome
+
+    # 1) A monitor watches the print end.
+    with mock.patch(
+        "kiln.community_autofire.geometric_signature_for",
+        return_value="geo16char0000000",
+    ):
+        watched = ca.auto_contribute_completion(
+            outcome="completed",
+            printer_file_name="plate.gcode",
+            job_id="job-dup",
+            printer_model="Bambu A1",
+            material="PLA",
+            print_time_seconds=1200,
+        )
+    assert watched["contributed"] is True
+    assert watched["outcome"] == "success"
+    assert ob.status()["total"] == 1
+
+    # 2) The agent then records the same print by hand.
+    with mock.patch("kiln.server._check_auth", return_value=None):
+        recorded = record_print_outcome(
+            job_id="job-dup",
+            outcome="success",
+            printer_name="bambu-01",
+            file_name="plate.gcode",
+            file_hash="filehash00000000",
+            material_type="PLA",
+            quality_grade="good",
+        )
+    assert recorded.get("success") is True
+    assert ob.status()["total"] == 1, "one physical print must ship once"
+
+    monkeypatch.setattr(_p, "_db", None, raising=False)
+
+
+def test_a_second_real_print_still_ships(ob, monkeypatch):
+    """The collapse must not swallow a genuine repeat print."""
+    monkeypatch.setenv("KILN_COMMUNITY_OPT_IN", "true")
+    from kiln import community_autofire as ca
+
+    with mock.patch(
+        "kiln.community_autofire.geometric_signature_for",
+        return_value="geo16char0000000",
+    ):
+        for job in ("job-a", "job-b"):
+            ca.auto_contribute_completion(
+                outcome="completed", printer_file_name="plate.gcode", job_id=job,
+            )
+    assert ob.status()["total"] == 2
+
+
+def test_registration_is_suppressed_under_test_runners(ob):
+    """A registered sender POSTs to production.
+
+    Auto-wiring one during a suite run means any test that drains a queue
+    publishes to the real federation endpoint — which is exactly how 30 junk
+    rows reached community_recoveries while this fix was being written.
+    """
+    assert ob._registration_suppressed() is True
+
+    called = []
+    ob.ensure_senders()  # must not reach the bridge at all
+    assert called == []
+
+
+def test_opted_out_print_is_not_reported_as_contributed(ob):
+    """The status dict is the only place a maintainer sees the difference
+    between 'shipped' and 'the user opted out'."""
+    from kiln.community_outbox import contribute_print_outcome
+
+    with mock.patch(
+        "kiln.community_sync.community_opt_in_enabled", return_value=False
+    ):
+        result = contribute_print_outcome(
+            outcome="completed", geometric_signature="geo16char0000000", job_id="j3",
+        )
+    assert result["contributed"] is False
+    assert result["opted_out"] is True
+    assert ob.status()["total"] == 0
+
+
+# ---------------------------------------------------------------------------
+# The real outbox is never touched by a test runner
+# ---------------------------------------------------------------------------
+
+
+class TestRealOutboxIsProtected:
+    """The outbox is the one local store that reaches OTHER PEOPLE.
+
+    A suite that enqueues into the real file ships fabricated prints and
+    recoveries to the shared community corpus every user reads — which is
+    exactly what happened: 48,523 fixture rows queued on a developer
+    machine and 21,536 already sent, against one real print.  Both ends
+    are guarded, and these tests prove the guard REFUSES rather than
+    merely existing.
+    """
+
+    def test_enqueue_into_the_real_outbox_is_refused_under_test(self, monkeypatch):
+        import kiln.community_outbox as ob
+
+        real = ob._default_db_path()
+        monkeypatch.delenv("KILN_DB_PATH", raising=False)
+        monkeypatch.setenv("PYTEST_CURRENT_TEST", "guard-check")
+        assert ob._db_path() == real, "precondition: resolving to the real file"
+        assert ob._suppressed_under_test() is True
+        assert ob.enqueue("guard:should-not-persist", {"x": 1}) is False
+
+    def test_drain_of_the_real_outbox_is_refused_under_test(self, monkeypatch):
+        """ensure_senders() imports the live senders, which POST to
+        production — a drain here would publish to other users."""
+        import kiln.community_outbox as ob
+
+        monkeypatch.delenv("KILN_DB_PATH", raising=False)
+        monkeypatch.setenv("PYTEST_CURRENT_TEST", "guard-check")
+        called = []
+        monkeypatch.setattr(ob, "ensure_senders", lambda: called.append(1))
+        assert ob.drain() == {"sent": 0, "failed": 0, "remaining": 0, "purged": 0}
+        assert called == [], "senders must never be resolved against the real outbox"
+
+    def test_a_test_owned_path_is_never_suppressed(self, tmp_path, monkeypatch):
+        """A suite pointing KILN_DB_PATH at its own directory is asking to
+        exercise the outbox and must keep working."""
+        import kiln.community_outbox as ob
+
+        monkeypatch.setenv("KILN_DB_PATH", str(tmp_path / "kiln.db"))
+        monkeypatch.setattr(ob, "_conn", None)
+        assert ob._suppressed_under_test() is False
+        assert ob.enqueue("guard:own-path", {"x": 1}) is True

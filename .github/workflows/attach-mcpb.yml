@@ -1,0 +1,46 @@
+name: Attach MCPB bundle to release
+
+# Packs the Claude Desktop / MCPB one-click bundle (mcpb/) and attaches it
+# to the GitHub release as a STABLE-named asset `kiln.mcpb`, so the site can
+# link a single always-current URL:
+#
+#   https://github.com/codeofaxel/Kiln/releases/latest/download/kiln.mcpb
+#
+# Deliberately isolated from publish.yml: packing is just a zip of the 5-file
+# bundle (manifest + 3-line wrapper + pyproject + README + icon) — no uv, no
+# Python, no PyPI dependency — so if it ever fails it cannot block the package
+# publish or the signing job. The version INSIDE the bundle is kept in lockstep
+# with kiln3d by tests/test_mcpb_manifest_version_matches_package, so the asset
+# is always the just-released version under a stable filename.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write  # upload the asset onto the release
+
+jobs:
+  attach-mcpb:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Pack the MCPB bundle
+        run: |
+          cd mcpb
+          rm -rf .venv uv.lock ./*.mcpb
+          npx --yes @anthropic-ai/mcpb@2.1.2 pack . ../kiln.mcpb
+          test -f ../kiln.mcpb
+
+      - name: Attach kiln.mcpb to the release
+        # softprops/action-gh-release v3.0.2 — same pin used by sign-release.yml
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
+        with:
+          files: kiln.mcpb
