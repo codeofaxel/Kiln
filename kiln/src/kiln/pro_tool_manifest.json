@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-27T02:45:13.018006+00:00",
-  "tool_count": 386,
+  "generated": "2026-07-28T01:51:41.725595+00:00",
+  "tool_count": 388,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -1707,9 +1707,43 @@
       }
     },
     {
+      "name": "cloud_pull_dfm_assessments",
+      "description": "Merge a drawing's remote manufacturability verdicts into local.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "intake_id": {
+            "title": "Intake Id",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "intake_id"
+        ],
+        "title": "cloud_pull_dfm_assessmentsArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "cloud_pull_manual_history",
-      "description": "Merge a design's remote manual-revision history into local.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Merge a design's remote manual-revision history into local.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "cloud_sync",
       "parameters": {
         "properties": {
@@ -1808,6 +1842,30 @@
       }
     },
     {
+      "name": "cloud_push_dfm_assessments",
+      "description": "Mirror a drawing's manufacturability verdicts to a remote.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "intake_id": {
+            "title": "Intake Id",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intake_id"
+        ],
+        "title": "cloud_push_dfm_assessmentsArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "cloud_push_feature_branch",
       "description": "Push a local feature branch (+ its versions) to a remote.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -1874,8 +1932,8 @@
     },
     {
       "name": "cloud_push_manual_history",
-      "description": "Push a design's assembly-manual revision history to a remote.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
+      "description": "Push a design's assembly-manual revision history to a remote.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
       "category": "cloud_sync",
       "parameters": {
         "properties": {
