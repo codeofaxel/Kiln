@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-07-28T03:28:38.821964+00:00",
+  "generated": "2026-07-28T07:25:46.070584+00:00",
   "tool_count": 390,
   "categories": {
     "product_generators": {
@@ -2661,6 +2661,11 @@
           "image_style": {
             "default": "auto",
             "title": "Image Style",
+            "type": "string"
+          },
+          "source_job_id": {
+            "default": "",
+            "title": "Source Job Id",
             "type": "string"
           }
         },
