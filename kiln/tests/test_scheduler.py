@@ -1182,6 +1182,13 @@ class TestAutoOutcomeRecording:
         # Dispatch
         scheduler.tick()
 
+        # The scheduler must SEE the job printing before an idle printer
+        # can honestly mean "it finished" — idle alone proves nothing.
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.PRINTING,
+        )
+        scheduler.tick()
+
         # Printer returns to idle — job is done
         adapter.get_state.return_value = PrinterState(
             connected=True, state=PrinterStatus.IDLE,
@@ -1195,7 +1202,8 @@ class TestAutoOutcomeRecording:
         assert call_args["outcome"] == "success"
         assert call_args["file_name"] == "benchy.gcode"
         assert call_args["file_hash"] == "abc123"
-        assert call_args["agent_id"] == "scheduler"
+        assert call_args["agent_id"] == "auto"
+        assert call_args["determined_by"] == "observed"
         assert "Auto-recorded by scheduler" in call_args["notes"]
 
     def test_auto_record_outcome_on_permanent_failure(self, queue, registry, event_bus):
@@ -1226,7 +1234,8 @@ class TestAutoOutcomeRecording:
         assert call_args["job_id"] == job_id
         assert call_args["printer_name"] == "printer-1"
         assert call_args["outcome"] == "failed"
-        assert call_args["agent_id"] == "scheduler"
+        assert call_args["agent_id"] == "auto"
+        assert call_args["determined_by"] == "observed"
         assert "error state" in call_args["notes"]
 
     def test_auto_record_skips_when_agent_already_recorded(self, queue, registry, event_bus):
@@ -1329,3 +1338,113 @@ class TestAutoOutcomeRecording:
         assert len(result["failed"]) == 1
         # No outcome should be recorded for dispatch failures
         mock_persistence.save_print_outcome.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Outcome honesty — the scheduler records only what it actually saw
+# ---------------------------------------------------------------------------
+
+class TestOutcomeHonesty:
+    """An idle printer proves a WATCHED job ended cleanly — nothing more.
+
+    The scheduler once recorded 'success' for any active job whose printer
+    went idle: a job that failed to start, or was cancelled at the
+    touchscreen, was laundered into a success row and fed proven-settings.
+    These tests pin the honest mapping and the determined_by stamp.
+    """
+
+    def _scheduler_with_db(self, queue, registry, event_bus, tmp_path):
+        from kiln.persistence import KilnDB
+
+        db = KilnDB(str(tmp_path / "sched.db"))
+        return JobScheduler(
+            queue, registry, event_bus, poll_interval=0.1,
+            max_retries=0, persistence=db,
+        ), db
+
+    def test_watched_job_going_idle_is_observed_success(
+        self, queue, registry, event_bus, tmp_path,
+    ):
+        scheduler, db = self._scheduler_with_db(queue, registry, event_bus, tmp_path)
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+        scheduler.tick()  # dispatch
+
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.PRINTING
+        )
+        scheduler.tick()  # the scheduler SEES the job printing
+
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.IDLE
+        )
+        scheduler.tick()
+
+        row = db.get_print_outcome(job_id)
+        assert row is not None
+        assert row["outcome"] == "success"
+        assert row["determined_by"] == "observed"
+
+    def test_never_seen_printing_records_unknown_not_success(
+        self, queue, registry, event_bus, tmp_path,
+    ):
+        scheduler, db = self._scheduler_with_db(queue, registry, event_bus, tmp_path)
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+        scheduler.tick()  # dispatch; adapter still reports IDLE
+
+        result = scheduler.tick()
+
+        # Queue lifecycle is unchanged -- the job leaves the active set...
+        assert job_id in result["completed"]
+        # ...but the LEARNING record is an honest unknown, never a guess.
+        row = db.get_print_outcome(job_id)
+        assert row is not None
+        assert row["outcome"] == "unknown"
+        assert row["determined_by"] == "inferred"
+
+    def test_error_state_records_failed(
+        self, queue, registry, event_bus, tmp_path,
+    ):
+        scheduler, db = self._scheduler_with_db(queue, registry, event_bus, tmp_path)
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+        scheduler.tick()
+
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.ERROR
+        )
+        scheduler.tick()
+
+        row = db.get_print_outcome(job_id)
+        assert row is not None
+        assert row["outcome"] == "failed"
+        assert row["determined_by"] == "observed"
+
+    def test_decided_row_is_never_overwritten(
+        self, queue, registry, event_bus, tmp_path,
+    ):
+        """An agent's decided verdict outranks the scheduler's inference."""
+        scheduler, db = self._scheduler_with_db(queue, registry, event_bus, tmp_path)
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+        scheduler.tick()
+
+        db.save_print_outcome({
+            "job_id": job_id, "printer_name": "printer-1",
+            "outcome": "failed", "agent_id": "mcp",
+            "determined_by": "user_reported",
+        })
+
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.IDLE
+        )
+        scheduler.tick()
+
+        row = db.get_print_outcome(job_id)
+        assert row["outcome"] == "failed"
+        assert row["determined_by"] == "user_reported"
