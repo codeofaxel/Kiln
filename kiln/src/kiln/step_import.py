@@ -69,9 +69,9 @@ SUBPROCESS_TIMEOUT_S: int = 300
 #:
 #: Everything past the kernel serves cadquery's visualization and solver
 #: features, which STEP→mesh conversion never calls.  ``-novtk`` is the same
-#: OCCT 7.9.3.1.1 build with the VTK linkage dropped; it converts identically
-#: (1612 triangles on the same test part) and about twice as fast.  Nobody
-#: should download a gigabyte to open one STEP file.
+#: OCCT 7.9.3.1.1 build with the VTK linkage dropped; measured 2026-07-27 it
+#: converts byte-identically to the vtk builds on the same test part, about
+#: twice as fast.  Nobody should download a gigabyte to open one STEP file.
 PIP_BACKEND = "cadquery-ocp-novtk"
 
 #: The one command that fixes a local install.
@@ -469,12 +469,30 @@ def _convert_via_gmsh(
     return _parse_subprocess_result(result, "Gmsh")
 
 
-#: Tessellation parameters for the OCP backend, chosen to match what
-#: ``cadquery.exporters.export(..., "STL")`` produces so switching backends
-#: doesn't silently change mesh density.  Verified 2026-07-27 on a filleted
-#: plate with a through hole: cadquery 1032 triangles, OCP 1612 — OCP is the
-#: slightly finer of the two, which is the safe direction to err.
-_OCP_LINEAR_DEFLECTION = 1e-3
+#: Tessellation bounds, set from what the PRINT PIPELINE can express rather
+#: than from any library's default.  Linear deflection caps chordal sag in
+#: mm; the slicer is the floor that matters: PrusaSlicer's default G-code
+#: resolution is 0.0125 mm, so sag below that is discarded before the
+#: printer ever sees it (and FDM positional accuracy, ~±0.1 mm, is another
+#: 8x above).  0.005 keeps the measured sag under that floor — the mesh is
+#: provably never the bottleneck — without paying for fidelity nothing
+#: downstream can print.  Measured 2026-07-27, sphere r=75 mm (the scale
+#: where this bites):
+#:
+#:   linear   triangles   max sag    time    STL size
+#:   0.001      755,246   0.0016 mm  49.4 s   36 MB
+#:   0.005      150,970   0.0068 mm   3.1 s    7 MB   ← this
+#:   0.010       75,380   0.0174 mm   1.0 s    3.6 MB (sag above the floor)
+#:
+#: At 0.001 a single 150 mm sphere costs 16x the time and 5x the mesh for
+#: sag 8x below what the slicer already throws away — and a few such
+#: surfaces in one file walk a conversion into SUBPROCESS_TIMEOUT_S.
+#: Angular deflection (radians) is what guards SMALL features, where the
+#: linear bound relaxes first: at 0.1 rad a Ø22 boss still gets ~60
+#: segments per circle (measured sag 0.002 mm).  Both bounds are passed to
+#: every kernel backend (OCP here, cadquery in
+#: :func:`_convert_via_cadquery`) so backend choice never changes density.
+_OCP_LINEAR_DEFLECTION = 5e-3
 _OCP_ANGULAR_DEFLECTION = 0.1
 
 
@@ -615,16 +633,25 @@ def _convert_via_cadquery(
     solids = result.solids().vals()
     body_count = len(solids) if solids else 1
 
+    # Same tessellation bounds as the OCP backend — see the constants above.
+    # cadquery's own export defaults (tolerance=0.1, angularTolerance=0.1 —
+    # verified against its source 2026-07-27) are coarser on the linear axis
+    # than our bound; passing ours keeps density identical across backends.
+    _tess = {
+        "tolerance": _OCP_LINEAR_DEFLECTION,
+        "angularTolerance": _OCP_ANGULAR_DEFLECTION,
+    }
+
     if merge_bodies or body_count <= 1:
         out_path = str(output_dir / "merged.stl")
-        cq.exporters.export(result, out_path, exportType="STL")
+        cq.exporters.export(result, out_path, exportType="STL", **_tess)
         return [out_path], body_count
     else:
         outputs: list[str] = []
         for i, solid in enumerate(solids):
             out_path = str(output_dir / f"body_{i}.stl")
             ws = cq.Workplane().add(solid)
-            cq.exporters.export(ws, out_path, exportType="STL")
+            cq.exporters.export(ws, out_path, exportType="STL", **_tess)
             outputs.append(out_path)
         return outputs, body_count
 

@@ -688,6 +688,22 @@ def test_configurable_constants():
     assert 30 <= SUBPROCESS_TIMEOUT_S <= 3600
 
 
+def test_ocp_deflection_sits_between_waste_and_visible():
+    """The kernel's chordal sag stays below the slicer's G-code resolution
+    (0.0125 mm — detail finer than that is discarded before the printer sees
+    it) without dropping to values that pay 10x mesh cost for sag nothing
+    downstream can express.  Measured 2026-07-27: a 150 mm sphere at 1e-3
+    is 755k triangles and 49 s; at 5e-3 it is 151k and 3 s with 0.007 mm
+    max sag.  If you change these, re-run that measurement and update the
+    justification table in step_import.py."""
+    from kiln.step_import import _OCP_ANGULAR_DEFLECTION, _OCP_LINEAR_DEFLECTION
+
+    assert 0.001 <= _OCP_LINEAR_DEFLECTION <= 0.0125
+    # Angular (radians) guards small features where the linear bound relaxes
+    # first; 0.2 rad (~11°) is where cylinder facets start to read as flats.
+    assert 0.05 <= _OCP_ANGULAR_DEFLECTION <= 0.2
+
+
 # ---------------------------------------------------------------------------
 # 26. FreeCAD failure falls through to Gmsh
 # ---------------------------------------------------------------------------
@@ -1344,3 +1360,75 @@ def test_ocp_runs_out_of_process(monkeypatch, sample_step_file, tmp_dir):
 
     assert seen["cmd"][0] == _sys.executable, "must use Kiln's own interpreter"
     assert seen["timeout"] == SUBPROCESS_TIMEOUT_S
+
+
+# ---------------------------------------------------------------------------
+# 31. The OTHER validation pipeline door: validate_and_prepare_mesh.
+#
+#     Found 2026-07-27 by handing every mesh-path tool a real STEP file:
+#     this one accepted it, tried to REPAIR the B-rep as a mesh, and
+#     reported a valid CAD part as "non-manifold, could not be repaired,
+#     0/100 grade F" — a misdiagnosis with the honest "unsupported type"
+#     buried in the error list.  Same class of bug validate_and_prepare
+#     had; same fix: convert at the door, through ensure_mesh_path.
+# ---------------------------------------------------------------------------
+
+
+def _generation_tools():
+    from kiln.plugins.generation_tools import _GenerationToolsPlugin
+
+    tools: dict[str, object] = {}
+    mcp = MagicMock()
+
+    def mock_tool(*args, **kwargs):
+        def deco(fn):
+            tools[kwargs.get("name", fn.__name__)] = fn
+            return fn
+        return deco
+
+    mcp.tool = mock_tool
+    _GenerationToolsPlugin().register(mcp)
+    return tools
+
+
+def test_validate_and_prepare_mesh_refuses_step_without_backend(
+    monkeypatch, sample_step_file
+):
+    """No backend: a structured NO_BACKEND refusal with a remedy — never a
+    fabricated 'could not be repaired' verdict about a valid CAD file."""
+    _no_backends(monkeypatch)
+    monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
+
+    result = _generation_tools()["validate_and_prepare_mesh"](
+        file_path=str(sample_step_file)
+    )
+    if isinstance(result, list):
+        result = next(e for e in result if isinstance(e, dict))
+
+    assert result.get("success") is not True
+    text = str(result)
+    assert "non-manifold" not in text.lower()
+    assert result["remedy"]["actionable_by_caller"] is True
+    assert "install-step-backend" in result["remedy"]["command"]
+
+
+def test_validate_and_prepare_mesh_converts_a_real_step(real_kernel, tmp_dir):
+    """With the kernel present the door converts and judges the real mesh."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    step_path = tmp_dir / "box.step"
+    box = BRepPrimAPI_MakeBox(20.0, 10.0, 5.0).Shape()
+    writer = STEPControl_Writer()
+    writer.Transfer(box, STEPControl_StepModelType.STEPControl_AsIs)
+    writer.Write(str(step_path))
+
+    result = _generation_tools()["validate_and_prepare_mesh"](
+        file_path=str(step_path)
+    )
+    if isinstance(result, list):
+        result = next(e for e in result if isinstance(e, dict))
+
+    assert result["success"] is True
+    assert result["passed"] is True, result.get("message")
+    assert "Converted from STEP" in result.get("step_conversion", "")

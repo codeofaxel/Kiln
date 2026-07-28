@@ -349,7 +349,12 @@ class _GenerationToolsPlugin:
             path (which may differ from the input if repairs created a new file).
 
             Args:
-                file_path: Path to an STL, OBJ, or GLB file.
+                file_path: Path to an STL, OBJ, GLB, or STEP/STP file.
+                    STEP is converted to a mesh on the way in; if no
+                    converter is installed the call returns ``NO_BACKEND``
+                    with a ``remedy`` — read it rather than guessing whether
+                    the user can fix this (``kiln install-step-backend``) or
+                    is on a hosted server with nothing to install.
                 material: Filament material for printability analysis (default PLA).
                 nozzle_diameter: Printer nozzle diameter in mm (default 0.4).
                 layer_height: Print layer height in mm (default 0.2).
@@ -363,6 +368,29 @@ class _GenerationToolsPlugin:
                 min_printability_score: Minimum score (0-100) to pass (default 40).
             """
             import kiln.server as _srv
+
+            # A STEP file is B-rep, not a mesh.  Without this the pipeline
+            # tried to REPAIR the CAD file as a mesh and reported a valid
+            # part as "non-manifold, could not be repaired, 0/100" — a
+            # misdiagnosis, with the honest "unsupported type" buried in the
+            # error list.  Convert first, through the same door every other
+            # pipeline uses, and the verdict below is about the real mesh.
+            from kiln.step_import import NoBackendError, ensure_mesh_path
+
+            step_note: str | None = None
+            try:
+                file_path, step_note = ensure_mesh_path(file_path)
+            except NoBackendError as exc:
+                err = _srv._error_dict(str(exc), code="NO_BACKEND")
+                # Structured remedy: tells the agent whether the user can fix
+                # this (kiln install-step-backend) or is on a hosted server.
+                err["remedy"] = exc.remedy
+                return err
+            except Exception as exc:
+                return _srv._error_dict(
+                    f"STEP conversion failed: {exc}",
+                    code="STEP_CONVERSION_FAILED",
+                )
 
             try:
                 from kiln.mesh_validation_pipeline import run_validation_pipeline
@@ -399,6 +427,7 @@ class _GenerationToolsPlugin:
                     "passed": result.passed,
                     "result": result.to_dict(),
                     "message": result.summary,
+                    **({"step_conversion": step_note} if step_note else {}),
                     **(
                         {
                             "bed_size_source": "printer_intelligence",
