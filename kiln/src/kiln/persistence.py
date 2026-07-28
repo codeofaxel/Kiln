@@ -3463,14 +3463,22 @@ class KilnDB:
 # ---------------------------------------------------------------------------
 
 _db: KilnDB | None = None
+_db_lock = threading.Lock()
 
 
 def get_db() -> KilnDB:
     """Return the module-level :class:`KilnDB` singleton.
 
-    The instance is lazily created on first call.
+    The instance is lazily created on first call, under a lock: two
+    threads reaching an uninitialized DB at the same time (a background
+    worker plus the caller that spawned it) would otherwise each build a
+    ``KilnDB`` and run schema setup on the same file, and the loser gets
+    "database is locked" — a failure that lands in whichever feature
+    happened to be on the background thread.
     """
     global _db
     if _db is None:
-        _db = KilnDB()
+        with _db_lock:
+            if _db is None:
+                _db = KilnDB()
     return _db

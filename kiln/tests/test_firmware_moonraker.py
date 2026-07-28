@@ -50,6 +50,27 @@ def _mock_response(
     return resp
 
 
+def _by_path(routes: dict[str, mock.MagicMock]):
+    """Serve mocked responses by ENDPOINT rather than by call order.
+
+    A conversation that opens with a status call can no longer be
+    scripted as an ordered list: the first connected status also arms the
+    one-shot print-history import, which fetches
+    ``/server/history/list`` on its own thread.  Routing by path keeps
+    each test asserting what it means (this endpoint answered this) and
+    leaves the extra request harmless — it gets an empty history.
+    """
+    empty_history = _mock_response(json_data={"result": {"count": 0, "jobs": []}})
+
+    def _route(method: str, url: str, **_kwargs: Any) -> mock.MagicMock:
+        for fragment, response in routes.items():
+            if fragment in url:
+                return response
+        return empty_history
+
+    return _route
+
+
 # ---------------------------------------------------------------------------
 # get_firmware_status
 # ---------------------------------------------------------------------------
@@ -230,7 +251,11 @@ class TestMoonrakerUpdateFirmware:
 
         with mock.patch.object(
             adapter._session, "request",
-            side_effect=[info_resp, obj_resp, update_resp],
+            side_effect=_by_path({
+                "/printer/info": info_resp,
+                "/printer/objects/query": obj_resp,
+                "/machine/update/": update_resp,
+            }),
         ):
             result = adapter.update_firmware()
 
@@ -250,7 +275,11 @@ class TestMoonrakerUpdateFirmware:
 
         with mock.patch.object(
             adapter._session, "request",
-            side_effect=[info_resp, obj_resp, update_resp],
+            side_effect=_by_path({
+                "/printer/info": info_resp,
+                "/printer/objects/query": obj_resp,
+                "/machine/update/": update_resp,
+            }),
         ):
             result = adapter.update_firmware(component="klipper")
 
