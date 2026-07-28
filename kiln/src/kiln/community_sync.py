@@ -9,13 +9,23 @@ Only geometric signatures, printer model, material, settings hash,
 outcome, and failure mode are shared.  No file paths, no user IDs,
 no PII.
 
-Two directions:
+Two directions, and they do NOT use the same door:
 
-* :func:`sync_community_print` / :func:`sync_community_print_async` —
-  push local outcomes to the community table.
-* :func:`fetch_community_insights` — pull aggregate failure statistics
-  for a (printer_model, material) pair.  Used at generation time to
-  seed printer context when local history is sparse.
+* **Contribute** — :func:`sync_community_print` /
+  :func:`sync_community_print_async` post one anonymized outcome
+  straight to the community table with the publishable key.  Every
+  install does this, on every tier; nothing here is gated.
+* **Read back** — :func:`fetch_community_insights` and
+  :func:`fetch_community_insight_for_signature` ask the Kiln API for a
+  *computed aggregate*, authenticated as this machine.  Nobody reads
+  the raw table: the server holds the credentials, reduces the matching
+  rows to counts and rates, and returns only that.
+
+Every read degrades to ``None`` — signed out, offline, or a plan that
+doesn't include community insights all land in the same place, and every
+caller already treats ``None`` as "use local knowledge alone".  Community
+data has always been a bonus layer on top of Kiln's own answer, never a
+prerequisite for one.
 """
 
 from __future__ import annotations
@@ -31,15 +41,24 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 _SUPABASE_URL = "https://nomzokpscfshjjzezplr.supabase.co"
-_SUPABASE_ANON_KEY = "sb_publishable_ZCJyEL0qeveSwgqv7dry3A_YI26Yw6S"  # PLACEHOLDER: RLS-gated publishable key, safe in client code
+# CONTRIBUTION ONLY — the publishable key inserts an anonymized outcome and
+# nothing else.  It is deliberately absent from every read path in this
+# module: reads go to the Kiln API (see ``_INSIGHT_ROUTE``), which holds the
+# credentials the corpus actually answers to.  Pinned by
+# ``tests/test_community_sync.py::test_publishable_key_is_contribution_only``.
+_SUPABASE_ANON_KEY = "sb_publishable_ZCJyEL0qeveSwgqv7dry3A_YI26Yw6S"  # PLACEHOLDER: RLS-gated publishable key, insert-only
+
+# Read side — the Kiln API computes the aggregate; we never see rows.
+_HOSTED_API_URL = "https://api.kiln3d.com"
+_INSIGHT_ROUTE = "/api/community/insight"
+_STATS_ROUTE = "/api/community/stats"
 
 # Pull-side cache: community aggregates rarely change within an hour,
 # and network hops on every generation would be a silent performance
 # tax.  Cache to disk with a short TTL; skip the network on cache hit.
 # Resolved at call time so ``HOME`` overrides (tests, sandboxes) work.
 _COMMUNITY_CACHE_TTL_SECONDS = 3600  # 1 hour
-_COMMUNITY_FETCH_LIMIT = 500
-_COMMUNITY_FETCH_TIMEOUT = 5.0
+_COMMUNITY_FETCH_TIMEOUT = 8.0
 
 
 def _community_cache_dir() -> Path:
@@ -149,9 +168,71 @@ def sync_community_print_async(record: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Pull side — aggregate community insights for a (printer_model, material)
-# pair.  Called at generation time when local outcome history is sparse.
+# Pull side — the Kiln API answers one scoped question with a computed
+# aggregate.  No raw rows, no table-level access, no key in this process
+# that could read the corpus directly.
 # ---------------------------------------------------------------------------
+
+
+def _api_base() -> str:
+    return (os.environ.get("KILN_API_URL") or _HOSTED_API_URL).rstrip("/")
+
+
+def _ask_community_api(route: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+    """POST one scoped question to the Kiln API; return the aggregate.
+
+    ``None`` covers every way this can come back empty — no sign-in, no
+    network, a plan without community insights, or a server that had
+    nothing to say.  They are the same outcome for a caller: use what you
+    know locally.  Nothing here raises, and nothing here blocks a print.
+    """
+    try:
+        from kiln.auth_session import resolve_api_bearer
+
+        bearer = resolve_api_bearer().token
+    except Exception:
+        bearer = ""
+    if not bearer:
+        _logger.debug("Community read skipped — no Kiln session on this machine")
+        return None
+
+    try:
+        import urllib.request
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {bearer}",
+            "Accept": "application/json",
+        }
+        try:
+            from kiln.version_check import _current_version
+
+            headers["X-Kiln-Client-Version"] = _current_version()
+        except Exception:
+            pass
+
+        req = urllib.request.Request(
+            f"{_api_base()}{route}",
+            data=json.dumps(payload).encode(),
+            headers=headers,
+            method="POST",
+        )
+        with urllib.request.urlopen(
+            req, timeout=_COMMUNITY_FETCH_TIMEOUT
+        ) as resp:
+            if resp.status >= 300:
+                return None
+            body = json.loads(resp.read().decode())
+    except Exception as exc:
+        # A 403 (plan without community insights) arrives here as an
+        # HTTPError, alongside every offline case — all of them mean the
+        # same thing to a caller, so none of them are worth a warning.
+        _logger.debug("Community read unavailable (non-fatal): %s", exc)
+        return None
+
+    if not isinstance(body, dict) or not body.get("has_data"):
+        return None
+    return body
 
 
 def _cache_path(printer_model: str, material: str) -> Path:
@@ -190,15 +271,18 @@ def fetch_community_insights(
 ) -> dict[str, Any] | None:
     """Fetch aggregate community failure statistics for a printer+material.
 
-    Queries Supabase for recent community prints matching the given
-    printer model and material, aggregates the failure-mode distribution,
-    and returns a summary dict.  Disk-cached for
+    Asks the Kiln API for a computed summary of community prints matching
+    this printer model and material.  Disk-cached for
     ``_COMMUNITY_CACHE_TTL_SECONDS`` so repeated generation calls within
     the same hour do not re-hit the network.
 
-    Returns ``None`` when opt-in is disabled, the network fails, or no
-    matching community data exists — callers should always tolerate
-    ``None`` and fall back to local/static sources.
+    Returns ``None`` when sharing is off, this machine has no Kiln
+    session, the network fails, the plan does not include community
+    insights, or nobody has printed anything like this yet.  Callers
+    should always tolerate ``None`` and fall back to local/static
+    sources — they already do.
+
+    Community insights come with Kiln Pro (https://kiln3d.com/pricing).
 
     :param printer_model: e.g. ``"bambu_x1c"``, ``"prusa_mk4"``.
     :param material: e.g. ``"PLA"``, ``"PETG"``.
@@ -222,64 +306,70 @@ def fetch_community_insights(
         if cached is not None:
             return cached
 
-    try:
-        import urllib.parse
-        import urllib.request
-
-        params = urllib.parse.urlencode({
-            "printer_model": f"eq.{printer_model}",
-            "material": f"eq.{material}",
-            "select": "failure_mode,outcome",
-            "limit": str(_COMMUNITY_FETCH_LIMIT),
-        })
-        url = f"{_SUPABASE_URL}/rest/v1/community_prints?{params}"
-        req = urllib.request.Request(
-            url,
-            headers={
-                "apikey": _SUPABASE_ANON_KEY,
-                "Authorization": f"Bearer {_SUPABASE_ANON_KEY}",
-                "Accept": "application/json",
-            },
-            method="GET",
-        )
-
-        with urllib.request.urlopen(req, timeout=_COMMUNITY_FETCH_TIMEOUT) as resp:
-            if resp.status >= 300:
-                _logger.debug("Community fetch status: %s", resp.status)
-                return None
-            rows = json.loads(resp.read().decode())
-
-    except Exception as exc:
-        _logger.debug("Community fetch failed (non-fatal): %s", exc)
-        return None
-
-    if not isinstance(rows, list) or not rows:
-        return None
-
-    # Aggregate failure_mode counts (only from rows that actually failed).
-    failure_counts: dict[str, int] = {}
-    success_count = 0
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        if row.get("outcome") == "success":
-            success_count += 1
-            continue
-        fm = row.get("failure_mode")
-        if fm:
-            failure_counts[fm] = failure_counts.get(fm, 0) + 1
-
-    # Sort by count desc so downstream consumers can trust iteration order.
-    ordered = dict(
-        sorted(failure_counts.items(), key=lambda kv: kv[1], reverse=True)
+    body = _ask_community_api(
+        _INSIGHT_ROUTE,
+        {"printer_model": printer_model, "material": material},
     )
+    if body is None:
+        return None
 
+    breakdown = body.get("failure_breakdown")
     result = {
-        "failure_breakdown": ordered,
-        "sample_size": len(rows),
-        "success_count": success_count,
+        "failure_breakdown": breakdown if isinstance(breakdown, dict) else {},
+        "sample_size": int(body.get("sample_size") or 0),
+        "success_count": int(body.get("success_count") or 0),
         "source": "community",
         "fetched_at": time.time(),
     }
     _write_cache(cache_path, result)
     return result
+
+
+def fetch_community_insight_for_signature(
+    geometric_signature: str,
+) -> dict[str, Any] | None:
+    """Community aggregate for ONE model geometry, or ``None``.
+
+    The returned dict matches what
+    :func:`kiln.community_registry.get_community_insight` produces from
+    local history — same fields, same meaning — so a caller can present
+    either without special-casing where it came from.
+
+    ``None`` covers every empty outcome: sharing off, no Kiln session,
+    offline, a plan without community insights, or nobody has printed
+    this shape yet.  Community insights come with Kiln Pro
+    (https://kiln3d.com/pricing).
+    """
+    if not community_opt_in_enabled():
+        return None
+    signature = (geometric_signature or "").strip()
+    if not signature:
+        return None
+
+    body = _ask_community_api(
+        _INSIGHT_ROUTE, {"geometric_signature": signature}
+    )
+    if body is None:
+        return None
+
+    insight = body.get("insight")
+    if not isinstance(insight, dict):
+        return None
+    groups = body.get("top_settings_groups")
+    if isinstance(groups, list) and groups:
+        insight = {**insight, "top_settings_groups": groups}
+    return insight
+
+
+def fetch_community_corpus_stats() -> dict[str, Any] | None:
+    """Totals for the whole community pool, or ``None``.
+
+    Counts only — how many prints the pool holds and how often they
+    worked.  Available to anyone signed in, on any plan: knowing the pool
+    is real shouldn't cost anything.
+    """
+    body = _ask_community_api(_STATS_ROUTE, {})
+    if body is None:
+        return None
+    stats = body.get("stats")
+    return stats if isinstance(stats, dict) else None

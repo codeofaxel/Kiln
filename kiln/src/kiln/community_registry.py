@@ -157,13 +157,18 @@ def get_community_insight(geometric_signature: str) -> CommunityInsight | None:
         return None
 
     records = [dict(row) for row in rows]
-    return _aggregate_records(geometric_signature, records)
+    return aggregate_community_records(geometric_signature, records)
 
 
-def _aggregate_records(
+def aggregate_community_records(
     signature: str, records: list[dict[str, Any]],
 ) -> CommunityInsight:
-    """Aggregate a list of print record dicts into a CommunityInsight."""
+    """Aggregate a list of print record dicts into a CommunityInsight.
+
+    The one aggregator for this shape.  Local history and the hosted
+    community aggregate both reduce through it, so an answer means the
+    same thing and carries the same fields wherever it was computed.
+    """
     total = len(records)
     success_count = 0
     printer_stats: dict[str, dict[str, int]] = {}

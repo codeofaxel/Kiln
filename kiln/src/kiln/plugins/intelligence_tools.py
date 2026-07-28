@@ -17,6 +17,30 @@ from typing import Any
 
 _logger = logging.getLogger(__name__)
 
+_PRICING_URL = "https://kiln3d.com/pricing"
+
+
+def _community_layer(community_insight: dict[str, Any] | None) -> dict[str, Any]:
+    """Describe the community layer's state in one honest block.
+
+    Present whether or not community data arrived, so a caller never has
+    to guess between "nobody has printed this" and "this plan doesn't
+    include it" — and so the absence reads as an invitation rather than
+    an error.
+    """
+    if community_insight is not None:
+        return {
+            "available": True,
+            "sample_size": community_insight.get("total_prints", 0),
+        }
+    return {
+        "available": False,
+        "note": (
+            "How this shape printed for everyone else comes with Kiln Pro."
+        ),
+        "learn_more": _PRICING_URL,
+    }
+
 
 class _IntelligenceToolsPlugin:
     """Print intelligence tools — DNA, community registry, material routing.
@@ -379,11 +403,23 @@ class _IntelligenceToolsPlugin:
 
         @mcp.tool()
         def get_community_insight(geometric_signature: str) -> dict:
-            """Get community aggregated data for a model geometry.
+            """Get aggregated print data for a model geometry.
 
-            Returns success rates, top printer models, top materials,
-            recommended settings, and common failure modes from the
-            community registry.
+            Two layers, and the tool always returns whatever it can get:
+
+            * ``insight`` — what THIS install has printed of this
+              geometry: success rate, printers, materials, settings,
+              failure modes.  Always available, no account needed.
+            * ``community`` — the same picture across everyone who has
+              printed this shape, so you can start from what already
+              worked.  Community insights come with Kiln Pro
+              (https://kiln3d.com/pricing); without them ``community``
+              reports that it isn't available and the local layer is
+              unaffected.
+
+            Never fails because of the network or the plan: no
+            connection, no account, or a plan without community
+            insights all still return the local answer.
 
             Args:
                 geometric_signature: Geometric signature to look up.
@@ -395,37 +431,81 @@ class _IntelligenceToolsPlugin:
                     get_community_insight as _get_insight,
                 )
 
-                insight = _get_insight(geometric_signature)
-                if insight is None:
-                    return {
-                        "success": True,
-                        "has_data": False,
-                        "message": "No community data found for this geometry.",
-                    }
+                local = _get_insight(geometric_signature)
+                local_dict = local.to_dict() if local is not None else None
 
-                return {
+                community_dict = None
+                try:
+                    from kiln.community_sync import (
+                        fetch_community_insight_for_signature,
+                    )
+
+                    community_dict = fetch_community_insight_for_signature(
+                        geometric_signature
+                    )
+                except Exception:
+                    # A community read never costs the caller their local
+                    # answer — this is enrichment, not the substance.
+                    _logger.debug(
+                        "Community insight unavailable", exc_info=True,
+                    )
+
+                result: dict = {
                     "success": True,
-                    "has_data": True,
-                    "insight": insight.to_dict(),
+                    "has_data": bool(local_dict or community_dict),
+                    "community": _community_layer(community_dict),
                 }
+                if local_dict is not None:
+                    result["insight"] = local_dict
+                if community_dict is not None:
+                    result["community_insight"] = community_dict
+                if not result["has_data"]:
+                    result["message"] = (
+                        "No print data found for this geometry yet."
+                    )
+                return result
             except Exception as exc:
                 _logger.exception("Unexpected error in get_community_insight")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool()
         def community_stats() -> dict:
-            """Get overall community registry statistics.
+            """Get overall print-registry statistics.
 
-            Returns total records, unique models, printers, materials,
-            and overall success rate.
+            ``stats`` covers this install: total records, unique models,
+            printers, materials, and overall success rate.  ``community``
+            adds the size of the shared pool everyone contributes to —
+            counts only, available to anyone signed in.
+
+            Works offline: the local numbers are always returned.
             """
             import kiln.server as _srv
 
             try:
                 from kiln.community_registry import get_community_stats
 
-                stats = get_community_stats()
-                return {"success": True, "stats": stats.to_dict()}
+                result: dict = {
+                    "success": True,
+                    "stats": get_community_stats().to_dict(),
+                }
+                try:
+                    from kiln.community_sync import fetch_community_corpus_stats
+
+                    corpus = fetch_community_corpus_stats()
+                except Exception:
+                    corpus = None
+                    _logger.debug("Community stats unavailable", exc_info=True)
+                if corpus is not None:
+                    result["community"] = {"available": True, **corpus}
+                else:
+                    result["community"] = {
+                        "available": False,
+                        "note": (
+                            "Community totals need a Kiln account and a "
+                            "connection. Sign in with `kiln signin`."
+                        ),
+                    }
+                return result
             except Exception as exc:
                 _logger.exception("Unexpected error in community_stats")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")

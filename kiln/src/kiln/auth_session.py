@@ -303,3 +303,47 @@ def get_paired_access_token(
 ) -> str:
     """Bearer string or ``""`` — for call sites that only want the token."""
     return resolve_session_bearer(refresh_margin_s).token
+
+
+@dataclass(frozen=True)
+class ApiBearer:
+    """Which credential this machine should present to the Kiln API.
+
+    ``state`` is ``"license"`` for an operator-supplied license key, or the
+    :class:`SessionBearer` state for a paired sign-in session.  ``token``
+    is empty only for ``needs_signin`` / ``signed_out``, and ``detail``
+    then carries the one sentence that tells the user how to fix it.
+    """
+
+    token: str
+    state: str
+    detail: str = ""
+
+
+def resolve_api_bearer(
+    refresh_margin_s: float = DEFAULT_REFRESH_MARGIN_S,
+) -> ApiBearer:
+    """The bearer for ANY authenticated call to the Kiln API.
+
+    One resolver for every caller — hosted tool calls, community reads,
+    anything that follows.  Resolution order:
+
+      1. ``KILN_LICENSE_KEY`` — an operator-supplied license wins, and
+         needs no refresh.
+      2. The paired sign-in session (``kiln signin`` / ``kiln pair``),
+         transparently refreshed near expiry by
+         :func:`resolve_session_bearer`.
+      3. Nothing — ``token`` is empty and ``state`` says which kind of
+         nothing, so a caller can tell "never signed in" from "session
+         expired" and say something useful either way.
+
+    Never raises.
+    """
+    license_key = os.environ.get("KILN_LICENSE_KEY", "").strip()
+    if license_key:
+        return ApiBearer(token=license_key, state="license")
+
+    session = resolve_session_bearer(refresh_margin_s)
+    return ApiBearer(
+        token=session.token, state=session.state, detail=session.detail
+    )
