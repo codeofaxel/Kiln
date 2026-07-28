@@ -57,6 +57,18 @@ logger = logging.getLogger(__name__)
 _MAX_ATTEMPTS = 8
 _DRAIN_BATCH = 50
 
+# One drain call keeps claiming batches until the queue is empty or it has
+# moved this many rows.  A ceiling, not a target: it bounds one startup
+# drain's work so a huge backlog can't hold the thread forever, while still
+# clearing thousands of rows per run instead of 50.
+_DRAIN_MAX_ROWS = 5000
+
+# The outbox is a queue, not an archive.  A delivered row is dead weight the
+# moment it ships; a row that exhausted its retries is evidence of an outage,
+# so it is kept far longer before being reclaimed.
+_DELIVERED_RETENTION_S = 24 * 60 * 60          # 1 day
+_DEAD_RETENTION_S = 30 * 24 * 60 * 60          # 30 days
+
 #: The default contribution kind — anonymous community print outcomes.
 DEFAULT_KIND = "community_print"
 
@@ -220,11 +232,103 @@ def _count_pending() -> int:
         ).fetchone()["n"]
 
 
-def drain(batch: int = _DRAIN_BATCH) -> dict[str, int]:
+def ensure_senders() -> None:
+    """Give every contribution kind a chance to register its sender.
+
+    A sender is registered as an import side effect of the module that owns
+    the kind, and kiln-pro's federation modules are imported lazily — inside
+    tool bodies — so a drain that ran at startup found no sender for their
+    kinds and failed every row it claimed.  Asking for registration before
+    draining is the fix; leaving it to import order is what broke.
+
+    No-op when kiln-pro isn't installed: free installs have exactly the one
+    built-in sender and nothing to add.
+
+    Suppressed under a test/CI runner, on the ``daily_stats`` precedent: a
+    registered sender POSTs to the real federation endpoint, so auto-wiring
+    one during a suite run would let any test that drains a queue publish to
+    production. (It did: a drain written to verify this very fix put 30 junk
+    rows in ``community_recoveries`` on 2026-07-28.) A test that wants a
+    sender registers its own stub — which is what a test should be asserting
+    against anyway.
+    """
+    if _registration_suppressed():
+        logger.debug("community outbox: sender registration suppressed (test/CI)")
+        return
+    try:
+        from kiln_pro.bridge import pro_features
+
+        pro_features.register_community_senders()
+    except Exception as exc:  # noqa: BLE001 — no kiln-pro, or a broken module
+        logger.debug("community outbox: pro senders unavailable: %s", exc)
+
+
+def _registration_suppressed() -> bool:
+    """True when a test/CI runner would otherwise wire up REAL senders.
+
+    Same env list as :func:`kiln.daily_stats._recording_suppressed`, applied
+    at the registration side.
+    """
+    try:
+        from kiln.heartbeat import _is_ci_environment
+
+        return _is_ci_environment()
+    except Exception:  # noqa: BLE001 — heartbeat absent, fall back to env
+        return any(os.environ.get(v) for v in ("CI", "PYTEST_CURRENT_TEST"))
+
+
+def purge_delivered(retain_seconds: float = _DELIVERED_RETENTION_S) -> int:
+    """Drop rows that are done with — delivered, or dead past the retry cap.
+
+    The outbox is a QUEUE, not an archive: nothing read these rows again once
+    they shipped, but nothing deleted them either, so the file grew forever
+    (2026-07-28: 21,195 delivered rows and 7,020 dead ones still on disk,
+    25 MB in a folder that is supposed to hold the user's work).
+
+    Dead rows are kept far longer than delivered ones — they are the evidence
+    that sends were failing, and deleting them promptly would erase the only
+    on-disk trace of an outage.
+    """
+    cutoff = time.time() - retain_seconds
+    dead_cutoff = time.time() - _DEAD_RETENTION_S
+    try:
+        with _db_lock:
+            conn = _db()
+            cur = _retry_on_locked(
+                lambda: conn.execute(
+                    "DELETE FROM community_outbox "
+                    "WHERE (sent_at IS NOT NULL AND sent_at < ?) "
+                    "   OR (sent_at IS NULL AND attempts >= ? AND created_at < ?)",
+                    (cutoff, _MAX_ATTEMPTS, dead_cutoff),
+                )
+            )
+            removed = cur.rowcount or 0
+            _retry_on_locked(conn.commit)
+        if removed:
+            logger.debug("community outbox: purged %d finished row(s)", removed)
+        return removed
+    except Exception as exc:  # noqa: BLE001 — housekeeping never breaks a drain
+        logger.debug("community outbox purge failed: %s", exc)
+        return 0
+
+
+def drain(batch: int = _DRAIN_BATCH, *, max_rows: int = _DRAIN_MAX_ROWS) -> dict[str, int]:
     """Send queued contributions, dispatching each to its kind's sender.
 
+    Drains REPEATEDLY until the queue is empty, this run has moved
+    ``max_rows``, or a whole batch fails.  One batch per call was the other
+    half of the 2026-07-28 stall: at 50 rows per server start, a 47,809-row
+    backlog needed ~956 restarts to clear while new rows kept arriving, so
+    the oldest rows were rechewed forever and most were never claimed once.
+
+    Stopping on a fully-failed batch is deliberate: when the endpoint is
+    down or the machine is offline, walking the whole backlog would burn
+    every row's retry budget in a single pass — exactly how a transient
+    outage turned into 7,020 permanently dead rows.  Progress continues,
+    failure backs off.
+
     Best-effort: a failed send stays queued (attempts incremented) for the next
-    drain.  Never raises.  Returns ``{sent, failed, remaining}``.
+    drain.  Never raises.  Returns ``{sent, failed, remaining, purged}``.
 
     Concurrency: the network send runs with NO lock held, so a slow/offline
     send never blocks ``enqueue``.  ``_db_lock`` is taken only to claim the
@@ -234,80 +338,103 @@ def drain(batch: int = _DRAIN_BATCH) -> dict[str, int]:
     """
     if not _drain_lock.acquire(blocking=False):
         # Another drain owns the queue right now — don't double-send.
-        return {"sent": 0, "failed": 0, "remaining": _count_pending()}
+        return {"sent": 0, "failed": 0, "remaining": _count_pending(), "purged": 0}
     try:
+        ensure_senders()
         sent = failed = 0
-        # 1) Claim a batch under a short lock — no network here.
-        with _db_lock:
-            conn = _db()
-            rows = _retry_on_locked(
-                lambda: conn.execute(
-                    "SELECT id, dedupe_key, payload, attempts, send_id, kind "
-                    "FROM community_outbox "
-                    "WHERE sent_at IS NULL AND attempts < ? ORDER BY id LIMIT ?",
-                    (_MAX_ATTEMPTS, batch),
-                )
-            ).fetchall()
-
-        # 2) Send each row with NO lock held; record + commit the result per
-        #    row under the lock.  Per-row commit keeps the crash-replay window
-        #    to a single row.
-        for row in rows:
-            ok = False
-            entry = _senders.get(row["kind"])
-            if entry is None:
-                # No sender registered for this kind (e.g. kiln-pro not loaded).
-                # Treat as a failed send so it retries / eventually surfaces as
-                # stuck, rather than silently looping.
-                logger.debug(
-                    "community outbox: no sender for kind=%s (id=%s)",
-                    row["kind"],
-                    row["id"],
-                )
-            else:
-                try:
-                    ok = bool(entry[0](json.loads(row["payload"]), row["send_id"]))
-                except Exception as exc:  # noqa: BLE001 — one bad row must not break the drain
-                    logger.debug("community outbox send error id=%s: %s", row["id"], exc)
-
-            with _db_lock:
-                conn = _db()
-                if ok:
-                    _retry_on_locked(
-                        lambda r=row, c=conn: c.execute(
-                            "UPDATE community_outbox SET sent_at = ? WHERE id = ?",
-                            (time.time(), r["id"]),
-                        )
-                    )
-                    sent += 1
-                else:
-                    _retry_on_locked(
-                        lambda r=row, c=conn: c.execute(
-                            "UPDATE community_outbox SET attempts = attempts + 1, "
-                            "last_error = ? WHERE id = ?",
-                            ("send failed", r["id"]),
-                        )
-                    )
-                    failed += 1
-                    if row["attempts"] + 1 >= _MAX_ATTEMPTS:
-                        # First crossing into "stuck": surface it once to the
-                        # logs.  Maintainer signal (federation endpoint down?),
-                        # never the user.  Only one drain runs at a time, so
-                        # row["attempts"]+1 is the post-update value.
-                        logger.warning(
-                            "community outbox row stuck after %d attempts "
-                            "(kind=%s, dedupe_key=%s) — sends are failing; check "
-                            "the federation endpoint, not the user.",
-                            _MAX_ATTEMPTS,
-                            row["kind"],
-                            row["dedupe_key"],
-                        )
-                _retry_on_locked(conn.commit)
-
-        return {"sent": sent, "failed": failed, "remaining": _count_pending()}
+        while sent + failed < max_rows:
+            passed, missed = _drain_one_batch(batch)
+            sent += passed
+            failed += missed
+            if passed == 0:
+                # Nothing moved: either the queue is empty or sends are
+                # failing.  Either way, stop — see the docstring.
+                break
+        purged = purge_delivered()
+        return {
+            "sent": sent,
+            "failed": failed,
+            "remaining": _count_pending(),
+            "purged": purged,
+        }
     finally:
         _drain_lock.release()
 
+
+def _drain_one_batch(batch: int) -> tuple[int, int]:
+    """Claim and send at most *batch* rows.  Returns ``(sent, failed)``.
+
+    Assumes the caller holds ``_drain_lock``.
+    """
+    sent = failed = 0
+    # 1) Claim a batch under a short lock — no network here.
+    with _db_lock:
+        conn = _db()
+        rows = _retry_on_locked(
+            lambda: conn.execute(
+                "SELECT id, dedupe_key, payload, attempts, send_id, kind "
+                "FROM community_outbox "
+                "WHERE sent_at IS NULL AND attempts < ? ORDER BY id LIMIT ?",
+                (_MAX_ATTEMPTS, batch),
+            )
+        ).fetchall()
+
+    # 2) Send each row with NO lock held; record + commit the result per
+    #    row under the lock.  Per-row commit keeps the crash-replay window
+    #    to a single row.
+    for row in rows:
+        ok = False
+        entry = _senders.get(row["kind"])
+        if entry is None:
+            # No sender registered for this kind (e.g. kiln-pro not loaded).
+            # Treat as a failed send so it retries / eventually surfaces as
+            # stuck, rather than silently looping.
+            logger.debug(
+                "community outbox: no sender for kind=%s (id=%s)",
+                row["kind"],
+                row["id"],
+            )
+        else:
+            try:
+                ok = bool(entry[0](json.loads(row["payload"]), row["send_id"]))
+            except Exception as exc:  # noqa: BLE001 — one bad row must not break the drain
+                logger.debug("community outbox send error id=%s: %s", row["id"], exc)
+
+        with _db_lock:
+            conn = _db()
+            if ok:
+                _retry_on_locked(
+                    lambda r=row, c=conn: c.execute(
+                        "UPDATE community_outbox SET sent_at = ? WHERE id = ?",
+                        (time.time(), r["id"]),
+                    )
+                )
+                sent += 1
+            else:
+                _retry_on_locked(
+                    lambda r=row, c=conn: c.execute(
+                        "UPDATE community_outbox SET attempts = attempts + 1, "
+                        "last_error = ? WHERE id = ?",
+                        ("send failed", r["id"]),
+                    )
+                )
+                failed += 1
+                if row["attempts"] + 1 >= _MAX_ATTEMPTS:
+                    # First crossing into "stuck": surface it once to the
+                    # logs.  Maintainer signal (federation endpoint down?),
+                    # never the user.  Only one drain runs at a time, so
+                    # row["attempts"]+1 is the post-update value.
+                    logger.warning(
+                        "community outbox row stuck after %d attempts "
+                        "(kind=%s, dedupe_key=%s) — sends are failing; check "
+                        "the federation endpoint, not the user.",
+                        _MAX_ATTEMPTS,
+                        row["kind"],
+                        row["dedupe_key"],
+                    )
+            _retry_on_locked(conn.commit)
+
+    return sent, failed
 
 def _safe_drain() -> None:
     try:

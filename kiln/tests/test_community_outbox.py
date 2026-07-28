@@ -60,7 +60,10 @@ def test_drain_sends_and_marks_sent(ob):
     with mock.patch("kiln.community_sync.sync_community_print", return_value=True) as send:
         result = ob.drain()
     send.assert_called_once()
-    assert result == {"sent": 1, "failed": 0, "remaining": 0}
+    # ``purged`` joined the result when the drain started reclaiming
+    # delivered rows; a row sent just now is well inside the retention
+    # window, so nothing is reclaimed here.
+    assert result == {"sent": 1, "failed": 0, "remaining": 0, "purged": 0}
     assert ob.status() == {"pending": 0, "sent": 1, "stuck": 0, "total": 1}
 
 
@@ -263,3 +266,103 @@ def test_unknown_kind_counts_as_failed_not_silently_looped(ob):
     assert result["sent"] == 0
     assert result["failed"] == 1
     assert ob.status()["pending"] == 1
+
+
+# ---------------------------------------------------------------------------
+# The 2026-07-28 stall — a queue that grew for two months and never drained
+# ---------------------------------------------------------------------------
+#
+# 69,004 rows, 47,809 never delivered.  Two bugs compounded: the drain sent
+# one batch of 50 per server start (so most rows were never even claimed),
+# and kiln-pro's federation senders register as an import side effect of
+# modules nothing imported at boot (so every row it DID claim failed).
+
+
+def test_drain_clears_a_backlog_bigger_than_one_batch(ob):
+    """One batch per call is why 47,809 rows sat for two months."""
+    ob.register_sender("bulk", lambda payload, send_id: True)
+    for i in range(320):  # > 6 batches of 50
+        ob.enqueue(f"bulk-{i}", {"i": i}, kind="bulk")
+
+    result = ob.drain()
+
+    assert result["sent"] == 320
+    assert result["remaining"] == 0
+
+
+def test_drain_backs_off_instead_of_burning_every_retry(ob):
+    """An outage must not spend the whole backlog's retry budget in one pass.
+
+    Walking a failing queue to the end is how a transient outage turned into
+    7,020 permanently-dead rows.  One failed batch, then stop.
+    """
+    ob.register_sender("down", lambda payload, send_id: False)
+    for i in range(300):
+        ob.enqueue(f"down-{i}", {"i": i}, kind="down")
+
+    result = ob.drain(batch=50)
+
+    assert result["sent"] == 0
+    assert result["failed"] == 50, "should stop after one failed batch, not walk 300"
+    assert result["remaining"] == 300  # still queued, retryable
+
+
+def test_a_kind_with_no_sender_does_not_strand_other_kinds(ob):
+    """The rows that failed were recovery rows; print rows had a sender."""
+    ob.register_sender("has_sender", lambda payload, send_id: True)
+    for i in range(10):
+        ob.enqueue(f"orphan-{i}", {"i": i}, kind="no_sender_registered")
+        ob.enqueue(f"fine-{i}", {"i": i}, kind="has_sender")
+
+    result = ob.drain()
+
+    assert result["sent"] == 10, "rows with a sender must still ship"
+
+
+def test_delivered_rows_are_reclaimed(ob):
+    """The outbox is a queue, not an archive — 21,195 shipped rows on disk."""
+    ob.register_sender("bulk", lambda payload, send_id: True)
+    for i in range(5):
+        ob.enqueue(f"old-{i}", {"i": i}, kind="bulk")
+    ob.drain()
+
+    # Age the delivered rows past the retention window.
+    with ob._db_lock:
+        conn = ob._db()
+        conn.execute(
+            "UPDATE community_outbox SET sent_at = ?",
+            (time.time() - ob._DELIVERED_RETENTION_S - 60,),
+        )
+        conn.commit()
+
+    assert ob.purge_delivered() == 5
+    assert ob.status()["total"] == 0
+
+
+def test_dead_rows_outlive_delivered_ones(ob):
+    """A dead row is the evidence sends were failing — don't erase it fast."""
+    ob.register_sender("down", lambda payload, send_id: False)
+    ob.enqueue("stuck", {"i": 1}, kind="down")
+    with ob._db_lock:
+        conn = ob._db()
+        conn.execute(
+            "UPDATE community_outbox SET attempts = ?, created_at = ?",
+            (ob._MAX_ATTEMPTS, time.time() - ob._DELIVERED_RETENTION_S - 60),
+        )
+        conn.commit()
+
+    assert ob.purge_delivered() == 0, "a day-old dead row must survive"
+
+
+def test_registration_is_suppressed_under_test_runners(ob):
+    """A registered sender POSTs to production.
+
+    Auto-wiring one during a suite run means any test that drains a queue
+    publishes to the real federation endpoint — which is exactly how 30 junk
+    rows reached community_recoveries while this fix was being written.
+    """
+    assert ob._registration_suppressed() is True
+
+    called = []
+    ob.ensure_senders()  # must not reach the bridge at all
+    assert called == []
