@@ -9579,8 +9579,16 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
                     f"files. Add it any time: {INSTALL_COMMAND}"
                 ),
             })
-    except Exception:  # noqa: BLE001 — a probe must never break doctor
-        pass
+    except Exception as _step_exc:  # noqa: BLE001 — never break doctor
+        # Report the broken probe rather than omitting the line.  Silently
+        # dropping a check from the one command whose job is revealing
+        # problems is the worst possible failure mode for it.
+        checks.append({
+            "name": "step-import",
+            "ok": True,
+            "warn": True,
+            "detail": f"could not check STEP support ({type(_step_exc).__name__})",
+        })
 
     # 7. SQLite writable
     db_dir = os.path.join(os.path.expanduser("~"), ".kiln")

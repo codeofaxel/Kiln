@@ -28,6 +28,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from kiln.step_import import _ocp_available as _REAL_OCP_AVAILABLE
 from kiln.step_import import (
     SUBPROCESS_TIMEOUT_S,
     TESSELLATION_TOLERANCE,
@@ -112,6 +113,23 @@ def _hide_ocp_backend_by_default(monkeypatch):
     this fixture and therefore wins.
     """
     monkeypatch.setattr("kiln.step_import._ocp_available", lambda: False)
+
+
+@pytest.fixture
+def real_kernel(_hide_ocp_backend_by_default, monkeypatch):
+    """Undo the hiding above for tests that must run the ACTUAL kernel.
+
+    Depends on the autouse fixture BY NAME so pytest is forced to build that
+    one first — otherwise fixture ordering decides whether the hide or the
+    restore wins, and the test passes or fails by collection order.
+
+    Restores the function captured at import time (before any fixture could
+    patch it), which is cheaper and far less invasive than reloading the
+    module out from under everything else holding a reference to it.
+    """
+    monkeypatch.setattr("kiln.step_import._ocp_available", _REAL_OCP_AVAILABLE)
+    if not _REAL_OCP_AVAILABLE():
+        pytest.skip("OCCT kernel not installed")
 
 
 # ---------------------------------------------------------------------------
@@ -746,7 +764,14 @@ def test_install_help_local_is_actionable(monkeypatch):
     assert remedy["surface"] == "local"
     assert remedy["actionable_by_caller"] is True
     assert remedy["command"] == "kiln install-step-backend"
-    assert "kiln3d[step]" in remedy["pip_command"]
+    # Names the backend package, NOT the kiln3d[step] extra: the extra only
+    # exists in a release that ships it, so on any earlier version that
+    # instruction fails.  What we hand a user has to work on the version
+    # they already have.
+    from kiln.step_import import PIP_BACKEND
+
+    assert PIP_BACKEND in remedy["pip_command"]
+    assert "kiln3d[step]" not in remedy["pip_command"]
 
 
 def test_install_help_hosted_never_tells_user_to_install(monkeypatch):
@@ -1030,11 +1055,7 @@ def test_cadquery_still_used_when_ocp_absent(
     assert mock_cq_conv.called
 
 
-@pytest.mark.skipif(
-    not __import__("kiln.step_import", fromlist=["_ocp_available"])._ocp_available(),
-    reason="OCCT kernel not installed",
-)
-def test_ocp_converts_a_real_step_file(tmp_dir):
+def test_ocp_converts_a_real_step_file(real_kernel, tmp_dir):
     """End-to-end against real B-rep geometry, when the kernel is present.
 
     Skips rather than fails where OCP isn't installed, so CI without the
@@ -1151,3 +1172,175 @@ def test_ensure_mesh_path_raises_no_backend_for_step(monkeypatch, sample_step_fi
         ensure_mesh_path(str(sample_step_file))
 
     assert exc_info.value.remedy["message"]
+
+
+# ---------------------------------------------------------------------------
+# 30. The paths a single-solid happy path never touches.
+# ---------------------------------------------------------------------------
+
+
+def _write_two_box_step(dest: Path) -> Path:
+    """A genuinely multi-solid STEP — two disjoint boxes in one compound."""
+    from OCP.BRep import BRep_Builder
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+    from OCP.TopoDS import TopoDS_Compound
+
+    compound = TopoDS_Compound()
+    builder = BRep_Builder()
+    builder.MakeCompound(compound)
+    builder.Add(compound, BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape())
+    builder.Add(
+        compound,
+        BRepPrimAPI_MakeBox(gp_Pnt(50.0, 0.0, 0.0), 10.0, 10.0, 10.0).Shape(),
+    )
+
+    writer = STEPControl_Writer()
+    writer.Transfer(compound, STEPControl_StepModelType.STEPControl_AsIs)
+    writer.Write(str(dest))
+    return dest
+
+
+def test_ocp_splits_bodies_when_asked(real_kernel, tmp_dir):
+    """merge_bodies=False writes one STL per solid.
+
+    The single-solid happy path never reaches this branch, so without this
+    the split code could be broken for as long as nobody imported a real
+    assembly — which is most of the time, right up until a customer does.
+    """
+    import struct
+
+    from kiln.step_import import _convert_via_ocp
+
+    step_path = _write_two_box_step(tmp_dir / "two_boxes.step")
+    out_dir = tmp_dir / "split"
+    out_dir.mkdir()
+
+    outputs, body_count = _convert_via_ocp(step_path, out_dir, merge_bodies=False)
+
+    assert body_count == 2
+    assert len(outputs) == 2
+    assert sorted(p.name for p in out_dir.glob("*.stl")) == ["body_0.stl", "body_1.stl"]
+    for out in outputs:
+        data = Path(out).read_bytes()
+        triangles = struct.unpack("<I", data[80:84])[0]
+        assert triangles == 12, f"each box is 12 triangles, got {triangles}"
+
+
+def test_ocp_merges_bodies_by_default(real_kernel, tmp_dir):
+    """The same file merged is one STL carrying both boxes."""
+    import struct
+
+    from kiln.step_import import _convert_via_ocp
+
+    step_path = _write_two_box_step(tmp_dir / "two_boxes.step")
+    out_dir = tmp_dir / "merged"
+    out_dir.mkdir()
+
+    outputs, body_count = _convert_via_ocp(step_path, out_dir, merge_bodies=True)
+
+    assert body_count == 2
+    assert len(outputs) == 1
+    data = Path(outputs[0]).read_bytes()
+    assert struct.unpack("<I", data[80:84])[0] == 24  # both boxes
+
+
+def test_validate_and_prepare_converts_a_real_step(real_kernel, tmp_dir):
+    """The CONVERTED happy path through the shared pipeline, end to end.
+
+    The no-backend path is covered above; this is the other half — that a
+    real STEP comes out the far side as a print-ready mesh with correct
+    dimensions, not merely 'did not crash'.
+    """
+    step_path = _write_two_box_step(tmp_dir / "boxes.step")
+
+    result = _validation_tools()["validate_and_prepare"](str(step_path))
+    if isinstance(result, list):
+        result = next(e for e in result if isinstance(e, dict) and "status" in e)
+
+    names = {c["name"] for c in result["checks"]}
+    assert "step_conversion" in names, "the conversion must be reported, not hidden"
+    conv = next(c for c in result["checks"] if c["name"] == "step_conversion")
+    assert conv["passed"] is True
+    assert "2 bodies" in conv["details"]
+    assert result["status"] in ("pass", "warn")
+
+
+def test_ensure_mesh_path_does_not_litter_the_source_folder(real_kernel, tmp_dir):
+    """An implicit conversion must not drop files beside the user's CAD file."""
+    from kiln.step_import import ensure_mesh_path
+
+    source_dir = tmp_dir / "customer_cad"
+    source_dir.mkdir()
+    step_path = _write_two_box_step(source_dir / "part.step")
+    before = {p.name for p in source_dir.iterdir()}
+
+    out, note = ensure_mesh_path(str(step_path))
+
+    assert note is not None
+    assert Path(out).exists()
+    assert {p.name for p in source_dir.iterdir()} == before, (
+        "conversion wrote into the source folder"
+    )
+
+
+def test_ocp_conversion_times_out_rather_than_hanging(monkeypatch, sample_step_file, tmp_dir):
+    """A wedged kernel becomes a clean error, never an unkillable thread.
+
+    Tessellation is a compiled C++ call: in-process, Python cannot interrupt
+    it and the API's worker thread is stuck until the machine restarts.  The
+    child-process design is what makes a timeout possible at all, so the
+    timeout has to be part of the contract, not an implementation detail.
+    """
+    import subprocess as _sp
+
+    from kiln.step_import import _convert_via_ocp
+
+    def _hang(*args, **kwargs):
+        raise _sp.TimeoutExpired(cmd="python", timeout=kwargs.get("timeout", 1))
+
+    monkeypatch.setattr("kiln.step_import.subprocess.run", _hang)
+
+    with pytest.raises(StepImportError) as exc_info:
+        _convert_via_ocp(Path(str(sample_step_file)), tmp_dir, merge_bodies=True)
+
+    assert "timed out" in str(exc_info.value).lower()
+
+
+def test_ocp_runs_out_of_process(monkeypatch, sample_step_file, tmp_dir):
+    """Pin the child-process design itself.
+
+    An "optimisation" back to an in-process call would silently remove the
+    only reason a timeout can work, and every test above would still pass.
+    """
+    import sys as _sys
+
+    seen = {}
+
+    def _fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        seen["timeout"] = kwargs.get("timeout")
+        return _sp_result()
+
+    def _sp_result():
+        import subprocess as _sp
+
+        out = tmp_dir / "merged.stl"
+        out.write_bytes(b"x")
+        return _sp.CompletedProcess(
+            args=["python"],
+            returncode=0,
+            stdout='KILN_RESULT:{"outputs": ["%s"], "body_count": 1}' % out,
+            stderr="",
+        )
+
+    from kiln.step_import import _convert_via_ocp
+
+    monkeypatch.setattr("kiln.step_import.subprocess.run", _fake_run)
+    _convert_via_ocp(Path(str(sample_step_file)), tmp_dir, merge_bodies=True)
+
+    from kiln.step_import import SUBPROCESS_TIMEOUT_S
+
+    assert seen["cmd"][0] == _sys.executable, "must use Kiln's own interpreter"
+    assert seen["timeout"] == SUBPROCESS_TIMEOUT_S

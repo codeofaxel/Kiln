@@ -25,6 +25,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import asdict, dataclass, field
@@ -76,8 +77,12 @@ PIP_BACKEND = "cadquery-ocp-novtk"
 #: The one command that fixes a local install.
 INSTALL_COMMAND = "kiln install-step-backend"
 
-#: The equivalent for someone who'd rather do it by hand.
-PIP_INSTALL_COMMAND = 'pip install "kiln3d[step]"'
+#: The equivalent for someone who'd rather do it by hand.  Names the backend
+#: package directly rather than the ``kiln3d[step]`` extra: the extra only
+#: exists in a release that ships it, so telling a user on any earlier
+#: version to install it hands them an instruction that fails.  This one is
+#: true on every version, including the one they already have.
+PIP_INSTALL_COMMAND = f'pip install "{PIP_BACKEND}"'
 
 _LOCAL_INSTALL_HELP = (
     "No STEP import backend found on this machine.\n"
@@ -473,62 +478,125 @@ _OCP_LINEAR_DEFLECTION = 1e-3
 _OCP_ANGULAR_DEFLECTION = 0.1
 
 
+# Runs in a CHILD interpreter — see _convert_via_ocp for why.
+_OCP_SCRIPT_TEMPLATE = r'''
+import json, os, sys
+
+from OCP.BRepMesh import BRepMesh_IncrementalMesh
+from OCP.IFSelect import IFSelect_ReturnStatus
+from OCP.StlAPI import StlAPI_Writer
+from OCP.STEPControl import STEPControl_Reader
+from OCP.TopAbs import TopAbs_ShapeEnum
+from OCP.TopExp import TopExp_Explorer
+
+step_path = {step_path!r}
+output_dir = {output_dir!r}
+merge = {merge!r}
+linear = {linear!r}
+angular = {angular!r}
+
+reader = STEPControl_Reader()
+if reader.ReadFile(step_path) != IFSelect_ReturnStatus.IFSelect_RetDone:
+    sys.stderr.write("OCCT could not read the STEP file\n")
+    raise SystemExit(3)
+reader.TransferRoots()
+shape = reader.OneShape()
+
+solids = []
+explorer = TopExp_Explorer(shape, TopAbs_ShapeEnum.TopAbs_SOLID)
+while explorer.More():
+    solids.append(explorer.Current())
+    explorer.Next()
+body_count = len(solids) or 1
+
+
+def write(target, path):
+    # Tessellate in place, then write: an untriangulated shape writes an
+    # EMPTY stl rather than failing, so meshing first is not optional.
+    BRepMesh_IncrementalMesh(target, linear, False, angular, True)
+    writer = StlAPI_Writer()
+    writer.ASCIIMode = False  # binary: ~4x smaller, identical geometry
+    writer.Write(target, path)
+
+
+if merge or body_count <= 1:
+    out = os.path.join(output_dir, "merged.stl")
+    write(shape, out)
+    outputs = [out]
+else:
+    outputs = []
+    for i, solid in enumerate(solids):
+        out = os.path.join(output_dir, "body_%d.stl" % i)
+        write(solid, out)
+        outputs.append(out)
+
+print("KILN_RESULT:" + json.dumps({{"outputs": outputs, "body_count": body_count}}))
+'''
+
+
 def _convert_via_ocp(
     step_path: Path,
     output_dir: Path,
     merge_bodies: bool,
 ) -> tuple[list[str], int]:
-    """Use the OCCT kernel directly (in-process) to convert STEP → STL.
+    """Use the OCCT kernel to convert STEP → STL, in a child interpreter.
 
     The same kernel cadquery wraps, called without the wrapper.  Preferred
     over :func:`_convert_via_cadquery` when both are present: it skips
-    cadquery's heavy import (~2 s on first call) for an identical result.
+    cadquery's heavy import for an identical mesh.
+
+    Runs OUT OF PROCESS, like the FreeCAD and gmsh backends, and for the
+    same two reasons — both of which bite hardest on the hosted API box:
+
+    1. **It can be timed out.**  Tessellation is a C++ call inside a
+       compiled extension.  Python cannot interrupt one: no exception is
+       raised at a bytecode boundary, and ``signal.alarm`` only fires on the
+       main thread while the API serves from worker threads.  In process, a
+       pathological STEP wedges that thread until the machine is restarted.
+       A child gets ``SUBPROCESS_TIMEOUT_S`` and a clean kill.
+    2. **It can't take the server's memory with it.**  A dense assembly can
+       tessellate into gigabytes; in the child that is one dead process and
+       a clear error, in process it is the OOM killer taking every in-flight
+       job with it (which this deploy has already survived once, from an
+       OpenSCAD boolean).
+
+    The cost is one interpreter start (~0.3 s) per conversion, which the
+    other two backends already pay and a CAD import can afford.
 
     Returns:
         (list of output paths, body_count)
     """
-    from OCP.BRepMesh import BRepMesh_IncrementalMesh
-    from OCP.IFSelect import IFSelect_ReturnStatus
-    from OCP.StlAPI import StlAPI_Writer
-    from OCP.STEPControl import STEPControl_Reader
-    from OCP.TopAbs import TopAbs_ShapeEnum
-    from OCP.TopExp import TopExp_Explorer
+    script = _OCP_SCRIPT_TEMPLATE.format(
+        step_path=str(step_path),
+        output_dir=str(output_dir),
+        merge=merge_bodies,
+        linear=_OCP_LINEAR_DEFLECTION,
+        angular=_OCP_ANGULAR_DEFLECTION,
+    )
 
-    reader = STEPControl_Reader()
-    if reader.ReadFile(str(step_path)) != IFSelect_ReturnStatus.IFSelect_RetDone:
-        raise StepImportError(f"OCCT could not read the STEP file: {step_path}")
-    reader.TransferRoots()
-    shape = reader.OneShape()
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        f.write(script)
+        script_path = f.name
 
-    solids = []
-    explorer = TopExp_Explorer(shape, TopAbs_ShapeEnum.TopAbs_SOLID)
-    while explorer.More():
-        solids.append(explorer.Current())
-        explorer.Next()
-    body_count = len(solids) or 1
-
-    def _write(target: Any, path: str) -> None:
-        # Tessellate in place, then write.  A shape with no triangulation
-        # writes an empty STL rather than failing, so meshing first is not
-        # optional.
-        BRepMesh_IncrementalMesh(
-            target, _OCP_LINEAR_DEFLECTION, False, _OCP_ANGULAR_DEFLECTION, True
+    try:
+        result = subprocess.run(
+            # sys.executable, not "python": the kernel lives in the
+            # interpreter running Kiln, which may not be first on PATH.
+            [sys.executable, script_path],
+            capture_output=True,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT_S,
         )
-        writer = StlAPI_Writer()
-        writer.ASCIIMode = False  # binary: ~4x smaller for identical geometry
-        writer.Write(target, path)
+    except subprocess.TimeoutExpired as exc:
+        raise StepImportError(
+            f"STEP conversion timed out after {SUBPROCESS_TIMEOUT_S}s. "
+            "The file is probably a large assembly — try converting a single "
+            "part, or simplify it in your CAD tool first."
+        ) from exc
+    finally:
+        os.unlink(script_path)
 
-    if merge_bodies or body_count <= 1:
-        out_path = str(output_dir / "merged.stl")
-        _write(shape, out_path)
-        return [out_path], body_count
-
-    outputs: list[str] = []
-    for i, solid in enumerate(solids):
-        out_path = str(output_dir / f"body_{i}.stl")
-        _write(solid, out_path)
-        outputs.append(out_path)
-    return outputs, body_count
+    return _parse_subprocess_result(result, "OCCT")
 
 
 def _convert_via_cadquery(
@@ -626,6 +694,12 @@ def ensure_mesh_path(
     front door and then failed several layers down with a contradictory
     "unsupported format" from code that never got the memo.
 
+    Output goes to a fresh temp directory unless the caller names one.
+    ``convert_step_to_stl`` defaults to the STEP file's own folder, which is
+    right when a user deliberately asked to import a file and wrong here:
+    this runs implicitly, deep inside other tools, and dropping an .stl next
+    to somebody's CAD file is a side effect they never asked for.
+
     Returns:
         ``(mesh_path, note)`` — ``note`` is a human-readable line for a
         report when a conversion happened, else ``None``.
@@ -637,6 +711,9 @@ def ensure_mesh_path(
     """
     if not is_step_file(path):
         return path, None
+
+    if output_dir is None:
+        output_dir = tempfile.mkdtemp(prefix="kiln_step_")
 
     result = convert_step_to_stl(path, output_dir=output_dir, merge_bodies=True)
     note = (
