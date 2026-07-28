@@ -52,9 +52,11 @@ class _StepToolsPlugin:
         ) -> dict:
             """Import a STEP (.step/.stp) CAD file and convert it to STL for Kiln's mesh pipeline.
 
-            Converts STEP files using available backends (FreeCAD, Gmsh, or
-            CadQuery).  Multi-body STEP files can be merged into a single STL
-            or split into separate files per body.
+            Converts STEP files using whichever backend is available (the
+            OCCT kernel that ``kiln install-step-backend`` sets up, or an
+            existing FreeCAD / Gmsh / CadQuery install).  Multi-body STEP
+            files can be merged into a single STL or split into separate
+            files per body.
 
             Use ``check_step_support`` first to verify that a conversion
             backend is installed.  After conversion, use ``diagnose_mesh``
@@ -133,8 +135,9 @@ class _StepToolsPlugin:
         def check_step_support() -> dict:
             """Check which STEP import backends are available on this system.
 
-            Returns a dict listing each backend (FreeCAD, Gmsh, CadQuery)
-            with its availability status and priority.  If none is found,
+            Returns a dict listing each backend (FreeCAD, Gmsh, the OCCT
+            kernel, CadQuery) with its availability status and priority.
+            If none is found,
             includes ``install_help`` (prose) and ``remedy`` (structured) —
             prefer ``remedy``: its ``actionable_by_caller`` flag tells you
             whether the user can fix this (``kiln install-step-backend``) or

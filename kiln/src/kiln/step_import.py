@@ -1,9 +1,9 @@
 """STEP file import — converts .step/.stp CAD files to STL for Kiln's mesh pipeline.
 
 Prefers whatever external tool is already on the machine (FreeCADCmd, then
-gmsh) via subprocess, then falls back to the in-process OCCT kernel — bare
-``OCP`` first, full ``cadquery`` after it, since OCP is the kernel cadquery
-wraps and going direct skips a ~2 s import for identical geometry.
+gmsh) via subprocess, then falls back to the OCCT kernel in a child process —
+bare ``OCP`` first, full ``cadquery`` after it, since OCP is the kernel
+cadquery wraps and going direct skips a ~2 s import for identical geometry.
 
 Preference order is "cheapest thing already installed first," which makes the
 kernel LAST at runtime and FIRST for installing: it is the only backend pip
@@ -760,7 +760,7 @@ def convert_step_to_stl(
 ) -> StepImportResult:
     """Convert a STEP (.step/.stp) file to STL.
 
-    Tries backends in order: FreeCADCmd → gmsh → cadquery.
+    Tries backends in order: FreeCADCmd → gmsh → OCCT kernel (OCP) → cadquery.
 
     Args:
         step_path: Path to the STEP file.
