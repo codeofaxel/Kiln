@@ -208,3 +208,73 @@ class TestStlRoutedForThumbnailGeneration:
         )
         assert captured.get("stl_paths") is None
         assert captured.get("source_3mf_path") is None
+
+
+class TestStepThumbnailSource:
+    """The slicer reads STEP natively, so a CAD file can reach a Bambu
+    without ever becoming a mesh here — and the LCD thumbnail is rendered
+    FROM a mesh.  Found 2026-07-28: the printer's screen went blank for
+    exactly the CAD-first users the STEP work exists to serve.
+    """
+
+    def test_step_is_converted_for_the_lcd_thumbnail(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        gcode = _write_dummy_gcode(tmp_path)
+        step = tmp_path / "part.step"
+        step.write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+        converted = tmp_path / "converted.stl"
+        converted.write_bytes(b"solid x\nendsolid x\n")
+
+        import kiln.printers.bambu_3mf as _b3mf
+        import kiln.step_import as _step
+
+        captured: dict = {}
+
+        def fake_build(body, dst, **kwargs):
+            captured.update(kwargs)
+            Path(dst).write_bytes(b"PK\x03\x04")
+
+        monkeypatch.setattr(_b3mf, "build_bambu_3mf", fake_build)
+        monkeypatch.setattr(
+            _step, "ensure_mesh_path", lambda p, **kw: (str(converted), "note")
+        )
+
+        threemf, warning = _auto_wrap_bambu_3mf(
+            str(gcode), effective_printer_id="bambu_a1", stl_path=str(step),
+        )
+
+        assert threemf is not None
+        assert warning is None
+        assert captured["stl_paths"] == [str(converted)]
+
+    def test_no_converter_costs_the_thumbnail_not_the_print(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Degrades to the old behavior — blank preview, working print."""
+        gcode = _write_dummy_gcode(tmp_path)
+        step = tmp_path / "part.step"
+        step.write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+
+        import kiln.printers.bambu_3mf as _b3mf
+        import kiln.step_import as _step
+
+        captured: dict = {}
+
+        def fake_build(body, dst, **kwargs):
+            captured.update(kwargs)
+            Path(dst).write_bytes(b"PK\x03\x04")
+
+        def no_backend(*a, **kw):
+            raise _step.NoBackendError()
+
+        monkeypatch.setattr(_b3mf, "build_bambu_3mf", fake_build)
+        monkeypatch.setattr(_step, "ensure_mesh_path", no_backend)
+
+        threemf, warning = _auto_wrap_bambu_3mf(
+            str(gcode), effective_printer_id="bambu_a1", stl_path=str(step),
+        )
+
+        assert threemf is not None, "a missing converter must never cost the print"
+        assert warning is None
+        assert captured["stl_paths"] is None

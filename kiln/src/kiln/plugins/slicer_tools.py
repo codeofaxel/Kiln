@@ -238,10 +238,12 @@ def _auto_wrap_bambu_3mf(
     ``project_file`` works, and that requires ``.3mf``).
 
     ``stl_path`` is routed by extension: ``.stl`` goes to ``stl_paths``
-    so OpenSCAD generates a thumbnail for the LCD preview, while ``.3mf``
-    goes to ``source_3mf_path`` to copy its embedded thumbnails.  Other
-    extensions (``.step``, ``.obj``) are ignored — the wrap still
-    succeeds but the touchscreen shows a blank preview.
+    so OpenSCAD generates a thumbnail for the LCD preview, ``.3mf`` goes
+    to ``source_3mf_path`` to copy its embedded thumbnails, and
+    ``.step``/``.stp`` is converted to a mesh for the thumbnail (the
+    slicer reads STEP directly, so a CAD file otherwise reaches the
+    printer with a blank screen).  Any other extension is ignored — the
+    wrap still succeeds, without a preview.
 
     Returns ``(threemf_path, warning)``.  When no wrap happens, both
     are ``None``.  Failure is non-fatal — the original gcode_path is
@@ -275,6 +277,24 @@ def _auto_wrap_bambu_3mf(
                 stl_paths = [stl_path]
             elif ext == ".3mf":
                 source_3mf = stl_path
+            elif ext in (".step", ".stp"):
+                # PrusaSlicer reads STEP natively, so a CAD file can be
+                # sliced without ever becoming a mesh here — but the LCD
+                # thumbnail is rendered FROM a mesh, so the printer's screen
+                # went blank for exactly the CAD-first users this path exists
+                # to serve.  Convert for the preview only.  No converter
+                # installed just means no thumbnail, which is where this
+                # started, so it degrades to the old behavior rather than
+                # costing anyone a print.
+                try:
+                    from kiln.step_import import ensure_mesh_path
+
+                    stl_paths = [ensure_mesh_path(stl_path)[0]]
+                except Exception as exc:  # noqa: BLE001
+                    _logger.info(
+                        "No LCD thumbnail for %s (%s)",
+                        os.path.basename(stl_path), exc,
+                    )
 
         gcode_body = _Path(gcode_path).read_text(encoding="utf-8")
         settings = BambuPrintSettings(
