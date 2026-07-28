@@ -44,6 +44,8 @@ class _PrintabilityToolsPlugin:
             build_volume_x: float | None = None,
             build_volume_y: float | None = None,
             build_volume_z: float | None = None,
+            material: str = "pla",
+            printer_id: str = "",
         ) -> dict:
             """Analyze a 3D model for FDM printing readiness.
 
@@ -52,6 +54,13 @@ class _PrintabilityToolsPlugin:
             surface estimation, and support volume estimation.  Returns a
             printability score (0-100), letter grade (A-F), and actionable
             recommendations.
+
+            Pass ``material`` (and ``printer_id`` when a printer is
+            registered) so the warping, thermal-stress, and adhesion checks
+            run against the actual filament instead of generic PLA defaults.
+            On the free tier those checks use conservative safe-floor
+            thresholds; with Kiln Pro they are tuned to the specific
+            material and printer (kiln3d.com/pricing).
 
             Args:
                 file_path: Path to an STL or OBJ mesh file.
@@ -62,6 +71,10 @@ class _PrintabilityToolsPlugin:
                 build_volume_x: Optional build volume X dimension in mm.
                 build_volume_y: Optional build volume Y dimension in mm.
                 build_volume_z: Optional build volume Z dimension in mm.
+                material: Material ID for warping / thermal-stress / adhesion
+                    analysis (default ``"pla"``).
+                printer_id: Optional registered printer whose real geometry
+                    and calibration should inform the analysis.
             """
             import kiln.server as _srv
             from kiln.printability import analyze_printability as _analyze
@@ -77,6 +90,8 @@ class _PrintabilityToolsPlugin:
                     layer_height=layer_height,
                     max_overhang_angle=max_overhang_angle,
                     build_volume=build_volume,
+                    material=material,
+                    printer_id=printer_id or None,
                 )
                 return {
                     "success": True,

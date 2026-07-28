@@ -27,10 +27,18 @@ _MAX_FREE_TIER_PARTS = 10
 
 
 def _has_pro_license() -> bool:
-    """Check if kiln-pro is installed and has a valid license."""
+    """True when the CALLER's effective tier is Pro or above.
+
+    Routes through the standard tier gate rather than the process-level
+    license check: on a hosted multi-tenant server the process itself
+    holds a valid license, so ``pro_features.has_valid_license`` would
+    wave every caller past the free-tier limit.  ``check_pro`` consults
+    the per-request tier override first (hosted) and falls back to the
+    local license manager (CLI / laptop), failing closed on errors.
+    """
     try:
-        from kiln_pro.bridge import pro_features
-        return pro_features.has_valid_license
+        from kiln_pro.pro_gate import check_pro
+        return check_pro("unlimited assembly parts") is None
     except ImportError:
         return False
 

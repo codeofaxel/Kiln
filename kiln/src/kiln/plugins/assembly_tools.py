@@ -98,10 +98,15 @@ class _AssemblyToolsPlugin:
                     material=material,
                     role=role,
                 )
-                assembly.parts.append(part)
+                # Route through add_part so the duplicate-ID check and the
+                # free-tier part limit apply here too — appending to the
+                # list directly would bypass both.
+                assembly.add_part(part)
                 return {"success": True, "data": assembly.to_dict()}
             except json.JSONDecodeError as exc:
                 return {"success": False, "error": f"Invalid assembly JSON: {exc}"}
+            except ValueError as exc:
+                return {"success": False, "error": str(exc)}
             except Exception as exc:
                 _logger.exception("Unexpected error in add_assembly_part")
                 return {"success": False, "error": str(exc)}

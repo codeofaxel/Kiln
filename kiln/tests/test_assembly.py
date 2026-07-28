@@ -473,9 +473,66 @@ class TestMaterialCompatibility:
         )
 
 
+class TestProLicenseCheckSemantics:
+    """_has_pro_license must reflect the CALLER's tier, not the process.
+
+    On a hosted multi-tenant server the process itself holds a valid
+    license, so a process-level check (pro_features.has_valid_license)
+    would wave every caller — free included — past the part limit.  The
+    check must route through check_pro, which consults the per-request
+    tier override first.
+    """
+
+    @staticmethod
+    def _install_fake_pro_gate(monkeypatch, check_pro):
+        import sys
+        import types
+
+        pro_gate = types.ModuleType("kiln_pro.pro_gate")
+        pro_gate.check_pro = check_pro
+        kiln_pro_pkg = types.ModuleType("kiln_pro")
+        kiln_pro_pkg.pro_gate = pro_gate
+        monkeypatch.setitem(sys.modules, "kiln_pro", kiln_pro_pkg)
+        monkeypatch.setitem(sys.modules, "kiln_pro.pro_gate", pro_gate)
+
+    def test_free_caller_is_capped_even_with_process_license(
+        self, monkeypatch
+    ):
+        from kiln import assembly as assembly_mod
+
+        self._install_fake_pro_gate(
+            monkeypatch,
+            lambda name="": {"code": "TIER_REQUIRED"},  # free caller
+        )
+        assert assembly_mod._has_pro_license() is False
+
+    def test_pro_caller_passes(self, monkeypatch):
+        from kiln import assembly as assembly_mod
+
+        self._install_fake_pro_gate(monkeypatch, lambda name="": None)
+        assert assembly_mod._has_pro_license() is True
+
+    def test_no_kiln_pro_means_free(self, monkeypatch):
+        import sys
+
+        from kiln import assembly as assembly_mod
+
+        monkeypatch.setitem(sys.modules, "kiln_pro", None)
+        monkeypatch.setitem(sys.modules, "kiln_pro.pro_gate", None)
+        assert assembly_mod._has_pro_license() is False
+
+
 class TestMaxPartsLimit:
-    def test_max_parts_limit(self, tmp_path):
-        """Adding more than _MAX_FREE_TIER_PARTS parts raises ValueError."""
+    def test_max_parts_limit(self, tmp_path, monkeypatch):
+        """Adding more than _MAX_FREE_TIER_PARTS parts raises ValueError.
+
+        Pins the cap arithmetic for a FREE caller explicitly — the dev
+        machine may carry a real license, and the caller-tier resolution
+        itself is pinned by TestProLicenseCheckSemantics.
+        """
+        from kiln import assembly as assembly_mod
+
+        monkeypatch.setattr(assembly_mod, "_has_pro_license", lambda: False)
         asm = create_assembly("limit_test")
         for i in range(_MAX_FREE_TIER_PARTS):
             stl = str(tmp_path / f"box_{i}.stl")

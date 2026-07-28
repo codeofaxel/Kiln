@@ -362,27 +362,39 @@ class _MeshToolsPlugin:
         # Mesh repair
         # ---------------------------------------------------------------
 
-        @mcp.tool()
-        def repair_mesh(file_path: str, output_path: str = "") -> dict:
-            """Basic mesh repair: fix degenerate triangles and bad normals (fast, safe).
+        def _repair_mesh_impl(
+            file_path: str,
+            output_path: str,
+            *,
+            deep: bool,
+            close_holes: bool,
+        ) -> dict:
+            """Shared repair path for ``repair_mesh`` and its deprecated alias.
 
-            For deeper repair with hole closing and boundary edge fixes, use
-            ``repair_mesh_advanced``. Removes zero-area triangles and recomputes
-            face normals.  Use this on meshes from AI generation providers before
-            slicing.
-
-            :param file_path: Path to the STL file to repair.
-            :param output_path: Output path.  Defaults to overwriting the input.
-            :returns: Dict with repair statistics.
+            ``deep=False`` runs the fast pass (degenerate-triangle removal +
+            normal recompute).  ``deep=True`` runs the boundary-aware engine,
+            which also detects boundary edges and — when *close_holes* is
+            True — closes small holes via fan triangulation.
             """
             from kiln.server import _check_auth, _error_dict
 
             if err := _check_auth("generate"):
                 return err
             try:
-                from kiln.generation.validation import repair_stl
+                if deep:
+                    from kiln.generation.validation import repair_stl_advanced
 
-                result = repair_stl(file_path, output_path=output_path or None)
+                    result = repair_stl_advanced(
+                        file_path,
+                        output_path=output_path or None,
+                        close_holes=close_holes,
+                    )
+                else:
+                    from kiln.generation.validation import repair_stl
+
+                    result = repair_stl(
+                        file_path, output_path=output_path or None,
+                    )
                 response = {"success": True, **result}
                 try:
                     from kiln_pro.plugins.git_render_tools import (
@@ -398,48 +410,52 @@ class _MeshToolsPlugin:
                 return _error_dict(f"Mesh repair failed: {exc}", code="REPAIR_ERROR")
 
         @mcp.tool()
+        def repair_mesh(
+            file_path: str,
+            output_path: str = "",
+            close_holes: bool = False,
+        ) -> dict:
+            """Repair mesh defects: degenerate triangles, bad normals, open holes.
+
+            The default pass is fast and safe: removes zero-area triangles and
+            recomputes face normals.  Use it on meshes from AI generation
+            providers before slicing.  Pass ``close_holes=True`` for the deep
+            pass, which additionally finds boundary edges (edges shared by only
+            one triangle) and closes small holes via fan triangulation — use it
+            when the mesh is not watertight.
+
+            :param file_path: Path to the STL file to repair.
+            :param output_path: Output path.  Defaults to overwriting the input.
+            :param close_holes: Also close open holes and fix boundary edges
+                (slower; default False).
+            :returns: Dict with repair statistics.
+            """
+            return _repair_mesh_impl(
+                file_path, output_path,
+                deep=close_holes, close_holes=close_holes,
+            )
+
+        @mcp.tool()
         def repair_mesh_advanced(
             file_path: str,
             output_path: str = "",
             close_holes: bool = True,
         ) -> dict:
-            """Deep mesh repair: degenerate removal + hole closing + boundary edge fixes.
+            """Deprecated alias for ``repair_mesh(close_holes=True)``.
 
-            Use when ``repair_mesh`` (basic) is not enough -- e.g. mesh has open
-            holes or boundary edges.  Goes beyond basic repair by finding boundary
-            edges (edges shared by only one triangle) and closing small holes via
-            fan triangulation.
+            Kept for one release so existing callers keep working; new callers
+            should use ``repair_mesh`` with ``close_holes=True``.  Behavior is
+            identical to the original tool.
 
             :param file_path: Path to the STL file.
             :param output_path: Output path.  Defaults to overwriting the input.
             :param close_holes: Whether to attempt closing holes (default True).
             :returns: Dict with repair statistics.
             """
-            from kiln.server import _check_auth, _error_dict
-
-            if err := _check_auth("generate"):
-                return err
-            try:
-                from kiln.generation.validation import repair_stl_advanced
-
-                result = repair_stl_advanced(
-                    file_path,
-                    output_path=output_path or None,
-                    close_holes=close_holes,
-                )
-                response = {"success": True, **result}
-                try:
-                    from kiln_pro.plugins.git_render_tools import (
-                        attach_inspect_bundle,
-                    )
-
-                    return attach_inspect_bundle(
-                        response, level="quick", stl_keys=("path",),
-                    )
-                except ImportError:
-                    return response
-            except Exception as exc:
-                return _error_dict(f"Advanced repair failed: {exc}", code="REPAIR_ERROR")
+            return _repair_mesh_impl(
+                file_path, output_path,
+                deep=True, close_holes=close_holes,
+            )
 
         # ---------------------------------------------------------------
         # Mesh manipulation (transform, splice, hollow, thicken, etc.)
