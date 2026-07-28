@@ -7,6 +7,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Kiln's hosted connection speaks the newest protocol.** Connect Kiln to
+  Claude or any other AI client and it now uses the July 2026 revision of
+  the Model Context Protocol. Long-running work — texture carving, print
+  repair, assembly booklets, technical drawings — hands back a ticket you
+  can check on, so a slow job never blocks the conversation. Nothing
+  changes for older clients.
+
 - **Print records now work on every printer Kiln supports (free).** Outcome
   recording used to run only on the Bambu connection; Moonraker, OctoPrint,
   Klipper and serial printers now record too. The record opens when a print
