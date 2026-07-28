@@ -33,8 +33,9 @@ _logger = logging.getLogger(__name__)
 # Constants — validation sets and safety limits
 # ---------------------------------------------------------------------------
 
-_VALID_OUTCOMES = frozenset({"success", "failed", "partial"})
+_VALID_OUTCOMES = frozenset({"success", "failed", "partial", "cancelled"})
 _VALID_QUALITY_GRADES = frozenset({"excellent", "good", "acceptable", "poor"})
+_VALID_DETERMINED_BY = frozenset({"observed", "inferred", "user_reported"})
 
 # Hard safety limits — recorded settings cannot exceed these.
 # Prevents malicious agents from poisoning the learning database
@@ -104,6 +105,128 @@ def _auto_classify_failure(
     }
 
 
+def _material_from_job(job_record: dict[str, Any] | None, job_id: str) -> str | None:
+    """Material this job DECLARED, from the job's own records.
+
+    Two stores, both recorded when the print was set up, both about this
+    exact job: the print-history row (its ``material_type`` column, then its
+    ``metadata`` payload) and the queue job's metadata, which is where a
+    submitted job carries the material the scheduler routed it on.
+
+    Returns ``None`` when no store names one — never a placeholder.
+    """
+    def named(value: Any) -> str | None:
+        text = str(value or "").strip()
+        # "unknown" is a placeholder some producers write instead of leaving
+        # the field empty; it names nothing, so it is an absence here too.
+        return text if text and text.lower() != "unknown" else None
+
+    if job_record:
+        metadata = job_record.get("metadata")
+        for candidate in (
+            job_record.get("material_type"),
+            metadata.get("material_type") if isinstance(metadata, dict) else None,
+        ):
+            if found := named(candidate):
+                return found
+    try:
+        import kiln.server as _srv
+
+        job = _srv._get_queue().get_job(job_id)
+        return named((job.metadata or {}).get("material_type"))
+    except Exception:
+        _logger.debug("No queue job material for %s", job_id, exc_info=True)
+    return None
+
+
+def _material_from_printer(printer_name: str | None) -> str | None:
+    """Material physically loaded in the printer RIGHT NOW, or ``None``.
+
+    Reads the same live AMS state ``get_active_material`` reads, through the
+    same tray helpers, so there is one parse of "which tray is active" rather
+    than a second one that drifts.  Honest-or-nothing at every step: an
+    external spool (no RFID), an unparseable tray index, a tray with no type,
+    or a printer with no AMS all return ``None``.  The one inference allowed
+    is the one that cannot be wrong — when the active slot is unreported but
+    every loaded tray holds the SAME material, that material ran the print
+    whichever slot fed it.
+    """
+    if not printer_name:
+        return None
+    try:
+        import kiln.server as _srv
+        from kiln.plugins.material_tools import (
+            _coerce_ams_slot,
+            _find_tray,
+            _iter_ams_trays,
+            _loaded_ams_trays,
+        )
+
+        adapter = _srv._registry.get(printer_name)
+        if adapter is None or not hasattr(adapter, "get_ams_status"):
+            return None
+        ams = adapter.get_ams_status()
+        if not isinstance(ams, dict):
+            return None
+
+        loaded = _loaded_ams_trays(ams)
+        slot = _coerce_ams_slot(ams.get("tray_now"))
+        if slot is None:
+            for field in ("active_tray", "tray_pre", "tray_tar"):
+                candidate = _coerce_ams_slot(ams.get(field))
+                if candidate is not None and _find_tray(loaded, candidate) is not None:
+                    slot = candidate
+                    break
+        if slot is not None:
+            tray = _find_tray(_iter_ams_trays(ams), slot)
+            material = str((tray or {}).get("tray_type", "") or "").strip()
+            return material or None
+
+        materials = {
+            str(tray.get("tray_type", "") or "").strip() for tray in loaded
+        }
+        materials.discard("")
+        if len(materials) == 1:
+            return materials.pop()
+    except Exception:
+        _logger.debug(
+            "Live material unavailable for %s (best-effort)", printer_name, exc_info=True
+        )
+    return None
+
+
+def _resolve_material_type(
+    job_record: dict[str, Any] | None,
+    job_id: str,
+    printer_name: str | None,
+    determined_by: str,
+) -> str | None:
+    """Backfill ``material_type`` for an outcome that arrived without one.
+
+    Mirrors the printer/file backfill: the primary capture path (the
+    terminal-state hook) knows the printer, the job, and the file, and
+    nothing else — so every auto-recorded row saved ``material_type=None``
+    and the material dimension of the learning loop never saw the prints it
+    was built to learn from.
+
+    Source order, strongest first: what the JOB declared (print history, then
+    the queue job), then what the PRINTER currently holds.  The live reading
+    is only consulted for an ``observed`` outcome — a live process watched
+    this print end, so the spool in the machine is the spool that just ran.
+    For a record arriving after the fact (``inferred`` on reconnect, or a
+    user settling last week's unknown row) today's spool is not evidence
+    about that print, and stamping it on would be a guess wearing a fact's
+    clothes.  ``None`` is the honest answer there, and an honest absence is
+    exactly what the per-material reads filter out.
+    """
+    from_job = _material_from_job(job_record, job_id)
+    if from_job:
+        return from_job
+    if determined_by == "observed":
+        return _material_from_printer(printer_name)
+    return None
+
+
 def record_print_outcome(
     job_id: str,
     outcome: str,
@@ -120,6 +243,7 @@ def record_print_outcome(
     decoration_settings: dict | None = None,
     auto_classify: bool = False,
     auto_recorded: bool = False,
+    determined_by: str | None = None,
 ) -> dict:
     """Record the outcome of a print for cross-printer learning.
 
@@ -148,7 +272,8 @@ def record_print_outcome(
 
     Args:
         job_id: The job ID from the print queue.
-        outcome: One of ``"success"``, ``"failed"``, or ``"partial"``.
+        outcome: One of ``"success"``, ``"failed"``, ``"partial"``, or
+            ``"cancelled"``.
         quality_grade: Optional — ``"excellent"``, ``"good"``, ``"acceptable"``, ``"poor"``.
         failure_mode: Optional — e.g. ``"spaghetti"``, ``"layer_shift"``, ``"warping"``.
         settings: Optional dict of print settings used (temp_tool, temp_bed, speed, etc.).
@@ -157,7 +282,12 @@ def record_print_outcome(
         printer_name: Printer used.  Auto-resolved from job if omitted.
         file_name: File printed.  Auto-resolved from job if omitted.
         file_hash: Optional hash of the file for cross-printer comparison.
-        material_type: Material used (e.g. ``"PLA"``, ``"PETG"``).
+        material_type: Material used (e.g. ``"PLA"``, ``"PETG"``).  Omit and
+            Kiln backfills it from what the job declared (print history, then
+            the queue job) or — for an outcome watched live — from the
+            filament the printer currently holds.  Stays unset when no honest
+            source knows it; per-material learning skips unset rows rather
+            than learning from a guess.
         decoration_slug: Optional decoration slug that was applied to this
             print.  When set, the matching decoration's success/failure
             counters are auto-updated.
@@ -174,6 +304,16 @@ def record_print_outcome(
             the outcome by calling record_print_outcome again with the
             same ``job_id`` — the most recent call wins at the
             ``proven_settings`` level.  Default False.
+        determined_by: Who settled this outcome — ``"observed"`` (a
+            live process watched the print end), ``"inferred"``
+            (reconstructed from printer state after the fact), or
+            ``"user_reported"`` (the human said so).  Defaults to
+            ``"observed"`` for auto-recorded outcomes and
+            ``"user_reported"`` otherwise — a manual record normally
+            relays what the user reported about the part in hand.
+            Recording an outcome for a print that started while Kiln
+            wasn't watching RESOLVES its pending row in place rather
+            than duplicating it.
     """
     import kiln.server as _srv
     from kiln.persistence import get_db
@@ -192,6 +332,13 @@ def record_print_outcome(
             f"Invalid quality_grade {quality_grade!r}. Must be one of: {', '.join(sorted(_VALID_QUALITY_GRADES))}",
             code="VALIDATION_ERROR",
         )
+    if determined_by and determined_by not in _VALID_DETERMINED_BY:
+        return _srv._error_dict(
+            f"Invalid determined_by {determined_by!r}. Must be one of: {', '.join(sorted(_VALID_DETERMINED_BY))}",
+            code="VALIDATION_ERROR",
+        )
+    if determined_by is None:
+        determined_by = "observed" if auto_recorded else "user_reported"
 
     # --- Auto-classification (opt-in) ---
     # Runs only for failed outcomes with no explicit failure_mode, and
@@ -236,6 +383,7 @@ def record_print_outcome(
                 )
 
     # --- Resolve printer/file from job if not provided ---
+    job_record: dict[str, Any] | None = None
     try:
         job_record = get_db().get_print_record(job_id)
         if job_record and not printer_name:
@@ -247,6 +395,16 @@ def record_print_outcome(
 
     if not printer_name:
         printer_name = "unknown"
+
+    # --- Backfill the material the same way, from honest sources only ---
+    # Callers that know the material pass it; the terminal-state hook cannot,
+    # so without this every auto-recorded row was material-blind.  Resolved
+    # BEFORE the row is written so the pending row opened at print start
+    # gains it too (``_resolve_row_locked`` COALESCEs material_type).
+    if not material_type:
+        material_type = _resolve_material_type(
+            job_record, job_id, printer_name, determined_by
+        )
 
     # Bug #10: auto-recorded outcomes get a tag in the notes so agents
     # and analytics can distinguish them from agent-curated outcomes.
@@ -275,6 +433,7 @@ def record_print_outcome(
                 "environment": environment,
                 "notes": notes,
                 "agent_id": "auto" if auto_recorded else "mcp",
+                "determined_by": determined_by,
                 "created_at": time.time(),
             }
         )
@@ -321,11 +480,18 @@ def record_print_outcome(
             import hashlib as _hl
             import json as _js
 
+            from kiln import community_outbox
             from kiln.community_sync import community_opt_in_enabled
 
-            if community_opt_in_enabled() and file_hash:
-                from kiln import community_outbox
-
+            # Which outcomes are worth aggregating is NOT decided here — a
+            # second opinion about the vocabulary is what let one print ship
+            # twice under two different words.  ``translate_outcome`` is the
+            # one authority; a cancelled print translates to nothing.
+            if (
+                community_opt_in_enabled()
+                and file_hash
+                and community_outbox.translate_outcome(outcome) is not None
+            ):
                 resolved_model: str | None = None
                 try:
                     adapter = _srv._registry.get(printer_name)
@@ -346,21 +512,24 @@ def record_print_outcome(
                 # then flush in the background.  A failed send (offline / crash
                 # / lock) is retried by a later drain instead of silently
                 # dropped — the old fire-and-forget thread lost the
-                # contribution on any hiccup.  Idempotent per outcome.
-                community_outbox.contribute(
-                    f"po:{job_id}:{file_hash}",
-                    {
-                        "geometric_signature": file_hash,
-                        "printer_model": resolved_model or printer_name or "unknown",
-                        "material": material_type or "unknown",
+                # contribution on any hiccup.  Idempotent per PRINT, not per
+                # call path: the key is minted by the shared helper, so a
+                # print the monitors already contributed collapses into that
+                # one row instead of shipping a second copy of itself.
+                community_outbox.contribute_print_outcome(
+                    outcome=outcome,
+                    geometric_signature=file_hash,
+                    job_id=job_id,
+                    printer_file_name=file_name,
+                    printer_model=resolved_model or printer_name,
+                    material=material_type,
+                    extra={
                         "settings_hash": _hl.sha256(
                             _js.dumps(settings or {}, sort_keys=True).encode(),
                         ).hexdigest()[:16],
                         "settings": settings,
-                        "outcome": outcome,
                         "quality_grade": _grade_map.get(quality_grade or "", "B"),
                         "failure_mode": failure_mode,
-                        "print_time_seconds": 0,
                     },
                 )
         except Exception:
@@ -398,6 +567,12 @@ def record_print_outcome(
                             or (existing.image_style if existing else "auto")
                         )
 
+                        # ``source_job_id`` makes the count idempotent: this
+                        # tool is re-callable for the same job (an agent
+                        # refining an auto-recorded outcome) and the pro
+                        # decoration tool can record the same print too — the
+                        # counters have no natural key of their own, so the
+                        # job id is what stops one print counting twice.
                         if outcome == "success":
                             record_decoration_success(
                                 decoration_slug,
@@ -405,6 +580,7 @@ def record_print_outcome(
                                 depth_mm=depth_mm,
                                 mode=mode,
                                 image_style=image_style,
+                                source_job_id=job_id,
                             )
                         else:
                             record_decoration_failure(
@@ -414,6 +590,7 @@ def record_print_outcome(
                                 mode=mode,
                                 image_style=image_style,
                                 failure_mode=failure_mode,
+                                source_job_id=job_id,
                             )
             except Exception:
                 _logger.debug(
@@ -428,9 +605,15 @@ def record_print_outcome(
             "printer_name": printer_name,
             "outcome": outcome,
             "quality_grade": quality_grade,
+            "determined_by": determined_by,
         }
         if failure_mode is not None:
             result["failure_mode"] = failure_mode
+        # Echo the material only when one is actually known — its ABSENCE is
+        # the signal that per-material learning will skip this row, and a
+        # caller that expected material data should see that, not a filler.
+        if material_type:
+            result["material_type"] = material_type
         if auto_classification is not None:
             result["auto_classification"] = auto_classification
         return result
@@ -891,7 +1074,19 @@ class _LearningToolsPlugin:
             """Query cross-printer learning insights for a specific printer.
 
             Returns success rates, failure mode breakdown, and per-material
-            statistics based on previously recorded outcomes.
+            statistics based on previously recorded outcomes — plus any
+            UNRESOLVED prints: jobs that started (or ended) while no Kiln
+            process was watching, whose outcome nobody has settled yet.
+
+            **Agent contract for ``unresolved_prints``**: these entries are
+            waiting on the one witness the machine can't replace — the
+            user, who has the part.  When the moment is natural (not
+            mid-task), ask casually ("Your ashtray finished while Kiln
+            wasn't watching — did it come out OK?") and settle the answer
+            via ``record_print_outcome(job_id=..., outcome=...,
+            determined_by="user_reported")``.  Never guess an outcome on
+            the user's behalf; an unresolved print stays out of all
+            success-rate math until someone who knows answers.
 
             **Note**: Insights are advisory.  They do NOT override safety limits
             or preflight checks.
@@ -905,6 +1100,9 @@ class _LearningToolsPlugin:
             try:
                 insights = get_db().get_printer_learning_insights(printer_name)
                 recent = get_db().list_print_outcomes(printer_name=printer_name, limit=limit)
+                unresolved = get_db().list_unresolved_outcomes(
+                    printer_name=printer_name, limit=limit,
+                )
 
                 # Confidence level based on sample size
                 total = insights.get("total_outcomes", 0)
@@ -920,6 +1118,7 @@ class _LearningToolsPlugin:
                     "printer_name": printer_name,
                     "insights": insights,
                     "recent_outcomes": recent,
+                    "unresolved_prints": unresolved,
                     "confidence": confidence,
                     "safety_notice": _LEARNING_SAFETY_NOTICE,
                 }

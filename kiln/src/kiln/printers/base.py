@@ -358,23 +358,55 @@ class PrinterAdapter(ABC):
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         original = cls.__dict__.get("upload_file")
-        if original is None or getattr(original, "_kiln_safety_wrapped", False):
-            return
-        import functools
+        if original is not None and not getattr(original, "_kiln_safety_wrapped", False):
+            import functools
 
-        @functools.wraps(original)
-        def _safe_upload_file(self, file_path: str):
-            try:
-                _preflight_upload_or_raise(self, file_path)
-            except _UnsafeUpload as exc:
-                # Raise PrinterError so callers get a consistent exception
-                # type across adapters.
-                from kiln.printers import PrinterError
-                raise PrinterError(str(exc)) from None
-            return original(self, file_path)
+            @functools.wraps(original)
+            def _safe_upload_file(self, file_path: str):
+                try:
+                    _preflight_upload_or_raise(self, file_path)
+                except _UnsafeUpload as exc:
+                    # Raise PrinterError so callers get a consistent exception
+                    # type across adapters.
+                    from kiln.printers import PrinterError
+                    raise PrinterError(str(exc)) from None
+                return original(self, file_path)
 
-        _safe_upload_file._kiln_safety_wrapped = True  # type: ignore[attr-defined]
-        cls.upload_file = _safe_upload_file
+            _safe_upload_file._kiln_safety_wrapped = True  # type: ignore[attr-defined]
+            cls.upload_file = _safe_upload_file
+
+        # ------------------------------------------------------------------
+        # Outcome-lifecycle interposition: wrap every concrete subclass's
+        # get_state so EVERY adapter — not just the one with push wiring —
+        # observes state transitions, resolves pending outcome rows on the
+        # first status after (re)connect, and records watched endings.
+        # Before this, six of seven adapters opened a pending row at print
+        # start that nothing ever resolved: the loop stayed honest (rows
+        # sat 'pending', excluded from the math) but learned nothing.
+        # Same engine-not-instance shape as the upload_file safety wrap:
+        # a new adapter inherits the wiring without knowing it exists.
+        # ------------------------------------------------------------------
+        state_original = cls.__dict__.get("get_state")
+        if state_original is not None and not getattr(
+            state_original, "_kiln_outcome_wrapped", False
+        ):
+            import functools
+
+            @functools.wraps(state_original)
+            def _observed_get_state(self):
+                state = state_original(self)
+                try:
+                    _feed_outcome_lifecycle(self, state)
+                except Exception:  # noqa: BLE001 — bookkeeping never breaks status
+                    import logging as _logging
+
+                    _logging.getLogger(__name__).debug(
+                        "outcome lifecycle feed failed", exc_info=True
+                    )
+                return state
+
+            _observed_get_state._kiln_outcome_wrapped = True  # type: ignore[attr-defined]
+            cls.get_state = _observed_get_state
 
     def set_safety_profile(self, profile_id: str) -> None:
         """Bind a printer safety profile for temperature validation.
@@ -501,6 +533,48 @@ class PrinterAdapter(ABC):
 
                 _logging.getLogger(__name__).debug(
                     "print-start stat recording failed", exc_info=True
+                )
+            # Nozzle wear counts at START — every print wears the nozzle,
+            # success or failure, and an end-hook only sees the prints
+            # something watched to completion.  No-op without kiln-pro.
+            try:
+                from kiln._pro_nozzle_bridge import record_print_odometer
+
+                record_print_odometer(self.name, file_name)
+            except Exception:  # noqa: BLE001 — wear bookkeeping never blocks a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "nozzle odometer recording failed", exc_info=True
+                )
+            # Open the outcome row NOW, while we can still see the print.
+            # The start is the one event Kiln is guaranteed to witness (it
+            # initiates it); if no process is alive when the print ends,
+            # this pending row is what lets the next session notice the
+            # print existed and settle how it went, instead of the print
+            # vanishing from history entirely.
+            try:
+                from kiln.auto_record_hook import open_pending_outcome
+
+                # The material Kiln COMMANDED at start is the strongest
+                # honest source — it survives even when the outcome is
+                # settled days later, when today's loaded spool is no
+                # longer evidence.  Adapter kwargs carry it under either
+                # generic key; absent both, the record-time backfill
+                # (job metadata, live AMS on watched endings) covers it.
+                commanded_material = kwargs.get("material_type") or kwargs.get("material")
+                open_pending_outcome(
+                    self.name,
+                    file_name,
+                    material_type=(
+                        str(commanded_material) if commanded_material else None
+                    ),
+                )
+            except Exception:  # noqa: BLE001 — bookkeeping must never affect a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "pending-outcome open failed", exc_info=True
                 )
         return result
 
@@ -916,6 +990,95 @@ class PrinterAdapter(ABC):
 # Forward-compatible alias for non-printing fabrication devices.
 # PrinterAdapter remains the canonical name for backward compatibility.
 DeviceAdapter = PrinterAdapter
+
+
+# ---------------------------------------------------------------------------
+# Outcome-lifecycle feed (called from the get_state wrap installed in
+# PrinterAdapter.__init_subclass__)
+# ---------------------------------------------------------------------------
+
+
+def _current_job_label(adapter: PrinterAdapter) -> str | None:
+    """Best-effort name of the job the printer is (or was last) running.
+
+    Used only on the rare paths that need identity — a terminal
+    transition or the once-per-process reconcile — never on every poll:
+    ``get_job()`` may cost a network round trip on some adapters.
+    """
+    try:
+        job = adapter.get_job()
+        label = getattr(job, "file_name", None)
+        return str(label) if label else None
+    except Exception:  # noqa: BLE001 — identity is optional, status is not
+        return None
+
+
+def _feed_outcome_lifecycle(adapter: PrinterAdapter, state: PrinterState) -> None:
+    """Feed one ``get_state()`` result into the print-outcome lifecycle.
+
+    This is what makes outcome capture ADAPTER-GENERIC: every adapter's
+    normalized status stream — polled by the scheduler, the status
+    tools, monitoring — drives the same three moves the Bambu push path
+    performs natively:
+
+    1. once per process, reconcile pending rows against the first
+       status the printer reports (a terminal state still naming the
+       job settles it; merely idle resolves to ``unknown``, never
+       success);
+    2. observe the state so the NEXT call sees the transition;
+    3. on an active→terminal edge, record the watched ending (idle
+       after watched printing = success; error = failed; a cancel in
+       flight = cancelled) — but only when the job has a name to
+       attribute it to; an unnamed ending stays pending for the
+       reconcile/user path rather than being guessed onto a row.
+
+    Adapters with their own push wiring (Bambu MQTT) keep it — both
+    layers resolve only rows that are still pending and dedupe per
+    (printer, job), so whichever sees the ending first wins and the
+    other no-ops.
+    """
+    status = getattr(state, "state", None)
+    value = getattr(status, "value", "") or ""
+    if not value:
+        return
+
+    from kiln.auto_record_hook import (
+        fire_terminal_state_hook,
+        is_terminal_transition,
+        observe_state,
+        reconcile_pending_outcomes,
+    )
+
+    name = adapter.name
+    if not getattr(adapter, "_base_outcomes_reconciled", False):
+        adapter._base_outcomes_reconciled = True  # type: ignore[attr-defined]
+        # Only pay for job identity (get_job may be a network round trip)
+        # when there is actually a pending row to settle.
+        from kiln.persistence import get_db
+
+        if get_db().list_print_outcomes(
+            printer_name=name, outcome="pending", limit=1,
+        ):
+            reconcile_pending_outcomes(
+                printer_name=name,
+                gcode_state=value,
+                current_job_label=_current_job_label(adapter),
+            )
+
+    prev = observe_state(name, value)
+    # Job identity may cost a network round trip — pay it only for an
+    # edge that could actually record something.
+    if is_terminal_transition(prev, value):
+        label = _current_job_label(adapter)
+        if label:
+            fire_terminal_state_hook(
+                prev_state=prev,
+                new_state=value,
+                print_error_code=0,
+                printer_name=name,
+                job_id=label,
+                file_name=label,
+            )
 
 
 # ---------------------------------------------------------------------------

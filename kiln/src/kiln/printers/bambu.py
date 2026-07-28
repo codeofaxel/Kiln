@@ -603,6 +603,10 @@ class BambuAdapter(PrinterAdapter):
         self._last_state_time: float = 0.0  # monotonic time of last accepted update
         self._connected = False
         self._sequence_id = 0
+        # One-shot per process: on the first full status after connecting,
+        # settle any outcome rows left pending by prints that ended while
+        # no Kiln process was watching (see auto_record_hook).
+        self._pending_outcomes_reconciled = False
 
         # MQTT client.
         self._mqtt_client: mqtt.Client | None = None
@@ -1152,6 +1156,33 @@ class BambuAdapter(PrinterAdapter):
                 except Exception as exc:  # pragma: no cover
                     logger.debug(
                         "auto-record hook raised (non-fatal): %s", exc,
+                    )
+
+            # First full status after (re)connecting: settle outcome rows
+            # left pending by prints that ended while nothing was
+            # watching.  The reconcile only trusts what this status can
+            # honestly say — a terminal state still naming the pending job
+            # resolves it; a merely-idle printer resolves it to "unknown",
+            # never to success; an actively-printing state leaves rows
+            # for the live hook above.
+            if not self._pending_outcomes_reconciled and new_gcode_state:
+                self._pending_outcomes_reconciled = True
+                try:
+                    from kiln.auto_record_hook import (
+                        reconcile_pending_outcomes,
+                    )
+
+                    reconcile_pending_outcomes(
+                        printer_name=self.name,
+                        gcode_state=new_gcode_state,
+                        print_error_code=print_error_for_hook,
+                        current_job_label=(
+                            str(job_id_for_hook) if job_id_for_hook else None
+                        ),
+                    )
+                except Exception as exc:  # pragma: no cover
+                    logger.debug(
+                        "pending-outcome reconcile raised (non-fatal): %s", exc,
                     )
 
             # Flow-anomaly cross-check — when the merged push_status

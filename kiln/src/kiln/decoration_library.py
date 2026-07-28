@@ -163,6 +163,13 @@ class Decoration:
     parent_version: int | None = None
     changes: dict[str, str] | None = None
     texture_params: dict[str, Any] | None = None
+    #: Prints already counted into ``proven_settings`` — ``"<job_id>:<material>"``
+    #: tokens, newest last, bounded (see ``_COUNTED_JOBS_MAX``).  The counters
+    #: are blind ``+= 1`` increments with no natural key, so two callers
+    #: recording the same physical print (the outcome tool and the pro
+    #: decoration tool, say) counted it twice.  See
+    #: :func:`record_decoration_success`.
+    counted_jobs: list[str] = field(default_factory=list)
 
     @property
     def category(self) -> str:
@@ -195,6 +202,8 @@ class Decoration:
             d["changes"] = self.changes
         if self.texture_params is not None:
             d["texture_params"] = self.texture_params
+        if self.counted_jobs:
+            d["counted_jobs"] = self.counted_jobs
         return d
 
     @classmethod
@@ -228,6 +237,9 @@ class Decoration:
             parent_version=d.get("parent_version"),
             changes=d.get("changes"),
             texture_params=d.get("texture_params"),
+            counted_jobs=[
+                str(j) for j in (d.get("counted_jobs") or []) if isinstance(j, str)
+            ],
         )
 
 
@@ -515,6 +527,35 @@ def delete_decoration(name_or_slug: str) -> bool:
     return True
 
 
+#: How many counted (job, material) tokens a decoration manifest remembers.
+#: Bounded and oldest-dropped, on the ``daily_stats.counted_outcomes``
+#: precedent: enough history that a repeat call minutes or days later still
+#: no-ops, without letting a manifest grow without limit.
+_COUNTED_JOBS_MAX = 200
+
+
+def _counted_token(source_job_id: str | None, material: str) -> str | None:
+    """The idempotency token for one physical print of one material.
+
+    ``None`` when the caller gave no job id — a keyless call keeps the old
+    blind-increment behavior and owns its own dedupe (documented on both
+    recorders).
+    """
+    job = str(source_job_id or "").strip()[:96]
+    if not job:
+        return None
+    return f"{job}:{material}"
+
+
+def _already_counted(dec: Decoration, token: str | None) -> bool:
+    return bool(token) and token in dec.counted_jobs
+
+
+def _remember_counted(dec: Decoration, token: str | None) -> None:
+    if token:
+        dec.counted_jobs = [*dec.counted_jobs, token][-_COUNTED_JOBS_MAX:]
+
+
 def record_decoration_success(
     name_or_slug: str,
     *,
@@ -522,14 +563,28 @@ def record_decoration_success(
     depth_mm: float,
     mode: str = "emboss",
     image_style: str = "auto",
+    source_job_id: str | None = None,
 ) -> Decoration:
     """Record a successful print, updating proven settings.
+
+    :param source_job_id: The print this outcome came from.  Pass it and the
+        count is idempotent: the decoration remembers the ``(job, material)``
+        pairs it has already counted, so a second call for the same print —
+        an agent recording the outcome and then calling the decoration tool
+        for the same job — no-ops instead of inflating the counters.  One
+        physical print counts once, whichever door recorded it.  Omit it and
+        the counter increments blindly as it always has; a keyless caller
+        owns its own dedupe.
 
     :raises ValueError: if the decoration is not found.
     """
     dec = get_decoration(name_or_slug)
     if dec is None:
         raise ValueError(f"Decoration not found: {name_or_slug}")
+
+    token = _counted_token(source_job_id, material)
+    if _already_counted(dec, token):
+        return dec
 
     now = _now_iso()
 
@@ -551,6 +606,7 @@ def record_decoration_success(
         )
 
     dec.print_count += 1
+    _remember_counted(dec, token)
     _write_manifest(dec.slug, dec.to_dict())
     return dec
 
@@ -563,6 +619,7 @@ def record_decoration_failure(
     mode: str = "emboss",
     image_style: str = "auto",
     failure_mode: str | None = None,
+    source_job_id: str | None = None,
 ) -> Decoration:
     """Record a failed print for this decoration + material combination.
 
@@ -573,11 +630,21 @@ def record_decoration_failure(
     with ``success_count=0`` so the record reflects the failure without
     falsely claiming a proven pairing.
 
+    :param source_job_id: As on :func:`record_decoration_success` — the
+        ledger is shared and carries no polarity, because one physical print
+        has one outcome: whichever verdict landed first for a ``(job,
+        material)`` pair is the one counted, and a later opposite call for
+        the same print is a correction, not a second print.
+
     :raises ValueError: if the decoration is not found.
     """
     dec = get_decoration(name_or_slug)
     if dec is None:
         raise ValueError(f"Decoration not found: {name_or_slug}")
+
+    token = _counted_token(source_job_id, material)
+    if _already_counted(dec, token):
+        return dec
 
     now = _now_iso()
 
@@ -603,6 +670,7 @@ def record_decoration_failure(
         )
 
     dec.print_count += 1
+    _remember_counted(dec, token)
     _write_manifest(dec.slug, dec.to_dict())
     return dec
 
@@ -810,6 +878,10 @@ def iterate_decoration(
         version=new_version,
         parent_version=old_version,
         changes=changes if changes else None,
+        # The counters carry forward, so the ledger that keeps them honest
+        # must carry forward with them — otherwise iterating a decoration
+        # re-opens the double-count window for prints already counted.
+        counted_jobs=list(current.counted_jobs),
     )
     _write_manifest(slug, dec.to_dict())
     _logger.debug("Iterated decoration %r v%d -> v%d", slug, old_version, new_version)
@@ -874,6 +946,12 @@ def rollback_decoration(
         version=new_version,
         parent_version=current_version,
         changes={"rollback": f"restored from v{version}"},
+        # Union of both ledgers: rolling back restores the archived counters,
+        # but a print counted since then is still counted, and must not be
+        # countable a second time.
+        counted_jobs=list(
+            dict.fromkeys([*archived.counted_jobs, *current.counted_jobs])
+        )[-_COUNTED_JOBS_MAX:],
     )
     _write_manifest(slug, dec.to_dict())
     _logger.debug(

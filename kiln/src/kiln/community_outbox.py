@@ -57,6 +57,18 @@ logger = logging.getLogger(__name__)
 _MAX_ATTEMPTS = 8
 _DRAIN_BATCH = 50
 
+# One drain call keeps claiming batches until the queue is empty or it has
+# moved this many rows.  A ceiling, not a target: it bounds one startup
+# drain's work so a huge backlog can't hold the thread forever, while still
+# clearing thousands of rows per run instead of 50.
+_DRAIN_MAX_ROWS = 5000
+
+# The outbox is a queue, not an archive.  A delivered row is dead weight the
+# moment it ships; a row that exhausted its retries is evidence of an outage,
+# so it is kept far longer before being reclaimed.
+_DELIVERED_RETENTION_S = 24 * 60 * 60          # 1 day
+_DEAD_RETENTION_S = 30 * 24 * 60 * 60          # 30 days
+
 #: The default contribution kind — anonymous community print outcomes.
 DEFAULT_KIND = "community_print"
 
@@ -114,6 +126,11 @@ def _community_gate() -> bool:
 register_sender(DEFAULT_KIND, _community_sender, gate=_community_gate)
 
 
+def _default_db_path() -> str:
+    """Where the REAL per-user outbox lives, ignoring any override."""
+    return os.path.join(os.path.expanduser("~"), ".kiln", "community_outbox.db")
+
+
 def _db_path() -> str:
     """Co-locate the outbox with kiln.db, honoring the KILN_DB_PATH override
     (so tests can point it at a tmp dir)."""
@@ -121,6 +138,36 @@ def _db_path() -> str:
         os.path.expanduser("~"), ".kiln", "kiln.db"
     )
     return os.path.join(os.path.dirname(base) or ".", "community_outbox.db")
+
+
+def _suppressed_under_test() -> bool:
+    """True when a test/CI runner would otherwise touch the REAL outbox.
+
+    The outbox is the one local store that reaches OTHER PEOPLE: queued
+    rows are sent to the shared community corpus, which every user reads
+    for "what worked for people like you".  A suite that enqueues into
+    the real file therefore doesn't just pollute one machine — it ships
+    fabricated prints and recoveries to everybody (2026-07-28: 48,523
+    fixture rows — ``strategy_a``, ``voron_2_4_350``, ``sig123`` — were
+    found queued on a developer machine, 21,536 of them already sent,
+    against exactly ONE real print).
+
+    Same shape as ``daily_stats._recording_suppressed``, applied at BOTH
+    ends: nothing is enqueued and nothing is sent.  A test that points
+    ``KILN_DB_PATH`` at its own directory is asking to exercise the
+    outbox and is never suppressed — only the real per-user file is
+    protected.
+    """
+    if _db_path() != _default_db_path():
+        return False
+    try:
+        from kiln.heartbeat import _is_ci_environment
+
+        return _is_ci_environment()
+    except Exception:  # noqa: BLE001 — heartbeat absent, fall back to env
+        return any(
+            os.environ.get(var) for var in ("CI", "PYTEST_CURRENT_TEST")
+        )
 
 
 def _db() -> sqlite3.Connection:
@@ -186,7 +233,12 @@ def enqueue(dedupe_key: str, record: dict[str, Any], *, kind: str = DEFAULT_KIND
     ignored.  Returns True if newly queued, False if already present.
 
     Holds ``_db_lock`` only for the local INSERT, so it never blocks behind a
-    drain's network I/O."""
+    drain's network I/O.
+
+    No-ops under a test/CI runner still pointed at the real per-user
+    outbox — see :func:`_suppressed_under_test`."""
+    if _suppressed_under_test():
+        return False
     with _db_lock:
         conn = _db()
         cur = _retry_on_locked(
@@ -220,11 +272,103 @@ def _count_pending() -> int:
         ).fetchone()["n"]
 
 
-def drain(batch: int = _DRAIN_BATCH) -> dict[str, int]:
+def ensure_senders() -> None:
+    """Give every contribution kind a chance to register its sender.
+
+    A sender is registered as an import side effect of the module that owns
+    the kind, and kiln-pro's federation modules are imported lazily — inside
+    tool bodies — so a drain that ran at startup found no sender for their
+    kinds and failed every row it claimed.  Asking for registration before
+    draining is the fix; leaving it to import order is what broke.
+
+    No-op when kiln-pro isn't installed: free installs have exactly the one
+    built-in sender and nothing to add.
+
+    Suppressed under a test/CI runner, on the ``daily_stats`` precedent: a
+    registered sender POSTs to the real federation endpoint, so auto-wiring
+    one during a suite run would let any test that drains a queue publish to
+    production. (It did: a drain written to verify this very fix put 30 junk
+    rows in ``community_recoveries`` on 2026-07-28.) A test that wants a
+    sender registers its own stub — which is what a test should be asserting
+    against anyway.
+    """
+    if _registration_suppressed():
+        logger.debug("community outbox: sender registration suppressed (test/CI)")
+        return
+    try:
+        from kiln_pro.bridge import pro_features
+
+        pro_features.register_community_senders()
+    except Exception as exc:  # noqa: BLE001 — no kiln-pro, or a broken module
+        logger.debug("community outbox: pro senders unavailable: %s", exc)
+
+
+def _registration_suppressed() -> bool:
+    """True when a test/CI runner would otherwise wire up REAL senders.
+
+    Same env list as :func:`kiln.daily_stats._recording_suppressed`, applied
+    at the registration side.
+    """
+    try:
+        from kiln.heartbeat import _is_ci_environment
+
+        return _is_ci_environment()
+    except Exception:  # noqa: BLE001 — heartbeat absent, fall back to env
+        return any(os.environ.get(v) for v in ("CI", "PYTEST_CURRENT_TEST"))
+
+
+def purge_delivered(retain_seconds: float = _DELIVERED_RETENTION_S) -> int:
+    """Drop rows that are done with — delivered, or dead past the retry cap.
+
+    The outbox is a QUEUE, not an archive: nothing read these rows again once
+    they shipped, but nothing deleted them either, so the file grew forever
+    (2026-07-28: 21,195 delivered rows and 7,020 dead ones still on disk,
+    25 MB in a folder that is supposed to hold the user's work).
+
+    Dead rows are kept far longer than delivered ones — they are the evidence
+    that sends were failing, and deleting them promptly would erase the only
+    on-disk trace of an outage.
+    """
+    cutoff = time.time() - retain_seconds
+    dead_cutoff = time.time() - _DEAD_RETENTION_S
+    try:
+        with _db_lock:
+            conn = _db()
+            cur = _retry_on_locked(
+                lambda: conn.execute(
+                    "DELETE FROM community_outbox "
+                    "WHERE (sent_at IS NOT NULL AND sent_at < ?) "
+                    "   OR (sent_at IS NULL AND attempts >= ? AND created_at < ?)",
+                    (cutoff, _MAX_ATTEMPTS, dead_cutoff),
+                )
+            )
+            removed = cur.rowcount or 0
+            _retry_on_locked(conn.commit)
+        if removed:
+            logger.debug("community outbox: purged %d finished row(s)", removed)
+        return removed
+    except Exception as exc:  # noqa: BLE001 — housekeeping never breaks a drain
+        logger.debug("community outbox purge failed: %s", exc)
+        return 0
+
+
+def drain(batch: int = _DRAIN_BATCH, *, max_rows: int = _DRAIN_MAX_ROWS) -> dict[str, int]:
     """Send queued contributions, dispatching each to its kind's sender.
 
+    Drains REPEATEDLY until the queue is empty, this run has moved
+    ``max_rows``, or a whole batch fails.  One batch per call was the other
+    half of the 2026-07-28 stall: at 50 rows per server start, a 47,809-row
+    backlog needed ~956 restarts to clear while new rows kept arriving, so
+    the oldest rows were rechewed forever and most were never claimed once.
+
+    Stopping on a fully-failed batch is deliberate: when the endpoint is
+    down or the machine is offline, walking the whole backlog would burn
+    every row's retry budget in a single pass — exactly how a transient
+    outage turned into 7,020 permanently dead rows.  Progress continues,
+    failure backs off.
+
     Best-effort: a failed send stays queued (attempts incremented) for the next
-    drain.  Never raises.  Returns ``{sent, failed, remaining}``.
+    drain.  Never raises.  Returns ``{sent, failed, remaining, purged}``.
 
     Concurrency: the network send runs with NO lock held, so a slow/offline
     send never blocks ``enqueue``.  ``_db_lock`` is taken only to claim the
@@ -232,82 +376,110 @@ def drain(batch: int = _DRAIN_BATCH) -> dict[str, int]:
     replays at most one row).  ``_drain_lock`` admits a single drain at a time;
     a second concurrent caller returns ``sent=0`` immediately.
     """
+    if _suppressed_under_test():
+        # A test runner pointed at the REAL outbox: ensure_senders() below
+        # imports the live senders, which POST to the shared production
+        # corpus.  Refuse — a suite must never publish to other users.
+        return {"sent": 0, "failed": 0, "remaining": 0, "purged": 0}
     if not _drain_lock.acquire(blocking=False):
         # Another drain owns the queue right now — don't double-send.
-        return {"sent": 0, "failed": 0, "remaining": _count_pending()}
+        return {"sent": 0, "failed": 0, "remaining": _count_pending(), "purged": 0}
     try:
+        ensure_senders()
         sent = failed = 0
-        # 1) Claim a batch under a short lock — no network here.
-        with _db_lock:
-            conn = _db()
-            rows = _retry_on_locked(
-                lambda: conn.execute(
-                    "SELECT id, dedupe_key, payload, attempts, send_id, kind "
-                    "FROM community_outbox "
-                    "WHERE sent_at IS NULL AND attempts < ? ORDER BY id LIMIT ?",
-                    (_MAX_ATTEMPTS, batch),
-                )
-            ).fetchall()
-
-        # 2) Send each row with NO lock held; record + commit the result per
-        #    row under the lock.  Per-row commit keeps the crash-replay window
-        #    to a single row.
-        for row in rows:
-            ok = False
-            entry = _senders.get(row["kind"])
-            if entry is None:
-                # No sender registered for this kind (e.g. kiln-pro not loaded).
-                # Treat as a failed send so it retries / eventually surfaces as
-                # stuck, rather than silently looping.
-                logger.debug(
-                    "community outbox: no sender for kind=%s (id=%s)",
-                    row["kind"],
-                    row["id"],
-                )
-            else:
-                try:
-                    ok = bool(entry[0](json.loads(row["payload"]), row["send_id"]))
-                except Exception as exc:  # noqa: BLE001 — one bad row must not break the drain
-                    logger.debug("community outbox send error id=%s: %s", row["id"], exc)
-
-            with _db_lock:
-                conn = _db()
-                if ok:
-                    _retry_on_locked(
-                        lambda r=row, c=conn: c.execute(
-                            "UPDATE community_outbox SET sent_at = ? WHERE id = ?",
-                            (time.time(), r["id"]),
-                        )
-                    )
-                    sent += 1
-                else:
-                    _retry_on_locked(
-                        lambda r=row, c=conn: c.execute(
-                            "UPDATE community_outbox SET attempts = attempts + 1, "
-                            "last_error = ? WHERE id = ?",
-                            ("send failed", r["id"]),
-                        )
-                    )
-                    failed += 1
-                    if row["attempts"] + 1 >= _MAX_ATTEMPTS:
-                        # First crossing into "stuck": surface it once to the
-                        # logs.  Maintainer signal (federation endpoint down?),
-                        # never the user.  Only one drain runs at a time, so
-                        # row["attempts"]+1 is the post-update value.
-                        logger.warning(
-                            "community outbox row stuck after %d attempts "
-                            "(kind=%s, dedupe_key=%s) — sends are failing; check "
-                            "the federation endpoint, not the user.",
-                            _MAX_ATTEMPTS,
-                            row["kind"],
-                            row["dedupe_key"],
-                        )
-                _retry_on_locked(conn.commit)
-
-        return {"sent": sent, "failed": failed, "remaining": _count_pending()}
+        while sent + failed < max_rows:
+            passed, missed = _drain_one_batch(batch)
+            sent += passed
+            failed += missed
+            if passed == 0:
+                # Nothing moved: either the queue is empty or sends are
+                # failing.  Either way, stop — see the docstring.
+                break
+        purged = purge_delivered()
+        return {
+            "sent": sent,
+            "failed": failed,
+            "remaining": _count_pending(),
+            "purged": purged,
+        }
     finally:
         _drain_lock.release()
 
+
+def _drain_one_batch(batch: int) -> tuple[int, int]:
+    """Claim and send at most *batch* rows.  Returns ``(sent, failed)``.
+
+    Assumes the caller holds ``_drain_lock``.
+    """
+    sent = failed = 0
+    # 1) Claim a batch under a short lock — no network here.
+    with _db_lock:
+        conn = _db()
+        rows = _retry_on_locked(
+            lambda: conn.execute(
+                "SELECT id, dedupe_key, payload, attempts, send_id, kind "
+                "FROM community_outbox "
+                "WHERE sent_at IS NULL AND attempts < ? ORDER BY id LIMIT ?",
+                (_MAX_ATTEMPTS, batch),
+            )
+        ).fetchall()
+
+    # 2) Send each row with NO lock held; record + commit the result per
+    #    row under the lock.  Per-row commit keeps the crash-replay window
+    #    to a single row.
+    for row in rows:
+        ok = False
+        entry = _senders.get(row["kind"])
+        if entry is None:
+            # No sender registered for this kind (e.g. kiln-pro not loaded).
+            # Treat as a failed send so it retries / eventually surfaces as
+            # stuck, rather than silently looping.
+            logger.debug(
+                "community outbox: no sender for kind=%s (id=%s)",
+                row["kind"],
+                row["id"],
+            )
+        else:
+            try:
+                ok = bool(entry[0](json.loads(row["payload"]), row["send_id"]))
+            except Exception as exc:  # noqa: BLE001 — one bad row must not break the drain
+                logger.debug("community outbox send error id=%s: %s", row["id"], exc)
+
+        with _db_lock:
+            conn = _db()
+            if ok:
+                _retry_on_locked(
+                    lambda r=row, c=conn: c.execute(
+                        "UPDATE community_outbox SET sent_at = ? WHERE id = ?",
+                        (time.time(), r["id"]),
+                    )
+                )
+                sent += 1
+            else:
+                _retry_on_locked(
+                    lambda r=row, c=conn: c.execute(
+                        "UPDATE community_outbox SET attempts = attempts + 1, "
+                        "last_error = ? WHERE id = ?",
+                        ("send failed", r["id"]),
+                    )
+                )
+                failed += 1
+                if row["attempts"] + 1 >= _MAX_ATTEMPTS:
+                    # First crossing into "stuck": surface it once to the
+                    # logs.  Maintainer signal (federation endpoint down?),
+                    # never the user.  Only one drain runs at a time, so
+                    # row["attempts"]+1 is the post-update value.
+                    logger.warning(
+                        "community outbox row stuck after %d attempts "
+                        "(kind=%s, dedupe_key=%s) — sends are failing; check "
+                        "the federation endpoint, not the user.",
+                        _MAX_ATTEMPTS,
+                        row["kind"],
+                        row["dedupe_key"],
+                    )
+            _retry_on_locked(conn.commit)
+
+    return sent, failed
 
 def _safe_drain() -> None:
     try:
@@ -340,6 +512,141 @@ def contribute(
     except Exception as exc:  # noqa: BLE001 — contribution must never break the caller
         logger.debug("community contribute failed (non-fatal): %s", exc)
         return {"queued": False, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Print-outcome contributions — ONE key, ONE vocabulary, both callers
+# ---------------------------------------------------------------------------
+#
+# Two paths ship a finished print to the community pool: the monitors
+# (``community_autofire``, watching a print end) and ``record_print_outcome``
+# (an agent recording it).  They each carried their own dedupe key and their
+# own outcome map — the monitor said ``completed``, the tool said ``success``
+# — so a print that was WATCHED and then RECORDED shipped twice, under two
+# different words, to a federation endpoint with no server-side dedupe.  The
+# aggregate counted one print as two.
+#
+# The fix is not a check in either caller: it is that neither caller mints a
+# key or translates a word any more.  Both call
+# :func:`contribute_print_outcome`, which owns both, and the outbox's
+# existing dedupe-by-key collapses the pair.
+
+#: Every outcome vocabulary that reaches the community pool, mapped to the DB
+#: vocabulary in exactly one place.  Absent from this map ⇒ contributes
+#: nothing (see :func:`translate_outcome`).
+_OUTCOME_TRANSLATION: dict[str, str] = {
+    "success": "success",
+    "completed": "success",   # monitor vocabulary
+    "failed": "failed",
+    "partial": "partial",
+}
+
+
+def translate_outcome(outcome: str | None) -> str | None:
+    """Map a caller's outcome word to the community DB vocabulary.
+
+    Returns ``None`` — meaning *contribute nothing* — for every word that
+    carries no verdict on the print: ``cancelled`` and ``timeout`` (clock and
+    user events, not model-quality signals), ``pending`` and ``unknown`` (the
+    print is still owed an answer), a mid-print state word, or a vocabulary
+    this function has never heard of.  Unknown words fail CLOSED rather than
+    defaulting to success: an aggregate that invents a grade is worse than one
+    that never saw the print.
+    """
+    if not outcome:
+        return None
+    return _OUTCOME_TRANSLATION.get(str(outcome).strip().lower())
+
+
+def print_contribution_key(
+    job_id: str | None,
+    geometric_signature: str,
+    printer_file_name: str | None = None,
+) -> str:
+    """The canonical dedupe key for ONE physical print.
+
+    The **job id is the identity** whenever there is one: a job is one print
+    run, and it is the single field both contribution paths carry verbatim
+    (the monitor reads it off the job, the outcome tool is called with it).
+    Keying on anything either path DERIVES — each computes the geometric
+    signature by a different route — would leave the double-ship in place,
+    which is the whole reason this key exists.
+
+    The geometric signature identifies the MODEL, not the run, so it can only
+    be the FALLBACK: a printer driven directly, with nothing in Kiln's queue,
+    has no job id.  There it is paired with the printer's file name so two
+    different files can't collide.  The known cost: two runs of the same file
+    with no job id collapse into one contribution while the first row is still
+    on disk.  That is the deliberate direction to err — this endpoint has no
+    server-side dedupe, so an over-report is permanent in the aggregate while
+    an under-report is one missed sample.
+    """
+    job = (job_id or "").strip()
+    if job:
+        return f"print:{job}"
+    fallback = (printer_file_name or "").strip() or geometric_signature
+    return f"print:sig:{fallback}:{geometric_signature}"
+
+
+def contribute_print_outcome(
+    *,
+    outcome: str,
+    geometric_signature: str,
+    job_id: str | None = None,
+    printer_file_name: str | None = None,
+    printer_model: str | None = None,
+    material: str | None = None,
+    print_time_seconds: int | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Contribute one finished print to the community pool.
+
+    The single door for print-outcome contributions: it translates the
+    caller's vocabulary, mints the canonical dedupe key, and hands the record
+    to :func:`contribute` (durable, opt-in-gated, non-blocking).
+
+    ``extra`` carries a caller's own richer fields (settings, quality grade,
+    failure mode) and is applied UNDER the fields this function owns, so no
+    caller can smuggle a different outcome word or signature into the payload
+    — the translation stays in one place by construction.
+
+    :returns: ``{"contributed": False, "reason": ...}`` when the outcome
+        carries no verdict, the geometry is unknown, the user is opted out,
+        or the enqueue failed; else ``{"contributed": True, ...}`` merged
+        with the outbox result (``queued`` False there means an identical
+        print was already queued — the double-ship, collapsed).
+    """
+    mapped = translate_outcome(outcome)
+    if mapped is None:
+        return {"contributed": False, "reason": "non_quality_outcome"}
+    signature = str(geometric_signature or "").strip()
+    if not signature:
+        return {"contributed": False, "reason": "no_geometry"}
+
+    record: dict[str, Any] = dict(extra or {})
+    record.update(
+        {
+            "geometric_signature": signature,
+            "printer_model": printer_model or "unknown",
+            "material": material or "unknown",
+            "outcome": mapped,
+            "print_time_seconds": int(print_time_seconds) if print_time_seconds else 0,
+        }
+    )
+    result = contribute(
+        print_contribution_key(job_id, signature, printer_file_name), record
+    )
+    # A row already on disk under this key IS contributed (by the path that
+    # got here first) — that is the collapse working.  Opted out or a failed
+    # enqueue is not, and this dict is the only place a maintainer would ever
+    # see the difference.
+    contributed = not (result.get("opted_out") or result.get("error"))
+    return {
+        "contributed": contributed,
+        "signature": signature,
+        "outcome": mapped,
+        **result,
+    }
 
 
 def status() -> dict[str, int]:

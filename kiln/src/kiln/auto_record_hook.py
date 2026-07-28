@@ -1,4 +1,4 @@
-"""Auto-record print outcomes on terminal state transitions (Bug #10).
+"""Print-outcome lifecycle: open at start, record at end, reconcile on reconnect.
 
 Kiln's learning loop (``record_print_outcome``, ``proven_settings``
 updates, regression alerts) historically fired only when an agent
@@ -13,6 +13,32 @@ so transitions to a terminal state auto-fire ``record_print_outcome``
 with inferred outcome semantics.  The hook is debounced against
 firmware state flickers and idempotent per job: repeat transitions to
 the same terminal state for the same job_id no-op after the first.
+
+Watching the ending is not enough, though — it only records prints a
+LIVE process saw finish.  Start a print, close the session, walk away:
+nothing was watching when it ended, so nothing was recorded, and long
+prints (where the data matters most) were systematically invisible.
+Three additions close that hole:
+
+1. :func:`open_pending_outcome` — called from
+   ``PrinterAdapter.start_print`` (the chokepoint every entry point and
+   adapter passes through), it writes the outcome row at print START
+   with ``outcome='pending'``.  Kiln always sees the start, because
+   Kiln initiates it; the record no longer depends on anyone watching
+   the end.
+2. :func:`fire_terminal_state_hook` (existing) resolves the pending
+   row when a live process DOES watch the ending
+   (``determined_by='observed'``).
+3. :func:`reconcile_pending_outcomes` — called once per adapter
+   connection, it settles pending rows with what the machine can
+   honestly report: a matching terminal state resolves to
+   success/failed (``determined_by='inferred'``); a printer that is
+   merely idle with the job gone resolves to ``unknown`` — NEVER to
+   success.  An unresolved print is a known unknown and known unknowns
+   are safe; a guessed success is a silent lie that trains the model.
+   The unknown rows are surfaced to the user next session, who is
+   holding the part and can settle what the machine could not
+   (``determined_by='user_reported'``).
 
 The hook is printer-adapter agnostic.  Bambu's MQTT push_status path
 calls :func:`fire_terminal_state_hook` from its state-update routine;
@@ -76,10 +102,14 @@ _TERMINAL_STATE_DEBOUNCE_S: float = 2.5
 # cancel intent can't bleed into an unrelated subsequent print.
 _CANCEL_INTENT_TTL_S: float = 5.0
 
-# Which gcode_state values count as "actively printing" (so a
-# transition OUT of one into a terminal state is the trigger).  Case-
-# insensitive — upper A1 sometimes emits "RUNNING", lowercase X1 sends
-# "running".  Callers should ``.lower()`` before passing in.
+# Which state values count as "actively printing" (so a transition OUT
+# of one into a terminal state is the trigger).  Case-insensitive —
+# upper A1 sometimes emits "RUNNING", lowercase X1 sends "running".
+# Callers should ``.lower()`` before passing in.  Two vocabularies feed
+# this set: Bambu's firmware gcode_state values AND the normalized
+# ``PrinterStatus`` values every adapter's ``get_state()`` reports
+# ("printing" / "cancelling") — both must read as active or the
+# adapter-generic wiring would resolve rows for a print still running.
 _ACTIVE_STATES: frozenset[str] = frozenset({
     "running",
     "pause",
@@ -88,13 +118,16 @@ _ACTIVE_STATES: frozenset[str] = frozenset({
     "slicing",
     "init",
     "busy",
+    "printing",    # normalized PrinterStatus vocabulary
+    "cancelling",  # a cancel in flight is still an active job
 })
 
 # gcode_state that means "the print finished cleanly".
 _FINISH_STATES: frozenset[str] = frozenset({"finish"})
 
-# gcode_state that means "the print failed with an error".
-_FAILED_STATES: frozenset[str] = frozenset({"failed"})
+# State that means "the print failed": Bambu's firmware "failed" plus
+# the normalized PrinterStatus "error".
+_FAILED_STATES: frozenset[str] = frozenset({"failed", "error"})
 
 # Neutral idle — could mean finished naturally, cancelled, or startup.
 # The cancel-intent table disambiguates.
@@ -173,6 +206,38 @@ def register_cancel_intent(printer_name: str) -> None:
     _HOOK_STATE.register_cancel_intent(printer_name)
 
 
+def _failure_mode_from_code(print_error_code: int) -> str:
+    """Map a firmware HMS error code to a canonical failure_mode.
+
+    Unrecognised codes fall back to the generic "other" — the operator
+    can refine via a manual record_print_outcome call with a specific
+    failure_mode.  Common Bambu HMS codes:
+      0C00_0100_0001_* = adhesion / first-layer
+      0500_C010_*      = SD card R/W
+      0700_0200_*      = filament runout
+      0500_0400_*      = extrusion / clog
+    """
+    code = int(print_error_code or 0)
+    if code == 0:
+        return "other"
+    # Cheap fingerprint — higher bits identify the HMS family.
+    family = (code >> 24) & 0xFF
+    if family == 0x07:
+        return "filament_runout"
+    if family == 0x0C:
+        return "adhesion"
+    if family == 0x05:
+        return "mechanical"
+    # Specific extruder / servo-overload code (HMS 0300-0900-...): a
+    # P2S-class closed-loop servo extruder faults here where a stepper
+    # would silently skip.  Narrow attr-prefix match (not the whole 0300
+    # family) keeps the blast radius minimal and mirrors the adapter's
+    # _classify_flow_anomaly attr-prefix convention.
+    if f"{code:08X}".startswith("03000900"):
+        return "mechanical"
+    return "other"
+
+
 def _infer_outcome(
     new_state: str,
     print_error_code: int,
@@ -191,34 +256,7 @@ def _infer_outcome(
     """
     state = new_state.lower().strip()
     if state in _FAILED_STATES:
-        # Map print_error_code to a canonical failure_mode when we
-        # recognise the HMS family.  Unrecognised codes fall back to
-        # the generic "other" — the operator can refine via a manual
-        # record_print_outcome call with a specific failure_mode.
-        # Common Bambu HMS codes:
-        #   0C00_0100_0001_* = adhesion / first-layer
-        #   0500_C010_*      = SD card R/W
-        #   0700_0200_*      = filament runout
-        #   0500_0400_*      = extrusion / clog
-        code = int(print_error_code or 0)
-        if code == 0:
-            return ("failed", "other")
-        # Cheap fingerprint — higher bits identify the HMS family.
-        family = (code >> 24) & 0xFF
-        if family == 0x07:
-            return ("failed", "filament_runout")
-        if family == 0x0C:
-            return ("failed", "adhesion")
-        if family == 0x05:
-            return ("failed", "mechanical")
-        # Specific extruder / servo-overload code (HMS 0300-0900-...): a
-        # P2S-class closed-loop servo extruder faults here where a stepper
-        # would silently skip.  Narrow attr-prefix match (not the whole 0300
-        # family) keeps the blast radius minimal and mirrors the adapter's
-        # _classify_flow_anomaly attr-prefix convention.
-        if f"{code:08X}".startswith("03000900"):
-            return ("failed", "mechanical")
-        return ("failed", "other")
+        return ("failed", _failure_mode_from_code(print_error_code))
     if state in _FINISH_STATES:
         return ("success", None)
     if state in _IDLE_STATES:
@@ -231,6 +269,21 @@ def _infer_outcome(
             return ("cancelled", None)
         return ("success", None)
     return None
+
+
+def is_terminal_transition(prev_state: str | None, new_state: str | None) -> bool:
+    """Cheap predicate: could this edge produce an outcome record?
+
+    Callers that must pay for job identity (a ``get_job()`` network round
+    trip) before firing use this to skip the cost on benign transitions.
+    """
+    if not prev_state or not new_state:
+        return False
+    prev = prev_state.lower().strip()
+    new = new_state.lower().strip()
+    return prev in _ACTIVE_STATES and (
+        new in _FINISH_STATES or new in _FAILED_STATES or new in _IDLE_STATES
+    )
 
 
 def fire_terminal_state_hook(
@@ -275,6 +328,12 @@ def fire_terminal_state_hook(
 
     outcome, failure_mode = outcome_info
 
+    # A job that was CANCELLING and then settled did not finish — it was
+    # cancelled, whether or not our side registered the intent (the
+    # touchscreen or another client may have issued it).
+    if outcome == "success" and prev_lc == "cancelling":
+        outcome = "cancelled"
+
     # Lazy import to avoid circulars at module load.  learning_tools
     # depends on server which depends on many adapters, one of which
     # (bambu) imports THIS module at its top.
@@ -291,6 +350,9 @@ def fire_terminal_state_hook(
         "outcome": outcome,
         "printer_name": printer_name,
         "auto_recorded": True,
+        # A live process watched this terminal transition happen — the
+        # strongest of the three outcome sources.
+        "determined_by": "observed",
         "notes": (
             f"auto-recorded on terminal state transition "
             f"({prev_lc!r} → {new_lc!r}, print_error={print_error_code})"
@@ -332,8 +394,148 @@ def observe_state(printer_name: str, current_state: str) -> str | None:
     return prev
 
 
+def open_pending_outcome(
+    printer_name: str,
+    file_name: str | None,
+    material_type: str | None = None,
+) -> str | None:
+    """Open a ``pending`` outcome row the moment a print starts.
+
+    Called from ``PrinterAdapter.start_print`` — the template method
+    every adapter and entry point passes through — so every print Kiln
+    initiates leaves a row whether or not anything is still alive when
+    it ends.  The job id is synthetic (the printer's own job label
+    isn't known until its firmware reports it); the resolution paths
+    match by printer + file and adopt the real id.  Never raises.
+
+    :returns: The synthetic job id, or ``None`` when nothing was opened.
+    """
+    try:
+        from kiln.persistence import get_db
+
+        job_id = f"start:{(printer_name or '').strip()[:64]}:{int(time.time() * 1000)}"
+        row_id = get_db().open_pending_outcome(
+            job_id=job_id,
+            printer_name=printer_name,
+            file_name=file_name,
+            material_type=material_type,
+        )
+        return job_id if row_id is not None else None
+    except Exception as exc:
+        _logger.debug("open_pending_outcome failed (non-fatal): %s", exc)
+        return None
+
+
+def reconcile_pending_outcomes(
+    *,
+    printer_name: str,
+    gcode_state: str,
+    print_error_code: int = 0,
+    current_job_label: str | None = None,
+) -> list[dict[str, Any]]:
+    """Settle pending outcome rows with what a reconnected printer can say.
+
+    Runs once per adapter connection.  A printer's status on reconnect
+    is CURRENT state, not history — an idle machine says nothing about
+    whether the last job finished, failed at layer 300, or was
+    cancelled at the touchscreen.  So each pending row resolves only as
+    far as the machine's testimony honestly reaches:
+
+    - the printer still shows a TERMINAL state for the matching job →
+      ``success`` / ``failed`` (``determined_by='inferred'``);
+    - the printer is actively printing → every pending row is left
+      alone (the live terminal-state hook owns the ending);
+    - anything else — idle, job gone, a different job's remains →
+      ``unknown``, never success.  The unknown row is excluded from all
+      success-rate and proven-settings math and surfaced next session
+      so the user, who is holding the part, can settle it.
+
+    :returns: The rows that were resolved (possibly empty).
+    """
+    state = (gcode_state or "").lower().strip()
+    if not printer_name or state in _ACTIVE_STATES:
+        return []
+
+    try:
+        from kiln.persistence import _file_stem_token, get_db
+
+        db = get_db()
+        pending = db.list_print_outcomes(
+            printer_name=printer_name, outcome="pending", limit=50,
+        )
+    except Exception as exc:
+        _logger.debug("reconcile_pending_outcomes: DB unavailable: %s", exc)
+        return []
+
+    if not pending:
+        return []
+
+    label_token = _file_stem_token(current_job_label)
+    resolved: list[dict[str, Any]] = []
+    for row in pending:
+        row_token = _file_stem_token(row.get("file_name"))
+        # The machine's terminal report is only testimony about the job
+        # it names.  A stem match ties them; a lone pending row may
+        # claim an unlabelled report (single-printer reality), but a
+        # MISmatched label means some other job ran after ours — which
+        # tells us nothing about how ours ended.
+        matches = bool(label_token) and label_token == row_token
+        lone_unlabelled = not label_token and len(pending) == 1
+
+        outcome: str
+        failure_mode: str | None = None
+        if state in _FINISH_STATES and (matches or lone_unlabelled):
+            outcome = "success"
+            note = (
+                "resolved on reconnect: printer still reported this job "
+                "finished cleanly"
+            )
+        elif state in _FAILED_STATES and (matches or lone_unlabelled):
+            outcome = "failed"
+            failure_mode = _failure_mode_from_code(print_error_code)
+            note = (
+                "resolved on reconnect: printer still reported this job "
+                f"in a failed state (print_error={print_error_code})"
+            )
+        else:
+            outcome = "unknown"
+            note = (
+                "print ended while Kiln was not watching; the printer's "
+                "state on reconnect could not say how it went — ask the "
+                "user, who has the part"
+            )
+
+        try:
+            update: dict[str, Any] = {
+                "job_id": row["job_id"],
+                "printer_name": printer_name,
+                "outcome": outcome,
+                "agent_id": "auto",
+                "determined_by": "inferred",
+                "notes": note,
+            }
+            if failure_mode:
+                update["failure_mode"] = failure_mode
+            db.save_print_outcome(update)
+            resolved.append({**row, "outcome": outcome, "notes": note})
+            _logger.info(
+                "reconcile_pending_outcomes: %r (started %s) → %r",
+                row.get("file_name") or row["job_id"],
+                row.get("created_at"),
+                outcome,
+            )
+        except Exception as exc:
+            _logger.debug(
+                "reconcile_pending_outcomes: could not resolve %r: %s",
+                row.get("job_id"), exc,
+            )
+    return resolved
+
+
 __all__ = [
     "fire_terminal_state_hook",
     "observe_state",
+    "open_pending_outcome",
+    "reconcile_pending_outcomes",
     "register_cancel_intent",
 ]

@@ -915,6 +915,42 @@ def _isolate_decoration_quota(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_kiln_db(tmp_path, monkeypatch):
+    """Keep the suite out of the developer's real ``~/.kiln/kiln.db``.
+
+    ``KilnDB()`` with no argument resolves to the default path, so any test
+    that constructs one writes print history, jobs and outcomes into the
+    real database.  It did: 1,811 phantom prints, 462 jobs and 333 outcomes
+    from ``a.gcode`` / ``test.gcode``, against exactly one genuine print.
+    The same class the daily-stats isolation already covers — the counters
+    were fixed and the database under them was not.
+
+    ``persistence._redirect_if_test_runner`` is the belt (the default path
+    is refused under CI env at the source); this is the suspenders, and it
+    gives each test its own file so a test that WANTS to assert on
+    persistence just works.
+
+    The singleton reset is part of the isolation: ``get_db()`` caches the
+    first instance it builds, so without the reset every later test reads
+    whichever tmp DB the FIRST caller bound — rows written by one test
+    (e.g. pending outcome rows opened by a start_print exercise) leak
+    into unrelated tests' assertions in whatever order the worker ran.
+    """
+    import kiln.persistence as _persistence
+    from kiln import auto_record_hook as _hook
+
+    monkeypatch.setenv("KILN_DB_PATH", str(tmp_path / "kiln.db"))
+    monkeypatch.setattr(_persistence, "_db", None)
+    # The outcome hook's observation ledger (previous state per printer,
+    # cancel intents, recorded-job dedupe) is process state of the same
+    # class as the DB singleton: one test's observed "printing" must not
+    # become the next test's phantom terminal transition.
+    monkeypatch.setattr(_hook, "_HOOK_STATE", _hook._HookState())
+    yield
+    monkeypatch.setattr(_persistence, "_db", None)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_daily_stats(tmp_path, monkeypatch):
     """Point telemetry counters at a per-test file, never the real one.
 

@@ -62,6 +62,11 @@ class JobScheduler:
         self._thread: threading.Thread | None = None
         self._active_jobs: dict[str, str] = {}  # job_id -> printer_name
         self._retry_counts: dict[str, int] = {}  # job_id -> attempts so far
+        # Jobs this scheduler has actually SEEN printing.  An idle printer
+        # only proves a job it was watched running has ended cleanly; a job
+        # that was dispatched but never observed printing may have failed to
+        # start, and claiming success for it would be a guess.
+        self._seen_printing: set[str] = set()
         self._retry_not_before: dict[str, float] = {}  # job_id -> earliest retry timestamp
         self._lock = threading.Lock()
 
@@ -115,7 +120,10 @@ class JobScheduler:
             # Exponential backoff: 30s, 60s, 120s, ...
             delay = self._retry_backoff_base * (2**count)
             self._retry_not_before[job_id] = time.time() + delay
-            # Reset the job back to QUEUED so a future tick can redispatch it
+            # Reset the job back to QUEUED so a future tick can redispatch it.
+            # The retry is a fresh physical print — the next attempt must
+            # earn its own "seen printing" observation.
+            self._seen_printing.discard(job_id)
             with self._lock:
                 job = self._queue.get_job(job_id)
                 job.status = JobStatus.QUEUED
@@ -145,6 +153,7 @@ class JobScheduler:
         # Retries exhausted — mark permanently failed
         self._retry_counts.pop(job_id, None)
         self._retry_not_before.pop(job_id, None)
+        self._seen_printing.discard(job_id)
         self._queue.mark_failed(job_id, error_msg)
         self._event_bus.publish(
             EventType.JOB_FAILED,
@@ -195,18 +204,44 @@ class JobScheduler:
         printer_name: str,
         outcome: str,
         error_msg: str | None = None,
+        determined_by: str = "observed",
     ) -> None:
         """Best-effort auto-record a print outcome to the learning database."""
         if not self._persistence:
             return
         try:
-            # Check if outcome already recorded (agent may have beaten us)
-            existing = self._persistence.get_print_outcome(job_id)
-            if existing is not None:
-                return  # Agent already recorded — don't overwrite
-
             # Try to get job metadata for richer outcome data
             job = self._queue.get_job(job_id)
+
+            # Check if a DECIDED outcome is already recorded (an agent may
+            # have beaten us).  An unresolved row (pending — opened at
+            # print start) is exactly what this call should settle.
+            existing = self._persistence.get_print_outcome(job_id)
+            if existing is not None and existing.get("outcome") not in ("pending", "unknown"):
+                return  # decided already — don't overwrite
+            if existing is None:
+                # The scheduler is a RESOLVER, never a second author.  The
+                # adapter layer (start_print + the get_state wiring) owns
+                # the row: it opens 'pending' at start and may already have
+                # recorded the watched ending under the printer's own job
+                # label.  Writing here without an unresolved row to settle
+                # would author a duplicate of an ending someone else
+                # recorded — so if nothing is owed, say nothing.
+                from kiln.persistence import _file_stem_token
+
+                unresolved = self._persistence.list_unresolved_outcomes(
+                    printer_name=printer_name, limit=50,
+                )
+                tokens = {
+                    _file_stem_token(job.file_name if job else None),
+                    _file_stem_token(job_id),
+                } - {""}
+                claimable = [
+                    row for row in unresolved
+                    if _file_stem_token(row.get("file_name")) in tokens
+                ] or (unresolved if len(unresolved) == 1 else [])
+                if not claimable:
+                    return
 
             self._persistence.save_print_outcome(
                 {
@@ -221,7 +256,8 @@ class JobScheduler:
                     "settings": None,
                     "environment": None,
                     "notes": f"Auto-recorded by scheduler. {error_msg}" if error_msg else "Auto-recorded by scheduler.",
-                    "agent_id": "scheduler",
+                    "agent_id": "auto",
+                    "determined_by": determined_by,
                     "created_at": time.time(),
                 }
             )
@@ -285,6 +321,7 @@ class JobScheduler:
                         source="scheduler",
                     )
                     self._auto_record_outcome(job_id, printer_name, "failed", error_msg=error_msg)
+                    self._seen_printing.discard(job_id)
                     failed.append({"job_id": job_id, "error": error_msg})
                     continue
 
@@ -292,19 +329,62 @@ class JobScheduler:
                 state = adapter.get_state()
                 job_progress = adapter.get_job()
 
-                # Printer returned to idle -- job is done
+                if state.state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+                    self._seen_printing.add(job_id)
+
+                # Printer returned to idle -- the job has ENDED.  How it
+                # ended is only as certain as what this loop actually saw:
+                #   - a job the queue itself cancelled ends as "cancelled";
+                #   - a job this loop WATCHED printing that is now idle with
+                #     no error ended cleanly -> "success" (observed);
+                #   - a job never seen printing may have failed to start —
+                #     claiming success would be a guess, and a guessed
+                #     success poisons the learning data that proven-settings
+                #     and printer rankings are built from.  It ends as
+                #     "unknown" (inferred) and the user gets asked.
                 if state.state == PrinterStatus.IDLE:
-                    self._queue.mark_completed(job_id)
+                    pre_idle_job = self._queue.get_job(job_id)
+                    queue_cancelled = bool(
+                        pre_idle_job is not None
+                        and getattr(pre_idle_job.status, "value", str(pre_idle_job.status)).lower()
+                        in ("cancelled", "canceled")
+                    )
+                    # CANCELLED is terminal in the queue's state machine —
+                    # completing it would raise, and the cancel path
+                    # already published its own event when it happened.
+                    if not queue_cancelled:
+                        self._queue.mark_completed(job_id)
                     with self._lock:
                         self._active_jobs.pop(job_id, None)
                         self._retry_counts.pop(job_id, None)
                         self._retry_not_before.pop(job_id, None)
-                    self._event_bus.publish(
-                        EventType.JOB_COMPLETED,
-                        {"job_id": job_id, "printer_name": printer_name},
-                        source="scheduler",
-                    )
-                    self._auto_record_outcome(job_id, printer_name, "success")
+                    if not queue_cancelled:
+                        self._event_bus.publish(
+                            EventType.JOB_COMPLETED,
+                            {"job_id": job_id, "printer_name": printer_name},
+                            source="scheduler",
+                        )
+                    if queue_cancelled:
+                        self._auto_record_outcome(
+                            job_id, printer_name, "cancelled",
+                            determined_by="observed",
+                        )
+                    elif job_id in self._seen_printing:
+                        self._auto_record_outcome(
+                            job_id, printer_name, "success",
+                            determined_by="observed",
+                        )
+                    else:
+                        self._auto_record_outcome(
+                            job_id, printer_name, "unknown",
+                            error_msg=(
+                                "Printer went idle before the scheduler ever "
+                                "saw this job printing — it may not have "
+                                "started. Outcome needs the user's answer."
+                            ),
+                            determined_by="inferred",
+                        )
+                    self._seen_printing.discard(job_id)
                     completed.append(job_id)
 
                 elif state.state == PrinterStatus.ERROR:

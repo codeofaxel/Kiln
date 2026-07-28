@@ -298,6 +298,7 @@ class _IntelligenceToolsPlugin:
             quality_grade: str = "B",
             failure_mode: str | None = None,
             print_time_seconds: int = 0,
+            job_id: str | None = None,
         ) -> dict:
             """Contribute a print outcome to the community registry.
 
@@ -314,6 +315,10 @@ class _IntelligenceToolsPlugin:
                 quality_grade: Grade from ``"A"`` to ``"F"`` (default ``"B"``).
                 failure_mode: Optional failure description.
                 print_time_seconds: Print duration in seconds.
+                job_id: The print's job id when known — it anchors the
+                    federation dedupe key, so a print that was also
+                    watched (or recorded via ``record_print_outcome``)
+                    ships to the community pool once, not twice.
             """
             import kiln.server as _srv
 
@@ -341,15 +346,22 @@ class _IntelligenceToolsPlugin:
 
                 contribute_print(record)
 
-                # Durable federation: enqueue locally first, flush in the
-                # background, retry a failed send on a later drain — never a
-                # silent drop (the old fire-and-forget thread lost it on any
-                # hiccup).  Idempotent per contribution.
+                # Durable federation through the ONE contribution door —
+                # canonical dedupe key + one vocabulary translation — so a
+                # print that was also watched by a monitor or recorded via
+                # record_print_outcome ships once.  (The old key here was
+                # timestamp-minted, so it could never dedupe against
+                # anything, including a replay of itself.)
                 try:
                     from kiln import community_outbox
-                    community_outbox.contribute(
-                        f"cp:{geometric_signature}:{record.timestamp}",
-                        record.to_dict(),
+                    community_outbox.contribute_print_outcome(
+                        outcome=outcome,
+                        geometric_signature=geometric_signature,
+                        job_id=job_id,
+                        printer_model=printer_model,
+                        material=material,
+                        print_time_seconds=print_time_seconds,
+                        extra=record.to_dict(),
                     )
                 except Exception:
                     pass  # Never let sync failure affect local contribution
