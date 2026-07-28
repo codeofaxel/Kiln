@@ -491,6 +491,14 @@ def _execute_tool(name: str, arguments: dict[str, Any]) -> str:
         else:
             result = asyncio.run(mcp_server.call_tool(name, arguments))
 
+        # Normalize across SDK majors: 1.x returns a content sequence (or a
+        # plain dict), 2.0 returns a CallToolResult model carrying .content.
+        # Without this, iterating the 2.0 model yields pydantic field tuples
+        # — corrupt text, not a crash.
+        result = getattr(result, "content", result)
+        if isinstance(result, dict):
+            return json.dumps(result, default=str)
+
         # call_tool returns a list of content objects; extract text
         parts = []
         for item in result:

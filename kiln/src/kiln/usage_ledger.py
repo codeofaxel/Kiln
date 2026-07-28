@@ -228,9 +228,12 @@ def flush() -> int:
             return 0
         entries = [{"day": d, "tool": t, "count": n} for d, t, n in rows]
 
-        import httpx
+        # requests, not httpx: httpx was only ever a transitive dep (via
+        # mcp<2) and vanished when the SDK moved to httpx2 — an ImportError
+        # here would silently kill the sync and read as an idle user.
+        import requests
 
-        resp = httpx.post(
+        resp = requests.post(
             f"{base}/api/me/stats/record",
             headers={"Authorization": f"Bearer {token}"},
             json={"device_id": device_id(), "entries": entries},

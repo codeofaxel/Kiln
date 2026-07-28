@@ -41,7 +41,7 @@ os.environ.pop("KILN_PRINTER_TYPE", None)
 # Monkey-patch FastMCP to accept unknown kwargs (like ``description``)
 # so that ``import kiln.server`` succeeds at collection time.
 # ---------------------------------------------------------------------------
-from mcp.server.fastmcp import FastMCP
+from kiln.mcp_compat import FastMCP
 
 _original_fastmcp_init = FastMCP.__init__
 

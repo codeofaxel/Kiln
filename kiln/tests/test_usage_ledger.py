@@ -117,7 +117,7 @@ def test_flush_posts_absolute_counts_and_advances_watermark(flushable, monkeypat
         captured["json"] = json
         return _FakeResp(200, {"success": True, "recorded": len(json["entries"])})
 
-    monkeypatch.setattr("httpx.post", fake_post)
+    monkeypatch.setattr("requests.post", fake_post)
     monkeypatch.setattr(lr, "_oauth_token", lambda: "tok-123")
 
     assert lr.flush() == 2  # two (day, tool) rows
@@ -141,7 +141,7 @@ def test_flush_noop_when_signed_out(flushable, monkeypatch):
         hits["n"] += 1
         return _FakeResp()
 
-    monkeypatch.setattr("httpx.post", fake_post)
+    monkeypatch.setattr("requests.post", fake_post)
     monkeypatch.setattr(lr, "_oauth_token", lambda: None)
     assert lr.flush() == 0
     assert hits["n"] == 0  # never touched the network
@@ -150,7 +150,7 @@ def test_flush_noop_when_signed_out(flushable, monkeypatch):
 def test_flush_keeps_watermark_on_http_failure(flushable, monkeypatch):
     lr.record("y")
     monkeypatch.setattr(lr, "_oauth_token", lambda: "tok")
-    monkeypatch.setattr("httpx.post", lambda *a, **k: _FakeResp(503, {"success": False}))
+    monkeypatch.setattr("requests.post", lambda *a, **k: _FakeResp(503, {"success": False}))
     assert lr.flush() == 0  # server failed
 
     sent = {}
@@ -159,7 +159,7 @@ def test_flush_keeps_watermark_on_http_failure(flushable, monkeypatch):
         sent["entries"] = json["entries"]
         return _FakeResp(200, {"success": True})
 
-    monkeypatch.setattr("httpx.post", ok_post)
+    monkeypatch.setattr("requests.post", ok_post)
     assert lr.flush() == 1  # watermark wasn't advanced, so y re-sends
     assert any(e["tool"] == "y" for e in sent["entries"])
 
@@ -168,7 +168,7 @@ def test_flush_treats_unsuccessful_body_as_failure(flushable, monkeypatch):
     lr.record("z")
     monkeypatch.setattr(lr, "_oauth_token", lambda: "tok")
     # HTTP 200 but success:false (e.g. sync_unavailable) must NOT advance.
-    monkeypatch.setattr("httpx.post", lambda *a, **k: _FakeResp(200, {"success": False}))
+    monkeypatch.setattr("requests.post", lambda *a, **k: _FakeResp(200, {"success": False}))
     assert lr.flush() == 0
 
 
@@ -179,7 +179,7 @@ def test_flush_refuses_non_https_base(flushable, monkeypatch):
     monkeypatch.setattr(lr, "_oauth_token", lambda: "tok")
     hits = {"n": 0}
     monkeypatch.setattr(
-        "httpx.post", lambda *a, **k: hits.__setitem__("n", hits["n"] + 1)
+        "requests.post", lambda *a, **k: hits.__setitem__("n", hits["n"] + 1)
     )
     assert lr.flush() == 0
     assert hits["n"] == 0  # never put the bearer on a non-https wire

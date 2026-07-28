@@ -66,7 +66,7 @@ from pathlib import Path
 from types import MethodType
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from kiln.mcp_compat import FastMCP, set_instructions
 
 with contextlib.suppress(ImportError):
     import kiln_pro  # noqa: F401 — triggers compat shim installation
@@ -12045,10 +12045,10 @@ def main() -> None:
     # Rebuild MCP instructions now that config, printers, marketplaces,
     # and plugins are all loaded.  This replaces the static fallback with
     # a context-aware summary of the user's actual capabilities.
-    # NOTE: FastMCP.instructions is a read-only property (no setter) in
-    # mcp>=1.9.  Write to the underlying server object directly.
-    # Workaround: FastMCP.instructions is read-only; write to the underlying server object.
-    mcp._mcp_server.instructions = _build_instructions()
+    # ``instructions`` is a read-only property on the server class, so the
+    # compat helper writes to the lowlevel server object (whose attribute
+    # name differs across SDK majors).
+    set_instructions(mcp, _build_instructions())
 
     # Initialise cloud sync from saved config
     _saved_sync = get_db().get_setting("cloud_sync_config")
