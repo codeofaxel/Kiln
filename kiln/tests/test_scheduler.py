@@ -1467,3 +1467,33 @@ class TestOutcomeHonesty:
         row = db.get_print_outcome(job_id)
         assert row["outcome"] == "failed"
         assert row["determined_by"] == "user_reported"
+
+    def test_queue_cancelled_job_records_cancelled(
+        self, queue, registry, event_bus, tmp_path,
+    ):
+        """A job the queue itself cancelled ends as 'cancelled' — never
+        laundered into success by the idle printer that follows, and the
+        terminal queue state is left alone (completing it would raise)."""
+        scheduler, db = self._scheduler_with_db(queue, registry, event_bus, tmp_path)
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+        scheduler.tick()  # dispatch
+        self._open_pending(db)
+
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.PRINTING
+        )
+        scheduler.tick()  # watched printing
+
+        queue.cancel(job_id)
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.IDLE
+        )
+        scheduler.tick()
+
+        row = db.get_print_outcome(job_id)
+        assert row is not None
+        assert row["outcome"] == "cancelled"
+        assert queue.get_job(job_id).status == JobStatus.CANCELLED
+        assert job_id not in scheduler.active_jobs

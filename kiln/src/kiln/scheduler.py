@@ -349,16 +349,21 @@ class JobScheduler:
                         and getattr(pre_idle_job.status, "value", str(pre_idle_job.status)).lower()
                         in ("cancelled", "canceled")
                     )
-                    self._queue.mark_completed(job_id)
+                    # CANCELLED is terminal in the queue's state machine —
+                    # completing it would raise, and the cancel path
+                    # already published its own event when it happened.
+                    if not queue_cancelled:
+                        self._queue.mark_completed(job_id)
                     with self._lock:
                         self._active_jobs.pop(job_id, None)
                         self._retry_counts.pop(job_id, None)
                         self._retry_not_before.pop(job_id, None)
-                    self._event_bus.publish(
-                        EventType.JOB_COMPLETED,
-                        {"job_id": job_id, "printer_name": printer_name},
-                        source="scheduler",
-                    )
+                    if not queue_cancelled:
+                        self._event_bus.publish(
+                            EventType.JOB_COMPLETED,
+                            {"job_id": job_id, "printer_name": printer_name},
+                            source="scheduler",
+                        )
                     if queue_cancelled:
                         self._auto_record_outcome(
                             job_id, printer_name, "cancelled",
