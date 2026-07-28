@@ -11558,34 +11558,37 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
     (the hosted default — paired users hit this without any env config).
     """
     api_url = (os.environ.get("KILN_API_URL") or "").strip() or _HOSTED_KILN_API_URL
-    bearer = os.environ.get("KILN_LICENSE_KEY", "").strip()
-    if not bearer:
-        try:
-            from kiln.auth_session import resolve_session_bearer
+    try:
+        from kiln.auth_session import resolve_api_bearer
 
-            session = resolve_session_bearer()
-        except Exception:
-            session = None
-        if session is None:
-            # Resolver unreachable (broken install).  Fall back to the
-            # raw stored token rather than claiming an unpaired account
-            # at a machine that plainly has a session on disk.
-            bearer = _raw_paired_access_token()
-        elif session.token:
-            bearer = session.token
-        elif session.state == "needs_signin":
-            # A session exists but its refresh token was rejected —
-            # distinct from never having paired, and the fix is one
-            # command.  Without this branch the stale bearer used to
-            # ride to the server and come back as an unexplained 401
-            # or a silent free-tier downgrade.
-            return {
-                "status": "error",
-                "error": session.detail,
-                "code": "KILN_SESSION_EXPIRED",
-                "tool": tool_name,
-                "setup_hint": "python3 -m kiln signin",
-            }
+        resolved = resolve_api_bearer()
+    except Exception:
+        resolved = None
+    if resolved is None:
+        # Resolver unreachable (broken install).  Fall back to the raw
+        # stored token rather than claiming an unpaired account at a
+        # machine that plainly has a session on disk.
+        bearer = (
+            os.environ.get("KILN_LICENSE_KEY", "").strip()
+            or _raw_paired_access_token()
+        )
+    elif resolved.token:
+        bearer = resolved.token
+    elif resolved.state == "needs_signin":
+        # A session exists but its refresh token was rejected —
+        # distinct from never having paired, and the fix is one
+        # command.  Without this branch the stale bearer used to
+        # ride to the server and come back as an unexplained 401
+        # or a silent free-tier downgrade.
+        return {
+            "status": "error",
+            "error": resolved.detail,
+            "code": "KILN_SESSION_EXPIRED",
+            "tool": tool_name,
+            "setup_hint": "python3 -m kiln signin",
+        }
+    else:
+        bearer = ""
     if not bearer:
         return {
             "status": "error",

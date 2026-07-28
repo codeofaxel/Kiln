@@ -247,26 +247,18 @@ class TestWireB_DecorationAutoSuccess:
 
 class TestWireC_CommunityPull:
     def test_fetch_aggregates_failure_modes(self, tmp_kiln_env, monkeypatch):
+        """The read now travels the licensed API: the server answers with
+        computed aggregates (never rows), and the client shapes them for
+        the blend.  Mock at the API door, which is the real contract."""
         monkeypatch.setenv("KILN_COMMUNITY_OPT_IN", "true")
         import kiln.community_sync as cs
 
-        fake_rows = [
-            {"failure_mode": "warping", "outcome": "failed"},
-            {"failure_mode": "warping", "outcome": "failed"},
-            {"failure_mode": "adhesion", "outcome": "failed"},
-            {"failure_mode": None, "outcome": "success"},
-        ]
-
-        class _Resp:
-            status = 200
-            def read(self):
-                return json.dumps(fake_rows).encode()
-            def __enter__(self):
-                return self
-            def __exit__(self, *a):
-                return None
-
-        with patch("urllib.request.urlopen", return_value=_Resp()):
+        api_body = {
+            "failure_breakdown": {"warping": 2, "adhesion": 1},
+            "sample_size": 4,
+            "success_count": 1,
+        }
+        with patch.object(cs, "_ask_community_api", return_value=api_body):
             result = cs.fetch_community_insights("bambu_x1c", "PLA", use_cache=False)
 
         assert result is not None
@@ -282,24 +274,14 @@ class TestWireC_CommunityPull:
         monkeypatch.setenv("KILN_COMMUNITY_OPT_IN", "true")
         import kiln.community_sync as cs
 
-        fake_rows = [{"failure_mode": "stringing", "outcome": "failed"}]
-
         call_count = {"n": 0}
 
-        class _Resp:
-            status = 200
-            def read(self):
-                return json.dumps(fake_rows).encode()
-            def __enter__(self):
-                return self
-            def __exit__(self, *a):
-                return None
-
-        def _fake_urlopen(*a, **kw):
+        def _fake_api(route, payload):
             call_count["n"] += 1
-            return _Resp()
+            return {"failure_breakdown": {"stringing": 1}, "sample_size": 1,
+                    "success_count": 0}
 
-        with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+        with patch.object(cs, "_ask_community_api", side_effect=_fake_api):
             a = cs.fetch_community_insights("bambu_x1c", "PLA")
             b = cs.fetch_community_insights("bambu_x1c", "PLA")
 
