@@ -534,6 +534,19 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "print-start stat recording failed", exc_info=True
                 )
+            # Nozzle wear counts at START — every print wears the nozzle,
+            # success or failure, and an end-hook only sees the prints
+            # something watched to completion.  No-op without kiln-pro.
+            try:
+                from kiln._pro_nozzle_bridge import record_print_odometer
+
+                record_print_odometer(self.name, file_name)
+            except Exception:  # noqa: BLE001 — wear bookkeeping never blocks a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "nozzle odometer recording failed", exc_info=True
+                )
             # Open the outcome row NOW, while we can still see the print.
             # The start is the one event Kiln is guaranteed to witness (it
             # initiates it); if no process is alive when the print ends,
