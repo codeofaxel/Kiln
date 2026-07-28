@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-28T01:51:41.725595+00:00",
-  "tool_count": 388,
+  "generated": "2026-07-28T03:28:38.821964+00:00",
+  "tool_count": 390,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -1741,6 +1741,38 @@
       }
     },
     {
+      "name": "cloud_pull_fair_records",
+      "description": "Read First Article Inspection records back from the cloud.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "enterprise",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "bundle_digest": {
+            "default": "",
+            "title": "Bundle Digest",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          },
+          "limit": {
+            "default": 200,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "cloud_pull_fair_recordsArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "cloud_pull_manual_history",
       "description": "Merge a design's remote manual-revision history into local.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
@@ -1862,6 +1894,33 @@
           "intake_id"
         ],
         "title": "cloud_push_dfm_assessmentsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_push_fair_records",
+      "description": "Mirror First Article Inspection records to your cloud workspace.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "enterprise",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "bundle_path": {
+            "default": "",
+            "title": "Bundle Path",
+            "type": "string"
+          },
+          "remote": {
+            "default": "default",
+            "title": "Remote",
+            "type": "string"
+          }
+        },
+        "title": "cloud_push_fair_recordsArguments",
         "type": "object"
       }
     },
