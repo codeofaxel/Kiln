@@ -7,6 +7,31 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Kiln's hosted connection speaks the newest protocol.** Connect Kiln to
+  Claude or any other AI client and it now uses the July 2026 revision of
+  the Model Context Protocol. Long-running work — texture carving, print
+  repair, assembly booklets, technical drawings — hands back a ticket you
+  can check on, so a slow job never blocks the conversation. Nothing
+  changes for older clients.
+
+- **Print records now work on every printer Kiln supports (free).** Outcome
+  recording used to run only on the Bambu connection; Moonraker, OctoPrint,
+  Klipper and serial printers now record too. The record opens when a print
+  starts, so closing your session doesn't lose it, and if Kiln wasn't
+  connected at the end it asks how the print went instead of assuming —
+  anything unconfirmed stays out of success rates and recommended settings
+  until you answer.
+
+- **See where a part can actually be made (Business+).** Assess one drawing
+  against several printers and read the answers side by side: which machines
+  hold the tolerances, how many parts come out in spec, and which dimension
+  is the obstacle on the ones that don't.
+
+- **First-article records you can hand to an auditor (Enterprise).** Your
+  inspection records and the exact package you submitted, kept together and
+  verified on the way out.
+
+
 - **Add Kiln to Claude Code in one command — free.** Kiln now ships as a
   Claude Code plugin. Run `claude plugin marketplace add codeofaxel/Kiln`,
   then `claude plugin install kiln@kiln`, and every Kiln tool — design,
@@ -104,6 +129,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   those numbers sharpen faster.*
 
 ### Changed
+
+- **Nozzle wear is measured, not assumed (free).** If Kiln has no usage
+  history for a nozzle, it now says so instead of reporting it as good as
+  new. Every print adds to the count — including prints that failed, which
+  wear a nozzle just the same.
+
 
 - **Material intelligence now answers for every filament Kiln knows.** Skin
   contact, durability, multi-material bonding and safe-load guidance used to

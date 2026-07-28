@@ -386,12 +386,16 @@ class TestGetState:
         info_resp = _mock_response(json_data=self._printer_info_response("startup"))
 
         with mock.patch.object(
-            adapter._session, "request", side_effect=[info_resp]
+            adapter._session, "request", return_value=info_resp
         ) as mock_req:
             state = adapter.get_state()
 
-        # Only one request should have been made (no objects query).
-        assert mock_req.call_count == 1
+        # The objects query is skipped: with Klipper not ready it would
+        # only fail.  (Asserted by endpoint rather than by call count —
+        # a first connect also fires the one-shot history import on its
+        # own thread, which is a different endpoint entirely.)
+        queried = [call.args[1] for call in mock_req.call_args_list]
+        assert "/printer/objects/query" not in queried
         assert state.connected is True
         assert state.state == PrinterStatus.BUSY
 
