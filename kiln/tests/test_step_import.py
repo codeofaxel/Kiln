@@ -1068,3 +1068,86 @@ def test_ocp_converts_a_real_step_file(tmp_dir):
     triangles = struct.unpack("<I", data[80:84])[0]
     assert triangles == 12, f"a box is 12 triangles, got {triangles}"
     assert len(data) == 84 + 50 * triangles
+
+
+# ---------------------------------------------------------------------------
+# 29. Every door, not just the STEP tools.
+#
+#     validate_and_prepare accepted `.step` at its format check and then
+#     raised an uncaught ValueError("Unsupported format: .step") four steps
+#     later, from an estimator that never got the memo.  The front door said
+#     yes and the back room said no.  `ensure_mesh_path` is the shared fix;
+#     these pin that it is actually wired, because a helper nobody calls is
+#     the same bug with extra steps.
+# ---------------------------------------------------------------------------
+
+
+def _validation_tools():
+    from kiln.plugins.validation_pipeline_tools import plugin
+
+    tools: dict[str, object] = {}
+    mcp = MagicMock()
+
+    def mock_tool():
+        def deco(fn):
+            tools[fn.__name__] = fn
+            return fn
+        return deco
+
+    mcp.tool = mock_tool
+    plugin.register(mcp)
+    return tools
+
+
+def test_validate_and_prepare_does_not_crash_on_step(monkeypatch, sample_step_file):
+    """A STEP file must produce a REPORT, never an uncaught exception."""
+    _no_backends(monkeypatch)
+    monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
+
+    result = _validation_tools()["validate_and_prepare"](str(sample_step_file))
+    if isinstance(result, list):
+        result = next(e for e in result if isinstance(e, dict) and "status" in e)
+
+    assert result["status"] == "fail"
+    assert result["ready_to_print"] is False
+    assert result["remedy"]["actionable_by_caller"] is True
+    assert "install-step-backend" in result["remedy"]["command"]
+
+
+def test_validate_and_prepare_step_remedy_is_honest_on_hosted(
+    monkeypatch, sample_step_file
+):
+    """Same path, hosted: no install instruction reaches the caller."""
+    _no_backends(monkeypatch)
+    monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+
+    result = _validation_tools()["validate_and_prepare"](str(sample_step_file))
+    if isinstance(result, list):
+        result = next(e for e in result if isinstance(e, dict) and "status" in e)
+
+    assert result["remedy"]["actionable_by_caller"] is False
+    assert result["remedy"]["command"] is None
+
+
+def test_ensure_mesh_path_passes_meshes_through_untouched(tmp_dir):
+    """Callers apply it unconditionally, so a non-STEP must be a no-op."""
+    from kiln.step_import import ensure_mesh_path
+
+    stl = tmp_dir / "already_a_mesh.stl"
+    stl.write_bytes(b"solid x\nendsolid x\n")
+
+    out, note = ensure_mesh_path(str(stl))
+
+    assert out == str(stl)
+    assert note is None
+
+
+def test_ensure_mesh_path_raises_no_backend_for_step(monkeypatch, sample_step_file):
+    """A STEP with no converter fails loudly with the remedy attached."""
+    _no_backends(monkeypatch)
+    from kiln.step_import import ensure_mesh_path
+
+    with pytest.raises(NoBackendError) as exc_info:
+        ensure_mesh_path(str(sample_step_file))
+
+    assert exc_info.value.remedy["message"]

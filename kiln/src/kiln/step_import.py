@@ -605,6 +605,49 @@ def _parse_subprocess_result(
 # ---------------------------------------------------------------------------
 
 
+def is_step_file(path: str) -> bool:
+    """True if this path names a STEP file, by extension."""
+    return Path(path).suffix.lower() in _VALID_EXTENSIONS
+
+
+def ensure_mesh_path(
+    path: str,
+    *,
+    output_dir: str | None = None,
+) -> tuple[str, str | None]:
+    """Hand this any model path; get back something the mesh pipeline can read.
+
+    The single door for "a STEP file turned up somewhere that wants a mesh."
+    Anything that is already a mesh passes straight through, so a caller can
+    apply this unconditionally without special-casing STEP itself.
+
+    Exists because the alternative is every pipeline growing its own STEP
+    branch, and the ones that didn't have one accepted ``.step`` at their
+    front door and then failed several layers down with a contradictory
+    "unsupported format" from code that never got the memo.
+
+    Returns:
+        ``(mesh_path, note)`` — ``note`` is a human-readable line for a
+        report when a conversion happened, else ``None``.
+
+    Raises:
+        NoBackendError: It IS a STEP file but nothing can convert it.  The
+            error carries :attr:`~NoBackendError.remedy`, so a caller can
+            tell the user what to do instead of guessing.
+    """
+    if not is_step_file(path):
+        return path, None
+
+    result = convert_step_to_stl(path, output_dir=output_dir, merge_bodies=True)
+    note = (
+        f"Converted from STEP ({Path(path).name}) to mesh — "
+        f"{result.body_count} "
+        f"{'body' if result.body_count == 1 else 'bodies'}, "
+        f"{result.conversion_time_s:.1f}s."
+    )
+    return result.output_path, note
+
+
 def convert_step_to_stl(
     step_path: str,
     output_dir: str | None = None,

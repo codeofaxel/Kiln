@@ -9547,6 +9547,41 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
             ),
         })
 
+    # 6b. STEP converter — OPTIONAL, unlike OpenSCAD above.  Deliberately
+    #     never warns when absent: most users never open a STEP file, and a
+    #     doctor that cries about something you don't need teaches people to
+    #     ignore it.  It reports either way so the capability is DISCOVERABLE
+    #     — a user who has CAD files learns the one command here instead of
+    #     finding out only when an import fails.
+    try:
+        from kiln.step_import import INSTALL_COMMAND, check_step_support
+
+        _step_info = check_step_support()
+        if _step_info["any_available"]:
+            _step_backend = next(
+                (n for n, b in sorted(
+                    _step_info["backends"].items(),
+                    key=lambda kv: kv[1].get("priority", 99),
+                ) if b.get("available")),
+                "unknown",
+            )
+            checks.append({
+                "name": "step-import",
+                "ok": True,
+                "detail": f"STEP/STP CAD files supported (via {_step_backend})",
+            })
+        else:
+            checks.append({
+                "name": "step-import",
+                "ok": True,
+                "detail": (
+                    "not installed — optional, only needed to open STEP/STP CAD "
+                    f"files. Add it any time: {INSTALL_COMMAND}"
+                ),
+            })
+    except Exception:  # noqa: BLE001 — a probe must never break doctor
+        pass
+
     # 7. SQLite writable
     db_dir = os.path.join(os.path.expanduser("~"), ".kiln")
     db_path = os.path.join(db_dir, "kiln.db")

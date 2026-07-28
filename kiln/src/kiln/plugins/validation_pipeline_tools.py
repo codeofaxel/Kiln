@@ -178,6 +178,59 @@ def run_full_validation_pipeline(
     if ext is None:
         return report.to_dict()
 
+    # Step 1b: A STEP file is B-rep, not a mesh.  The format check accepts
+    # .step, so without this the pipeline carried it four steps deeper and
+    # then raised an uncaught "Unsupported format: .step" from the estimator
+    # — the front door saying yes and the back room saying no.  Convert here,
+    # once, and every step after this sees an ordinary mesh.
+    from kiln.step_import import NoBackendError, ensure_mesh_path
+
+    try:
+        input_path, _step_note = ensure_mesh_path(input_path)
+    except NoBackendError as exc:
+        report.checks.append(_CheckResult(
+            name="format",
+            passed=False,
+            details=str(exc),
+            severity="error",
+        ))
+        report.status = "fail"
+        report.ready_to_print = False
+        report.validated_path = input_path
+        report.summary = (
+            "Not ready (0/100). This is a STEP file and no converter is "
+            "installed."
+        )
+        report.printability_score = 0
+        report.next_action = None
+        result = report.to_dict()
+        # The structured remedy travels with the report so the agent can tell
+        # the user the one command, or that it's a server-side gap.
+        result["remedy"] = exc.remedy
+        return result
+    except Exception as exc:  # noqa: BLE001 — a bad STEP is a user error
+        report.checks.append(_CheckResult(
+            name="format",
+            passed=False,
+            details=f"STEP conversion failed: {exc}",
+            severity="error",
+        ))
+        report.status = "fail"
+        report.ready_to_print = False
+        report.validated_path = input_path
+        report.summary = f"Not ready (0/100). STEP conversion failed: {exc}"
+        report.printability_score = 0
+        report.next_action = None
+        return report.to_dict()
+
+    if _step_note:
+        report.checks.append(_CheckResult(
+            name="step_conversion",
+            passed=True,
+            details=_step_note,
+        ))
+        ext = Path(input_path).suffix.lower()
+
     # Step 2: Mesh analysis
     _step_mesh_analysis(report, input_path, ext)
 

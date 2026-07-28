@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-07-27T02:45:13.018006+00:00",
+  "generated": "2026-07-28T01:43:44.418626+00:00",
   "tool_count": 386,
   "categories": {
     "product_generators": {
@@ -4586,7 +4586,7 @@
     },
     {
       "name": "import_external_mesh",
-      "description": "Import an external mesh (STL / OBJ / PLY / GLB / glTF / 3MF) as a first-class design version.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Import external geometry (STL / OBJ / PLY / GLB / glTF / 3MF / STEP) as a first-class design version.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
