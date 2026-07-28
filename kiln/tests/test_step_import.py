@@ -1625,3 +1625,88 @@ def test_convert_step_rejects_unknown_format(sample_step_file):
 
     with pytest.raises(ValueError):
         convert_step(str(sample_step_file), output_format="obj")
+
+
+# ---------------------------------------------------------------------------
+# 33. The ensure_mesh_path conversion cache.
+#
+#     One flow crosses two doors (validate, then import) and used to convert
+#     the same bytes twice.  Content-addressed, OS-temp, copy-out-on-hit —
+#     a mutated result must never poison a later call.
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_mesh_path_caches_identical_bytes(real_kernel, tmp_dir):
+    import time as _time
+
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    from kiln.step_import import ensure_mesh_path
+
+    step = tmp_dir / "cachetest.step"
+    writer = STEPControl_Writer()
+    writer.Transfer(
+        BRepPrimAPI_MakeBox(17.0, 13.0, 7.0).Shape(),
+        STEPControl_StepModelType.STEPControl_AsIs,
+    )
+    writer.Write(str(step))
+    # Unique content per run so the first call is a genuine MISS even when
+    # earlier runs populated the machine-wide cache.
+    step.write_bytes(step.read_bytes() + f"/* {_time.time_ns()} */".encode())
+
+    d1, d2, d3 = tmp_dir / "o1", tmp_dir / "o2", tmp_dir / "o3"
+    for d in (d1, d2, d3):
+        d.mkdir()
+
+    p1, note1 = ensure_mesh_path(str(step), output_dir=str(d1))
+    p2, note2 = ensure_mesh_path(str(step), output_dir=str(d2))
+
+    assert "cached" not in (note1 or "")
+    assert "cached" in (note2 or ""), "second identical call must hit the cache"
+    assert p1 != p2, "a hit is an independent copy, never an alias"
+    assert Path(p1).read_bytes() == Path(p2).read_bytes()
+
+    # Poisoning check: mutilate the first result, the next hit is pristine.
+    original = Path(p2).read_bytes()
+    Path(p1).write_bytes(b"vandalized")
+    p3, note3 = ensure_mesh_path(str(step), output_dir=str(d3))
+    assert "cached" in (note3 or "")
+    assert Path(p3).read_bytes() == original
+
+
+def test_ensure_mesh_path_cache_write_failure_is_not_fatal(
+    real_kernel, tmp_dir, monkeypatch
+):
+    """A full or read-only temp dir costs the cache, never the conversion."""
+    import shutil as _shutil
+    import time as _time
+
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    from kiln.step_import import ensure_mesh_path
+
+    step = tmp_dir / "nocache.step"
+    writer = STEPControl_Writer()
+    writer.Transfer(
+        BRepPrimAPI_MakeBox(3.0, 3.0, 3.0).Shape(),
+        STEPControl_StepModelType.STEPControl_AsIs,
+    )
+    writer.Write(str(step))
+    step.write_bytes(step.read_bytes() + f"/* {_time.time_ns()} */".encode())
+
+    real_copyfile = _shutil.copyfile
+
+    def failing_copy(src, dst, *a, **k):
+        if "kiln_step_cache" in str(dst):
+            raise OSError("disk full")
+        return real_copyfile(src, dst, *a, **k)
+
+    monkeypatch.setattr("shutil.copyfile", failing_copy)
+
+    out = tmp_dir / "out"
+    out.mkdir()
+    p, note = ensure_mesh_path(str(step), output_dir=str(out))
+    assert Path(p).is_file()
+    assert "cached" not in (note or "")

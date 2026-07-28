@@ -1020,6 +1020,10 @@ def ensure_mesh_path(
     this runs implicitly, deep inside other tools, and dropping an .stl next
     to somebody's CAD file is a side effect they never asked for.
 
+    Repeat conversions of identical bytes are served from a content-hash
+    cache in the OS temp dir (each hit is an independent COPY — mutating a
+    returned mesh can never poison a later call).
+
     Returns:
         ``(mesh_path, note)`` — ``note`` is a human-readable line for a
         report when a conversion happened, else ``None``.
@@ -1035,6 +1039,40 @@ def ensure_mesh_path(
     if output_dir is None:
         output_dir = tempfile.mkdtemp(prefix="kiln_step_")
 
+    # One flow often crosses two doors (validate_and_prepare, then
+    # import_external_mesh) and each would reconvert the same bytes.  The
+    # cache is content-addressed — same file content, same tessellation
+    # constants, same backend availability ⇒ same mesh — so a hit is safe by
+    # construction, including on the shared hosted box.  It lives in the OS
+    # temp dir on purpose: the OS already owns cleanup there, and Fly's disk
+    # is ephemeral anyway, so building our own eviction would be inventing a
+    # janitor for a self-cleaning room.  Hits are COPIED out, never aliased:
+    # callers repair meshes in place, and handing two callers one file would
+    # let the first mutation poison every later hit.
+    import hashlib
+    import shutil as _shutil
+
+    backend_fingerprint = (
+        _find_freecad_cmd() or "",
+        _find_gmsh_cmd() or "",
+        _ocp_available(),
+        _cadquery_available(),
+    )
+    key = hashlib.sha256(
+        Path(path).read_bytes()
+        + repr((_OCP_LINEAR_DEFLECTION, _OCP_ANGULAR_DEFLECTION,
+                backend_fingerprint)).encode()
+    ).hexdigest()
+    cache_dir = Path(tempfile.gettempdir()) / "kiln_step_cache"
+    cached = cache_dir / f"{key}.stl"
+
+    if cached.is_file():
+        out = str(Path(output_dir) / "merged.stl")
+        _shutil.copyfile(cached, out)
+        return out, (
+            f"Converted from STEP ({Path(path).name}) to mesh — cached, 0.0s."
+        )
+
     result = convert_step_to_stl(path, output_dir=output_dir, merge_bodies=True)
     note = (
         f"Converted from STEP ({Path(path).name}) to mesh — "
@@ -1042,6 +1080,16 @@ def ensure_mesh_path(
         f"{'body' if result.body_count == 1 else 'bodies'}, "
         f"{result.conversion_time_s:.1f}s."
     )
+    try:
+        # Atomic publish so a concurrent process never reads a half-written
+        # entry; losing the race just means both converted once.
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        tmp = cached.with_suffix(f".{os.getpid()}.tmp")
+        _shutil.copyfile(result.output_path, tmp)
+        os.replace(tmp, cached)
+    except OSError:
+        pass  # a full or read-only temp dir must never fail the conversion
+
     return result.output_path, note
 
 
