@@ -7,6 +7,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Drop in CAD files and print them — free for everyone.** Kiln now reads
+  STEP, the format every CAD program and machine shop speaks. Hand any Kiln
+  tool a `.step` and it becomes a printable model automatically — and a
+  coloured multi-part assembly keeps its colours and part names, ready for
+  multi-material printing. One command sets up the converter:
+  `kiln install-step-backend`.
+
 - **Kiln's hosted connection speaks the newest protocol.** Connect Kiln to
   Claude or any other AI client and it now uses the July 2026 revision of
   the Model Context Protocol. Long-running work — texture carving, print
@@ -160,6 +167,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   refreshing, Kiln shows you the one command to run.
 
 ### Fixed
+
+- **Honest answers about unreadable files.** A file Kiln can't read
+  (corrupted, or CAD that needs converting first) now gets told exactly
+  that.
 
 - **Filament runout sensors now work on Klipper printers.**
 
