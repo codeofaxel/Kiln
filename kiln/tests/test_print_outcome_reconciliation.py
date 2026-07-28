@@ -358,6 +358,48 @@ class TestReconnectReconciliation:
 
 
 # ---------------------------------------------------------------------------
+# The adapter wire — first status after connect runs the reconcile, once.
+# ---------------------------------------------------------------------------
+
+
+class TestBambuReconcileWire:
+    def _adapter(self):
+        from kiln.printers.bambu import BambuAdapter
+
+        return BambuAdapter(
+            host="192.168.1.100", access_code="12345678",
+            serial="01P00A000000001", timeout=2,
+        )
+
+    def _push_status(self, adapter, **fields):
+        import json as _json
+        from unittest.mock import MagicMock
+
+        msg = MagicMock()
+        msg.payload = _json.dumps(
+            {"print": {"command": "push_status", **fields}}
+        ).encode()
+        adapter._on_message(MagicMock(), None, msg)
+
+    def test_first_status_triggers_reconcile_once(self, tmp_kiln_env):
+        from unittest.mock import patch
+
+        adapter = self._adapter()
+        with patch(
+            "kiln.auto_record_hook.reconcile_pending_outcomes",
+            return_value=[],
+        ) as reconcile:
+            self._push_status(adapter, gcode_state="idle")
+            assert reconcile.call_count == 1
+            kwargs = reconcile.call_args.kwargs
+            assert kwargs["printer_name"] == adapter.name
+            assert kwargs["gcode_state"] == "idle"
+            # Later status updates must not re-run it.
+            self._push_status(adapter, gcode_state="idle")
+            assert reconcile.call_count == 1
+
+
+# ---------------------------------------------------------------------------
 # Layer 3 — the human settles what the machine could not.
 # ---------------------------------------------------------------------------
 
