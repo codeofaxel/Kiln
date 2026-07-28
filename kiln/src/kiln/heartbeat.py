@@ -92,10 +92,14 @@ def _is_hosted_multitenant() -> bool:
     activity.  Hosted usage is already measured properly, per tenant,
     in the cloud ledgers; sending this row too would double-report it
     into a dashboard tile it can only distort.
+
+    Delegates to :mod:`kiln.runtime_env` — the shared predicate, so this
+    and the STEP-backend error messaging can never disagree about what
+    "hosted" means.
     """
-    return os.environ.get("KILN_HOSTED_MULTITENANT", "").strip() in (
-        "1", "true", "yes",
-    )
+    from kiln.runtime_env import is_hosted_multitenant
+
+    return is_hosted_multitenant()
 
 
 def _already_sent_today() -> bool:

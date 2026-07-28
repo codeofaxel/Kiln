@@ -12,6 +12,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+# Eager, unlike the conversion imports below, which stay lazy for plugin
+# load time.  An exception class referenced in an `except` clause has to be
+# bound before the clause is evaluated: import it inside the `try` and a
+# failing import would surface as a NameError from the handler instead of
+# the real error.  kiln.step_import is stdlib-only at module level, so this
+# costs nothing.
+from kiln.step_import import NoBackendError
+
 _logger = logging.getLogger(__name__)
 
 
@@ -51,6 +59,14 @@ class _StepToolsPlugin:
             Use ``check_step_support`` first to verify that a conversion
             backend is installed.  After conversion, use ``diagnose_mesh``
             or ``analyze_mesh_geometry`` to validate the output.
+
+            If this returns ``code="NO_BACKEND"``, read the ``remedy`` field
+            rather than guessing: when ``remedy.actionable_by_caller`` is
+            True, tell the user to run ``remedy.command`` (``kiln
+            install-step-backend``) — one command and it works.  When it is
+            False the caller is on a hosted server and has nothing to
+            install; say so plainly and suggest ``report_issue``.  Never
+            hand a hosted user an install instruction.
 
             Args:
                 file_path: Path to the STEP/STP file.
@@ -99,6 +115,16 @@ class _StepToolsPlugin:
                 return {"error": str(exc), "code": "FILE_NOT_FOUND"}
             except ValueError as exc:
                 return {"error": str(exc), "code": "INVALID_INPUT"}
+            except NoBackendError as exc:
+                # NOT a conversion error — the file was never opened.  Its own
+                # code, so an agent can tell "your STEP is bad" (which the user
+                # must fix) from "this install has no converter" (which is a
+                # one-command fix, or ours to fix if they're on hosted).
+                return {
+                    "error": str(exc),
+                    "code": "NO_BACKEND",
+                    "remedy": exc.remedy,
+                }
             except Exception as exc:
                 _logger.error("STEP import failed: %s", exc, exc_info=True)
                 return {"error": str(exc), "code": "CONVERSION_ERROR"}
@@ -108,8 +134,11 @@ class _StepToolsPlugin:
             """Check which STEP import backends are available on this system.
 
             Returns a dict listing each backend (FreeCAD, Gmsh, CadQuery)
-            with its availability status and priority.  If no backend is
-            found, includes install instructions.
+            with its availability status and priority.  If none is found,
+            includes ``install_help`` (prose) and ``remedy`` (structured) —
+            prefer ``remedy``: its ``actionable_by_caller`` flag tells you
+            whether the user can fix this (``kiln install-step-backend``) or
+            whether they're on a hosted server where they cannot.
 
             Call this before ``import_step_file`` to verify the system is
             ready for STEP conversion.

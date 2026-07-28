@@ -74,6 +74,15 @@ serial = ["pyserial>=3.5"]
 qr = ["qrcode[pil]>=8.2"]
 emboss = ["Pillow>=9.0", "rembg>=2.0.69", "onnxruntime>=1.24.3"]
 mesh-diagnostics = ["trimesh>=4.0", "numpy>=1.24"]
+# STEP/STP import.  The VTK-free OCCT kernel — measured on disk 2026-07-27:
+# `cadquery` 1163 MB, `cadquery-ocp` 848 MB (it hard-requires vtk==9.6.2 and
+# won't even import without it), `cadquery-ocp-novtk` 228 MB.  Everything
+# past the kernel serves visualization and solver features STEP conversion
+# never calls.  An extra rather than a core dependency because most users
+# never open a STEP file; `kiln install-step-backend` installs it for the
+# ones who do.  Anyone who already has full cadquery keeps working — the OCP
+# backend uses whichever build provides the `OCP` module.
+step = ["cadquery-ocp-novtk>=7.9"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",

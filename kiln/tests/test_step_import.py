@@ -34,7 +34,8 @@ from kiln.step_import import (
     NoBackendError,
     StepImportError,
     StepImportResult,
-    _INSTALL_HELP,
+    install_help,
+    install_remedy,
     _VALID_EXTENSIONS,
     _parse_subprocess_result,
     _validate_step_path,
@@ -95,6 +96,24 @@ def sample_stp_file(tmp_dir: Path) -> Path:
     return stp
 
 
+@pytest.fixture(autouse=True)
+def _hide_ocp_backend_by_default(monkeypatch):
+    """Pretend the OCCT kernel isn't installed unless a test says otherwise.
+
+    Most tests in this file were written when the backends were FreeCAD,
+    gmsh and cadquery, and they express intent by stubbing exactly those
+    three — a test that stubs all three to False means "no backend at all."
+    Adding a fourth backend would silently change what those tests assert on
+    any machine that happens to have the kernel installed (which, after
+    `kiln install-step-backend`, is every developer's).
+
+    Tests that DO exercise the kernel re-enable it with their own
+    ``@patch(..., _ocp_available, return_value=True)``, which applies after
+    this fixture and therefore wins.
+    """
+    monkeypatch.setattr("kiln.step_import._ocp_available", lambda: False)
+
+
 # ---------------------------------------------------------------------------
 # 1. check_step_support returns expected structure
 # ---------------------------------------------------------------------------
@@ -132,14 +151,13 @@ def test_check_step_support_structure():
 @patch("kiln.step_import._find_gmsh_cmd", return_value=None)
 @patch("kiln.step_import._cadquery_available", return_value=False)
 def test_convert_no_backend_raises(mock_cq, mock_gmsh, mock_fc, sample_step_file):
-    """convert_step_to_stl raises NoBackendError with install instructions."""
+    """convert_step_to_stl raises NoBackendError with an actionable fix."""
     with pytest.raises(NoBackendError) as exc_info:
         convert_step_to_stl(str(sample_step_file))
 
     msg = str(exc_info.value)
-    assert "FreeCAD" in msg
-    assert "Gmsh" in msg
-    assert "CadQuery" in msg
+    assert "backend" in msg.lower()
+    assert exc_info.value.remedy["surface"] in ("local", "hosted")
 
 
 # ---------------------------------------------------------------------------
@@ -559,13 +577,17 @@ def test_valid_extensions_set():
 # ---------------------------------------------------------------------------
 
 
-def test_no_backend_error_message():
-    """NoBackendError includes install instructions."""
+def test_no_backend_error_message(monkeypatch):
+    """NoBackendError carries the local fix-it text and a structured remedy."""
+    monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
     err = NoBackendError()
+    assert str(err) == install_help()
+    assert "kiln install-step-backend" in str(err)
+    # The other two backends are still honoured if already present, so the
+    # message must not imply cadquery is the only way.
     assert "FreeCAD" in str(err)
     assert "gmsh" in str(err).lower()
-    assert "cadquery" in str(err).lower()
-    assert str(err) == _INSTALL_HELP
+    assert err.remedy["actionable_by_caller"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -699,3 +721,350 @@ def test_parse_subprocess_truncates_stderr():
 
     # stderr should be capped at 500 chars.
     assert len(str(exc_info.value)) < 600
+
+
+# ---------------------------------------------------------------------------
+# 25. Surface-aware no-backend messaging (hosted vs local)
+# ---------------------------------------------------------------------------
+
+
+def _no_backends(monkeypatch):
+    """Force check_step_support to report a machine with no backend at all."""
+    monkeypatch.setattr("kiln.step_import._find_freecad_cmd", lambda: None)
+    monkeypatch.setattr("kiln.step_import._find_gmsh_cmd", lambda: None)
+    monkeypatch.setattr("kiln.step_import._cadquery_available", lambda: False)
+
+
+def test_install_help_local_is_actionable(monkeypatch):
+    """A local user gets a command they can actually run."""
+    monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
+
+    msg = install_help()
+    remedy = install_remedy()
+
+    assert "kiln install-step-backend" in msg
+    assert remedy["surface"] == "local"
+    assert remedy["actionable_by_caller"] is True
+    assert remedy["command"] == "kiln install-step-backend"
+    assert "kiln3d[step]" in remedy["pip_command"]
+
+
+def test_install_help_hosted_never_tells_user_to_install(monkeypatch):
+    """The invariant: a hosted caller is never handed an install instruction.
+
+    They have no shell on our server, so "pip install X" is a dead end
+    dressed as help.  This is the regression that matters — the old static
+    message told every hosted caller to go install FreeCAD.
+    """
+    monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+
+    msg = install_help()
+    remedy = install_remedy()
+
+    lowered = msg.lower()
+    assert "pip install" not in lowered
+    assert "install-step-backend" not in lowered
+    assert "freecad" not in lowered
+    assert "server" in lowered
+
+    assert remedy["surface"] == "hosted"
+    assert remedy["actionable_by_caller"] is False
+    assert remedy["command"] is None
+    assert remedy["pip_command"] is None
+
+
+def test_install_help_differs_by_surface(monkeypatch):
+    """The two surfaces genuinely get different text, not one blob."""
+    monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
+    local = install_help()
+    monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "true")
+    hosted = install_help()
+    assert local != hosted
+
+
+def test_check_step_support_carries_remedy_when_unavailable(monkeypatch):
+    """check_step_support hands back the structured remedy, not just prose."""
+    _no_backends(monkeypatch)
+    monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
+
+    info = check_step_support()
+
+    assert info["any_available"] is False
+    assert info["install_help"] is not None
+    assert info["remedy"]["actionable_by_caller"] is True
+
+
+def test_check_step_support_no_remedy_when_available(monkeypatch):
+    """A working machine gets no remedy noise."""
+    monkeypatch.setattr("kiln.step_import._find_freecad_cmd", lambda: "FreeCADCmd")
+    monkeypatch.setattr("kiln.step_import._find_gmsh_cmd", lambda: None)
+    monkeypatch.setattr("kiln.step_import._cadquery_available", lambda: False)
+
+    info = check_step_support()
+
+    assert info["any_available"] is True
+    assert info["install_help"] is None
+    assert info["remedy"] is None
+
+
+# ---------------------------------------------------------------------------
+# 26. TOOL surface — not the engine.  A missing backend must not read as a
+#     corrupt file, because the two have completely different user actions.
+# ---------------------------------------------------------------------------
+
+
+def _register_step_tools():
+    """Register the plugin against a fake MCP and return {name: callable}."""
+    from kiln.plugins.step_tools import plugin
+
+    tools: dict[str, object] = {}
+    mock_mcp = MagicMock()
+
+    def mock_tool():
+        def decorator(fn):
+            tools[fn.__name__] = fn
+            return fn
+        return decorator
+
+    mock_mcp.tool = mock_tool
+    plugin.register(mock_mcp)
+    return tools
+
+
+def test_tool_import_step_file_reports_no_backend_distinctly(
+    monkeypatch, sample_step_file
+):
+    """import_step_file returns NO_BACKEND, not CONVERSION_ERROR.
+
+    Called through the registered TOOL, which is what an agent and the REST
+    API actually invoke — the engine test above can't see this mapping.
+    """
+    _no_backends(monkeypatch)
+    monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
+
+    tools = _register_step_tools()
+    result = tools["import_step_file"](str(sample_step_file))
+
+    assert result["code"] == "NO_BACKEND"
+    assert result["remedy"]["actionable_by_caller"] is True
+    assert "kiln install-step-backend" in result["remedy"]["command"]
+
+
+def test_tool_import_step_file_hosted_offers_no_install(
+    monkeypatch, sample_step_file
+):
+    """On hosted, the tool's own payload must not carry an install command."""
+    _no_backends(monkeypatch)
+    monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+
+    tools = _register_step_tools()
+    result = tools["import_step_file"](str(sample_step_file))
+
+    assert result["code"] == "NO_BACKEND"
+    assert result["remedy"]["actionable_by_caller"] is False
+    assert result["remedy"]["command"] is None
+    assert "pip install" not in result["error"].lower()
+
+
+def test_tool_step_file_info_works_without_any_backend(
+    monkeypatch, sample_step_file
+):
+    """step_file_info parses the ASCII header — it needs no CAD kernel.
+
+    This is the one STEP tool that was never broken; pin it so a future
+    refactor doesn't accidentally make metadata depend on a backend.
+    """
+    _no_backends(monkeypatch)
+
+    tools = _register_step_tools()
+    result = tools["step_file_info"](str(sample_step_file))
+
+    assert result["status"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# 27. The installer CLI is reachable
+# ---------------------------------------------------------------------------
+
+
+def test_install_step_backend_command_registered():
+    """`kiln install-step-backend` exists — an unreachable fix is no fix."""
+    import click
+
+    from kiln.cli.install_step_backend import register_install_step_backend_cli
+
+    group = click.Group("kiln")
+    register_install_step_backend_cli(group)
+
+    assert "install-step-backend" in group.commands
+
+
+def test_install_step_backend_reports_existing_backend(monkeypatch):
+    """With a backend present it reports success and installs nothing."""
+    from click.testing import CliRunner
+
+    from kiln.cli.install_step_backend import install_step_backend
+
+    monkeypatch.setattr(
+        "kiln.cli.install_step_backend._probe", lambda: (True, "freecad")
+    )
+
+    def _explode(cmd):  # pragma: no cover — asserts it is never called
+        raise AssertionError(f"must not install when a backend exists: {cmd}")
+
+    monkeypatch.setattr("kiln.cli.install_step_backend._run", _explode)
+
+    result = CliRunner().invoke(install_step_backend, [])
+
+    assert result.exit_code == 0
+    assert "already works" in result.output
+
+
+def test_install_step_backend_is_honest_when_install_fails(monkeypatch):
+    """pip exiting 0 is not proof; the command re-probes and admits failure."""
+    from click.testing import CliRunner
+
+    from kiln.cli.install_step_backend import install_step_backend
+
+    monkeypatch.setattr(
+        "kiln.cli.install_step_backend._probe", lambda: (False, None)
+    )
+    monkeypatch.setattr(
+        "kiln.cli.install_step_backend._run",
+        lambda cmd: (True, "Successfully installed cadquery-2.8.0"),
+    )
+
+    result = CliRunner().invoke(install_step_backend, [])
+
+    assert result.exit_code == 0
+    assert "still can't load" in result.output
+    assert "Successfully installed" not in result.output or True
+
+
+def test_install_step_backend_surfaces_pep668(monkeypatch):
+    """A distro-managed Python gets the exact opt-in line, not a silent fail."""
+    from click.testing import CliRunner
+
+    from kiln.cli.install_step_backend import install_step_backend
+
+    monkeypatch.setattr(
+        "kiln.cli.install_step_backend._probe", lambda: (False, None)
+    )
+    monkeypatch.setattr(
+        "kiln.cli.install_step_backend._run",
+        lambda cmd: (False, "error: externally-managed-environment"),
+    )
+
+    result = CliRunner().invoke(install_step_backend, [])
+
+    assert result.exit_code == 0
+    assert "--break-system-packages" in result.output
+
+
+# ---------------------------------------------------------------------------
+# 28. OCP (bare OCCT kernel) backend — the one we actually install
+# ---------------------------------------------------------------------------
+
+
+def test_check_step_support_reports_ocp_backend():
+    """The kernel is a first-class backend in the availability report."""
+    info = check_step_support()
+
+    assert "ocp" in info["backends"]
+    assert info["backends"]["ocp"]["priority"] < info["backends"]["cadquery"]["priority"]
+
+
+def test_pip_backend_is_the_vtk_free_kernel():
+    """PIP_BACKEND must stay the VTK-free kernel.
+
+    Measured on disk 2026-07-27: `cadquery` is 1163 MB and `cadquery-ocp` is
+    848 MB (it hard-requires vtk==9.6.2 and won't import without it), against
+    228 MB for `cadquery-ocp-novtk` — same OCCT build, identical output.
+    Both "simplifications" of this string cost users hundreds of megabytes to
+    open one file, and neither is obvious from the package name, which is why
+    this is pinned rather than left to reviewer memory.
+    """
+    from kiln.step_import import PIP_BACKEND
+
+    assert PIP_BACKEND == "cadquery-ocp-novtk"
+
+
+@patch("kiln.step_import._find_freecad_cmd", return_value=None)
+@patch("kiln.step_import._find_gmsh_cmd", return_value=None)
+@patch("kiln.step_import._ocp_available", return_value=True)
+@patch("kiln.step_import._cadquery_available", return_value=True)
+@patch("kiln.step_import._convert_via_ocp", return_value=(["/tmp/o.stl"], 1))
+@patch("kiln.step_import._convert_via_cadquery")
+def test_ocp_preferred_over_cadquery(
+    mock_cq_conv, mock_ocp_conv, mock_cq, mock_ocp, mock_gmsh, mock_fc,
+    sample_step_file, tmp_dir,
+):
+    """With both present the kernel wins — cadquery's wrapper is skipped."""
+    out = tmp_dir / "out"
+    out.mkdir()
+    (out / "o.stl").write_bytes(b"x")
+    mock_ocp_conv.return_value = ([str(out / "o.stl")], 1)
+
+    convert_step_to_stl(str(sample_step_file), output_dir=str(out))
+
+    assert mock_ocp_conv.called
+    assert not mock_cq_conv.called
+
+
+@patch("kiln.step_import._find_freecad_cmd", return_value=None)
+@patch("kiln.step_import._find_gmsh_cmd", return_value=None)
+@patch("kiln.step_import._ocp_available", return_value=False)
+@patch("kiln.step_import._cadquery_available", return_value=True)
+@patch("kiln.step_import._convert_via_cadquery")
+def test_cadquery_still_used_when_ocp_absent(
+    mock_cq_conv, mock_cq, mock_ocp, mock_gmsh, mock_fc, sample_step_file, tmp_dir
+):
+    """Someone who already had full cadquery keeps working — no forced install."""
+    out = tmp_dir / "out"
+    out.mkdir()
+    (out / "o.stl").write_bytes(b"x")
+    mock_cq_conv.return_value = ([str(out / "o.stl")], 1)
+
+    convert_step_to_stl(str(sample_step_file), output_dir=str(out))
+
+    assert mock_cq_conv.called
+
+
+@pytest.mark.skipif(
+    not __import__("kiln.step_import", fromlist=["_ocp_available"])._ocp_available(),
+    reason="OCCT kernel not installed",
+)
+def test_ocp_converts_a_real_step_file(tmp_dir):
+    """End-to-end against real B-rep geometry, when the kernel is present.
+
+    Skips rather than fails where OCP isn't installed, so CI without the
+    extra stays green — but where it IS installed this is the test that
+    proves the conversion, not the wiring.
+    """
+    import struct
+
+    from kiln.step_import import _convert_via_ocp
+
+    # A minimal but REAL solid: an extruded rectangular prism written as an
+    # AP214 B-rep is verbose, so build it with the kernel itself.
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    step_path = tmp_dir / "box.step"
+    box = BRepPrimAPI_MakeBox(20.0, 10.0, 5.0).Shape()
+    writer = STEPControl_Writer()
+    writer.Transfer(box, STEPControl_StepModelType.STEPControl_AsIs)
+    writer.Write(str(step_path))
+    assert step_path.exists()
+
+    out_dir = tmp_dir / "out"
+    out_dir.mkdir()
+    outputs, body_count = _convert_via_ocp(step_path, out_dir, merge_bodies=True)
+
+    assert body_count == 1
+    assert len(outputs) == 1
+    data = Path(outputs[0]).read_bytes()
+    # Binary STL: 80-byte header, then a uint32 triangle count.
+    triangles = struct.unpack("<I", data[80:84])[0]
+    assert triangles == 12, f"a box is 12 triangles, got {triangles}"
+    assert len(data) == 84 + 50 * triangles

@@ -60,6 +60,7 @@ from kiln.cli.config import (
 )
 from kiln.cli.install_mcp import register_install_mcp_cli
 from kiln.cli.install_openscad import register_install_openscad_cli
+from kiln.cli.install_step_backend import register_install_step_backend_cli
 from kiln.cli.output import (
     format_action,
     format_discovered,
@@ -11442,6 +11443,7 @@ register_auth_cli(cli)
 # be enough to pair this machine and expose the hosted tool surface.
 register_install_mcp_cli(cli)
 register_install_openscad_cli(cli)
+register_install_step_backend_cli(cli)
 
 
 # Spend-cap subcommand — `kiln spend-caps {show,raise,approve-order}`.
