@@ -21,6 +21,8 @@ try:  # mcp>=2.0 — speaks MCP spec 2026-07-28 (stateless core)
     from mcp.server.mcpserver import (  # type: ignore[import-not-found]
         Context,
         Image,
+    )
+    from mcp.server.mcpserver import (
         MCPServer as FastMCP,
     )
 
@@ -48,7 +50,7 @@ def lowlevel_server(mcp: Any) -> Any:
     """
     server = getattr(mcp, "_lowlevel_server", None)
     if server is None:
-        server = getattr(mcp, "_mcp_server")
+        server = mcp._mcp_server
     return server
 
 

@@ -29,10 +29,10 @@ import hmac
 import json
 import logging
 import os
-import tempfile
 import sqlite3
 import stat
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Callable, Sequence

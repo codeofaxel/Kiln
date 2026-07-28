@@ -19,6 +19,7 @@ This is a **free-tier** feature — no kiln-pro dependency.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -1266,7 +1267,7 @@ def convert_step(
     data = _convert_via_ocp_xcaf(validated_path, out_dir)
     parts = [
         {"stl_path": p, "name": n, "color": c}
-        for p, n, c in zip(data["outputs"], data["names"], data["colors"])
+        for p, n, c in zip(data["outputs"], data["names"], data["colors"], strict=True)
     ]
 
     has_color = any(p["color"] for p in parts)
@@ -1291,10 +1292,8 @@ def convert_step(
     out_3mf = str(out_dir / f"{validated_path.stem}.3mf")
     _write_3mf(parts, out_3mf)
     for p in parts:  # the per-part STLs were scaffolding, not output
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(p["stl_path"])
-        except OSError:
-            pass
     elapsed = time.monotonic() - t0
 
     return StepImportResult(
