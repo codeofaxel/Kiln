@@ -570,6 +570,11 @@ class MoonrakerAdapter(PrinterAdapter):
                 "https": _https_proxy,
             }
 
+        # Print-history backfill: fired once per adapter instance, the
+        # first time a request confirms the server is actually there.
+        self._history_backfilled: bool = False
+        self._history_backfill_thread: threading.Thread | None = None
+
         # Push monitoring (WebSocket) -- disabled by default.
         self._ws_monitor: MoonrakerWebSocketMonitor | None = None
         if _push_monitoring_enabled():
@@ -780,6 +785,59 @@ class MoonrakerAdapter(PrinterAdapter):
 
     def get_state(self) -> PrinterState:
         """Retrieve the current printer state and temperatures.
+
+        This is also Moonraker's connect path: the adapter has no
+        explicit ``connect()``, so the first status that comes back
+        connected IS the confirmation that the server is reachable.  That
+        is where the one-shot print-history backfill fires.
+
+        See :meth:`_read_state` for the status protocol itself.
+        """
+        state = self._read_state()
+        if getattr(state, "connected", False):
+            self._maybe_backfill_history()
+        return state
+
+    def _maybe_backfill_history(self) -> None:
+        """Adopt the server's own job history — once per adapter instance.
+
+        Moonraker keeps a complete record of every job it ran, including
+        the years before Kiln was installed; :mod:`kiln.printers.moonraker_history`
+        turns that into real print outcomes.  Wired HERE, at the engine's
+        connect path, rather than behind a new tool: no user should have
+        to know an import exists to get their own history.
+
+        Three things keep it from ever costing a connection: the flag is
+        set BEFORE any work (a failure never re-arms a retry storm), the
+        work runs on a daemon thread off the status path (an HTTP fetch
+        plus N row writes must not be paid by a caller asking for a
+        temperature), and every layer swallows its own exceptions.
+        """
+        if self._history_backfilled:
+            return
+        self._history_backfilled = True
+        try:
+            thread = threading.Thread(
+                target=self._run_history_backfill,
+                name="kiln-moonraker-history",
+                daemon=True,
+            )
+            thread.start()
+            self._history_backfill_thread = thread
+        except Exception as exc:  # noqa: BLE001 — never break get_state
+            logger.debug("Could not start Moonraker history backfill: %s", exc)
+
+    def _run_history_backfill(self) -> None:
+        """Thread body for the one-shot history import.  Never raises."""
+        try:
+            from kiln.printers.moonraker_history import backfill_history
+
+            backfill_history(self)
+        except Exception as exc:  # noqa: BLE001 — courtesy import, non-fatal
+            logger.debug("Moonraker history backfill failed: %s", exc)
+
+    def _read_state(self) -> PrinterState:
+        """Fetch the current printer state and temperatures.
 
         When push monitoring is active and the WebSocket is connected,
         builds the state from the cached data to avoid an HTTP round-trip.
