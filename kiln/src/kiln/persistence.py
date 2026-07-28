@@ -29,6 +29,7 @@ import hmac
 import json
 import logging
 import os
+import tempfile
 import sqlite3
 import stat
 import sys
@@ -46,6 +47,44 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_DB_DIR = os.path.join(str(Path.home()), ".kiln")
 _DEFAULT_DB_PATH = os.path.join(_DEFAULT_DB_DIR, "kiln.db")
+
+#: Where a test/CI run's writes go instead of the user's real database.
+#: Per interpreter, so a suite still gets a working DB that persists across
+#: the run — just not the one holding somebody's print history.
+_TEST_DB_PATH = os.path.join(
+    tempfile.gettempdir(), f"kiln-test-{os.getpid()}.db"
+)
+
+
+def _redirect_if_test_runner(path: str) -> str:
+    """Keep a test run out of the user's real ``~/.kiln/kiln.db``.
+
+    ``daily_stats`` learned this the expensive way and got both a write-side
+    guard and a conftest fixture; ``kiln.db`` got neither, and a developer's
+    real database filled with 1,811 phantom prints, 462 phantom jobs and 333
+    phantom outcomes from ``a.gcode`` / ``test.gcode`` — enough that the
+    print history read as a busy shop when exactly one row was a real print.
+    Counters were fixed at the write side; the DB underneath them was not.
+
+    Only the DEFAULT path is redirected.  A test that points ``KILN_DB_PATH``
+    at its own file is asking to exercise persistence and gets exactly that.
+    """
+    if path != _DEFAULT_DB_PATH:
+        return path
+    try:
+        from kiln.heartbeat import _is_ci_environment
+
+        testing = _is_ci_environment()
+    except Exception:  # noqa: BLE001 — heartbeat absent, fall back to env
+        testing = any(
+            os.environ.get(var) for var in ("CI", "PYTEST_CURRENT_TEST")
+        )
+    if not testing:
+        return path
+    logger.warning(
+        "test/CI run redirected off the real kiln.db → %s", _TEST_DB_PATH
+    )
+    return _TEST_DB_PATH
 
 # SQL parameter type accepted by both sqlite3 and typical DB-API adapters.
 _SqlParams = Sequence[Any] | dict[str, Any]
@@ -468,6 +507,7 @@ class KilnDB:
         backend: StorageBackend | None = None,
     ) -> None:
         self._db_path = db_path or os.environ.get("KILN_DB_PATH", _DEFAULT_DB_PATH)
+        self._db_path = _redirect_if_test_runner(self._db_path)
         self._is_postgres = False
 
         if backend is not None:

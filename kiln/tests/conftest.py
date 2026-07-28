@@ -915,6 +915,26 @@ def _isolate_decoration_quota(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_kiln_db(tmp_path, monkeypatch):
+    """Keep the suite out of the developer's real ``~/.kiln/kiln.db``.
+
+    ``KilnDB()`` with no argument resolves to the default path, so any test
+    that constructs one writes print history, jobs and outcomes into the
+    real database.  It did: 1,811 phantom prints, 462 jobs and 333 outcomes
+    from ``a.gcode`` / ``test.gcode``, against exactly one genuine print.
+    The same class the daily-stats isolation already covers — the counters
+    were fixed and the database under them was not.
+
+    ``persistence._redirect_if_test_runner`` is the belt (the default path
+    is refused under CI env at the source); this is the suspenders, and it
+    gives each test its own file so a test that WANTS to assert on
+    persistence just works.
+    """
+    monkeypatch.setenv("KILN_DB_PATH", str(tmp_path / "kiln.db"))
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_daily_stats(tmp_path, monkeypatch):
     """Point telemetry counters at a per-test file, never the real one.
 
