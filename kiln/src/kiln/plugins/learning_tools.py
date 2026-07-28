@@ -33,8 +33,15 @@ _logger = logging.getLogger(__name__)
 # Constants — validation sets and safety limits
 # ---------------------------------------------------------------------------
 
-_VALID_OUTCOMES = frozenset({"success", "failed", "partial"})
+_VALID_OUTCOMES = frozenset({"success", "failed", "partial", "cancelled"})
 _VALID_QUALITY_GRADES = frozenset({"excellent", "good", "acceptable", "poor"})
+_VALID_DETERMINED_BY = frozenset({"observed", "inferred", "user_reported"})
+
+# Outcomes that carry a verdict on the print settings.  A cancelled
+# print says nothing about whether the settings were good, so it is
+# recorded (honest history) but never contributed to community data or
+# decoration proven-settings counters.
+_LEARNING_OUTCOMES = frozenset({"success", "failed", "partial"})
 
 # Hard safety limits — recorded settings cannot exceed these.
 # Prevents malicious agents from poisoning the learning database
@@ -120,6 +127,7 @@ def record_print_outcome(
     decoration_settings: dict | None = None,
     auto_classify: bool = False,
     auto_recorded: bool = False,
+    determined_by: str | None = None,
 ) -> dict:
     """Record the outcome of a print for cross-printer learning.
 
@@ -148,7 +156,8 @@ def record_print_outcome(
 
     Args:
         job_id: The job ID from the print queue.
-        outcome: One of ``"success"``, ``"failed"``, or ``"partial"``.
+        outcome: One of ``"success"``, ``"failed"``, ``"partial"``, or
+            ``"cancelled"``.
         quality_grade: Optional — ``"excellent"``, ``"good"``, ``"acceptable"``, ``"poor"``.
         failure_mode: Optional — e.g. ``"spaghetti"``, ``"layer_shift"``, ``"warping"``.
         settings: Optional dict of print settings used (temp_tool, temp_bed, speed, etc.).
@@ -174,6 +183,16 @@ def record_print_outcome(
             the outcome by calling record_print_outcome again with the
             same ``job_id`` — the most recent call wins at the
             ``proven_settings`` level.  Default False.
+        determined_by: Who settled this outcome — ``"observed"`` (a
+            live process watched the print end), ``"inferred"``
+            (reconstructed from printer state after the fact), or
+            ``"user_reported"`` (the human said so).  Defaults to
+            ``"observed"`` for auto-recorded outcomes and
+            ``"user_reported"`` otherwise — a manual record normally
+            relays what the user reported about the part in hand.
+            Recording an outcome for a print that started while Kiln
+            wasn't watching RESOLVES its pending row in place rather
+            than duplicating it.
     """
     import kiln.server as _srv
     from kiln.persistence import get_db
@@ -192,6 +211,13 @@ def record_print_outcome(
             f"Invalid quality_grade {quality_grade!r}. Must be one of: {', '.join(sorted(_VALID_QUALITY_GRADES))}",
             code="VALIDATION_ERROR",
         )
+    if determined_by and determined_by not in _VALID_DETERMINED_BY:
+        return _srv._error_dict(
+            f"Invalid determined_by {determined_by!r}. Must be one of: {', '.join(sorted(_VALID_DETERMINED_BY))}",
+            code="VALIDATION_ERROR",
+        )
+    if determined_by is None:
+        determined_by = "observed" if auto_recorded else "user_reported"
 
     # --- Auto-classification (opt-in) ---
     # Runs only for failed outcomes with no explicit failure_mode, and
@@ -275,6 +301,7 @@ def record_print_outcome(
                 "environment": environment,
                 "notes": notes,
                 "agent_id": "auto" if auto_recorded else "mcp",
+                "determined_by": determined_by,
                 "created_at": time.time(),
             }
         )
@@ -323,7 +350,7 @@ def record_print_outcome(
 
             from kiln.community_sync import community_opt_in_enabled
 
-            if community_opt_in_enabled() and file_hash:
+            if community_opt_in_enabled() and file_hash and outcome in _LEARNING_OUTCOMES:
                 from kiln import community_outbox
 
                 resolved_model: str | None = None
@@ -428,6 +455,7 @@ def record_print_outcome(
             "printer_name": printer_name,
             "outcome": outcome,
             "quality_grade": quality_grade,
+            "determined_by": determined_by,
         }
         if failure_mode is not None:
             result["failure_mode"] = failure_mode
@@ -891,7 +919,19 @@ class _LearningToolsPlugin:
             """Query cross-printer learning insights for a specific printer.
 
             Returns success rates, failure mode breakdown, and per-material
-            statistics based on previously recorded outcomes.
+            statistics based on previously recorded outcomes — plus any
+            UNRESOLVED prints: jobs that started (or ended) while no Kiln
+            process was watching, whose outcome nobody has settled yet.
+
+            **Agent contract for ``unresolved_prints``**: these entries are
+            waiting on the one witness the machine can't replace — the
+            user, who has the part.  When the moment is natural (not
+            mid-task), ask casually ("Your ashtray finished while Kiln
+            wasn't watching — did it come out OK?") and settle the answer
+            via ``record_print_outcome(job_id=..., outcome=...,
+            determined_by="user_reported")``.  Never guess an outcome on
+            the user's behalf; an unresolved print stays out of all
+            success-rate math until someone who knows answers.
 
             **Note**: Insights are advisory.  They do NOT override safety limits
             or preflight checks.
@@ -905,6 +945,9 @@ class _LearningToolsPlugin:
             try:
                 insights = get_db().get_printer_learning_insights(printer_name)
                 recent = get_db().list_print_outcomes(printer_name=printer_name, limit=limit)
+                unresolved = get_db().list_unresolved_outcomes(
+                    printer_name=printer_name, limit=limit,
+                )
 
                 # Confidence level based on sample size
                 total = insights.get("total_outcomes", 0)
@@ -920,6 +963,7 @@ class _LearningToolsPlugin:
                     "printer_name": printer_name,
                     "insights": insights,
                     "recent_outcomes": recent,
+                    "unresolved_prints": unresolved,
                     "confidence": confidence,
                     "safety_notice": _LEARNING_SAFETY_NOTICE,
                 }

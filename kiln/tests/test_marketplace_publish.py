@@ -308,7 +308,10 @@ class TestGeneratePrintCertificate:
                    (job_id, printer_name, file_hash, material_type, outcome,
                     settings, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                ("j2", "ender3", fhash, "petg", "failure", None, time.time()),
+                # Canonical vocabulary — the certificate reader counts only
+                # decided outcomes ('success'/'failed'/'partial'), so the
+                # old out-of-vocabulary "failure" literal no longer counts.
+                ("j2", "ender3", fhash, "petg", "failed", None, time.time()),
             )
             db._conn.commit()
 

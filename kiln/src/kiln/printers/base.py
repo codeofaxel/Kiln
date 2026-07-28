@@ -502,6 +502,22 @@ class PrinterAdapter(ABC):
                 _logging.getLogger(__name__).debug(
                     "print-start stat recording failed", exc_info=True
                 )
+            # Open the outcome row NOW, while we can still see the print.
+            # The start is the one event Kiln is guaranteed to witness (it
+            # initiates it); if no process is alive when the print ends,
+            # this pending row is what lets the next session notice the
+            # print existed and settle how it went, instead of the print
+            # vanishing from history entirely.
+            try:
+                from kiln.auto_record_hook import open_pending_outcome
+
+                open_pending_outcome(self.name, file_name)
+            except Exception:  # noqa: BLE001 — bookkeeping must never affect a print
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "pending-outcome open failed", exc_info=True
+                )
         return result
 
     @abstractmethod

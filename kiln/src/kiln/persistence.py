@@ -48,6 +48,24 @@ logger = logging.getLogger(__name__)
 _DEFAULT_DB_DIR = os.path.join(str(Path.home()), ".kiln")
 _DEFAULT_DB_PATH = os.path.join(_DEFAULT_DB_DIR, "kiln.db")
 
+
+def _file_stem_token(file_name: str | None) -> str:
+    """Normalize a print file reference for start-vs-end matching.
+
+    The start side holds a local path ("/tmp/ashtray.gcode.3mf"); the end
+    side holds the printer's own job label ("ashtray").  Comparing the
+    lowercased basename with ALL extensions stripped lets the two sides
+    agree without either knowing the other's naming.
+    """
+    base = os.path.basename(str(file_name or "")).strip().lower()
+    if not base:
+        return ""
+    while True:
+        stem, ext = os.path.splitext(base)
+        if not ext or not stem:
+            return base
+        base = stem
+
 #: Where a test/CI run's writes go instead of the user's real database.
 #: Per interpreter, so a suite still gets a working DB that persists across
 #: the run — just not the one holding somebody's print history.
@@ -532,6 +550,7 @@ class KilnDB:
 
         self._ensure_schema()
         self._migrate_agent_memory()
+        self._migrate_print_outcomes()
         self._enforce_permissions()
 
     # ------------------------------------------------------------------
@@ -553,6 +572,26 @@ class KilnDB:
             self._conn.execute("ALTER TABLE agent_memory ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
         if "expires_at" not in columns:
             self._conn.execute("ALTER TABLE agent_memory ADD COLUMN expires_at REAL DEFAULT NULL")
+        self._conn.commit()
+
+    def _migrate_print_outcomes(self) -> None:
+        """Add the determined_by column to existing print_outcomes tables.
+
+        ``determined_by`` records WHO settled the outcome: ``observed`` (a
+        live Kiln process watched the terminal transition), ``inferred``
+        (reconstructed from printer state on a later reconnect), or
+        ``user_reported`` (a human told us).  Three sources can disagree;
+        the record has to say which one it is carrying.
+        """
+        if self._is_postgres:
+            rows = self._conn.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'print_outcomes'",
+            ).fetchall()
+            columns = {row[0] for row in rows}
+        else:
+            columns = {row[1] for row in self._conn.execute("PRAGMA table_info(print_outcomes)").fetchall()}
+        if "determined_by" not in columns:
+            self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN determined_by TEXT DEFAULT NULL")
         self._conn.commit()
 
     def _enforce_permissions(self) -> None:
@@ -788,6 +827,7 @@ class KilnDB:
                     environment     TEXT,
                     notes           TEXT,
                     agent_id        TEXT,
+                    determined_by   TEXT,
                     created_at      REAL NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_print_outcomes_printer
@@ -2209,38 +2249,96 @@ class KilnDB:
     # Print outcomes (cross-printer learning)
     # ------------------------------------------------------------------
 
+    # The full outcome vocabulary.  ``success`` / ``failed`` / ``partial``
+    # are DECIDED, learning-bearing outcomes: a print ran to a judged end
+    # and its settings earned a verdict.  The other three are not:
+    # ``pending``  — the print started and, as far as Kiln knows, has not
+    #                ended (opened at print start so no print is ever lost);
+    # ``unknown``  — the print ended while nothing was watching and the
+    #                machine could not honestly say how (a known unknown —
+    #                never guessed into a success);
+    # ``cancelled``— the user aborted; says nothing about the settings.
+    # Rate math and proven-settings read ONLY the decided three.
+    VALID_OUTCOMES = frozenset(
+        {"success", "failed", "partial", "cancelled", "pending", "unknown"}
+    )
+    LEARNING_OUTCOMES = frozenset({"success", "failed", "partial"})
+    UNRESOLVED_OUTCOMES = frozenset({"pending", "unknown"})
+    VALID_DETERMINED_BY = frozenset({"observed", "inferred", "user_reported"})
+
     def save_print_outcome(self, outcome: dict[str, Any]) -> int:
-        """Save an agent-curated print outcome record.  Returns row id."""
-        VALID_OUTCOMES = {"success", "failed", "partial"}
+        """Save a print outcome record.  Returns row id.
+
+        Upsert semantics on ``job_id`` (unique index): if a row for the
+        same job already exists and is unresolved (``pending`` /
+        ``unknown``), the new record RESOLVES it in place.  If the
+        existing row is already decided, a non-auto (agent- or
+        user-curated) record updates it — the documented "agents can
+        refine an auto-recorded outcome" contract — while an
+        ``agent_id='auto'`` record never overwrites a decided row.
+        """
         outcome_val = outcome.get("outcome", "")
-        if outcome_val not in VALID_OUTCOMES:
-            raise ValueError(f"Invalid outcome {outcome_val!r}. Must be one of: {sorted(VALID_OUTCOMES)}")
+        if outcome_val not in self.VALID_OUTCOMES:
+            raise ValueError(f"Invalid outcome {outcome_val!r}. Must be one of: {sorted(self.VALID_OUTCOMES)}")
+        determined_by = outcome.get("determined_by")
+        if determined_by and determined_by not in self.VALID_DETERMINED_BY:
+            raise ValueError(
+                f"Invalid determined_by {determined_by!r}. Must be one of: {sorted(self.VALID_DETERMINED_BY)}"
+            )
         if outcome.get("quality_grade") and outcome["quality_grade"] not in {"excellent", "good", "acceptable", "poor"}:
             raise ValueError(f"Invalid quality_grade {outcome['quality_grade']!r}")
-        if outcome.get("failure_mode") and outcome["failure_mode"] not in {
-            "spaghetti",
-            "layer_shift",
-            "warping",
-            "adhesion",
-            "stringing",
-            "under_extrusion",
-            "over_extrusion",
-            "clog",
-            "thermal_runaway",
-            "power_loss",
-            "mechanical",
-            "other",
-        }:
+        # Validate against the ONE canonical vocabulary.  A hardcoded copy
+        # here once drifted behind kiln.failure_vocabulary (it was missing
+        # "filament_runout"), so the tool layer accepted a mode this layer
+        # then rejected — silently dropping every auto-recorded runout.
+        from kiln.failure_vocabulary import VALID_FAILURE_MODES
+        if outcome.get("failure_mode") and outcome["failure_mode"] not in VALID_FAILURE_MODES:
             raise ValueError(f"Invalid failure_mode {outcome['failure_mode']!r}")
 
         with self._write_lock:
+            existing = self._conn.execute(
+                "SELECT id, outcome, agent_id FROM print_outcomes WHERE job_id = ? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (outcome["job_id"],),
+            ).fetchone()
+            if existing is not None:
+                existing_id, existing_outcome, _ = (
+                    existing[0], existing[1], existing[2],
+                )
+                incoming_is_auto = outcome.get("agent_id") == "auto"
+                if existing_outcome in self.UNRESOLVED_OUTCOMES or not incoming_is_auto:
+                    self._resolve_row_locked(existing_id, outcome)
+                    return existing_id
+                # Auto-record vs an already-decided row: the decided row
+                # wins (a human or agent verdict outranks the hook).
+                raise ValueError(
+                    f"Outcome for job_id {outcome['job_id']!r} already recorded"
+                )
+            # No row under this job id.  If this is a DECIDED ending and a
+            # pending row is open for the same printer, this ending most
+            # plausibly belongs to it: the start side keyed the row with a
+            # synthetic id because the printer's own job label isn't known
+            # until firmware reports it.  Resolve that row — adopting the
+            # real job id — instead of inserting a duplicate.
+            if outcome_val != "pending" and outcome.get("printer_name"):
+                # The printer's job label (job_id here) is usually the
+                # file stem, so it participates in name matching too.
+                match = self._match_pending_locked(
+                    outcome["printer_name"],
+                    outcome.get("file_name") or outcome.get("job_id"),
+                )
+                if match is not None:
+                    self._resolve_row_locked(
+                        match["id"], outcome, new_job_id=outcome["job_id"],
+                    )
+                    return match["id"]
             try:
                 cur = self._conn.execute(
                     """INSERT INTO print_outcomes
                        (job_id, printer_name, file_name, file_hash, material_type,
                         outcome, quality_grade, failure_mode, settings, environment,
-                        notes, agent_id, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        notes, agent_id, determined_by, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         outcome["job_id"],
                         outcome["printer_name"],
@@ -2254,6 +2352,7 @@ class KilnDB:
                         json.dumps(outcome["environment"]) if outcome.get("environment") else None,
                         outcome.get("notes"),
                         outcome.get("agent_id"),
+                        outcome.get("determined_by"),
                         outcome.get("created_at", time.time()),
                     ),
                 )
@@ -2265,6 +2364,134 @@ class KilnDB:
                 if "integrity" in type(exc).__name__.lower() or isinstance(exc, sqlite3.IntegrityError):
                     raise ValueError(f"Outcome for job_id {outcome['job_id']!r} already recorded") from exc
                 raise
+
+    def _match_pending_locked(
+        self,
+        printer_name: str,
+        file_name: str | None,
+    ) -> dict[str, Any] | None:
+        """Pending-row matching for an arriving ending.  Caller holds the lock.
+
+        A file-stem match claims its row; with no stem to compare, only a
+        LONE pending row for the printer is claimed — with several open,
+        guessing which one this ending belongs to could stamp the wrong
+        print, so none is claimed and the arrival inserts fresh.
+        """
+        rows = self._conn.execute(
+            "SELECT * FROM print_outcomes WHERE printer_name = ? AND outcome = 'pending' "
+            "ORDER BY created_at ASC",
+            (printer_name,),
+        ).fetchall()
+        if not rows:
+            return None
+        candidates = [self._outcome_row_to_dict(r) for r in rows]
+        target = _file_stem_token(file_name)
+        if target:
+            for cand in candidates:
+                if _file_stem_token(cand.get("file_name")) == target:
+                    return cand
+        if len(candidates) == 1:
+            return candidates[0]
+        return None
+
+    def _resolve_row_locked(
+        self,
+        row_id: int,
+        outcome: dict[str, Any],
+        new_job_id: str | None = None,
+    ) -> None:
+        """Update an existing outcome row in place.  Caller holds the lock.
+
+        ``created_at`` is deliberately preserved — for a row opened at
+        print start it is the START time, which is what "your print
+        finished while Kiln wasn't watching" surfaces need.
+        """
+        if new_job_id:
+            self._conn.execute(
+                "UPDATE print_outcomes SET job_id = ? WHERE id = ?",
+                (new_job_id, row_id),
+            )
+        self._conn.execute(
+            """UPDATE print_outcomes
+               SET outcome = ?, quality_grade = COALESCE(?, quality_grade),
+                   failure_mode = COALESCE(?, failure_mode),
+                   settings = COALESCE(?, settings),
+                   environment = COALESCE(?, environment),
+                   notes = COALESCE(?, notes),
+                   material_type = COALESCE(?, material_type),
+                   file_hash = COALESCE(?, file_hash),
+                   agent_id = COALESCE(?, agent_id),
+                   determined_by = COALESCE(?, determined_by)
+               WHERE id = ?""",
+            (
+                outcome["outcome"],
+                outcome.get("quality_grade"),
+                outcome.get("failure_mode"),
+                json.dumps(outcome["settings"]) if outcome.get("settings") else None,
+                json.dumps(outcome["environment"]) if outcome.get("environment") else None,
+                outcome.get("notes"),
+                outcome.get("material_type"),
+                outcome.get("file_hash"),
+                outcome.get("agent_id"),
+                outcome.get("determined_by"),
+                row_id,
+            ),
+        )
+        self._conn.commit()
+
+    def open_pending_outcome(
+        self,
+        job_id: str,
+        printer_name: str,
+        file_name: str | None = None,
+        material_type: str | None = None,
+    ) -> int | None:
+        """Open a ``pending`` outcome row at print START.
+
+        Written the moment a print starts — the one event Kiln always
+        sees, because Kiln initiates it — so the record never depends on
+        a process still being alive when the print ends.  Returns the
+        row id, or ``None`` when a row for ``job_id`` already exists.
+        """
+        try:
+            return self.save_print_outcome(
+                {
+                    "job_id": job_id,
+                    "printer_name": printer_name,
+                    "file_name": file_name,
+                    "material_type": material_type,
+                    "outcome": "pending",
+                    "agent_id": "auto",
+                    "notes": "opened at print start; outcome not yet known",
+                }
+            )
+        except ValueError:
+            return None
+
+    def list_unresolved_outcomes(
+        self,
+        printer_name: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Return pending/unknown rows — prints still owed an answer.
+
+        These are the prints that started (or ended unseen) while no
+        Kiln process was watching.  Surfaced so the next session can ask
+        the human, who is holding the part and can settle what the
+        machine could not.
+        """
+        clauses = ["outcome IN ('pending', 'unknown')"]
+        params: list[Any] = []
+        if printer_name:
+            clauses.append("printer_name = ?")
+            params.append(printer_name)
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT * FROM print_outcomes WHERE {' AND '.join(clauses)} "
+            "ORDER BY created_at DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [self._outcome_row_to_dict(r) for r in rows]
 
     def get_print_outcome(self, job_id: str) -> dict[str, Any] | None:
         """Return the outcome record for *job_id*, or ``None``."""
@@ -2282,8 +2509,16 @@ class KilnDB:
         file_hash: str | None = None,
         outcome: str | None = None,
         limit: int = 50,
+        include_all: bool = False,
     ) -> list[dict[str, Any]]:
-        """Return outcome records, optionally filtered."""
+        """Return outcome records, optionally filtered.
+
+        By default only DECIDED, learning-bearing outcomes (success /
+        failed / partial) are returned — every rate and proven-settings
+        consumer reads through here, and a pending, unknown, or
+        cancelled row is not a verdict on settings.  An explicit
+        ``outcome=`` filter or ``include_all=True`` sees everything.
+        """
         clauses: list[str] = []
         params: list[Any] = []
         if printer_name:
@@ -2295,6 +2530,8 @@ class KilnDB:
         if outcome:
             clauses.append("outcome = ?")
             params.append(outcome)
+        elif not include_all:
+            clauses.append("outcome IN ('success', 'failed', 'partial')")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         params.append(limit)
         rows = self._conn.execute(
@@ -2303,10 +2540,17 @@ class KilnDB:
         ).fetchall()
         return [self._outcome_row_to_dict(r) for r in rows]
 
+    # Aggregate denominators count only decided outcomes.  A pending or
+    # unknown row is a print whose result NOBODY knows — counting it as a
+    # non-success would manufacture failures; counting it as success would
+    # be the false-success bias this vocabulary exists to prevent.  A
+    # cancelled print carries no verdict on the settings either way.
+    _DECIDED = "outcome IN ('success', 'failed', 'partial')"
+
     def get_printer_learning_insights(self, printer_name: str) -> dict[str, Any]:
         """Return aggregated outcome insights for a single printer."""
         total = self._conn.execute(
-            "SELECT COUNT(*) FROM print_outcomes WHERE printer_name = ?",
+            f"SELECT COUNT(*) FROM print_outcomes WHERE printer_name = ? AND {self._DECIDED}",
             (printer_name,),
         ).fetchone()[0]
         if total == 0:
@@ -2335,7 +2579,7 @@ class KilnDB:
             "  COUNT(*) as total, "
             "  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as wins "
             "FROM print_outcomes "
-            "WHERE printer_name = ? AND material_type IS NOT NULL "
+            f"WHERE printer_name = ? AND material_type IS NOT NULL AND {self._DECIDED} "
             "GROUP BY material_type ORDER BY total DESC",
             (printer_name,),
         ).fetchall()
@@ -2360,7 +2604,7 @@ class KilnDB:
             "  COUNT(*) as total, "
             "  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as wins "
             "FROM print_outcomes "
-            "WHERE file_hash = ? "
+            f"WHERE file_hash = ? AND {self._DECIDED} "
             "GROUP BY printer_name ORDER BY (CAST(wins AS REAL) / total) DESC, total DESC",
             (file_hash,),
         ).fetchall()
@@ -2386,7 +2630,7 @@ class KilnDB:
         material_type: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return printers ranked by success rate for the given criteria."""
-        clauses: list[str] = []
+        clauses: list[str] = [self._DECIDED]
         params: list[Any] = []
         if file_hash:
             clauses.append("file_hash = ?")
@@ -2394,7 +2638,7 @@ class KilnDB:
         if material_type:
             clauses.append("material_type = ?")
             params.append(material_type)
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        where = " WHERE " + " AND ".join(clauses)
         rows = self._conn.execute(
             f"SELECT printer_name, "
             f"  COUNT(*) as total, "
