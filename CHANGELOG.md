@@ -7,6 +7,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Kiln cleans up after itself.** Every agent session starts its own
+  background Kiln, and closed sessions leave theirs behind — quietly holding
+  memory. Kiln now notices the pile-up, tells you in plain English, and
+  closes the leftovers when you ask, checking that nothing is printing first
+  and never touching the session you're in. In a terminal: `kiln trim`.
+
 - **Too big for your printer? Kiln cuts it into a kit.** When a model won't
   fit, Kiln can split it into pieces that fit your printer and go back
   together — cutting where it makes sense and sealing every cut so each
