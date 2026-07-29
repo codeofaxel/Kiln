@@ -92,17 +92,47 @@ def _make_adapter(
     return adapter
 
 
-def _start_watcher_briefly(
+def _collect_vision_frames(bus) -> list[dict]:
+    """Return all VISION_FRAME_CAPTURED events the bus has received.
+
+    Copies the history under the bus lock so this is safe to call while
+    the watcher thread is still publishing.
+    """
+    from kiln.events import EventType
+
+    with bus._lock:
+        history = list(bus._history)
+    return [e for e in history if e.type == EventType.VISION_FRAME_CAPTURED]
+
+
+def _run_watcher_until_frames(
     adapter,
     bus,
     *,
+    min_frames: int,
     poll_interval: float = 0.05,
     snapshot_interval: float = 0.05,
-    run_seconds: float = 1.0,
     stall_timeout: int = 0,
     max_snapshots: int = 10000,
-) -> object:
-    """Spin a _PrintWatcher in a background thread, then stop it."""
+    timeout: float = 30.0,
+) -> list[dict]:
+    """Run a _PrintWatcher until it has published *min_frames* frames.
+
+    Every assertion in this file is about the CONTENT of the published
+    VISION_FRAME_CAPTURED sequence, never about how long the watcher ran.
+    So the watcher is driven by the observed event count rather than by a
+    fixed ``time.sleep`` — a loaded CI runner gets through fewer poll ticks
+    per second, and a wall-clock bound silently turns that into a short
+    frame sequence and a spurious failure.  *timeout* is a generous
+    backstop for a genuinely hung watcher, not the expected duration:
+    on an unloaded machine this returns in roughly
+    ``min_frames * poll_interval`` seconds.
+
+    Returns every frame collected once the watcher has stopped, which may
+    be more than *min_frames* — the thread can publish another frame or
+    two before it observes the stop event.  Assertions should therefore
+    anchor on the sequence itself, not on ``frames[-1]``.
+    """
     from kiln.plugins.monitoring_tools import _PrintWatcher
 
     watcher = _PrintWatcher(
@@ -117,18 +147,19 @@ def _start_watcher_briefly(
         stall_timeout=stall_timeout,
     )
     watcher.start()
+    deadline = time.monotonic() + timeout
     try:
-        time.sleep(run_seconds)
+        while len(_collect_vision_frames(bus)) < min_frames:
+            if time.monotonic() >= deadline:
+                collected = len(_collect_vision_frames(bus))
+                pytest.fail(
+                    f"Watcher published {collected} VISION_FRAME_CAPTURED "
+                    f"event(s) in {timeout:g}s; expected at least {min_frames}."
+                )
+            time.sleep(0.01)
     finally:
         watcher.stop()
-    return watcher
-
-
-def _collect_vision_frames(bus) -> list[dict]:
-    """Return all VISION_FRAME_CAPTURED events the bus has received."""
-    from kiln.events import EventType
-
-    return [e for e in bus._history if e.type == EventType.VISION_FRAME_CAPTURED]
+    return _collect_vision_frames(bus)
 
 
 # ---------------------------------------------------------------------------
@@ -162,9 +193,8 @@ class TestVisionCheckPayloadShape:
             snapshot_sequence=[bytes([i] * 200) for i in range(20)],
         )
 
-        _start_watcher_briefly(adapter, bus, run_seconds=0.6)
+        events = _run_watcher_until_frames(adapter, bus, min_frames=2)
 
-        events = _collect_vision_frames(bus)
         assert len(events) >= 2, "Expected multiple VISION_FRAME_CAPTURED events"
         for ev in events:
             data = ev.data
@@ -186,9 +216,8 @@ class TestVisionCheckPayloadShape:
             snapshot_sequence=[distinct_blob] * 20,
         )
 
-        _start_watcher_briefly(adapter, bus, run_seconds=0.4)
+        events = _run_watcher_until_frames(adapter, bus, min_frames=1)
 
-        events = _collect_vision_frames(bus)
         assert events, "Expected at least one VISION_FRAME_CAPTURED"
         ev = events[0]
         decoded = base64.b64decode(ev.data["snapshot_b64"])
@@ -210,9 +239,8 @@ class TestVisionCheckPayloadShape:
             snapshot_sequence=[b"x" * 200, b"y" * 200, b"z" * 200],
         )
 
-        _start_watcher_briefly(adapter, bus, run_seconds=0.4)
+        events = _run_watcher_until_frames(adapter, bus, min_frames=1)
 
-        events = _collect_vision_frames(bus)
         assert events
         assert all(ev.data["watch_id"] == "enrich-test" for ev in events)
 
@@ -235,9 +263,8 @@ class TestCameraChangedBit:
             snapshot_sequence=[bytes([i] * 200) for i in range(20)],
         )
 
-        _start_watcher_briefly(adapter, bus, run_seconds=0.3)
+        events = _run_watcher_until_frames(adapter, bus, min_frames=1)
 
-        events = _collect_vision_frames(bus)
         assert events
         assert events[0].data["camera_changed"] is False, (
             "First VISION_FRAME_CAPTURED should report camera_changed=False (no prior frame)"
@@ -252,9 +279,8 @@ class TestCameraChangedBit:
             snapshot_sequence=[bytes([i] * 200) for i in range(20)],
         )
 
-        _start_watcher_briefly(adapter, bus, run_seconds=0.5)
+        events = _run_watcher_until_frames(adapter, bus, min_frames=2)
 
-        events = _collect_vision_frames(bus)
         assert len(events) >= 2
         # Frame 2+: bytes differ, hash differs, camera_changed=True
         assert events[1].data["camera_changed"] is True
@@ -269,9 +295,8 @@ class TestCameraChangedBit:
             snapshot_sequence=[identical] * 30,
         )
 
-        _start_watcher_briefly(adapter, bus, run_seconds=0.5)
+        events = _run_watcher_until_frames(adapter, bus, min_frames=3)
 
-        events = _collect_vision_frames(bus)
         assert len(events) >= 3
         # First event: no prior frame, camera_changed=False
         # Subsequent events: hash matches prior, camera_changed=False
@@ -297,9 +322,8 @@ class TestConsecutiveStaticFrames:
             snapshot_sequence=[bytes([i] * 200) for i in range(20)],
         )
 
-        _start_watcher_briefly(adapter, bus, run_seconds=0.3)
+        events = _run_watcher_until_frames(adapter, bus, min_frames=1)
 
-        events = _collect_vision_frames(bus)
         assert events
         assert events[0].data["consecutive_static_frames"] == 0
 
@@ -313,9 +337,8 @@ class TestConsecutiveStaticFrames:
             snapshot_sequence=[identical] * 40,
         )
 
-        _start_watcher_briefly(adapter, bus, run_seconds=0.6)
+        events = _run_watcher_until_frames(adapter, bus, min_frames=3)
 
-        events = _collect_vision_frames(bus)
         # Build a list of consecutive_static_frames values across events.
         counter_values = [e.data["consecutive_static_frames"] for e in events]
         # Frame 0: 0 (first frame, no comparison)
@@ -341,19 +364,34 @@ class TestConsecutiveStaticFrames:
             snapshot_sequence=seq,
         )
 
-        _start_watcher_briefly(adapter, bus, run_seconds=0.6)
+        # 4 static frames, then the first differing one — the tick that
+        # must reset the counter.
+        events = _run_watcher_until_frames(adapter, bus, min_frames=5)
 
-        events = _collect_vision_frames(bus)
         counter_values = [e.data["consecutive_static_frames"] for e in events]
-        # We expect the counter to climb through the static run, then
-        # drop back to 0 once a different frame arrives.
-        assert max(counter_values) >= 2, (
+        changed_flags = [e.data["camera_changed"] for e in events]
+
+        # Anchor on the first frame the watcher reported as changed rather
+        # than on the last event collected.  The last event is whichever
+        # frame the watcher happened to reach before stopping, and the
+        # scripted snapshot list repeats its final entry once exhausted —
+        # so a run that is short OR long enough lands on a static frame and
+        # says nothing about whether the reset happened.
+        change_idx = next((i for i, changed in enumerate(changed_flags) if changed), None)
+        assert change_idx is not None, (
+            f"Expected a camera change once the static run ended; "
+            f"got camera_changed={changed_flags}"
+        )
+        # The counter climbed through the static run that preceded it...
+        assert max(counter_values[:change_idx]) >= 2, (
             f"Counter should have accumulated past 1 during static run; "
             f"got {counter_values}"
         )
-        # After the run of identicals + change, the LAST event should
-        # have the counter at 0 (camera changed each tick now).
-        assert counter_values[-1] == 0
+        # ...and reset to 0 on the frame whose bytes differed.
+        assert counter_values[change_idx] == 0, (
+            f"Counter should reset to 0 on the first changed frame "
+            f"(index {change_idx}); got {counter_values}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -374,9 +412,8 @@ class TestTimeSinceLastProgress:
             snapshot_sequence=[bytes([i] * 200) for i in range(20)],
         )
 
-        _start_watcher_briefly(adapter, bus, run_seconds=0.4)
+        events = _run_watcher_until_frames(adapter, bus, min_frames=1)
 
-        events = _collect_vision_frames(bus)
         assert events
         for ev in events:
             value = ev.data["time_since_last_progress_seconds"]
@@ -394,9 +431,13 @@ class TestTimeSinceLastProgress:
             snapshot_sequence=[bytes([i] * 200) for i in range(100)],
         )
 
-        _start_watcher_briefly(adapter, bus, run_seconds=0.6)
+        # Six frames at a 0.05s poll interval span at least 0.25s, so the
+        # 0.1s growth below is guaranteed by the frame count rather than by
+        # the runner keeping up with a wall-clock budget.  A slow runner
+        # only spreads the frames further apart, which makes the assertion
+        # more true, never less.
+        events = _run_watcher_until_frames(adapter, bus, min_frames=6)
 
-        events = _collect_vision_frames(bus)
         assert len(events) >= 3
         values = [e.data["time_since_last_progress_seconds"] for e in events]
         # Strictly monotonic increase (allow small float noise).
@@ -434,9 +475,8 @@ class TestNoDecisionsInPublicWatcher:
             snapshot_sequence=[bytes([i] * 200) for i in range(20)],
         )
 
-        _start_watcher_briefly(adapter, bus, run_seconds=0.4)
+        events = _run_watcher_until_frames(adapter, bus, min_frames=1)
 
-        events = _collect_vision_frames(bus)
         assert events
         for ev in events:
             for forbidden in self.FORBIDDEN_FIELDS:
