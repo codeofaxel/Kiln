@@ -465,3 +465,42 @@ class TestOnHandRecommendation:
         ]
         rec = recommend_material("flexible", on_hand=on_hand)
         assert rec.material.name == "tpu"
+
+    def test_multiple_machines_ordered_by_stock(self) -> None:
+        """When two machines hold the material, the fullest is named
+        first — matching find_printers_with_material ordering."""
+        on_hand = [
+            _on_hand_entry(
+                "PETG",
+                loaded_on=[
+                    _loaded_row("low-machine", 100.0),
+                    _loaded_row("full-machine", 900.0),
+                ],
+            ),
+        ]
+        rec = recommend_material("strong", on_hand=on_hand)
+        printers = [r["printer_name"] for r in rec.availability["loaded_on"]]
+        assert printers == ["full-machine", "low-machine"]
+
+    def test_abrasive_consult_uses_recorded_variant(self, monkeypatch) -> None:
+        """The nozzle bridge must be asked about the material the user
+        will ACTUALLY print (PETG-CF), not the catalog base (petg)."""
+        from kiln import _pro_nozzle_bridge
+
+        consulted: dict = {}
+
+        def _fake_consult(*, filament_material: str, printer_id: str):
+            consulted["filament"] = filament_material
+            return None
+
+        monkeypatch.setattr(
+            _pro_nozzle_bridge, "consult_abrasive_escalation", _fake_consult
+        )
+        monkeypatch.setattr(
+            _pro_nozzle_bridge, "consult_nozzle_summary", lambda _pid: None
+        )
+        on_hand = [
+            _on_hand_entry("PETG-CF", loaded_on=[_loaded_row("x1c", 750.0)]),
+        ]
+        recommend_material("strong", printer_id="x1c", on_hand=on_hand)
+        assert consulted["filament"] == "PETG-CF"

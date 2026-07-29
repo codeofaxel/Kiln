@@ -466,6 +466,11 @@ def _availability_for(
             loaded.append({**row, "material_type": mt})
         for sp in entry.get("shelf_spools") or []:
             shelf.append({**sp, "material_type": mt})
+    # Name the machine with the most material first (the one to use),
+    # matching find_printers_with_material's most-stock-first ordering.
+    loaded.sort(
+        key=lambda r: r.get("remaining_grams") or 0.0, reverse=True
+    )
     status = "loaded" if loaded else "on_shelf"
     return {
         "status": status,
@@ -734,7 +739,13 @@ def recommend_material(
         try:
             from kiln import _pro_nozzle_bridge
 
+            # Consult with the material the user will ACTUALLY print:
+            # in on-hand mode that's the recorded inventory string
+            # ("PETG-CF"), whose abrasive-ness the catalog base name
+            # ("petg") would understate.
             _filament = top_mat.name
+            if availability and availability.get("as_recorded"):
+                _filament = availability["as_recorded"][0]
             _nozzle_advisory = _pro_nozzle_bridge.consult_abrasive_escalation(
                 filament_material=_filament,
                 printer_id=printer_id,
