@@ -261,16 +261,24 @@ def fleet_scope_verdict(feature: str) -> dict[str, Any] | None:
     a per-door branch is how the drift starts, and the printer cap already
     taught us that lesson at ``register_printer`` (2026-07-27).
 
-    What is gated is the cross-machine ANSWER, not possession: registering
-    and using printers stays free at every tier, and a single-machine
-    install is never a fleet, so it passes here without a licence check or
-    a network call — free and Pro keep full inventory awareness of their
-    own printer and their own shelf.  The moment an answer spans more
-    machines than the tier allows, the fleet view is what Business sells.
+    What is gated is the cross-machine ANSWER.  Registering printers and
+    printing on them stays free at every tier — serial use of two owned
+    machines is honest single-machine use, and the print path never
+    consults this gate.  But a view that spans machines ("which of mine
+    holds PETG") only means anything on a fleet, and a fleet is Business:
+    an install with more registered MACHINES than its tier's cap is
+    refused here even when it drives them one at a time.  Per-machine
+    questions stay open at every tier — scope to one printer and this
+    gate never fires.
 
-    Soft-passes on anything it cannot prove (unknown tier, broken
-    registry, any error): a licensing check must never be the reason a
-    user cannot see their own materials.
+    Two failure modes, deliberately opposite:
+
+    * **Tier unresolvable** (``kiln.licensing`` absent — public Kiln with
+      no kiln-pro) → treated as FREE, the most restrictive cap.  Fails
+      CLOSED, so a missing licence module can never unlock a paid view.
+    * **Registry unreadable / any unexpected error** → allowed.  Fails
+      OPEN, because a broken registry is our fault and must never be the
+      reason a user cannot see their own materials.
     """
     try:
         from kiln.registry import get_registry
