@@ -162,6 +162,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   printer and material — and now keeps the two print directions apart, so
   those numbers sharpen faster.*
 
+- **Print checks now tune to your filament and your printer (free).**
+  Warping, heat-stress and bed-grip warnings follow the material actually
+  loaded and the machine that will run it — in slicing, cost estimates and
+  the pre-print readiness check too.
+
 ### Changed
 
 - **Nozzle wear is measured, not assumed (free).** If Kiln has no usage
