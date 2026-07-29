@@ -547,7 +547,10 @@ class _IntelligenceToolsPlugin:
             can be swapped in); without it, every machine's load counts.
             When nothing on hand suits the request, the response returns
             the best catalog pick clearly labeled needs-purchase — it
-            never silently widens to the catalog.
+            never silently widens to the catalog.  And when what you have
+            works but a material you DON'T own fits the job materially
+            better, the answer names that too, so "best of what you have"
+            is never mistaken for "right for the job".
 
             **Which material tool to use:**
 

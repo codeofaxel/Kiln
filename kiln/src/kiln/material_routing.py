@@ -412,6 +412,12 @@ def _format_nozzle_context_line(
 
 # Aliases from inventory material strings to catalog names.  Keys are
 # lowercase inventory tokens; values are catalog keys in ``_MATERIALS``.
+# Score gap (0-100 scale) at which a not-owned material is worth naming
+# as a materially better fit than the best on-hand option.  Tuned so
+# adjacent materials stay quiet and a real mismatch (PLA offered for a
+# "flexible" part when TPU exists) speaks up.
+_POOR_FIT_SCORE_GAP: float = 10.0
+
 _CATALOG_ALIASES: dict[str, str] = {
     "pla+": "pla_plus",
     "pla plus": "pla_plus",
@@ -552,32 +558,14 @@ def recommend_material(
         attributing the answer to the machine(s) holding it (or to the
         shelf, when a spool swap is needed first).  When nothing on hand
         matches the catalog, the best CATALOG pick is returned, clearly
-        labeled needs-purchase — never a silent widening.
+        labeled needs-purchase — never a silent widening.  When the
+        on-hand pick is a materially worse fit than a material the user
+        does NOT own, that is named too (``better_catalog_option``), so
+        "best of what you have" is never mistaken for "right for the
+        job".
     """
     mapping = parse_intent(intent)
     candidates = list(_MATERIALS.values())
-
-    # On-hand narrowing: when the caller supplied their physical
-    # inventory, the candidate universe is what they actually have.
-    # Entries with neither a loaded row nor a shelf spool carry no
-    # physical material and confer no candidacy.
-    on_hand_index: dict[str, list[dict[str, Any]]] = {}
-    on_hand_status: str | None = None
-    if on_hand is not None:
-        for entry in on_hand:
-            if not (entry.get("loaded_on") or entry.get("shelf_spools")):
-                continue
-            cat = _catalog_match(str(entry.get("material_type", "")))
-            if cat is not None:
-                on_hand_index.setdefault(cat, []).append(entry)
-        matched = [m for m in candidates if m.name in on_hand_index]
-        if matched:
-            candidates = matched
-            on_hand_status = "on_hand"
-        elif not on_hand:
-            on_hand_status = "no_inventory_recorded"
-        else:
-            on_hand_status = "needs_purchase"
 
     # Filter by printer capabilities
     if printer_capabilities:
@@ -629,6 +617,37 @@ def recommend_material(
         if food_filtered:
             candidates = food_filtered
 
+    # On-hand narrowing runs LAST, so the candidate set it narrows has
+    # already passed the printer / budget / food-safety filters.  That
+    # keeps the on-hand-vs-catalog comparison below apples-to-apples:
+    # the material we say the user is missing is one their printer can
+    # actually run.  Entries with neither a loaded row nor a shelf spool
+    # carry no physical material and confer no candidacy.
+    on_hand_index: dict[str, list[dict[str, Any]]] = {}
+    on_hand_status: str | None = None
+    catalog_best: tuple[float, MaterialProperties] | None = None
+    if on_hand is not None:
+        for entry in on_hand:
+            if not (entry.get("loaded_on") or entry.get("shelf_spools")):
+                continue
+            cat = _catalog_match(str(entry.get("material_type", "")))
+            if cat is not None:
+                on_hand_index.setdefault(cat, []).append(entry)
+        catalog_scored = sorted(
+            ((_score_material(m, mapping.weights), m) for m in candidates),
+            key=lambda x: x[0],
+            reverse=True,
+        )
+        catalog_best = catalog_scored[0] if catalog_scored else None
+        matched = [m for m in candidates if m.name in on_hand_index]
+        if matched:
+            candidates = matched
+            on_hand_status = "on_hand"
+        elif not on_hand:
+            on_hand_status = "no_inventory_recorded"
+        else:
+            on_hand_status = "needs_purchase"
+
     # Score all candidates
     scored: list[tuple[float, MaterialProperties]] = []
     for mat in candidates:
@@ -666,6 +685,29 @@ def recommend_material(
     if on_hand_status == "on_hand":
         availability = _availability_for(top_mat.name, on_hand_index)
         reasoning = f"{reasoning} {_format_on_hand_line(availability)}"
+        # Being on hand is not the same as being right for the job.  When
+        # a material the user does NOT own suits the intent materially
+        # better, say so — recommending the best of a poor shelf without
+        # mentioning it is the quiet half of silently widening.
+        if catalog_best is not None:
+            cat_score, cat_mat = catalog_best
+            if (
+                cat_mat.name != top_mat.name
+                and cat_score - top_score >= _POOR_FIT_SCORE_GAP
+            ):
+                availability["better_catalog_option"] = {
+                    "name": cat_mat.name,
+                    "display_name": cat_mat.display_name,
+                    "score": cat_score,
+                    "score_gap": round(cat_score - top_score, 2),
+                }
+                reasoning = (
+                    f"POOR FIT ON HAND: {cat_mat.display_name} suits "
+                    f"'{mapping.intent}' materially better "
+                    f"({cat_score}/100 vs {top_score}/100) but you don't "
+                    f"have it. {top_mat.display_name} is the best of what "
+                    f"you do have.\n\n{reasoning}"
+                )
     elif on_hand_status is not None:
         recorded = sorted({
             str(e.get("material_type", "")) for e in (on_hand or [])

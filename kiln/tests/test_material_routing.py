@@ -504,3 +504,61 @@ class TestOnHandRecommendation:
         ]
         recommend_material("strong", printer_id="x1c", on_hand=on_hand)
         assert consulted["filament"] == "PETG-CF"
+
+    def test_poor_fit_names_the_material_you_lack(self) -> None:
+        """Best-of-a-poor-shelf must not pass as right-for-the-job: when
+        an unowned material fits the intent materially better, say so."""
+        on_hand = [
+            _on_hand_entry("PLA", loaded_on=[_loaded_row("x1c", 940.0)]),
+        ]
+        rec = recommend_material("flexible phone case", on_hand=on_hand)
+        # Still recommends what they actually have...
+        assert rec.material.name == "pla"
+        assert rec.availability["status"] == "loaded"
+        # ...but names TPU as the materially better fit they lack.
+        better = rec.availability["better_catalog_option"]
+        assert better["name"] == "tpu"
+        assert better["score_gap"] >= 10.0
+        assert "POOR FIT ON HAND" in rec.reasoning
+        assert "TPU" in rec.reasoning
+
+    def test_good_fit_stays_quiet(self) -> None:
+        """No poor-fit noise when the on-hand pick IS the best pick."""
+        on_hand = [
+            _on_hand_entry("TPU", loaded_on=[_loaded_row("x1c", 500.0)]),
+            _on_hand_entry("PLA", loaded_on=[_loaded_row("x1c", 940.0)]),
+        ]
+        rec = recommend_material("flexible", on_hand=on_hand)
+        assert rec.material.name == "tpu"
+        assert "better_catalog_option" not in rec.availability
+        assert "POOR FIT" not in rec.reasoning
+
+    def test_better_option_respects_printer_capability(self) -> None:
+        """Never name a material the printer cannot run: PC/nylon need an
+        enclosure, so an open-frame printer must not be told to buy them."""
+        on_hand = [
+            _on_hand_entry("PLA", loaded_on=[_loaded_row("a1", 940.0)]),
+        ]
+        rec = recommend_material(
+            "strong",
+            printer_capabilities={"has_enclosure": False, "has_heated_bed": True},
+            on_hand=on_hand,
+        )
+        better = rec.availability.get("better_catalog_option")
+        if better is not None:
+            suggested = get_material(better["name"])
+            assert suggested is not None
+            assert suggested.requires_enclosure is False
+
+    def test_better_option_respects_budget(self) -> None:
+        """A material priced out by the budget is not a 'better option'."""
+        on_hand = [
+            _on_hand_entry("PLA", loaded_on=[_loaded_row("x1c", 940.0)]),
+        ]
+        rec = recommend_material(
+            "flexible", budget_usd=25.0, on_hand=on_hand
+        )
+        better = rec.availability.get("better_catalog_option")
+        if better is not None:
+            suggested = get_material(better["name"])
+            assert suggested.cost_per_kg_usd <= 25.0
