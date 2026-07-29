@@ -7447,6 +7447,52 @@ def recent_events(limit: int = 20, *, type: str | None = None) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _annotate_session_liveness(payload: dict) -> None:
+    """Tell the truth when the tier came from a sign-in that has lapsed.
+
+    A tier resolved from a paired sign-in IS that session: once the
+    session can no longer be refreshed, every hosted call fails.  A
+    status tool that still answers "valid" then sends the user off to
+    debug the feature when the whole fix is signing in again — which is
+    exactly how an hour went on 2026-07-29, chasing a "broken" cloud
+    push while this tool reported a valid Enterprise licence.
+
+    Only the OAuth case is annotated.  An operator-supplied key in the
+    environment or ``~/.kiln/license`` does not depend on a session and
+    must keep reporting precisely what it reported before.
+
+    Entitlement is untouched: tier decisions route through
+    ``check_tier`` / ``check_pro``, never through this report, so this
+    can only change what a human is TOLD, never what they may do.
+    """
+    if payload.get("source") != "oauth":
+        return
+    try:
+        from kiln.auth_session import resolve_session_bearer
+
+        session = resolve_session_bearer()
+    except Exception:  # noqa: BLE001 — a diagnostic must never break the report
+        return
+    payload["session_state"] = session.state
+    # Usability is the EMPTY TOKEN, not a list of state names.
+    # ``SessionBearer`` documents that the token is empty only for
+    # ``needs_signin`` / ``signed_out``; ``refreshed`` (just renewed) and
+    # ``degraded`` (serving on offline grace) are working sessions.
+    # Reading it this way also means a state added later is judged by
+    # whether it can actually authenticate, not by whether someone
+    # remembered to add it here — the first draft tested
+    # ``state == "live"`` and declared a freshly refreshed session
+    # invalid, which is the same false alarm in the other direction.
+    if session.token:
+        return
+    # The tier stays reported — it is what the account holds once the
+    # user signs back in.  Validity is the part that actually changed.
+    payload["is_valid"] = False
+    payload["action_required"] = session.detail or (
+        "Your Kiln session has expired. Run `kiln signin` to sign in again."
+    )
+
+
 @mcp.tool()
 def license_status() -> dict:
     """Get the current license tier, validity, and key details.
@@ -7454,12 +7500,20 @@ def license_status() -> dict:
     Returns the active tier (free/pro/business), whether the license is
     valid, expiration date, and how it was resolved (env/file/default).
     No authentication required.
+
+    When the tier comes from a sign-in session (``source`` is
+    ``"oauth"``), the answer also carries ``session_state``. If that
+    session has lapsed, ``is_valid`` is ``false`` and
+    ``action_required`` says how to fix it — surface that line to the
+    user verbatim, because every hosted call will fail until they do.
     """
     try:
         from kiln.licensing import get_license_manager
 
         info = get_license_manager().get_info()
-        return {"success": True, **info.to_dict()}
+        payload = {"success": True, **info.to_dict()}
+        _annotate_session_liveness(payload)
+        return payload
     except Exception as exc:
         logger.exception("Unexpected error in license_status")
         return _error_dict(f"Unexpected error in license_status: {exc}", code="INTERNAL_ERROR")
