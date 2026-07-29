@@ -89,6 +89,52 @@ class TestAddAssemblyPart:
         assert result["success"] is False
         assert "Invalid assembly JSON" in result["error"]
 
+    @patch("kiln.assembly.AssemblyPart")
+    @patch("kiln.assembly.Assembly.from_dict")
+    def test_routes_through_add_part(
+        self, mock_from_dict, mock_part_cls, assembly_tools
+    ):
+        """The tool must call Assembly.add_part, never append directly.
+
+        add_part carries the duplicate-ID check and the free-tier part
+        limit; appending to .parts bypasses both (the bug this pins).
+        """
+        mock_asm = MagicMock()
+        mock_asm.to_dict.return_value = {"name": "test", "parts": []}
+        mock_from_dict.return_value = mock_asm
+
+        result = assembly_tools["add_assembly_part"](
+            assembly_json=_assembly_json(),
+            part_id="p1",
+            file_path="/tmp/part.stl",
+        )
+
+        assert result["success"] is True
+        mock_asm.add_part.assert_called_once()
+
+    @patch("kiln.assembly.AssemblyPart")
+    @patch("kiln.assembly.Assembly.from_dict")
+    def test_free_tier_limit_surfaces_as_error(
+        self, mock_from_dict, mock_part_cls, assembly_tools
+    ):
+        """A ValueError from add_part (dup ID or free-tier cap) becomes a
+        clean error dict, not an unhandled exception."""
+        mock_asm = MagicMock()
+        mock_asm.add_part.side_effect = ValueError(
+            "Free tier limited to 10 parts per assembly. "
+            "Upgrade to Kiln Pro for unlimited parts."
+        )
+        mock_from_dict.return_value = mock_asm
+
+        result = assembly_tools["add_assembly_part"](
+            assembly_json=_assembly_json(),
+            part_id="p11",
+            file_path="/tmp/part.stl",
+        )
+
+        assert result["success"] is False
+        assert "Free tier limited to 10 parts" in result["error"]
+
 
 # ---------------------------------------------------------------------------
 # TestAddAssemblyInterface

@@ -188,7 +188,11 @@ class _SmartPrintToolsPlugin:
                         (".stl", ".obj", ".3mf")
                     ):
                         try:
-                            report = analyze_printability(model_path)
+                            report = analyze_printability(
+                                model_path,
+                                material=material or "pla",
+                                printer_id=printer_id or None,
+                            )
                             if report.bed_adhesion:
                                 signals["adhesion_risk"] = (
                                     report.bed_adhesion.adhesion_risk

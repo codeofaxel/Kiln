@@ -69,6 +69,10 @@ scripts/*
 # …and for the public-language gate, which checks tracked text and new
 # commit messages for private editorial context before it reaches GitHub.
 !scripts/check_public_language.py
+# …and for the tool-door param-parity gate, which is run by a CI-collected
+# test so a tuned engine axis (material, printer_id) can never be silently
+# unreachable through the @mcp.tool() door an agent actually calls.
+!scripts/audit_tool_param_parity.py
 
 # Internal working docs (backed up via iCloud)
 .dev

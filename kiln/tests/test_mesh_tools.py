@@ -168,6 +168,24 @@ class TestRepairMesh:
         assert result["error"]["code"] == "REPAIR_ERROR"
         assert "corrupt" in result["error"]["message"]
 
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.generation.validation.repair_stl_advanced")
+    def test_close_holes_routes_to_deep_engine(
+        self, mock_advanced, _auth, mesh_tools
+    ) -> None:
+        """repair_mesh(close_holes=True) runs the boundary-aware engine —
+        the merged replacement for the old repair_mesh_advanced tool."""
+        mock_advanced.return_value = {"holes_closed": 2, "path": "/tmp/out.stl"}
+        result = mesh_tools["repair_mesh"](
+            file_path="/tmp/model.stl", close_holes=True,
+        )
+
+        assert result["success"] is True
+        assert result["holes_closed"] == 2
+        mock_advanced.assert_called_once_with(
+            "/tmp/model.stl", output_path=None, close_holes=True,
+        )
+
 
 # ---------------------------------------------------------------------------
 # TestRepairMeshAdvanced
