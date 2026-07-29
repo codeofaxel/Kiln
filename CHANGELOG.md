@@ -7,6 +7,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Too big for your printer? Kiln cuts it into a kit.** When a model won't
+  fit, Kiln can split it into pieces that fit your printer and go back
+  together — cutting where it makes sense and sealing every cut so each
+  piece actually prints. Splitting is free; Pro works out how the pieces
+  should attach and builds that into them.
+
 - **Recommend from the spools you actually own.** Ask what to print in and
   Kiln can answer from your real shelf and loaded filament instead of the
   whole catalog. It names the printer that has it, or tells you it needs a
