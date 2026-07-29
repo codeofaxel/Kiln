@@ -48,6 +48,33 @@ def _warn_threshold() -> int:
     return max(2, value)
 
 
+def _humanize_etime(etime: str) -> str:
+    """Turn ps etime ([[dd-]hh:]mm:ss) into plain English ("about 2 days").
+
+    The warning is read by people who don't know what an etime — or a
+    PID — is.  Falls back to the raw string on anything unparseable.
+    """
+    try:
+        days = 0
+        clock = etime
+        if "-" in clock:
+            day_part, clock = clock.split("-", 1)
+            days = int(day_part)
+        fields = [int(f) for f in clock.split(":")]
+        hours = fields[0] if len(fields) == 3 else 0
+        minutes = fields[-2]
+        total_hours = days * 24 + hours
+        if total_hours >= 36:
+            return f"about {round(total_hours / 24)} days"
+        if total_hours >= 1:
+            return f"about {total_hours} hour{'s' if total_hours != 1 else ''}"
+        if minutes >= 1:
+            return f"about {minutes} minute{'s' if minutes != 1 else ''}"
+        return "under a minute"
+    except Exception:
+        return etime
+
+
 def _list_serve_processes() -> list[dict] | None:
     """Return one entry per ``kiln serve`` process, or ``None`` when
     the process table cannot be read (non-POSIX platform, ``ps``
@@ -134,13 +161,20 @@ def check_serve_siblings() -> dict:
     }
     threshold = _warn_threshold()
     if len(procs) >= threshold:
+        # Plain-English first: the reader may not know what a PID is.
+        # "Quit and reopen" genuinely fixes it — once the client apps
+        # close, the leftover servers lose their parent and the orphan
+        # watchdog (kiln.parent_watchdog) shuts them down within a
+        # minute.  PIDs trail as a power-user shortcut only.
         result["warning"] = (
-            f"{len(procs)} 'kiln serve' processes are running on this machine "
-            f"(oldest: {result['oldest_age']}). Each open MCP client session "
-            f"keeps one alive; if you have fewer sessions than that open, the "
-            f"rest are leftovers from closed sessions and can be trimmed. "
-            f"Close unused Claude/MCP-client windows, or kill the oldest PIDs: "
-            f"{result['pids'][:10]}"
+            f"{len(procs)} background copies of Kiln's server are running "
+            f"(oldest has been up {_humanize_etime(result['oldest_age'])}). "
+            f"Each open agent session normally keeps just one — the rest "
+            f"are leftovers from closed sessions, quietly using memory. "
+            f"Easiest fix: fully quit and reopen your Claude/MCP apps; "
+            f"leftover servers shut themselves down within a minute of "
+            f"their app closing. (Power users can instead kill the oldest "
+            f"process IDs directly: {result['pids'][:10]}.)"
         )
     return result
 

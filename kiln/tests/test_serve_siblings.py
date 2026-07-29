@@ -137,6 +137,23 @@ class TestCheckServeSiblings:
         assert report["pids"] == sorted(report["pids"], reverse=True)
         assert report["oldest_age"] is not None
 
+    def test_warning_leads_with_plain_english_fix(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The primary instruction must work for someone who has never
+        heard of a PID: quit and reopen the apps (the orphan watchdog
+        then reaps the leftovers).  PIDs may only trail as a power-user
+        aside."""
+        monkeypatch.delenv("KILN_SERVE_SIBLING_WARN_THRESHOLD", raising=False)
+        with _fake_ps(self._procs(6)):
+            warning = serve_siblings.check_serve_siblings()["warning"]
+        assert "quit and reopen" in warning
+        # The app-restart fix must come before any mention of process IDs.
+        assert warning.index("quit and reopen") < warning.index("process IDs")
+        # No raw ps etime in the prose — ages are humanized.
+        assert "hour" in warning or "minute" in warning or "day" in warning
+
+
     def test_threshold_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("KILN_SERVE_SIBLING_WARN_THRESHOLD", "2")
         with _fake_ps(self._procs(2)):
@@ -164,6 +181,26 @@ class TestCheckServeSiblings:
             report = serve_siblings.check_serve_siblings()
         assert report["count"] is None
         assert report["warning"] is None
+
+
+class TestHumanizeEtime:
+    @pytest.mark.parametrize(
+        ("etime", "expected"),
+        [
+            ("00:42", "under a minute"),
+            ("05:44", "about 5 minutes"),
+            ("01:00", "about 1 minute"),
+            ("02:33:31", "about 2 hours"),
+            ("23:59:21", "about 23 hours"),
+            ("01-02:03:04", "about 26 hours"),
+            ("04-20:12:26", "about 5 days"),
+        ],
+    )
+    def test_humanizes(self, etime: str, expected: str) -> None:
+        assert serve_siblings._humanize_etime(etime) == expected
+
+    def test_garbage_falls_back_to_raw(self) -> None:
+        assert serve_siblings._humanize_etime("weird") == "weird"
 
 
 # ---------------------------------------------------------------------------
