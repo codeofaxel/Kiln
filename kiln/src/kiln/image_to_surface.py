@@ -327,6 +327,141 @@ def _write_pgm(path: str, rows: list[list[int]], w: int, h: int) -> None:
             f.write(bytes(row))
 
 
+def _mask_rows(
+    rows: list[list[int]], w: int, h: int, mask: str, style: str
+) -> list[list[int]]:
+    """Confine a photo heightmap to a product-matched pool, in rows space.
+
+    Pure Python on the row grid — no imaging dependency can be missing, so
+    this boundary cannot be skipped the way the in-style mask was when
+    rembg was absent.  Outside the shape maps to 0 (no displacement); the
+    shape is inset from the grid edge so the outermost ring never carves.
+    """
+    effective = mask if mask != "auto" else ("circle" if style == "coin" else "rounded_rectangle")
+    inset = max(2.0, min(w, h) * 0.02)
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+
+    if effective == "circle":
+        r = min(cx, cy) - inset
+
+        def _inside(x: float, y: float) -> bool:
+            return (x - cx) ** 2 + (y - cy) ** 2 <= r * r
+    else:  # rectangle / rounded_rectangle — softened corners either way
+        corner = min(w, h) * 0.08
+        x0, y0 = inset, inset
+        x1, y1 = w - 1 - inset, h - 1 - inset
+
+        def _inside(x: float, y: float) -> bool:
+            if x < x0 or x > x1 or y < y0 or y > y1:
+                return False
+            dx = max(x0 + corner - x, x - (x1 - corner), 0.0)
+            dy = max(y0 + corner - y, y - (y1 - corner), 0.0)
+            return dx * dx + dy * dy <= corner * corner
+
+    return [
+        [v if _inside(x, y) else 0 for x, v in enumerate(row)]
+        for y, row in enumerate(rows)
+    ]
+
+
+def _is_mark_on_flat_field(rows: list[list[int]], w: int, h: int) -> bool:
+    """True when the image is artwork on a clean field (a logo), not a photo.
+
+    A logo carries its meaning in the MARK; the field around it is empty
+    space that should stay flush with the part. A photo carries meaning
+    everywhere, so its field is content and a coin-style carve is right.
+    Telling them apart is what stops a logo from being sunk into a
+    rectangular (or rounded, or circular) tray of its own background.
+
+    The test is deliberately conservative — a uniform border AND a
+    strongly two-tone histogram AND sparse ink — so a photo is never
+    mistaken for a mark.
+    """
+    if w < 8 or h < 8:
+        return False
+    border = rows[0] + rows[-1] + [r[0] for r in rows] + [r[-1] for r in rows]
+    lo, hi = min(border), max(border)
+    if hi - lo > 12:
+        return False  # a photo's edge is not one flat tone
+    field = (lo + hi) // 2
+    flat = sum(1 for r in rows for v in r if abs(v - field) <= 12)
+    total = w * h
+    if flat / total < 0.45:
+        return False  # too little empty space to be a mark on a field
+    # Bimodal: most non-field pixels sit far from the field tone.
+    far = sum(1 for r in rows for v in r if abs(v - field) > 60)
+    non_field = total - flat
+    return non_field > 0 and far / max(1, non_field) > 0.5
+
+
+def _flatten_field(rows: list[list[int]], w: int, h: int) -> list[list[int]]:
+    """Map a mark's background to the no-carve level, artwork to full carve.
+
+    After this the heightmap carves the MARK and nothing else, so no
+    boundary of any shape can appear on the part.
+    """
+    border = rows[0] + rows[-1] + [r[0] for r in rows] + [r[-1] for r in rows]
+    field = (min(border) + max(border)) // 2
+    span = max(1, max(abs(255 - field), abs(field)))
+    # Deadband: JPEG noise and posterizing leave the field a tone or two off
+    # true flat, which would carve a few microns everywhere — invisible in
+    # the data, but it is still a cut where the part should be untouched.
+    # Anything within this band of the field tone is exactly flush.
+    deadband = 16
+
+    def _v(value: int) -> int:
+        delta = abs(value - field)
+        if delta <= deadband:
+            return 0
+        return min(255, int((delta - deadband) * 255 / max(1, span - deadband)))
+
+    return [[_v(v) for v in row] for row in rows]
+
+
+def _shape_mask_image(img, mask: str, style: str):
+    """Confine an emboss image to a product-shaped area, zeroing outside.
+
+    The area outside the mask is set to 0 — the no-carve level — so the
+    carve boundary is a deliberate shape (a circle on a round product, a
+    softened rectangle otherwise) instead of the source image's raw
+    rectangle.  A raw rectangle reads on the printed part as a sunken
+    photo frame around the artwork, which is never what anyone asked for.
+
+    Kept module-level and dependency-free (Pillow only) so EVERY path can
+    call it: the full coin pipeline, and the degraded path taken when an
+    optional dependency such as rembg is missing.  Previously the mask
+    lived inside the coin block, so a missing rembg skipped masking
+    entirely and shipped the frame (2026-07-29).
+    """
+    from PIL import Image, ImageDraw
+
+    effective = mask if mask != "auto" else ("circle" if style == "coin" else "rounded_rectangle")
+    if effective == "rectangle":
+        # Explicit full-bleed: still soften the corners so the boundary is
+        # not a hard photographic rectangle.
+        effective = "rounded_rectangle"
+
+    # Inset by at least a pixel: a shape drawn flush to the bitmap edge
+    # leaves the outermost ring INSIDE it, so the field there still carves
+    # and the frame survives with rounded corners.
+    inset = max(2, int(min(img.size) * 0.02))
+    shape = Image.new("L", img.size, 0)
+    draw = ImageDraw.Draw(shape)
+    if effective == "circle":
+        cx, cy = img.size[0] // 2, img.size[1] // 2
+        r = min(cx, cy) - inset
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
+    else:
+        corner_r = int(min(img.size) * 0.08)
+        draw.rounded_rectangle(
+            [inset, inset, img.size[0] - 1 - inset, img.size[1] - 1 - inset],
+            radius=corner_r, fill=255,
+        )
+    out = Image.new("L", img.size, 0)
+    out.paste(img, mask=shape)
+    return out
+
+
 def _write_dat(path: str, rows: list[list[int]], w: int, h: int) -> None:
     """Write a DAT heightmap file for OpenSCAD ``surface()``.
 
@@ -437,6 +572,30 @@ def prepare_image_for_emboss(
         os.makedirs(output_dir, exist_ok=True)
         image_path = _auto_convert_heic(image_path, output_dir)
 
+    # ---- Content decides the treatment, before any style runs ----
+    # A logo/glyph is artwork on empty space: carve the MARK, leave the
+    # field flush.  A photo is content everywhere: coin relief inside a
+    # product-shaped mask.  Deciding here, on the SOURCE image, is what
+    # makes the difference structural — the photo pipeline masks to a
+    # circle, and running it over a logo carved the whole disc away and
+    # left the mask's edge printed on the part as a ring.  Callers pass a
+    # style as a hint; the image itself is the authority.
+    _mark_mode = False
+    try:
+        _probe_rows, _pw, _ph = _load_image_as_grayscale(image_path)
+        _probe_rows, _pw, _ph = _downscale(_probe_rows, _pw, _ph, max_resolution)
+        _mark_mode = _is_mark_on_flat_field(_probe_rows, _pw, _ph)
+    except Exception:  # noqa: BLE001 — a probe failure just means "treat as photo"
+        _mark_mode = False
+
+    if _mark_mode:
+        _logger.info(
+            "Emboss: artwork on a clean field detected — carving the mark "
+            "only, leaving the surrounding surface flush."
+        )
+        style = "default"
+        edge_enhance = False
+
     # Apply style-specific preprocessing
     if style == "photo":
         # Best for photos of people, pets, objects.
@@ -528,11 +687,17 @@ def prepare_image_for_emboss(
                 bg.paste(img_rgba, mask=img_rgba.split()[3])
                 img = bg.convert("L")
             except ImportError:
-                raise ImportError(
-                    "Photo emboss (style='coin') requires background removal. "
-                    "Install with: pip install kiln[emboss]  "
-                    "(or: pip install rembg onnxruntime)"
-                ) from None
+                # rembg is an ENHANCEMENT (subject isolation), not a
+                # prerequisite.  Raising here aborted the whole coin
+                # pipeline — including the shape mask — and the fallback
+                # carved the source image's raw rectangle into the part as
+                # a sunken photo frame.  Degrade to no background removal
+                # and keep every other step, mask included.
+                _logger.info(
+                    "Photo emboss: background removal unavailable "
+                    "(pip install kiln[emboss]) — continuing without it; "
+                    "the subject may not separate as cleanly."
+                )
 
             # Step 3: Foreground crop with 8% padding
             bbox = img.getbbox()
@@ -620,32 +785,8 @@ def prepare_image_for_emboss(
                 lambda x: (x // step) * step * 255 // (step * (_posterize_levels - 1))
             )
 
-            # Apply mask shape (circle, rectangle, rounded_rectangle)
-            # "auto" for coin style defaults to circle (proven Ash coaster recipe)
-            effective_mask = mask if mask != "auto" else "circle"
-            if effective_mask == "circle":
-                from PIL import ImageDraw
-                _mask = Image.new("L", img.size, 0)
-                draw = ImageDraw.Draw(_mask)
-                cx, cy = img.size[0] // 2, img.size[1] // 2
-                r = min(cx, cy) - 2
-                draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
-                result = Image.new("L", img.size, 0)
-                result.paste(img, mask=_mask)
-                img = result
-            elif effective_mask == "rounded_rectangle":
-                from PIL import ImageDraw
-                _mask = Image.new("L", img.size, 0)
-                draw = ImageDraw.Draw(_mask)
-                corner_r = int(min(img.size) * 0.08)
-                draw.rounded_rectangle(
-                    [0, 0, img.size[0] - 1, img.size[1] - 1],
-                    radius=corner_r, fill=255,
-                )
-                result = Image.new("L", img.size, 0)
-                result.paste(img, mask=_mask)
-                img = result
-            # "rectangle" — no mask, keep full image as-is
+            # Confine the carve to a product shape — see _shape_mask_image.
+            img = _shape_mask_image(img, mask, "coin")
 
             preprocessed = os.path.join(output_dir, "preprocessed_coin.png")
             os.makedirs(output_dir, exist_ok=True)
@@ -817,8 +958,37 @@ def prepare_image_for_emboss(
 
     # style == "default" — no preprocessing, use existing behavior
 
+    # Boundary guarantee, applied on EVERY path: an image decoration must
+    # never carve its own outline into the part.  Two shapes of input, two
+    # right answers, decided here rather than per-generator:
+    #
+    #   * a MARK on a clean field (logo, glyph, traced SVG) — carve the
+    #     mark, leave the field flush.  Nothing but the artwork is cut, so
+    #     no frame of any shape can appear.
+    #   * a PHOTO — coin relief inside a product-shaped mask, inset far
+    #     enough that the bitmap's own edge never carves.
+    #
+    # Before this, the shape mask lived inside the coin pipeline, that
+    # pipeline aborted when the optional rembg package was missing, and the
+    # fallback carved the source rectangle into the part as a sunken photo
+    # frame (found on a real coaster, 2026-07-29).
     rows, w, h = _load_image_as_grayscale(image_path)
     rows, w, h = _downscale(rows, w, h, max_resolution)
+
+    if _mark_mode:
+        # Artwork on a clean field: the mark is the ONLY thing that may
+        # displace the surface.  No pool, no frame, no mask shape — the
+        # carve goes to zero at the artwork's own edges because the field
+        # maps to zero, not because a boundary was drawn around it.
+        rows = _flatten_field(rows, w, h)
+    elif mask != "none":
+        # A photo has content everywhere, so SOME boundary must exist; the
+        # right one matches the PRODUCT (the proven coin look: a deliberate
+        # inset pool), never the photo's own rectangle.  Enforced here in
+        # heightmap space as the belt: whatever a style did or skipped
+        # upstream — including a style that degraded because an optional
+        # dependency was missing — the boundary below is the one that ships.
+        rows = _mask_rows(rows, w, h, mask, style)
 
     if edge_enhance:
         rows = _sharpen(rows, w, h)
