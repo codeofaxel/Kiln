@@ -69,6 +69,21 @@ class TestListServeProcesses:
             procs = serve_siblings._list_serve_processes()
         assert [p["pid"] for p in procs] == [202]
 
+    def test_counts_every_supported_launch_shape(self) -> None:
+        """All real entry points count: the kiln script, the kiln3d
+        alias, and ``python -m kiln`` (kiln/__main__.py)."""
+        out = _ps_output(
+            [
+                "  111 00:10 /home/u/.venv/bin/kiln serve",
+                "  112 00:10 /home/u/.venv/bin/kiln3d serve",
+                "  113 00:10 /usr/bin/python3 -m kiln serve",
+                "  114 00:10 /usr/bin/python3 /home/u/.venv/bin/kiln serve",
+            ]
+        )
+        with _fake_ps(out):
+            procs = serve_siblings._list_serve_processes()
+        assert [p["pid"] for p in procs] == [111, 112, 113, 114]
+
     def test_ignores_lookalike_commands(self) -> None:
         """`kiln` must be the executable basename immediately followed by
         the `serve` argument — not a substring elsewhere in the line."""

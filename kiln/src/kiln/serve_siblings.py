@@ -73,21 +73,24 @@ def _list_serve_processes() -> list[dict] | None:
         if len(parts) < 3:
             continue
         pid_str, etime, args = parts
-        # The server's argv is either ``<path>/kiln serve …`` or
-        # ``<python> <path>/kiln serve …``.  Require the ``kiln`` token
-        # to be the executable itself or the script an interpreter is
-        # running — a mention deeper in the args is not a server.  This
-        # also skips wrappers that repeat the server's command line in
-        # their own args (macOS spawns ``…/Helpers/disclaimer
-        # <real command>`` around each server; counting those would
-        # double-count every one).
+        # The server's argv is ``<path>/kiln serve …`` (or the kiln3d
+        # alias), ``<python> <path>/kiln serve …``, or ``<python> -m
+        # kiln serve …`` — every launch shape pyproject's
+        # [project.scripts] and kiln/__main__.py support.  Require the
+        # ``kiln`` token to be the executable itself, the script an
+        # interpreter is running, or the -m module — a mention deeper
+        # in the args is not a server.  This also skips wrappers that
+        # repeat the server's command line in their own args (macOS
+        # spawns ``…/Helpers/disclaimer <real command>`` around each
+        # server; counting those would double-count every one).
         tokens = args.split()
         if not any(
-            os.path.basename(tok) == "kiln"
+            os.path.basename(tok) in ("kiln", "kiln3d")
             and idx + 1 < len(tokens)
             and tokens[idx + 1] == "serve"
             and (
                 idx == 0
+                or tokens[idx - 1] == "-m"
                 or os.path.basename(tokens[idx - 1]).lower().startswith("python")
             )
             for idx, tok in enumerate(tokens)
