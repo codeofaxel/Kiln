@@ -827,8 +827,6 @@ class TestCompletePrintRecoveryProOutcome:
         recovery_tools,
     ) -> None:
         """Successful recovery does NOT consult the rerouter."""
-        from kiln.print_recovery import RecoveryStatus
-
         session = self._build_session_with_failure()
         # already MONITORING with passed checks — complete_recovery
         # would mark it COMPLETED.
@@ -1345,6 +1343,146 @@ class TestRecommendMaterial:
             result = intelligence_tools["recommend_material"](intent="easy")
         assert result["success"] is True
         assert "answered_for_printer" not in result
+
+    def test_default_path_passes_no_inventory_and_claims_no_scope(
+        self, intelligence_tools
+    ) -> None:
+        """Without on_hand_only the engine sees on_hand=None and the
+        response makes no on-hand claim — catalog behavior unchanged."""
+        mock_rec = MagicMock()
+        mock_rec.to_dict.return_value = {"material": "PLA"}
+
+        with patch(
+            "kiln.material_routing.recommend_material", return_value=mock_rec
+        ) as mock_engine:
+            result = intelligence_tools["recommend_material"](intent="easy")
+        assert result["success"] is True
+        assert "on_hand_scope" not in result
+        assert mock_engine.call_args.kwargs["on_hand"] is None
+
+
+class TestRecommendMaterialOnHand:
+    """On-hand scope through the real door: seeded DB, real engine.
+
+    The mixed-fleet contract: two printers with different loads must
+    produce an answer attributed to the RIGHT machine, and scoping to
+    one printer must hide the other machine's loads.
+    """
+
+    @pytest.fixture()
+    def seeded_db(self, tmp_path):
+        from kiln.persistence import KilnDB
+
+        db = KilnDB(db_path=str(tmp_path / "onhand.db"))
+        yield db
+        db.close()
+
+    def test_mixed_fleet_names_the_right_machine(
+        self, intelligence_tools, seeded_db
+    ) -> None:
+        seeded_db.save_material(
+            "a1-left", 0, "PETG", color="black", remaining_grams=800.0
+        )
+        seeded_db.save_material(
+            "a1-right", 0, "PLA", color="white", remaining_grams=900.0
+        )
+
+        with patch("kiln.persistence.get_db", return_value=seeded_db):
+            result = intelligence_tools["recommend_material"](
+                intent="strong", on_hand_only=True
+            )
+
+        assert result["success"] is True
+        assert result["on_hand_scope"] == "fleet"
+        rec = result["recommendation"]
+        assert rec["material"]["name"] == "petg"
+        availability = rec["availability"]
+        assert availability["status"] == "loaded"
+        printers = [r["printer_name"] for r in availability["loaded_on"]]
+        assert printers == ["a1-left"]
+
+    def test_printer_id_scopes_to_that_machine(
+        self, intelligence_tools, seeded_db
+    ) -> None:
+        """The other machine's PETG must not leak into a scoped answer."""
+        seeded_db.save_material(
+            "a1-left", 0, "PETG", color="black", remaining_grams=800.0
+        )
+        seeded_db.save_material(
+            "a1-right", 0, "PLA", color="white", remaining_grams=900.0
+        )
+
+        with patch("kiln.persistence.get_db", return_value=seeded_db):
+            result = intelligence_tools["recommend_material"](
+                intent="strong", on_hand_only=True, printer_id="a1-right"
+            )
+
+        assert result["success"] is True
+        assert result["on_hand_scope"] == "printer:a1-right"
+        assert result["answered_for_printer"] == "a1-right"
+        rec = result["recommendation"]
+        assert rec["material"]["name"] == "pla"
+        printers = [
+            r["printer_name"] for r in rec["availability"]["loaded_on"]
+        ]
+        assert printers == ["a1-right"]
+
+    def test_shelf_spool_counts_for_scoped_machine(
+        self, intelligence_tools, seeded_db
+    ) -> None:
+        """A shelved spool is reachable via a swap, so it counts even when
+        scoped to a machine that has nothing loaded."""
+        seeded_db.save_spool({
+            "id": "sp-petg",
+            "material_type": "PETG",
+            "color": "black",
+            "brand": "Polymaker",
+            "weight_grams": 1000.0,
+            "remaining_grams": 600.0,
+        })
+
+        with patch("kiln.persistence.get_db", return_value=seeded_db):
+            result = intelligence_tools["recommend_material"](
+                intent="strong", on_hand_only=True, printer_id="a1-left"
+            )
+
+        rec = result["recommendation"]
+        assert rec["material"]["name"] == "petg"
+        assert rec["availability"]["status"] == "on_shelf"
+        assert rec["availability"]["swap_needed"] is True
+
+    def test_nothing_viable_labeled_needs_purchase(
+        self, intelligence_tools, seeded_db
+    ) -> None:
+        """No silent widening: an unmatched inventory yields a catalog
+        answer explicitly labeled as a purchase."""
+        seeded_db.save_material(
+            "ender3", 0, "PVA", color="natural", remaining_grams=400.0
+        )
+
+        with patch("kiln.persistence.get_db", return_value=seeded_db):
+            result = intelligence_tools["recommend_material"](
+                intent="strong", on_hand_only=True
+            )
+
+        assert result["success"] is True
+        rec = result["recommendation"]
+        assert rec["availability"]["status"] == "needs_purchase"
+        assert rec["availability"]["on_hand_recorded"] == ["PVA"]
+        assert "NOT ON HAND" in rec["reasoning"]
+        assert rec["material"]["name"]  # catalog pick still present
+
+    def test_empty_inventory_is_honest(
+        self, intelligence_tools, seeded_db
+    ) -> None:
+        with patch("kiln.persistence.get_db", return_value=seeded_db):
+            result = intelligence_tools["recommend_material"](
+                intent="strong", on_hand_only=True
+            )
+
+        rec = result["recommendation"]
+        assert rec["availability"]["status"] == "no_inventory_recorded"
+        assert "add_spool" in rec["reasoning"]
 
 
 class TestListAvailableMaterials:

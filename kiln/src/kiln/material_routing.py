@@ -8,6 +8,7 @@ material properties, and printer capabilities.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -52,6 +53,7 @@ class MaterialRecommendation:
     estimated_cost_usd: float | None
     success_rate: float | None  # from print DNA if available
     alternatives: list[dict[str, Any]]  # other options
+    availability: dict[str, Any] | None = None  # on-hand attribution, if asked
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -408,6 +410,93 @@ def _format_nozzle_context_line(
     return line if len(line) <= 200 else line[:197] + "..."
 
 
+# Aliases from inventory material strings to catalog names.  Keys are
+# lowercase inventory tokens; values are catalog keys in ``_MATERIALS``.
+_CATALOG_ALIASES: dict[str, str] = {
+    "pla+": "pla_plus",
+    "pla plus": "pla_plus",
+    "pa": "nylon",
+    "polyamide": "nylon",
+    "polycarbonate": "pc",
+}
+
+
+def _catalog_match(material_type: str) -> str | None:
+    """Map an inventory material string to a catalog material name.
+
+    Inventory strings come from AMS sync and user spools ("PETG-CF",
+    "PLA+", "PA-CF"); the catalog keys are base families ("petg",
+    "pla_plus", "nylon").  Filled variants (CF/GF/…) match their base
+    family for candidacy; the caller keeps the exact inventory string
+    for attribution, so a response can still say "PETG-CF".  Returns
+    ``None`` when nothing in the catalog corresponds.
+    """
+    token = (material_type or "").strip().lower()
+    if not token:
+        return None
+    for candidate in (token, token.replace("-", "_").replace(" ", "_")):
+        if candidate in _MATERIALS:
+            return candidate
+        if candidate in _CATALOG_ALIASES:
+            return _CATALOG_ALIASES[candidate]
+    base = re.split(r"[-_ ]", token, maxsplit=1)[0]
+    if base in _MATERIALS:
+        return base
+    return _CATALOG_ALIASES.get(base)
+
+
+def _availability_for(
+    catalog_name: str,
+    on_hand_index: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Build the on-hand attribution block for one catalog material.
+
+    Says WHERE the material physically is: which machines have it loaded
+    (with the exact inventory string, so "PETG-CF" survives the catalog
+    mapping) and which unloaded shelf spools carry it.
+    """
+    loaded: list[dict[str, Any]] = []
+    shelf: list[dict[str, Any]] = []
+    as_recorded: list[str] = []
+    for entry in on_hand_index.get(catalog_name, []):
+        mt = str(entry.get("material_type", ""))
+        if mt and mt not in as_recorded:
+            as_recorded.append(mt)
+        for row in entry.get("loaded_on") or []:
+            loaded.append({**row, "material_type": mt})
+        for sp in entry.get("shelf_spools") or []:
+            shelf.append({**sp, "material_type": mt})
+    status = "loaded" if loaded else "on_shelf"
+    return {
+        "status": status,
+        "as_recorded": as_recorded,
+        "loaded_on": loaded,
+        "shelf_spools": shelf,
+        "swap_needed": status == "on_shelf",
+    }
+
+
+def _format_on_hand_line(availability: dict[str, Any]) -> str:
+    """One honest sentence saying where the recommended material is."""
+    names = ", ".join(availability.get("as_recorded", [])) or "material"
+    if availability["status"] == "loaded":
+        spots = []
+        for row in availability["loaded_on"][:3]:
+            grams = row.get("remaining_grams")
+            where = row.get("printer_name", "?")
+            spots.append(
+                f"{where} (~{grams:.0f}g)" if isinstance(grams, (int, float))
+                else where
+            )
+        return f"ON HAND: {names} loaded on {', '.join(spots)}."
+    count = len(availability.get("shelf_spools", []))
+    return (
+        f"ON HAND (shelf only): {count} spool(s) of {names} available but "
+        f"not currently loaded — a spool swap is needed before printing "
+        f"(suggest_spool_swaps can plan it)."
+    )
+
+
 def recommend_material(
     intent: str,
     *,
@@ -415,6 +504,7 @@ def recommend_material(
     budget_usd: float | None = None,
     model_fingerprint: dict[str, Any] | None = None,
     printer_id: str = "",
+    on_hand: list[dict[str, Any]] | None = None,
 ) -> MaterialRecommendation:
     """Recommend a material based on user intent and constraints.
 
@@ -449,9 +539,40 @@ def recommend_material(
 
         Free-tier installs without kiln-pro silently skip both
         enrichments — reasoning is unchanged.
+    :param on_hand: Optional on-hand inventory (each entry the
+        ``OnHandMaterial.to_dict()`` shape from
+        :func:`kiln.material_inventory.get_on_hand_materials`).  When
+        provided, candidacy narrows to materials the caller physically
+        has, and the recommendation carries an ``availability`` block
+        attributing the answer to the machine(s) holding it (or to the
+        shelf, when a spool swap is needed first).  When nothing on hand
+        matches the catalog, the best CATALOG pick is returned, clearly
+        labeled needs-purchase — never a silent widening.
     """
     mapping = parse_intent(intent)
     candidates = list(_MATERIALS.values())
+
+    # On-hand narrowing: when the caller supplied their physical
+    # inventory, the candidate universe is what they actually have.
+    # Entries with neither a loaded row nor a shelf spool carry no
+    # physical material and confer no candidacy.
+    on_hand_index: dict[str, list[dict[str, Any]]] = {}
+    on_hand_status: str | None = None
+    if on_hand is not None:
+        for entry in on_hand:
+            if not (entry.get("loaded_on") or entry.get("shelf_spools")):
+                continue
+            cat = _catalog_match(str(entry.get("material_type", "")))
+            if cat is not None:
+                on_hand_index.setdefault(cat, []).append(entry)
+        matched = [m for m in candidates if m.name in on_hand_index]
+        if matched:
+            candidates = matched
+            on_hand_status = "on_hand"
+        elif not on_hand:
+            on_hand_status = "no_inventory_recorded"
+        else:
+            on_hand_status = "needs_purchase"
 
     # Filter by printer capabilities
     if printer_capabilities:
@@ -533,6 +654,41 @@ def recommend_material(
         f"Score: {top_score}/100."
     )
 
+    # On-hand attribution — say WHERE the answer physically is, or say
+    # out loud that it isn't on hand.  Never silently widen: the
+    # needs-purchase fallback keeps the catalog answer but labels it.
+    availability: dict[str, Any] | None = None
+    if on_hand_status == "on_hand":
+        availability = _availability_for(top_mat.name, on_hand_index)
+        reasoning = f"{reasoning} {_format_on_hand_line(availability)}"
+    elif on_hand_status is not None:
+        recorded = sorted({
+            str(e.get("material_type", "")) for e in (on_hand or [])
+            if e.get("material_type")
+        })
+        availability = {
+            "status": on_hand_status,
+            "as_recorded": [],
+            "loaded_on": [],
+            "shelf_spools": [],
+            "swap_needed": False,
+            "on_hand_recorded": recorded,
+        }
+        if on_hand_status == "no_inventory_recorded":
+            reasoning = (
+                "NOT ON HAND: no spools or loaded materials are recorded — "
+                "record inventory with add_spool or an AMS/CFS sync to get "
+                "on-hand answers. Catalog recommendation follows; purchase "
+                f"required.\n\n{reasoning}"
+            )
+        else:
+            have = ", ".join(recorded) or "your recorded materials"
+            reasoning = (
+                f"NOT ON HAND: nothing you have recorded ({have}) matches "
+                f"this request — {top_mat.display_name} is a catalog pick "
+                f"and needs to be purchased.\n\n{reasoning}"
+            )
+
     # Check Print DNA for success rate if fingerprint provided
     success_rate: float | None = None
     if model_fingerprint:
@@ -550,14 +706,22 @@ def recommend_material(
     # Build alternatives (up to 3, excluding the top pick)
     alternatives: list[dict[str, Any]] = []
     for alt_score, alt_mat in scored[1:4]:
-        alternatives.append(
-            {
-                "material": alt_mat.display_name,
-                "name": alt_mat.name,
-                "score": alt_score,
-                "settings": _default_settings(alt_mat),
+        alt: dict[str, Any] = {
+            "material": alt_mat.display_name,
+            "name": alt_mat.name,
+            "score": alt_score,
+            "settings": _default_settings(alt_mat),
+        }
+        if on_hand_status == "on_hand":
+            alt_avail = _availability_for(alt_mat.name, on_hand_index)
+            alt["availability"] = {
+                "status": alt_avail["status"],
+                "loaded_on": [
+                    r.get("printer_name") for r in alt_avail["loaded_on"]
+                ],
+                "shelf_spools": len(alt_avail["shelf_spools"]),
             }
-        )
+        alternatives.append(alt)
 
     # Nozzle overlays — when the caller supplied a printer_id AND
     # kiln-pro is installed, consult the bridge for (a) abrasive
@@ -627,6 +791,7 @@ def recommend_material(
         estimated_cost_usd=top_mat.cost_per_kg_usd,
         success_rate=success_rate,
         alternatives=alternatives,
+        availability=availability,
     )
 
 

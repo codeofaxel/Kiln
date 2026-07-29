@@ -167,6 +167,24 @@ class RestockSuggestion:
 
 
 @dataclass(frozen=True)
+class OnHandMaterial:
+    """One material type the user physically has — loaded and/or shelved."""
+
+    material_type: str
+    loaded_on: tuple[dict[str, Any], ...]
+    shelf_spools: tuple[dict[str, Any], ...]
+    total_grams: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "material_type": self.material_type,
+            "loaded_on": [dict(r) for r in self.loaded_on],
+            "shelf_spools": [dict(s) for s in self.shelf_spools],
+            "total_grams": self.total_grams,
+        }
+
+
+@dataclass(frozen=True)
 class FleetAssignment:
     """Optimal job-to-printer assignment by material."""
 
@@ -313,6 +331,95 @@ def get_fleet_material_summary(db: Any) -> list[FleetMaterialSummary]:
             spool_count=b["spool_count"],
             printers_loaded=tuple(sorted(b["printers"])),
             colors=tuple(sorted(b["colors"])),
+        ))
+    return results
+
+
+def get_on_hand_materials(
+    db: Any,
+    *,
+    printer_name: str | None = None,
+) -> list[OnHandMaterial]:
+    """Snapshot of materials the user physically has, grouped by type.
+
+    Combines loaded materials (``printer_materials`` rows) with unloaded
+    shelf spools (``list_spools()`` entries not linked to any printer).
+    This is the same physical-reality picture
+    :func:`get_fleet_material_summary` aggregates, kept per machine
+    instead of collapsed: each entry names WHICH printers have the
+    material loaded, so an answer built on it can attribute itself to a
+    machine.
+
+    :param printer_name: When given, the loaded half is scoped to that
+        one machine, and spools loaded on OTHER machines are excluded
+        entirely.  The shelf is machine-agnostic and always included —
+        a shelved spool is reachable from any printer via a swap.
+    """
+    all_loaded = _get_all_materials(db)
+    loaded_spool_ids = {m.get("spool_id") for m in all_loaded if m.get("spool_id")}
+
+    if printer_name is not None:
+        scoped_loaded = [
+            m for m in all_loaded if m.get("printer_name") == printer_name
+        ]
+    else:
+        scoped_loaded = all_loaded
+    scoped_spool_ids = {
+        m.get("spool_id") for m in scoped_loaded if m.get("spool_id")
+    }
+
+    agg: dict[str, dict[str, Any]] = {}
+
+    def _bucket(mt: str) -> dict[str, Any]:
+        return agg.setdefault(mt, {"loaded": [], "shelf": [], "grams": 0.0})
+
+    for mat in scoped_loaded:
+        mt = (mat.get("material_type") or "").upper()
+        if not mt:
+            continue
+        bucket = _bucket(mt)
+        bucket["loaded"].append({
+            "printer_name": mat.get("printer_name", ""),
+            "tool_index": mat.get("tool_index", 0),
+            "remaining_grams": mat.get("remaining_grams"),
+            "color": mat.get("color"),
+            "spool_id": mat.get("spool_id"),
+        })
+        # Loaded rows without a linked spool carry their own grams; linked
+        # rows are counted through the spool below (same non-double-counting
+        # rule as get_fleet_material_summary).
+        if not mat.get("spool_id") and mat.get("remaining_grams"):
+            bucket["grams"] += mat["remaining_grams"]
+
+    for spool in db.list_spools():
+        mt = (spool.get("material_type") or "").upper()
+        if not mt:
+            continue
+        rem = spool.get("remaining_grams", 0.0) or 0.0
+        if spool.get("id") in loaded_spool_ids:
+            # Loaded on some machine — visible only through that machine's
+            # printer_materials row.  When scoped, a spool loaded on a
+            # DIFFERENT machine is not available here at all.
+            if spool.get("id") in scoped_spool_ids:
+                _bucket(mt)["grams"] += rem
+            continue
+        bucket = _bucket(mt)
+        bucket["grams"] += rem
+        bucket["shelf"].append({
+            "spool_id": spool.get("id"),
+            "brand": spool.get("brand"),
+            "color": spool.get("color"),
+            "remaining_grams": rem,
+        })
+
+    results: list[OnHandMaterial] = []
+    for mt in sorted(agg):
+        b = agg[mt]
+        results.append(OnHandMaterial(
+            material_type=mt,
+            loaded_on=tuple(b["loaded"]),
+            shelf_spools=tuple(b["shelf"]),
+            total_grams=round(b["grams"], 2),
         ))
     return results
 

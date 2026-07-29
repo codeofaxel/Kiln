@@ -23,6 +23,7 @@ from kiln.material_inventory import (
     forecast_consumption,
     get_consumption_history,
     get_fleet_material_summary,
+    get_on_hand_materials,
     get_restock_suggestions,
     optimize_fleet_assignment,
     suggest_spool_swaps,
@@ -611,3 +612,74 @@ class TestSuggestSpoolSwaps:
         result = suggest_spool_swaps(db, jobs=jobs)
         # Should return empty (no spools to suggest)
         assert isinstance(result, list)
+
+
+# ---------------------------------------------------------------------------
+# get_on_hand_materials
+# ---------------------------------------------------------------------------
+
+
+class TestGetOnHandMaterials:
+    """Tests for the on-hand inventory snapshot (loaded + shelf, per machine)."""
+
+    def test_empty_db_returns_empty(self, db):
+        assert get_on_hand_materials(db) == []
+
+    def test_groups_loaded_by_type_with_machine_attribution(self, db):
+        _add_material(db, "a1-left", "PETG", remaining_grams=800.0, color="black")
+        _add_material(db, "a1-right", "PLA", remaining_grams=900.0, color="white")
+
+        result = get_on_hand_materials(db)
+        by_type = {r.material_type: r for r in result}
+        assert set(by_type) == {"PETG", "PLA"}
+        assert [r["printer_name"] for r in by_type["PETG"].loaded_on] == ["a1-left"]
+        assert [r["printer_name"] for r in by_type["PLA"].loaded_on] == ["a1-right"]
+
+    def test_shelf_excludes_loaded_spools(self, db):
+        _add_spool(db, "sp-loaded", "PETG", remaining_grams=700.0)
+        _add_spool(db, "sp-shelf", "PETG", remaining_grams=500.0, brand="Polymaker")
+        _add_material(db, "a1-left", "PETG", spool_id="sp-loaded")
+
+        result = get_on_hand_materials(db)
+        assert len(result) == 1
+        entry = result[0]
+        shelf_ids = [s["spool_id"] for s in entry.shelf_spools]
+        assert shelf_ids == ["sp-shelf"]
+        assert [r["printer_name"] for r in entry.loaded_on] == ["a1-left"]
+
+    def test_printer_scope_hides_other_machines(self, db):
+        _add_spool(db, "sp-left", "PETG", remaining_grams=700.0)
+        _add_material(db, "a1-left", "PETG", spool_id="sp-left")
+        _add_material(db, "a1-right", "PLA", remaining_grams=900.0)
+        _add_spool(db, "sp-shelf", "ASA", remaining_grams=600.0)
+
+        result = get_on_hand_materials(db, printer_name="a1-right")
+        by_type = {r.material_type: r for r in result}
+        # PETG lives on the other machine (loaded row + linked spool):
+        # invisible in this scope.  The shelf ASA is reachable via a swap.
+        assert set(by_type) == {"PLA", "ASA"}
+        assert [r["printer_name"] for r in by_type["PLA"].loaded_on] == ["a1-right"]
+        assert by_type["ASA"].loaded_on == ()
+        assert len(by_type["ASA"].shelf_spools) == 1
+
+    def test_grams_not_double_counted_for_linked_spool(self, db):
+        _add_spool(db, "sp-1", "PLA", remaining_grams=1000.0)
+        _add_material(db, "ender3", "PLA", spool_id="sp-1", remaining_grams=1000.0)
+
+        result = get_on_hand_materials(db)
+        assert len(result) == 1
+        assert result[0].total_grams == 1000.0
+
+    def test_unlinked_loaded_row_counts_its_own_grams(self, db):
+        _add_material(db, "ender3", "PLA", remaining_grams=250.0)
+        _add_spool(db, "sp-shelf", "PLA", remaining_grams=500.0)
+
+        result = get_on_hand_materials(db)
+        assert result[0].total_grams == 750.0
+
+    def test_to_dict_shape(self, db):
+        _add_material(db, "a1-left", "PETG-CF", remaining_grams=300.0)
+        entry = get_on_hand_materials(db)[0].to_dict()
+        assert entry["material_type"] == "PETG-CF"
+        assert entry["loaded_on"][0]["printer_name"] == "a1-left"
+        assert entry["shelf_spools"] == []

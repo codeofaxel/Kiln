@@ -10,11 +10,49 @@ from kiln.material_routing import (
     IntentMapping,
     MaterialProperties,
     MaterialRecommendation,
+    _catalog_match,
     get_material,
     list_materials,
     parse_intent,
     recommend_material,
 )
+
+
+def _on_hand_entry(
+    material_type: str,
+    *,
+    loaded_on: list[dict] | None = None,
+    shelf_spools: list[dict] | None = None,
+) -> dict:
+    """Build an on-hand entry in the OnHandMaterial.to_dict() shape."""
+    return {
+        "material_type": material_type,
+        "loaded_on": loaded_on or [],
+        "shelf_spools": shelf_spools or [],
+        "total_grams": sum(
+            (r.get("remaining_grams") or 0.0)
+            for r in (loaded_on or []) + (shelf_spools or [])
+        ),
+    }
+
+
+def _loaded_row(printer_name: str, grams: float = 500.0, color: str = "black") -> dict:
+    return {
+        "printer_name": printer_name,
+        "tool_index": 0,
+        "remaining_grams": grams,
+        "color": color,
+        "spool_id": None,
+    }
+
+
+def _shelf_row(grams: float = 500.0, brand: str = "Generic") -> dict:
+    return {
+        "spool_id": "sp-test",
+        "brand": brand,
+        "color": "black",
+        "remaining_grams": grams,
+    }
 
 # ---------------------------------------------------------------------------
 # Dataclass tests
@@ -312,3 +350,118 @@ class TestGetMaterial:
         for name in ("pla", "petg", "abs", "tpu", "asa", "nylon", "pc", "pla_plus"):
             mat = get_material(name)
             assert mat is not None, f"Material {name} not found"
+
+
+# ---------------------------------------------------------------------------
+# Catalog matching (inventory string -> catalog name)
+# ---------------------------------------------------------------------------
+
+
+class TestCatalogMatch:
+    def test_exact_names(self) -> None:
+        assert _catalog_match("PETG") == "petg"
+        assert _catalog_match("pla") == "pla"
+
+    def test_filled_variant_matches_base_family(self) -> None:
+        assert _catalog_match("PETG-CF") == "petg"
+        assert _catalog_match("ABS-GF") == "abs"
+
+    def test_aliases(self) -> None:
+        assert _catalog_match("PLA+") == "pla_plus"
+        assert _catalog_match("PA") == "nylon"
+        assert _catalog_match("PA-CF") == "nylon"
+        assert _catalog_match("Polycarbonate") == "pc"
+
+    def test_unknown_returns_none(self) -> None:
+        assert _catalog_match("PVA") is None
+        assert _catalog_match("") is None
+
+
+# ---------------------------------------------------------------------------
+# On-hand narrowing
+# ---------------------------------------------------------------------------
+
+
+class TestOnHandRecommendation:
+    """On-hand narrowing: answer from what the user physically has, name
+    the machine holding it, and label honest fallbacks."""
+
+    def test_narrows_to_loaded_materials_and_names_machine(self) -> None:
+        on_hand = [
+            _on_hand_entry("PLA", loaded_on=[_loaded_row("a1-right", 900.0)]),
+            _on_hand_entry("PETG", loaded_on=[_loaded_row("a1-left", 800.0)]),
+        ]
+        rec = recommend_material("strong", on_hand=on_hand)
+        assert rec.material.name == "petg"
+        assert rec.availability is not None
+        assert rec.availability["status"] == "loaded"
+        printers = [r["printer_name"] for r in rec.availability["loaded_on"]]
+        assert printers == ["a1-left"]
+        assert "ON HAND" in rec.reasoning
+        assert "a1-left" in rec.reasoning
+
+    def test_variant_string_survives_to_attribution(self) -> None:
+        on_hand = [
+            _on_hand_entry("PETG-CF", loaded_on=[_loaded_row("x1c", 750.0)]),
+        ]
+        rec = recommend_material("strong", on_hand=on_hand)
+        assert rec.material.name == "petg"
+        assert rec.availability["as_recorded"] == ["PETG-CF"]
+        assert "PETG-CF" in rec.reasoning
+
+    def test_shelf_only_flags_swap(self) -> None:
+        on_hand = [
+            _on_hand_entry("PETG", shelf_spools=[_shelf_row(600.0, "Polymaker")]),
+        ]
+        rec = recommend_material("strong", on_hand=on_hand)
+        assert rec.availability["status"] == "on_shelf"
+        assert rec.availability["swap_needed"] is True
+        assert "swap" in rec.reasoning.lower()
+
+    def test_no_catalog_match_labels_needs_purchase(self) -> None:
+        on_hand = [
+            _on_hand_entry("PVA", loaded_on=[_loaded_row("ender3", 400.0)]),
+        ]
+        rec = recommend_material("strong", on_hand=on_hand)
+        # Honest fallback: full-catalog answer, clearly labeled.
+        assert rec.availability["status"] == "needs_purchase"
+        assert rec.availability["on_hand_recorded"] == ["PVA"]
+        assert rec.reasoning.startswith("NOT ON HAND")
+        assert rec.material.name  # a real catalog pick is still returned
+
+    def test_empty_inventory_is_honest(self) -> None:
+        rec = recommend_material("strong", on_hand=[])
+        assert rec.availability["status"] == "no_inventory_recorded"
+        assert "add_spool" in rec.reasoning
+        assert rec.reasoning.startswith("NOT ON HAND")
+
+    def test_none_keeps_catalog_behavior(self) -> None:
+        rec = recommend_material("strong")
+        assert rec.availability is None
+        assert "ON HAND" not in rec.reasoning
+
+    def test_entry_without_physical_rows_confers_no_candidacy(self) -> None:
+        # An entry with neither a loaded row nor a shelf spool carries no
+        # physical material — it must not narrow candidacy.
+        on_hand = [_on_hand_entry("PETG")]
+        rec = recommend_material("strong", on_hand=on_hand)
+        assert rec.availability["status"] == "needs_purchase"
+
+    def test_alternatives_carry_availability(self) -> None:
+        on_hand = [
+            _on_hand_entry("PLA", loaded_on=[_loaded_row("a1-right", 900.0)]),
+            _on_hand_entry("PETG", loaded_on=[_loaded_row("a1-left", 800.0)]),
+            _on_hand_entry("TPU", shelf_spools=[_shelf_row(300.0)]),
+        ]
+        rec = recommend_material("strong", on_hand=on_hand)
+        assert rec.alternatives, "expected at least one alternative"
+        for alt in rec.alternatives:
+            assert alt["availability"]["status"] in ("loaded", "on_shelf")
+
+    def test_intent_still_ranks_within_on_hand(self) -> None:
+        on_hand = [
+            _on_hand_entry("PLA", loaded_on=[_loaded_row("m1", 900.0)]),
+            _on_hand_entry("TPU", loaded_on=[_loaded_row("m2", 400.0)]),
+        ]
+        rec = recommend_material("flexible", on_hand=on_hand)
+        assert rec.material.name == "tpu"

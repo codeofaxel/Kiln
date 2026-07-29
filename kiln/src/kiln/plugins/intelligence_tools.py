@@ -521,6 +521,7 @@ class _IntelligenceToolsPlugin:
             has_heated_bed: bool = True,
             budget_usd: float | None = None,
             printer_id: str = "",
+            on_hand_only: bool = False,
         ) -> dict:
             """Recommend material from intent + printer capabilities (considers enclosure, bed, budget).
 
@@ -536,9 +537,22 @@ class _IntelligenceToolsPlugin:
             brass nozzle get an explicit wear warning) and the response
             names the machine it answered for.
 
+            Pass ``on_hand_only=True`` to recommend only from materials you
+            physically have — recorded spools (``add_spool``) plus what's
+            loaded on your machines (AMS/CFS sync).  The recommendation's
+            ``availability`` block then says WHERE the material is: which
+            machine has it loaded, or that it's on the shelf and needs a
+            spool swap first.  With ``printer_id`` the loaded half is
+            scoped to that one machine (shelf spools always count — they
+            can be swapped in); without it, every machine's load counts.
+            When nothing on hand suits the request, the response returns
+            the best catalog pick clearly labeled needs-purchase — it
+            never silently widens to the catalog.
+
             **Which material tool to use:**
 
             - Quick intent-based pick for your own printer? → ``recommend_material`` (this tool)
+            - Only from spools I actually own? → ``recommend_material(on_hand_only=True)``
             - Designing a part and need engineering specs? → ``recommend_design_material``
             - Ordering a print from a service? → ``suggest_material_for_order``
             - Which of MY printers has a material loaded? → ``find_printers_with_material``
@@ -551,6 +565,9 @@ class _IntelligenceToolsPlugin:
                 budget_usd: Optional maximum budget per kg in USD.
                 printer_id: Optional registered printer to answer for.
                     Empty = printer-agnostic recommendation.
+                on_hand_only: Restrict candidates to recorded inventory
+                    (loaded materials + shelf spools).  Default False =
+                    full catalog.
             """
             import kiln.server as _srv
 
@@ -564,11 +581,22 @@ class _IntelligenceToolsPlugin:
                     "has_heated_bed": has_heated_bed,
                 }
 
+                on_hand: list[dict[str, Any]] | None = None
+                if on_hand_only:
+                    from kiln.material_inventory import get_on_hand_materials
+                    from kiln.persistence import get_db
+
+                    inventory = get_on_hand_materials(
+                        get_db(), printer_name=printer_id or None
+                    )
+                    on_hand = [m.to_dict() for m in inventory]
+
                 rec = _recommend(
                     intent,
                     printer_capabilities=caps,
                     budget_usd=budget_usd,
                     printer_id=printer_id,
+                    on_hand=on_hand,
                 )
 
                 response = {"success": True, "recommendation": rec.to_dict()}
@@ -576,6 +604,10 @@ class _IntelligenceToolsPlugin:
                 # unnamed printer context is an invisible assumption.
                 if printer_id:
                     response["answered_for_printer"] = printer_id
+                if on_hand_only:
+                    response["on_hand_scope"] = (
+                        f"printer:{printer_id}" if printer_id else "fleet"
+                    )
                 return response
             except Exception as exc:
                 _logger.exception("Unexpected error in recommend_material")
