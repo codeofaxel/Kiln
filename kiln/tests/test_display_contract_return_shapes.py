@@ -27,10 +27,11 @@ import pytest
 REPO = pathlib.Path(__file__).resolve().parent.parent
 SRC = REPO / "src" / "kiln"
 
+# Helpers whose RETURN VALUE is the [Image, result] composite.  The other
+# autofire helpers (autofire_import, autofire_pr_artifact) return a
+# RenderBundle for embedding under a key — a dict return stays a dict.
 COMPOSITE_HELPERS = {
     "attach_inspect_bundle",
-    "autofire_import",
-    "autofire_pr_artifact",
     "attach_product_preview",
 }
 
@@ -70,14 +71,20 @@ def _violations_in(root: pathlib.Path) -> list[str]:
             ann = ast.unparse(node.returns)
             if not (ann.startswith("dict[") or ann.startswith("Dict[")):
                 continue
-            for r in ast.walk(node):
-                if isinstance(r, ast.Return) and isinstance(r.value, ast.Call):
+            # Body-wide, not return-position-only: a composite assigned to
+            # a variable and returned later is the same wire break
+            # (auto_recover shipped exactly that shape, 2026-07-29).
+            for c in ast.walk(node):
+                if isinstance(c, ast.Call):
                     name = getattr(
-                        r.value.func, "id", getattr(r.value.func, "attr", "")
+                        c.func, "id", getattr(c.func, "attr", "")
                     )
                     if name in reach:
                         hits.append(f"{f.relative_to(root)}::{node.name} -> {ann}")
                         break
+                else:
+                    continue
+                break
     return hits
 
 
