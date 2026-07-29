@@ -14,7 +14,7 @@ Kiln gives AI agents a safe, unified way to design, validate, and manufacture 3D
 
 **Three ways to get to a print:**
 
-- **🖨️ Your printers.** Control OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, or Direct USB/Serial machines on your LAN.
+- **🖨️ Your printers.** Control OctoPrint, Moonraker, Creality, Bambu Lab, Prusa Link, Elegoo, Duet (RepRapFirmware, beta), or Direct USB/Serial machines on your LAN.
 - **🌐 Third-party model search.** Search external model repositories such as MakerWorld and MyMiniFactory, then download where the provider permits, slice, and print.
 - **🏭 Fulfillment providers.** Route jobs to third-party fulfillment services like Craftcloud for overflow, specialty materials, or when you don't own a printer.
 
@@ -285,6 +285,9 @@ Start the MCP server (for agent integration).
 #### `kiln health`
 Check Kiln's own setup: MCP client config drift, stale paths, environment problems — and self-heal where it can.
 
+#### `kiln trim`
+Close leftover background Kiln servers that closed agent sessions leave behind. Checks that nothing is printing first and never touches the session you're in.
+
 #### `kiln doctor` / `kiln doctor-creality`
 Diagnose connection problems. The Creality variant verifies local Moonraker reachability and gives same-LAN/IP/port guidance.
 
@@ -461,6 +464,7 @@ Design intelligence queries — material recommendations for a duty, printer des
 | `predict_print_failure` | `file_path` | Pre-print risk score with per-failure details |
 | `scale_mesh_to_fit` / `center_model_on_bed` / `mirror_mesh_model` / `hollow_mesh_model` / `simplify_mesh_model` | `file_path`, params | Mesh transformations |
 | `merge_mesh_files` / `split_mesh_by_component` / `compose_models` | `file_paths` | Composition and splitting |
+| `split_mesh_to_fit` | `model_path`, bed or `printer_id` | Cut an oversize model into printable pieces that reassemble; cuts land on natural seams and every cut face comes back sealed |
 | `export_model_3mf` / `extract_model_from_3mf` | `file_path` | 3MF conversion and extraction |
 | `estimate_mesh_print_time` / `estimate_material_cost` / `estimate_support_material` | `file_path`, params | Pre-slice estimates |
 | `compare_mesh_versions` | `file_a`, `file_b` | Geometric diff between two meshes |
@@ -864,4 +868,4 @@ Kiln's paid tiers ship through the private `kiln-pro` companion package ([kiln3d
 
 *Kiln is a project of Hadron Labs Inc.*
 
-<!-- DOCS_REVIEWED_FOR: 1.2.0 -->
+<!-- DOCS_REVIEWED_FOR: 1.3.0 -->
