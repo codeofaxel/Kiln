@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-28T07:25:46.070584+00:00",
-  "tool_count": 390,
+  "generated": "2026-07-29T00:22:59.832032+00:00",
+  "tool_count": 398,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -22,6 +22,10 @@
     "engineering": {
       "label": "Engineering Math",
       "pitch": "Real ISO 286 limits-and-fits, beam mechanics with proper factor of safety, and tolerance stacking (worst-case + RSS + Monte Carlo) for parts you actually need to trust. Two-mode UX: plain-English by default, full formula trace and textbook citations when you ask for the math."
+    },
+    "drawing_intake": {
+      "label": "Drawing Intake & DFM",
+      "pitch": "Hand Kiln a customer engineering drawing and get a per-dimension manufacturability verdict grounded in your machines' measured capability: pass/marginal/fail per characteristic, conservative predicted yield, and concrete orientation / tolerance / compensation recommendations."
     },
     "print_intelligence": {
       "label": "Print Intelligence",
@@ -7229,6 +7233,132 @@
       }
     },
     {
+      "name": "assess_drawing_manufacturability",
+      "description": "The verdict: can this machine hold this drawing's tolerances?\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "category": "drawing_intake",
+      "parameters": {
+        "properties": {
+          "intake_id": {
+            "title": "Intake Id",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          },
+          "quantity": {
+            "default": 1,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "printer_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Ids"
+          },
+          "verdict_policy": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Verdict Policy"
+          },
+          "remember_policy": {
+            "default": false,
+            "title": "Remember Policy",
+            "type": "boolean"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intake_id"
+        ],
+        "title": "assess_drawing_manufacturabilityArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "intake_engineering_drawing",
+      "description": "Start a drawing intake: register the drawing and get its pages to read.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "category": "drawing_intake",
+      "parameters": {
+        "properties": {
+          "file_path": {
+            "title": "File Path",
+            "type": "string"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "title": "intake_engineering_drawingArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "submit_drawing_extraction",
+      "description": "Submit your structured extraction of a drawing for verification.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "category": "drawing_intake",
+      "parameters": {
+        "properties": {
+          "intake_id": {
+            "title": "Intake Id",
+            "type": "string"
+          },
+          "extraction": {
+            "additionalProperties": true,
+            "title": "Extraction",
+            "type": "object"
+          },
+          "save": {
+            "default": true,
+            "title": "Save",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "intake_id",
+          "extraction"
+        ],
+        "title": "submit_drawing_extractionArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "analyze_frame_bracing",
       "description": "Where the diagonals go in a shelf, rack, frame, or lattice.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -8236,6 +8366,23 @@
       }
     },
     {
+      "name": "assess_fair_reaccomplishment",
+      "description": "Detect FAI re-accomplishment signals from evidence drift.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "enterprise",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "evidence_case_id": {
+            "default": "",
+            "title": "Evidence Case Id",
+            "type": "string"
+          }
+        },
+        "title": "assess_fair_reaccomplishmentArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "check_chemical_resistance",
       "description": "Will a printed <material> part survive <reagent>? -- cited, plain-English, tier-gated.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -8639,6 +8786,346 @@
           "name"
         ],
         "title": "lookup_fastenerArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "manage_fair_characteristics",
+      "description": "Characteristic sets and inspection results for FAIR Form 3.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "enterprise",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "design_version_id": {
+            "default": "",
+            "title": "Design Version Id",
+            "type": "string"
+          },
+          "characteristics": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Characteristics"
+          },
+          "general_tolerance_note": {
+            "default": "",
+            "title": "General Tolerance Note",
+            "type": "string"
+          },
+          "set_id": {
+            "default": "",
+            "title": "Set Id",
+            "type": "string"
+          },
+          "char_no": {
+            "default": 0,
+            "title": "Char No",
+            "type": "integer"
+          },
+          "serial_number": {
+            "default": "",
+            "title": "Serial Number",
+            "type": "string"
+          },
+          "value_kind": {
+            "default": "variable",
+            "title": "Value Kind",
+            "type": "string"
+          },
+          "values": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Values"
+          },
+          "attribute_result": {
+            "default": "",
+            "title": "Attribute Result",
+            "type": "string"
+          },
+          "method": {
+            "default": "",
+            "title": "Method",
+            "type": "string"
+          },
+          "tool_id": {
+            "default": "",
+            "title": "Tool Id",
+            "type": "string"
+          },
+          "report_number": {
+            "default": "",
+            "title": "Report Number",
+            "type": "string"
+          },
+          "report_rows": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Report Rows"
+          },
+          "attested_by": {
+            "default": "",
+            "title": "Attested By",
+            "type": "string"
+          },
+          "attested_on": {
+            "default": "",
+            "title": "Attested On",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "manage_fair_characteristicsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "manage_fair_evidence_bundle",
+      "description": "Portable FAIR evidence bundles for air-gapped team transfer.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "enterprise",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "evidence_case_id": {
+            "default": "",
+            "title": "Evidence Case Id",
+            "type": "string"
+          },
+          "bundle_path": {
+            "default": "",
+            "title": "Bundle Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "manage_fair_evidence_bundleArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "manage_fair_registry",
+      "description": "Record and read the attested identities FAIR drafts consume.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "enterprise",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "key": {
+            "default": "",
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Payload"
+          },
+          "attested_by": {
+            "default": "",
+            "title": "Attested By",
+            "type": "string"
+          },
+          "attested_on": {
+            "default": "",
+            "title": "Attested On",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "manage_fair_registryArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "prepopulate_fair_draft",
+      "description": "Pre-populate an AS9102 FAIR draft from a Kiln evidence case.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "enterprise",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "evidence_case_id": {
+            "title": "Evidence Case Id",
+            "type": "string"
+          },
+          "part_identity": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Part Identity"
+          },
+          "organization": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Organization"
+          },
+          "order_context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Order Context"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Unit"
+          },
+          "fai_declaration": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Fai Declaration"
+          },
+          "form2_row_inputs": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Form2 Row Inputs"
+          },
+          "use_registry": {
+            "default": true,
+            "title": "Use Registry",
+            "type": "boolean"
+          },
+          "output_form_set": {
+            "default": "9102C",
+            "title": "Output Form Set",
+            "type": "string"
+          },
+          "export_formats": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Export Formats"
+          }
+        },
+        "required": [
+          "evidence_case_id"
+        ],
+        "title": "prepopulate_fair_draftArguments",
         "type": "object"
       }
     },

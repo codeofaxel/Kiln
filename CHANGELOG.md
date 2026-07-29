@@ -29,14 +29,41 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   anything unconfirmed stays out of success rates and recommended settings
   until you answer.
 
-- **See where a part can actually be made (Business+).** Assess one drawing
-  against several printers and read the answers side by side: which machines
-  hold the tolerances, how many parts come out in spec, and which dimension
-  is the obstacle on the ones that don't.
+- **Hand Kiln a customer drawing, get a straight answer (Business+).**
+  Drop in an engineering drawing (PDF or a photo) and Kiln reads every
+  dimension and tolerance on the sheet, then tells you — dimension by
+  dimension — whether your printers can hold them, how many good parts
+  to expect per batch, and what would improve the odds: a different
+  print orientation, a small tolerance ask back to your customer, or
+  Kiln's per-machine compensation. The answers come from how your
+  machines have actually printed, not generic 3D-printing rules of
+  thumb, and they sharpen every time you report a real measurement.
+  Anything Kiln can't honestly assess is listed for your review —
+  never silently passed. Fleet ranking ("which of my machines is the
+  right one for this job") is Enterprise. Enterprise shops can also set
+  their own quality bar: out of every 100 parts you print, how many
+  have to come out on-size before you'd call the job a safe "yes"?
+  Kiln's default is strict (97 of 100); tell it your number once and
+  it's saved to your account — every future drawing is graded against
+  your bar, on any machine you sign into, and each report says which
+  bar it used.
 
-- **First-article records you can hand to an auditor (Enterprise).** Your
-  inspection records and the exact package you submitted, kept together and
-  verified on the way out.
+- **Kiln warns you about holes before you print them (Business+).**
+  Printed holes always come out a bit smaller than the drawing asks
+  for. When the drawing doesn't say how much slop is allowed, Kiln now
+  tells you how far off it'll be for your material — so you can plan
+  to drill them out, instead of finding out after the part is done.
+
+- **Attach the CAD, get a price and a time (Business+).** The report
+  adds a ballpark material cost and print time for a single part. Ask
+  for a batch and it totals the whole run — padded for the parts Kiln
+  predicts will measure outside the drawing's limits, so you're not
+  quoting a perfect-world number.
+
+- **First Article Inspection drafting (Enterprise).** As you design and
+  print parts and log inspections in Kiln, it builds the record for you
+  — so when an AS9102 FAIR report is due, Kiln drafts it from your own
+  work. Your reviewer verifies and signs; Kiln never fills the sign-off.
 
 
 - **Add Kiln to Claude Code in one command — free.** Kiln now ships as a
