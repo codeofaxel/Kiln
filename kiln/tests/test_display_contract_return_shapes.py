@@ -107,3 +107,78 @@ class TestDisplayContractReturnShapes:
             "display contract needs a new wire strategy before shipping "
             "on this SDK."
         )
+
+
+def _consumption_violations(root: pathlib.Path) -> list[str]:
+    """In-process assignments from composite-capable tools must unwrap.
+
+    A display-contract tool returns ``[Image, payload_dict]`` on
+    success; code assigning that result and reading it as a dict
+    crashes exactly on the happy path (found live in the mid-print
+    fleet wrappers and the public preflight consumers, 2026-07-29).
+    Rule: any assignment whose value is a call to a composite-capable
+    TOOL, made inside a function that never references
+    ``unwrap_tool_result``, is a violation.  A same-module UNdecorated
+    def with the same name is an engine twin, not the tool — skipped.
+    """
+    # Pass 1: composite-capable tool names (decorated, returns a helper).
+    tool_names: set[str] = set()
+    for f in sorted(root.rglob("*.py")):
+        if "tests" in f.parts or f.name.startswith("test_"):
+            continue
+        try:
+            tree = ast.parse(f.read_text())
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if not any("mcp.tool" in ast.unparse(d) for d in node.decorator_list):
+                continue
+            for r in ast.walk(node):
+                if isinstance(r, ast.Return) and isinstance(r.value, ast.Call):
+                    n = getattr(r.value.func, "id", getattr(r.value.func, "attr", ""))
+                    if n in COMPOSITE_HELPERS:
+                        tool_names.add(node.name)
+    # Pass 2: assignments from those names without an unwrap in scope.
+    out: list[str] = []
+    for f in sorted(root.rglob("*.py")):
+        if "tests" in f.parts or f.name.startswith("test_"):
+            continue
+        try:
+            src = f.read_text()
+            tree = ast.parse(src)
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        top_level_plain = {
+            n.name
+            for n in tree.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and not any("mcp.tool" in ast.unparse(d) for d in n.decorator_list)
+        }
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            fn_src = ast.unparse(fn)
+            if "unwrap_tool_result" in fn_src:
+                continue
+            for node in ast.walk(fn):
+                if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+                    continue
+                func = node.value.func
+                if not isinstance(func, ast.Name):
+                    continue  # attribute calls (self.x, module.x) resolve elsewhere
+                name = func.id
+                if name in tool_names and name not in top_level_plain and name != fn.name:
+                    out.append(f"{f.relative_to(root)}::{fn.name} assigns from {name} (line {node.lineno})")
+    return out
+
+
+class TestInProcessConsumption:
+    def test_composite_results_are_unwrapped_before_consumption(self):
+        violations = _consumption_violations(SRC)
+        assert not violations, (
+            "In-process callers consuming a display-contract tool's "
+            "result without unwrap_tool_result — this crashes when the "
+            f"callee succeeds with a preview: {violations}"
+        )

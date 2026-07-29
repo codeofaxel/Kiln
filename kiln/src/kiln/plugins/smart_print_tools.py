@@ -13,6 +13,7 @@ import json
 import logging
 import os
 from typing import Any
+from kiln.tool_results import unwrap_tool_result
 
 _logger = logging.getLogger(__name__)
 
@@ -409,7 +410,7 @@ class _SmartPrintToolsPlugin:
                 "retry_print_with_fix", safety_name
             ):
                 return block
-            pf = _srv.preflight_check()
+            pf = unwrap_tool_result(_srv.preflight_check())
             if not pf.get("ready", False):
                 return _srv._error_dict(
                     pf.get("summary", "Pre-flight checks failed"),

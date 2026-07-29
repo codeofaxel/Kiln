@@ -118,6 +118,7 @@ from kiln.generation import (
     validate_mesh,
 )
 from kiln.heater_watchdog import HeaterWatchdog
+from kiln.tool_results import unwrap_tool_result
 
 try:
     from kiln.licensing import (
@@ -4365,7 +4366,9 @@ def start_print(
             )
             _audit("start_print", "preflight_skipped", details={"file": file_name})
         else:
-            pf = preflight_check(remote_file=file_name, accept_paused=resume_from_paused)
+            pf = unwrap_tool_result(
+                preflight_check(remote_file=file_name, accept_paused=resume_from_paused)
+            )
             if not pf.get("ready", False):
                 # Build a detailed remediation message from individual checks
                 failed = [c for c in pf.get("checks", []) if not c.get("passed", False)]
@@ -7919,7 +7922,7 @@ def download_and_upload(
             if block := _emergency_latch_error("download_and_upload", safety_printer):
                 return block
             # Mandatory pre-flight safety gate before starting print.
-            pf = preflight_check()
+            pf = unwrap_tool_result(preflight_check())
             if not pf.get("ready", False):
                 _audit(
                     "download_and_upload",

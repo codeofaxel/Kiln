@@ -14,6 +14,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Any
+from kiln.tool_results import unwrap_tool_result
 
 _logger = logging.getLogger(__name__)
 
@@ -1275,7 +1276,7 @@ class _SlicerToolsPlugin:
                 safety_printer = _srv._resolve_effective_printer_name(printer_name)
                 if block := _srv._emergency_latch_error("slice_and_print", safety_printer):
                     return block
-                pf = _srv.preflight_check()
+                pf = unwrap_tool_result(_srv.preflight_check())
                 if not pf.get("ready", False):
                     _srv._audit(
                         "slice_and_print",
