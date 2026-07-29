@@ -1122,9 +1122,9 @@ def _install_mcp_request_context_capture() -> None:
             # to, and rewriting serialised text to sneak one in is how a
             # wire format gets corrupted.
             with contextlib.suppress(Exception):
-                from kiln.stage_link import attach_stage_link
+                from kiln.stage_link import attach_stage_link_async
 
-                attach_stage_link(result)
+                await attach_stage_link_async(result)
             return result
         finally:
             _current_mcp_request_context.reset(token)

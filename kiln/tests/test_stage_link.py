@@ -200,3 +200,125 @@ class TestAttachStageLink:
         result = {"success": True, "stl_path": _stl(tmp_path / "p.stl")}
         assert stage_link.attach_stage_link(result) is result
         assert "viewer_url" not in result
+
+
+class TestInputVersusOutputMesh:
+    """A mesh-changer reports both meshes; the link must name the RESULT.
+
+    Dict order must decide nothing — a repair that linked its input would
+    hand the user the broken version and call it the fix.
+    """
+
+    def test_input_key_never_wins_even_when_it_comes_first(self):
+        assert stage_link.find_mesh_path(
+            {"input_mesh_path": "/x/before.stl", "repaired_stl": "/x/after.stl"}
+        ) == "/x/after.stl"
+
+    def test_input_key_never_wins_even_when_it_comes_last(self):
+        assert stage_link.find_mesh_path(
+            {"repaired_stl": "/x/after.stl", "input_mesh_path": "/x/before.stl"}
+        ) == "/x/after.stl"
+
+    def test_an_input_only_result_gets_no_link(self):
+        """Better nothing than a link to the thing they already had."""
+        assert stage_link.find_mesh_path({"source_mesh": "/x/before.stl"}) is None
+        assert stage_link.find_mesh_path({"original_stl_path": "/x/b.stl"}) is None
+
+    @pytest.mark.parametrize("marker", ["input", "source", "original", "before", "src"])
+    def test_every_input_marker_is_disqualified(self, marker):
+        assert stage_link.find_mesh_path({f"{marker}_stl": "/x/b.stl"}) is None
+
+    def test_named_product_beats_a_bare_mesh_key(self):
+        assert stage_link.find_mesh_path(
+            {"mesh": "/x/tmp.stl", "output_stl": "/x/real.stl"}
+        ) == "/x/real.stl"
+
+
+class TestAsyncAttachDoesNotStallTheLoop:
+    """The dispatch hook is a coroutine; a blocking upload there freezes the
+    whole local server.  This pins the offload."""
+
+    def test_loop_keeps_running_during_a_slow_upload(self, tmp_path, monkeypatch):
+        import asyncio
+
+        _wire(monkeypatch)
+        import httpx
+
+        def _slow_post(url, **kw):
+            time.sleep(0.5)  # a real upload, in real seconds
+            return _Resp()
+
+        monkeypatch.setattr(httpx, "post", _slow_post)
+        result = {"success": True, "stl_path": _stl(tmp_path / "p.stl")}
+
+        async def _run():
+            ticks = 0
+
+            async def _heartbeat():
+                nonlocal ticks
+                while True:
+                    await asyncio.sleep(0.05)
+                    ticks += 1
+
+            beat = asyncio.create_task(_heartbeat())
+            await stage_link.attach_stage_link_async(result)
+            beat.cancel()
+            return ticks
+
+        ticks = asyncio.run(_run())
+        assert result["viewer_url"], "link was not attached"
+        # A blocked loop cannot tick.  ~0.5s of upload at a 0.05s beat is
+        # ~10 ticks; anything above a couple proves the loop stayed alive.
+        assert ticks >= 3, (
+            f"event loop stalled during the upload (only {ticks} ticks) — a "
+            "local server would be frozen for the whole transfer"
+        )
+
+    def test_async_variant_never_raises(self, monkeypatch):
+        import asyncio
+
+        def _boom(*a, **k):
+            raise RuntimeError("nope")
+
+        monkeypatch.setattr(stage_link, "find_mesh_path", _boom)
+        r = {"success": True}
+        assert asyncio.run(stage_link.attach_stage_link_async(r)) is r
+
+    def test_async_variant_skips_work_when_there_is_no_mesh(self, monkeypatch):
+        import asyncio
+
+        calls = _wire(monkeypatch)
+        r = {"success": True, "message": "no geometry here"}
+        asyncio.run(stage_link.attach_stage_link_async(r))
+        assert calls == [] and "viewer_url" not in r
+
+
+class TestNeverRaisesContract:
+    """``stage_link_for`` documents "never raises".  Tools run in a thread
+    pool, so a concurrent eviction between the cache read and the expiry read
+    is reachable — and it used to escape as a KeyError."""
+
+    def test_concurrent_eviction_does_not_raise(self, tmp_path, monkeypatch):
+        _wire(monkeypatch)
+        p = _stl(tmp_path / "p.stl")
+        stage_link.stage_link_for(p)  # populate
+        real_get = stage_link._cache_get
+
+        def _evict_then_hit(sha):
+            entry = real_get(sha)
+            stage_link._cache.pop(sha, None)  # another thread got there first
+            return entry
+
+        monkeypatch.setattr(stage_link, "_cache_get", _evict_then_hit)
+        got = stage_link.stage_link_for(p)  # must not raise
+        assert got["viewer_url"]
+
+    def test_parallel_callers_all_get_a_link(self, tmp_path, monkeypatch):
+        """The real shape: many threads staging the same mesh at once."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        _wire(monkeypatch)
+        p = _stl(tmp_path / "p.stl")
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(lambda _: stage_link.stage_link_for(p), range(24)))
+        assert all(r and r["viewer_url"] for r in results), "a parallel caller got nothing"

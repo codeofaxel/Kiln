@@ -84,7 +84,13 @@ def _api_base() -> str:
         return "https://api.kiln3d.com"
 
 
-def _cache_get(sha: str) -> str | None:
+def _cache_get(sha: str) -> tuple[str, float] | None:
+    """The live entry for these bytes, or ``None``.
+
+    Returns the whole entry rather than just the URL so a caller never has to
+    read ``_cache`` a second time: tools run in a thread pool, and a second
+    lookup can find the key already evicted by another thread.
+    """
     hit = _cache.get(sha)
     if not hit:
         return None
@@ -92,7 +98,7 @@ def _cache_get(sha: str) -> str | None:
     if expires_at - time.time() <= _REUSE_FLOOR_S:
         _cache.pop(sha, None)
         return None
-    return url
+    return url, expires_at
 
 
 def _cache_put(sha: str, url: str, expires_at: float) -> None:
@@ -142,7 +148,7 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
     if cached:
         # Same bytes already staged — the sixteen-pose case, and the
         # re-render-an-unchanged-design case, both land here.
-        return {"viewer_url": cached, "expires_at": _cache[sha][1], "cached": True}
+        return {"viewer_url": cached[0], "expires_at": cached[1], "cached": True}
 
     try:
         from kiln.auth_session import resolve_api_bearer
@@ -202,12 +208,36 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
 #: that gate is automatically visible to this one.
 _MESH_KEY_SEGMENTS = ("stl", "3mf", "mesh", "obj")
 
+#: A mesh-changing tool reports BOTH the mesh it was handed and the mesh it
+#: made.  Dict order decides nothing here: a key that names the input is
+#: never the answer, or a repair would hand the user a link to the broken
+#: version and call it the fix.
+_INPUT_MARKERS = (
+    "input", "source", "original", "before", "parent", "prev", "previous",
+    "from", "base", "src",
+)
+
+#: ...and when several candidates remain, the one that names itself as the
+#: product wins over a bare ``mesh``.
+_OUTPUT_MARKERS = (
+    "output", "result", "produced", "final", "new", "repaired", "decorated",
+    "textured", "merged", "split", "generated", "exported", "written",
+)
+
 
 def _looks_like_mesh_key(key: str) -> bool:
     k = key.lower()
     if k.endswith("_path"):
         k = k[: -len("_path")]
     return any(seg == part for part in k.split("_") for seg in _MESH_KEY_SEGMENTS)
+
+
+def _key_rank(key: str) -> int | None:
+    """Preference for a mesh-shaped key: higher wins, ``None`` disqualifies."""
+    parts = set(key.lower().split("_"))
+    if parts & set(_INPUT_MARKERS):
+        return None
+    return 1 if parts & set(_OUTPUT_MARKERS) else 0
 
 
 def find_mesh_path(result: Any) -> str | None:
@@ -220,21 +250,28 @@ def find_mesh_path(result: Any) -> str | None:
     if not isinstance(result, dict):
         return None
 
-    def _scan(d: dict) -> str | None:
+    def _scan(d: dict) -> tuple[int, str] | None:
+        best: tuple[int, str] | None = None
         for key, value in d.items():
-            if isinstance(value, str) and value and _looks_like_mesh_key(key):
-                if Path(value).suffix.lower() in _MESH_SUFFIXES:
-                    return value
-        return None
+            if not (isinstance(value, str) and value and _looks_like_mesh_key(key)):
+                continue
+            if Path(value).suffix.lower() not in _MESH_SUFFIXES:
+                continue
+            rank = _key_rank(key)
+            if rank is None:
+                continue
+            if best is None or rank > best[0]:
+                best = (rank, value)
+        return best
 
     direct = _scan(result)
     if direct:
-        return direct
+        return direct[1]
     for value in result.values():
         if isinstance(value, dict):
             nested = _scan(value)
             if nested:
-                return nested
+                return nested[1]
     return None
 
 
@@ -271,5 +308,31 @@ def attach_stage_link(result: Any, mesh_path: str | os.PathLike[str] | None = No
             "3D — drag to rotate, scroll to zoom. The link is temporary.",
         )
     except Exception as exc:  # noqa: BLE001 — a preview must never die for a link
+        logger.debug("stage link not attached: %s", exc)
+    return result
+
+
+async def attach_stage_link_async(result: Any) -> Any:
+    """``attach_stage_link`` for a caller that is already on an event loop.
+
+    The upload is a blocking socket call.  Run straight from a coroutine it
+    would stall the loop for as long as the transfer takes — on a local
+    stdio server that is the WHOLE server: no other tool call, no
+    heartbeat, nothing, while a mesh uploads.  So the work goes to a
+    thread and the loop keeps serving.
+
+    Never raises.  Returns ``result`` for chaining.
+    """
+    import asyncio
+
+    try:
+        if not isinstance(result, dict) or result.get("viewer_url"):
+            return result
+        if result.get("success") is False:
+            return result
+        if not find_mesh_path(result):
+            return result
+        await asyncio.to_thread(attach_stage_link, result)
+    except Exception as exc:  # noqa: BLE001
         logger.debug("stage link not attached: %s", exc)
     return result
