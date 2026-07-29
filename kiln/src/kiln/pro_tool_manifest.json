@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-29T00:22:59.832032+00:00",
-  "tool_count": 398,
+  "generated": "2026-07-29T03:48:21.537785+00:00",
+  "tool_count": 399,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -2280,7 +2280,7 @@
     },
     {
       "name": "auto_multicolor_from_texture",
-      "description": "Segment a textured OBJ mesh into discrete color zones for multi-material printing.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Segment a textured OBJ mesh into discrete color zones for multi-material printing.\n\nFree tier: 3 multicolor splits/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "decoration",
       "parameters": {
@@ -2708,7 +2708,7 @@
     },
     {
       "name": "inspect_design",
-      "description": "Render and analyze a 3D mesh \u2014 shaded previews, cross-section slices, raw measurements (volume, watertightness, dimensions), and a print-readiness verdict (Pro+). Channels are opt-in, results land in a manifest.json bundle.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Render and analyze a 3D mesh \u2014 shaded previews, cross-section slices, raw measurements (volume, watertightness, dimensions), and a print-readiness verdict (Pro+). Channels are opt-in, results land in a manifest.json bundle.\n\nFree tier: 3 inspections/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "design_inspection",
       "parameters": {
@@ -12061,7 +12061,7 @@
     },
     {
       "name": "make_printable",
-      "description": "Turn any messy / AI-generated / organic mesh into a print-ready solid.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Turn any messy / AI-generated / organic mesh into a print-ready solid.\n\nFree tier: 2 print-ready fixes/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "print_intelligence",
       "parameters": {
@@ -13253,6 +13253,140 @@
       }
     },
     {
+      "name": "split_mesh_to_fit",
+      "description": "Cut ONE solid into printable pieces that reassemble \u2014 the other honest answer to \"it doesn't fit\" (scale_mesh_to_fit shrinks; this cuts, so a functional part keeps its real dimensions).\n\nFree tier: 3 part splits/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "model_path": {
+            "title": "Model Path",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "bed_x_mm": {
+            "default": 0.0,
+            "title": "Bed X Mm",
+            "type": "number"
+          },
+          "bed_y_mm": {
+            "default": 0.0,
+            "title": "Bed Y Mm",
+            "type": "number"
+          },
+          "bed_z_mm": {
+            "default": 0.0,
+            "title": "Bed Z Mm",
+            "type": "number"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "cut_axis": {
+            "default": "",
+            "title": "Cut Axis",
+            "type": "string"
+          },
+          "cut_positions_mm": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cut Positions Mm"
+          },
+          "snap_to_natural": {
+            "default": false,
+            "title": "Snap To Natural",
+            "type": "boolean"
+          },
+          "add_joints": {
+            "default": true,
+            "title": "Add Joints",
+            "type": "boolean"
+          },
+          "joint_method": {
+            "default": "auto",
+            "title": "Joint Method",
+            "type": "string"
+          },
+          "serviceable": {
+            "default": false,
+            "title": "Serviceable",
+            "type": "boolean"
+          },
+          "structural": {
+            "default": false,
+            "title": "Structural",
+            "type": "boolean"
+          },
+          "hardware_ok": {
+            "default": true,
+            "title": "Hardware Ok",
+            "type": "boolean"
+          },
+          "fastener_size": {
+            "default": "M3",
+            "title": "Fastener Size",
+            "type": "string"
+          },
+          "magnet_d_mm": {
+            "default": 6.0,
+            "title": "Magnet D Mm",
+            "type": "number"
+          },
+          "magnet_h_mm": {
+            "default": 3.0,
+            "title": "Magnet H Mm",
+            "type": "number"
+          },
+          "pin_clearance_mm": {
+            "default": 0.2,
+            "title": "Pin Clearance Mm",
+            "type": "number"
+          },
+          "arrange_plates": {
+            "default": true,
+            "title": "Arrange Plates",
+            "type": "boolean"
+          },
+          "max_pieces": {
+            "default": 0,
+            "title": "Max Pieces",
+            "type": "integer"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "output_dir": {
+            "default": "",
+            "title": "Output Dir",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_path"
+        ],
+        "title": "split_mesh_to_fitArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "verify_mesh_fit",
       "description": "Prove that separate parts can PHYSICALLY assemble \u2014 the ONE fit check, exact shared-material math, not a picture.",
       "tier": "free",
@@ -13353,7 +13487,7 @@
     },
     {
       "name": "generate_ashtray",
-      "description": "Generate an ashtray with optional branding and QR code.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate an ashtray with optional branding and QR code.\n\nFree tier: 3 ashtrays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -13425,7 +13559,7 @@
     },
     {
       "name": "generate_bookmark",
-      "description": "Generate a bookmark with optional decoration and page clip.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a bookmark with optional decoration and page clip.\n\nFree tier: 3 bookmarks/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -13492,7 +13626,7 @@
     },
     {
       "name": "generate_coaster",
-      "description": "Generate a coaster with optional branding and QR code.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a coaster with optional branding and QR code.\n\nFree tier: 3 coasters/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -13549,7 +13683,7 @@
     },
     {
       "name": "generate_fridge_magnet",
-      "description": "Generate a printable fridge magnet with front decoration.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a printable fridge magnet with front decoration.\n\nFree tier: 3 fridge magnets/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -13631,7 +13765,7 @@
     },
     {
       "name": "generate_frisbee",
-      "description": "Generate a flying-disc frisbee with optional top decoration.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a flying-disc frisbee with optional top decoration.\n\nFree tier: 3 frisbees/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -13693,7 +13827,7 @@
     },
     {
       "name": "generate_jewelry_tray",
-      "description": "Generate a jewelry tray with optional decoration and QR code.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a jewelry tray with optional decoration and QR code.\n\nFree tier: 3 jewelry trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -13785,7 +13919,7 @@
     },
     {
       "name": "generate_keychain",
-      "description": "Generate a 3D-printable keychain.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a 3D-printable keychain.\n\nFree tier: 3 keychains/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -13862,7 +13996,7 @@
     },
     {
       "name": "generate_license_plate_frame",
-      "description": "Generate a US-spec license plate frame.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a US-spec license plate frame.\n\nFree tier: 3 license plate frames/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -13964,7 +14098,7 @@
     },
     {
       "name": "generate_nameplate",
-      "description": "Generate a desk nameplate with two-line raised text.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a desk nameplate with two-line raised text.\n\nFree tier: 3 nameplates/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -14041,7 +14175,7 @@
     },
     {
       "name": "generate_ornament",
-      "description": "Generate a hanging ornament with optional decoration.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a hanging ornament with optional decoration.\n\nFree tier: 3 ornaments/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -14113,7 +14247,7 @@
     },
     {
       "name": "generate_pen_cup",
-      "description": "Generate a desktop pen / brush cup with optional QR + decoration.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a desktop pen / brush cup with optional QR + decoration.\n\nFree tier: 3 pen cups/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -14200,7 +14334,7 @@
     },
     {
       "name": "generate_pet_bowl",
-      "description": "Generate a tapered pet bowl optimized for FDM printing.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a tapered pet bowl optimized for FDM printing.\n\nFree tier: 3 pet bowls/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -14267,7 +14401,7 @@
     },
     {
       "name": "generate_pet_tag",
-      "description": "Generate a 3D-printable pet ID tag.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a 3D-printable pet ID tag.\n\nFree tier: 3 pet tags/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -14346,7 +14480,7 @@
     },
     {
       "name": "generate_rolling_tray",
-      "description": "Generate a rolling tray \u2014 a shallow rectangular work tray with a concave *cove* inner wall, so loose contents sweep clean into a corner instead of catching a 90-degree edge.  Decorate the interior work surface and the exterior underside, both.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a rolling tray \u2014 a shallow rectangular work tray with a concave *cove* inner wall, so loose contents sweep clean into a corner instead of catching a 90-degree edge.  Decorate the interior work surface and the exterior underside, both.\n\nFree tier: 3 rolling trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -14433,7 +14567,7 @@
     },
     {
       "name": "generate_soap_dish",
-      "description": "Generate a draining soap dish with optional bottom branding.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a draining soap dish with optional bottom branding.\n\nFree tier: 3 soap dishes/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -14510,7 +14644,7 @@
     },
     {
       "name": "generate_wall_plaque",
-      "description": "Generate a wall-mountable photo plaque.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a wall-mountable photo plaque.\n\nFree tier: 3 wall plaques/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -16364,7 +16498,7 @@
     },
     {
       "name": "apply_geometric_texture",
-      "description": "Apply a procedural texture as physical surface relief.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Apply a procedural texture as physical surface relief.\n\nFree tier: 3 textures/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "textures",
       "parameters": {
@@ -16588,7 +16722,7 @@
     },
     {
       "name": "apply_image_texture",
-      "description": "Apply a photo-based texture as a tiled deboss/emboss pattern.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Apply a photo-based texture as a tiled deboss/emboss pattern.\n\nFree tier: 3 textures/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "textures",
       "parameters": {
@@ -16738,7 +16872,7 @@
     },
     {
       "name": "apply_procedural_texture",
-      "description": "Apply a multicolor procedural texture (requires AMS/MMU for multi-material printing).\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Apply a multicolor procedural texture (requires AMS/MMU for multi-material printing).\n\nFree tier: 3 textures/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "textures",
       "parameters": {
@@ -17117,7 +17251,7 @@
     },
     {
       "name": "recover_texture_detail",
-      "description": "Turn a model's painted-on detail into REAL printable relief.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Turn a model's painted-on detail into REAL printable relief.\n\nFree tier: 3 textures/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "textures",
       "parameters": {
