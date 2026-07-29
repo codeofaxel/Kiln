@@ -37,7 +37,8 @@ All three modes use the same MCP tools and CLI commands. No printer and no insta
 
 The short version of the capability map. Everything below is reachable through the same MCP tools and CLI.
 
-- **Design.** Describe a part in plain language and Kiln designs it — no external AI service or API key required — then previews it and iterates with you. Common items (coasters, keychains, trays, nameplates, and more) route to dedicated generators. Parametric templates, STEP/STL import, and opt-in cloud generation providers round out the ways a design can start.
+- **Design.** Describe a part in plain language and Kiln designs it — no external AI service or API key required — then previews it and iterates with you. Common items (coasters, keychains, trays, nameplates, and more) route to dedicated generators. Parametric templates, STEP/STL import, and opt-in cloud generation providers round out the ways a design can start. A multi-part model can be imported with its named parts intact and turned into a buildable kit: the largest printable scale, proof the pieces physically fit, and plate-by-plate packing.
+- **See it in 3D.** Models render from every angle before printing, and on the hosted connection you can turn a design over interactively — inline in AI apps that support embedded panels, or through a shareable link.
 - **Validate before you print.** Every model can be checked for printability before it reaches a printer: overhangs, thin walls, bridging, bed adhesion, support needs, warping risk, and more — scored, graded, and paired with concrete fixes. Parts that physically can't succeed (too big for the plate, a material your hotend can't melt) are caught up front, free.
 - **Print and monitor.** Slice with your installed slicer, print on any supported printer, and monitor with camera snapshots, progress, temperatures, and health checks. Failed prints get diagnosis, guided recovery, and — on supported setups — resume from the layer where the print stopped.
 - **Decorate.** Photos, logos, QR codes, text, and procedural textures can be applied to models for single- or multi-color printing (paid tiers; see [pricing](https://kiln3d.com/pricing)).
@@ -93,6 +94,8 @@ To update later: `kiln self-update` (or ask your AI assistant — it will offer 
 kiln signin        # create your free account (optional, unlocks stats and saved designs)
 kiln install-mcp   # connects Kiln to Claude Desktop, Claude Code, and Codex automatically
 ```
+
+Kiln's hosted connection speaks the July 2026 revision of the Model Context Protocol: long-running work hands back a ticket you can check on, and confirmations (like a fulfillment order's price) come back as real questions in your app. Older clients keep working unchanged.
 
 Restart your AI app and it can run your printer. Using a different MCP client? `kiln install-mcp --print` prints the config — or paste it yourself:
 
