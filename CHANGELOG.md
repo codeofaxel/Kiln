@@ -7,6 +7,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Recommend from the spools you actually own.** Ask what to print in and
+  Kiln can answer from your real shelf and loaded filament instead of the
+  whole catalog. It names the printer that has it, or tells you it needs a
+  swap. Nothing suitable? You get an honest "you'd need to buy this" — and
+  if something you don't own fits much better, Kiln says so.
+
 - **Drop in CAD files and print them — free for everyone.** Kiln now reads
   STEP, the format every CAD program and machine shop speaks. Hand any Kiln
   tool a `.step` and it becomes a printable model automatically — and a
