@@ -118,6 +118,7 @@ from kiln.generation import (
     validate_mesh,
 )
 from kiln.heater_watchdog import HeaterWatchdog
+from kiln.tool_results import unwrap_tool_result
 
 try:
     from kiln.licensing import (
@@ -1192,7 +1193,17 @@ def _get_adapter() -> PrinterAdapter:
             raise RuntimeError(
                 "KILN_PRINTER_SERIAL environment variable is not set.  Set it to your Bambu printer's serial number."
             )
-        _adapter = BambuAdapter(host=host, access_code=api_key, serial=serial)
+        # Thread the configured model through, like the Creality branch
+        # above and _build_adapter_from_config_entry both do — bed-aware
+        # planners (e.g. split-to-fit) resolve the machine's envelope from
+        # the adapter's model, so dropping it here strands the default
+        # printer with no known bed.
+        _adapter = BambuAdapter(
+            host=host,
+            access_code=api_key,
+            serial=serial,
+            printer_model=_PRINTER_MODEL or None,
+        )
     elif printer_type == "elegoo":
         if ElegooAdapter is None:
             raise RuntimeError(
@@ -4355,7 +4366,9 @@ def start_print(
             )
             _audit("start_print", "preflight_skipped", details={"file": file_name})
         else:
-            pf = preflight_check(remote_file=file_name, accept_paused=resume_from_paused)
+            pf = unwrap_tool_result(
+                preflight_check(remote_file=file_name, accept_paused=resume_from_paused)
+            )
             if not pf.get("ready", False):
                 # Build a detailed remediation message from individual checks
                 failed = [c for c in pf.get("checks", []) if not c.get("passed", False)]
@@ -7115,6 +7128,10 @@ def register_printer(
                 host=host,
                 access_code=api_key,
                 serial=serial,
+                # Like the Creality branch: the declared model is the
+                # adapter's identity too, not just a safety-profile hint —
+                # bed-aware planners read it back off the registry.
+                printer_model=printer_model or None,
                 tls_mode="pin" if verify_ssl else "insecure",
             )
         elif printer_type == "elegoo":
@@ -7905,7 +7922,7 @@ def download_and_upload(
             if block := _emergency_latch_error("download_and_upload", safety_printer):
                 return block
             # Mandatory pre-flight safety gate before starting print.
-            pf = preflight_check()
+            pf = unwrap_tool_result(preflight_check())
             if not pf.get("ready", False):
                 _audit(
                     "download_and_upload",
@@ -8100,7 +8117,7 @@ def rotate_model(
     rotation_x: float = 0.0,
     rotation_y: float = 0.0,
     output_path: str | None = None,
-) -> dict[str, Any]:
+) -> dict:
     """Rotate a 3D model file (STL or 3MF) by specified angles before slicing.
 
     Useful for improving print quality — rotating a tall narrow part 45° around

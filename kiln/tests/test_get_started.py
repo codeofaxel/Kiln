@@ -9,7 +9,14 @@ Covers:
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from kiln.server import get_started
+
+# get_started() adds a serve_process_pileup key only when leftover serve
+# processes cross the warning threshold on the running machine; pin the
+# healthy report so the key-contract assertion is machine-independent.
+_HEALTHY_SIBLINGS = {"count": 1, "pids": [111], "oldest_age": "05:44", "warning": None}
 
 
 class TestGetStarted:
@@ -20,7 +27,11 @@ class TestGetStarted:
         assert result["success"] is True
 
     def test_has_required_keys(self):
-        result = get_started()
+        with patch(
+            "kiln.serve_siblings.check_serve_siblings",
+            return_value=_HEALTHY_SIBLINGS,
+        ):
+            result = get_started()
         expected_keys = {
             "success",
             "update",

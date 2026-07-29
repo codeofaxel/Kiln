@@ -170,8 +170,9 @@ def apply_decoration_spec(
     # shape ``[Image, payload_dict]`` (inline preview + data).  This
     # function's contract is "decorate_surface's result DICT" — unwrap
     # to the payload so callers never juggle transport shapes.
-    if isinstance(result, (list, tuple)):
-        result = next((x for x in result if isinstance(x, dict)), result)
+    from kiln.tool_results import unwrap_tool_result
+
+    result = unwrap_tool_result(result)
     if isinstance(result, dict):
         path = _decorated_path(result)
         if path and "decorated_model_path" not in result:

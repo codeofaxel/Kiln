@@ -1618,11 +1618,12 @@ class TestRegisterPrinter:
         class FakeBambuAdapter:
             name = "bambu"
 
-            def __init__(self, *, host, access_code, serial, tls_mode):
+            def __init__(self, *, host, access_code, serial, tls_mode, printer_model=None):
                 self.host = host
                 self.access_code = access_code
                 self.serial = serial
                 self.tls_mode = tls_mode
+                self._printer_model = (printer_model or "").strip().lower()
 
             def set_safety_profile(self, profile_id):
                 self.profile_id = profile_id

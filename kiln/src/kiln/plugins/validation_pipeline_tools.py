@@ -451,7 +451,7 @@ class _ValidationPipelinePlugin:
             target_height_mm: float = 0,
             printer_id: str = "",
             material: str = "PLA",
-        ) -> dict[str, Any]:
+        ) -> dict:
             """Prepare any AI-generated model for printing — auto-fixes the unit problem.
 
             AI model generators (Meshy, Tripo, Stability, Gemini) routinely

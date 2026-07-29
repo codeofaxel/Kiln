@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln.events import EventType
+from kiln.tool_results import unwrap_tool_result
 
 _logger = logging.getLogger(__name__)
 
@@ -1217,7 +1218,7 @@ class _MonitoringToolsPlugin:
                 )
 
                 # -- Automatic pre-flight safety gate (mandatory) --
-                pf = _srv.preflight_check()
+                pf = unwrap_tool_result(_srv.preflight_check())
                 if not pf.get("ready", False):
                     _srv._audit(
                         "start_monitored_print",

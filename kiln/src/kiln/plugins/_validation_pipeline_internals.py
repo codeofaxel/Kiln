@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from kiln.support_assessment import MATERIAL_ALIASES as _MATERIAL_ALIASES
+from kiln.tool_results import unwrap_tool_result
 
 _logger = logging.getLogger(__name__)
 
@@ -424,7 +425,7 @@ def _auto_scale_if_needed(
     try:
         from kiln.server import rescale_model
 
-        result = rescale_model(stl_path, scale_factor=scale_factor)
+        result = unwrap_tool_result(rescale_model(stl_path, scale_factor=scale_factor))
         scaled_path = result.get("path", "")
         if scaled_path and Path(scaled_path).exists():
             return scaled_path, scale_factor
