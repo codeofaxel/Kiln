@@ -763,7 +763,13 @@ def visualize_model(
         successful = [v for v in views if v.get("path")]
         failed = [v for v in views if not v.get("path")]
 
-        return {
+        # A preview is a picture of a 3D thing; the stage is the thing.  Every
+        # user-facing render in both packages funnels through here, so one wire
+        # gives every one of them the turn-it-over link instead of each tool
+        # remembering to ask.  Cost is bounded by the content-addressed cache
+        # in stage_link: a sixteen-pose inspection sheet of one mesh uploads
+        # once, and re-rendering an unchanged design uploads not at all.
+        result = {
             "success": len(successful) > 0,
             "views": views,
             "output_dir": output_dir,
@@ -781,6 +787,9 @@ def visualize_model(
                 )
             ),
         }
+        from kiln.stage_link import attach_stage_link
+
+        return attach_stage_link(result, file_path)
 
     finally:
         if is_wrapper:

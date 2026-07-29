@@ -1111,6 +1111,20 @@ def _install_mcp_request_context_capture() -> None:
             # result and cannot raise.  The result rides along so mapped
             # outcome counters can skip failure-shaped returns.
             _record_local_tool_call(name, result)
+            # Backstop for the turn-it-over link: the render path already
+            # attaches one (model_visualizer), which covers every tool that
+            # shows a preview.  This catches the rest — a tool that produces
+            # a mesh without rendering it — so the capability is not a
+            # per-tool branch anybody can forget.  The content-addressed
+            # cache makes the already-attached case free.  Only a dict
+            # result can carry a new key; once the MCP layer has serialised
+            # a result into content blocks there is nothing left to attach
+            # to, and rewriting serialised text to sneak one in is how a
+            # wire format gets corrupted.
+            with contextlib.suppress(Exception):
+                from kiln.stage_link import attach_stage_link
+
+                attach_stage_link(result)
             return result
         finally:
             _current_mcp_request_context.reset(token)
