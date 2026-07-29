@@ -438,7 +438,11 @@ class _MaterialToolsPlugin:
                 try:
                     from kiln.printability import analyze_printability as _analyze
 
-                    report = _analyze(model_path)
+                    report = _analyze(
+                        model_path,
+                        material=material or "pla",
+                        printer_id=printer_id or None,
+                    )
                     if report.bed_adhesion is not None:
                         risk = report.bed_adhesion.adhesion_risk
                         adhesion_status = "ok" if risk == "low" else ("warning" if risk == "medium" else "critical")

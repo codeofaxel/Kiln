@@ -586,7 +586,9 @@ class _DesignToolsPlugin:
                 # question — always surface the heuristic-grade upgrade nudge.
                 from kiln.load_bearing_detector import attach_load_bearing_nudge
 
-                return attach_load_bearing_nudge(result, force=True)
+                return attach_load_bearing_nudge(
+                    result, force=True, material=material,
+                )
             except Exception as exc:
                 _logger.error("Load estimation failed: %s", exc, exc_info=True)
                 return {"success": False, "error": str(exc)}
@@ -1709,6 +1711,7 @@ class _DesignToolsPlugin:
         def analyze_warping_risk(
             file_path: str,
             material: str = "pla",
+            printer_id: str = "",
         ) -> dict:
             """Analyze warping risk for a 3D model based on geometry and material.
 
@@ -1729,6 +1732,8 @@ class _DesignToolsPlugin:
                 file_path: Path to STL or OBJ file to analyze.
                 material: Material ID (e.g. "pla", "abs", "petg"). Defaults to PLA.
                     Used to look up thermal warping tendency.
+                printer_id: Optional registered printer whose real geometry
+                    and calibration should inform the analysis.
 
             Examples:
                 analyze_warping_risk("/path/to/model.stl", material="abs")
@@ -1737,7 +1742,9 @@ class _DesignToolsPlugin:
             from kiln.printability import analyze_printability
 
             try:
-                report = analyze_printability(file_path, material=material)
+                report = analyze_printability(
+                    file_path, material=material, printer_id=printer_id or None,
+                )
                 if report.warping is not None:
                     result = report.warping.to_dict()
                     result["success"] = True

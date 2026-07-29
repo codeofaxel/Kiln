@@ -160,7 +160,11 @@ class _EstimateToolsPlugin:
 
                 if ext in _PRINTABLE_EXTENSIONS:
                     try:
-                        report = analyze_printability(input_path)
+                        report = analyze_printability(
+                            input_path,
+                            material=material,
+                            printer_id=printer_id or None,
+                        )
                         printability_dict = report.to_dict()
 
                         # 6. Adhesion recommendation

@@ -1137,7 +1137,11 @@ class _SlicerToolsPlugin:
                             recommend_adhesion,
                         )
 
-                        report = _analyze_printability(input_path)
+                        report = _analyze_printability(
+                            input_path,
+                            material=material or "pla",
+                            printer_id=effective_printer_id or None,
+                        )
                         if report.bed_adhesion:
                             has_enclosure = False
                             is_bs = False

@@ -262,7 +262,11 @@ class _PrintabilityToolsPlugin:
             )
 
             try:
-                report = _analyze(model_path)
+                report = _analyze(
+                    model_path,
+                    material=material,
+                    printer_id=printer_id or None,
+                )
                 if report.bed_adhesion is None:
                     return {
                         "success": True,
@@ -364,7 +368,11 @@ class _PrintabilityToolsPlugin:
                     try:
                         from kiln.printability import analyze_printability as _analyze
 
-                        report = _analyze(model_path)
+                        report = _analyze(
+                            model_path,
+                            material=material or "pla",
+                            printer_id=printer_id or None,
+                        )
                         model_analysis = report.to_dict()
                         if report.bed_adhesion:
                             signals["adhesion_risk"] = report.bed_adhesion.adhesion_risk
