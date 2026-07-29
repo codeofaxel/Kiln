@@ -224,6 +224,17 @@ jobs:
 
       - name: Publish kiln3d to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # A duplicate upload must not cascade.  publish-mcp-registry and
+          # publish-clawhub both `needs: publish-kiln`, so PyPI's 400 "file
+          # already exists" — what a manual publish or a resumed partial run
+          # produces — failed this job and SKIPPED both registries, leaving
+          # the release announced on PyPI and nowhere else (1.3.0 shipped
+          # that way on 2026-07-29).  The version itself is still guarded:
+          # validate-version refuses a tag that does not match the package.
+          # Every sibling package here already sets this; the one that
+          # cascades was the one that did not.
+          skip-existing: true
 
   build-octoprint-cli:
     needs: [test, validate-version]
