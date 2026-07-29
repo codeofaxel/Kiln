@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-29T03:48:21.537785+00:00",
-  "tool_count": 399,
+  "generated": "2026-07-29T08:17:02.536936+00:00",
+  "tool_count": 402,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -8366,6 +8366,311 @@
       }
     },
     {
+      "name": "assess_conformal_coating_application",
+      "description": "Assess a populated board's conformal-coating and process path.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "use_description": {
+            "title": "Use Description",
+            "type": "string"
+          },
+          "threats": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Threats"
+          },
+          "electrical_role": {
+            "default": "",
+            "title": "Electrical Role",
+            "type": "string"
+          },
+          "contact_stack": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Contact Stack"
+          },
+          "contact_reviews": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Contact Reviews"
+          },
+          "unknown_critical_contacts": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Unknown Critical Contacts"
+          },
+          "geometry_flags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Geometry Flags"
+          },
+          "must_protect_zones": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Must Protect Zones"
+          },
+          "keep_outs_documented": {
+            "default": false,
+            "title": "Keep Outs Documented",
+            "type": "boolean"
+          },
+          "cleanliness_evidence": {
+            "default": false,
+            "title": "Cleanliness Evidence",
+            "type": "boolean"
+          },
+          "chemical_exposures": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Chemical Exposures"
+          },
+          "chemical_exposure_details_complete": {
+            "default": false,
+            "title": "Chemical Exposure Details Complete",
+            "type": "boolean"
+          },
+          "candidate_family": {
+            "default": "",
+            "title": "Candidate Family",
+            "type": "string"
+          },
+          "exact_product": {
+            "default": "",
+            "title": "Exact Product",
+            "type": "string"
+          },
+          "exact_product_family": {
+            "default": "",
+            "title": "Exact Product Family",
+            "type": "string"
+          },
+          "exact_product_family_verified": {
+            "default": false,
+            "title": "Exact Product Family Verified",
+            "type": "boolean"
+          },
+          "exact_product_revision": {
+            "default": "",
+            "title": "Exact Product Revision",
+            "type": "string"
+          },
+          "supplier_data_current": {
+            "default": false,
+            "title": "Supplier Data Current",
+            "type": "boolean"
+          },
+          "current_sds_available": {
+            "default": false,
+            "title": "Current Sds Available",
+            "type": "boolean"
+          },
+          "sds_revision": {
+            "default": "",
+            "title": "Sds Revision",
+            "type": "string"
+          },
+          "application_method": {
+            "default": "",
+            "title": "Application Method",
+            "type": "string"
+          },
+          "cure_method": {
+            "default": "",
+            "title": "Cure Method",
+            "type": "string"
+          },
+          "process_capabilities": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Process Capabilities"
+          },
+          "spray_controls_available": {
+            "default": false,
+            "title": "Spray Controls Available",
+            "type": "boolean"
+          },
+          "solvent_controls_available": {
+            "default": false,
+            "title": "Solvent Controls Available",
+            "type": "boolean"
+          },
+          "isocyanate_status": {
+            "default": "unknown",
+            "title": "Isocyanate Status",
+            "type": "string"
+          },
+          "uv_equipment_protocol_available": {
+            "default": false,
+            "title": "Uv Equipment Protocol Available",
+            "type": "boolean"
+          },
+          "shadow_geometry": {
+            "default": false,
+            "title": "Shadow Geometry",
+            "type": "boolean"
+          },
+          "secondary_cure_verified": {
+            "default": false,
+            "title": "Secondary Cure Verified",
+            "type": "boolean"
+          },
+          "coverage_inspection": {
+            "default": false,
+            "title": "Coverage Inspection",
+            "type": "boolean"
+          },
+          "rework_required": {
+            "default": false,
+            "title": "Rework Required",
+            "type": "boolean"
+          },
+          "rework_plan_documented": {
+            "default": false,
+            "title": "Rework Plan Documented",
+            "type": "boolean"
+          },
+          "high_consequence": {
+            "default": false,
+            "title": "High Consequence",
+            "type": "boolean"
+          },
+          "regulated_scope": {
+            "default": false,
+            "title": "Regulated Scope",
+            "type": "boolean"
+          },
+          "compliance_claim": {
+            "default": false,
+            "title": "Compliance Claim",
+            "type": "boolean"
+          },
+          "governance_requested": {
+            "default": false,
+            "title": "Governance Requested",
+            "type": "boolean"
+          },
+          "configuration_id": {
+            "default": "",
+            "title": "Configuration Id",
+            "type": "string"
+          },
+          "configuration_revision": {
+            "default": "",
+            "title": "Configuration Revision",
+            "type": "string"
+          },
+          "evidence_case_id": {
+            "default": "",
+            "title": "Evidence Case Id",
+            "type": "string"
+          },
+          "product_document_revision_id": {
+            "default": "",
+            "title": "Product Document Revision Id",
+            "type": "string"
+          },
+          "safety_document_revision_id": {
+            "default": "",
+            "title": "Safety Document Revision Id",
+            "type": "string"
+          },
+          "render_packet": {
+            "default": false,
+            "title": "Render Packet",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "use_description"
+        ],
+        "title": "assess_conformal_coating_applicationArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "assess_fair_reaccomplishment",
       "description": "Detect FAI re-accomplishment signals from evidence drift.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "enterprise",
@@ -8998,6 +9303,284 @@
           "action"
         ],
         "title": "manage_fair_registryArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "manage_protection_outcomes",
+      "description": "Record and read real outcome observations for a protected board configuration (Enterprise).\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "enterprise",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "evidence_case_id": {
+            "default": "",
+            "title": "Evidence Case Id",
+            "type": "string"
+          },
+          "source_event_id": {
+            "default": "",
+            "title": "Source Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "state": {
+            "default": "",
+            "title": "State",
+            "type": "string"
+          },
+          "article_reference": {
+            "default": "",
+            "title": "Article Reference",
+            "type": "string"
+          },
+          "observed_on": {
+            "default": "",
+            "title": "Observed On",
+            "type": "string"
+          },
+          "evidence_grade": {
+            "default": "unverified_report",
+            "title": "Evidence Grade",
+            "type": "string"
+          },
+          "causal_status": {
+            "default": "reported",
+            "title": "Causal Status",
+            "type": "string"
+          },
+          "evidence_reference": {
+            "default": "",
+            "title": "Evidence Reference",
+            "type": "string"
+          },
+          "execution_reference": {
+            "default": "",
+            "title": "Execution Reference",
+            "type": "string"
+          },
+          "observation_window": {
+            "default": "",
+            "title": "Observation Window",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "manage_protection_outcomesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "manage_supplier_document_evidence",
+      "description": "Create and maintain controlled supplier evidence (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "category": "engineering_intelligence",
+      "parameters": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "supplier_name": {
+            "default": "",
+            "title": "Supplier Name",
+            "type": "string"
+          },
+          "product_name": {
+            "default": "",
+            "title": "Product Name",
+            "type": "string"
+          },
+          "document_type": {
+            "default": "",
+            "title": "Document Type",
+            "type": "string"
+          },
+          "revision_label": {
+            "default": "",
+            "title": "Revision Label",
+            "type": "string"
+          },
+          "document_text": {
+            "default": "",
+            "title": "Document Text",
+            "type": "string"
+          },
+          "identity_spans": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Identity Spans"
+          },
+          "product_form": {
+            "default": "",
+            "title": "Product Form",
+            "type": "string"
+          },
+          "lot_identifier": {
+            "default": "",
+            "title": "Lot Identifier",
+            "type": "string"
+          },
+          "region": {
+            "default": "global",
+            "title": "Region",
+            "type": "string"
+          },
+          "language": {
+            "default": "en",
+            "title": "Language",
+            "type": "string"
+          },
+          "issue_date": {
+            "default": "",
+            "title": "Issue Date",
+            "type": "string"
+          },
+          "source_filename": {
+            "default": "",
+            "title": "Source Filename",
+            "type": "string"
+          },
+          "source_url": {
+            "default": "",
+            "title": "Source Url",
+            "type": "string"
+          },
+          "reviewed_by": {
+            "default": "",
+            "title": "Reviewed By",
+            "type": "string"
+          },
+          "review_acknowledged": {
+            "default": false,
+            "title": "Review Acknowledged",
+            "type": "boolean"
+          },
+          "correction_reason": {
+            "default": "",
+            "title": "Correction Reason",
+            "type": "string"
+          },
+          "supersedes_revision_id": {
+            "default": "",
+            "title": "Supersedes Revision Id",
+            "type": "string"
+          },
+          "document_id": {
+            "default": "",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "document_revision_id": {
+            "default": "",
+            "title": "Document Revision Id",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "design_version_id": {
+            "default": "",
+            "title": "Design Version Id",
+            "type": "string"
+          },
+          "document_revision_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Document Revision Ids"
+          },
+          "manual_id": {
+            "default": "",
+            "title": "Manual Id",
+            "type": "string"
+          },
+          "bom_items": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Bom Items"
+          },
+          "currentness_attestations": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Currentness Attestations"
+          },
+          "purpose": {
+            "default": "conformal_coating",
+            "title": "Purpose",
+            "type": "string"
+          },
+          "created_by": {
+            "default": "",
+            "title": "Created By",
+            "type": "string"
+          },
+          "evidence_case_id": {
+            "default": "",
+            "title": "Evidence Case Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "manage_supplier_document_evidenceArguments",
         "type": "object"
       }
     },

@@ -169,6 +169,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   Kiln Enterprise adds what a shop needs to prove its parts pass an ESD audit.
   The safety basics are free for everyone. See https://kiln3d.com/pricing.
 
+- **Conformal-coating help for circuit boards (Business+).** Kiln helps
+  you pick a coating for a populated board, flags how it could fail and
+  what you still need to prove, and keeps the safety basics free on
+  every tier. It never approves a coating or signs off a board — that
+  stays with a qualified person.
+
+- **Always know which supplier spec you built on (Business+).**
+  Suppliers quietly revise the data sheets for their materials and
+  chemicals. Give Kiln a data sheet and it locks that exact version to
+  your design, keeps a copy you can pull back up anytime — and when you
+  bring in a newer revision, it flags every decision that was built on
+  the old one.
+
+- **Learns from your real results (Enterprise).** Kiln remembers your
+  inspection and field outcomes for a given setup and surfaces them next
+  time — as context that never overrides a safety check.
+
 - **Tidy your workshop (Pro+).** Archive a design to hide it from your list,
   and restore it anytime — nothing is ever lost. See
   https://kiln3d.com/pricing.
