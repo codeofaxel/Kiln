@@ -125,17 +125,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   with both current and older RepRapFirmware — including the Vision Miner
   22 IDEX v4.
 
-- **Wrap your own image around any model.** Hand Kiln a photo or pattern and it
-  becomes real, printable surface texture across the whole object — curved,
-  organic, or imported, not just a flat face. Kiln sizes it to print at a
-  believable scale and tells you plainly when a pattern is too big for the
-  object to show it properly.
-
-- **Finishes you can shape.** Flip which parts of a pattern stand proud, deepen
-  the carve, soften it, or fade it out near the edges so it blends into the
-  surface — and round things like balls and ornaments now wrap properly instead
-  of seaming. The same controls are now in the web studio at kiln3d.com, behind
-  an "Advanced finish" panel.
+- **Your texture work goes further.** Kiln's texture engine now wraps your
+  own image around the whole object rather than one face, lets you shape the
+  finish (invert it, deepen it, soften it, fade it into the surface), and can
+  raise detail that was only painted on a model into real printable relief.
+  Purely additive, so walls never thin and your original file is untouched.
+  Free (3 detail recoveries a month; unlimited on Kiln Pro). The same finish
+  controls are now in the web studio at kiln3d.com, behind an "Advanced
+  finish" panel.
 
 - **High-temperature engineering plastics, now first-class.** Kiln
   recognizes six advanced polymers — PEEK, PEI (1010 and 9085), PEKK, PPSU,
