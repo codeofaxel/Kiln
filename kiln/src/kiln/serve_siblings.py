@@ -161,20 +161,25 @@ def check_serve_siblings() -> dict:
     }
     threshold = _warn_threshold()
     if len(procs) >= threshold:
-        # Plain-English first: the reader may not know what a PID is.
-        # "Quit and reopen" genuinely fixes it — once the client apps
-        # close, the leftover servers lose their parent and the orphan
-        # watchdog (kiln.parent_watchdog) shuts them down within a
-        # minute.  PIDs trail as a power-user shortcut only.
+        # Plain-English, no chore assigned: the reader may not know
+        # what a PID is, and "go restart everything now" is friction.
+        # The honest framing is self-healing — once the client apps
+        # close (which happens in normal life anyway), the leftovers
+        # lose their parent and the orphan watchdog
+        # (kiln.parent_watchdog) shuts them down within a minute.  No
+        # urgency is implied because none exists: leftovers cost
+        # memory, not correctness.  PIDs trail as a power-user
+        # shortcut only.
         result["warning"] = (
             f"{len(procs)} background copies of Kiln's server are running "
             f"(oldest has been up {_humanize_etime(result['oldest_age'])}). "
             f"Each open agent session normally keeps just one — the rest "
             f"are leftovers from closed sessions, quietly using memory. "
-            f"Easiest fix: fully quit and reopen your Claude/MCP apps; "
-            f"leftover servers shut themselves down within a minute of "
-            f"their app closing. (Power users can instead kill the oldest "
-            f"process IDs directly: {result['pids'][:10]}.)"
+            f"No action needed: they clean themselves up within a minute "
+            f"of their app fully closing, so they'll clear next time you "
+            f"quit your Claude/MCP apps. (Power users who want the memory "
+            f"back sooner can kill the oldest process IDs: "
+            f"{result['pids'][:10]}.)"
         )
     return result
 

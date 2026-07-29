@@ -137,19 +137,21 @@ class TestCheckServeSiblings:
         assert report["pids"] == sorted(report["pids"], reverse=True)
         assert report["oldest_age"] is not None
 
-    def test_warning_leads_with_plain_english_fix(
+    def test_warning_is_plain_english_and_assigns_no_chore(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The primary instruction must work for someone who has never
-        heard of a PID: quit and reopen the apps (the orphan watchdog
-        then reaps the leftovers).  PIDs may only trail as a power-user
-        aside."""
+        """The warning must work for someone who has never heard of a
+        PID, and must not read as a task: the honest framing is
+        self-healing (leftovers clear when the apps next close), with
+        no urgency because none exists.  PIDs may only trail as a
+        power-user aside."""
         monkeypatch.delenv("KILN_SERVE_SIBLING_WARN_THRESHOLD", raising=False)
         with _fake_ps(self._procs(6)):
             warning = serve_siblings.check_serve_siblings()["warning"]
-        assert "quit and reopen" in warning
-        # The app-restart fix must come before any mention of process IDs.
-        assert warning.index("quit and reopen") < warning.index("process IDs")
+        assert "No action needed" in warning
+        assert "clean themselves up" in warning
+        # The self-healing explanation comes before any mention of PIDs.
+        assert warning.index("No action needed") < warning.index("process IDs")
         # No raw ps etime in the prose — ages are humanized.
         assert "hour" in warning or "minute" in warning or "day" in warning
 
