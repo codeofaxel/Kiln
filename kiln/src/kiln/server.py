@@ -8114,7 +8114,7 @@ def rotate_model(
     rotation_x: float = 0.0,
     rotation_y: float = 0.0,
     output_path: str | None = None,
-) -> dict[str, Any]:
+) -> dict:
     """Rotate a 3D model file (STL or 3MF) by specified angles before slicing.
 
     Useful for improving print quality — rotating a tall narrow part 45° around
