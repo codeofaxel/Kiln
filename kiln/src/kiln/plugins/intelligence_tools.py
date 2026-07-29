@@ -539,7 +539,9 @@ class _IntelligenceToolsPlugin:
 
             Pass ``on_hand_only=True`` to recommend only from materials you
             physically have — recorded spools (``add_spool``) plus what's
-            loaded on your machines (AMS/CFS sync).  The recommendation's
+            loaded on your machines (AMS/CFS sync).  Scoped to one printer
+            this works on every tier; sweeping a multi-machine fleet in one
+            call is a Kiln Business feature (https://kiln3d.com/pricing).  The recommendation's
             ``availability`` block then says WHERE the material is: which
             machine has it loaded, or that it's on the shelf and needs a
             spool swap first.  With ``printer_id`` the loaded half is
@@ -586,8 +588,28 @@ class _IntelligenceToolsPlugin:
 
                 on_hand: list[dict[str, Any]] | None = None
                 if on_hand_only:
-                    from kiln.material_inventory import get_on_hand_materials
+                    from kiln.material_inventory import (
+                        fleet_scope_verdict,
+                        get_on_hand_materials,
+                    )
                     from kiln.persistence import get_db
+
+                    # Scoped to one machine, this is single-machine
+                    # awareness and free on every tier.  Unscoped, it
+                    # sweeps the whole fleet — the same cross-machine
+                    # answer the fleet inventory tools sell, so it goes
+                    # through the same shared gate.
+                    if not printer_id and (
+                        blocked := fleet_scope_verdict(
+                            "Recommending across every machine you own"
+                        )
+                    ):
+                        blocked["upgrade_hint"] = (
+                            "Pass printer_id to answer for one machine on "
+                            "your current plan, or see "
+                            "https://kiln3d.com/pricing for fleet-wide answers."
+                        )
+                        return blocked
 
                     inventory = get_on_hand_materials(
                         get_db(), printer_name=printer_id or None

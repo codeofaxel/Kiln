@@ -53,6 +53,11 @@ class _MaterialInventoryToolsPlugin:
             import kiln.server as _srv
 
             try:
+                from kiln.material_inventory import fleet_scope_verdict
+
+                if blocked := fleet_scope_verdict("Fleet material summary"):
+                    return blocked
+
                 from kiln.material_inventory import (
                     get_fleet_material_summary as _summary,
                 )
@@ -83,6 +88,11 @@ class _MaterialInventoryToolsPlugin:
             import kiln.server as _srv
 
             try:
+                from kiln.material_inventory import fleet_scope_verdict
+
+                if blocked := fleet_scope_verdict("Fleet consumption history"):
+                    return blocked
+
                 from kiln.material_inventory import get_consumption_history
                 from kiln.persistence import get_db
 
@@ -115,6 +125,11 @@ class _MaterialInventoryToolsPlugin:
             import kiln.server as _srv
 
             try:
+                from kiln.material_inventory import fleet_scope_verdict
+
+                if blocked := fleet_scope_verdict("Fleet consumption forecasting"):
+                    return blocked
+
                 from kiln.material_inventory import forecast_consumption
                 from kiln.persistence import get_db
 
@@ -138,8 +153,10 @@ class _MaterialInventoryToolsPlugin:
             """Check if a printer has enough material for a print job.
 
             When material is insufficient, generates actionable suggestions
-            including alternative printers with enough stock, shelf spool
-            availability, pause-and-swap hints, and purchase links.
+            including shelf spool availability, pause-and-swap hints, and
+            purchase links.  Suggestions that point at OTHER machines are a
+            fleet-wide answer and need Kiln Business; the check itself —
+            does THIS printer have enough — works on every tier.
 
             Args:
                 printer_name: Name of the printer to check.
@@ -152,6 +169,7 @@ class _MaterialInventoryToolsPlugin:
                 from kiln.material_inventory import (
                     check_material_sufficiency as _check,
                 )
+                from kiln.material_inventory import fleet_scope_verdict
                 from kiln.persistence import get_db
 
                 db = get_db()
@@ -161,7 +179,26 @@ class _MaterialInventoryToolsPlugin:
                     required_grams=required_grams,
                     material_type=material_type,
                 )
-                return {"success": True, "check": check.to_dict()}
+                payload = check.to_dict()
+                # The single-machine verdict is never gated — a user must
+                # always be able to ask whether the printer in front of
+                # them has enough filament.  Only the cross-machine half
+                # ("printer B has 800g") is the fleet answer.
+                if fleet_scope_verdict("Alternative printers") is not None:
+                    hidden = len(payload.get("alternative_printers") or [])
+                    payload["alternative_printers"] = []
+                    payload["suggestions"] = [
+                        s for s in payload.get("suggestions", [])
+                        if "Printer " not in s
+                    ]
+                    if hidden:
+                        payload["fleet_alternatives_available"] = hidden
+                        payload["upgrade_hint"] = (
+                            f"{hidden} other machine(s) of yours have this "
+                            f"material — fleet answers are a Kiln Business "
+                            f"feature (https://kiln3d.com/pricing)."
+                        )
+                return {"success": True, "check": payload}
             except Exception as exc:
                 _logger.exception("Unexpected error in check_material_sufficiency")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
@@ -177,6 +214,11 @@ class _MaterialInventoryToolsPlugin:
             import kiln.server as _srv
 
             try:
+                from kiln.material_inventory import fleet_scope_verdict
+
+                if blocked := fleet_scope_verdict("Fleet restock suggestions"):
+                    return blocked
+
                 from kiln.material_inventory import (
                     get_restock_suggestions as _restock,
                 )
@@ -213,6 +255,11 @@ class _MaterialInventoryToolsPlugin:
             import kiln.server as _srv
 
             try:
+                from kiln.material_inventory import fleet_scope_verdict
+
+                if blocked := fleet_scope_verdict("Finding which printers hold a material"):
+                    return blocked
+
                 from kiln.material_inventory import (
                     find_printers_with_material as _find,
                 )
@@ -249,6 +296,11 @@ class _MaterialInventoryToolsPlugin:
             import kiln.server as _srv
 
             try:
+                from kiln.material_inventory import fleet_scope_verdict
+
+                if blocked := fleet_scope_verdict("Fleet job assignment"):
+                    return blocked
+
                 from kiln.material_inventory import (
                     optimize_fleet_assignment as _assign,
                 )
@@ -279,6 +331,11 @@ class _MaterialInventoryToolsPlugin:
             import kiln.server as _srv
 
             try:
+                from kiln.material_inventory import fleet_scope_verdict
+
+                if blocked := fleet_scope_verdict("Fleet spool-swap planning"):
+                    return blocked
+
                 from kiln.material_inventory import suggest_spool_swaps as _swaps
                 from kiln.persistence import get_db
 

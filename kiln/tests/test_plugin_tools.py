@@ -1472,6 +1472,82 @@ class TestRecommendMaterialOnHand:
         assert "NOT ON HAND" in rec["reasoning"]
         assert rec["material"]["name"]  # catalog pick still present
 
+    @staticmethod
+    def _fleet_of(monkeypatch, machines: int, cap: int | None = 1):
+        """Fake a multi-machine install with a controllable tier cap."""
+        import sys
+        import types
+
+        import kiln.registry as registry_mod
+
+        class _Reg:
+            count = machines
+
+        monkeypatch.setattr(registry_mod, "get_registry", lambda: _Reg())
+        lic = sys.modules.get("kiln.licensing")
+        if lic is None:
+            lic = types.ModuleType("kiln.licensing")
+            monkeypatch.setitem(sys.modules, "kiln.licensing", lic)
+        monkeypatch.setattr(lic, "get_tier", lambda: "free", raising=False)
+        monkeypatch.setattr(
+            lic, "max_printers_for_tier", lambda _t: cap, raising=False
+        )
+
+    def test_fleet_wide_sweep_needs_business(
+        self, intelligence_tools, seeded_db, monkeypatch
+    ) -> None:
+        """Sweeping every machine at once is the same cross-machine answer
+        the fleet inventory tools sell — so it takes the same gate."""
+        seeded_db.save_material("a1-left", 0, "PETG", remaining_grams=800.0)
+        self._fleet_of(monkeypatch, machines=3, cap=1)
+
+        with patch("kiln.persistence.get_db", return_value=seeded_db):
+            result = intelligence_tools["recommend_material"](
+                intent="strong", on_hand_only=True
+            )
+        assert result["success"] is False
+        assert result["code"] == "TIER_FLEET_SCOPE"
+        assert "printer_id" in result["upgrade_hint"]
+
+    def test_one_machine_scope_stays_free_on_a_fleet(
+        self, intelligence_tools, seeded_db, monkeypatch
+    ) -> None:
+        """Asking about ONE machine is single-machine awareness — free at
+        every tier, even when the install has many printers."""
+        seeded_db.save_material("a1-left", 0, "PETG", remaining_grams=800.0)
+        self._fleet_of(monkeypatch, machines=3, cap=1)
+
+        with patch("kiln.persistence.get_db", return_value=seeded_db):
+            result = intelligence_tools["recommend_material"](
+                intent="strong", on_hand_only=True, printer_id="a1-left"
+            )
+        assert result["success"] is True
+        assert result["recommendation"]["material"]["name"] == "petg"
+
+    def test_single_printer_install_sweeps_free(
+        self, intelligence_tools, seeded_db, monkeypatch
+    ) -> None:
+        """A one-printer install is never a fleet: the unscoped sweep is
+        just 'my printer and my shelf'."""
+        seeded_db.save_material("only-one", 0, "PETG", remaining_grams=800.0)
+        self._fleet_of(monkeypatch, machines=1, cap=1)
+
+        with patch("kiln.persistence.get_db", return_value=seeded_db):
+            result = intelligence_tools["recommend_material"](
+                intent="strong", on_hand_only=True
+            )
+        assert result["success"] is True
+        assert result["on_hand_scope"] == "fleet"
+
+    def test_catalog_mode_is_never_fleet_gated(
+        self, intelligence_tools, monkeypatch
+    ) -> None:
+        """Plain catalog advice touches no machine state — a fleet gate
+        must never reach it."""
+        self._fleet_of(monkeypatch, machines=9, cap=1)
+        result = intelligence_tools["recommend_material"](intent="strong")
+        assert result["success"] is True
+
     def test_empty_inventory_is_honest(
         self, intelligence_tools, seeded_db
     ) -> None:

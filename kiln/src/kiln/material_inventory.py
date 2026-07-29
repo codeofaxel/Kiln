@@ -254,6 +254,60 @@ def _get_purchase_urls(
     return {"amazon": f"https://www.amazon.com/s?k={query}"}
 
 
+def fleet_scope_verdict(feature: str) -> dict[str, Any] | None:
+    """Refuse a FLEET-WIDE material answer below Business; ``None`` allows.
+
+    Every tool here that answers ACROSS machines calls this one helper —
+    a per-door branch is how the drift starts, and the printer cap already
+    taught us that lesson at ``register_printer`` (2026-07-27).
+
+    What is gated is the cross-machine ANSWER, not possession: registering
+    and using printers stays free at every tier, and a single-machine
+    install is never a fleet, so it passes here without a licence check or
+    a network call — free and Pro keep full inventory awareness of their
+    own printer and their own shelf.  The moment an answer spans more
+    machines than the tier allows, the fleet view is what Business sells.
+
+    Soft-passes on anything it cannot prove (unknown tier, broken
+    registry, any error): a licensing check must never be the reason a
+    user cannot see their own materials.
+    """
+    try:
+        from kiln.registry import get_registry
+
+        # Fast path — one machine can never be a fleet.  Costs nothing,
+        # which is what nearly every install pays here.
+        machines = get_registry().count
+        if machines <= 1:
+            return None
+
+        try:
+            from kiln.licensing import get_tier, max_printers_for_tier
+
+            cap = max_printers_for_tier(get_tier())
+        except Exception:
+            cap = 1  # free-tier fallback: kiln-pro absent
+        if cap is None or cap <= 0 or machines <= cap:
+            return None
+
+        return {
+            "success": False,
+            "error": (
+                f"{feature} answers across all {machines} of your machines, "
+                f"and fleet views are a Kiln Business feature."
+            ),
+            "code": "TIER_FLEET_SCOPE",
+            "machines": machines,
+            "upgrade_hint": (
+                "Ask about one printer to stay on your current plan, or see "
+                "https://kiln3d.com/pricing for fleet-wide answers."
+            ),
+        }
+    except Exception:  # noqa: BLE001 — never block a user from their own data
+        logger.debug("fleet-scope gate soft-passed", exc_info=True)
+        return None
+
+
 def _determine_urgency(days_until_empty: float | None) -> str:
     """Map days-until-empty to urgency level."""
     if days_until_empty is None:
