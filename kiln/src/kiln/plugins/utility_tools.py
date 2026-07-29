@@ -151,6 +151,126 @@ class _UtilityToolsPlugin:
             return {"success": bool(result.get("ok")), **result}
 
         # ------------------------------------------------------------------
+        # trim_serve_processes
+        # ------------------------------------------------------------------
+
+        @mcp.tool()
+        def trim_serve_processes(
+            confirm: bool = False,
+            open_sessions: int | None = None,
+            force: bool = False,
+        ) -> dict:
+            """Close leftover Kiln servers left behind by closed sessions.
+
+            Every agent session spawns its own background Kiln server;
+            client apps don't reliably close them when a session ends, so
+            they accumulate and quietly hold memory. This is the cleanup
+            the pile-up warning (health_check / kiln_health / get_started)
+            offers.
+
+            WHY THIS IS SAFE: closing a server never stops a physical
+            print — the printer keeps going regardless. What a close can
+            end is MONITORING (a running watch loop). So this refuses to
+            act while any printer has a job in flight, and otherwise the
+            worst case is that a still-open session reconnects. This
+            session's own server is never closed.
+
+            AGENT CONTRACT (important):
+              * ASK THE USER how many agent sessions they actually have
+                open right now and pass it as open_sessions — they are
+                the one source of truth for that, and it beats guessing
+                from process age. Never ask them for a PID.
+              * Confirm before acting. Called without confirm, this
+                returns the plan (how many would close, how many stay)
+                to show the user; pass confirm=True once they agree.
+              * If it comes back blocked because something is printing,
+                tell the user what's printing and leave it alone — offer
+                to clean up after the print finishes rather than
+                reaching for force.
+
+            Args:
+                confirm: Set True to actually close the leftovers.
+                open_sessions: The user's own count of agent sessions
+                    currently open. Keeps that many most-recently-started
+                    servers and proposes the rest.
+                force: Proceed even though a printer has a job in flight.
+                    Only when the user explicitly insists, knowing that
+                    monitoring for that job may stop.
+            """
+            from kiln.serve_siblings import perform_trim, plan_trim, printing_now
+
+            if not confirm:
+                plan = plan_trim(open_sessions=open_sessions)
+                if plan["scanned"] is None:
+                    return {
+                        "success": False,
+                        "status": "unavailable",
+                        "message": "Cannot read the process table on this platform.",
+                    }
+                printing = printing_now()
+                if not plan["candidates"]:
+                    return {
+                        "success": True,
+                        "status": "nothing_to_trim",
+                        "plan": plan,
+                        "message": (
+                            f"All {plan['scanned']} running Kiln server(s) look "
+                            f"current — nothing to clean up."
+                        ),
+                    }
+                if printing["active"]:
+                    return {
+                        "success": True,
+                        "status": "blocked_printing",
+                        "plan": plan,
+                        "printing": printing,
+                        "message": (
+                            f"{', '.join(printing['active'])} — a print is in "
+                            f"progress, so closing servers now could stop the "
+                            f"monitoring for it. {len(plan['candidates'])} "
+                            f"leftover server(s) are waiting; offer to clean "
+                            f"them up once the print finishes."
+                        ),
+                    }
+                return {
+                    "success": True,
+                    "status": "needs_confirmation",
+                    "plan": plan,
+                    "printing": printing,
+                    "message": (
+                        f"{len(plan['candidates'])} leftover Kiln server(s) can "
+                        f"be closed ({len(plan['kept'])} stay, including this "
+                        f"session's). Nothing is printing, so the worst case is "
+                        f"that a still-open session reconnects. Want me to close "
+                        f"them? Call again with confirm=true once the user says "
+                        f"yes."
+                    ),
+                }
+
+            result = perform_trim(open_sessions=open_sessions, force=force)
+            if result["blocked"]:
+                return {
+                    "success": False,
+                    "status": "blocked_printing",
+                    **result,
+                    "message": (
+                        f"Not closing anything: {', '.join(result['printing']['active'])} "
+                        f"— a print is in progress and monitoring could be lost. "
+                        f"Try again once it finishes."
+                    ),
+                }
+            return {
+                "success": not result["failed"],
+                "status": "trimmed",
+                **result,
+                "message": (
+                    f"Closed {len(result['trimmed'])} leftover server(s); "
+                    f"{len(result['kept'])} kept (including this session's)."
+                    + (f" {len(result['failed'])} could not be closed." if result["failed"] else "")
+                ),
+            }
+
+        # ------------------------------------------------------------------
         # health_check
         # ------------------------------------------------------------------
 
@@ -502,9 +622,14 @@ class _UtilityToolsPlugin:
                     _serve_pileup = {
                         **_sibling_report,
                         "action": (
-                            "Tell the user about this now — they can't see it "
-                            "from inside a session. Relay the warning verbatim; "
-                            "the user decides which processes to trim."
+                            "Mention this to the user — they can't see it from "
+                            "inside a session — and offer to clean it up with "
+                            "trim_serve_processes. Ask how many agent sessions "
+                            "they actually have open and pass that as "
+                            "open_sessions; never ask them for a PID. It is not "
+                            "urgent and no print is at risk (the tool refuses "
+                            "while anything is printing), so raise it once, "
+                            "lightly, and drop it if they aren't interested."
                         ),
                     }
             except Exception:  # noqa: BLE001

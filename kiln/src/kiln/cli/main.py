@@ -9308,6 +9308,93 @@ def _deep_network_diagnostics(host: str, printer_cfg: dict) -> list[dict]:
 
 
 @cli.command()
+@click.option(
+    "--open-sessions",
+    type=int,
+    default=None,
+    help=(
+        "How many agent sessions you actually have open. Keeps that many "
+        "most-recently-started servers and closes the rest."
+    ),
+)
+@click.option("--yes", "assume_yes", is_flag=True, help="Skip the confirmation prompt.")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Proceed even while a printer has a job in flight (monitoring may stop).",
+)
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def trim(open_sessions: int | None, assume_yes: bool, force: bool, json_mode: bool) -> None:
+    """Close leftover Kiln servers from agent sessions you've closed.
+
+    Every agent session spawns its own background server, and client
+    apps don't reliably close them when a session ends.  This closes
+    the leftovers.  It never closes this process, and it refuses while
+    a printer has a job in flight — closing a server can't stop a
+    print, but it can stop the monitoring of one.
+    """
+    import json as _json
+
+    from kiln.serve_siblings import perform_trim, plan_trim, printing_now
+
+    plan = plan_trim(open_sessions=open_sessions)
+    if plan["scanned"] is None:
+        click.echo("Cannot read the process table on this platform.", err=True)
+        raise SystemExit(1)
+
+    if not plan["candidates"]:
+        if json_mode:
+            click.echo(_json.dumps({"trimmed": [], "plan": plan}))
+        else:
+            click.echo(
+                f"All {plan['scanned']} running Kiln server(s) look current — "
+                f"nothing to clean up."
+            )
+        return
+
+    printing = printing_now()
+    if printing["active"] and not force:
+        msg = (
+            f"Not closing anything — a print is in progress: "
+            f"{', '.join(printing['active'])}. Closing a server can't stop the "
+            f"print itself, but it can stop Kiln monitoring it. Run again once "
+            f"it finishes (or --force if you're sure)."
+        )
+        if json_mode:
+            click.echo(_json.dumps({"blocked": True, "printing": printing, "plan": plan}))
+        else:
+            click.echo(msg, err=True)
+        raise SystemExit(1)
+
+    if not json_mode:
+        click.echo(f"{len(plan['candidates'])} leftover Kiln server(s) can be closed:")
+        for cand in plan["candidates"]:
+            click.echo(f"  · {cand['reason']}")
+        click.echo(f"Keeping {len(plan['kept'])} (including this session's own).")
+        if printing["unknown"]:
+            click.echo(
+                f"  note: couldn't check {len(printing['unknown'])} printer(s) — "
+                f"{'; '.join(printing['unknown'][:3])}"
+            )
+    if not assume_yes and not click.confirm("Close them?", default=True):
+        click.echo("Nothing closed.")
+        return
+
+    result = perform_trim(open_sessions=open_sessions, force=force)
+    if json_mode:
+        click.echo(_json.dumps(result))
+    else:
+        click.echo(
+            f"Closed {len(result['trimmed'])} leftover server(s); "
+            f"{len(result['kept'])} kept."
+        )
+        if result["failed"]:
+            click.echo(f"{len(result['failed'])} could not be closed:", err=True)
+            for item in result["failed"]:
+                click.echo(f"  PID {item['pid']}: {item['error']}", err=True)
+
+
+@cli.command()
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.option("--deep", is_flag=True, help="Run deep network diagnostics when printer is unreachable.")
 @click.pass_context
