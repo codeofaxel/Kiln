@@ -3,7 +3,7 @@
   "name": "io.github.codeofaxel/kiln",
   "title": "Kiln",
   "description": "Kiln MCP server for agents: design, slice, print, monitor, and recover physical objects safely.",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "repository": {
     "url": "https://github.com/codeofaxel/Kiln",
     "source": "github"
@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "kiln3d",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "runtimeHint": "uvx",
       "packageArguments": [
         { "type": "positional", "value": "serve" }
