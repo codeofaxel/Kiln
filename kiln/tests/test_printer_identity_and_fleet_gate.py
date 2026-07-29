@@ -334,3 +334,89 @@ class TestPossessionIsFree:
 
         src = inspect.getsource(srv.register_printer)
         assert "TIER_PRINTER_LIMIT" not in src
+
+
+# ---------------------------------------------------------------------------
+# The declared model must reach the adapter — every construction door
+# ---------------------------------------------------------------------------
+
+
+class TestModelReachesAdapter:
+    """A printer's declared model is identity, not just a safety hint.
+
+    Bed-aware planners (split-to-fit) resolve a registered machine's usable
+    envelope from its adapter's model.  The named-config door threaded it,
+    but the default-printer door and the register_printer tool dropped it —
+    so the one printer most users have reported no known bed (2026-07-28).
+    """
+
+    def test_register_printer_threads_model_into_bambu_adapter(
+        self, monkeypatch,
+    ):
+        pytest.importorskip("paho.mqtt")
+        import kiln.server as srv
+
+        monkeypatch.setattr(srv, "_check_auth", lambda _s: None)
+        reg = srv._get_registry()
+        for name in list(reg.list_names()):
+            reg.unregister(name)
+
+        result = srv.register_printer(
+            name="bench-a1",
+            printer_type="bambu",
+            host="192.0.2.20",
+            api_key="12345678",
+            serial="TESTSERIAL01",
+            printer_model="bambu_a1",
+            persist=False,
+            verify_connection=False,
+        )
+        assert result["success"] is True
+        adapter = reg.get("bench-a1")
+        assert getattr(adapter, "_printer_model", "") == "bambu_a1"
+        reg.unregister("bench-a1")
+
+    def test_model_reaches_modeless_adapters_via_safety_profile(
+        self, monkeypatch,
+    ):
+        import kiln.server as srv
+
+        monkeypatch.setattr(srv, "_check_auth", lambda _s: None)
+        reg = srv._get_registry()
+        for name in list(reg.list_names()):
+            reg.unregister(name)
+
+        result = srv.register_printer(
+            name="bench-neptune",
+            printer_type="moonraker",
+            host="192.0.2.21",
+            printer_model="neptune4_plus",
+            persist=False,
+            verify_connection=False,
+        )
+        assert result["success"] is True
+        adapter = reg.get("bench-neptune")
+        assert getattr(adapter, "_safety_profile_id", "") == "neptune4_plus"
+        reg.unregister("bench-neptune")
+
+    def test_every_bambu_construction_site_passes_the_model(self):
+        """Structural pin for the doors a behavioural test can't reach
+        (the module-global default-printer path): no BambuAdapter may be
+        constructed in server.py without threading printer_model."""
+        import inspect
+        import re
+
+        import kiln.server as srv
+
+        src = inspect.getsource(srv)
+        sites = [
+            m for m in re.finditer(r"BambuAdapter\((?:[^()]|\([^()]*\))*\)", src)
+        ]
+        assert sites, "expected BambuAdapter construction sites in server.py"
+        missing = [
+            m.group(0) for m in sites if "printer_model" not in m.group(0)
+        ]
+        assert not missing, (
+            "BambuAdapter constructed without printer_model= — the adapter "
+            f"loses its model identity: {missing}"
+        )

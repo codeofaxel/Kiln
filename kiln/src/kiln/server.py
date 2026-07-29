@@ -1192,7 +1192,17 @@ def _get_adapter() -> PrinterAdapter:
             raise RuntimeError(
                 "KILN_PRINTER_SERIAL environment variable is not set.  Set it to your Bambu printer's serial number."
             )
-        _adapter = BambuAdapter(host=host, access_code=api_key, serial=serial)
+        # Thread the configured model through, like the Creality branch
+        # above and _build_adapter_from_config_entry both do — bed-aware
+        # planners (e.g. split-to-fit) resolve the machine's envelope from
+        # the adapter's model, so dropping it here strands the default
+        # printer with no known bed.
+        _adapter = BambuAdapter(
+            host=host,
+            access_code=api_key,
+            serial=serial,
+            printer_model=_PRINTER_MODEL or None,
+        )
     elif printer_type == "elegoo":
         if ElegooAdapter is None:
             raise RuntimeError(
@@ -7115,6 +7125,10 @@ def register_printer(
                 host=host,
                 access_code=api_key,
                 serial=serial,
+                # Like the Creality branch: the declared model is the
+                # adapter's identity too, not just a safety-profile hint —
+                # bed-aware planners read it back off the registry.
+                printer_model=printer_model or None,
                 tls_mode="pin" if verify_ssl else "insecure",
             )
         elif printer_type == "elegoo":
