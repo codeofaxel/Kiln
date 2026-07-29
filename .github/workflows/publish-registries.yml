@@ -1,0 +1,120 @@
+# Publish an existing release to the discovery registries, on demand.
+#
+# The release workflow publishes PyPI first and gates the MCP Registry and
+# ClawHub behind it (`needs: publish-kiln`).  That order is right — a
+# directory should not advertise a version pip cannot install — but it
+# leaves no way to finish a release whose PyPI step already succeeded by
+# some other route.  When 1.3.0 was uploaded to PyPI by hand, the release
+# run hit a duplicate-file rejection and skipped BOTH registries, and
+# nothing could re-run them: a `release` event replays the workflow file
+# from the TAG's commit, so a fix landed on main cannot reach it.
+#
+# This is that missing door.  It publishes only the two directories, takes
+# the version explicitly, and refuses to advertise anything PyPI is not
+# already serving — so it can restore a half-finished release without ever
+# inventing one.  Safe to re-run: both registries no-op on a version they
+# already carry.
+name: Publish registries (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, without the leading v (e.g. 1.3.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse a version PyPI is not serving
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::'$VERSION' is not a 3-segment version"
+            exit 1
+          fi
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            "https://pypi.org/pypi/kiln3d/${VERSION}/json")
+          if [ "$code" != "200" ]; then
+            echo "::error::kiln3d ${VERSION} is not on PyPI (HTTP ${code}) — publish it first"
+            exit 1
+          fi
+          echo "kiln3d ${VERSION} is live on PyPI"
+
+  publish-mcp-registry:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      # The tag, not the default branch: server.json must describe the
+      # version being advertised, not whatever main has moved on to.
+      # `verify` is a hard dependency and rejects anything that is not
+      # three dot-separated integers, so this ref cannot carry a payload.
+      - name: Checkout the released tag
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: v${{ inputs.version }}
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Authenticate to MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Sync server.json to the published version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' \
+            server.json > server.tmp && mv server.tmp server.json
+
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish
+
+  publish-clawhub:
+    needs: verify
+    runs-on: ubuntu-latest
+
+    steps:
+      # `verify` is a hard dependency and rejects anything that is not
+      # three dot-separated integers, so this ref cannot carry a payload.
+      - name: Checkout the released tag
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: v${{ inputs.version }}
+
+      - name: Install ClawHub CLI
+        run: npm install -g clawhub
+
+      - name: Log in to ClawHub
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+        run: clawhub login --token "$CLAWHUB_TOKEN" --no-browser
+
+      - name: Prepare minimal publish folder
+        run: |
+          mkdir -p /tmp/kiln-clawhub
+          cp SKILL.md server.json README.md LICENSE /tmp/kiln-clawhub/
+
+      - name: Publish to ClawHub
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          clawhub publish /tmp/kiln-clawhub \
+            --slug kiln \
+            --name "Kiln" \
+            --version "$VERSION" \
+            --changelog "v${VERSION} — see https://github.com/codeofaxel/Kiln/releases/tag/v${VERSION}" \
+            --tags "latest,3d-printing,mcp,ai-agent,bambu,moonraker,octoprint,prusa,klipper,elegoo"
