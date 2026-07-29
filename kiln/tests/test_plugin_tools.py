@@ -1315,6 +1315,37 @@ class TestRecommendMaterial:
             result = intelligence_tools["recommend_material"](intent="exotic material")
         assert "error" in result
 
+    def test_printer_id_forwarded_and_named_in_response(
+        self, intelligence_tools
+    ) -> None:
+        """Explicit printer_id reaches the engine AND the response names
+        the machine the answer was computed for — a mixed fleet needs to
+        know which printer the recommendation targets."""
+        mock_rec = MagicMock()
+        mock_rec.to_dict.return_value = {"material": "PETG-CF"}
+
+        with patch(
+            "kiln.material_routing.recommend_material", return_value=mock_rec
+        ) as mock_engine:
+            result = intelligence_tools["recommend_material"](
+                intent="strong", printer_id="a1-combo"
+            )
+        assert result["success"] is True
+        assert result["answered_for_printer"] == "a1-combo"
+        assert mock_engine.call_args.kwargs["printer_id"] == "a1-combo"
+
+    def test_no_printer_id_means_no_machine_claim(
+        self, intelligence_tools
+    ) -> None:
+        """Printer-agnostic answers must not claim a machine."""
+        mock_rec = MagicMock()
+        mock_rec.to_dict.return_value = {"material": "PLA"}
+
+        with patch("kiln.material_routing.recommend_material", return_value=mock_rec):
+            result = intelligence_tools["recommend_material"](intent="easy")
+        assert result["success"] is True
+        assert "answered_for_printer" not in result
+
 
 class TestListAvailableMaterials:
     """Tests for list_available_materials tool."""

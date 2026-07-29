@@ -282,14 +282,18 @@ class _IntelligenceToolsPlugin:
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool()
-        def get_model_print_history(file_hash: str) -> dict:
+        def get_model_print_history(file_hash: str, material: str = "") -> dict:
             """Get all print attempts for a model identified by file hash.
 
             Returns the complete history of print outcomes, settings, and
-            quality grades for a specific model.
+            quality grades for a specific model.  The success-rate metrics
+            cover every material by default; pass ``material`` to scope
+            them to one filament ("how does this do in PETG?").
 
             Args:
                 file_hash: SHA-256 hash of the model file.
+                material: Optional material filter for the success-rate
+                    metrics.  Empty = all materials.
             """
             import kiln.server as _srv
 
@@ -297,7 +301,7 @@ class _IntelligenceToolsPlugin:
                 from kiln.print_dna import get_model_history, get_success_rate
 
                 records = get_model_history(file_hash)
-                rate = get_success_rate(file_hash)
+                rate = get_success_rate(file_hash, material=material or None)
 
                 return {
                     "success": True,
@@ -516,6 +520,7 @@ class _IntelligenceToolsPlugin:
             has_enclosure: bool = False,
             has_heated_bed: bool = True,
             budget_usd: float | None = None,
+            printer_id: str = "",
         ) -> dict:
             """Recommend material from intent + printer capabilities (considers enclosure, bed, budget).
 
@@ -524,17 +529,28 @@ class _IntelligenceToolsPlugin:
             ``"make it cheap"``) into an optimal material recommendation
             with settings.
 
+            Pass ``printer_id`` to answer for a SPECIFIC machine — essential
+            on a mixed fleet, where "what should I run this in" depends on
+            which printer will run it.  The recommendation is then computed
+            against that machine's nozzle state (abrasive materials on a
+            brass nozzle get an explicit wear warning) and the response
+            names the machine it answered for.
+
             **Which material tool to use:**
 
             - Quick intent-based pick for your own printer? → ``recommend_material`` (this tool)
             - Designing a part and need engineering specs? → ``recommend_design_material``
             - Ordering a print from a service? → ``suggest_material_for_order``
+            - Which of MY printers has a material loaded? → ``find_printers_with_material``
+            - What's loaded across the fleet right now? → ``get_fleet_material_summary``
 
             Args:
                 intent: User intent text (e.g. ``"strong"``, ``"pretty"``).
                 has_enclosure: Whether the printer has an enclosure.
                 has_heated_bed: Whether the printer has a heated bed.
                 budget_usd: Optional maximum budget per kg in USD.
+                printer_id: Optional registered printer to answer for.
+                    Empty = printer-agnostic recommendation.
             """
             import kiln.server as _srv
 
@@ -552,9 +568,15 @@ class _IntelligenceToolsPlugin:
                     intent,
                     printer_capabilities=caps,
                     budget_usd=budget_usd,
+                    printer_id=printer_id,
                 )
 
-                return {"success": True, "recommendation": rec.to_dict()}
+                response = {"success": True, "recommendation": rec.to_dict()}
+                # Say which machine the answer was computed for — an
+                # unnamed printer context is an invisible assumption.
+                if printer_id:
+                    response["answered_for_printer"] = printer_id
+                return response
             except Exception as exc:
                 _logger.exception("Unexpected error in recommend_material")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")

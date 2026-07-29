@@ -149,8 +149,14 @@ class _GenerationAIToolsPlugin:
             provider: str = "meshy",
             format: str = "stl",
             style: str | None = None,
+            material: str = "",
         ) -> dict:
             """Generate a 3D model from a text prompt via external AI API (Meshy/etc).
+
+            Pass ``material`` when the user has named one ("print this in
+            TPU") — it steers the design-intelligence prompt enrichment
+            toward that material's constraints.  It is a design hint, not a
+            slicing setting; leave it empty when the material is undecided.
 
             Start here if user has no template/image — just a text description.
             For image-based generation, use ``generate_model_from_image``.
@@ -214,6 +220,7 @@ class _GenerationAIToolsPlugin:
                         max_len = get_provider_prompt_limit(provider)
                         improved = enhance_prompt_with_design_intelligence(
                             prompt,
+                            material=material or None,
                             printer_model=_srv._PRINTER_MODEL or None,
                             max_length=max_len,
                         )

@@ -382,7 +382,9 @@ class _DesignReasoningToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        def design_advisor(prompt: str, printer_model: str = "") -> dict:
+        def design_advisor(
+            prompt: str, printer_model: str = "", material: str = "",
+        ) -> dict:
             """Ask which generation method to use for a design idea (triage tool — call FIRST).
 
             Analyzes the design prompt and recommends:
@@ -394,6 +396,8 @@ class _DesignReasoningToolsPlugin:
 
             :param prompt: Text description of the desired object.
             :param printer_model: Optional printer model for constraints.
+            :param material: Optional material the user has already named
+                ("for ABS") — tunes the constraint analysis to it.
             :returns: Dict with recommendations.
             """
             import json
@@ -527,7 +531,11 @@ class _DesignReasoningToolsPlugin:
             try:
                 from kiln.design_intelligence import get_design_constraints
 
-                brief = get_design_constraints(prompt, printer_model=printer_model or None)
+                brief = get_design_constraints(
+                    prompt,
+                    material=material or None,
+                    printer_model=printer_model or None,
+                )
                 if brief.recommended_material:
                     mat = brief.recommended_material
                     recommendations["recommended_material"] = {

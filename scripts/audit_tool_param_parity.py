@@ -71,6 +71,14 @@ PARAM_PARITY_EXEMPT: dict[tuple[str, str], str] = {
     ("multi_copy_print", "printer_id"):
         "tool resolves the printer profile to bed_width_mm/bed_depth_mm "
         "itself — the engine's printer_id is an alternative route",
+    ("multi_copy_print", "material"):
+        "single-material execution door: material belongs to the slice "
+        "profile / reslice overrides; mixed-material batches route "
+        "through multi_material_print and multi_color_copies",
+    ("validate_assembly", "material"):
+        "per-part materials already feed the signal (load_bearing_signal("
+        "material=p.material) per part); the flagged call is the "
+        "interface-level one, which carries joint_type by design",
 }
 
 # (tool_name, param) -> one-line note.  KNOWN findings owed a product
@@ -78,24 +86,9 @@ PARAM_PARITY_EXEMPT: dict[tuple[str, str], str] = {
 # Reported as warnings, not failures, so the gate can hold the line on NEW
 # findings while the tail is worked down.  A stale entry fails the run.
 PARAM_PARITY_BASELINE: dict[tuple[str, str], str] = {
-    ("design_advisor", "material"):
-        "prompt-first door; whether to accept a material hint pre-design "
-        "is a product decision",
-    ("generate_model", "material"):
-        "generation-time material is usually unknown; deciding whether the "
-        "prompt enhancer should accept an intended material is a product call",
-    ("get_model_print_history", "material"):
-        "history aggregates across materials today; a material filter is a "
-        "product decision",
-    ("multi_copy_print", "material"):
-        "tool has no material param; the reslice pipeline takes overrides "
-        "elsewhere — needs a decision on exposing material here",
-    ("recommend_material", "printer_id"):
-        "tool derives printer context internally; explicit printer_id "
-        "targeting is a product decision",
-    ("validate_assembly", "material"):
-        "parts carry per-part materials; which one feeds the load-bearing "
-        "signal needs a design decision",
+    # (2026-07-28 round 2: the six original baseline rows were resolved —
+    # four doors gained the axis param, two moved to EXEMPT with verified
+    # reasons.  New findings start here.)
 }
 
 
