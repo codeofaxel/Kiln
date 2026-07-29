@@ -12171,6 +12171,18 @@ def main() -> None:
     from kiln.parent_watchdog import start_parent_watchdog
     start_parent_watchdog()
 
+    # Sibling pile-up check: the watchdog above only fires when a
+    # parent DIES; the common leak is a parent that lives on as an
+    # idle husk after its session ends, keeping its server alive.
+    # Nothing external reaps those, so each new server checks the
+    # process table at boot and warns on stderr when the machine has
+    # accumulated more ``kiln serve`` processes than any plausible
+    # number of live sessions.  Shared detector: kiln.serve_siblings
+    # (also wired into health_check / kiln_health / get_started /
+    # ``kiln doctor``).
+    from kiln.serve_siblings import log_sibling_warning_at_startup
+    log_sibling_warning_at_startup()
+
     # Community-contribution self-heal: flush any contributions a previous
     # session queued but couldn't send (offline / crash).  Silent,
     # opt-in-gated, best-effort on a daemon thread so it never delays boot

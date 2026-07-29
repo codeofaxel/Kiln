@@ -205,6 +205,17 @@ class _UtilityToolsPlugin:
                 _logger.debug("Failed to get billing health summary: %s", exc)
                 health_data["billing_health"] = {"status": "unknown"}
 
+            # Sibling serve processes — accumulated servers from closed
+            # sessions are the one health problem the server can't see
+            # from the inside.  Shared detector: kiln.serve_siblings.
+            try:
+                from kiln.serve_siblings import check_serve_siblings
+
+                health_data["serve_processes"] = check_serve_siblings()
+            except Exception as exc:
+                _logger.debug("Serve-sibling check failed: %s", exc)
+                health_data["serve_processes"] = {"count": None, "warning": None}
+
             try:
                 from kiln.emboss_generator import (
                     _OPENSCAD_MIN_VERSION_YEAR,
@@ -308,6 +319,16 @@ class _UtilityToolsPlugin:
             except Exception:  # noqa: BLE001
                 update_info = None
 
+            # Sibling serve processes — shared detector, see
+            # kiln.serve_siblings.  When `warning` is set, relay it to
+            # the user verbatim; the user decides what to trim.
+            try:
+                from kiln.serve_siblings import check_serve_siblings
+
+                serve_processes = check_serve_siblings()
+            except Exception:  # noqa: BLE001
+                serve_processes = {"count": None, "warning": None}
+
             return {
                 "success": True,
                 "version": kiln.__version__,
@@ -320,6 +341,7 @@ class _UtilityToolsPlugin:
                 "webhook_endpoints": len(_srv._get_webhook_mgr().list_endpoints()),
                 "modules": modules,
                 "safety_profile": safety_profile_info,
+                "serve_processes": serve_processes,
                 "healthy": True,
             }
 
@@ -466,10 +488,33 @@ class _UtilityToolsPlugin:
                     ),
                 }
 
+            # Serve-process pile-up nudge — get_started is the mandated
+            # first call, so it's where an agent learns the machine has
+            # accumulated servers from closed sessions.  Only included
+            # when the shared detector actually warns; a healthy count
+            # adds nothing to onboarding.
+            _serve_pileup = None
+            try:
+                from kiln.serve_siblings import check_serve_siblings
+
+                _sibling_report = check_serve_siblings()
+                if _sibling_report.get("warning"):
+                    _serve_pileup = {
+                        **_sibling_report,
+                        "action": (
+                            "Tell the user about this now — they can't see it "
+                            "from inside a session. Relay the warning verbatim; "
+                            "the user decides which processes to trim."
+                        ),
+                    }
+            except Exception:  # noqa: BLE001
+                _serve_pileup = None
+
             return {
                 "success": True,
                 "update": _update_info,
                 "account": _account,
+                **({"serve_process_pileup": _serve_pileup} if _serve_pileup else {}),
                 "overview": (
                     f"Kiln is agent infrastructure for 3D printing. This session "
                     f"has {live_tool_count} MCP tools ({live_capability_count} "

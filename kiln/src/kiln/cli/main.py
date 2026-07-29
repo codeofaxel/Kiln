@@ -9363,7 +9363,36 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
     except Exception as exc:
         checks.append({"name": "slicer", "ok": False, "detail": str(exc)})
 
-    # 4. Config / printers configured
+    # 4. Serve-process pile-up — servers accumulated from closed MCP
+    # sessions.  Shared detector (kiln.serve_siblings), same numbers
+    # the health_check / kiln_health / get_started tools report.
+    try:
+        from kiln.serve_siblings import check_serve_siblings
+
+        _siblings = check_serve_siblings()
+        if _siblings["count"] is None:
+            checks.append(
+                {
+                    "name": "serve_processes",
+                    "ok": True,
+                    "detail": "process scan unavailable on this platform",
+                }
+            )
+        else:
+            checks.append(
+                {
+                    "name": "serve_processes",
+                    "ok": _siblings["warning"] is None,
+                    "detail": (
+                        _siblings["warning"]
+                        or f"{_siblings['count']} running (normal: one per open MCP session)"
+                    ),
+                }
+            )
+    except Exception as exc:
+        checks.append({"name": "serve_processes", "ok": True, "detail": f"check skipped: {exc}"})
+
+    # 5. Config / printers configured
     printer_cfg = None
     try:
         printer_name = ctx.obj.get("printer")
@@ -9381,7 +9410,7 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
     except Exception as exc:
         checks.append({"name": "config", "ok": False, "detail": str(exc)})
 
-    # 5. Printer reachable (use adapter with auth, not raw HTTP)
+    # 6. Printer reachable (use adapter with auth, not raw HTTP)
     if printer_cfg:
         host = printer_cfg.get("host", "")
         if host:
@@ -9488,7 +9517,7 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
             }
         )
 
-    # 6. OpenSCAD — REQUIRED for local OpenSCAD-native design (Kiln's default
+    # 7. OpenSCAD — REQUIRED for local OpenSCAD-native design (Kiln's default
     #    "make" path), and it must be the development snapshot: the old stable
     #    build silently breaks SVG/text booleans and lacks the Manifold backend.
     #    Report honestly and version-check it (never label it "optional").
@@ -9590,7 +9619,7 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
             "detail": f"could not check STEP support ({type(_step_exc).__name__})",
         })
 
-    # 7. SQLite writable
+    # 8. SQLite writable
     db_dir = os.path.join(os.path.expanduser("~"), ".kiln")
     db_path = os.path.join(db_dir, "kiln.db")
     try:
@@ -9605,7 +9634,7 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
     except Exception as exc:
         checks.append({"name": "database", "ok": False, "detail": str(exc)})
 
-    # 8. WSL 2 detection
+    # 9. WSL 2 detection
     wsl = False
     if sys.platform == "linux":
         try:
