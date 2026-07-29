@@ -33,8 +33,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   `kiln install-step-backend`.
 
 - **Kiln's hosted connection speaks the newest protocol.** Connect Kiln to
-  Claude or any other AI client and it now uses the July 2026 revision of
-  the Model Context Protocol. Long-running work — texture carving, print
+  Claude or any other AI client and it now uses the 2026-07-28 Model Context
+  Protocol specification. Long-running work — texture carving, print
   repair, assembly booklets, technical drawings — hands back a ticket you
   can check on, so a slow job never blocks the conversation. Nothing
   changes for older clients.
