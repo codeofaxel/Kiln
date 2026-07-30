@@ -128,9 +128,33 @@ def _engineering_overlay_loaded(kind: str = "materials") -> bool:
         if attr is None:
             return False
         getattr(kb, attr)
-        return kb.has_private_overlay(kind)
+        if not kb.has_private_overlay(kind):
+            return False
     except Exception:
         return False
+
+    # The overlay merged — but merging is not the same as being entitled to
+    # what is inside it.  A whole-kind gate refuses the read outright, so the
+    # check above answered correctly; a FIELD-level gate lets the record
+    # through carrying only the free floor, and then "did it merge" says yes
+    # for everyone and this hint goes silent for the very callers it exists to
+    # tell.  Presence is not entitlement — the same distinction the pro bridge
+    # draws for feature modules.
+    #
+    # kiln-pro publishes the honest answer.  Absent (a free / public install),
+    # or on any error, fall back to what merging already established rather
+    # than inventing a verdict: a missing companion must never turn a working
+    # hint into a wrong one in either direction.
+    try:
+        from kiln_pro.hosted_intelligence import (  # type: ignore[import-not-found]
+            overlay_depth_withheld,
+        )
+    except ImportError:
+        return True
+    try:
+        return not overlay_depth_withheld(kind)
+    except Exception:  # noqa: BLE001 — a hint must not break the answer
+        return True
 
 
 # Free-tier upgrade-hint copy.  Kept short and terminal-friendly so MCP
