@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import sys
 import threading
 import time
 from datetime import date
@@ -45,6 +46,14 @@ def _recording_suppressed() -> bool:
     """
     if _STATS_PATH != _DEFAULT_STATS_PATH:
         return False
+    # A local `pytest` run sets no CI variable, so delegating to the
+    # heartbeat's CI check alone let developer test runs write real
+    # telemetry — the exact failure this guard was added to stop.  It
+    # was still happening on 2026-07-29, on 1.3.0, from a laptop.  Check
+    # the test runner FIRST; the CI list is the remote half of the same
+    # question, not the whole of it.
+    if os.environ.get("PYTEST_CURRENT_TEST") or "pytest" in sys.modules:
+        return True
     try:
         from kiln.heartbeat import _is_ci_environment
 
@@ -222,6 +231,11 @@ def _empty_day() -> dict[str, Any]:
         # heartbeat so we can see which tools are driving upgrades
         # vs. which are just hitting unsynced machines.
         "tier_denials": {},        # {"fleet_status": 2, "texture_apply": 1}
+        # Not-signed-in refusals: tool_name -> times a caller reached
+        # for a capability and was told to pair an account first.  The
+        # call never leaves the machine, so no server counter can see
+        # it — which made the product's most common refusal invisible.
+        "account_wall": {},        # {"apply_image_texture": 3}
         # Per-tool call counts: tool_name → times called today.  Counts
         # EVERY local tool dispatch (not just the six outcome events),
         # so the anonymous heartbeat can finally show what unsigned
@@ -245,6 +259,14 @@ _ROLLOVER_COUNTERS = (
     "textures", "slices", "downloads", "print_hours",
 )
 
+# The name->count maps carried through the day rollover alongside the
+# scalar counters above.  Kept separate because the lockstep test pins
+# _ROLLOVER_COUNTERS to _VALID_EVENTS (the scalar activity counters);
+# these are a different shape answering a different question.
+_ROLLOVER_MAPS = (
+    "tier_denials", "account_wall", "tool_calls",
+)
+
 
 def _archive_completed_day(data: dict[str, Any]) -> dict[str, Any]:
     """Return a fresh day that remembers the day that just ended.
@@ -262,6 +284,17 @@ def _archive_completed_day(data: dict[str, Any]) -> dict[str, Any]:
     previous = {"date": data.get("date")}
     for key in _ROLLOVER_COUNTERS:
         previous[key] = data.get(key, 0)
+    # The name→count maps need carrying for the same reason the scalars
+    # do, and were missed when this function was written.  The heartbeat
+    # samples at server start, so a denial recorded at 15:00 only ever
+    # shipped if the server also restarted before midnight; otherwise the
+    # day rolled over, the map reset to {}, and the evidence was gone.
+    # That is the likeliest reason only 8 of 747 production heartbeats
+    # carried any tier_denials at all.
+    for key in _ROLLOVER_MAPS:
+        carried = data.get(key)
+        if isinstance(carried, dict) and carried:
+            previous[key] = carried
     if previous["date"]:
         fresh["previous"] = previous
     # Print bookkeeping is not a counter — it spans the day boundary by
@@ -535,36 +568,66 @@ def record_print_hours_for_job(job_id: str, hours: float) -> None:
         _logger.debug("record_print_hours_for_job(%s) failed: %s", job_id, exc)
 
 
-def record_tier_denial(tool_name: str) -> None:
-    """Increment the TIER_REQUIRED denial counter for ``tool_name``.
+def _record_name_count(bucket: str, tool_name: str) -> None:
+    """Increment ``data[bucket][tool_name]`` for today.  Never raises.
 
-    Called from :func:`requires_tier`'s error path (both the public-Kiln
-    stub and the kiln-pro decorator).  Lets a post-hoc look at the
-    daily heartbeat show exactly which tools are hit by users whose
-    machines aren't synced to their paid tier — the funnel-leak
-    signal we were missing.
+    The three name→count maps (tool calls, tier denials, account-wall
+    hits) are the same structure with the same hygiene needs, so they
+    share one recorder.  They did not always: ``record_tier_denial`` was
+    written separately and validated nothing, which is how ``%s%s%s``
+    and ``/tmp/pp-fuzz`` reached the production heartbeat table while
+    the identically-shaped ``tool_calls`` map stayed clean.  Two
+    functions doing one job is how one of them ends up wrong.
 
-    Thread-safe, never raises — if anything goes wrong we drop the
-    event rather than interfering with tool-call error paths.
+    Keys must look like a real tool name (``_TOOL_NAME_RE``) and each
+    map is capped at ``_TOOL_CALLS_MAX_DISTINCT`` distinct names per day
+    so neither the local file nor the heartbeat payload can grow without
+    bound.  Names and counts only — never arguments or paths.
     """
-    name = (tool_name or "").strip() or "<unknown>"
-    # Tight bound on the label: the heartbeat JSON column has a size
-    # budget and someone passing a massive __name__ from a weird
-    # callable shouldn't be able to blow through it.  64 chars is
-    # enough for every tool name we ship and then some.
-    if len(name) > 64:
-        name = name[:64]
+    name = (tool_name or "").strip()
+    if not _TOOL_NAME_RE.match(name):
+        return  # not a real tool name — drop rather than pollute the map
     try:
         with _lock:
             data = _read()
-            buckets = data.get("tier_denials", {})
+            buckets = data.get(bucket, {})
             if not isinstance(buckets, dict):
                 buckets = {}
+            if name not in buckets and len(buckets) >= _TOOL_CALLS_MAX_DISTINCT:
+                return  # cap distinct names; existing ones still counted below
             buckets[name] = int(buckets.get(name, 0)) + 1
-            data["tier_denials"] = buckets
+            data[bucket] = buckets
             _write(data)
     except Exception as exc:
-        _logger.debug("record_tier_denial(%s) failed: %s", tool_name, exc)
+        _logger.debug("record %s[%s] failed: %s", bucket, tool_name, exc)
+
+
+def record_tier_denial(tool_name: str) -> None:
+    """Increment the TIER_REQUIRED denial counter for ``tool_name``.
+
+    Called from every path that refuses a caller for their licence tier:
+    :func:`requires_tier` here and in kiln-pro, and kiln-pro's inline
+    ``check_pro`` / ``check_business`` / ``check_enterprise`` gates.
+    Shows which locked doors people are actually pushing on.
+    """
+    _record_name_count("tier_denials", tool_name)
+
+
+def record_account_wall(tool_name: str) -> None:
+    """Increment the not-signed-in refusal counter for ``tool_name``.
+
+    Distinct from a tier denial, and far more common: this is a user who
+    reached for a capability and was told to pair an account first, so
+    the call never left the machine.  It was invisible for exactly that
+    reason — no server request means no server-side counter — which made
+    the most-hit refusal in the product the one nobody could see.
+
+    Kept as its own map rather than folded into ``tier_denials`` because
+    the two demand different answers.  A tier denial means "wants it,
+    won't pay yet"; an account-wall hit means "wants it, hasn't even
+    told us who they are".
+    """
+    _record_name_count("account_wall", tool_name)
 
 
 def record_tool_call(tool_name: str) -> None:
@@ -575,27 +638,8 @@ def record_tool_call(tool_name: str) -> None:
     just the six outcome events.  This is the only anonymous view of what
     a NOT-signed-in local user does — the per-user ledger only syncs when
     signed in.
-
-    Only genuine tool names (``_TOOL_NAME_RE``) are recorded, and no more
-    than ``_TOOL_CALLS_MAX_DISTINCT`` distinct names per day.  Names +
-    counts only — never arguments.  Thread-safe, never raises.
     """
-    name = (tool_name or "").strip()
-    if not _TOOL_NAME_RE.match(name):
-        return  # not a real tool name — drop rather than pollute the map
-    try:
-        with _lock:
-            data = _read()
-            buckets = data.get("tool_calls", {})
-            if not isinstance(buckets, dict):
-                buckets = {}
-            if name not in buckets and len(buckets) >= _TOOL_CALLS_MAX_DISTINCT:
-                return  # cap distinct names; existing ones still counted below
-            buckets[name] = int(buckets.get(name, 0)) + 1
-            data["tool_calls"] = buckets
-            _write(data)
-    except Exception as exc:
-        _logger.debug("record_tool_call(%s) failed: %s", tool_name, exc)
+    _record_name_count("tool_calls", tool_name)
 
 
 def get_daily_stats() -> dict[str, Any]:
@@ -614,6 +658,7 @@ def get_daily_stats() -> dict[str, Any]:
         "slicer_profiles": data.get("slicer_profiles", {}),
         "marketplace_sources": data.get("marketplace_sources", {}),
         "tier_denials": data.get("tier_denials", {}),
+        "account_wall": data.get("account_wall", {}),
         "tool_calls": data.get("tool_calls", {}),
         # The last COMPLETE day's counters (see _archive_completed_day).
         # The heartbeat reports these because the same-day counters it

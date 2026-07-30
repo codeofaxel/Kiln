@@ -11614,6 +11614,14 @@ def _paired_access_token() -> str:
         return _raw_paired_access_token()
 
 
+# Tier required by each pro tool, keyed by tool name and filled in by
+# ``_register_pro_tool_stubs`` from the manifest.  The manifest has
+# always carried a ``tier`` per tool; nothing read it, so all 345 paid
+# capabilities presented to an agent looking exactly like the 54 free
+# ones and no refusal could say which tier it needed.
+_PRO_TOOL_TIERS: dict[str, str] = {}
+
+
 def _pro_api_call(tool_name: str, **kwargs) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
 
@@ -11661,15 +11669,42 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
     else:
         bearer = ""
     if not bearer:
+        # The most-hit refusal in the product, and until now the only one
+        # that recorded nothing: it returns here without ever reaching a
+        # server, so no server-side counter could see it.  Best-effort.
+        try:
+            from kiln.daily_stats import record_account_wall
+
+            record_account_wall(tool_name)
+        except Exception:
+            pass
+        required_tier = _PRO_TOOL_TIERS.get(tool_name, "")
+        # Lead with what they get, then ONE action.  This message is the
+        # first and usually only thing a free user ever learns about a
+        # paid capability; "pair your account" answered a question they
+        # had not asked and named nothing they would want.
+        if required_tier:
+            message = (
+                f"'{tool_name}' is part of Kiln {required_tier.capitalize()}. "
+                "Sign in to get started — accounts are free and take a few "
+                "seconds: `python3 -m kiln signin`. "
+                f"What {required_tier.capitalize()} includes: "
+                "https://kiln3d.com/pricing"
+            )
+        else:
+            message = (
+                f"'{tool_name}' is included free — Kiln just needs to know "
+                "who you are to meter it fairly. Run `python3 -m kiln signin` "
+                "(a few seconds), or generate a code at "
+                "https://app.kiln3d.com/connect and run `python3 -m kiln pair <code>`."
+            )
         return {
             "status": "error",
-            "error": (
-                f"'{tool_name}' needs a paired Kiln account. "
-                "Run `python3 -m kiln signin`, or generate a code at "
-                "https://app.kiln3d.com/connect and run `python3 -m kiln pair <code>`."
-            ),
+            "error": message,
             "code": "KILN_ACCOUNT_NOT_PAIRED",
             "tool": tool_name,
+            "required_tier": required_tier or "free",
+            "upgrade_url": "https://kiln3d.com/pricing",
             "setup_hint": "python3 -m kiln signin",
         }
     import json
@@ -11773,6 +11808,17 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
             continue
 
         description = tool_def.get("description", name)
+        # Say what this costs, in the one place an agent always reads.
+        # An agent that knows the tier can tell the user "that needs
+        # Pro" before spending a call to find out.
+        tier = str(tool_def.get("tier") or "").strip().lower()
+        if tier and tier != "free":
+            _PRO_TOOL_TIERS[name] = tier
+            description = (
+                f"{description}\n\n"
+                f"Requires Kiln {tier.capitalize()}. "
+                f"Pricing: https://kiln3d.com/pricing"
+            )
         params_schema = tool_def.get("parameters", {})
 
         # Build the stub function.  Closures capture `name` by reference,
