@@ -98,27 +98,6 @@ def _merge_pro_overlay_if_available(
     return _deep_merge_dicts(public_data, overlay)
 
 
-#: Overlay kind -> the :class:`_DesignKnowledgeBase` property that reads it.
-#: One map for every table, so probing whether a table's curated depth was
-#: reachable never depends on the prober having been told about that table.
-#: A partial map silently answers "no overlay" for anything missing from it,
-#: which is the wrong answer in the dangerous direction.  Adding a table to
-#: ``_DesignKnowledgeBase._load`` adds a line here.
-_OVERLAY_KIND_PROPERTY = {
-    "materials": "materials",
-    "design_templates": "templates",
-    "functional_requirements": "requirements",
-    "load_tables": "load_tables",
-    "environment_compatibility": "environment",
-    "printer_profiles": "printers",
-    "material_troubleshooting": "troubleshooting",
-    "printer_material_compatibility": "printer_compatibility",
-    "post_processing": "post_processing",
-    "multi_material_pairing": "multi_material",
-    "skin_contact": "skin_contact",
-}
-
-
 def _engineering_overlay_loaded(kind: str = "materials") -> bool:
     """Probe whether one kiln-pro engineering overlay actually merged.
 
@@ -139,13 +118,16 @@ def _engineering_overlay_loaded(kind: str = "materials") -> bool:
     window, or the overlay endpoint is down.
     """
     try:
-        if _OVERLAY_KIND_PROPERTY.get(kind) is None:
-            return False
         # One question, asked of the same authority the table read asks, so the
         # hint can never contradict what the caller was actually served.  It
-        # used to take two — touch the property to force the merge, then read
-        # back a process-wide "did it merge" flag — which made the hint depend
-        # on who warmed the process rather than on who is asking.
+        # used to take three — check a hand-listed kind -> property map, touch
+        # the property to force the merge, then read back a process-wide "did
+        # it merge" flag.  The flag made the hint depend on who warmed the
+        # process rather than on who is asking; the map was a second copy of
+        # which kinds exist, and a copy can disagree — it shipped four of
+        # eleven entries, so seven tables answered "no overlay" and their
+        # cautions went silent.  An unknown kind is rejected by the loader
+        # itself, which logs it as the programming error it is.
         if not _get_kb().has_private_overlay(kind):
             return False
     except Exception:

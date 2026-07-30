@@ -44,7 +44,6 @@ from kiln.design_intelligence import (
     TroubleshootingResult,
     _DesignKnowledgeBase,
     _get_kb,
-    _OVERLAY_KIND_PROPERTY,
     _PublicMaterialProfile,
     _reset_knowledge_base,
     check_environment_compatibility,
@@ -1925,22 +1924,22 @@ class TestFreePathCautions:
         assert estimate_load_capacity("pla", 50.0, 40.0) is not None
         assert unestablished_caution("load_tables", "Nobody checked X.") == ""
 
-    def test_the_kind_map_covers_every_table_the_kb_merges(self):
+    def test_every_table_the_kb_merges_is_really_probeable(self, monkeypatch):
         """THE BUG, pinned in the direction it actually happened.
 
-        _OVERLAY_KIND_PROPERTY was a partial 4-entry map, so
-        _engineering_overlay_loaded answered "no overlay" for the seven tables
-        nobody had told it about — a confident wrong answer, in the direction
-        that suppresses a caution.
+        _engineering_overlay_loaded used to consult a hand-listed kind ->
+        property map. It shipped four of eleven entries, so it answered "no
+        overlay" for the seven tables nobody had told it about — a confident
+        wrong answer, in the direction that suppresses a caution.
 
-        Its sibling test below checks the map has no DEAD entries. That is the
-        opposite direction and would not have caught this: the bug was a
-        MISSING entry, and a missing entry leaves every existing one valid.
+        The map is gone: the loader is the only authority on which kinds
+        exist, so there is no second list to fall behind. What still needs
+        pinning is the BEHAVIOUR the map was there to provide, so this asks
+        the real probe about every table, deriving the set from the knowledge
+        base's own _table() calls rather than from another list — a list that
+        must be kept in sync is the same failure with an extra step.
 
-        So this derives the authoritative set from the knowledge base's own
-        _table() calls rather than a second hand-maintained list — a list that
-        must be kept in sync is the same failure with an extra step. Add a
-        table, forget the map, and this goes red.
+        Add a table, and if it cannot be probed this goes red.
         """
         import ast
         import inspect as _inspect
@@ -1958,19 +1957,19 @@ class TestFreePathCautions:
             and isinstance(node.args[1], ast.Constant)
         }
         assert merged, "found no _table() calls — this test stopped testing"
-        missing = merged - set(_OVERLAY_KIND_PROPERTY)
-        assert not missing, (
-            f"the knowledge base merges {sorted(missing)} but the kind map "
-            "does not list them, so _engineering_overlay_loaded will answer "
-            "'no overlay' for them and their cautions will go silent"
-        )
 
-    def test_every_overlay_kind_is_probeable(self):
-        # A partial kind->property map answers "no overlay" for anything it
-        # was never told about, which is wrong in the dangerous direction.
-        kb = _DesignKnowledgeBase()
-        for kind, prop in _OVERLAY_KIND_PROPERTY.items():
-            assert hasattr(kb, prop), f"{kind} maps to a missing property {prop}"
+        # A paid caller: every table's overlay is readable, so every table's
+        # probe must say so.  A kind the probe cannot see reads as free here,
+        # which is precisely how the cautions went silent.
+        self._overlay(monkeypatch, {kind: {"x": {"y": 1}} for kind in merged})
+        monkeypatch.setattr(_di, "_kb", None)
+        unprobeable = sorted(
+            kind for kind in merged if not _di._engineering_overlay_loaded(kind)
+        )
+        assert not unprobeable, (
+            f"the knowledge base merges {unprobeable} but the probe answers "
+            "'no overlay' for them, so their cautions will go silent"
+        )
 
     # --- 1. estimate_load_capacity ----------------------------------------
 
