@@ -100,7 +100,7 @@ def _walk_resolution_chain() -> dict[str, Any]:
                 "detail": f"No license file at {license_path}",
             })
 
-        # Step 4: OAuth session (kiln login)
+        # Step 4: OAuth session (kiln signin)
         auth_path = Path("~/.kiln/auth_tokens.json").expanduser()
         if auth_path.is_file():
             chain.append({
@@ -112,7 +112,9 @@ def _walk_resolution_chain() -> dict[str, Any]:
             chain.append({
                 "source": "oauth_session",
                 "matched": False,
-                "detail": f"No OAuth session at {auth_path}; run 'kiln login' or sign in via the web app to bind this machine",
+                # A chain entry states what IS, not what to type — the fix
+                # travels once, in the response's agent-addressed field.
+                "detail": f"No OAuth session at {auth_path}; this machine isn't bound to a kiln3d.com account",
             })
 
         # Step 5: ask the actual LicenseManager what the resolved tier is.
@@ -167,14 +169,26 @@ def _build_response(
     """Produce the structured response + agent-friendly one-liner."""
     tier_label = effective_tier.title() if effective_tier else "Free"
     rank = _TIER_RANK.get(effective_tier.lower(), 0)
+    # Only the free branch is actionable by signing in — a resolved Pro or
+    # Business seat has nothing to connect, and a hint offered there reads as
+    # though something were still wrong.
+    hint_fields: dict[str, Any] = {}
 
     if effective_tier.lower() == "free":
+        from kiln.tiers_and_terms import (
+            ALREADY_SUBSCRIBED_LINE,
+            signin_hint_fields,
+        )
+
+        hint_fields = signin_hint_fields()
+        # Written in second person, so this is the USER's half however it is
+        # labelled: it says what's true and what it would take, and the
+        # command travels in agent_hint alongside it.
         agent_summary = (
             f"You're on the Free tier. Why: {matched_detail}. "
-            "If you've already paid, run `kiln login` to bind this machine to your account, "
-            "or set the KILN_LICENSE_KEY env var to your license. "
-            "Free-tier features still work via api.kiln3d.com when you're signed in. "
-            "See https://kiln3d.com/pricing for plans."
+            f"{ALREADY_SUBSCRIBED_LINE} "
+            "Free-tier features still work via api.kiln3d.com once you're "
+            "signed in. See what the paid tiers include at kiln3d.com/pricing"
         )
     elif effective_tier.lower() == "pro":
         agent_summary = (
@@ -208,6 +222,7 @@ def _build_response(
         "matched_source": matched_source,
         "agent_summary": agent_summary,
         "pricing_url": "https://kiln3d.com/pricing",
+        **hint_fields,
     }
 
 
@@ -262,7 +277,7 @@ class _TierDiagnosticPlugin:
                 kiln-pro not installed on this machine.  User can still
                 use Pro features via api.kiln3d.com if signed in.
               - effective_tier="free", matched_source="default":
-                kiln-pro installed but no auth — needs `kiln login` or
+                kiln-pro installed but no auth — needs `kiln signin` or
                 KILN_LICENSE_KEY.
               - effective_tier="pro" (or higher) with matched_source=
                 "license_manager_resolve" and "oauth_session" matched=True

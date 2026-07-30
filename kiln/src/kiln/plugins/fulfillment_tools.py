@@ -949,22 +949,26 @@ class _FulfillmentToolsPlugin:
                     FREE = "free"
                 LicenseTier = _DummyTier
                 def check_tier(required, *_a, **_kw):
+                    from kiln.tiers_and_terms import tier_required_message
+
                     tier_label = getattr(required, "value", required) if required else "business"
-                    return (False, (
-                        f"This feature requires Kiln {str(tier_label).title()}. "
-                        "Already subscribed? Run `kiln login` to sync this machine. "
-                        "Otherwise: https://kiln3d.com/pricing"
-                    ))
+                    return (
+                        False,
+                        tier_required_message("This feature", str(tier_label)),
+                    )
 
             if err := _srv._check_billing_auth("print"):
                 return err
             tier_ok, tier_msg = check_tier(LicenseTier.BUSINESS)
             if not tier_ok:
+                from kiln.tiers_and_terms import signin_hint_fields
+
                 return {
                     "success": False,
                     "error": tier_msg,
                     "code": "LICENSE_REQUIRED",
                     "required_tier": "business",
+                    **signin_hint_fields(),
                 }
             try:
                 provider = _srv._get_fulfillment()

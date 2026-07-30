@@ -211,12 +211,17 @@ def _post_refresh(refresh_token: str) -> tuple[int, dict]:
 
 
 def _signin_hint(stored: dict) -> str:
-    email = str(stored.get("email") or "").strip()
-    who = f" for {email}" if email else ""
-    return (
-        f"Your Kiln session{who} has expired and could not be refreshed. "
-        "Run `kiln signin` to sign in again."
-    )
+    """The person-facing half of an expired session.
+
+    ``detail`` is not an internal field: it surfaces verbatim as
+    ``license_status``'s ``action_required`` and as the ``error`` of a refused
+    hosted call, so it is read by someone who was in the middle of making
+    something.  The command belongs in the agent-addressed field those two
+    responses carry alongside it, not here.
+    """
+    from kiln.tiers_and_terms import session_expired_message
+
+    return session_expired_message(str(stored.get("email") or ""))
 
 
 def resolve_session_bearer(
@@ -230,14 +235,12 @@ def resolve_session_bearer(
     stored = _read_tokens()
     token = str(stored.get("access_token") or "").strip()
     if not token:
+        from kiln.tiers_and_terms import signed_out_message
+
         return SessionBearer(
             token="",
             state="signed_out",
-            detail=(
-                "No Kiln session found. Run `kiln signin`, or "
-                "generate a code at https://app.kiln3d.com/connect and run "
-                "`kiln pair <code>`."
-            ),
+            detail=signed_out_message(),
         )
 
     if _seconds_to_expiry(token) > refresh_margin_s:

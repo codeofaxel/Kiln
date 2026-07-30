@@ -185,15 +185,15 @@ except ImportError:
     LicenseTier = _DummyTier  # type: ignore[misc]
 
     def check_tier(required, *_a, **_kw):
+        # Imported locally: this stub is defined above the module's import
+        # block, and the message is the one a caller shows a person.  The
+        # (ok, message) tuple is an established contract with no room for an
+        # agent-addressed field, so callers that build a response dict around
+        # it splat ``signin_hint_fields()`` in themselves.
+        from kiln.tiers_and_terms import tier_required_message
+
         tier_label = getattr(required, "value", required) if required else "pro"
-        return (
-            False,
-            (
-                f"This feature requires Kiln {str(tier_label).title()}. "
-                "Already subscribed? Run `kiln signin` to sync this machine. "
-                "Otherwise: https://kiln3d.com/pricing"
-            ),
-        )
+        return (False, tier_required_message("This feature", str(tier_label)))
 
     def get_tier(*_a, **_kw):
         return "free"
@@ -217,18 +217,20 @@ except ImportError:
                     record_tier_denial(tool_name)
                 except Exception:
                     pass
+                from kiln.tiers_and_terms import (
+                    signin_hint_fields,
+                    tier_required_message,
+                )
+
                 return {
                     "success": False,
-                    "error": (
-                        f"{tool_name} requires Kiln {str(tier_label).title()}. "
-                        "Already subscribed? Run `kiln signin` to sync this machine. "
-                        "Otherwise: https://kiln3d.com/pricing"
-                    ),
+                    "error": tier_required_message(tool_name, str(tier_label)),
                     "code": "TIER_REQUIRED",
                     "required_tier": str(tier_label),
                     "tool": tool_name,
                     "retryable": False,
                     "upgrade_url": "https://kiln3d.com/pricing",
+                    **signin_hint_fields(),
                 }
 
             return wrapper
@@ -315,7 +317,13 @@ from kiln.thingiverse import (
     ThingiverseError,
     ThingiverseNotFoundError,
 )
-from kiln.tiers_and_terms import TIERS_AND_TERMS
+from kiln.tiers_and_terms import (
+    AGENT_ACCOUNT_NUDGE,
+    TIERS_AND_TERMS,
+    session_expired_message,
+    signin_hint_fields,
+    tier_required_message,
+)
 from kiln.webhooks import WebhookManager
 
 
@@ -692,15 +700,7 @@ def _build_instructions() -> str:
         from kiln.cli.auth_commands import _read_tokens
 
         if not _read_tokens().get("access_token"):
-            parts.append(
-                "ACCOUNT: The user is not signed in. Kiln works fully without "
-                "an account; a free account adds a cloud design library with "
-                "share links, plus the free monthly allowance of Kiln's hosted "
-                "tools. If the user wants to save or share a design, offer to "
-                "sign them in — call `kiln_signin` and give them the URL it "
-                "returns (or they can run `kiln signin` in a terminal). Mention "
-                "it at most once per session, and never block work on it."
-            )
+            parts.append(f"ACCOUNT: {AGENT_ACCOUNT_NUDGE}")
     except Exception:  # noqa: BLE001 -- nudge is best-effort, never fatal
         pass
 
@@ -2576,16 +2576,22 @@ def _error_dict(
     code: str = "ERROR",
     *,
     retryable: bool | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a standardised error response dict.
 
     If *retryable* is not supplied explicitly it is inferred from *code*:
     codes in ``_RETRYABLE_CODES`` are assumed retryable, everything else
     (auth, validation, not-found, unsupported) is not.
+
+    *extra* merges top-level keys alongside ``error`` — for refusals that
+    carry an agent-addressed field next to the human-readable ``message``
+    (``**signin_hint_fields()``).  It cannot reach inside ``error``, so the
+    envelope every existing caller depends on keeps its exact shape.
     """
     if retryable is None:
         retryable = code in _RETRYABLE_CODES
-    return {
+    payload: dict[str, Any] = {
         "success": False,
         "error": {
             "code": code,
@@ -2593,6 +2599,9 @@ def _error_dict(
             "retryable": retryable,
         },
     }
+    if extra:
+        payload.update(extra)
+    return payload
 
 
 def _flush_restart_stdio() -> int:
@@ -7488,9 +7497,11 @@ def _annotate_session_liveness(payload: dict) -> None:
     # The tier stays reported — it is what the account holds once the
     # user signs back in.  Validity is the part that actually changed.
     payload["is_valid"] = False
-    payload["action_required"] = session.detail or (
-        "Your Kiln session has expired. Run `kiln signin` to sign in again."
-    )
+    # ``action_required`` is read by a person looking at their own licence
+    # status, so it names the situation and not the command.  The command
+    # rides alongside for the agent, which can just do it.
+    payload["action_required"] = session.detail or session_expired_message()
+    payload.update(signin_hint_fields())
 
 
 @mcp.tool()
@@ -11664,7 +11675,7 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
             "error": resolved.detail,
             "code": "KILN_SESSION_EXPIRED",
             "tool": tool_name,
-            "setup_hint": "kiln signin",
+            **signin_hint_fields(),
         }
     else:
         bearer = ""
@@ -11683,9 +11694,10 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
         # uses in kiln-pro.  ``error`` is read by a PERSON: it says what they
         # reached for and what it costs them to continue, and contains no
         # command, because a person who wanted a textured coaster should not
-        # be handed a terminal.  ``agent_guidance`` is read by the agent,
-        # which is the thing that can actually run the command, and is told
-        # to run it rather than recite it.
+        # be handed a terminal.  The agent-addressed half comes from
+        # ``kiln.tiers_and_terms`` — the whole tool surface shares one
+        # definition of it now, so this refusal cannot drift away from the
+        # thirteen others that say the same thing.
         #
         # This used to read "pair a Kiln account, run `python3 -m kiln pair
         # <code>`" — and a test asserted that exact string, so the worst copy
@@ -11709,18 +11721,7 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
             "tool": tool_name,
             "required_tier": required_tier or "free",
             "upgrade_url": "https://kiln3d.com/pricing",
-            # Named agent_hint, not agent_guidance: the public SME-leak gate
-            # counts `agent_guidance` as a curated-data field marker, and
-            # server.py already names every printer vendor, so the pair trips
-            # a moat check this refusal has nothing to do with.  Cheaper to
-            # pick another word than to weaken a security gate over copy.
-            "agent_hint": (
-                "Run `kiln signin` for the user — it opens a browser and "
-                "finishes on its own. Do not ask them to type a command. On "
-                "a machine with no browser, `kiln pair <code>` works instead, "
-                "with a code from https://app.kiln3d.com/connect"
-            ),
-            "setup_hint": "kiln signin",
+            **signin_hint_fields(),
         }
     import json
     import urllib.error
@@ -14973,11 +14974,13 @@ def decorate_surface(
                     raise ImportError("kiln-pro not installed")
             except ImportError:
                 return _error_dict(
-                    "SVG logo decoration is a Pro feature. "
-                    "Free tier supports PNG/JPG photos and text. "
-                    "Already subscribed? Run `kiln signin` to sync this machine. "
-                    "Otherwise: https://kiln3d.com/pricing",
+                    tier_required_message(
+                        "SVG logo decoration",
+                        "pro",
+                        "Free tier supports PNG/JPG photos and text",
+                    ),
                     code="PRO_REQUIRED",
+                    extra=signin_hint_fields(),
                 )
 
             from kiln.image_to_surface import prepare_svg_for_emboss

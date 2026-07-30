@@ -502,12 +502,16 @@ class _IntelligenceToolsPlugin:
                 if corpus is not None:
                     result["community"] = {"available": True, **corpus}
                 else:
+                    from kiln.tiers_and_terms import signin_hint_fields
+
                     result["community"] = {
                         "available": False,
                         "note": (
                             "Community totals need a Kiln account and a "
-                            "connection. Sign in with `kiln signin`."
+                            "connection. Signing in is free and takes a few "
+                            "seconds."
                         ),
+                        **signin_hint_fields(),
                     }
                 return result
             except Exception as exc:

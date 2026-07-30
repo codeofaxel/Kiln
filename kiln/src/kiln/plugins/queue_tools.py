@@ -72,19 +72,25 @@ def submit_job(
     if _is_free:
         pending = _srv._get_queue().pending_count()
         if pending >= FREE_TIER_MAX_QUEUED_JOBS:
+            from kiln.tiers_and_terms import (
+                ALREADY_SUBSCRIBED_LINE,
+                signin_hint_fields,
+            )
+
             return {
                 "success": False,
                 "error": (
                     f"Job queue is limited to {FREE_TIER_MAX_QUEUED_JOBS} pending jobs on the Free tier "
                     f"(you have {pending}). Wait for jobs to complete, "
                     "or upgrade to Kiln Pro for unlimited queue depth with multi-printer scheduling. "
-                    "Already subscribed? Run `kiln login` to sync this machine. "
-                    "Otherwise: https://kiln3d.com/pricing"
+                    f"{ALREADY_SUBSCRIBED_LINE} "
+                    "Otherwise, see what Pro includes at kiln3d.com/pricing"
                 ),
                 "code": "FREE_TIER_LIMIT",
                 "pending_count": pending,
                 "max_allowed": FREE_TIER_MAX_QUEUED_JOBS,
                 "upgrade_url": "https://kiln3d.com/pricing",
+                **signin_hint_fields(),
             }
     try:
         job_id = _srv._get_queue().submit(
