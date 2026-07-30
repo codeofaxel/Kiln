@@ -92,10 +92,10 @@ Eight backends. The name in backticks is the `KILN_PRINTER_TYPE` value.
 | **Moonraker / Klipper** (`moonraker`) | Moonraker HTTP API | Any Klipper printer — Voron, Rat Rig V-Core 3, Sovol SV07, QIDI X-Plus 3 |
 | **OctoPrint** (`octoprint`) | OctoPrint REST API | Any OctoPrint-connected printer |
 | **Duet / RepRapFirmware** (`duet`) | RepRapFirmware HTTP (RRF 2 and 3) | Duet 2 WiFi/Ethernet, Duet 3, and the machines built around them |
-| **Direct USB** (`serial`) | Marlin G-code over USB serial | Any Marlin printer — Ender 3, Prusa MK3S, CR-10 |
+| **Direct USB** (`usb`) | Marlin G-code over USB serial | Any Marlin printer — Ender 3, Prusa MK3S, CR-10 |
 
 Two backends need an extra: `pip install 'kiln3d[elegoo]'` and `pip install
-'kiln3d[serial]'`. The rest work with a plain install. Bambu printers need LAN
+'kiln3d[usb]'`. The rest work with a plain install. Bambu printers need LAN
 Mode and Developer Mode turned on plus a current access code (printer screen →
 Settings → Network); a restarted printer issues a new code and the old one
 stops working.

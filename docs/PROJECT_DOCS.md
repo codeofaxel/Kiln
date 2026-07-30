@@ -146,7 +146,7 @@ kiln auth --name x1c --host 192.168.1.100 --type bambu --access-code 12345678 --
 kiln auth --name saturn --host 192.168.1.50 --type elegoo
 
 # Direct USB / Serial
-kiln auth --name ender3-usb --host /dev/tty.usbserial-0001 --type serial
+kiln auth --name ender3-usb --host /dev/tty.usbserial-0001 --type usb
 ```
 
 ### Ethernet-Only Setup (No Wi-Fi)
@@ -222,7 +222,7 @@ Save printer credentials to `~/.kiln/config.yaml`.
 |---|---|---|
 | `--name` | Yes | Friendly name for this printer |
 | `--host` | Yes | Printer URL (e.g., `http://octopi.local`) |
-| `--type` | Yes | Backend: `octoprint`, `moonraker`, `creality`, `bambu`, `prusalink`, `elegoo`, `serial` |
+| `--type` | Yes | Backend: `octoprint`, `moonraker`, `creality`, `bambu`, `prusalink`, `elegoo`, `duet`, `usb` |
 | `--api-key` | OctoPrint, Moonraker/Creality, Prusa Link | API key when the backend requires one |
 | `--access-code` | Bambu | Bambu Lab access code |
 | `--serial` | Bambu, Elegoo optional | Bambu Lab serial number or SDCP mainboard identifier |
@@ -664,7 +664,7 @@ Any Marlin or RepRapFirmware printer over a USB serial connection.
 
 **Configuration:**
 ```yaml
-type: serial
+type: usb
 host: /dev/tty.usbserial-0001
 ```
 

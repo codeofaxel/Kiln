@@ -56,14 +56,15 @@ except ImportError:
 from kiln.cli.auth_commands import register_auth_cli
 from kiln.cli.bridge_commands import register_bridge_cli
 from kiln.cli.config import (
-    list_printers as _list_printers,
-)
-from kiln.cli.config import (
+    _normalize_printer_type,
     load_printer_config,
     remove_printer,
     save_printer,
     set_active_printer,
     validate_printer_config,
+)
+from kiln.cli.config import (
+    list_printers as _list_printers,
 )
 from kiln.cli.install_mcp import register_install_mcp_cli
 from kiln.cli.install_openscad import register_install_openscad_cli
@@ -403,6 +404,22 @@ def _emergency_block_message(printer_name: str, status: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
+class _PrinterTypeChoice(click.Choice):
+    """A ``--type`` that accepts renamed spellings and shows the current ones.
+
+    ``click.Choice`` rejects a value before any of our code sees it, so a
+    plain Choice would break every script still passing ``--type serial``
+    even though config.yaml and the env var both accept it.  Normalizing
+    first means the alias table is honoured at the parse layer too, while
+    ``--help`` lists only the canonical names.
+    """
+
+    def convert(self, value, param, ctx):  # noqa: ANN001, ANN201
+        return super().convert(
+            _normalize_printer_type(str(value).strip().lower()), param, ctx
+        )
+
+
 def _make_adapter(cfg: dict[str, Any]):
     """Create a PrinterAdapter from a config dict."""
     from kiln.printers import (
@@ -415,7 +432,9 @@ def _make_adapter(cfg: dict[str, Any]):
         PrusaLinkAdapter,
     )
 
-    ptype = cfg.get("type", "octoprint")
+    # Callers hand us anything from a hand-written config.yaml, so honour
+    # the legacy aliases here too rather than trusting every caller to.
+    ptype = _normalize_printer_type(cfg.get("type", "octoprint"))
     host = cfg.get("host", "")
 
     if ptype == "octoprint":
@@ -454,7 +473,7 @@ def _make_adapter(cfg: dict[str, Any]):
             host=host,
             api_key=cfg.get("api_key") or None,
         )
-    elif ptype == "serial":
+    elif ptype == "usb":
         # `kiln auth --type serial` and register_printer() both store the
         # port path in `host`; `port` is the key config.yaml uses when it
         # was hand-written.  Accept either — without this branch every
@@ -1679,7 +1698,7 @@ def discover(timeout: float, subnet: str | None, methods: tuple, json_mode: bool
     "--type",
     "printer_type",
     required=True,
-    type=click.Choice(list(PRINTER_TYPES)),
+    type=_PrinterTypeChoice(list(PRINTER_TYPES)),
     help="Printer backend type.",
 )
 @click.option(
@@ -1712,9 +1731,9 @@ def auth(
     """Save printer credentials to the config file."""
     # Outside the try: the handler below reports every exception as a failed
     # save, and nothing has been written yet.
-    if baudrate is not None and printer_type != "serial":
+    if baudrate is not None and printer_type != "usb":
         raise click.UsageError(
-            "--baudrate applies to --type serial only; "
+            "--baudrate applies to --type usb only; "
             f"{printer_type} printers are reached over the network."
         )
     try:
@@ -7451,7 +7470,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         if printer_type == "unknown":
             printer_type = click.prompt(
                 "  Printer type could not be auto-detected. Select type",
-                type=click.Choice(list(NETWORK_PRINTER_TYPES)),
+                type=_PrinterTypeChoice(list(NETWORK_PRINTER_TYPES)),
             )
         suggested_name = (selected.name or printer_type).lower().replace(" ", "-").replace(".", "-")
     else:
@@ -7474,7 +7493,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                 click.echo("  Could not auto-detect printer type.")
                 printer_type = click.prompt(
                     "  Select printer type",
-                    type=click.Choice(list(NETWORK_PRINTER_TYPES)),
+                    type=_PrinterTypeChoice(list(NETWORK_PRINTER_TYPES)),
                 )
                 suggested_name = printer_type
         except Exception as exc:
@@ -7482,7 +7501,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
             click.echo("  Probe failed. Enter type manually.")
             printer_type = click.prompt(
                 "  Select printer type",
-                type=click.Choice(list(NETWORK_PRINTER_TYPES)),
+                type=_PrinterTypeChoice(list(NETWORK_PRINTER_TYPES)),
             )
             suggested_name = printer_type
 
