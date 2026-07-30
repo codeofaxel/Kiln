@@ -141,8 +141,14 @@ _UPGRADE_HINT_TROUBLESHOOTING = (
     "(root cause + ordered fixes + prevention). "
     "See https://kiln3d.com/pricing"
 )
+# Deliberately does NOT mention safety notes.  Those ship free at every tier —
+# a dust mask, a respirator, "uncured epoxy is a skin sensitizer" — so listing
+# them here told a free user their protective-equipment guidance was behind the
+# paywall when they already had it.  A paywall that overstates itself costs more
+# trust than the sale is worth, and on safety guidance it is the wrong claim to
+# make at all.
 _UPGRADE_HINT_POST_PROCESSING = (
-    "Kiln Pro adds step-by-step procedures, safety notes, "
+    "Kiln Pro adds step-by-step procedures "
     "and strengthening tradeoffs. "
     "See https://kiln3d.com/pricing"
 )
