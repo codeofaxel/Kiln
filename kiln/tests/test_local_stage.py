@@ -159,3 +159,25 @@ class TestInstallOnARealFastMCP:
         local_stage.install(mcp)
         second = local_stage.install(mcp)
         assert second["resource"], "a second install must not break the first"
+
+
+class TestStructuredContentPreservesTheToolsOutput:
+    """A host that prefers structuredContent shows THAT and nothing else.
+
+    Seeding it with only the token hid success, paths and message from the
+    agent — caught by calling the tool for real, not by a unit test.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _on(self, monkeypatch):
+        monkeypatch.setenv(local_stage._ENABLE_ENV, "1")
+
+    def test_result_as_dict_reads_the_tools_own_return(self):
+        r = _Result({"success": True, "message": "made a coaster", "stl_path": "/x/a.stl"})
+        assert local_stage._result_as_dict(r) == {
+            "success": True, "message": "made a coaster", "stl_path": "/x/a.stl"}
+
+    def test_result_as_dict_survives_prose(self):
+        r = _Result(None)
+        r.content = [_Block("not json at all")]
+        assert local_stage._result_as_dict(r) is None

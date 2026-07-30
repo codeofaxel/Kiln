@@ -90,6 +90,55 @@ def _mesh_from_result_json(text: str) -> str | None:
     return find_mesh_path(parsed)
 
 
+#: Where the panel reads an inline payload from.
+_VIEWER_KEY = "kiln_viewer"
+
+#: Above this the geometry is not worth putting on the wire with every
+#: result; those meshes fall back to the fetch path (and the still image).
+_MAX_INLINE_PAYLOAD_BYTES = 6 * 1024 * 1024
+
+
+def _inline_payload(token: str) -> dict | None:
+    """The viewer payload for a minted token, small enough to inline."""
+    import json
+
+    mesh = resolve(token)
+    if not mesh:
+        return None
+    try:
+        from kiln_pro._rest.mcp_apps import mesh_to_viewer_payload
+
+        payload = mesh_to_viewer_payload(mesh)
+    except Exception:  # noqa: BLE001 — no payload is not a failed tool call
+        logger.debug("inline payload unavailable", exc_info=True)
+        return None
+    if payload.get("downgraded"):
+        return payload  # the honest "too big" card is worth showing
+    try:
+        if len(json.dumps(payload)) > _MAX_INLINE_PAYLOAD_BYTES:
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+    return payload
+
+
+def _result_as_dict(result: Any) -> dict | None:
+    """The tool's own return value, parsed back out of its content blocks."""
+    import json
+
+    for block in getattr(result, "content", None) or []:
+        text = getattr(block, "text", None)
+        if not isinstance(text, str):
+            continue
+        try:
+            parsed = json.loads(text)
+        except Exception:  # noqa: BLE001
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
 def token_for_call_result(result: Any) -> str | None:
     """Mint a stage token for a finished ``CallToolResult``, or ``None``.
 
@@ -282,10 +331,32 @@ def install(mcp: Any) -> dict[str, Any]:
                     inner = getattr(resp, "root", resp)
                     token = token_for_call_result(inner)
                     if token:
-                        sc = dict(getattr(inner, "structuredContent", None) or {})
+                        sc = getattr(inner, "structuredContent", None)
+                        if not isinstance(sc, dict):
+                            # The tool had none.  Seed it from the result the
+                            # tool actually returned, because a host that
+                            # prefers structuredContent will show THIS and
+                            # nothing else — seeding it with only the token
+                            # would hide the tool's own output from the agent
+                            # (measured: success, paths and message all
+                            # vanished from the visible result).
+                            sc = _result_as_dict(inner) or {}
+                        else:
+                            sc = dict(sc)
                         artifact = dict(sc.get("artifact") or {})
                         artifact["artifact_token"] = token
                         sc["artifact"] = artifact
+                        # Ship the geometry WITH the result, not just a ticket
+                        # to fetch it.  The panel's fetch path needs the host
+                        # to let a rendered panel call tools back, and a host
+                        # that doesn't leaves the stage sitting on its waiting
+                        # animation forever with no way to say why.  The panel
+                        # reads an inline payload first, so this makes the
+                        # stage independent of that permission.  The token
+                        # stays as the fallback for hosts that do allow it.
+                        payload = _inline_payload(token)
+                        if payload is not None:
+                            sc[_VIEWER_KEY] = payload
                         inner.structuredContent = sc
                 except Exception:  # noqa: BLE001
                     logger.debug("local stage token not attached", exc_info=True)
