@@ -28,6 +28,7 @@ from typing import Any, Callable
 
 import pytest
 
+import kiln.design_intelligence as di
 from kiln.design_intelligence import (
     DesignBrief,
     EnvironmentReport,
@@ -41,6 +42,7 @@ from kiln.design_intelligence import (
     TroubleshootingResult,
     _DesignKnowledgeBase,
     _get_kb,
+    _OVERLAY_KIND_PROPERTY,
     _PublicMaterialProfile,
     _reset_knowledge_base,
     check_environment_compatibility,
@@ -69,6 +71,7 @@ from kiln.design_intelligence import (
     match_requirements,
     recommend_material_for_design,
     troubleshoot_print_issue,
+    unestablished_caution,
 )
 
 from .conftest import (
@@ -1626,3 +1629,213 @@ class TestBondingMetadata:
         assert get_material_profile("nylon").bonding.get("hard_to_bond") is True
         assert get_material_profile("tpu_85a").bonding.get("hard_to_bond") is True
         assert get_material_profile("pla").bonding.get("hard_to_bond") is None
+
+
+# ---------------------------------------------------------------------------
+# Free-path honesty — a caution whose only source is the private overlay
+# ---------------------------------------------------------------------------
+
+
+class TestFreePathCautions:
+    """``unestablished_caution`` and its three call sites.
+
+    The shared defect: a public JSON field is absent or empty, the kiln-pro
+    overlay is its only source, and the consumer does ``.get(field, <empty>)``
+    — so a caution silently becomes nothing and no branch notices.  Telling
+    someone a part is fine when nobody checked is the one error direction
+    that hurts, so the free path must say what it could not establish.
+    """
+
+    def _overlay(self, monkeypatch, payload: dict[str, Any] | None) -> None:
+        """Install a fake overlay loader.
+
+        ``payload=None`` is the free caller: the loader refuses, exactly as a
+        tier / license / network refusal does.  A dict is the paid caller.
+        """
+        package = ModuleType("kiln_pro")
+        package.__path__ = []  # type: ignore[attr-defined]
+        overlays = ModuleType("kiln_pro.data_overlays")
+
+        def load_overlay(kind: str) -> dict[str, Any]:
+            if payload is None:
+                raise RuntimeError(f"overlay refused for {kind}")
+            return payload.get(kind, {})
+
+        overlays.load_overlay = load_overlay  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "kiln_pro", package)
+        monkeypatch.setitem(sys.modules, "kiln_pro.data_overlays", overlays)
+
+    # --- the shared helper itself -----------------------------------------
+
+    def test_helper_speaks_when_the_overlay_could_not_be_read(self, monkeypatch):
+        self._overlay(monkeypatch, None)
+        said = unestablished_caution("load_tables", "Nobody checked X.")
+        assert said.startswith("Nobody checked X.")
+        assert "kiln3d.com/pricing" in said
+
+    def test_helper_is_silent_when_the_overlay_merged(self, monkeypatch):
+        self._overlay(monkeypatch, {"load_tables": {"pla": {"notes": ["x"]}}})
+        assert estimate_load_capacity("pla", 50.0, 40.0) is not None
+        assert unestablished_caution("load_tables", "Nobody checked X.") == ""
+
+    def test_every_overlay_kind_is_probeable(self):
+        # A partial kind->property map answers "no overlay" for anything it
+        # was never told about, which is wrong in the dangerous direction.
+        kb = _DesignKnowledgeBase()
+        for kind, prop in _OVERLAY_KIND_PROPERTY.items():
+            assert hasattr(kb, prop), f"{kind} maps to a missing property {prop}"
+
+    # --- 1. estimate_load_capacity ----------------------------------------
+
+    def test_load_estimate_cautions_when_material_caveats_unreadable(
+        self, monkeypatch
+    ):
+        self._overlay(monkeypatch, None)
+        est = estimate_load_capacity("pla", 50.0, 40.0)
+        assert est is not None
+        assert est.caution, "a safe-load number shipped with no caveat at all"
+        assert "pla" in est.caution
+        assert "kiln3d.com/pricing" in est.caution
+
+    def test_load_estimate_number_is_identical_on_both_paths(self, monkeypatch):
+        self._overlay(monkeypatch, None)
+        free = estimate_load_capacity("pla", 50.0, 40.0)
+        _reset_knowledge_base()
+        self._overlay(monkeypatch, {"load_tables": {"pla": {"notes": ["paid"]}}})
+        paid = estimate_load_capacity("pla", 50.0, 40.0)
+        assert free is not None and paid is not None
+        # Only the honesty differs; the engineering answer must not.
+        assert free.max_load_n == paid.max_load_n
+        assert free.derating_applied == paid.derating_applied
+        assert paid.caution == ""
+        assert "paid" in paid.reasoning
+
+    def test_load_estimate_prefers_a_real_public_note_over_the_caution(
+        self, monkeypatch
+    ):
+        # Where a public floor genuinely exists, surface it instead of saying
+        # nothing could be established.
+        self._overlay(monkeypatch, None)
+        _get_kb().load_tables["pla"]["notes"] = ["public floor note"]
+        est = estimate_load_capacity("pla", 50.0, 40.0)
+        assert est is not None
+        assert "public floor note" in est.reasoning
+        assert est.caution == ""
+
+    # --- 2. design templates ----------------------------------------------
+
+    def test_template_cautions_when_only_the_orientation_label_survives(
+        self, monkeypatch
+    ):
+        self._overlay(monkeypatch, None)
+        tpl = get_design_template("living_hinge")
+        assert tpl is not None
+        assert tpl.print_orientation  # the public label is still there
+        assert tpl.print_orientation_reason == ""
+        assert tpl.agent_guidance == []
+        assert tpl.has_engineering_data() is False
+        assert tpl.caution, "an orientation label shipped with no explanation"
+        assert "kiln3d.com/pricing" in tpl.caution
+
+    def test_template_listing_carries_the_same_caution(self, monkeypatch):
+        # Both doors to a template must behave the same; the listing is the
+        # one an agent browsing patterns actually hits.
+        self._overlay(monkeypatch, None)
+        listed = {t.template_id: t for t in list_design_templates()}
+        assert listed
+        assert all(t.caution for t in listed.values())
+        assert listed["living_hinge"].caution == (
+            get_design_template("living_hinge").caution
+        )
+
+    def test_template_is_silent_when_the_reasoning_merged(self, monkeypatch):
+        self._overlay(
+            monkeypatch,
+            {
+                "design_templates": {
+                    "living_hinge": {
+                        "print_orientation_reason": "paid reason",
+                        "agent_guidance": ["paid guidance"],
+                    }
+                }
+            },
+        )
+        tpl = get_design_template("living_hinge")
+        assert tpl is not None
+        assert tpl.print_orientation_reason == "paid reason"
+        assert tpl.caution == ""
+
+    def test_orientation_constraint_is_never_an_empty_string(self, monkeypatch):
+        # The prompt-building door: it guarded on the public orientation
+        # LABEL but appended the overlay-only REASON, pushing "" into the
+        # constraint list on the free path.
+        from kiln.generation_feedback import enhance_prompt_with_design_intelligence
+
+        self._overlay(monkeypatch, None)
+        result = enhance_prompt_with_design_intelligence(
+            "a snap fit enclosure lid with a living hinge"
+        )
+        assert all(c.strip() for c in result.constraints_added), (
+            f"empty constraint in {result.constraints_added!r}"
+        )
+
+    # --- 3. multi-material compatibility ----------------------------------
+
+    def test_multi_material_cautions_when_the_reasoning_is_unreadable(
+        self, monkeypatch
+    ):
+        self._overlay(monkeypatch, None)
+        report = check_multi_material_compatibility("pla", "abs")
+        assert report.compatible is False  # the verdict survives
+        assert report.notes == ""
+        assert report.caution, "a bare verdict shipped with no reasoning"
+        assert "kiln3d.com/pricing" in report.caution
+
+    def test_multi_material_never_points_at_an_empty_rule_list(self, monkeypatch):
+        # The no-data branch told the caller to "Check general rules." while
+        # general_rules is empty by construction on the public floor.
+        self._overlay(monkeypatch, None)
+        report = check_multi_material_compatibility("pla", "peek")
+        assert report.general_rules == []
+        assert "general rules" not in report.notes.lower()
+        assert report.caution
+
+    def test_multi_material_keeps_the_pointer_when_rules_exist(self, monkeypatch):
+        self._overlay(
+            monkeypatch,
+            {"multi_material_pairing": {"general_rules": ["a real rule"]}},
+        )
+        report = check_multi_material_compatibility("pla", "peek")
+        assert report.general_rules == ["a real rule"]
+        assert "Check general rules." in report.notes
+
+    def test_multi_material_is_silent_when_the_notes_merged(self, monkeypatch):
+        self._overlay(
+            monkeypatch,
+            {
+                "multi_material_pairing": {
+                    "co_print_compatibility": {"pla": {"abs": {"notes": "paid note"}}}
+                }
+            },
+        )
+        report = check_multi_material_compatibility("pla", "abs")
+        assert report.notes == "paid note"
+        assert report.caution == ""
+
+    # --- one helper, three call sites -------------------------------------
+
+    def test_all_three_sites_route_through_the_shared_helper(self, monkeypatch):
+        # Three hand-rolled variants is how this class of defect started.
+        seen: list[str] = []
+
+        def spy(overlay_kind: str, what_is_unknown: str) -> str:
+            seen.append(overlay_kind)
+            return "spy"
+
+        self._overlay(monkeypatch, None)
+        monkeypatch.setattr(di, "unestablished_caution", spy)
+
+        assert estimate_load_capacity("pla", 50.0, 40.0).caution == "spy"
+        assert get_design_template("living_hinge").caution == "spy"
+        assert check_multi_material_compatibility("pla", "abs").caution == "spy"
+        assert seen == ["load_tables", "design_templates", "multi_material_pairing"]

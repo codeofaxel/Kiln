@@ -1480,8 +1480,18 @@ def enhance_prompt_with_design_intelligence(
 
     # Pattern-specific constraints — include design rules, not just orientation
     for pattern in brief.applicable_patterns[:2]:
-        if pattern.print_orientation:
+        # Guard the value actually appended, not its sibling.  The reason
+        # comes from the kiln-pro overlay, so guarding on the public
+        # orientation LABEL pushed an empty string into the constraint list
+        # whenever the overlay was unavailable.  The label itself is public —
+        # state that rather than nothing.
+        if pattern.print_orientation_reason:
             core_constraints.append(pattern.print_orientation_reason)
+        elif pattern.print_orientation:
+            core_constraints.append(
+                f"{pattern.display_name}: print orientation "
+                f"{pattern.print_orientation.replace('_', ' ')}"
+            )
         # Include the most important pattern-specific rule
         if hasattr(pattern, "design_rules") and pattern.design_rules:
             for key in ("min_arm_thickness_mm", "min_wall_thickness_mm"):
