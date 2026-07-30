@@ -2497,31 +2497,41 @@ def simplify_mesh(
 # Multi-factor design scorecard
 # ---------------------------------------------------------------------------
 #
-# Tiering: free tier ships with equal-weight (25/25/25/25) factor
-# combination, generic deduction values, and a simple grade ladder
-# (A=80, B=60, C=40, D=20).  Pro+ overlays the curated 35/25/20/20
-# weighting + tuned per-factor deductions + the calibrated grade
-# thresholds via the ``scorecard_weights`` overlay.  Function signature
-# and return shape are identical between tiers — only values differ.
+# Tiering: the SCALE is not a tier feature.  Every tier combines the
+# four factors with the same weights and reads the same grade ladder,
+# because a letter grade is a claim about the part — "B" has to mean
+# the same thing to everyone or it means nothing.  Two earlier ladders
+# (a 25/25/25/25 blend and an A=80 ladder here, an A=90 ladder in the
+# overlay) graded the same 11:1 narrow-base part "A" without a licence
+# and "B" with one, off identical per-factor scores and identical
+# notes.  The scale was the only difference, and it read generous in
+# exactly the direction that hurts: the lighter printability weight
+# discounted the factor that catches overhangs and non-manifold walls.
+#
+# What the ``scorecard_weights`` overlay legitimately still supplies is
+# DEPTH: curated per-factor deduction rules and their notes, which
+# change what gets flagged rather than what a letter is worth.  An
+# overlay may override any value below; these are the floor everyone
+# gets.  The weights here match the ones the ``mesh_quality_scorecard``
+# tool docstring publishes to every caller.
 
 
 _OVERALL_WEIGHTS_PUBLIC: dict[str, float] = {
-    "printability": 0.25,
+    "printability": 0.35,
     "structural": 0.25,
-    "efficiency": 0.25,
-    "quality": 0.25,
+    "efficiency": 0.20,
+    "quality": 0.20,
 }
 
 _GRADE_THRESHOLDS_PUBLIC: dict[str, int] = {
-    "A": 80,
-    "B": 60,
-    "C": 40,
-    "D": 20,
+    "A": 90,
+    "B": 80,
+    "C": 65,
+    "D": 50,
 }
 
 # Rule order = severity order.  First matching rule per metric wins,
-# so put more-severe thresholds first.  Free tier values are softer
-# than the Pro overlay's tuned deductions.
+# so put more-severe thresholds first.
 _STRUCTURAL_DEDUCTIONS_PUBLIC: list[dict[str, Any]] = [
     {"metric": "aspect_ratio",       "operator": ">",  "threshold": 10,    "deduction": -15, "note_template": "Extreme aspect ratio ({value:.0f}:1)"},
     {"metric": "aspect_ratio",       "operator": ">",  "threshold": 5,     "deduction": -5,  "note_template": "High aspect ratio ({value:.1f}:1)"},
@@ -2656,11 +2666,12 @@ def design_scorecard(file_path: str) -> dict[str, Any]:
     - **Efficiency**: fill ratio, overhang waste
     - **Quality**: triangle density, degenerate count
 
-    Free tier ships with equal-weight (25/25/25/25) factor combination,
-    generic deductions, and a simple grade ladder (A=80, B=60, C=40,
-    D=20).  Pro+ unlocks the curated 35/25/20/20 weighting + tuned
-    deductions + the calibrated A/B/C/D/F thresholds via the
-    ``scorecard_weights`` overlay.
+    The score and the letter mean the same thing at every tier: the
+    35/25/20/20 weighting and the A>=90 / B>=80 / C>=65 / D>=50 ladder
+    are the floor everyone gets.  What the ``scorecard_weights``
+    overlay adds for Pro+ is depth — curated per-factor deduction
+    rules and the notes that come with them, which change what gets
+    flagged, not what a grade is worth.
 
     Args:
         file_path: Path to mesh file.
