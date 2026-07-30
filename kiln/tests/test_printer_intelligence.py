@@ -21,6 +21,7 @@ Covers:
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import FrozenInstanceError
 from unittest import mock
 
@@ -60,13 +61,11 @@ PUBLIC_PROFILE_FIELDS = {
 
 @pytest.fixture(autouse=True)
 def _reset_intel_cache():
-    """Reset the singleton cache before each test for isolation."""
+    """Reset the profile caches before each test for isolation."""
     import kiln.printer_intelligence as mod
-    mod._cache.clear()
-    mod._loaded = False
+    mod._reset_caches()
     yield
-    mod._cache.clear()
-    mod._loaded = False
+    mod._reset_caches()
 
 
 # ===================================================================
@@ -153,6 +152,152 @@ class TestGetPrinterIntel:
         ) as load_overlay:
             get_printer_intel("bambu_x1c")
         load_overlay.assert_called_once_with("printer_intelligence")
+
+
+# ===================================================================
+# Per-caller entitlement
+# ===================================================================
+
+class _FakeOverlayLoader:
+    """Stand-in for kiln-pro's caller-aware ``load_overlay``.
+
+    The real one refuses a caller who has not earned an overlay by raising;
+    this reproduces that contract without needing kiln-pro installed, and
+    counts calls so a test can tell "asked again" from "merged again".
+    """
+
+    def __init__(self, overlay: dict) -> None:
+        self.overlay = overlay
+        self.tier = "free"
+        self.calls: list[str] = []
+
+    def __call__(self, kind: str) -> dict:
+        self.calls.append(kind)
+        if self.tier == "free":
+            raise RuntimeError(f"Caller tier is not entitled to '{kind}'.")
+        return self.overlay
+
+
+PAID_DEPTH = {
+    "ender3": {
+        "quirks": ["PTFE tube degrades above 240C."],
+        "calibration": {"esteps": "Extrude 100mm, measure, rescale."},
+        "failure_modes": [
+            {
+                "symptom": "under-extrusion",
+                "cause": "clogged nozzle",
+                "fix": "cold pull",
+            }
+        ],
+        "materials": {"PLA": {"notes": "Curated per-printer note."}},
+    }
+}
+
+
+@pytest.fixture
+def overlay_loader(monkeypatch):
+    """Install a fake kiln-pro whose overlay is gated on a switchable tier."""
+    import types
+
+    loader = _FakeOverlayLoader(PAID_DEPTH)
+    data_overlays = types.ModuleType("kiln_pro.data_overlays")
+    data_overlays.load_overlay = loader
+    package = types.ModuleType("kiln_pro")
+    package.data_overlays = data_overlays
+    monkeypatch.setitem(sys.modules, "kiln_pro", package)
+    monkeypatch.setitem(sys.modules, "kiln_pro.data_overlays", data_overlays)
+    return loader
+
+
+def _depth(printer_id: str = "ender3") -> tuple[int, int, int]:
+    intel = get_printer_intel(printer_id)
+    return len(intel.quirks), len(intel.calibration), len(intel.failure_modes)
+
+
+def _read_as(loader: _FakeOverlayLoader, tier: str) -> tuple[int, int, int]:
+    loader.tier = tier
+    return _depth()
+
+
+class TestPerCallerEntitlement:
+    """The overlay merge is process-wide; the entitlement decision is not.
+
+    Covers:
+        - a paid caller keeps curated depth behind a free caller
+        - a free caller keeps the public floor behind a paid caller
+        - the answer does not depend on who warmed the process (the one
+          that would have caught the frozen ``_loaded`` seam)
+        - the public safety floor survives a refused overlay
+        - the entitlement question is re-asked without re-merging
+        - no kiln-pro at all still degrades to the public floor
+    """
+
+    def test_paid_caller_keeps_depth_after_a_free_caller_warms_the_process(
+        self, overlay_loader
+    ) -> None:
+        assert _read_as(overlay_loader, "free") == (0, 0, 0)
+        assert _read_as(overlay_loader, "pro") == (1, 1, 1)
+
+    def test_free_caller_keeps_the_floor_after_a_paid_caller_warms_the_process(
+        self, overlay_loader
+    ) -> None:
+        assert _read_as(overlay_loader, "pro") == (1, 1, 1)
+        assert _read_as(overlay_loader, "free") == (0, 0, 0)
+
+    def test_answer_does_not_depend_on_warm_up_order(self, overlay_loader) -> None:
+        import kiln.printer_intelligence as mod
+
+        mod._reset_caches()
+        free_alone = _read_as(overlay_loader, "free")
+        mod._reset_caches()
+        paid_alone = _read_as(overlay_loader, "pro")
+        # If these matched, the rest of the test would prove nothing.
+        assert free_alone != paid_alone
+
+        mod._reset_caches()
+        free_first = _read_as(overlay_loader, "free")
+        paid_second = _read_as(overlay_loader, "pro")
+
+        mod._reset_caches()
+        paid_first = _read_as(overlay_loader, "pro")
+        free_second = _read_as(overlay_loader, "free")
+
+        assert free_first == free_second == free_alone
+        assert paid_first == paid_second == paid_alone
+
+    def test_refused_overlay_still_serves_the_public_safety_floor(
+        self, overlay_loader
+    ) -> None:
+        overlay_loader.tier = "free"
+        intel = get_printer_intel("ender3")
+        assert intel.display_name == "Creality Ender 3 / Ender 3 Pro / Ender 3 V2"
+        assert intel.firmware == "marlin"
+        assert intel.hotend_type == "ptfe_lined"
+        # The temperatures a caller could hurt a printer with are public.
+        assert intel.materials["PLA"].hotend == 200
+        assert intel.materials["PLA"].bed == 60
+        # Losing the overlay costs depth, never the catalogue.
+        assert "ender3" in list_intel_profiles()
+
+    def test_entitlement_is_re_asked_but_the_merge_is_not_repeated(
+        self, overlay_loader
+    ) -> None:
+        overlay_loader.tier = "pro"
+        first = get_printer_intel("ender3")
+        second = get_printer_intel("ender3")
+        # Asked every read — the entitlement answer is never cached...
+        assert overlay_loader.calls == ["printer_intelligence"] * 2
+        # ...but the decoded profile is, so no re-merge on the hot path.
+        assert first is second
+
+    def test_no_kiln_pro_installed_serves_the_public_floor(self, monkeypatch) -> None:
+        # ``None`` in sys.modules is the documented "this import fails" marker.
+        # The submodule needs its own: an already-imported ``kiln_pro.x`` is
+        # served straight out of sys.modules without consulting its parent.
+        monkeypatch.setitem(sys.modules, "kiln_pro", None)
+        monkeypatch.setitem(sys.modules, "kiln_pro.data_overlays", None)
+        assert _depth() == (0, 0, 0)
+        assert get_printer_intel("ender3").materials["PLA"].hotend == 200
 
 
 # ===================================================================

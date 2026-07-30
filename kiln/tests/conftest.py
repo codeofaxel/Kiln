@@ -689,17 +689,11 @@ def _printer_intelligence_overlay_loaded() -> bool:
     the safety-floor side.
     """
     try:
-        from kiln.printer_intelligence import (
-            _cache,
-            _load,
-            get_printer_intel,
-        )
+        import kiln.printer_intelligence as _mod
+        from kiln.printer_intelligence import get_printer_intel
         # Force a fresh load so a previous test that primed the
         # cache without the overlay doesn't poison this probe.
-        _cache.clear()
-        import kiln.printer_intelligence as _mod
-        _mod._loaded = False
-        _load()
+        _mod._reset_caches()
         intel = get_printer_intel("ender3")
         if not intel.quirks or not intel.failure_modes:
             return False
