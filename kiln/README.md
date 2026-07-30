@@ -77,12 +77,20 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ## Supported Printers
 
-| Backend | Status | Printers |
-|---------|--------|----------|
-| **OctoPrint** | Stable | Any OctoPrint-connected printer (Prusa, Ender, custom) |
-| **Moonraker** | Stable | Klipper-based printers (Voron, Ratrig, etc.) |
-| **Bambu Lab** | Stable | X1C, P1S, A1 (via LAN MQTT + FTPS) |
-| **Prusa Link** | Stable | MK4, XL, Mini+ (local REST API — type: `prusalink`) |
+Eight backends. The name in backticks is the `KILN_PRINTER_TYPE` value.
+
+| Backend | Transport | Printers |
+|---------|-----------|----------|
+| **Bambu Lab** (`bambu`) | LAN MQTT + FTPS | X1C, X1E, P1S, P1P, P2S, A1, A1 Mini, A2L, H2S |
+| **Creality** (`creality`) | Moonraker/Klipper over the LAN | K1, K1C, K1 Max, K1 SE, K2/K2 Pro/K2 Plus, Hi, Ender-3 V3 KE, CR-10 SE |
+| **Prusa Link** (`prusalink`) | Local REST API | MK4, XL, Mini+ |
+| **Elegoo** (`elegoo`) | SDCP over WebSocket | Centauri Carbon and other SDCP machines. Neptune 4 and OrangeStorm Giga run Klipper — use `moonraker` for those |
+| **Moonraker / Klipper** (`moonraker`) | Moonraker HTTP API | Any Klipper printer — Voron, Rat Rig V-Core 3, Sovol SV07, QIDI X-Plus 3 |
+| **OctoPrint** (`octoprint`) | OctoPrint REST API | Any OctoPrint-connected printer |
+| **Duet / RepRapFirmware** (`duet`) | RRF HTTP object model (RRF 2 and 3) | Duet 2 WiFi/Ethernet, Duet 3, and the machines built around them |
+| **Direct USB** (`serial`) | Marlin G-code over USB serial | Any Marlin printer — Ender 3, Prusa MK3S, CR-10 |
+
+Two backends need an extra: `pip install 'kiln3d[elegoo]'` and `pip install 'kiln3d[serial]'`. The rest work with a plain install.
 
 ## Features
 
@@ -123,16 +131,19 @@ AI Agent (Claude, GPT, custom)
     |
     | CLI or MCP (Model Context Protocol)
     v
-+--------------------+
-|        Kiln        |
-+--------------------+
-  |       |        |        |       |       |
-  v       v        v        v       v       v
-OctoPrint Moonraker Bambu  PrusaLink Elegoo Serial
-  |       |        |        |       |       |
-  v       v        v        v       v       v
-Prusa   Voron    X1C/P1S  MK4/XL  Saturn  Ender
++------------------------------------------+
+|                   Kiln                   |
+|     design, validate, slice, monitor     |
++------------------------------------------+
+    |
+    | one PrinterAdapter interface, eight backends
+    v
+Your printer  (see Supported Printers above)
 ```
+
+Tools are written against that one interface rather than once per printer.
+Backends differ in what the hardware exposes, so `PrinterCapabilities`
+reports what a given machine actually supports.
 
 ## Development
 
