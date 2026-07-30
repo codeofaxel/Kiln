@@ -9,8 +9,8 @@
     "name": "Kiln Contributors"
   },
   "icon": "icon.png",
-  "homepage": "https://kiln3d.com",
-  "documentation": "https://kiln3d.com/docs",
+  "homepage": "https://kiln3d.com/?utm_source=claude-directory&utm_medium=listing",
+  "documentation": "https://kiln3d.com/docs?utm_source=claude-directory&utm_medium=listing",
   "support": "https://github.com/codeofaxel/Kiln/issues",
   "repository": {
     "type": "git",

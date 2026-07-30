@@ -96,8 +96,8 @@ kiln = "kiln.cli.main:main"
 kiln3d = "kiln.cli.main:main"
 
 [project.urls]
-Homepage = "https://kiln3d.com"
-Documentation = "https://kiln3d.com/docs"
+Homepage = "https://kiln3d.com/?utm_source=pypi&utm_medium=package-page"
+Documentation = "https://kiln3d.com/docs?utm_source=pypi&utm_medium=package-page"
 Repository = "https://github.com/codeofaxel/Kiln"
 Issues = "https://github.com/codeofaxel/Kiln/issues"
 Changelog = "https://github.com/codeofaxel/Kiln/releases"

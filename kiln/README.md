@@ -32,6 +32,8 @@ pip install kiln3d
 pip install -e ".[dev]"
 ```
 
+OS-specific walkthrough (Windows, WSL 2, Linux) at [kiln3d.com/install](https://kiln3d.com/install?utm_source=pypi&utm_medium=package-page).
+
 ### 2. Configure
 
 ```bash
@@ -75,6 +77,8 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 }
 ```
 
+Full documentation: [kiln3d.com/docs](https://kiln3d.com/docs?utm_source=pypi&utm_medium=package-page).
+
 ## Supported Printers
 
 | Backend | Status | Printers |
@@ -83,6 +87,8 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 | **Moonraker** | Stable | Klipper-based printers (Voron, Ratrig, etc.) |
 | **Bambu Lab** | Stable | X1C, P1S, A1 (via LAN MQTT + FTPS) |
 | **Prusa Link** | Stable | MK4, XL, Mini+ (local REST API — type: `prusalink`) |
+
+The full searchable list of tuned printer profiles is at [kiln3d.com/printers](https://kiln3d.com/printers?utm_source=pypi&utm_medium=package-page).
 
 ## Features
 
@@ -116,6 +122,8 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 - **Webhooks** — HMAC-signed event notifications for job lifecycle
 - **OTA firmware updates** — check, update, and rollback printer firmware
 
+Features marked (Pro) need a paid tier — [kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=pypi&utm_medium=package-page).
+
 ## Architecture
 
 ```
@@ -143,4 +151,4 @@ cd kiln && python3 -m pytest tests/ -v
 
 ## License
 
-AGPL-3.0-or-later. Commercial licensing is available for companies that need proprietary use.
+AGPL-3.0-or-later. Commercial licensing is available for companies that need proprietary use — see [kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=pypi&utm_medium=package-page).
