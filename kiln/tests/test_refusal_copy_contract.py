@@ -32,6 +32,8 @@ from kiln.tiers_and_terms import (
     AGENT_SIGNIN_HINT,
     ALREADY_SUBSCRIBED_LINE,
     SIGNIN_COMMAND,
+    account_required_message,
+    free_allowance_phrase,
     session_expired_message,
     signed_out_message,
     signin_hint_fields,
@@ -73,6 +75,14 @@ def _capture_tools(plugin_module: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
+_TEXTURE_ALLOWANCE = {
+    "bucket": "decoration",
+    "limit": 3,
+    "noun": "textures",
+    "period": "month",
+}
+
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -83,6 +93,9 @@ def _capture_tools(plugin_module: str) -> dict:
         session_expired_message("user@example.com"),
         signed_out_message(),
         ALREADY_SUBSCRIBED_LINE,
+        account_required_message("apply_image_texture", "", _TEXTURE_ALLOWANCE),
+        account_required_message("cloud_push_branch", "pro"),
+        account_required_message("some_free_tool"),
     ],
 )
 def test_user_facing_copy_carries_no_command(message):
@@ -104,6 +117,80 @@ def test_tier_message_puts_the_free_alternative_before_the_pricing_link():
     """
     msg = tier_required_message("SVG decoration", "pro", "PNG and JPG still work")
     assert msg.index("PNG and JPG still work") < msg.index("kiln3d.com/pricing")
+
+
+# ---------------------------------------------------------------------------
+# The free allowance — say the real number, or say nothing
+# ---------------------------------------------------------------------------
+#
+# The account wall is decided LOCALLY, before any request goes out, so the
+# server's "free includes 3 textures a month" was written where almost nobody
+# could reach it.  The number now travels in the pro tool manifest, which makes
+# the failure mode a stated-but-wrong figure — worse than the silence it
+# replaced, because a person told a number believes it.  Hence the shape these
+# pin: a real declared allowance is stated, and anything less than a complete,
+# well-formed one produces no allowance sentence at all.
+
+
+def test_allowance_sentence_states_the_declared_number():
+    msg = account_required_message("apply_image_texture", "", _TEXTURE_ALLOWANCE)
+    assert "3 textures a month" in msg
+    # Free is the headline; the number reassures.  A refusal for a free tool
+    # that reads as an upsell is a lie about the price.
+    assert "free to use" in msg
+    assert "pricing" not in msg.lower()
+
+
+@pytest.mark.parametrize(
+    "allowance",
+    [
+        None,
+        {},
+        {"noun": "textures", "period": "month"},          # no limit
+        {"limit": 3, "period": "month"},                  # no noun
+        {"limit": 0, "noun": "textures"},                 # nothing included
+        {"limit": -1, "noun": "textures"},
+        {"limit": True, "noun": "textures"},              # bool is an int
+        {"limit": "3", "noun": "textures"},               # string from bad JSON
+        {"limit": 3, "noun": "   "},
+        {"limit": 3, "noun": "textures", "period": "  "},
+        {"limit": 3, "noun": 7},
+        "not a dict",
+        3,
+    ],
+)
+def test_an_allowance_we_cannot_read_is_never_invented(allowance):
+    """No number, no partial number, no placeholder — no sentence."""
+    assert free_allowance_phrase(allowance) == ""
+    msg = account_required_message("apply_image_texture", "", allowance)
+    assert "free includes" not in msg
+    # A digit would mean some fragment of an unreadable block still rendered.
+    assert not any(ch.isdigit() for ch in msg), msg
+
+
+def test_allowance_period_comes_from_the_declaration():
+    phrase = free_allowance_phrase(
+        {"limit": 2, "noun": "print-ready fixes", "period": "week"}
+    )
+    assert phrase == "2 print-ready fixes a week"
+
+
+def test_allowance_period_defaults_to_month_when_unstated():
+    assert free_allowance_phrase({"limit": 2, "noun": "part splits"}) == (
+        "2 part splits a month"
+    )
+
+
+def test_a_paid_tier_answers_instead_of_the_free_allowance():
+    """What it costs is the answer to the question a paid tool raises.
+
+    Naming a free monthly figure next to a tier requirement leaves a reader
+    unable to tell which one applies to them.
+    """
+    msg = account_required_message("some_pro_tool", "pro", _TEXTURE_ALLOWANCE)
+    assert "Kiln Pro" in msg
+    assert "kiln3d.com/pricing" in msg
+    assert "3 textures" not in msg
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +336,103 @@ def test_pro_only_tools_refuse_without_handing_over_a_terminal(
     _assert_reads_as_prose(result[error_key], f"{tool_name} error")
     assert SIGNIN_COMMAND in result["agent_hint"]
     assert result["setup_hint"] == SIGNIN_COMMAND
+
+
+@pytest.fixture
+def registered_pro_stubs():
+    """Register the real manifest's stubs and yield its metered tools.
+
+    ``_register_pro_tool_stubs`` normally runs only on a free install (the
+    ``ImportError`` branch), so on a machine with kiln-pro present the
+    allowance registry would sit empty and a test that merely read it would
+    pass by being vacuous.  Driving the real function against a throwaway MCP
+    reads the SHIPPED manifest on every machine, then puts the module globals
+    back.
+    """
+    import kiln.server as server
+
+    tiers = dict(server._PRO_TOOL_TIERS)
+    quota = dict(server._PRO_TOOL_QUOTA)
+
+    class FakeMCP:
+        def tool(self_mcp):
+            return lambda fn: fn
+
+    try:
+        server._register_pro_tool_stubs(FakeMCP())
+        yield server._PRO_TOOL_QUOTA
+    finally:
+        server._PRO_TOOL_TIERS.clear()
+        server._PRO_TOOL_TIERS.update(tiers)
+        server._PRO_TOOL_QUOTA.clear()
+        server._PRO_TOOL_QUOTA.update(quota)
+
+
+def test_shipped_manifest_declares_an_allowance_for_the_metered_tools(
+    registered_pro_stubs,
+):
+    """The mirrored manifest is a build artifact; a stale one goes silent.
+
+    Without this, regenerating from a kiln-pro that had lost its quota
+    registries would drop every allowance and the copy would quietly revert to
+    the vaguer sentence — no error anywhere.  ``apply_image_texture`` is named
+    because it is the tool this whole path was reported against.
+    """
+    assert "apply_image_texture" in registered_pro_stubs, (
+        "the mirrored pro_tool_manifest.json carries no allowance for "
+        "apply_image_texture — regenerate it from kiln-pro"
+    )
+    for name, block in registered_pro_stubs.items():
+        assert free_allowance_phrase(block), f"{name} has an unreadable {block!r}"
+        assert block.get("bucket"), f"{name} names no allowance pool"
+
+
+def test_account_wall_states_each_tool_its_own_declared_allowance(
+    registered_pro_stubs, tmp_path, monkeypatch
+):
+    """The real refusal, through the real manifest — not the builder alone.
+
+    Asserts the sentence carries the number the manifest declares rather than
+    any specific figure: what the free tier includes is kiln-pro's decision to
+    change, and a public test that hardcoded "3" would fail the next time it
+    did.
+    """
+    from kiln.server import _pro_api_call
+
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+    monkeypatch.delenv("KILN_API_URL", raising=False)
+    monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+
+    for name, block in registered_pro_stubs.items():
+        result = _pro_api_call(name)
+        assert result["code"] == "KILN_ACCOUNT_NOT_PAIRED"
+        assert free_allowance_phrase(block) in result["error"], name
+        _assert_reads_as_prose(result["error"], f"{name} account wall")
+        # The machine-readable twin, for a caller that would rather render the
+        # allowance itself than parse the sentence.
+        assert result["quota"] == block
+        assert SIGNIN_COMMAND in result["agent_hint"]
+
+
+def test_account_wall_says_nothing_about_an_allowance_it_was_never_given(
+    tmp_path, monkeypatch
+):
+    """A tool with no declared allowance gets no number and no ``quota`` key.
+
+    An empty dict would be indistinguishable from "metered at zero" to a
+    caller reading the payload; absence cannot be misread that way.
+    """
+    from kiln.server import _pro_api_call
+
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+    monkeypatch.delenv("KILN_API_URL", raising=False)
+    monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+
+    result = _pro_api_call("cloud_remote_list")
+
+    assert result["code"] == "KILN_ACCOUNT_NOT_PAIRED"
+    assert "quota" not in result
+    assert "free includes" not in result["error"]
 
 
 def test_license_status_expired_session_splits_by_audience(monkeypatch):

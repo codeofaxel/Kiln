@@ -33,11 +33,19 @@ from kiln.printer_backends import (
 logger = logging.getLogger(__name__)
 
 
-# Renamed printer-type aliases.  ``prusaconnect`` was renamed to
-# ``prusalink`` in Kiln 1.1.5; saved configs that still pin the old name
-# keep working — we normalize on read and warn once so users can update
-# at their leisure instead of hitting "unsupported printer type".
-_LEGACY_PRINTER_TYPE_ALIASES = {"prusaconnect": "prusalink"}
+# Renamed printer-type aliases.  A saved config that still pins an old name
+# keeps working — we normalize on read and warn once, so users update at
+# their leisure instead of hitting "unsupported printer type".  Every door
+# that reads a type from a user (env, config.yaml, the register_printer
+# tool) runs it through _normalize_printer_type; an alias that only some
+# doors honour is the same bug with extra steps.
+_LEGACY_PRINTER_TYPE_ALIASES = {
+    "prusaconnect": "prusalink",
+    # "serial" named the wire protocol; users and the README call the
+    # backend USB.  The identifier sense of the word is spoken for by
+    # `--serial` (a Bambu serial number), which is what it should mean.
+    "serial": "usb",
+}
 _warned_legacy_printer_types: set[str] = set()
 
 
@@ -52,7 +60,7 @@ def _normalize_printer_type(ptype: str) -> str:
     if ptype not in _warned_legacy_printer_types:
         _warned_legacy_printer_types.add(ptype)
         logger.warning(
-            "Printer type %r was renamed to %r in Kiln 1.1.5; using %r. "
+            "Printer type %r is now called %r; using %r. "
             "Update your config's `type:` to silence this notice.",
             ptype,
             canonical,
@@ -91,7 +99,7 @@ def _normalize_host(host: str, printer_type: str = "octoprint") -> str:
         # Strip any accidental scheme — MQTT/FTPS/WebSocket need raw host.
         host = re.sub(r"^https?://", "", host, flags=re.IGNORECASE)
         return host.rstrip("/")
-    if printer_type == "serial":
+    if printer_type == "usb":
         # Serial port paths (e.g. /dev/ttyUSB0, COM3) — return as-is.
         return host
     if host and not re.match(r"^https?://", host, re.IGNORECASE):
@@ -136,8 +144,8 @@ def _validate_printer_url(url: str, *, printer_type: str = "octoprint") -> tuple
             warnings.append(f"Hostname contains spaces: {cleaned!r}")
         return cleaned, warnings
 
-    # Serial printers use port paths -- skip all HTTP/URL validation.
-    if printer_type == "serial":
+    # USB printers use port paths -- skip all HTTP/URL validation.
+    if printer_type == "usb":
         return cleaned, warnings
 
     # Scheme check (already handled by _normalize_host, but be explicit)
@@ -414,8 +422,8 @@ def save_printer(
             entry["api_key"] = api_key
         if printer_model:
             entry["printer_model"] = printer_model
-    elif printer_type == "serial":
-        # For serial printers, 'host' stores the serial port path.
+    elif printer_type == "usb":
+        # For USB printers, 'host' stores the serial port path.
         pass
 
     if printer_model:
@@ -424,7 +432,7 @@ def save_printer(
     # Record a baud rate only when it differs from the default, so changing
     # the default later stays an edit rather than a migration of every
     # config that pinned it.
-    if printer_type == "serial" and baudrate and baudrate != DEFAULT_SERIAL_BAUDRATE:
+    if printer_type == "usb" and baudrate and baudrate != DEFAULT_SERIAL_BAUDRATE:
         entry["baudrate"] = int(baudrate)
 
     printers[name] = entry

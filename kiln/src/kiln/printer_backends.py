@@ -43,7 +43,7 @@ PRINTER_BACKENDS: tuple[PrinterBackend, ...] = (
     PrinterBackend("moonraker", "Moonraker (Klipper)"),
     PrinterBackend("octoprint", "OctoPrint"),
     PrinterBackend("duet", "Duet (RepRapFirmware)"),
-    PrinterBackend("serial", "Direct USB", networked=False),
+    PrinterBackend("usb", "Direct USB", networked=False),
 )
 
 #: Every accepted ``printer_type``.

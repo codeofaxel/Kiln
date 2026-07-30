@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-07-29T08:17:02.536936+00:00",
+  "generated": "2026-07-30T05:42:38.785778+00:00",
   "tool_count": 402,
   "categories": {
     "product_generators": {
@@ -2344,6 +2344,12 @@
         ],
         "title": "auto_multicolor_from_textureArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "decoration",
+        "limit": 3,
+        "noun": "multicolor splits",
+        "period": "month"
       }
     },
     {
@@ -2748,6 +2754,12 @@
         ],
         "title": "inspect_designArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "decoration",
+        "limit": 3,
+        "noun": "inspections",
+        "period": "month"
       }
     },
     {
@@ -12699,6 +12711,12 @@
         ],
         "title": "make_printableArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "make_printable",
+        "limit": 2,
+        "noun": "print-ready fixes",
+        "period": "month"
       }
     },
     {
@@ -13967,6 +13985,12 @@
         ],
         "title": "split_mesh_to_fitArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "split_fit",
+        "limit": 3,
+        "noun": "part splits",
+        "period": "month"
       }
     },
     {
@@ -14138,6 +14162,12 @@
         },
         "title": "generate_ashtrayArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "generator",
+        "limit": 3,
+        "noun": "ashtrays",
+        "period": "month"
       }
     },
     {
@@ -14205,6 +14235,12 @@
         },
         "title": "generate_bookmarkArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "generator",
+        "limit": 3,
+        "noun": "bookmarks",
+        "period": "month"
       }
     },
     {
@@ -14262,6 +14298,12 @@
         },
         "title": "generate_coasterArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "generator",
+        "limit": 3,
+        "noun": "coasters",
+        "period": "month"
       }
     },
     {
@@ -14344,6 +14386,12 @@
         },
         "title": "generate_fridge_magnetArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "generator",
+        "limit": 3,
+        "noun": "fridge magnets",
+        "period": "month"
       }
     },
     {
@@ -14406,6 +14454,12 @@
         },
         "title": "generate_frisbeeArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "generator",
+        "limit": 3,
+        "noun": "frisbees",
+        "period": "month"
       }
     },
     {
@@ -14498,6 +14552,12 @@
         },
         "title": "generate_jewelry_trayArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "generator",
+        "limit": 3,
+        "noun": "jewelry trays",
+        "period": "month"
       }
     },
     {
@@ -14575,6 +14635,12 @@
         },
         "title": "generate_keychainArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "generator",
+        "limit": 3,
+        "noun": "keychains",
+        "period": "month"
       }
     },
     {
@@ -14677,6 +14743,12 @@
         },
         "title": "generate_license_plate_frameArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "generator",
+        "limit": 3,
+        "noun": "license plate frames",
+        "period": "month"
       }
     },
     {
@@ -14754,6 +14826,12 @@
         },
         "title": "generate_nameplateArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "generator",
+        "limit": 3,
+        "noun": "nameplates",
+        "period": "month"
       }
     },
     {
@@ -14826,6 +14904,12 @@
         },
         "title": "generate_ornamentArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "generator",
+        "limit": 3,
+        "noun": "ornaments",
+        "period": "month"
       }
     },
     {
@@ -14913,6 +14997,12 @@
         },
         "title": "generate_pen_cupArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "generator",
+        "limit": 3,
+        "noun": "pen cups",
+        "period": "month"
       }
     },
     {
@@ -14980,6 +15070,12 @@
         },
         "title": "generate_pet_bowlArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "generator",
+        "limit": 3,
+        "noun": "pet bowls",
+        "period": "month"
       }
     },
     {
@@ -15059,6 +15155,12 @@
         ],
         "title": "generate_pet_tagArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "generator",
+        "limit": 3,
+        "noun": "pet tags",
+        "period": "month"
       }
     },
     {
@@ -15146,6 +15248,12 @@
         },
         "title": "generate_rolling_trayArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "generator",
+        "limit": 3,
+        "noun": "rolling trays",
+        "period": "month"
       }
     },
     {
@@ -15223,6 +15331,12 @@
         },
         "title": "generate_soap_dishArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "generator",
+        "limit": 3,
+        "noun": "soap dishes",
+        "period": "month"
       }
     },
     {
@@ -15297,6 +15411,12 @@
         ],
         "title": "generate_wall_plaqueArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "generator",
+        "limit": 3,
+        "noun": "wall plaques",
+        "period": "month"
       }
     },
     {
@@ -17301,6 +17421,12 @@
         ],
         "title": "apply_geometric_textureArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "decoration",
+        "limit": 3,
+        "noun": "textures",
+        "period": "month"
       }
     },
     {
@@ -17451,6 +17577,12 @@
         ],
         "title": "apply_image_textureArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "decoration",
+        "limit": 3,
+        "noun": "textures",
+        "period": "month"
       }
     },
     {
@@ -17680,6 +17812,12 @@
         ],
         "title": "apply_procedural_textureArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "decoration",
+        "limit": 3,
+        "noun": "textures",
+        "period": "month"
       }
     },
     {
@@ -17874,6 +18012,12 @@
         ],
         "title": "recover_texture_detailArguments",
         "type": "object"
+      },
+      "quota": {
+        "bucket": "decoration",
+        "limit": 3,
+        "noun": "textures",
+        "period": "month"
       }
     },
     {

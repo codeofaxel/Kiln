@@ -70,6 +70,9 @@ postgres = ["psycopg2-binary>=2.9.12"]
 # private repo (see kiln3d.com/docs) — don't promise it here.
 stripe = ["stripe>=15.3.0"]
 payments = ["stripe>=15.3.0", "cryptography>=41.0"]
+# The backend is named `usb`; `serial` stays as an alias so the install
+# line in older docs keeps working.
+usb = ["pyserial>=3.5"]
 serial = ["pyserial>=3.5"]
 qr = ["qrcode[pil]>=8.2"]
 emboss = ["Pillow>=9.0", "rembg>=2.0.69", "onnxruntime>=1.24.3"]

@@ -15,13 +15,14 @@ Environment variables
 ``KILN_PRINTER_TYPE``
     Printer backend type.  Supported values: ``"octoprint"``,
     ``"moonraker"``, ``"creality"``, ``"bambu"``, ``"elegoo"``,
-    ``"prusalink"``, ``"duet"``, and ``"serial"``.
+    ``"prusalink"``, ``"duet"``, and ``"usb"``.
     Defaults to ``"octoprint"``.
+    ``"serial"`` is accepted as a legacy alias for ``"usb"``.
 ``KILN_PRINTER_PORT``
     Serial port path for USB printers (required when ``KILN_PRINTER_TYPE``
-    is ``"serial"``).  E.g. ``"/dev/ttyUSB0"`` or ``"COM3"``.
+    is ``"usb"``).  E.g. ``"/dev/ttyUSB0"`` or ``"COM3"``.
 ``KILN_PRINTER_BAUDRATE``
-    Baud rate for serial printers (default 115200; many Marlin boards are
+    Baud rate for USB printers (default 115200; many Marlin boards are
     flashed for 250000).
 ``KILN_PRINTER_SERIAL``
     Bambu printer serial number (required when ``KILN_PRINTER_TYPE``
@@ -322,6 +323,7 @@ from kiln.thingiverse import (
 from kiln.tiers_and_terms import (
     AGENT_ACCOUNT_NUDGE,
     TIERS_AND_TERMS,
+    account_required_message,
     session_expired_message,
     signin_hint_fields,
     tier_required_message,
@@ -574,7 +576,10 @@ def _reload_env_config() -> None:
     if _yaml_has_printer and not _force_env:
         # YAML wins — override any env-derived values we just read.
         _PRINTER_HOST = str(_yaml_cfg.get("host", ""))
-        _PRINTER_TYPE = str(_yaml_cfg.get("type", "octoprint"))
+        # Normalize like the env path above: a config.yaml pinning a renamed
+        # type (prusaconnect, serial) reaches the dispatcher through here,
+        # and without this the alias table simply never ran on the YAML path.
+        _PRINTER_TYPE = _normalize_printer_type(str(_yaml_cfg.get("type", "octoprint")))
         # Bambu stores the LAN Access Code under `access_code`; every
         # other backend uses `api_key`.  Internally the server treats
         # them interchangeably via `_PRINTER_API_KEY`.
@@ -1237,7 +1242,7 @@ def _get_adapter() -> PrinterAdapter:
         _adapter = ElegooAdapter(host=host, mainboard_id=mainboard_id)
     elif printer_type == "prusalink":
         _adapter = PrusaLinkAdapter(host=host, api_key=api_key or None)
-    elif printer_type == "serial":
+    elif printer_type == "usb":
         port = os.environ.get("KILN_PRINTER_PORT", "")
         if not port:
             raise RuntimeError(
@@ -1422,7 +1427,9 @@ def _build_adapter_from_config_entry(name: str, entry: dict[str, Any]) -> Printe
     """
     host = str(entry.get("host") or "").strip()
     api_key = str(entry.get("api_key") or entry.get("access_code") or "").strip()
-    printer_type = str(entry.get("type") or entry.get("printer_type") or "").strip().lower()
+    printer_type = _normalize_printer_type(
+        str(entry.get("type") or entry.get("printer_type") or "").strip().lower()
+    )
     serial = str(entry.get("serial") or "").strip()
     printer_model = str(entry.get("printer_model") or "").strip()
 
@@ -1464,7 +1471,7 @@ def _build_adapter_from_config_entry(name: str, entry: dict[str, Any]) -> Printe
         adapter = ElegooAdapter(host=host, mainboard_id=mainboard_id)
     elif printer_type == "prusalink":
         adapter = PrusaLinkAdapter(host=host, api_key=api_key or None)
-    elif printer_type == "serial":
+    elif printer_type == "usb":
         # register_printer() persists a serial printer's port path as
         # `host`, so accept that too rather than demanding a `port` key
         # the tool that wrote the entry never emits.
@@ -7060,11 +7067,12 @@ def register_printer(
     Args:
         name: Unique human-readable name (e.g. "voron-350", "bambu-x1c").
         printer_type: Backend type -- "octoprint", "moonraker", "bambu",
-            "creality", "elegoo", "prusalink", "duet", or "serial".
-        host: Base URL or IP address of the printer.  For serial printers,
+            "creality", "elegoo", "prusalink", "duet", or "usb".
+            "serial" is accepted as a legacy alias for "usb".
+        host: Base URL or IP address of the printer.  For USB printers,
             this is the port path (e.g. "/dev/ttyUSB0", "COM3").
         api_key: API key (required for OctoPrint and Bambu, optional for
-            Moonraker/Creality, unused for serial).  For Bambu printers
+            Moonraker/Creality, unused for USB).  For Bambu printers
             this is the LAN Access Code.
         serial: Printer serial number (required for Bambu printers).
         verify_ssl: Whether to verify SSL certificates (default True).
@@ -7076,7 +7084,7 @@ def register_printer(
             sessions load the same printer. Default ``True``.
         verify_connection: For Bambu printers, immediately query AMS status
             after registration and return a proof summary. Default ``True``.
-        baudrate: Baud rate for serial printers.  Defaults to
+        baudrate: Baud rate for USB printers.  Defaults to
             ``DEFAULT_SERIAL_BAUDRATE``; many Marlin boards are flashed
             for 250000 and will not talk at the default.
 
@@ -7118,6 +7126,11 @@ def register_printer(
                 "printers in parallel (3 included, up to 50): "
                 "https://kiln3d.com/pricing"
             )
+        # Agents call this with whatever the docs they read said, and older
+        # docs say "serial".  Normalize before anything branches on it, so
+        # the tool honours the same aliases config.yaml and the env var do.
+        printer_type = _normalize_printer_type(printer_type)
+
         # Validate and clean the printer URL
         host, url_warnings = _validate_printer_url(host, printer_type=printer_type)
         if not host:
@@ -7186,8 +7199,8 @@ def register_printer(
             )
         elif printer_type == "prusalink":
             adapter = PrusaLinkAdapter(host=host, api_key=api_key or None)
-        elif printer_type == "serial":
-            # For serial printers, 'host' is the serial port path (e.g.
+        elif printer_type == "usb":
+            # For USB printers, 'host' is the serial port path (e.g.
             # /dev/ttyUSB0) and 'api_key' is unused.
             adapter = SerialPrinterAdapter(
                 port=host,
@@ -11668,6 +11681,22 @@ def _paired_access_token() -> str:
 # ones and no refusal could say which tier it needed.
 _PRO_TOOL_TIERS: dict[str, str] = {}
 
+# Free monthly allowance per metered pro tool — ``{"bucket", "limit", "noun",
+# "period"}`` straight from the manifest, filled in by the same loop.  Only
+# tools the server actually meters have an entry, so a lookup miss means "this
+# tool has no declared allowance" and the copy below says nothing about one.
+#
+# It is here because the account wall is enforced LOCALLY: ``_pro_api_call``
+# refuses before the request leaves the machine, so the server's own
+# "free includes N a month" — the one place that number was ever written —
+# reached almost nobody.
+#
+# The cost of moving it client-side is that an old install states an old
+# figure.  Bounded, and deliberately accepted: this copy is only ever read
+# while SIGNED OUT, before anything has been metered, and the server's own
+# response is authoritative from the first real call onward.
+_PRO_TOOL_QUOTA: dict[str, dict] = {}
+
 
 def _pro_api_call(tool_name: str, **kwargs) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
@@ -11726,39 +11755,36 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
         except Exception:
             pass
         required_tier = _PRO_TOOL_TIERS.get(tool_name, "")
+        allowance = _PRO_TOOL_QUOTA.get(tool_name)
         # Two audiences, two fields — the same split ``_tier_required_error``
         # uses in kiln-pro.  ``error`` is read by a PERSON: it says what they
         # reached for and what it costs them to continue, and contains no
         # command, because a person who wanted a textured coaster should not
-        # be handed a terminal.  The agent-addressed half comes from
+        # be handed a terminal.  Both halves come from
         # ``kiln.tiers_and_terms`` — the whole tool surface shares one
-        # definition of it now, so this refusal cannot drift away from the
+        # definition of them now, so this refusal cannot drift away from the
         # thirteen others that say the same thing.
         #
         # This used to read "pair a Kiln account, run `python3 -m kiln pair
         # <code>`" — and a test asserted that exact string, so the worst copy
         # in the product was the one line nobody could fix by accident.
-        if required_tier:
-            tier_name = required_tier.capitalize()
-            message = (
-                f"{tool_name} is part of Kiln {tier_name}. "
-                "Signing in is free and takes a few seconds. "
-                f"See what {tier_name} includes at kiln3d.com/pricing"
-            )
-        else:
-            message = (
-                f"{tool_name} is free to use — Kiln just needs to know who "
-                "you are to count it. Signing in takes a few seconds."
-            )
-        return {
+        payload = {
             "status": "error",
-            "error": message,
+            "error": account_required_message(
+                tool_name, tier=required_tier, allowance=allowance,
+            ),
             "code": "KILN_ACCOUNT_NOT_PAIRED",
             "tool": tool_name,
             "required_tier": required_tier or "free",
             "upgrade_url": "https://kiln3d.com/pricing",
             **signin_hint_fields(),
         }
+        # Machine-readable twin of the sentence, for a caller that would rather
+        # render the allowance its own way than parse prose.  Omitted entirely
+        # when unknown — an absent key cannot be misread as "no allowance".
+        if allowance:
+            payload["quota"] = dict(allowance)
+        return payload
     import json
     import urllib.error
     import urllib.request
@@ -11871,6 +11897,12 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 f"Requires Kiln {tier.capitalize()}. "
                 f"Pricing: https://kiln3d.com/pricing"
             )
+        # Metered tools carry their real monthly allowance; unmetered ones
+        # carry no block at all, and get no entry, so the account wall can
+        # only ever state a number the server actually charges.
+        quota = tool_def.get("quota")
+        if isinstance(quota, dict) and quota:
+            _PRO_TOOL_QUOTA[name] = quota
         params_schema = tool_def.get("parameters", {})
 
         # Build the stub function.  Closures capture `name` by reference,
@@ -12369,16 +12401,19 @@ def main() -> None:
     except Exception:
         logger.debug("community outbox startup drain skipped", exc_info=True)
 
-    # Inline-stage experiment (KILN_LOCAL_STAGE=1).  Runs HERE, after every
-    # tool and plugin has registered, because it stamps the mesh-producing
-    # tools — done any earlier it would stamp an empty registry.  A no-op
-    # with the flag unset, which is every install.
+    # The inline 3D stage.  Runs HERE, after every tool and plugin has
+    # registered, because it stamps the mesh-producing tools — done any
+    # earlier it would stamp an empty registry.
     try:
-        from kiln import local_stage
+        from kiln import local_stage, stage_cache
 
+        # Pull the stage document now, on a daemon thread, so the first
+        # design of a session finds it already cached instead of waiting on
+        # a download with an empty panel.
+        stage_cache.warm()
         local_stage.install(mcp)
     except Exception:
-        logger.debug("local inline stage not installed", exc_info=True)
+        logger.debug("inline stage not installed", exc_info=True)
 
     mcp.run()
 

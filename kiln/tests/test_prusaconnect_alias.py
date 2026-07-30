@@ -17,8 +17,17 @@ def test_normalize_maps_prusaconnect_to_prusalink():
     assert _normalize_printer_type("prusaconnect") == "prusalink"
 
 
+def test_normalize_maps_serial_to_usb():
+    """The transport is named for the cable now, not the wire protocol.
+
+    ``--serial`` means a Bambu serial number and nothing else; the backend
+    a user plugs in over USB is ``usb``.
+    """
+    assert _normalize_printer_type("serial") == "usb"
+
+
 def test_normalize_passes_through_current_types():
-    for t in ("octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink", "serial"):
+    for t in ("octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink", "duet", "usb"):
         assert _normalize_printer_type(t) == t
 
 
