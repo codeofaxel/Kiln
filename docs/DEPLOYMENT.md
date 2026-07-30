@@ -1,6 +1,6 @@
 # Kiln Deployment Guide
 
-Comprehensive reference for deploying Kiln as a hosted REST API service or local MCP server. Covers all environment variables, Docker/Railway deployment, and health verification.
+Reference for running Kiln yourself. Covers all environment variables, Docker deployment, and health verification.
 
 ---
 
@@ -219,28 +219,11 @@ docker run -d \
   kiln
 ```
 
-### Hosted REST API (Dockerfile.api)
+### Hosted REST API
 
-For deploying Kiln as an HTTP REST API service (no MCP transport):
-
-```bash
-docker build -f Dockerfile.api -t kiln-hosted .
-docker run -d \
-  --name kiln-hosted \
-  -p 8080:8080 \
-  -v kiln-data:/data \
-  --env-file .env \
-  --restart unless-stopped \
-  kiln-hosted
-```
-
-Key differences from standard Docker:
-- Installs `kiln[rest]` (includes FastAPI + uvicorn)
-- Runs as non-root `kiln` user
-- Persistent volume at `/data` for SQLite DB and license cache
-- Exposes port 8080 (hosted REST default)
-- Runs `kiln rest --host 0.0.0.0 --port 8080`
-- Built-in healthcheck on `/api/health`
+If you'd rather not run any of this yourself, Kiln is also available as a
+managed service — no servers to deploy, patch, or keep alive. See
+[kiln3d.com/pricing](https://kiln3d.com/pricing).
 
 ### Docker Compose
 
@@ -253,34 +236,6 @@ cp .env.example .env
 
 docker compose up -d
 ```
-
----
-
-## Railway Deployment
-
-Kiln can be deployed on Railway using the hosted Dockerfile:
-
-1. **Create a new Railway project** and connect your Git repository.
-
-2. **Set the Dockerfile path** to `Dockerfile.api` in your Railway service settings.
-
-3. **Configure environment variables** in the Railway dashboard:
-   - All `KILN_*` variables from the table above
-   - Include `KILN_API_AUTH_TOKEN` (required for hosted REST on non-localhost binds)
-
-4. **Persistent storage**: Attach a Railway volume mounted at `/data` to persist the SQLite database and license cache across deploys.
-
-5. **Health checks**: Railway auto-detects the `HEALTHCHECK` directive. The endpoint is `GET /api/health`.
-
-6. **Recommended Railway variables**:
-   ```
-   KILN_API_AUTH_TOKEN=change-me-long-random-token
-   KILN_PRINTER_HOST=http://your-printer-ip
-   KILN_PRINTER_API_KEY=your-api-key
-   KILN_DB_PATH=/data/kiln.db
-   KILN_LOG_FORMAT=json
-   KILN_RATE_LIMIT=60
-   ```
 
 ---
 
@@ -341,7 +296,7 @@ docker inspect --format='{{json .State.Health}}' kiln-hosted
 - [ ] Set `KILN_RATE_LIMIT` to an appropriate value
 - [ ] Ensure config files have `0600` permissions (automatic on Linux/macOS)
 - [ ] Mount `/data` as a persistent volume for database durability
-- [ ] Run the container as non-root (Dockerfile.api does this automatically)
+- [ ] Run the container as non-root
 - [ ] Never commit `.env` files or API keys to version control
 - [ ] Set `KILN_LLM_PRIVACY_MODE=1` (default) to redact secrets from LLM context
 - [ ] Set `KILN_CONFIRM_MODE=true` for hosted deployments to require confirmation for destructive operations
