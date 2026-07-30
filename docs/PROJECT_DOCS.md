@@ -656,7 +656,7 @@ mainboard_id: ABCD1234ABCD1234  # optional, auto-discovered
 
 **File upload:** the printer fetches files from your machine over the local network, so your firewall must allow local inbound connections from the printer.
 
-**Dependencies:** Requires the `websocket-client` package. Install with `pip install 'kiln[elegoo]'`.
+**Dependencies:** Requires the `websocket-client` package. Install with `pip install 'kiln3d[elegoo]'`.
 
 ### Direct USB / Serial
 

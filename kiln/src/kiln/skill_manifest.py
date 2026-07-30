@@ -438,7 +438,7 @@ def get_skill_definition_path() -> Path:
     for p in candidates:
         if p.is_file():
             return p
-    raise FileNotFoundError("SKILL.md not found. Run 'pip install kiln' or check your installation.")
+    raise FileNotFoundError("SKILL.md not found. Run 'pip install kiln3d' or check your installation.")
 
 
 _AGENT_WORKSPACE_MARKERS: list[str] = [

@@ -695,7 +695,7 @@ def prepare_image_for_emboss(
                 # and keep every other step, mask included.
                 _logger.info(
                     "Photo emboss: background removal unavailable "
-                    "(pip install kiln[emboss]) — continuing without it; "
+                    "(pip install 'kiln3d[emboss]') — continuing without it; "
                     "the subject may not separate as cleanly."
                 )
 
