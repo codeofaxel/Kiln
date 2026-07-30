@@ -140,13 +140,21 @@ def build_surface() -> tuple[dict, list[tuple[str, list[str]]]]:
 
 
 def render_readme_block(payload: dict) -> str:
-    """One-line, auto-maintained breadth summary for the README, between markers."""
+    """One-line, auto-maintained breadth summary for the README, between markers.
+
+    The link carries the same source/medium tags the rest of the README's
+    outbound kiln3d.com links do (b157b96b).  It lives here rather than in
+    the README because this block is regenerated: tagging the rendered
+    output by hand meant the next run of this script silently stripped the
+    attribution back off.
+    """
     brands = ", ".join(b["brand"] for b in payload["brands"])
     return (
         f"{RM_BEGIN}\n"
         f"Kiln ships **tuned profiles for {payload['total_models']} models across "
         f"{payload['total_brands']} brands** — {brands}. "
-        f"[See the full searchable list →](https://kiln3d.com/printers)\n"
+        f"[See the full searchable list →]"
+        f"(https://kiln3d.com/printers?utm_source=github&utm_medium=readme)\n"
         f"{RM_END}"
     )
 
