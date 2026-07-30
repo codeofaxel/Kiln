@@ -18,18 +18,25 @@ Detection probe: ``_engineering_overlay_loaded()`` checks whether
 
 from __future__ import annotations
 
+import sys
+from contextlib import contextmanager
+from types import ModuleType
 from unittest.mock import patch
 
 import pytest
 
 from kiln.design_intelligence import (
+    _TIER_PRODUCT_NAMES,
     _UPGRADE_HINT_ENVIRONMENT,
     _UPGRADE_HINT_POST_PROCESSING,
+    _UPGRADE_HINT_TEMPLATES,
     _UPGRADE_HINT_TROUBLESHOOTING,
     _engineering_overlay_loaded,
+    _upgrade_hint,
     check_environment_compatibility,
     get_post_processing,
     troubleshoot_print_issue,
+    unestablished_caution,
 )
 
 # ---------------------------------------------------------------------------
@@ -182,6 +189,139 @@ class TestToDictIncludesHint:
 # runner's actual environment (orthogonal cross-check for the patched
 # tests above; runs end-to-end against _get_kb()).
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Which tier the copy names — the hint must not sell a tier the caller owns
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _kiln_pro_says(tier, *, raises=False, absent=False):
+    """Stand in for kiln-pro's verdict, installed or not.
+
+    The public repo must be testable on its own, so the companion's answer is
+    injected rather than provisioned: a fake module in ``sys.modules`` is what
+    the in-function import will find.  ``absent=True`` puts ``None`` there,
+    which is exactly how Python reports a module that cannot be imported.
+    """
+    if absent:
+        patched = {"kiln_pro.hosted_intelligence": None}
+    else:
+        module = ModuleType("kiln_pro.hosted_intelligence")
+
+        def _unlock(kind):
+            if raises:
+                raise RuntimeError("licensing is unreachable")
+            return tier
+
+        module.overlay_depth_unlock_tier = _unlock
+        patched = {
+            "kiln_pro": sys.modules.get("kiln_pro") or ModuleType("kiln_pro"),
+            "kiln_pro.hosted_intelligence": module,
+        }
+    with patch.dict(sys.modules, patched):
+        yield
+
+
+class TestHintNamesTheTierThatActuallyUnlocksIt:
+    """"Kiln Pro" is right only while every gate is Pro-band, and one already is
+    not: a ``skin_contact`` record carries Business- and Enterprise-band depth,
+    so it is withheld from a free caller AND from a paying Pro one.  Hardcoded
+    copy would tell that Pro customer to buy the tier they are already on.
+    """
+
+    def test_business_band_depth_points_at_business(self):
+        with _kiln_pro_says("business"):
+            hint = _upgrade_hint("post_processing")
+        assert "Kiln Business" in hint
+        assert "Kiln Pro" not in hint, "a paying Pro caller was sold their own tier"
+
+    def test_enterprise_band_depth_points_at_enterprise(self):
+        with _kiln_pro_says("enterprise"):
+            hint = _upgrade_hint("post_processing")
+        assert "Kiln Enterprise" in hint
+        assert "Kiln Pro" not in hint
+
+    def test_pro_band_depth_still_says_pro(self):
+        """The common case keeps its exact wording — this fixes the kinds that
+        outgrew Pro, it does not re-price the ones that did not."""
+        with _kiln_pro_says("pro"):
+            assert _upgrade_hint("post_processing") == _UPGRADE_HINT_POST_PROCESSING
+
+    def test_nothing_withheld_falls_back_to_todays_wording(self):
+        """``None`` means 'no tier can be named', never 'nothing is missing' —
+        whether to show a hint at all is the caller's separate question."""
+        with _kiln_pro_says(None):
+            assert _upgrade_hint("post_processing") == _UPGRADE_HINT_POST_PROCESSING
+            assert (
+                _upgrade_hint("material_troubleshooting")
+                == _UPGRADE_HINT_TROUBLESHOOTING
+            )
+            assert (
+                _upgrade_hint("environment_compatibility") == _UPGRADE_HINT_ENVIRONMENT
+            )
+
+    def test_a_public_only_install_is_byte_identical_to_before(self):
+        """No companion, no verdict, no change: the free repo ships the copy it
+        shipped yesterday."""
+        with _kiln_pro_says(None, absent=True):
+            assert _upgrade_hint("post_processing") == _UPGRADE_HINT_POST_PROCESSING
+            assert (
+                _upgrade_hint("material_troubleshooting")
+                == _UPGRADE_HINT_TROUBLESHOOTING
+            )
+            assert (
+                _upgrade_hint("environment_compatibility") == _UPGRADE_HINT_ENVIRONMENT
+            )
+
+    def test_a_raising_companion_falls_back(self):
+        """Upgrade copy must never be able to break the answer it rides on."""
+        with _kiln_pro_says(None, raises=True):
+            assert _upgrade_hint("post_processing") == _UPGRADE_HINT_POST_PROCESSING
+
+    def test_an_unnameable_tier_falls_back_rather_than_guessing(self):
+        """A tier this build has no product name for is not rounded down to the
+        cheapest one it knows — a wrong tier in upsell copy is worse than a
+        vague one."""
+        with _kiln_pro_says("platinum"):
+            assert _upgrade_hint("post_processing") == _UPGRADE_HINT_POST_PROCESSING
+
+    def test_the_wired_tool_carries_the_named_tier_not_just_the_helper(self):
+        """The helper being right is not the product being right — this is what
+        an agent actually reads off the response."""
+        with _kiln_pro_says("business"):
+            with patch(
+                "kiln.design_intelligence._engineering_overlay_loaded",
+                return_value=False,
+            ):
+                result = get_post_processing("pla")
+        assert result is not None
+        assert "Kiln Business" in result.upgrade_hint
+        assert "Kiln Pro" not in result.upgrade_hint
+
+    def test_the_caution_tail_names_the_tier_too(self):
+        """``unestablished_caution`` shares the same shortfall and the same
+        mistake — it pointed at Pro for depth Pro does not carry either."""
+        with _kiln_pro_says("business"):
+            with patch(
+                "kiln.design_intelligence._engineering_overlay_loaded",
+                return_value=False,
+            ):
+                caution = unestablished_caution("skin_contact", "Not established.")
+        assert caution.startswith("Not established. ")
+        assert "Kiln Business carries the curated notes" in caution
+        assert "Kiln Pro" not in caution
+
+    @pytest.mark.parametrize("kind", sorted(_UPGRADE_HINT_TEMPLATES))
+    @pytest.mark.parametrize("product", sorted(_TIER_PRODUCT_NAMES.values()))
+    def test_every_template_stays_shippable_at_every_tier(self, kind, product):
+        """The hygiene rules above hold for the default rendering; a longer
+        product name must not quietly break them."""
+        rendered = _UPGRADE_HINT_TEMPLATES[kind].format(product=product)
+        assert rendered.startswith(product), "the product name leads the sentence"
+        assert rendered.endswith("https://kiln3d.com/pricing")
+        assert len(rendered) <= 200, f"{kind} at {product} is {len(rendered)} chars"
 
 
 class TestOverlayDetectionProbe:
