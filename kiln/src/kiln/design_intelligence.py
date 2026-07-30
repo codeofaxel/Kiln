@@ -174,11 +174,57 @@ def _engineering_overlay_loaded(kind: str = "materials") -> bool:
         return True
 
 
+# What each unlockable tier is called in copy.  The map is the whole reason
+# this indirection exists: a tier is an internal rank, a product name is the
+# thing a user can go and buy.
+_TIER_PRODUCT_NAMES: dict[str, str] = {
+    "pro": "Kiln Pro",
+    "business": "Kiln Business",
+    "enterprise": "Kiln Enterprise",
+}
+
+# Named whenever nothing better is known — a public-only install, a caller with
+# nothing withheld, a tier this build cannot name.  Pro is the entry paid tier,
+# so it is the honest generic: it never asks a user to buy more than they need.
+_DEFAULT_UPGRADE_PRODUCT = "Kiln Pro"
+
+
+def _upgrade_product_name(kind: str) -> str:
+    """Which Kiln product actually carries the depth withheld for *kind*.
+
+    Upgrade copy used to say "Kiln Pro" everywhere, which holds only while
+    every gate is Pro-band — and one already is not.  A ``skin_contact`` record
+    carries Business- and Enterprise-band depth, so it is withheld from a free
+    caller AND from a paying Pro one; hardcoded copy would tell that Pro
+    customer to buy the tier they are already on.
+
+    kiln-pro is the half that withheld the depth, so it is the half that knows
+    what would return it.  Absent (a free / public install), erroring, or
+    unable to name a tier, fall back to the generic product rather than
+    guessing: a wrong tier in upsell copy is worse than a vague one.
+    """
+    try:
+        from kiln_pro.hosted_intelligence import (  # type: ignore[import-not-found]
+            overlay_depth_unlock_tier,
+        )
+    except ImportError:
+        return _DEFAULT_UPGRADE_PRODUCT
+    try:
+        tier = overlay_depth_unlock_tier(kind)
+    except Exception:  # noqa: BLE001 — copy must not break the answer
+        return _DEFAULT_UPGRADE_PRODUCT
+    if not isinstance(tier, str):
+        return _DEFAULT_UPGRADE_PRODUCT
+    return _TIER_PRODUCT_NAMES.get(tier.strip().lower(), _DEFAULT_UPGRADE_PRODUCT)
+
+
 # Shared tail for :func:`unestablished_caution`.  Says where the missing depth
 # lives without implying the answer is knowable only by paying — the caution
-# itself already told the user what to do.
+# itself already told the user what to do.  ``{product}`` is resolved per
+# caller by :func:`_upgrade_product_name`, so the tail names the tier that
+# really has the notes instead of assuming Pro.
 _UNESTABLISHED_TAIL = (
-    "Kiln Pro carries the curated notes for this. See https://kiln3d.com/pricing"
+    "{product} carries the curated notes for this. See https://kiln3d.com/pricing"
 )
 
 
@@ -209,32 +255,56 @@ def unestablished_caution(overlay_kind: str, what_is_unknown: str) -> str:
     """
     if _engineering_overlay_loaded(overlay_kind):
         return ""
-    return f"{what_is_unknown} {_UNESTABLISHED_TAIL}"
+    tail = _UNESTABLISHED_TAIL.format(product=_upgrade_product_name(overlay_kind))
+    return f"{what_is_unknown} {tail}"
 
 
 # Free-tier upgrade-hint copy.  Kept short and terminal-friendly so MCP
 # agents can surface it verbatim; ends with the canonical pricing URL
 # so a user (or the agent itself) can act on it without further lookup.
-_UPGRADE_HINT_TROUBLESHOOTING = (
-    "Kiln Pro adds per-symptom diagnostic playbooks "
-    "(root cause + ordered fixes + prevention). "
-    "See https://kiln3d.com/pricing"
+# Keyed by the overlay kind whose depth is missing, because that kind is what
+# decides ``{product}`` — see :func:`_upgrade_product_name`.
+_UPGRADE_HINT_TEMPLATES: dict[str, str] = {
+    "material_troubleshooting": (
+        "{product} adds per-symptom diagnostic playbooks "
+        "(root cause + ordered fixes + prevention). "
+        "See https://kiln3d.com/pricing"
+    ),
+    # Deliberately does NOT mention safety notes.  Those ship free at every
+    # tier — a dust mask, a respirator, "uncured epoxy is a skin sensitizer" —
+    # so listing them here told a free user their protective-equipment guidance
+    # was behind the paywall when they already had it.  A paywall that
+    # overstates itself costs more trust than the sale is worth, and on safety
+    # guidance it is the wrong claim to make at all.
+    "post_processing": (
+        "{product} adds step-by-step procedures "
+        "and strengthening tradeoffs. "
+        "See https://kiln3d.com/pricing"
+    ),
+    "environment_compatibility": (
+        "{product} adds curated SME notes on what each rating means "
+        "and what to do about it. "
+        "See https://kiln3d.com/pricing"
+    ),
+}
+
+
+def _upgrade_hint(kind: str) -> str:
+    """The free-tier hint for *kind*, naming the tier that would unlock it."""
+    return _UPGRADE_HINT_TEMPLATES[kind].format(product=_upgrade_product_name(kind))
+
+
+# The default rendering of each hint: what a public-only install shows, and
+# what any caller falls back to when no tier can be named.  Byte-identical to
+# the copy that shipped before the product name was allowed to vary.
+_UPGRADE_HINT_TROUBLESHOOTING = _UPGRADE_HINT_TEMPLATES[
+    "material_troubleshooting"
+].format(product=_DEFAULT_UPGRADE_PRODUCT)
+_UPGRADE_HINT_POST_PROCESSING = _UPGRADE_HINT_TEMPLATES["post_processing"].format(
+    product=_DEFAULT_UPGRADE_PRODUCT
 )
-# Deliberately does NOT mention safety notes.  Those ship free at every tier —
-# a dust mask, a respirator, "uncured epoxy is a skin sensitizer" — so listing
-# them here told a free user their protective-equipment guidance was behind the
-# paywall when they already had it.  A paywall that overstates itself costs more
-# trust than the sale is worth, and on safety guidance it is the wrong claim to
-# make at all.
-_UPGRADE_HINT_POST_PROCESSING = (
-    "Kiln Pro adds step-by-step procedures "
-    "and strengthening tradeoffs. "
-    "See https://kiln3d.com/pricing"
-)
-_UPGRADE_HINT_ENVIRONMENT = (
-    "Kiln Pro adds curated SME notes on what each rating means "
-    "and what to do about it. "
-    "See https://kiln3d.com/pricing"
+_UPGRADE_HINT_ENVIRONMENT = _UPGRADE_HINT_TEMPLATES["environment_compatibility"].format(
+    product=_DEFAULT_UPGRADE_PRODUCT
 )
 # Free-tier bonding nudge: shown when a recommended material carries the
 # public common-knowledge `hard_to_bond` floor flag but no Pro overlay (so no
@@ -2501,7 +2571,7 @@ def check_environment_compatibility(
         upgrade_hint=(
             ""
             if _engineering_overlay_loaded("environment_compatibility")
-            else _UPGRADE_HINT_ENVIRONMENT
+            else _upgrade_hint("environment_compatibility")
         ),
     )
 
@@ -3034,7 +3104,7 @@ def troubleshoot_print_issue(
         upgrade_hint=(
             ""
             if _engineering_overlay_loaded("material_troubleshooting")
-            else _UPGRADE_HINT_TROUBLESHOOTING
+            else _upgrade_hint("material_troubleshooting")
         ),
     )
 
@@ -3126,7 +3196,7 @@ def get_post_processing(material_id: str) -> PostProcessingGuide | None:
         upgrade_hint=(
             ""
             if _engineering_overlay_loaded("post_processing")
-            else _UPGRADE_HINT_POST_PROCESSING
+            else _upgrade_hint("post_processing")
         ),
     )
 
@@ -3173,7 +3243,7 @@ def get_public_post_processing(material_id: str) -> PostProcessingGuide | None:
         techniques=techniques,
         paintability=paintability,
         strengthening=strengthening,
-        upgrade_hint=_UPGRADE_HINT_POST_PROCESSING,
+        upgrade_hint=_upgrade_hint("post_processing"),
     )
 
 
