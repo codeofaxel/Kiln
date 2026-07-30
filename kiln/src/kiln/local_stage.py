@@ -210,6 +210,13 @@ def host_renders_apps(mcp: Any) -> bool:
     nothing pays for it once — its first make is a still image, and the
     resource read it performs to draw that first panel turns the stage on
     for the rest of the session.
+
+    The declaration is the path that matters in practice.  Claude Desktop
+    sends it at initialize, under ``capabilities.extensions``, naming the
+    same mimetype this module serves — captured from a real handshake, not
+    assumed, and pinned in the tests.  So the first make of a session opens
+    the panel; the resource-read signal is the safety net for a host that
+    renders without saying so.
     """
     if _host_read_the_stage:
         return True

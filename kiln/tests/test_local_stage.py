@@ -266,6 +266,47 @@ class TestOnlyAnAppsHostGetsTheGeometry:
     def test_no_session_at_all_reads_as_no(self):
         assert local_stage.host_renders_apps(object()) is False
 
+    def test_a_real_claude_desktop_handshake_gets_the_geometry(self):
+        """The captured article, parsed by the real SDK model.
+
+        Verbatim from Claude Desktop's own initialize request
+        (``~/Library/Logs/Claude/mcp-server-kiln.log``, 2026-07-29) — the
+        host this stage was built for.  Everything else in this class is a
+        hand-built double, which proves the LOGIC and could agree with
+        itself about the wrong wire shape forever; ``extensions`` is not a
+        modelled field on ClientCapabilities, so whether it survives parsing
+        at all is an SDK behaviour, not ours.  If a future SDK stops
+        carrying it, or someone narrows _declared_extensions, this is the
+        test that notices — and the failure mode it guards is silent: no
+        error, no panel, just a still image where the 3D stage used to be.
+        """
+        from mcp.types import InitializeRequestParams
+
+        params = InitializeRequestParams.model_validate({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {"extensions": {
+                "io.modelcontextprotocol/ui": {
+                    "mimeTypes": ["text/html;profile=mcp-app"]}}},
+            "clientInfo": {"name": "claude-ai", "version": "0.1.0"},
+        })
+
+        class _Real:
+            def __init__(self):
+                session = type("S", (), {})()
+                session.client_params = params
+                ctx = type("C", (), {})()
+                ctx.session = session
+                self._mcp_server = type("L", (), {"request_context": ctx})()
+
+        host = _Real()
+        assert local_stage.host_renders_apps(host) is True, (
+            "the host this was built for would get a still image"
+        )
+        declared = local_stage._declared_extensions(host)
+        assert local_stage.MCP_APP_MIME_TYPE in (
+            declared[self.UI]["mimeTypes"]
+        ), "the host asked for a mimetype the stage does not serve"
+
     def test_the_payload_is_withheld_from_a_silent_host(self, tmp_path):
         sc = _run_hook(_Host(_Caps()), _real_cube(tmp_path / "cube.stl"))
         assert sc["artifact"]["artifact_token"], "the token is cheap and always rides"
