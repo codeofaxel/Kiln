@@ -98,6 +98,27 @@ def _merge_pro_overlay_if_available(
     return _deep_merge_dicts(public_data, overlay)
 
 
+#: Overlay kind -> the :class:`_DesignKnowledgeBase` property that reads it.
+#: One map for every table, so probing whether a table's curated depth was
+#: reachable never depends on the prober having been told about that table.
+#: A partial map silently answers "no overlay" for anything missing from it,
+#: which is the wrong answer in the dangerous direction.  Adding a table to
+#: ``_DesignKnowledgeBase._load`` adds a line here.
+_OVERLAY_KIND_PROPERTY = {
+    "materials": "materials",
+    "design_templates": "templates",
+    "functional_requirements": "requirements",
+    "load_tables": "load_tables",
+    "environment_compatibility": "environment",
+    "printer_profiles": "printers",
+    "material_troubleshooting": "troubleshooting",
+    "printer_material_compatibility": "printer_compatibility",
+    "post_processing": "post_processing",
+    "multi_material_pairing": "multi_material",
+    "skin_contact": "skin_contact",
+}
+
+
 def _engineering_overlay_loaded(kind: str = "materials") -> bool:
     """Probe whether one kiln-pro engineering overlay actually merged.
 
@@ -118,19 +139,53 @@ def _engineering_overlay_loaded(kind: str = "materials") -> bool:
     """
     try:
         kb = _get_kb()
-        property_by_kind = {
-            "materials": "materials",
-            "environment_compatibility": "environment",
-            "material_troubleshooting": "troubleshooting",
-            "post_processing": "post_processing",
-        }
-        attr = property_by_kind.get(kind)
+        attr = _OVERLAY_KIND_PROPERTY.get(kind)
         if attr is None:
             return False
+        # Touch the property first: the merge happens on read, so probing
+        # before the table has been read would report a false "no overlay".
         getattr(kb, attr)
         return kb.has_private_overlay(kind)
     except Exception:
         return False
+
+
+# Shared tail for :func:`unestablished_caution`.  Says where the missing depth
+# lives without implying the answer is knowable only by paying — the caution
+# itself already told the user what to do.
+_UNESTABLISHED_TAIL = (
+    "Kiln Pro carries the curated notes for this. See https://kiln3d.com/pricing"
+)
+
+
+def unestablished_caution(overlay_kind: str, what_is_unknown: str) -> str:
+    """The honest answer when a caution's only source could not be read.
+
+    A ``.get(field, <empty>)`` over a table whose curated cautions live in a
+    kiln-pro overlay cannot tell two very different things apart: *we looked
+    and there is nothing to warn about*, and *we could not read the thing
+    that would have warned us*.  Both arrive as an empty value, the caution
+    silently becomes nothing, and no branch anywhere notices — which reads to
+    the user as a clearance.  SILENCE IS NOT AN ACCEPTABLE ANSWER, the same
+    reason :func:`get_skin_contact_floor` returns an explicit uncharacterized
+    floor instead of ``None``.
+
+    Callers pass the plain-English statement of what could not be
+    established; this adds the shared pointer to where that depth lives.
+    Never assert safety here and never invent a caveat — say what is not
+    known and let the user decide.
+
+    :param overlay_kind: The table whose curated depth is the field's only
+        source (e.g. ``"load_tables"``).
+    :param what_is_unknown: One or two plain sentences naming what is missing
+        and what the user should do about it.
+    :returns: ``""`` when the overlay for *overlay_kind* did merge — the
+        emptiness is then a real, checked silence, and speaking over it would
+        be dishonest in the other direction — otherwise the caution.
+    """
+    if _engineering_overlay_loaded(overlay_kind):
+        return ""
+    return f"{what_is_unknown} {_UNESTABLISHED_TAIL}"
 
 
 # Free-tier upgrade-hint copy.  Kept short and terminal-friendly so MCP
@@ -362,6 +417,10 @@ class DesignTemplate:
     design_rules: dict[str, Any] = field(default_factory=dict)
     print_orientation_reason: str = ""
     agent_guidance: list[str] = field(default_factory=list)
+    # Set when this template's reasoning could not be read, so the caller is
+    # holding an orientation LABEL with no explanation, no dimension rules and
+    # no failure modes.  See :func:`unestablished_caution`.
+    caution: str = ""
 
     def has_engineering_data(self) -> bool:
         """True when the kiln-pro engineering overlay is loaded.
@@ -447,13 +506,21 @@ class MaterialRecommendation:
 
 @dataclass
 class LoadEstimate:
-    """Estimated safe load capacity for a specific cantilever geometry."""
+    """Estimated safe load capacity for a specific cantilever geometry.
+
+    ``caution`` is set when this material's own caveats could not be read
+    (the public load table carries ``notes`` for only a few materials; the
+    rest live in the kiln-pro overlay).  Empty means the caveats are either
+    present in ``reasoning`` or genuinely absent — never that the number
+    needs no caveat.  See :func:`unestablished_caution`.
+    """
 
     material: str
     max_load_n: float
     safety_factor: float
     derating_applied: float
     reasoning: list[str]
+    caution: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -603,7 +670,12 @@ class PostProcessingGuide:
 
 @dataclass
 class MultiMaterialReport:
-    """Co-print compatibility report between two materials."""
+    """Co-print compatibility report between two materials.
+
+    ``caution`` is set when the reasoning behind the verdict could not be
+    read — the public pairing matrix carries the verdict but no ``notes`` and
+    no ``general_rules``.  See :func:`unestablished_caution`.
+    """
 
     material_a: str
     material_b: str
@@ -612,6 +684,7 @@ class MultiMaterialReport:
     notes: str
     support_pair: dict[str, Any] | None
     general_rules: list[str]
+    caution: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -2221,7 +2294,8 @@ def estimate_load_capacity(
         "application class, and fatigue/creep checks, use Kiln Pro's "
         "design_for_load."
     )
-    reasoning.extend(material_data.get("notes", []))
+    notes = material_data.get("notes", [])
+    reasoning.extend(notes)
 
     return LoadEstimate(
         material=material_key,
@@ -2232,6 +2306,22 @@ def estimate_load_capacity(
         safety_factor=3.0,
         derating_applied=derating,
         reasoning=reasoning,
+        # The number is the same at every tier; the material's own caveats
+        # are not.  When they could not be read, say so rather than hand
+        # back a bare figure that reads as a clearance.
+        caution=(
+            ""
+            if notes
+            else unestablished_caution(
+                "load_tables",
+                "This is the geometry calculation only. What most often "
+                "breaks a real part — a load left sitting on it for weeks, "
+                "repeated bending, or filament that has soaked up moisture — "
+                "is not in this number, and no caution specific to "
+                f"{material_key} could be read here. Treat it as unchecked "
+                "for this material and test the part before you rely on it.",
+            )
+        ),
     )
 
 
@@ -2597,6 +2687,42 @@ def find_public_design_templates(use_case: str) -> list[dict[str, Any]]:
     return matches
 
 
+def _build_design_template(template_id: str, data: dict[str, Any]) -> DesignTemplate:
+    """Build one template record from its merged knowledge-base entry.
+
+    One builder for every caller, so the honesty caution can never be wired
+    into the single-template lookup and forgotten in the listing.
+    """
+    reason = data.get("print_orientation_reason", "")
+    guidance = data.get("agent_guidance", [])
+    return DesignTemplate(
+        template_id=template_id,
+        display_name=data["display_name"],
+        description=data["description"],
+        use_cases=data["use_cases"],
+        material_compatibility=data["material_compatibility"],
+        print_orientation=data["print_orientation"],
+        design_rules=data.get("design_rules", {}),
+        print_orientation_reason=reason,
+        agent_guidance=guidance,
+        # The orientation LABEL is public; the reason for it, this pattern's
+        # dimension rules and its known failure modes are not.  A label with
+        # no reason invites the caller to treat the pattern as understood.
+        caution=(
+            ""
+            if (reason or guidance)
+            else unestablished_caution(
+                "design_templates",
+                "The print orientation for this pattern is named here, but "
+                "not why it matters, what dimensions the pattern needs, or "
+                "how it usually fails. Treat the label as a starting point "
+                "rather than a checked design, and print a test piece before "
+                "committing to it.",
+            )
+        ),
+    )
+
+
 def get_design_template(template_id: str) -> DesignTemplate | None:
     """Get a design template by ID.
 
@@ -2607,38 +2733,16 @@ def get_design_template(template_id: str) -> DesignTemplate | None:
     if data is None:
         return None
 
-    return DesignTemplate(
-        template_id=template_id,
-        display_name=data["display_name"],
-        description=data["description"],
-        use_cases=data["use_cases"],
-        material_compatibility=data["material_compatibility"],
-        print_orientation=data["print_orientation"],
-        design_rules=data.get("design_rules", {}),
-        print_orientation_reason=data.get("print_orientation_reason", ""),
-        agent_guidance=data.get("agent_guidance", []),
-    )
+    return _build_design_template(template_id, data)
 
 
 def list_design_templates() -> list[DesignTemplate]:
     """Return all design templates sorted by name."""
     kb = _get_kb()
-    templates = []
-    for tid, data in sorted(kb.templates.items()):
-        templates.append(
-            DesignTemplate(
-                template_id=tid,
-                display_name=data["display_name"],
-                description=data["description"],
-                use_cases=data["use_cases"],
-                material_compatibility=data["material_compatibility"],
-                print_orientation=data["print_orientation"],
-                design_rules=data.get("design_rules", {}),
-                print_orientation_reason=data.get("print_orientation_reason", ""),
-                agent_guidance=data.get("agent_guidance", []),
-            )
-        )
-    return templates
+    return [
+        _build_design_template(tid, data)
+        for tid, data in sorted(kb.templates.items())
+    ]
 
 
 def find_templates_for_use_case(use_case: str) -> list[DesignTemplate]:
@@ -3086,39 +3190,66 @@ def check_multi_material_compatibility(
             support_match = sp
             break
 
+    def _verdict_caution() -> str:
+        """A verdict with no notes: yes/no, and nothing about what actually
+        goes wrong at the interface or how to work around it."""
+        return unestablished_caution(
+            "multi_material_pairing",
+            "The verdict is here, but not the reasoning behind it — what "
+            "goes wrong at the interface, and what to do about temperatures "
+            "and purging if you try the pair anyway. Run a small test piece "
+            "before committing to a long print.",
+        )
+
     if pair_data:
+        notes = pair_data.get("notes", "")
         return MultiMaterialReport(
             material_a=a,
             material_b=b,
             compatible=pair_data.get("compatible", False),
             interface_adhesion=pair_data.get("interface_adhesion", "unknown"),
-            notes=pair_data.get("notes", ""),
+            notes=notes,
             support_pair=support_match,
             general_rules=rules,
+            caution="" if notes else _verdict_caution(),
         )
 
     # No explicit data — use support pair if available
     if support_match:
         adhesion = support_match.get("interface_adhesion", "unknown")
+        notes = support_match.get("notes", "")
         return MultiMaterialReport(
             material_a=a,
             material_b=b,
             compatible=adhesion not in ("none", "poor"),
             interface_adhesion=adhesion,
-            notes=support_match.get("notes", ""),
+            notes=notes,
             support_pair=support_match,
             general_rules=rules,
+            caution="" if notes else _verdict_caution(),
         )
 
-    # No data at all
+    # No data at all.  Only send the caller to the general rules when there
+    # ARE any: that list is empty on the public floor, so the old wording
+    # pointed at something that could never have anything in it.
+    no_data_note = f"No compatibility data for {a} + {b}."
+    if rules:
+        no_data_note += " Check general rules."
     return MultiMaterialReport(
         material_a=a,
         material_b=b,
         compatible=False,
         interface_adhesion="unknown",
-        notes=f"No compatibility data for {a} + {b}. Check general rules.",
+        notes=no_data_note,
         support_pair=None,
         general_rules=rules,
+        caution=unestablished_caution(
+            "multi_material_pairing",
+            "Nothing here covers this pair, and the general polymer rules "
+            "that would let you reason it out are not available either. "
+            "Treat it as untested rather than fine — a test piece is the "
+            "only thing that will tell you.",
+        ),
     )
 
 
