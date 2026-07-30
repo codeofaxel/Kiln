@@ -128,6 +128,34 @@ def token_for_call_result(result: Any) -> str | None:
     return None
 
 
+def _write_test_cube() -> str | None:
+    """A 20mm binary-STL cube in a temp file.  No dependencies on purpose —
+    the diagnostic must not fail for a reason unrelated to what it tests."""
+    import struct
+    import tempfile
+
+    s = 20.0
+    v = [(0, 0, 0), (s, 0, 0), (s, s, 0), (0, s, 0),
+         (0, 0, s), (s, 0, s), (s, s, s), (0, s, s)]
+    faces = [(0, 3, 2), (0, 2, 1), (4, 5, 6), (4, 6, 7),
+             (0, 1, 5), (0, 5, 4), (2, 3, 7), (2, 7, 6),
+             (1, 2, 6), (1, 6, 5), (0, 4, 7), (0, 7, 3)]
+    try:
+        blob = bytearray(b"\x00" * 80) + struct.pack("<I", len(faces))
+        for a, b, c in faces:
+            blob += struct.pack("<3f", 0.0, 0.0, 0.0)
+            for idx in (a, b, c):
+                blob += struct.pack("<3f", *v[idx])
+            blob += struct.pack("<H", 0)
+        fd, path = tempfile.mkstemp(suffix=".stl", prefix="kiln_stage_smoke_")
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(bytes(blob))
+        return path
+    except Exception:  # noqa: BLE001
+        logger.debug("test cube not written", exc_info=True)
+        return None
+
+
 def install(mcp: Any) -> dict[str, Any]:
     """Register the stage resource + payload tool, and stamp mesh tools.
 
@@ -183,6 +211,38 @@ def install(mcp: Any) -> dict[str, Any]:
         out["payload_tool"] = True
     except Exception:
         logger.warning("local stage: payload tool failed", exc_info=True)
+
+    # An unmistakable name, so the experiment answers the question it asks.
+    # A machine running this flag typically also has the plain local server
+    # and the hosted connector attached, and all three offer the ordinary
+    # mesh tools — so asking for one of those would be answered by whichever
+    # server the host felt like, and a panel (or no panel) would prove
+    # nothing about THIS one.  Only this server has this tool.
+    try:
+        @mcp.tool(name="stage_smoke_test",
+                  meta={"ui": {"resourceUri": MESH_VIEWER_RESOURCE_URI}})
+        def stage_smoke_test() -> dict:
+            """Open a small test cube on Kiln's 3D stage.
+
+            Diagnostic for the local inline-stage experiment: makes a 20mm
+            cube and hands it back the same way a real design would, so the
+            only question left is whether this app renders the panel.
+            """
+            mesh = _write_test_cube()
+            if mesh is None:
+                return {"success": False, "error": "Could not write the test cube."}
+            return {
+                "success": True,
+                "stl_path": mesh,
+                "message": (
+                    "Made a 20mm test cube. If a 3D panel opened above this "
+                    "message, the local inline stage works."
+                ),
+            }
+
+        out["smoke_tool"] = True
+    except Exception:
+        logger.warning("local stage: smoke tool failed", exc_info=True)
 
     # Point the mesh-producing tools at the stage.  Mutating meta after
     # registration keeps this a pure add-on: no tool's signature, return
