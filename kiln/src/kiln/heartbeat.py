@@ -388,6 +388,14 @@ def _send_heartbeat() -> None:
                 # ran `kiln pair`) or persist (they gave up — a
                 # support-ticket ticker).
                 "tier_denials": stats.get("tier_denials", {}),
+                # Not-signed-in refusals — {tool_name: count_today}.
+                # The companion to tier_denials and the larger of the
+                # two: a tier denial is someone who has an account and
+                # won't pay yet, while this is someone who reached for a
+                # capability before we knew who they were.  It never
+                # reached a server, so this heartbeat is the only way it
+                # is ever seen.
+                "account_wall": stats.get("account_wall", {}),
                 # Per-tool call counts — {tool_name: count_today}.  The
                 # anonymous view of what a not-signed-in local user
                 # actually does.  Capped to the busiest tools so the

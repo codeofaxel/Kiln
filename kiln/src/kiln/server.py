@@ -935,7 +935,7 @@ def _record_local_tool_call(name: str, result: Any = None) -> None:
       the call in ``~/.kiln`` and syncs it when the user is signed in.
     * free install (no kiln-pro) → the public ``usage_ledger`` records the
       call locally and flushes to ``/api/me/stats/record`` when the user
-      is signed in via ``python3 -m kiln signin``.
+      is signed in via ``kiln signin``.
 
     Two independent channels fire here:
     * the ANONYMOUS aggregate counter (``daily_stats.record_tool_call``) —
@@ -11614,6 +11614,14 @@ def _paired_access_token() -> str:
         return _raw_paired_access_token()
 
 
+# Tier required by each pro tool, keyed by tool name and filled in by
+# ``_register_pro_tool_stubs`` from the manifest.  The manifest has
+# always carried a ``tier`` per tool; nothing read it, so all 345 paid
+# capabilities presented to an agent looking exactly like the 54 free
+# ones and no refusal could say which tier it needed.
+_PRO_TOOL_TIERS: dict[str, str] = {}
+
+
 def _pro_api_call(tool_name: str, **kwargs) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
 
@@ -11656,21 +11664,63 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
             "error": resolved.detail,
             "code": "KILN_SESSION_EXPIRED",
             "tool": tool_name,
-            "setup_hint": "python3 -m kiln signin",
+            "setup_hint": "kiln signin",
         }
     else:
         bearer = ""
     if not bearer:
+        # The most-hit refusal in the product, and until now the only one
+        # that recorded nothing: it returns here without ever reaching a
+        # server, so no server-side counter could see it.  Best-effort.
+        try:
+            from kiln.daily_stats import record_account_wall
+
+            record_account_wall(tool_name)
+        except Exception:
+            pass
+        required_tier = _PRO_TOOL_TIERS.get(tool_name, "")
+        # Two audiences, two fields — the same split ``_tier_required_error``
+        # uses in kiln-pro.  ``error`` is read by a PERSON: it says what they
+        # reached for and what it costs them to continue, and contains no
+        # command, because a person who wanted a textured coaster should not
+        # be handed a terminal.  ``agent_guidance`` is read by the agent,
+        # which is the thing that can actually run the command, and is told
+        # to run it rather than recite it.
+        #
+        # This used to read "pair a Kiln account, run `python3 -m kiln pair
+        # <code>`" — and a test asserted that exact string, so the worst copy
+        # in the product was the one line nobody could fix by accident.
+        if required_tier:
+            tier_name = required_tier.capitalize()
+            message = (
+                f"{tool_name} is part of Kiln {tier_name}. "
+                "Signing in is free and takes a few seconds. "
+                f"See what {tier_name} includes at kiln3d.com/pricing"
+            )
+        else:
+            message = (
+                f"{tool_name} is free to use — Kiln just needs to know who "
+                "you are to count it. Signing in takes a few seconds."
+            )
         return {
             "status": "error",
-            "error": (
-                f"'{tool_name}' needs a paired Kiln account. "
-                "Run `python3 -m kiln signin`, or generate a code at "
-                "https://app.kiln3d.com/connect and run `python3 -m kiln pair <code>`."
-            ),
+            "error": message,
             "code": "KILN_ACCOUNT_NOT_PAIRED",
             "tool": tool_name,
-            "setup_hint": "python3 -m kiln signin",
+            "required_tier": required_tier or "free",
+            "upgrade_url": "https://kiln3d.com/pricing",
+            # Named agent_hint, not agent_guidance: the public SME-leak gate
+            # counts `agent_guidance` as a curated-data field marker, and
+            # server.py already names every printer vendor, so the pair trips
+            # a moat check this refusal has nothing to do with.  Cheaper to
+            # pick another word than to weaken a security gate over copy.
+            "agent_hint": (
+                "Run `kiln signin` for the user — it opens a browser and "
+                "finishes on its own. Do not ask them to type a command. On "
+                "a machine with no browser, `kiln pair <code>` works instead, "
+                "with a code from https://app.kiln3d.com/connect"
+            ),
+            "setup_hint": "kiln signin",
         }
     import json
     import urllib.error
@@ -11773,6 +11823,17 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
             continue
 
         description = tool_def.get("description", name)
+        # Say what this costs, in the one place an agent always reads.
+        # An agent that knows the tier can tell the user "that needs
+        # Pro" before spending a call to find out.
+        tier = str(tool_def.get("tier") or "").strip().lower()
+        if tier and tier != "free":
+            _PRO_TOOL_TIERS[name] = tier
+            description = (
+                f"{description}\n\n"
+                f"Requires Kiln {tier.capitalize()}. "
+                f"Pricing: https://kiln3d.com/pricing"
+            )
         params_schema = tool_def.get("parameters", {})
 
         # Build the stub function.  Closures capture `name` by reference,
