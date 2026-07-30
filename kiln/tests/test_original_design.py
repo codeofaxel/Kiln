@@ -313,10 +313,15 @@ class TestAuditOriginalDesignIntentVerification:
                 printer_model="bambu_a1",
             )
 
-        # Baseline audit has none of the intent gates.
-        assert all(
-            not g.name.startswith("intent_") for g in baseline.gates
-        )
+        # None of the pro verdict gates leak in...
+        intent_gates = [g for g in baseline.gates if g.name.startswith("intent_")]
+        assert [g.name for g in intent_gates] == ["intent_verification"]
+        # ...but the audit says the check did not run, rather than
+        # omitting it and reading as a clean bill of health.
+        not_checked = intent_gates[0]
+        assert not_checked.checked is False
+        assert not_checked.passed is False
+        assert not_checked.severity == "info"
         # Sanity: baseline still produces the well-known gates.
         gate_names = {g.name for g in baseline.gates}
         assert "mesh_validation" in gate_names
@@ -445,10 +450,13 @@ class TestAuditOriginalDesignIntentVerification:
             )
 
         assert audit.readiness_score >= 0
-        # No intent gates added because the verify call raised.
-        assert not any(
-            g.name.startswith("intent_") for g in audit.gates
-        )
+        # The verify call raised, so no verdict gates — but a check that
+        # blew up is a check that did not run, and the audit has to say
+        # so.  Going quiet here is what let a design "pass" a gate that
+        # never executed.
+        intent_gates = [g for g in audit.gates if g.name.startswith("intent_")]
+        assert [g.name for g in intent_gates] == ["intent_verification"]
+        assert intent_gates[0].checked is False
 
 
 # ---------------------------------------------------------------------------
@@ -1138,3 +1146,112 @@ class TestAuditOriginalDesignPrintabilityRemedies:
 
         assert audit.recommended_remedies is None
         assert audit.applied_remedies is None
+
+
+# ---------------------------------------------------------------------------
+# Unrun checks are reported, not omitted
+# ---------------------------------------------------------------------------
+
+
+def _no_kiln_pro(monkeypatch):
+    """Make every kiln_pro import fail, as on a plain public install."""
+    import builtins as _builtins
+
+    real_import = _builtins.__import__
+
+    def _blocked(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.startswith("kiln_pro"):
+            raise ImportError("simulated: kiln-pro not installed")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(_builtins, "__import__", _blocked)
+
+
+class TestUnrunGatesAreReported:
+    """An audit must say which checks did not run.
+
+    ready_for_print was computed over a gate list the intent gates were
+    silently missing from, so a design came back clean over checks that
+    were never executed.  Nothing in the report said so.
+    """
+
+    def test_declared_intent_that_cannot_be_read_is_named(self, monkeypatch):
+        _no_kiln_pro(monkeypatch)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            # A sidecar kiln-pro wrote earlier, sitting next to the mesh.
+            with open(path + ".intent.json", "w") as fh:
+                fh.write('{"generator": "generate_from_template", "assertions": []}')
+            audit = audit_original_design(path, "simple coaster")
+
+        gate = next(g for g in audit.gates if g.name == "intent_verification")
+        assert gate.checked is False
+        assert gate.details["declared_intent_present"] is True
+        assert "declared intent" in gate.message.lower()
+        assert "cannot check" in gate.message.lower()
+        # The reader now owns the check, so it belongs in the actions.
+        assert any(
+            "could not be checked" in action for action in audit.next_actions
+        )
+
+    def test_no_declared_intent_says_there_was_nothing_to_check(self, monkeypatch):
+        # The two silences are different and the report must not blur
+        # them: nothing declared is not the same as could not verify.
+        _no_kiln_pro(monkeypatch)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            audit = audit_original_design(path, "simple coaster")
+
+        gate = next(g for g in audit.gates if g.name == "intent_verification")
+        assert gate.checked is False
+        assert gate.details["declared_intent_present"] is False
+        assert "nothing to check" in gate.message.lower()
+        assert not any(
+            "could not be checked" in action for action in audit.next_actions
+        )
+
+    def test_unrun_gate_never_reads_as_passed(self, monkeypatch):
+        # The whole point: a consumer rendering a tick per passed gate
+        # must not tick a check that never ran.
+        _no_kiln_pro(monkeypatch)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            audit = audit_original_design(path, "simple coaster")
+
+        for gate in audit.gates:
+            if not gate.checked:
+                assert gate.passed is False, gate.name
+
+    def test_checked_survives_serialisation(self, monkeypatch):
+        # Callers read the audit as a dict; the distinction has to reach
+        # them, not just live on the dataclass.
+        _no_kiln_pro(monkeypatch)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            audit = audit_original_design(path, "simple coaster")
+
+        gates = audit.to_dict()["gates"]
+        assert all("checked" in g for g in gates)
+        assert any(g["checked"] is False for g in gates)
+
+    def test_unrun_gate_does_not_block_printing(self, monkeypatch):
+        # Honesty, not a paywall.  A check this install cannot run must
+        # not turn into a blocker, or every free user is stuck forever.
+        _no_kiln_pro(monkeypatch)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            audit = audit_original_design(path, "simple coaster")
+
+        gate = next(g for g in audit.gates if g.name == "intent_verification")
+        assert gate.severity == "info"
+        assert gate.message not in audit.blockers
+
+    def test_gates_that_ran_are_marked_checked(self, monkeypatch):
+        _no_kiln_pro(monkeypatch)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0), "cube.stl")
+            audit = audit_original_design(path, "simple coaster")
+
+        ran = {g.name for g in audit.gates if g.checked}
+        assert "mesh_validation" in ran
+        assert "printability" in ran

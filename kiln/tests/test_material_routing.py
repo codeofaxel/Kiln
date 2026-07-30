@@ -562,3 +562,95 @@ class TestOnHandRecommendation:
         if better is not None:
             suggested = get_material(better["name"])
             assert suggested.cost_per_kg_usd <= 25.0
+
+
+class TestAbrasiveFilamentFloor:
+    """The always-free nozzle-wear caution for filled filament.
+
+    The precise NOZZLE ADVISORY needs kiln-pro AND a recorded nozzle
+    state.  Without both, a filled spool used to route to the user with
+    no mention of the nozzle at all — and a missing warning reads as
+    "no concern".
+    """
+
+    def test_recorded_filled_spool_gets_the_floor(self) -> None:
+        rec = recommend_material(
+            "strong functional bracket",
+            printer_id="default",
+            on_hand=[_on_hand_entry("PETG-CF", loaded_on=[_loaded_row("default")])],
+        )
+        assert "ABRASIVE FILAMENT" in rec.reasoning
+        assert "PETG-CF" in rec.reasoning
+        assert "hardened steel" in rec.reasoning.lower()
+
+    def test_floor_is_honest_about_not_knowing_the_nozzle(self) -> None:
+        # Public Kiln holds no nozzle state.  The floor must say so
+        # rather than imply it inspected the machine.
+        rec = recommend_material(
+            "strong functional bracket",
+            printer_id="default",
+            on_hand=[_on_hand_entry("PLA-GF", loaded_on=[_loaded_row("default")])],
+        )
+        assert "cannot see which nozzle" in rec.reasoning.lower()
+
+    def test_floor_does_not_need_a_printer_id(self) -> None:
+        # Abrasiveness is a property of the filament, not the machine,
+        # so the caution cannot depend on the caller naming a printer.
+        rec = recommend_material(
+            "strong functional bracket",
+            on_hand=[_on_hand_entry("PA-CF", loaded_on=[_loaded_row("default")])],
+        )
+        assert "ABRASIVE FILAMENT" in rec.reasoning
+
+    def test_unfilled_filament_gets_no_caution(self) -> None:
+        rec = recommend_material(
+            "strong functional bracket",
+            printer_id="default",
+            on_hand=[_on_hand_entry("PETG", loaded_on=[_loaded_row("default")])],
+        )
+        assert "ABRASIVE FILAMENT" not in rec.reasoning
+
+    def test_catalog_only_recommendation_is_unchanged(self) -> None:
+        # No public catalog material is filled, so a catalog-only answer
+        # must stay quiet.  (The name rule sees the catalog key here —
+        # "pc", not "Polycarbonate" — so the display-name false positive
+        # is the classifier's own test to catch, not this one's.)
+        rec = recommend_material("strong functional bracket", printer_id="default")
+        assert "ABRASIVE FILAMENT" not in rec.reasoning
+
+    def test_precise_advisory_suppresses_the_floor(self, monkeypatch) -> None:
+        # When kiln-pro answers with the nozzle-aware verdict, that is
+        # strictly better.  Nobody gets warned twice.
+        from kiln import _pro_nozzle_bridge
+
+        monkeypatch.setattr(
+            _pro_nozzle_bridge,
+            "consult_abrasive_escalation",
+            lambda **kwargs: {
+                "severity": "red",
+                "escalated": True,
+                "escalation_reason": "abrasive_brass",
+                "filament_class": "abrasive",
+                "nozzle_material": "brass",
+                "user_warning": "Brass nozzle with an abrasive filament.",
+            },
+        )
+        rec = recommend_material(
+            "strong functional bracket",
+            printer_id="default",
+            on_hand=[_on_hand_entry("PETG-CF", loaded_on=[_loaded_row("default")])],
+        )
+        assert "NOZZLE ADVISORY" in rec.reasoning
+        assert "ABRASIVE FILAMENT" not in rec.reasoning
+
+    def test_floor_warns_it_never_filters(self) -> None:
+        # Same contract as the skin-contact advisory: a caution never
+        # drops a candidate or breaks routing.
+        rec = recommend_material(
+            "strong functional bracket",
+            printer_id="default",
+            on_hand=[_on_hand_entry("PETG-CF", loaded_on=[_loaded_row("default")])],
+        )
+        assert rec.material is not None
+        assert rec.score > 0
+        assert rec.settings

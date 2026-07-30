@@ -6,11 +6,12 @@ import pytest
 
 from kiln.material_safety import (
     MATERIAL_PROCESS,
+    abrasive_nozzle_floor,
     build_bambu_flush_matrix,
     check_material_compatibility,
     get_process_settings,
+    is_abrasive_filament,
 )
-
 
 # ---------------------------------------------------------------------------
 # check_material_compatibility — basic cases
@@ -307,3 +308,83 @@ class TestBuildBambuFlushMatrix:
         result = build_bambu_flush_matrix(["PLA", "ABS", "PETG"], n_slots=3)
         values = result.split()
         assert len(values) == 9  # 3×3
+
+
+# ---------------------------------------------------------------------------
+# is_abrasive_filament / abrasive_nozzle_floor
+# ---------------------------------------------------------------------------
+
+
+class TestAbrasiveFilament:
+    """Filled-filament detection and the free nozzle-wear floor.
+
+    Coverage: curated-table hits, name-rule hits for the filled grades
+    the table does not carry, colourway names that must not trip it,
+    and the floor's honesty about what it cannot establish.
+    """
+
+    @pytest.mark.parametrize(
+        "material",
+        [
+            "PLA-CF",       # the one entry MATERIAL_PROCESS carries
+            "PETG-CF",      # not in the table — name rule must catch it
+            "PA-CF",
+            "PAHT-CF",
+            "PPS-CF",
+            "PLA-GF",
+            "ASA-GF",
+            "PA6-CF15",     # grade number rides along
+            "pla-cf",       # case-insensitive
+            "PLA Wood",
+            "Copperfill",
+            "woodfill",
+            "Metal Filled PLA",
+            "PLA Carbon Fiber",
+            "Glass Fiber Nylon",
+            "glass-fibre PA",
+        ],
+    )
+    def test_filled_filament_is_abrasive(self, material):
+        assert is_abrasive_filament(material) is True
+
+    @pytest.mark.parametrize(
+        "material",
+        [
+            "PLA", "PETG", "ABS", "ASA", "TPU", "TPE", "PVA", "HIPS",
+            "PA", "PC", "PLA+", "PLA-HF", "NYLON",
+            "Polycarbonate",   # contains "carbon" — must not read as filled
+            "Copper PLA",      # a colourway, not a filler
+            "Bronze PETG",
+            "Sea Glass PLA",
+            "Redwood PLA",
+            "", "   ",
+        ],
+    )
+    def test_unfilled_filament_is_not_abrasive(self, material):
+        assert is_abrasive_filament(material) is False
+
+    def test_no_catalogued_material_trips_the_rule(self):
+        # Every material in MATERIAL_PROCESS must agree with its own
+        # requires_hardened_nozzle flag, so the name rule can never
+        # contradict the curated table it extends.
+        for name, settings in MATERIAL_PROCESS.items():
+            assert is_abrasive_filament(name) is bool(
+                settings["requires_hardened_nozzle"]
+            ), name
+
+    def test_floor_names_the_material_and_the_fix(self):
+        note = abrasive_nozzle_floor("PETG-CF")
+        assert "PETG-CF" in note
+        assert "hardened steel" in note.lower()
+
+    def test_floor_does_not_claim_to_know_the_nozzle(self):
+        # Public Kiln holds no nozzle state.  Claiming otherwise would be
+        # the false-safe direction: the reader would trust a reading that
+        # was never taken.
+        note = abrasive_nozzle_floor("PLA-CF").lower()
+        assert "cannot see which nozzle" in note
+        assert "caution and not a measurement" in note
+
+    def test_floor_is_silent_for_unfilled_filament(self):
+        assert abrasive_nozzle_floor("PLA") == ""
+        assert abrasive_nozzle_floor("") == ""

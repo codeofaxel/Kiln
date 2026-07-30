@@ -25,6 +25,7 @@ Compatibility levels
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -487,6 +488,87 @@ def check_material_compatibility(materials: list[str]) -> dict[str, Any]:
 def get_process_settings(material: str) -> dict[str, Any] | None:
     """Return recommended process settings for a material, or None if unknown."""
     return MATERIAL_PROCESS.get(_normalise(material))
+
+
+# ---------------------------------------------------------------------------
+# Abrasive-filament floor
+# ---------------------------------------------------------------------------
+
+#: Fill wording in a filled filament's own name.  Whole words, because
+#: "CARBON" as a bare substring reads POLYCARBONATE as carbon-filled, and
+#: "GLASS" alone reads a sea-glass colourway as glass fibre.  Metal fill
+#: is left to the ``FILL`` rule below: "Copper" on a spool is far more
+#: often a colour than a filler, but "Copperfill" never is.
+_ABRASIVE_FILL_PATTERNS = (
+    r"\bCARBON\b",
+    r"\bWOOD\b",
+    r"\bMETAL\b",
+    r"GLASS\s*-?\s*FIB",
+    r"FILL",
+)
+
+#: Fill suffixes, matched as whole tokens so "PETG" never reads as "GF"
+#: and a grade number rides along ("PA6-CF15").
+_ABRASIVE_FILL_PREFIXES = ("CF", "GF")
+
+_ABRASIVE_NOZZLE_FLOOR = (
+    "ABRASIVE FILAMENT: {name} is a filled filament (carbon, glass, wood "
+    "or metal). Filled filament grinds a standard brass nozzle out of "
+    "round, which shows up as sizes drifting and gaps in the walls long "
+    "before the nozzle looks damaged. Kiln cannot see which nozzle is "
+    "fitted here, so treat this as a caution and not a measurement: "
+    "check yours, and print this on hardened steel if it is brass."
+)
+
+
+def is_abrasive_filament(material: str) -> bool:
+    """True when *material* names a filled — and so abrasive — filament.
+
+    Two public sources, no curated table required:
+
+    1. an explicit ``requires_hardened_nozzle`` entry in
+       :data:`MATERIAL_PROCESS`, when the material is one we list;
+    2. otherwise the fill wording in the name itself.
+
+    The name rule matters because the filled-filament market moves faster
+    than any fixed table — ``MATERIAL_PROCESS`` carries PLA-CF but not
+    PETG-CF, PA-CF or PLA-GF, and a lookup miss must not read as "not
+    abrasive".  Errs toward warning: a needless caution costs a moment,
+    a missed one costs a nozzle.
+    """
+    settings = get_process_settings(material)
+    if settings is not None and settings.get("requires_hardened_nozzle"):
+        return True
+
+    name = _normalise(material)
+    if not name:
+        return False
+    if any(re.search(p, name) for p in _ABRASIVE_FILL_PATTERNS):
+        return True
+    for token in re.split(r"[^A-Z0-9]+", name):
+        for prefix in _ABRASIVE_FILL_PREFIXES:
+            if token.startswith(prefix) and token[len(prefix):].isdigit():
+                return True
+            if token == prefix:
+                return True
+    return False
+
+
+def abrasive_nozzle_floor(material: str) -> str:
+    """The always-free nozzle-wear caution for a filled filament.
+
+    Returns ``""`` for an unfilled filament or an empty name — there is
+    nothing to warn about, and a caution on every spool is noise that
+    trains people to skip the ones that matter.
+
+    Deliberately says nothing about which nozzle is fitted: public Kiln
+    holds no nozzle state, so the honest floor is the material fact plus
+    what it cannot establish.  Never phrase this as a clearance — a
+    filled filament on brass is a real cost, and silence reads as "fine".
+    """
+    if not is_abrasive_filament(material):
+        return ""
+    return _ABRASIVE_NOZZLE_FLOOR.format(name=material.strip())
 
 
 def build_bambu_flush_matrix(materials: list[str], n_slots: int = 4) -> str:
