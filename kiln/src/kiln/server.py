@@ -322,6 +322,7 @@ from kiln.thingiverse import (
 from kiln.tiers_and_terms import (
     AGENT_ACCOUNT_NUDGE,
     TIERS_AND_TERMS,
+    account_required_message,
     session_expired_message,
     signin_hint_fields,
     tier_required_message,
@@ -11668,6 +11669,22 @@ def _paired_access_token() -> str:
 # ones and no refusal could say which tier it needed.
 _PRO_TOOL_TIERS: dict[str, str] = {}
 
+# Free monthly allowance per metered pro tool — ``{"bucket", "limit", "noun",
+# "period"}`` straight from the manifest, filled in by the same loop.  Only
+# tools the server actually meters have an entry, so a lookup miss means "this
+# tool has no declared allowance" and the copy below says nothing about one.
+#
+# It is here because the account wall is enforced LOCALLY: ``_pro_api_call``
+# refuses before the request leaves the machine, so the server's own
+# "free includes N a month" — the one place that number was ever written —
+# reached almost nobody.
+#
+# The cost of moving it client-side is that an old install states an old
+# figure.  Bounded, and deliberately accepted: this copy is only ever read
+# while SIGNED OUT, before anything has been metered, and the server's own
+# response is authoritative from the first real call onward.
+_PRO_TOOL_QUOTA: dict[str, dict] = {}
+
 
 def _pro_api_call(tool_name: str, **kwargs) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
@@ -11726,39 +11743,36 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
         except Exception:
             pass
         required_tier = _PRO_TOOL_TIERS.get(tool_name, "")
+        allowance = _PRO_TOOL_QUOTA.get(tool_name)
         # Two audiences, two fields — the same split ``_tier_required_error``
         # uses in kiln-pro.  ``error`` is read by a PERSON: it says what they
         # reached for and what it costs them to continue, and contains no
         # command, because a person who wanted a textured coaster should not
-        # be handed a terminal.  The agent-addressed half comes from
+        # be handed a terminal.  Both halves come from
         # ``kiln.tiers_and_terms`` — the whole tool surface shares one
-        # definition of it now, so this refusal cannot drift away from the
+        # definition of them now, so this refusal cannot drift away from the
         # thirteen others that say the same thing.
         #
         # This used to read "pair a Kiln account, run `python3 -m kiln pair
         # <code>`" — and a test asserted that exact string, so the worst copy
         # in the product was the one line nobody could fix by accident.
-        if required_tier:
-            tier_name = required_tier.capitalize()
-            message = (
-                f"{tool_name} is part of Kiln {tier_name}. "
-                "Signing in is free and takes a few seconds. "
-                f"See what {tier_name} includes at kiln3d.com/pricing"
-            )
-        else:
-            message = (
-                f"{tool_name} is free to use — Kiln just needs to know who "
-                "you are to count it. Signing in takes a few seconds."
-            )
-        return {
+        payload = {
             "status": "error",
-            "error": message,
+            "error": account_required_message(
+                tool_name, tier=required_tier, allowance=allowance,
+            ),
             "code": "KILN_ACCOUNT_NOT_PAIRED",
             "tool": tool_name,
             "required_tier": required_tier or "free",
             "upgrade_url": "https://kiln3d.com/pricing",
             **signin_hint_fields(),
         }
+        # Machine-readable twin of the sentence, for a caller that would rather
+        # render the allowance its own way than parse prose.  Omitted entirely
+        # when unknown — an absent key cannot be misread as "no allowance".
+        if allowance:
+            payload["quota"] = dict(allowance)
+        return payload
     import json
     import urllib.error
     import urllib.request
@@ -11871,6 +11885,12 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
                 f"Requires Kiln {tier.capitalize()}. "
                 f"Pricing: https://kiln3d.com/pricing"
             )
+        # Metered tools carry their real monthly allowance; unmetered ones
+        # carry no block at all, and get no entry, so the account wall can
+        # only ever state a number the server actually charges.
+        quota = tool_def.get("quota")
+        if isinstance(quota, dict) and quota:
+            _PRO_TOOL_QUOTA[name] = quota
         params_schema = tool_def.get("parameters", {})
 
         # Build the stub function.  Closures capture `name` by reference,

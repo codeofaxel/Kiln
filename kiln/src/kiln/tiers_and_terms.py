@@ -217,6 +217,75 @@ def tier_required_message(subject: str, tier: str, alternative: str = "") -> str
     )
 
 
+def free_allowance_phrase(allowance: dict | None) -> str:
+    """``"3 textures a month"`` from a manifest allowance block, or ``""``.
+
+    The empty string is the whole point of this function existing separately:
+    an allowance we cannot read is an allowance we do not mention.  A refusal
+    that invents "3 of something" is worse than one that stays quiet, because
+    a person who is told a number will believe it, and every caller downstream
+    of here would rather have no sentence than a wrong one.
+
+    So each field is checked rather than trusted — the block arrives from a
+    generated JSON file, and ``bool`` is excluded explicitly because it passes
+    ``isinstance(x, int)`` and would render "True textures".
+    """
+    if not isinstance(allowance, dict):
+        return ""
+    limit = allowance.get("limit")
+    noun = allowance.get("noun")
+    period = allowance.get("period") or "month"
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+        return ""
+    if not isinstance(noun, str) or not noun.strip():
+        return ""
+    if not isinstance(period, str) or not period.strip():
+        return ""
+    return f"{limit} {noun.strip()} a {period.strip()}"
+
+
+def account_required_message(
+    subject: str, tier: str = "", allowance: dict | None = None
+) -> str:
+    """Person-facing copy for "this needs an account before it can run".
+
+    Distinct from :func:`tier_required_message`, which answers "you need to
+    pay": most tools reaching this one are FREE, and the account is only the
+    identity the monthly allowance is counted against.  Reading as an upsell
+    there would be a lie about the price.
+
+    *allowance* is the tool's ``quota`` block from the pro tool manifest.  When
+    it names a real number the copy states it, because the number is the
+    reassuring half — "free" alone leaves a reader wondering what the catch is,
+    and the server that knew the figure never gets asked: this refusal is
+    decided locally, before any request goes out.
+
+    A paid *tier* wins over an allowance rather than stacking with it.  For a
+    tool that genuinely costs money, what it costs is the answer to the
+    question being asked; a free-monthly figure alongside it only muddies
+    which one applies.
+    """
+    tier_name = str(tier or "").strip()
+    if tier_name and tier_name.lower() != "free":
+        tier_name = tier_name.title()
+        return (
+            f"{subject} is part of Kiln {tier_name}. "
+            "Signing in is free and takes a few seconds. "
+            f"See what {tier_name} includes at kiln3d.com/pricing"
+        )
+    phrase = free_allowance_phrase(allowance)
+    if phrase:
+        return (
+            f"{subject} is free to use — free includes {phrase}. Kiln just "
+            "needs to know who you are to count them, and signing in takes a "
+            "few seconds."
+        )
+    return (
+        f"{subject} is free to use — Kiln just needs to know who you are to "
+        "count it. Signing in takes a few seconds."
+    )
+
+
 def session_expired_message(email: str = "") -> str:
     """Person-facing copy for a sign-in that has lapsed.
 
@@ -246,6 +315,8 @@ __all__ = [
     "SIGNIN_COMMAND",
     "SUBSTITUTION_LINE",
     "TIERS_AND_TERMS",
+    "account_required_message",
+    "free_allowance_phrase",
     "session_expired_message",
     "signed_out_message",
     "signin_hint_fields",
