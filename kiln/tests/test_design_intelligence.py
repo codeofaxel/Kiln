@@ -72,6 +72,7 @@ from kiln.design_intelligence import (
     match_requirements,
     recommend_material_for_design,
     troubleshoot_print_issue,
+    curated_entry_exists,
     unestablished_caution,
 )
 
@@ -1924,6 +1925,85 @@ class TestFreePathCautions:
         assert estimate_load_capacity("pla", 50.0, 40.0) is not None
         assert unestablished_caution("load_tables", "Nobody checked X.") == ""
 
+    # --- the third state: the table merged, this entity is not in it ------
+
+    def test_merged_table_does_not_vouch_for_an_uncurated_entity(self, monkeypatch):
+        """THE BUG THIS SPLIT EXISTS FOR, pinned in its real direction.
+
+        Asking only "did the table merge?" is answered by whichever entities
+        ARE curated.  Measured on 2026-07-30: load_tables carried notes for 5
+        of 38 materials, so a caller asking about PEEK got a bare load figure
+        and caution="" — this function's own signal for a checked silence —
+        at every tier, paid included.  Nobody had checked PEEK.
+        """
+        self._overlay(monkeypatch, {"load_tables": {"pla": {"notes": ["x"]}}})
+        # The table merged on the strength of pla...
+        assert unestablished_caution("load_tables", "Nobody checked X.") == ""
+        # ...but it says nothing whatsoever about peek.
+        said = unestablished_caution(
+            "load_tables", "Nobody checked X.",
+            curated_entry_exists=curated_entry_exists("load_tables", "peek"),
+        )
+        assert said.startswith("Nobody checked X.")
+
+    def test_uncurated_entity_is_not_sold_an_upgrade_that_lacks_it_too(
+        self, monkeypatch
+    ):
+        """A paywall that overstates itself costs more than the sale.
+
+        Nobody wrote this note at ANY tier, so pointing the caller at pricing
+        would sell a page that does not have the answer either.  The
+        unreadable-table case still points there; this one must not.
+        """
+        self._overlay(monkeypatch, {"load_tables": {"pla": {"notes": ["x"]}}})
+        said = unestablished_caution(
+            "load_tables", "Nobody checked X.", curated_entry_exists=False,
+        )
+        assert "pricing" not in said
+        assert "Kiln Pro" not in said
+
+    def test_unreadable_table_outranks_the_entity_question(self, monkeypatch):
+        """An entitlement refusal must never be relabelled "nobody wrote one".
+
+        When the overlay cannot be read we do not know whether the entity is
+        curated, so state 1 wins and the caller is pointed at the tier that
+        has the depth.
+        """
+        self._overlay(monkeypatch, None)
+        said = unestablished_caution(
+            "load_tables", "Nobody checked X.", curated_entry_exists=False,
+        )
+        assert "kiln3d.com/pricing" in said
+
+    def test_curated_entry_exists_is_false_when_the_overlay_is_refused(
+        self, monkeypatch
+    ):
+        self._overlay(monkeypatch, None)
+        assert curated_entry_exists("load_tables", "pla") is False
+
+    def test_curated_entry_exists_reads_the_served_payload(self, monkeypatch):
+        self._overlay(monkeypatch, {"load_tables": {"pla": {"notes": ["x"]}}})
+        assert curated_entry_exists("load_tables", "pla") is True
+        assert curated_entry_exists("load_tables", "PLA") is True   # case-folded
+        assert curated_entry_exists("load_tables", "peek") is False
+
+    def test_load_estimate_cautions_for_a_material_nobody_curated(
+        self, monkeypatch
+    ):
+        """End to end, through the real answer a user receives.
+
+        The number is unchanged — this adds honesty, it does not restate
+        physics — but the bare figure no longer reads as a clearance.
+        """
+        self._overlay(monkeypatch, {"load_tables": {"pla": {"notes": ["x"]}}})
+        curated = estimate_load_capacity("pla", 50.0, 40.0)
+        uncurated = estimate_load_capacity("petg", 50.0, 40.0)
+        assert curated is not None and uncurated is not None
+        assert curated.caution == ""          # somebody looked at pla
+        assert uncurated.caution != ""        # nobody looked at petg
+        assert "petg" in uncurated.caution
+        assert "pricing" not in uncurated.caution
+
     def test_every_table_the_kb_merges_is_really_probeable(self, monkeypatch):
         """THE BUG, pinned in the direction it actually happened.
 
@@ -2116,7 +2196,14 @@ class TestFreePathCautions:
         # Three hand-rolled variants is how this class of defect started.
         seen: list[str] = []
 
-        def spy(overlay_kind: str, what_is_unknown: str) -> str:
+        def spy(
+            overlay_kind: str,
+            what_is_unknown: str,
+            *,
+            curated_entry_exists: bool | None = None,
+        ) -> str:
+            # The entity-level answer is OPTIONAL by design: the pairing site
+            # is keyed by two materials, which one entity id cannot address.
             seen.append(overlay_kind)
             return "spy"
 

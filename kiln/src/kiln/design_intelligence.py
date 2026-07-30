@@ -210,8 +210,22 @@ _UNESTABLISHED_TAIL = (
     "{product} carries the curated notes for this. See https://kiln3d.com/pricing"
 )
 
+# Tail for the third state below: the table merged and simply has no entry for
+# the thing being asked about.  Deliberately does NOT name a tier or link
+# pricing — nobody has written this note at any tier, so pointing at an upgrade
+# would sell a page that does not have the answer either.  A paywall that
+# overstates itself costs more trust than the sale is worth.
+_UNCURATED_ENTRY_TAIL = (
+    "No curated note has been established for this one at any tier yet."
+)
 
-def unestablished_caution(overlay_kind: str, what_is_unknown: str) -> str:
+
+def unestablished_caution(
+    overlay_kind: str,
+    what_is_unknown: str,
+    *,
+    curated_entry_exists: bool | None = None,
+) -> str:
     """The honest answer when a caution's only source could not be read.
 
     A ``.get(field, <empty>)`` over a table whose curated cautions live in a
@@ -223,6 +237,23 @@ def unestablished_caution(overlay_kind: str, what_is_unknown: str) -> str:
     reason :func:`get_skin_contact_floor` returns an explicit uncharacterized
     floor instead of ``None``.
 
+    THERE ARE THREE STATES, NOT TWO, and conflating the last two is how this
+    function stayed silent on the case it was written for.  "Did the table
+    merge?" is a question about the TABLE, and a table answers yes on the
+    strength of whichever entities it does describe — so an entity it says
+    nothing about got ``""``, this function's own signal for a real, checked
+    silence.  A bare engineering figure then reads as a clearance nobody
+    issued, and it reads that way for every caller, not just the free one.
+
+      1. The table could not be read (absent, or this caller's tier has not
+         earned it) -> the caution, pointing at the tier that has the depth.
+      2. The table was read but carries no entry for this entity -> the
+         caution, saying plainly that nobody has written one.  Pass
+         ``curated_entry_exists=False``.
+      3. The table was read, this entity IS curated, and the field is still
+         empty -> ``""``.  Someone looked and had nothing to add; speaking
+         over that would be dishonest in the other direction.
+
     Callers pass the plain-English statement of what could not be
     established; this adds the shared pointer to where that depth lives.
     Never assert safety here and never invent a caveat — say what is not
@@ -231,15 +262,41 @@ def unestablished_caution(overlay_kind: str, what_is_unknown: str) -> str:
     :param overlay_kind: The table whose curated depth is the field's only
         source (e.g. ``"load_tables"``).
     :param what_is_unknown: One or two plain sentences naming what is missing
-        and what the user should do about it.
-    :returns: ``""`` when the overlay for *overlay_kind* did merge — the
-        emptiness is then a real, checked silence, and speaking over it would
-        be dishonest in the other direction — otherwise the caution.
+        and what the user should do about it.  Word it so it reads correctly
+        whether the source was unreadable or merely silent on this entity —
+        "was not established here", not "could not be read".
+    :param curated_entry_exists: Whether the merged table has an entry for the
+        entity being asked about, from
+        :func:`curated_entry_exists` at the call site.  ``None`` keeps the
+        table-level behaviour, for callers whose overlay is keyed by something
+        the entity id alone cannot address (a material PAIR, a nested block).
+    :returns: The caution, or ``""`` in state 3 only.
     """
-    if _engineering_overlay_loaded(overlay_kind):
-        return ""
-    tail = _UNESTABLISHED_TAIL.format(product=_upgrade_product_name(overlay_kind))
-    return f"{what_is_unknown} {tail}"
+    if not _engineering_overlay_loaded(overlay_kind):
+        tail = _UNESTABLISHED_TAIL.format(
+            product=_upgrade_product_name(overlay_kind)
+        )
+        return f"{what_is_unknown} {tail}"
+    if curated_entry_exists is False:
+        return f"{what_is_unknown} {_UNCURATED_ENTRY_TAIL}"
+    return ""
+
+
+def curated_entry_exists(overlay_kind: str, entity_id: str) -> bool:
+    """Whether the curated overlay this caller was served has an entry for one
+    entity.
+
+    The RECORD-level twin of :func:`_engineering_overlay_loaded`, which is
+    TABLE-level.  Presence of an entry is the test, not presence of any
+    particular field inside it: an entity somebody curated and chose to write
+    no note for is a real checked silence (state 3 above), while an entity the
+    curated source has never heard of is not.
+
+    False whenever the overlay is unreadable, so a caller that asks this first
+    still lands in state 1 rather than mislabelling an entitlement refusal as
+    an uncurated entity.
+    """
+    return _get_kb().has_private_overlay_entry(overlay_kind, entity_id)
 
 
 # Free-tier upgrade-hint copy.  Kept short and terminal-friendly so MCP
@@ -950,6 +1007,22 @@ class _DesignKnowledgeBase:
         disagree with the table the caller was actually served.
         """
         return bool(_load_pro_overlay_if_available(overlay_kind))
+
+    def has_private_overlay_entry(self, overlay_kind: str, entity_id: str) -> bool:
+        """Whether that private depth includes an entry for ONE entity.
+
+        :meth:`has_private_overlay` answers a question about the table and is
+        therefore answered by whichever entities happen to be curated — which
+        is the whole reason an uncurated material read as "checked, nothing to
+        say".  This asks about the row the caller actually named.
+
+        Read from the same payload :meth:`_table` merges, so the answer cannot
+        disagree with the record the caller was served.
+        """
+        overlay = _load_pro_overlay_if_available(overlay_kind)
+        if not isinstance(overlay, dict):
+            return False
+        return isinstance(overlay.get((entity_id or "").lower()), dict)
 
     @property
     def materials(self) -> dict[str, dict[str, Any]]:
@@ -2440,8 +2513,11 @@ def estimate_load_capacity(
                 "breaks a real part — a load left sitting on it for weeks, "
                 "repeated bending, or filament that has soaked up moisture — "
                 "is not in this number, and no caution specific to "
-                f"{material_key} could be read here. Treat it as unchecked "
+                f"{material_key} was established here. Treat it as unchecked "
                 "for this material and test the part before you rely on it.",
+                curated_entry_exists=curated_entry_exists(
+                    "load_tables", material_key
+                ),
             )
         ),
     )
@@ -2840,6 +2916,9 @@ def _build_design_template(template_id: str, data: dict[str, Any]) -> DesignTemp
                 "how it usually fails. Treat the label as a starting point "
                 "rather than a checked design, and print a test piece before "
                 "committing to it.",
+                curated_entry_exists=curated_entry_exists(
+                    "design_templates", template_id
+                ),
             )
         ),
     )
