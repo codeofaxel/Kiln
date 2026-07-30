@@ -93,11 +93,33 @@ class PrinterIntel:
 
 
 # ---------------------------------------------------------------------------
-# Singleton cache
+# Caches — process-wide DATA, per-caller ENTITLEMENT
 # ---------------------------------------------------------------------------
+#
+# Two questions live here and they have different lifetimes.  WHAT DATA EXISTS
+# is the same for every caller — one JSON file, one merge — so it is decoded
+# once per process.  WHETHER A CALLER MAY READ the curated half is a question
+# about the caller, so it is asked on every read.
+#
+# Caching the two together behind a single "loaded" flag froze the second
+# answer at whatever the first read of the process happened to be.  That is
+# invisible where one operator is the only caller, and wrong wherever one
+# process serves many: every later reader inherited the first reader's
+# entitlement, in whichever direction it happened to fall.
 
-_cache: dict[str, PrinterIntel] = {}
-_loaded: bool = False
+#: Profiles built from the public JSON alone — the floor every caller gets.
+_public_cache: dict[str, PrinterIntel] = {}
+_public_loaded: bool = False
+
+#: The parsed public JSON, kept so the merge below never re-reads the file.
+_public_raw: dict[str, Any] | None = None
+
+#: ``(the overlay payload that was merged, the profiles merged from it)``.
+#: Holding the payload object instead of a boolean keeps the merge reusable
+#: exactly as long as it is still the same data, and re-merges by itself if
+#: kiln-pro ever serves this kind per-caller — a field-level tier projection
+#: hands back a different object, which this comparison notices.
+_merged_cache: tuple[dict[str, Any], dict[str, PrinterIntel]] | None = None
 
 
 def _deep_merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -120,57 +142,21 @@ def _deep_merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str
     return result
 
 
-def _merge_pro_overlay_if_available(public: dict[str, Any]) -> dict[str, Any]:
-    """Merge the kiln-pro printer_intelligence overlay into the public raw
-    dict.  Free tier (kiln-pro absent / no license / overlay unreachable)
-    returns ``public`` unchanged.  Pro+ tier gets the curated quirks,
-    calibration recipes, failure_modes, and per-material notes restored.
-
-    Phase 2 split (2026-05-17): public file carries the spec sheet +
-    per-material recipe numbers + the structured ``has_input_shaping``
-    bool; the curated prose moves here.  Audit:
-    kiln_pro/data/DESIGN_KNOWLEDGE_LEAK_AUDIT.md.
-    """
-    try:
-        from kiln_pro.data_overlays import load_overlay  # type: ignore[import-not-found]
-    except ImportError:
-        return public
-    try:
-        overlay = load_overlay("printer_intelligence")
-    except Exception as exc:
-        logger.warning(
-            "kiln-pro printer_intelligence overlay unavailable, "
-            "falling back to safety-floor: %s",
-            exc,
-        )
-        return public
-    return _deep_merge_dicts(public, overlay)
-
-
-def _load() -> None:
-    global _loaded
-    if _loaded:
-        # The decoded/merged profile cache is process-wide, but a hosted
-        # boundary still needs to record every logical private read. Touch the
-        # canonical loader before the cache short-circuit; it is process-cached
-        # itself, so this records access without re-reading or re-merging data.
+def _read_public_json() -> dict[str, Any]:
+    """The public ``printer_intelligence.json``, parsed once per process."""
+    global _public_raw
+    if _public_raw is None:
         try:
-            from kiln_pro.data_overlays import load_overlay  # type: ignore[import-not-found]
+            _public_raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            logger.error("Failed to load printer intelligence: %s", exc)
+            _public_raw = {}
+    return _public_raw
 
-            load_overlay("printer_intelligence")
-        except Exception:
-            pass
-        return
 
-    try:
-        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError) as exc:
-        logger.error("Failed to load printer intelligence: %s", exc)
-        _loaded = True
-        return
-
-    raw = _merge_pro_overlay_if_available(raw)
-
+def _build_profiles(raw: dict[str, Any]) -> dict[str, PrinterIntel]:
+    """Decode a raw profile map — public, or public merged with the overlay."""
+    profiles: dict[str, PrinterIntel] = {}
     for key, data in raw.items():
         if key == "_meta":
             continue
@@ -206,7 +192,7 @@ def _load() -> None:
                     )
                 )
 
-            _cache[key] = PrinterIntel(
+            profiles[key] = PrinterIntel(
                 id=key,
                 display_name=data.get("display_name", key),
                 firmware=data.get("firmware", "marlin"),
@@ -222,9 +208,84 @@ def _load() -> None:
             )
         except (KeyError, TypeError, ValueError) as exc:
             logger.warning("Skipping malformed intel profile '%s': %s", key, exc)
+    return profiles
 
-    _loaded = True
-    logger.debug("Loaded %d printer intel profiles from %s", len(_cache), _DATA_FILE)
+
+def _public_profiles() -> dict[str, PrinterIntel]:
+    """The public safety floor: spec sheet, limits, per-material temp recipes.
+
+    Served to every caller who is not entitled to the curated overlay, and it
+    is the same floor a kiln-pro-less install has always had.  Losing the
+    overlay costs depth; it never costs a printer limit.
+    """
+    global _public_loaded
+    if not _public_loaded:
+        _public_cache.update(_build_profiles(_read_public_json()))
+        _public_loaded = True
+        logger.debug(
+            "Loaded %d printer intel profiles from %s",
+            len(_public_cache),
+            _DATA_FILE,
+        )
+    return _public_cache
+
+
+def _overlay_for_caller() -> dict[str, Any] | None:
+    """The printer_intelligence overlay THIS caller may read, or ``None``.
+
+    ``kiln_pro.data_overlays.load_overlay`` is the authority and is asked on
+    every read, because it is the thing that knows the answer per caller: it
+    owns whether the overlay exists at all, whether the calling tool declared
+    it, and whether this caller's tier has earned it.  Public Kiln deliberately
+    does not re-implement any of that — it asks, and it degrades on a no.
+
+    Asking every time is cheap.  kiln-pro caches the payload for the process,
+    so a repeat ask is a dict lookup plus the entitlement check — never a
+    re-fetch, and (see :func:`_profiles_for_caller`) never a re-merge.
+
+    ``None`` means "serve the public floor": kiln-pro absent, a build without
+    this overlay kind, an unreachable overlay, or a caller who has not earned
+    the depth.  All four are a degrade rather than an error, and kiln-pro logs
+    the genuine unavailability cases itself at its own severity — repeating
+    them here at warning level would only drown that signal.
+
+    Phase 2 split (2026-05-17): the public file carries the spec sheet, the
+    per-material recipe numbers and the structured ``has_input_shaping`` bool;
+    the curated quirks, calibration recipes, failure modes and per-material
+    notes live in the overlay.
+    """
+    try:
+        from kiln_pro.data_overlays import load_overlay  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    try:
+        overlay = load_overlay("printer_intelligence")
+    except Exception as exc:
+        logger.debug(
+            "printer_intelligence overlay not served to this caller, "
+            "falling back to safety-floor: %s",
+            exc,
+        )
+        return None
+    return overlay if isinstance(overlay, dict) and overlay else None
+
+
+def _profiles_for_caller() -> dict[str, PrinterIntel]:
+    """Profiles at the depth this caller is entitled to, right now.
+
+    The merge itself is process-wide — it is the same file for everybody — so
+    it happens once and is reused; only the entitlement question is re-asked.
+    """
+    global _merged_cache
+    overlay = _overlay_for_caller()
+    if overlay is None:
+        return _public_profiles()
+    cached = _merged_cache
+    if cached is not None and cached[0] is overlay:
+        return cached[1]
+    merged = _build_profiles(_deep_merge_dicts(_read_public_json(), overlay))
+    _merged_cache = (overlay, merged)
+    return merged
 
 
 # ---------------------------------------------------------------------------
@@ -235,24 +296,26 @@ def _load() -> None:
 def get_printer_intel(printer_id: str) -> PrinterIntel:
     """Return operational intelligence for *printer_id*.
 
-    Falls back to the ``"default"`` profile if no match is found.
+    Falls back to the ``"default"`` profile if no match is found.  Curated
+    depth (quirks, calibration recipes, failure modes) is included only for a
+    caller entitled to it; everyone else gets the public floor.
     """
-    _load()
+    profiles = _profiles_for_caller()
     normalised = printer_id.lower().replace("-", "_").strip()
     candidates = [normalised]
     if normalised.startswith("creality_"):
         candidates.append(normalised.removeprefix("creality_"))
     for candidate in candidates:
-        profile = _cache.get(candidate)
+        profile = profiles.get(candidate)
         if profile is not None:
             return profile
 
-    for key in _cache:
+    for key in profiles:
         for candidate in candidates:
             if candidate.startswith(key) or key.startswith(candidate):
-                return _cache[key]
+                return profiles[key]
 
-    default = _cache.get("default")
+    default = profiles.get("default")
     if default is not None:
         return default
     raise KeyError(f"No printer intelligence for '{printer_id}' and no default available.")
@@ -260,8 +323,7 @@ def get_printer_intel(printer_id: str) -> PrinterIntel:
 
 def list_intel_profiles() -> list[str]:
     """Return all available printer intel profile IDs."""
-    _load()
-    return sorted(_cache.keys())
+    return sorted(_profiles_for_caller())
 
 
 def get_material_settings(
@@ -333,17 +395,15 @@ _raw_loaded: bool = False
 
 
 def _load_raw() -> None:
-    """Load the raw JSON dict so we can read extended fields like speed data."""
+    """Load the raw JSON dict so we can read extended fields like speed data.
+
+    Public data only, at every tier: build volumes, temp ceilings and speed
+    limits are the safety floor, never overlay depth.
+    """
     global _raw_loaded
     if _raw_loaded:
         return
-    try:
-        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError) as exc:
-        logger.error("Failed to load raw printer intelligence: %s", exc)
-        _raw_loaded = True
-        return
-    for key, data in raw.items():
+    for key, data in _read_public_json().items():
         if key == "_meta":
             continue
         _raw_cache[key] = data
@@ -362,6 +422,17 @@ def _get_raw(printer_id: str) -> dict[str, Any] | None:
         if normalised.startswith(key) or key.startswith(normalised):
             return _raw_cache[key]
     return None
+
+
+def _reset_caches() -> None:
+    """Drop every decoded profile and the parsed JSON behind them.  For tests."""
+    global _public_loaded, _public_raw, _merged_cache, _raw_loaded
+    _public_cache.clear()
+    _public_loaded = False
+    _public_raw = None
+    _merged_cache = None
+    _raw_cache.clear()
+    _raw_loaded = False
 
 
 # ---------------------------------------------------------------------------

@@ -500,16 +500,17 @@ def compat_data() -> dict:
 
 @pytest.fixture(scope="module")
 def printer_intel() -> dict:
-    """Printer intelligence MERGED with the kiln-pro overlay.
+    """The public printer_intelligence records, keyed by printer id.
 
     Public file holds the spec sheet + per-material recipe numbers + the
-    structured has_input_shaping bool; the overlay layers quirks +
-    calibration recipes + failure_modes + per-material notes back in
-    (Phase 2 split, 2026-05-17).
+    structured has_input_shaping bool; quirks, calibration recipes,
+    failure_modes and per-material notes ship in the kiln-pro overlay
+    (Phase 2 split, 2026-05-17).  The cross-checks below are about which
+    printers exist and which materials they claim, so the public set is the
+    right one to read — and it is the same set at every tier.
     """
-    from kiln.printer_intelligence import _load, _load_raw, _raw_cache
-    _load()         # ensure dataclass cache is primed
-    _load_raw()     # ensure raw cache is primed (also runs the overlay merge)
+    from kiln.printer_intelligence import _load_raw, _raw_cache
+    _load_raw()     # ensure the raw cache is primed
     return dict(_raw_cache)
 
 
