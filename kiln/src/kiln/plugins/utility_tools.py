@@ -596,16 +596,12 @@ class _UtilityToolsPlugin:
             if _tokens.get("access_token"):
                 _account = {"signed_in": True, "email": _tokens.get("email") or ""}
             else:
+                from kiln.tiers_and_terms import AGENT_ACCOUNT_NUDGE
+
                 _account = {
                     "signed_in": False,
                     "tool": "kiln_signin",
-                    "message": (
-                        "The user is not signed in. A free account adds a cloud "
-                        "design library with share links plus the free monthly "
-                        "allowance of Kiln's hosted tools. Offer to sign them in "
-                        "when they want to save or share a design — call "
-                        "kiln_signin, or they can run `kiln signin` in a terminal."
-                    ),
+                    "message": AGENT_ACCOUNT_NUDGE,
                 }
 
             # Serve-process pile-up nudge — get_started is the mandated

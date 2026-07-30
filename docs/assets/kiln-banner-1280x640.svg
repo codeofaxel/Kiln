@@ -1,13 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640">
 <rect width="1280" height="640" fill="#1A1A1A"/>
-<line x1="544.0" y1="330.0" x2="580.0" y2="210.0" stroke="#CCCCCC" stroke-width="3.0" stroke-linecap="butt"/>
-<line x1="736.0" y1="330.0" x2="700.0" y2="210.0" stroke="#CCCCCC" stroke-width="3.0" stroke-linecap="butt"/>
-<line x1="544.0" y1="330.0" x2="736.0" y2="330.0" stroke="#CCCCCC" stroke-width="3.0" stroke-linecap="butt"/>
-<line x1="580.0" y1="210.0" x2="618.4" y2="210.0" stroke="#CCCCCC" stroke-width="3.0" stroke-linecap="butt"/>
-<line x1="661.6" y1="210.0" x2="700.0" y2="210.0" stroke="#CCCCCC" stroke-width="3.0" stroke-linecap="butt"/>
-<line x1="565.6" y1="288.0" x2="714.4" y2="288.0" stroke="#FF6B2B" stroke-width="3.5999999999999996" stroke-linecap="butt"/>
-<text x="596.8" y="530.0" font-family="'Inter','Helvetica Neue',sans-serif" font-size="64" font-weight="700" fill="#FFFFFF" text-anchor="middle" letter-spacing="0.25em">K</text>
-<text x="625.6" y="530.0" font-family="'Inter','Helvetica Neue',sans-serif" font-size="64" font-weight="700" fill="#FF6B2B" text-anchor="middle" letter-spacing="0.25em">I</text>
-<text x="654.4" y="530.0" font-family="'Inter','Helvetica Neue',sans-serif" font-size="64" font-weight="700" fill="#FFFFFF" text-anchor="middle" letter-spacing="0.25em">L</text>
-<text x="683.2" y="530.0" font-family="'Inter','Helvetica Neue',sans-serif" font-size="64" font-weight="700" fill="#FFFFFF" text-anchor="middle" letter-spacing="0.25em">N</text>
+<path d="M 557.14 286.2 L 556.06 289.8 L 723.94 289.8 L 722.86 286.2 Z" fill="#FF6B2B"/>
+<path d="M 618.4 210 L 580 210 L 544 330 L 736 330 L 700 210 L 661.6 210" fill="none" stroke="#CCCCCC" stroke-width="3" stroke-linejoin="miter" stroke-linecap="butt"/>
+<path d="M162.7 -151.8V-338Q187.5 -368.2 212.5 -398Q237.5 -427.8 262.5 -457.6Q287.5 -487.5 312.6 -517.4L492.1 -727.5H672.4L365.3 -373H353.3ZM54.3 0V-727.5H204.5V-526.6V-342.5V-270.8V0ZM506.5 0 288.9 -329.8 379.3 -443.9 679.8 0Z" fill="#FFFFFF" transform="translate(551.49 530.00) scale(0.064000)"/>
+<path d="M204.5 -727.5V0H54.3V-727.5Z" fill="#FF6B2B" transform="translate(606.88 530.00) scale(0.064000)"/>
+<path d="M54.3 0V-727.5H204.5V-128.7H535V0Z" fill="#FFFFFF" transform="translate(634.96 530.00) scale(0.064000)"/>
+<path d="M54.3 0V-727.5H212.6L446.3 -355.4Q457.1 -338.4 473.5 -309.7Q490 -281 508.6 -247.8Q527.1 -214.7 543.5 -184.3L526.5 -145.6Q524.7 -178.9 523.4 -222.1Q522 -265.3 521.4 -305.2Q520.8 -345 520.8 -367.5V-727.5H670.9V0H512.2L300.2 -337.1Q287.3 -357.8 267.1 -391.7Q247 -425.6 222.4 -469Q197.9 -512.4 171.2 -560.5L197.5 -577.6Q200.8 -523.9 202.3 -476.7Q203.7 -429.5 204.1 -393.7Q204.5 -357.9 204.5 -337.5V0Z" fill="#FFFFFF" transform="translate(682.11 530.00) scale(0.064000)"/>
 </svg>

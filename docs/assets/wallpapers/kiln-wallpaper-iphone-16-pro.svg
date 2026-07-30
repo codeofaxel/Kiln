@@ -1,37 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1206 2622" width="1206" height="2622">
-  <defs>
-    <radialGradient id="glow" cx="50%" cy="42.0%" r="39.0%">
-      <stop offset="0%" stop-color="#FF6B2B" stop-opacity="0.08"/>
-      <stop offset="100%" stop-color="#FF6B2B" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-
-  <!-- Background -->
-  <rect width="1206" height="2622" fill="#0D0D0D"/>
-
-  <!-- Subtle radial glow -->
-  <ellipse cx="603" cy="1101" rx="470" ry="470" fill="url(#glow)"/>
-
-  <!-- Kiln icon -->
-  <g fill="none" stroke="#E8E8E8" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
-    <!-- Left leg -->
-    <line x1="422.1" y1="1182.6" x2="490.8" y2="979.1"/>
-    <!-- Right leg -->
-    <line x1="783.9" y1="1182.6" x2="715.2" y2="979.1"/>
-    <!-- Bottom -->
-    <line x1="422.1" y1="1182.6" x2="783.9" y2="1182.6"/>
-    <!-- Top-left cap -->
-    <line x1="490.8" y1="979.1" x2="574.1" y2="979.1"/>
-    <!-- Top-right cap -->
-    <line x1="631.9" y1="979.1" x2="715.2" y2="979.1"/>
-  </g>
-
-  <!-- Orange heat bar -->
-  <line x1="478.8" y1="1046.9" x2="727.2" y2="1046.9" stroke="#FF6B2B" stroke-width="6" stroke-linecap="round"/>
-
-  <!-- Wordmark: K [I] L N -->
-  <text x="466.2" y="1331.9" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="96" font-weight="300" fill="#E8E8E8" dominant-baseline="central">K</text>
-  <rect x="549.9" y="1298.3" width="15" height="69" rx="2" fill="#FF6B2B"/>
-  <text x="648.6" y="1331.9" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="96" font-weight="300" fill="#E8E8E8" dominant-baseline="central">L</text>
-  <text x="739.8" y="1331.9" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="96" font-weight="300" fill="#E8E8E8" dominant-baseline="central">N</text>
+<defs><radialGradient id="glow" cx="50%" cy="42.0%" r="39.0%"><stop offset="0%" stop-color="#FF6B2B" stop-opacity="0.08"/><stop offset="100%" stop-color="#FF6B2B" stop-opacity="0"/></radialGradient></defs>
+<rect width="1206" height="2622" fill="#0D0D0D"/>
+<ellipse cx="603" cy="1101" rx="470" ry="470" fill="url(#glow)"/>
+<path d="M 462.14 1108.46 L 460.31 1114.58 L 745.69 1114.58 L 743.86 1108.46 Z" fill="#FF6B2B"/>
+<path d="M 566.28 978.92 L 501 978.92 L 439.81 1182.92 L 766.19 1182.92 L 705 978.92 L 639.72 978.92" fill="none" stroke="#CCCCCC" stroke-width="5.1" stroke-linejoin="miter" stroke-linecap="butt"/>
+<path d="M162.7 -151.8V-338Q187.5 -368.2 212.5 -398Q237.5 -427.8 262.5 -457.6Q287.5 -487.5 312.6 -517.4L492.1 -727.5H672.4L365.3 -373H353.3ZM54.3 0V-727.5H204.5V-526.6V-342.5V-270.8V0ZM506.5 0 288.9 -329.8 379.3 -443.9 679.8 0Z" fill="#CCCCCC" transform="translate(469.90 1332.24) scale(0.096239)"/>
+<path d="M204.5 -727.5V0H54.3V-727.5Z" fill="#FF6B2B" transform="translate(553.20 1332.24) scale(0.096239)"/>
+<path d="M54.3 0V-727.5H204.5V-128.7H535V0Z" fill="#CCCCCC" transform="translate(595.43 1332.24) scale(0.096239)"/>
+<path d="M54.3 0V-727.5H212.6L446.3 -355.4Q457.1 -338.4 473.5 -309.7Q490 -281 508.6 -247.8Q527.1 -214.7 543.5 -184.3L526.5 -145.6Q524.7 -178.9 523.4 -222.1Q522 -265.3 521.4 -305.2Q520.8 -345 520.8 -367.5V-727.5H670.9V0H512.2L300.2 -337.1Q287.3 -357.8 267.1 -391.7Q247 -425.6 222.4 -469Q197.9 -512.4 171.2 -560.5L197.5 -577.6Q200.8 -523.9 202.3 -476.7Q203.7 -429.5 204.1 -393.7Q204.5 -357.9 204.5 -337.5V0Z" fill="#CCCCCC" transform="translate(666.32 1332.24) scale(0.096239)"/>
 </svg>

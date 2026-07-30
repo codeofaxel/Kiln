@@ -24,6 +24,12 @@ from typing import Any
 
 import yaml
 
+from kiln.printer_backends import (
+    DEFAULT_SERIAL_BAUDRATE,
+    PRINTER_TYPES,
+    format_printer_types,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -330,7 +336,7 @@ def load_printer_config(
                 "No printers configured. Run 'kiln setup' for guided network discovery and setup, "
                 "or add one manually with:\n"
                 "  kiln auth --name my-printer --host <IP_OR_HOSTNAME> --type <TYPE> --api-key <KEY>\n"
-                "Supported types: octoprint, moonraker, creality, bambu, elegoo, prusalink, serial"
+                f"Supported types: {format_printer_types(quote='')}"
             )
         else:
             raise ValueError(
@@ -367,10 +373,14 @@ def save_printer(
     access_code: str | None = None,
     serial: str | None = None,
     printer_model: str | None = None,
+    baudrate: int | None = None,
     set_active: bool = True,
     config_path: Path | None = None,
 ) -> Path:
     """Add or update a printer in the config file.
+
+    *baudrate* applies to serial printers only; omit it to let the adapter
+    fall back to :data:`DEFAULT_SERIAL_BAUDRATE`.
 
     Returns the path to the config file.
     """
@@ -410,6 +420,12 @@ def save_printer(
 
     if printer_model:
         entry["printer_model"] = printer_model
+
+    # Record a baud rate only when it differs from the default, so changing
+    # the default later stays an edit rather than a migration of every
+    # config that pinned it.
+    if printer_type == "serial" and baudrate and baudrate != DEFAULT_SERIAL_BAUDRATE:
+        entry["baudrate"] = int(baudrate)
 
     printers[name] = entry
 
@@ -506,9 +522,7 @@ def validate_printer_config(cfg: dict[str, Any]) -> tuple[bool, str | None]:
     Returns ``(True, None)`` or ``(False, error_message)``.
     """
     ptype = _normalize_printer_type(cfg.get("type", ""))
-    if ptype not in (
-        "octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink", "duet", "serial"
-    ):
+    if ptype not in PRINTER_TYPES:
         return False, f"Unknown printer type: {ptype!r}"
 
     host = cfg.get("host", "")

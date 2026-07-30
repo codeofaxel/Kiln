@@ -9,7 +9,7 @@ is not.
 
 The cloud flush (:func:`flush`) batches these aggregates up to
 ``POST /api/me/stats/record`` when the user is signed in
-(``python3 -m kiln signin``) and online, so local agent work counts on
+(``kiln signin``) and online, so local agent work counts on
 their ``/stats`` dashboard — not just web-app activity.  Counting is
 idempotent across retries and machines: we send each ``(day, tool)``
 row's ABSOLUTE local count plus a stable ``device_id``; the server keys
@@ -185,7 +185,7 @@ def _oauth_token() -> str | None:
 
     Reuses public Kiln's own resolver (``server._paired_access_token``),
     which reads ``~/.kiln/auth_tokens.json`` (honoring ``KILN_AUTH_HOME``)
-    — the same file ``python3 -m kiln signin`` writes.  A license-key
+    — the same file ``kiln signin`` writes.  A license-key
     bearer is intentionally NOT used here: the per-user ``/stats`` table
     is JWT-only, so a license bearer would just be recorded as 0.
     """

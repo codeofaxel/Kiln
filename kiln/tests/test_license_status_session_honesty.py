@@ -54,7 +54,7 @@ def _install_session(monkeypatch, *, state: str, detail: str = "", raises: bool 
 
 EXPIRED = (
     "Your Kiln session for adam@kiln3d.com has expired and could not be "
-    "refreshed. Run `python3 -m kiln signin` to sign in again."
+    "refreshed. Run `kiln signin` to sign in again."
 )
 
 
@@ -131,9 +131,19 @@ def test_missing_auth_session_module_degrades_quietly(monkeypatch):
 
 
 def test_a_state_with_no_detail_still_says_what_to_do(monkeypatch):
-    """Never leave the user with a false report and no next step."""
+    """Never leave the user with a false report and no next step.
+
+    The next step is split by audience: ``action_required`` is what the person
+    reads and says what happened in plain words, while the command they cannot
+    type from a chat window rides in the agent-addressed fields beside it.
+    """
     _install_session(monkeypatch, state="signed_out", detail="")
     payload = {"source": "oauth", "tier": "pro", "is_valid": True}
     _annotate_session_liveness(payload)
     assert payload["is_valid"] is False
-    assert "signin" in payload["action_required"]
+    assert "signing in" in payload["action_required"].lower()
+    assert "`" not in payload["action_required"], (
+        "no command syntax in user-facing copy"
+    )
+    assert "kiln signin" in payload["agent_hint"]
+    assert payload["setup_hint"] == "kiln signin"

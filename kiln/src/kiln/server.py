@@ -21,7 +21,8 @@ Environment variables
     Serial port path for USB printers (required when ``KILN_PRINTER_TYPE``
     is ``"serial"``).  E.g. ``"/dev/ttyUSB0"`` or ``"COM3"``.
 ``KILN_PRINTER_BAUDRATE``
-    Baud rate for serial printers (default 115200).
+    Baud rate for serial printers (default 115200; many Marlin boards are
+    flashed for 250000).
 ``KILN_PRINTER_SERIAL``
     Bambu printer serial number (required when ``KILN_PRINTER_TYPE``
     is ``"bambu"``).
@@ -185,15 +186,15 @@ except ImportError:
     LicenseTier = _DummyTier  # type: ignore[misc]
 
     def check_tier(required, *_a, **_kw):
+        # Imported locally: this stub is defined above the module's import
+        # block, and the message is the one a caller shows a person.  The
+        # (ok, message) tuple is an established contract with no room for an
+        # agent-addressed field, so callers that build a response dict around
+        # it splat ``signin_hint_fields()`` in themselves.
+        from kiln.tiers_and_terms import tier_required_message
+
         tier_label = getattr(required, "value", required) if required else "pro"
-        return (
-            False,
-            (
-                f"This feature requires Kiln {str(tier_label).title()}. "
-                "Already subscribed? Run `kiln signin` to sync this machine. "
-                "Otherwise: https://kiln3d.com/pricing"
-            ),
-        )
+        return (False, tier_required_message("This feature", str(tier_label)))
 
     def get_tier(*_a, **_kw):
         return "free"
@@ -217,18 +218,20 @@ except ImportError:
                     record_tier_denial(tool_name)
                 except Exception:
                     pass
+                from kiln.tiers_and_terms import (
+                    signin_hint_fields,
+                    tier_required_message,
+                )
+
                 return {
                     "success": False,
-                    "error": (
-                        f"{tool_name} requires Kiln {str(tier_label).title()}. "
-                        "Already subscribed? Run `kiln signin` to sync this machine. "
-                        "Otherwise: https://kiln3d.com/pricing"
-                    ),
+                    "error": tier_required_message(tool_name, str(tier_label)),
                     "code": "TIER_REQUIRED",
                     "required_tier": str(tier_label),
                     "tool": tool_name,
                     "retryable": False,
                     "upgrade_url": "https://kiln3d.com/pricing",
+                    **signin_hint_fields(),
                 }
 
             return wrapper
@@ -283,6 +286,7 @@ from kiln.pipelines import (
 )
 from kiln.plugin_loader import register_all_plugins
 from kiln.plugins import PluginContext, PluginManager
+from kiln.printer_backends import DEFAULT_SERIAL_BAUDRATE, format_printer_types
 from kiln.printer_intelligence import (
     diagnose_issue,
     get_material_settings,
@@ -315,7 +319,13 @@ from kiln.thingiverse import (
     ThingiverseError,
     ThingiverseNotFoundError,
 )
-from kiln.tiers_and_terms import TIERS_AND_TERMS
+from kiln.tiers_and_terms import (
+    AGENT_ACCOUNT_NUDGE,
+    TIERS_AND_TERMS,
+    session_expired_message,
+    signin_hint_fields,
+    tier_required_message,
+)
 from kiln.webhooks import WebhookManager
 
 
@@ -692,15 +702,7 @@ def _build_instructions() -> str:
         from kiln.cli.auth_commands import _read_tokens
 
         if not _read_tokens().get("access_token"):
-            parts.append(
-                "ACCOUNT: The user is not signed in. Kiln works fully without "
-                "an account; a free account adds a cloud design library with "
-                "share links, plus the free monthly allowance of Kiln's hosted "
-                "tools. If the user wants to save or share a design, offer to "
-                "sign them in — call `kiln_signin` and give them the URL it "
-                "returns (or they can run `kiln signin` in a terminal). Mention "
-                "it at most once per session, and never block work on it."
-            )
+            parts.append(f"ACCOUNT: {AGENT_ACCOUNT_NUDGE}")
     except Exception:  # noqa: BLE001 -- nudge is best-effort, never fatal
         pass
 
@@ -935,7 +937,7 @@ def _record_local_tool_call(name: str, result: Any = None) -> None:
       the call in ``~/.kiln`` and syncs it when the user is signed in.
     * free install (no kiln-pro) → the public ``usage_ledger`` records the
       call locally and flushes to ``/api/me/stats/record`` when the user
-      is signed in via ``python3 -m kiln signin``.
+      is signed in via ``kiln signin``.
 
     Two independent channels fire here:
     * the ANONYMOUS aggregate counter (``daily_stats.record_tool_call``) —
@@ -1200,7 +1202,10 @@ def _get_adapter() -> PrinterAdapter:
     elif printer_type == "bambu":
         if BambuAdapter is None:
             raise RuntimeError(
-                "Bambu support requires paho-mqtt.  Install it with: pip install 'kiln[bambu]' or pip install paho-mqtt"
+                # paho-mqtt is a core dependency, so reaching here means a
+                # broken install rather than a missing extra: `kiln3d[bambu]`
+                # is empty and would install nothing.
+                "Bambu support requires paho-mqtt.  Install it with: pip install paho-mqtt"
             )
         if not api_key:
             raise RuntimeError(
@@ -1226,7 +1231,7 @@ def _get_adapter() -> PrinterAdapter:
         if ElegooAdapter is None:
             raise RuntimeError(
                 "Elegoo SDCP support requires websocket-client.  "
-                "Install it with: pip install 'kiln[elegoo]' or pip install websocket-client"
+                "Install it with: pip install 'kiln3d[elegoo]' or pip install websocket-client"
             )
         mainboard_id = os.environ.get("KILN_PRINTER_MAINBOARD_ID", "")
         _adapter = ElegooAdapter(host=host, mainboard_id=mainboard_id)
@@ -1239,12 +1244,12 @@ def _get_adapter() -> PrinterAdapter:
                 "KILN_PRINTER_PORT environment variable is not set.  "
                 "Set it to the serial port path (e.g. /dev/ttyUSB0, /dev/ttyACM0, COM3)."
             )
-        baudrate = parse_int_env("KILN_PRINTER_BAUDRATE", 115200)
+        baudrate = parse_int_env("KILN_PRINTER_BAUDRATE", DEFAULT_SERIAL_BAUDRATE)
         _adapter = SerialPrinterAdapter(port=port, baudrate=baudrate)
     else:
         raise RuntimeError(
             f"Unsupported printer type: {printer_type!r}.  "
-            f"Supported types are 'octoprint', 'moonraker', 'creality', 'bambu', 'elegoo', 'prusalink', and 'serial'."
+            f"Supported types are {format_printer_types(conjunction='and')}."
         )
 
     # Propagate safety profile to adapter for defense-in-depth temp limits.
@@ -1460,14 +1465,18 @@ def _build_adapter_from_config_entry(name: str, entry: dict[str, Any]) -> Printe
     elif printer_type == "prusalink":
         adapter = PrusaLinkAdapter(host=host, api_key=api_key or None)
     elif printer_type == "serial":
-        port = str(entry.get("port") or os.environ.get("KILN_PRINTER_PORT", ""))
+        # register_printer() persists a serial printer's port path as
+        # `host`, so accept that too rather than demanding a `port` key
+        # the tool that wrote the entry never emits.
+        port = str(entry.get("port") or host or os.environ.get("KILN_PRINTER_PORT", ""))
         if not port:
             raise RuntimeError(f"Config entry {name!r} (serial) is missing 'port'.")
-        baudrate = int(entry.get("baudrate") or parse_int_env("KILN_PRINTER_BAUDRATE", 115200))
+        baudrate = int(entry.get("baudrate") or parse_int_env("KILN_PRINTER_BAUDRATE", DEFAULT_SERIAL_BAUDRATE))
         adapter = SerialPrinterAdapter(port=port, baudrate=baudrate)
     else:
         raise RuntimeError(
-            f"Config entry {name!r} has unsupported printer type {printer_type!r}."
+            f"Config entry {name!r} has unsupported printer type {printer_type!r}.  "
+            f"Supported types are {format_printer_types(conjunction='and')}."
         )
 
     if printer_model:
@@ -2594,16 +2603,22 @@ def _error_dict(
     code: str = "ERROR",
     *,
     retryable: bool | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a standardised error response dict.
 
     If *retryable* is not supplied explicitly it is inferred from *code*:
     codes in ``_RETRYABLE_CODES`` are assumed retryable, everything else
     (auth, validation, not-found, unsupported) is not.
+
+    *extra* merges top-level keys alongside ``error`` — for refusals that
+    carry an agent-addressed field next to the human-readable ``message``
+    (``**signin_hint_fields()``).  It cannot reach inside ``error``, so the
+    envelope every existing caller depends on keeps its exact shape.
     """
     if retryable is None:
         retryable = code in _RETRYABLE_CODES
-    return {
+    payload: dict[str, Any] = {
         "success": False,
         "error": {
             "code": code,
@@ -2611,6 +2626,9 @@ def _error_dict(
             "retryable": retryable,
         },
     }
+    if extra:
+        payload.update(extra)
+    return payload
 
 
 def _flush_restart_stdio() -> int:
@@ -7032,6 +7050,7 @@ def register_printer(
     printer_model: str | None = None,
     persist: bool = True,
     verify_connection: bool = True,
+    baudrate: int | None = None,
 ) -> dict:
     """Register a new printer in the fleet.
 
@@ -7057,6 +7076,9 @@ def register_printer(
             sessions load the same printer. Default ``True``.
         verify_connection: For Bambu printers, immediately query AMS status
             after registration and return a proof summary. Default ``True``.
+        baudrate: Baud rate for serial printers.  Defaults to
+            ``DEFAULT_SERIAL_BAUDRATE``; many Marlin boards are flashed
+            for 250000 and will not talk at the default.
 
     Once registered the printer appears in ``fleet_status()`` and can be
     targeted by ``submit_job()``.
@@ -7167,12 +7189,14 @@ def register_printer(
         elif printer_type == "serial":
             # For serial printers, 'host' is the serial port path (e.g.
             # /dev/ttyUSB0) and 'api_key' is unused.
-            baudrate = 115200
-            adapter = SerialPrinterAdapter(port=host, baudrate=baudrate)
+            adapter = SerialPrinterAdapter(
+                port=host,
+                baudrate=baudrate or DEFAULT_SERIAL_BAUDRATE,
+            )
         else:
             return _error_dict(
                 f"Unsupported printer_type: {printer_type!r}. "
-                "Supported: 'octoprint', 'moonraker', 'creality', 'bambu', 'elegoo', 'prusalink', 'serial'.",
+                f"Supported: {format_printer_types()}.",
                 code="INVALID_ARGS",
             )
 
@@ -7191,6 +7215,7 @@ def register_printer(
                     access_code=api_key if printer_type == "bambu" else None,
                     serial=serial,
                     printer_model=printer_model,
+                    baudrate=baudrate,
                     set_active=True,
                 )
                 persisted_path = str(persisted)
@@ -7506,9 +7531,11 @@ def _annotate_session_liveness(payload: dict) -> None:
     # The tier stays reported — it is what the account holds once the
     # user signs back in.  Validity is the part that actually changed.
     payload["is_valid"] = False
-    payload["action_required"] = session.detail or (
-        "Your Kiln session has expired. Run `kiln signin` to sign in again."
-    )
+    # ``action_required`` is read by a person looking at their own licence
+    # status, so it names the situation and not the command.  The command
+    # rides alongside for the agent, which can just do it.
+    payload["action_required"] = session.detail or session_expired_message()
+    payload.update(signin_hint_fields())
 
 
 @mcp.tool()
@@ -9565,7 +9592,9 @@ def fleet_workflow() -> str:
     return (
         "To manage a fleet of printers:\n\n"
         "1. Call `fleet_status` to see all registered printers and their states\n"
-        "2. Use `register_printer` to add new printers (octoprint, moonraker, creality, bambu, elegoo, prusalink, or serial)\n"
+        "2. Use `register_printer` to add new printers ("
+        + format_printer_types(quote="", conjunction="or")
+        + ")\n"
         "3. Submit jobs with `submit_job` — the scheduler auto-dispatches to idle printers\n"
         "4. Monitor via `queue_summary` and `job_status`\n"
         "5. Check `recent_events` for lifecycle updates\n\n"
@@ -11632,6 +11661,14 @@ def _paired_access_token() -> str:
         return _raw_paired_access_token()
 
 
+# Tier required by each pro tool, keyed by tool name and filled in by
+# ``_register_pro_tool_stubs`` from the manifest.  The manifest has
+# always carried a ``tier`` per tool; nothing read it, so all 345 paid
+# capabilities presented to an agent looking exactly like the 54 free
+# ones and no refusal could say which tier it needed.
+_PRO_TOOL_TIERS: dict[str, str] = {}
+
+
 def _pro_api_call(tool_name: str, **kwargs) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
 
@@ -11674,21 +11711,53 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
             "error": resolved.detail,
             "code": "KILN_SESSION_EXPIRED",
             "tool": tool_name,
-            "setup_hint": "python3 -m kiln signin",
+            **signin_hint_fields(),
         }
     else:
         bearer = ""
     if not bearer:
+        # The most-hit refusal in the product, and until now the only one
+        # that recorded nothing: it returns here without ever reaching a
+        # server, so no server-side counter could see it.  Best-effort.
+        try:
+            from kiln.daily_stats import record_account_wall
+
+            record_account_wall(tool_name)
+        except Exception:
+            pass
+        required_tier = _PRO_TOOL_TIERS.get(tool_name, "")
+        # Two audiences, two fields — the same split ``_tier_required_error``
+        # uses in kiln-pro.  ``error`` is read by a PERSON: it says what they
+        # reached for and what it costs them to continue, and contains no
+        # command, because a person who wanted a textured coaster should not
+        # be handed a terminal.  The agent-addressed half comes from
+        # ``kiln.tiers_and_terms`` — the whole tool surface shares one
+        # definition of it now, so this refusal cannot drift away from the
+        # thirteen others that say the same thing.
+        #
+        # This used to read "pair a Kiln account, run `python3 -m kiln pair
+        # <code>`" — and a test asserted that exact string, so the worst copy
+        # in the product was the one line nobody could fix by accident.
+        if required_tier:
+            tier_name = required_tier.capitalize()
+            message = (
+                f"{tool_name} is part of Kiln {tier_name}. "
+                "Signing in is free and takes a few seconds. "
+                f"See what {tier_name} includes at kiln3d.com/pricing"
+            )
+        else:
+            message = (
+                f"{tool_name} is free to use — Kiln just needs to know who "
+                "you are to count it. Signing in takes a few seconds."
+            )
         return {
             "status": "error",
-            "error": (
-                f"'{tool_name}' needs a paired Kiln account. "
-                "Run `python3 -m kiln signin`, or generate a code at "
-                "https://app.kiln3d.com/connect and run `python3 -m kiln pair <code>`."
-            ),
+            "error": message,
             "code": "KILN_ACCOUNT_NOT_PAIRED",
             "tool": tool_name,
-            "setup_hint": "python3 -m kiln signin",
+            "required_tier": required_tier or "free",
+            "upgrade_url": "https://kiln3d.com/pricing",
+            **signin_hint_fields(),
         }
     import json
     import urllib.error
@@ -11791,6 +11860,17 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
             continue
 
         description = tool_def.get("description", name)
+        # Say what this costs, in the one place an agent always reads.
+        # An agent that knows the tier can tell the user "that needs
+        # Pro" before spending a call to find out.
+        tier = str(tool_def.get("tier") or "").strip().lower()
+        if tier and tier != "free":
+            _PRO_TOOL_TIERS[name] = tier
+            description = (
+                f"{description}\n\n"
+                f"Requires Kiln {tier.capitalize()}. "
+                f"Pricing: https://kiln3d.com/pricing"
+            )
         params_schema = tool_def.get("parameters", {})
 
         # Build the stub function.  Closures capture `name` by reference,
@@ -14941,11 +15021,13 @@ def decorate_surface(
                     raise ImportError("kiln-pro not installed")
             except ImportError:
                 return _error_dict(
-                    "SVG logo decoration is a Pro feature. "
-                    "Free tier supports PNG/JPG photos and text. "
-                    "Already subscribed? Run `kiln signin` to sync this machine. "
-                    "Otherwise: https://kiln3d.com/pricing",
+                    tier_required_message(
+                        "SVG logo decoration",
+                        "pro",
+                        "Free tier supports PNG/JPG photos and text",
+                    ),
                     code="PRO_REQUIRED",
+                    extra=signin_hint_fields(),
                 )
 
             from kiln.image_to_surface import prepare_svg_for_emboss

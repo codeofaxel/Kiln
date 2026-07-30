@@ -1497,17 +1497,23 @@ class _SlicerToolsPlugin:
                 if profile.tier == "pro":
                     ok, message = _srv.check_tier(_srv.LicenseTier.PRO)
                     if not ok:
+                        from kiln.tiers_and_terms import (
+                            signin_hint_fields,
+                            tier_required_message,
+                        )
+
                         return {
                             "success": False,
-                            "error": (
-                                f"The '{profile.display_name}' slicer profile requires Kiln Pro. "
-                                f"Free-tier profiles available: default, ender3, prusa_mk3s, klipper_generic. "
-                                f"Already subscribed? Run `kiln login` to sync this machine. "
-                                f"Otherwise: https://kiln3d.com/pricing"
+                            "error": tier_required_message(
+                                f"The '{profile.display_name}' slicer profile",
+                                "pro",
+                                "Free-tier profiles available: default, "
+                                "ender3, prusa_mk3s, klipper_generic",
                             ),
                             "code": "LICENSE_REQUIRED",
                             "required_tier": "pro",
                             "upgrade_url": "https://kiln3d.com/pricing",
+                            **signin_hint_fields(),
                         }
 
                 return {"success": True, "profile": slicer_profile_to_dict(profile)}

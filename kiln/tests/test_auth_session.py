@@ -73,7 +73,12 @@ class TestFastPaths:
         result = resolve_session_bearer()
         assert result.state == "signed_out"
         assert result.token == ""
-        assert "kiln signin" in result.detail
+        # ``detail`` surfaces verbatim as license_status's action_required and
+        # as a refused hosted call's error, so it is read by a person: it says
+        # what is true, and carries no command syntax.  The command travels in
+        # the agent-addressed field those responses attach alongside it.
+        assert "signed in" in result.detail
+        assert "`" not in result.detail, "no command syntax in user-facing copy"
 
     def test_signed_out_when_access_token_empty(self, auth_home, monkeypatch):
         _no_network(monkeypatch)
@@ -179,7 +184,9 @@ class TestRejectedRefresh:
         assert result.state == "needs_signin"
         assert result.token == ""
         assert "user@example.com" in result.detail
-        assert "kiln signin" in result.detail
+        assert "expired" in result.detail
+        # Person-facing copy: no command syntax here (see the signed_out case).
+        assert "`" not in result.detail, "no command syntax in user-facing copy"
         # Never destructive: the file (and its email/tier context) stays.
         assert (auth_home / ".kiln" / "auth_tokens.json").exists()
 

@@ -28,6 +28,13 @@ from typing import Any
 
 import click
 
+from kiln.printer_backends import (
+    DEFAULT_SERIAL_BAUDRATE,
+    NETWORK_PRINTER_TYPES,
+    PRINTER_TYPE_LABELS,
+    PRINTER_TYPES,
+    format_printer_types,
+)
 from kiln.printers.base import PrinterError
 
 # Exception types for typed catch handlers (prefer specific over blanket Exception)
@@ -447,8 +454,27 @@ def _make_adapter(cfg: dict[str, Any]):
             host=host,
             api_key=cfg.get("api_key") or None,
         )
+    elif ptype == "serial":
+        # `kiln auth --type serial` and register_printer() both store the
+        # port path in `host`; `port` is the key config.yaml uses when it
+        # was hand-written.  Accept either — without this branch every
+        # `kiln` command refused a USB printer the server happily drove.
+        from kiln.printers import SerialPrinterAdapter
+
+        port = cfg.get("port") or host
+        if not port:
+            raise click.ClickException(
+                "Serial printers need a port path (e.g. /dev/ttyUSB0, COM3)."
+            )
+        return SerialPrinterAdapter(
+            port=port,
+            baudrate=int(cfg.get("baudrate") or DEFAULT_SERIAL_BAUDRATE),
+        )
     else:
-        raise click.ClickException(f"Unknown printer type: {ptype!r}")
+        raise click.ClickException(
+            f"Unknown printer type: {ptype!r}. "
+            f"Supported: {format_printer_types()}."
+        )
 
 
 def _get_adapter_from_ctx(ctx: click.Context):
@@ -1642,12 +1668,18 @@ def discover(timeout: float, subnet: str | None, methods: tuple, json_mode: bool
 
 @cli.command()
 @click.option("--name", "-n", required=True, help="Name for this printer (e.g. 'voron').")
-@click.option("--host", "-h", required=True, help="Printer URL or IP (e.g. http://octopi.local).")
+@click.option(
+    "--host",
+    "-h",
+    required=True,
+    help="Printer URL or IP (e.g. http://octopi.local), or the serial port "
+    "path for a USB printer (e.g. /dev/ttyUSB0, COM3).",
+)
 @click.option(
     "--type",
     "printer_type",
     required=True,
-    type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink", "duet"]),
+    type=click.Choice(list(PRINTER_TYPES)),
     help="Printer backend type.",
 )
 @click.option(
@@ -1657,6 +1689,13 @@ def discover(timeout: float, subnet: str | None, methods: tuple, json_mode: bool
 )
 @click.option("--access-code", default=None, help="LAN access code (Bambu).")
 @click.option("--serial", default=None, help="Printer serial number (Bambu) or mainboard ID (Elegoo).")
+@click.option(
+    "--baudrate",
+    type=int,
+    default=None,
+    help=f"Baud rate for a USB printer (default {DEFAULT_SERIAL_BAUDRATE}; "
+    "many Marlin boards are flashed for 250000).",
+)
 @click.option("--printer-model", default=None, help="Printer model profile (e.g. k1_max, sparkx_i7, ender3_v4).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def auth(
@@ -1666,10 +1705,18 @@ def auth(
     api_key: str | None,
     access_code: str | None,
     serial: str | None,
+    baudrate: int | None,
     printer_model: str | None,
     json_mode: bool,
 ) -> None:
     """Save printer credentials to the config file."""
+    # Outside the try: the handler below reports every exception as a failed
+    # save, and nothing has been written yet.
+    if baudrate is not None and printer_type != "serial":
+        raise click.UsageError(
+            "--baudrate applies to --type serial only; "
+            f"{printer_type} printers are reached over the network."
+        )
     try:
         path = save_printer(
             name,
@@ -1678,6 +1725,7 @@ def auth(
             api_key=api_key,
             access_code=access_code,
             serial=serial,
+            baudrate=baudrate,
             printer_model=printer_model,
         )
         prusa_diagnostics: dict[str, Any] | None = None
@@ -7282,17 +7330,6 @@ def donate(json_mode: bool) -> None:
 # ---------------------------------------------------------------------------
 
 
-_PRINTER_TYPE_LABELS = {
-    "octoprint": "OctoPrint",
-    "moonraker": "Moonraker (Klipper)",
-    "creality": "Creality (Klipper/Moonraker)",
-    "bambu": "Bambu Lab",
-    "elegoo": "Elegoo (SDCP)",
-    "prusalink": "Prusa Link",
-    "duet": "Duet (RepRapFirmware)",
-}
-
-
 @cli.command()
 @click.option(
     "--skip-discovery",
@@ -7377,7 +7414,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
             click.echo(f"    {'#':<4} {'Name':<25} {'Host':<22} {'Type':<14} {'Method'}")
             click.echo(f"    {'─' * 4} {'─' * 25} {'─' * 22} {'─' * 14} {'─' * 10}")
             for i, p in enumerate(discovered, 1):
-                label = _PRINTER_TYPE_LABELS.get(p.printer_type, p.printer_type)
+                label = PRINTER_TYPE_LABELS.get(p.printer_type, p.printer_type)
                 display_name = p.name or "(unnamed)"
                 click.echo(f"    {i:<4} {display_name:<25} {p.host:<22} {label:<14} {p.discovery_method}")
             click.echo()
@@ -7414,7 +7451,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         if printer_type == "unknown":
             printer_type = click.prompt(
                 "  Printer type could not be auto-detected. Select type",
-                type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink", "duet"]),
+                type=click.Choice(list(NETWORK_PRINTER_TYPES)),
             )
         suggested_name = (selected.name or printer_type).lower().replace(" ", "-").replace(".", "-")
     else:
@@ -7429,7 +7466,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                 p = probed[0]
                 printer_type = p.printer_type
                 click.echo(
-                    f"  Detected: {_PRINTER_TYPE_LABELS.get(printer_type, printer_type)}"
+                    f"  Detected: {PRINTER_TYPE_LABELS.get(printer_type, printer_type)}"
                     + (f" ({p.name})" if p.name else "")
                 )
                 suggested_name = (p.name or printer_type).lower().replace(" ", "-").replace(".", "-")
@@ -7437,7 +7474,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                 click.echo("  Could not auto-detect printer type.")
                 printer_type = click.prompt(
                     "  Select printer type",
-                    type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink", "duet"]),
+                    type=click.Choice(list(NETWORK_PRINTER_TYPES)),
                 )
                 suggested_name = printer_type
         except Exception as exc:
@@ -7445,7 +7482,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
             click.echo("  Probe failed. Enter type manually.")
             printer_type = click.prompt(
                 "  Select printer type",
-                type=click.Choice(["octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink", "duet"]),
+                type=click.Choice(list(NETWORK_PRINTER_TYPES)),
             )
             suggested_name = printer_type
 
@@ -7465,7 +7502,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         # hunting for a key their printer never issues.
         credential = "Machine password" if printer_type == "duet" else "API key"
         api_key = click.prompt(
-            f"  {credential} for {_PRINTER_TYPE_LABELS.get(printer_type, printer_type)}",
+            f"  {credential} for {PRINTER_TYPE_LABELS.get(printer_type, printer_type)}",
             default="",
             show_default=False,
         )

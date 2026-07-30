@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.tiers_and_terms import signin_hint_fields, tier_required_message
+
 _logger = logging.getLogger(__name__)
 
 
@@ -121,8 +123,9 @@ class _ConsumerToolsPlugin:
             except ImportError:
                 return {
                     "status": "error",
-                    "error": "Tax calculation requires Kiln Pro. Already subscribed? Run `kiln login` to sync this machine. Otherwise: https://kiln3d.com/pricing",
+                    "error": tier_required_message("Tax calculation", "pro"),
                     "code": "PRO_REQUIRED",
+                    **signin_hint_fields(),
                 }
 
             # Canonical-preview mode: walk the fee through BillingLedger
@@ -196,8 +199,9 @@ class _ConsumerToolsPlugin:
             except ImportError:
                 return {
                     "status": "error",
-                    "error": "Tax calculation requires Kiln Pro. Already subscribed? Run `kiln login` to sync this machine. Otherwise: https://kiln3d.com/pricing",
+                    "error": tier_required_message("Tax calculation", "pro"),
                     "code": "PRO_REQUIRED",
+                    **signin_hint_fields(),
                 }
 
             try:
@@ -226,8 +230,9 @@ class _ConsumerToolsPlugin:
             except ImportError:
                 return {
                     "status": "error",
-                    "error": "Tax calculation requires Kiln Pro. Already subscribed? Run `kiln login` to sync this machine. Otherwise: https://kiln3d.com/pricing",
+                    "error": tier_required_message("Tax calculation", "pro"),
                     "code": "PRO_REQUIRED",
+                    **signin_hint_fields(),
                 }
 
             try:
