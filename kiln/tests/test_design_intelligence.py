@@ -26,6 +26,8 @@ import sys
 from types import ModuleType
 from typing import Any, Callable
 
+import pathlib
+
 import pytest
 
 import kiln.design_intelligence as di
@@ -1677,6 +1679,46 @@ class TestFreePathCautions:
         self._overlay(monkeypatch, {"load_tables": {"pla": {"notes": ["x"]}}})
         assert estimate_load_capacity("pla", 50.0, 40.0) is not None
         assert unestablished_caution("load_tables", "Nobody checked X.") == ""
+
+    def test_the_kind_map_covers_every_table_the_kb_merges(self):
+        """THE BUG, pinned in the direction it actually happened.
+
+        _OVERLAY_KIND_PROPERTY was a partial 4-entry map, so
+        _engineering_overlay_loaded answered "no overlay" for the seven tables
+        nobody had told it about — a confident wrong answer, in the direction
+        that suppresses a caution.
+
+        Its sibling test below checks the map has no DEAD entries. That is the
+        opposite direction and would not have caught this: the bug was a
+        MISSING entry, and a missing entry leaves every existing one valid.
+
+        So this derives the authoritative set from the knowledge base's own
+        _table() calls rather than a second hand-maintained list — a list that
+        must be kept in sync is the same failure with an extra step. Add a
+        table, forget the map, and this goes red.
+        """
+        import ast
+        import inspect as _inspect
+
+        from kiln import design_intelligence as _di
+
+        tree = ast.parse(pathlib.Path(_inspect.getfile(_di)).read_text())
+        merged = {
+            node.args[1].value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "_table"
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+        }
+        assert merged, "found no _table() calls — this test stopped testing"
+        missing = merged - set(_OVERLAY_KIND_PROPERTY)
+        assert not missing, (
+            f"the knowledge base merges {sorted(missing)} but the kind map "
+            "does not list them, so _engineering_overlay_loaded will answer "
+            "'no overlay' for them and their cautions will go silent"
+        )
 
     def test_every_overlay_kind_is_probeable(self):
         # A partial kind->property map answers "no overlay" for anything it
