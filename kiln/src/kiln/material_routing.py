@@ -770,6 +770,13 @@ def recommend_material(
             }
         alternatives.append(alt)
 
+    # The material the user will ACTUALLY print: in on-hand mode that's
+    # the recorded inventory string ("PETG-CF"), whose abrasive-ness the
+    # catalog base name ("petg") would understate.
+    _filament = top_mat.name
+    if availability and availability.get("as_recorded"):
+        _filament = availability["as_recorded"][0]
+
     # Nozzle overlays — when the caller supplied a printer_id AND
     # kiln-pro is installed, consult the bridge for (a) abrasive
     # escalation against the top pick (prepended NOZZLE ADVISORY) and
@@ -777,17 +784,11 @@ def recommend_material(
     # reasoning).  Both surface as reasoning-string mutations to
     # preserve the existing return shape for callers that parse it.
     # Free-tier installs without kiln-pro silently skip both wires.
+    _nozzle_advisory_shown = False
     if printer_id:
         try:
             from kiln import _pro_nozzle_bridge
 
-            # Consult with the material the user will ACTUALLY print:
-            # in on-hand mode that's the recorded inventory string
-            # ("PETG-CF"), whose abrasive-ness the catalog base name
-            # ("petg") would understate.
-            _filament = top_mat.name
-            if availability and availability.get("as_recorded"):
-                _filament = availability["as_recorded"][0]
             _nozzle_advisory = _pro_nozzle_bridge.consult_abrasive_escalation(
                 filament_material=_filament,
                 printer_id=printer_id,
@@ -800,6 +801,7 @@ def recommend_material(
                     f"NOZZLE ADVISORY: {_nozzle_advisory.get('user_warning', '')} "
                     f"\n\n{reasoning}"
                 )
+                _nozzle_advisory_shown = True
 
             _nozzle_summary = _pro_nozzle_bridge.consult_nozzle_summary(
                 printer_id,
@@ -811,6 +813,26 @@ def recommend_material(
             logger.debug(
                 "Nozzle overlay skipped", exc_info=True,
             )
+
+    # Abrasive-filament floor.  The NOZZLE ADVISORY above is the precise
+    # answer — it knows which nozzle is fitted and how much life is left —
+    # but it needs kiln-pro AND a recorded nozzle state, so it says nothing
+    # on a free install and nothing on a paid one whose printer has never
+    # had its nozzle recorded.  Both cases used to route a filled filament
+    # to the user with no mention of the nozzle at all, and a missing
+    # warning reads as "no concern".  This floor states the material fact
+    # and is explicit about the nozzle being the part we cannot see.
+    # Public floor; reaches every install.  Suppressed when the precise
+    # advisory already fired, so nobody gets told twice.
+    if not _nozzle_advisory_shown:
+        try:
+            from kiln.material_safety import abrasive_nozzle_floor
+
+            _abrasive_note = abrasive_nozzle_floor(_filament)
+            if _abrasive_note:
+                reasoning = f"{_abrasive_note}\n\n{reasoning}"
+        except Exception:  # noqa: BLE001 — advisory is best-effort
+            logger.debug("Abrasive-filament floor skipped", exc_info=True)
 
     # Skin-contact advisory (worn / handled against skin).  This is NOT a
     # filter — no printed material is skin-safe, so we never drop or downrank
