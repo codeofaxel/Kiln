@@ -82,15 +82,19 @@ Eight backends. The name in backticks is the `KILN_PRINTER_TYPE` value.
 | Backend | Transport | Printers |
 |---------|-----------|----------|
 | **Bambu Lab** (`bambu`) | LAN MQTT + FTPS | X1C, X1E, P1S, P1P, P2S, A1, A1 Mini, A2L, H2S |
-| **Creality** (`creality`) | Moonraker/Klipper over the LAN | K1, K1C, K1 Max, K1 SE, K2/K2 Pro/K2 Plus, Hi, Ender-3 V3 KE, CR-10 SE |
-| **Prusa Link** (`prusalink`) | Local REST API | MK4, XL, Mini+ |
+| **Creality** (`creality`) | Moonraker HTTP API (port-probed) | K1, K1C, K1 Max, Ender-3 V3 / V3 KE, CR-10 SE; K2 family and Hi where Fluidd/Moonraker is present. Marlin-era Enders use `serial` or `octoprint` |
+| **Prusa Link** (`prusalink`) | Prusa Link HTTP API | MK4, XL, Mini+ |
 | **Elegoo** (`elegoo`) | SDCP over WebSocket | Centauri Carbon and other SDCP machines. Neptune 4 and OrangeStorm Giga run Klipper — use `moonraker` for those |
 | **Moonraker / Klipper** (`moonraker`) | Moonraker HTTP API | Any Klipper printer — Voron, Rat Rig V-Core 3, Sovol SV07, QIDI X-Plus 3 |
 | **OctoPrint** (`octoprint`) | OctoPrint REST API | Any OctoPrint-connected printer |
-| **Duet / RepRapFirmware** (`duet`) | RRF HTTP object model (RRF 2 and 3) | Duet 2 WiFi/Ethernet, Duet 3, and the machines built around them |
+| **Duet / RepRapFirmware** (`duet`) | RepRapFirmware HTTP (RRF 2 and 3) | Duet 2 WiFi/Ethernet, Duet 3, and the machines built around them |
 | **Direct USB** (`serial`) | Marlin G-code over USB serial | Any Marlin printer — Ender 3, Prusa MK3S, CR-10 |
 
-Two backends need an extra: `pip install 'kiln3d[elegoo]'` and `pip install 'kiln3d[serial]'`. The rest work with a plain install.
+Two backends need an extra: `pip install 'kiln3d[elegoo]'` and `pip install
+'kiln3d[serial]'`. The rest work with a plain install. Bambu printers need LAN
+Mode and Developer Mode turned on plus a current access code (printer screen →
+Settings → Network); a restarted printer issues a new code and the old one
+stops working.
 
 ## Features
 
@@ -138,7 +142,7 @@ AI Agent (Claude, GPT, custom)
     |
     | one PrinterAdapter interface, eight backends
     v
-Your printer  (see Supported Printers above)
+Your printer (see Supported Printers above)
 ```
 
 Tools are written against that one interface rather than once per printer.
