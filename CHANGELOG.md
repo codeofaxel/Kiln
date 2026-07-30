@@ -13,6 +13,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   browser link to the same stage everywhere else. Drag to rotate, check it
   from every angle before you print.
 
+### Fixed
+
+- **Kiln now says plainly when it couldn't establish something, so silence
+  never reads as an all-clear.**
+
 ## [1.3.0] - 2026-07-29
 
 ### Added
