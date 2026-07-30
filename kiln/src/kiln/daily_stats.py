@@ -265,6 +265,8 @@ _ROLLOVER_COUNTERS = (
 # these are a different shape answering a different question.
 _ROLLOVER_MAPS = (
     "tier_denials", "account_wall", "tool_calls",
+    "texture_names", "decoration_types", "slicer_profiles",
+    "marketplace_sources",
 )
 
 
