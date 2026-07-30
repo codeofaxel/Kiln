@@ -398,7 +398,7 @@ class ElegooAdapter(PrinterAdapter):
         except ImportError as exc:
             raise PrinterError(
                 "Elegoo SDCP support requires the websocket-client package.  "
-                "Install it with: pip install 'kiln[elegoo]' or pip install websocket-client",
+                "Install it with: pip install 'kiln3d[elegoo]' or pip install websocket-client",
             ) from exc
 
         with self._ws_lock:

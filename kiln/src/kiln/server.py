@@ -285,6 +285,7 @@ from kiln.pipelines import (
 )
 from kiln.plugin_loader import register_all_plugins
 from kiln.plugins import PluginContext, PluginManager
+from kiln.printer_backends import format_printer_types
 from kiln.printer_intelligence import (
     diagnose_issue,
     get_material_settings,
@@ -1182,7 +1183,10 @@ def _get_adapter() -> PrinterAdapter:
     elif printer_type == "bambu":
         if BambuAdapter is None:
             raise RuntimeError(
-                "Bambu support requires paho-mqtt.  Install it with: pip install 'kiln[bambu]' or pip install paho-mqtt"
+                # paho-mqtt is a core dependency, so reaching here means a
+                # broken install rather than a missing extra: `kiln3d[bambu]`
+                # is empty and would install nothing.
+                "Bambu support requires paho-mqtt.  Install it with: pip install paho-mqtt"
             )
         if not api_key:
             raise RuntimeError(
@@ -1208,7 +1212,7 @@ def _get_adapter() -> PrinterAdapter:
         if ElegooAdapter is None:
             raise RuntimeError(
                 "Elegoo SDCP support requires websocket-client.  "
-                "Install it with: pip install 'kiln[elegoo]' or pip install websocket-client"
+                "Install it with: pip install 'kiln3d[elegoo]' or pip install websocket-client"
             )
         mainboard_id = os.environ.get("KILN_PRINTER_MAINBOARD_ID", "")
         _adapter = ElegooAdapter(host=host, mainboard_id=mainboard_id)
@@ -1226,7 +1230,7 @@ def _get_adapter() -> PrinterAdapter:
     else:
         raise RuntimeError(
             f"Unsupported printer type: {printer_type!r}.  "
-            f"Supported types are 'octoprint', 'moonraker', 'creality', 'bambu', 'elegoo', 'prusalink', and 'serial'."
+            f"Supported types are {format_printer_types(conjunction='and')}."
         )
 
     # Propagate safety profile to adapter for defense-in-depth temp limits.
@@ -1442,14 +1446,18 @@ def _build_adapter_from_config_entry(name: str, entry: dict[str, Any]) -> Printe
     elif printer_type == "prusalink":
         adapter = PrusaLinkAdapter(host=host, api_key=api_key or None)
     elif printer_type == "serial":
-        port = str(entry.get("port") or os.environ.get("KILN_PRINTER_PORT", ""))
+        # register_printer() persists a serial printer's port path as
+        # `host`, so accept that too rather than demanding a `port` key
+        # the tool that wrote the entry never emits.
+        port = str(entry.get("port") or host or os.environ.get("KILN_PRINTER_PORT", ""))
         if not port:
             raise RuntimeError(f"Config entry {name!r} (serial) is missing 'port'.")
         baudrate = int(entry.get("baudrate") or parse_int_env("KILN_PRINTER_BAUDRATE", 115200))
         adapter = SerialPrinterAdapter(port=port, baudrate=baudrate)
     else:
         raise RuntimeError(
-            f"Config entry {name!r} has unsupported printer type {printer_type!r}."
+            f"Config entry {name!r} has unsupported printer type {printer_type!r}.  "
+            f"Supported types are {format_printer_types(conjunction='and')}."
         )
 
     if printer_model:
@@ -7163,7 +7171,7 @@ def register_printer(
         else:
             return _error_dict(
                 f"Unsupported printer_type: {printer_type!r}. "
-                "Supported: 'octoprint', 'moonraker', 'creality', 'bambu', 'elegoo', 'prusalink', 'serial'.",
+                f"Supported: {format_printer_types()}.",
                 code="INVALID_ARGS",
             )
 
@@ -9558,7 +9566,9 @@ def fleet_workflow() -> str:
     return (
         "To manage a fleet of printers:\n\n"
         "1. Call `fleet_status` to see all registered printers and their states\n"
-        "2. Use `register_printer` to add new printers (octoprint, moonraker, creality, bambu, elegoo, prusalink, or serial)\n"
+        "2. Use `register_printer` to add new printers ("
+        + format_printer_types(quote="", conjunction="or")
+        + ")\n"
         "3. Submit jobs with `submit_job` — the scheduler auto-dispatches to idle printers\n"
         "4. Monitor via `queue_summary` and `job_status`\n"
         "5. Check `recent_events` for lifecycle updates\n\n"

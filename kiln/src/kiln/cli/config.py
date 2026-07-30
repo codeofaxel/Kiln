@@ -24,6 +24,8 @@ from typing import Any
 
 import yaml
 
+from kiln.printer_backends import PRINTER_TYPES, format_printer_types
+
 logger = logging.getLogger(__name__)
 
 
@@ -330,7 +332,7 @@ def load_printer_config(
                 "No printers configured. Run 'kiln setup' for guided network discovery and setup, "
                 "or add one manually with:\n"
                 "  kiln auth --name my-printer --host <IP_OR_HOSTNAME> --type <TYPE> --api-key <KEY>\n"
-                "Supported types: octoprint, moonraker, creality, bambu, elegoo, prusalink, serial"
+                f"Supported types: {format_printer_types(quote='')}"
             )
         else:
             raise ValueError(
@@ -506,9 +508,7 @@ def validate_printer_config(cfg: dict[str, Any]) -> tuple[bool, str | None]:
     Returns ``(True, None)`` or ``(False, error_message)``.
     """
     ptype = _normalize_printer_type(cfg.get("type", ""))
-    if ptype not in (
-        "octoprint", "moonraker", "creality", "bambu", "elegoo", "prusalink", "duet", "serial"
-    ):
+    if ptype not in PRINTER_TYPES:
         return False, f"Unknown printer type: {ptype!r}"
 
     host = cfg.get("host", "")
