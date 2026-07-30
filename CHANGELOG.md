@@ -3,6 +3,16 @@
 All notable changes to Kiln are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- **See your design in 3D wherever you run Kiln — free for everyone.** The
+  interactive stage used to need Kiln's hosted connection; now every install
+  has it — a 3D panel right in the conversation where apps support it, and a
+  browser link to the same stage everywhere else. Drag to rotate, check it
+  from every angle before you print.
+
 ## [1.3.0] - 2026-07-29
 
 ### Added
