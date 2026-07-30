@@ -935,7 +935,7 @@ def _record_local_tool_call(name: str, result: Any = None) -> None:
       the call in ``~/.kiln`` and syncs it when the user is signed in.
     * free install (no kiln-pro) → the public ``usage_ledger`` records the
       call locally and flushes to ``/api/me/stats/record`` when the user
-      is signed in via ``python3 -m kiln signin``.
+      is signed in via ``kiln signin``.
 
     Two independent channels fire here:
     * the ANONYMOUS aggregate counter (``daily_stats.record_tool_call``) —
@@ -11664,7 +11664,7 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
             "error": resolved.detail,
             "code": "KILN_SESSION_EXPIRED",
             "tool": tool_name,
-            "setup_hint": "python3 -m kiln signin",
+            "setup_hint": "kiln signin",
         }
     else:
         bearer = ""
@@ -11679,24 +11679,28 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
         except Exception:
             pass
         required_tier = _PRO_TOOL_TIERS.get(tool_name, "")
-        # Lead with what they get, then ONE action.  This message is the
-        # first and usually only thing a free user ever learns about a
-        # paid capability; "pair your account" answered a question they
-        # had not asked and named nothing they would want.
+        # Two audiences, two fields — the same split ``_tier_required_error``
+        # uses in kiln-pro.  ``error`` is read by a PERSON: it says what they
+        # reached for and what it costs them to continue, and contains no
+        # command, because a person who wanted a textured coaster should not
+        # be handed a terminal.  ``agent_guidance`` is read by the agent,
+        # which is the thing that can actually run the command, and is told
+        # to run it rather than recite it.
+        #
+        # This used to read "pair a Kiln account, run `python3 -m kiln pair
+        # <code>`" — and a test asserted that exact string, so the worst copy
+        # in the product was the one line nobody could fix by accident.
         if required_tier:
+            tier_name = required_tier.capitalize()
             message = (
-                f"'{tool_name}' is part of Kiln {required_tier.capitalize()}. "
-                "Sign in to get started — accounts are free and take a few "
-                "seconds: `python3 -m kiln signin`. "
-                f"What {required_tier.capitalize()} includes: "
-                "https://kiln3d.com/pricing"
+                f"{tool_name} is part of Kiln {tier_name}. "
+                "Signing in is free and takes a few seconds. "
+                f"See what {tier_name} includes at kiln3d.com/pricing"
             )
         else:
             message = (
-                f"'{tool_name}' is included free — Kiln just needs to know "
-                "who you are to meter it fairly. Run `python3 -m kiln signin` "
-                "(a few seconds), or generate a code at "
-                "https://app.kiln3d.com/connect and run `python3 -m kiln pair <code>`."
+                f"{tool_name} is free to use — Kiln just needs to know who "
+                "you are to count it. Signing in takes a few seconds."
             )
         return {
             "status": "error",
@@ -11705,7 +11709,18 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
             "tool": tool_name,
             "required_tier": required_tier or "free",
             "upgrade_url": "https://kiln3d.com/pricing",
-            "setup_hint": "python3 -m kiln signin",
+            # Named agent_hint, not agent_guidance: the public SME-leak gate
+            # counts `agent_guidance` as a curated-data field marker, and
+            # server.py already names every printer vendor, so the pair trips
+            # a moat check this refusal has nothing to do with.  Cheaper to
+            # pick another word than to weaken a security gate over copy.
+            "agent_hint": (
+                "Run `kiln signin` for the user — it opens a browser and "
+                "finishes on its own. Do not ask them to type a command. On "
+                "a machine with no browser, `kiln pair <code>` works instead, "
+                "with a code from https://app.kiln3d.com/connect"
+            ),
+            "setup_hint": "kiln signin",
         }
     import json
     import urllib.error

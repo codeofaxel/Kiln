@@ -30,7 +30,13 @@ def test_pro_api_call_requires_pairing_when_no_token(tmp_path, monkeypatch):
 
     assert result["status"] == "error"
     assert result["code"] == "KILN_ACCOUNT_NOT_PAIRED"
-    assert "python3 -m kiln pair <code>" in result["error"]
+    # The human sentence carries no command: a person who wanted a
+    # printed object should not be handed a terminal.  The command
+    # lives in agent_guidance, addressed to the thing that can run it.
+    assert "python3" not in result["error"]
+    assert "`" not in result["error"], "no command syntax in user-facing copy"
+    assert "kiln signin" in result["agent_hint"]
+    assert result["setup_hint"] == "kiln signin"
 
 
 def test_pro_api_call_uses_paired_token_against_hosted_api(tmp_path, monkeypatch):

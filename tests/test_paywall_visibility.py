@@ -214,7 +214,14 @@ class TestTheWallIsAnOffer:
         assert out["required_tier"] == "pro"
         assert out["upgrade_url"] == "https://kiln3d.com/pricing"
         assert "Kiln Pro" in out["error"], "must name what they are reaching for"
-        assert "kiln signin" in out["error"], "must give exactly one next step"
+        # Two audiences, two fields.  The person reads prose and is never
+        # handed a terminal; the agent — the thing that can actually run
+        # it — gets the command and is told to run it, not recite it.
+        assert "python3" not in out["error"], "never send a person to a python invocation"
+        assert "`" not in out["error"], "no command syntax in user-facing copy"
+        assert "kiln signin" in out["agent_hint"]
+        assert "Do not ask them to type a command" in out["agent_hint"]
+        assert out["setup_hint"] == "kiln signin"
 
     def test_free_tool_refusal_says_it_is_free(self):
         from kiln import server

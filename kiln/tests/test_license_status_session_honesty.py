@@ -54,7 +54,7 @@ def _install_session(monkeypatch, *, state: str, detail: str = "", raises: bool 
 
 EXPIRED = (
     "Your Kiln session for adam@kiln3d.com has expired and could not be "
-    "refreshed. Run `python3 -m kiln signin` to sign in again."
+    "refreshed. Run `kiln signin` to sign in again."
 )
 
 

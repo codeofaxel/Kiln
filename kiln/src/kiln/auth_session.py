@@ -215,7 +215,7 @@ def _signin_hint(stored: dict) -> str:
     who = f" for {email}" if email else ""
     return (
         f"Your Kiln session{who} has expired and could not be refreshed. "
-        "Run `python3 -m kiln signin` to sign in again."
+        "Run `kiln signin` to sign in again."
     )
 
 
@@ -234,9 +234,9 @@ def resolve_session_bearer(
             token="",
             state="signed_out",
             detail=(
-                "No Kiln session found. Run `python3 -m kiln signin`, or "
+                "No Kiln session found. Run `kiln signin`, or "
                 "generate a code at https://app.kiln3d.com/connect and run "
-                "`python3 -m kiln pair <code>`."
+                "`kiln pair <code>`."
             ),
         )
 
