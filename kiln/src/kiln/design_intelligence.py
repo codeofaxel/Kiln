@@ -134,18 +134,19 @@ def _engineering_overlay_loaded(kind: str = "materials") -> bool:
     their own table kind so checking an upgrade hint never reads an unrelated
     private dataset.
 
-    Returns False when kiln-pro is absent, the license is invalid, the
-    network is past the offline-grace window, or the overlay endpoint is down.
+    Returns False when kiln-pro is absent, the license is invalid, the caller's
+    tier has not earned this table, the network is past the offline-grace
+    window, or the overlay endpoint is down.
     """
     try:
-        kb = _get_kb()
-        attr = _OVERLAY_KIND_PROPERTY.get(kind)
-        if attr is None:
+        if _OVERLAY_KIND_PROPERTY.get(kind) is None:
             return False
-        # Touch the property first: the merge happens on read, so probing
-        # before the table has been read would report a false "no overlay".
-        getattr(kb, attr)
-        if not kb.has_private_overlay(kind):
+        # One question, asked of the same authority the table read asks, so the
+        # hint can never contradict what the caller was actually served.  It
+        # used to take two — touch the property to force the merge, then read
+        # back a process-wide "did it merge" flag — which made the hint depend
+        # on who warmed the process rather than on who is asking.
+        if not _get_kb().has_private_overlay(kind):
             return False
     except Exception:
         return False
@@ -790,7 +791,19 @@ class _DesignKnowledgeBase:
         # out of the merged material dicts), so curated table-level policy —
         # which is legitimately public — would otherwise be unreachable.
         self._table_meta: dict[str, dict[str, Any]] = {}
-        self._merged_overlay_kinds: set[str] = set()
+        #: Overlay kind -> ``(the overlay payload that was merged, the merged
+        #: table)``.  Two questions live in this class and they have different
+        #: lifetimes.  WHAT DATA EXISTS is the same for every caller — the same
+        #: JSON files, the same merge — so it is decoded and merged once.
+        #: WHETHER A CALLER MAY READ the curated half is a question about the
+        #: caller, so :meth:`_table` asks it on every read.
+        #:
+        #: Keeping the payload OBJECT rather than a "merged already" flag is
+        #: what keeps those two apart: the merge is reused exactly as long as it
+        #: is still the same data, and re-merges by itself when kiln-pro serves
+        #: this kind differently per caller — a field-level tier projection
+        #: hands back a different object, which this comparison notices.
+        self._merged: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
         self._loaded = False
 
     def _load(self) -> None:
@@ -841,23 +854,44 @@ class _DesignKnowledgeBase:
         attr: str,
         overlay_kind: str,
     ) -> dict[str, Any]:
-        """Return one table, loading only its matching private overlay.
+        """Return one table at the depth THIS caller is entitled to, right now.
 
-        The canonical overlay loader is called on every property access so a
-        hosted request records the dataset even when both the public table and
-        private overlay are already cached. The deep merge itself happens once.
+        ``kiln_pro.data_overlays.load_overlay`` is the authority on that and is
+        asked on every read, because it is the thing that knows the answer per
+        caller: it owns whether the overlay exists at all, whether the calling
+        tool declared this kind, and whether this caller's tier has earned it.
+        Public Kiln deliberately re-implements none of that — it asks, and it
+        degrades to the public floor on a no.
+
+        Asking every time is cheap and is what this method already did: kiln-pro
+        caches the payload for the process, so a repeat ask is a dict lookup plus
+        the entitlement check, never a re-fetch.  What used to happen after the
+        ask was the bug — the merged table was written back over the public one
+        behind a "merged already" flag, so the first read of the process decided
+        what every later read got.  The merge is still done once per payload;
+        only its result is now kept beside the public floor instead of on top
+        of it.
         """
         self._load()
+        public_data: dict[str, Any] = getattr(self, attr)
         overlay = _load_pro_overlay_if_available(overlay_kind)
-        if overlay_kind not in self._merged_overlay_kinds and overlay:
-            public_data = getattr(self, attr)
-            setattr(self, attr, _deep_merge_dicts(public_data, overlay))
-            self._merged_overlay_kinds.add(overlay_kind)
-        return getattr(self, attr)
+        if not overlay:
+            return public_data
+        cached = self._merged.get(overlay_kind)
+        if cached is not None and cached[0] is overlay:
+            return cached[1]
+        merged = _deep_merge_dicts(public_data, overlay)
+        self._merged[overlay_kind] = (overlay, merged)
+        return merged
 
     def has_private_overlay(self, overlay_kind: str) -> bool:
-        """Whether this knowledge table actually merged private depth."""
-        return overlay_kind in self._merged_overlay_kinds
+        """Whether THIS caller can read the private depth for this table.
+
+        Same question :meth:`_table` asks, through the same authority, so a
+        caution that fires on "the curated source could not be read" can never
+        disagree with the table the caller was actually served.
+        """
+        return bool(_load_pro_overlay_if_available(overlay_kind))
 
     @property
     def materials(self) -> dict[str, dict[str, Any]]:
