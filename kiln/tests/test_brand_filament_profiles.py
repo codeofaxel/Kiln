@@ -155,14 +155,15 @@ _SAMPLE_BRAND_PROFILES: dict[str, dict] = {
 def _inject_brand_profiles():
     """Reset KB and inject mock brand profile data for test isolation."""
     _reset_knowledge_base()
-    kb = _get_kb()
-    # Force KB to load so we can inject into the real materials dict.
-    _ = kb.materials
+    # Inject into the table CALLERS are served, not the private public floor
+    # behind it: where a kiln-pro overlay is readable those are two different
+    # dicts, and the code under test reads the served one.
+    materials = _get_kb().materials
     for mid, extra in _SAMPLE_BRAND_PROFILES.items():
-        if mid in kb._materials:
-            kb._materials[mid]["brand_profiles"] = extra["brand_profiles"]
+        if mid in materials:
+            materials[mid]["brand_profiles"] = extra["brand_profiles"]
         else:
-            kb._materials[mid] = extra
+            materials[mid] = extra
     yield
     _reset_knowledge_base()
 

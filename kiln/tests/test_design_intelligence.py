@@ -131,17 +131,22 @@ class TestKnowledgeBaseOverlayLoading:
         self,
         monkeypatch,
     ):
+        """Every access is recorded; the same payload is merged only once.
+
+        kiln-pro caches an overlay payload for the process, so a repeat read
+        hands back the same object — and the merge behind it is reused. The
+        loader is still asked every time, because that ask is what records the
+        dataset access and what resolves this caller's entitlement.
+
+        A payload that is NOT the same object is a different answer and is
+        deliberately re-merged; see ``TestPerCallerEntitlement``.
+        """
         calls: list[str] = []
-        overlays = iter(
-            (
-                {"pla": {"trace_sentinel": "first"}},
-                {"pla": {"trace_sentinel": "second"}},
-            )
-        )
+        payload = {"pla": {"trace_sentinel": "first"}}
 
         def load_overlay(kind: str) -> dict[str, Any]:
             calls.append(kind)
-            return next(overlays)
+            return payload
 
         self._install_overlay_loader(monkeypatch, load_overlay)
         kb = _DesignKnowledgeBase()
@@ -188,6 +193,246 @@ class TestKnowledgeBaseOverlayLoading:
         assert catalog
         assert matches
         assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# Per-caller entitlement
+# ---------------------------------------------------------------------------
+
+
+class _TieredOverlayLoader:
+    """Stand-in for kiln-pro's caller-aware ``load_overlay``.
+
+    The real one refuses a caller who has not earned an overlay by raising;
+    this reproduces that contract without needing kiln-pro installed. A known
+    kind hands back the SAME object every time, as kiln-pro's process cache
+    does, and calls are counted so a test can tell "asked again" from
+    "merged again".
+    """
+
+    def __init__(self, paid: dict[str, dict[str, Any]]) -> None:
+        self.paid = paid
+        self.tier = "free"
+        self.calls: list[str] = []
+
+    def __call__(self, kind: str) -> dict[str, Any]:
+        self.calls.append(kind)
+        if self.tier == "free":
+            raise RuntimeError(f"Caller tier is not entitled to '{kind}'.")
+        return self.paid.get(kind, {})
+
+
+#: The curated half of the materials table — what a free caller must not see
+#: and a paid caller must not lose behind one.
+PAID_MATERIALS = {
+    "materials": {
+        "pla": {
+            "mechanical": {"tensile_strength_mpa": 50},
+            "use_case_ratings": {"structural_load_bearing": "poor"},
+            "agent_guidance": ["Curated guidance."],
+        }
+    }
+}
+
+
+@pytest.fixture
+def tiered_overlay(monkeypatch):
+    """Install a fake kiln-pro whose overlay is gated on a switchable tier."""
+    loader = _TieredOverlayLoader(PAID_MATERIALS)
+    package = ModuleType("kiln_pro")
+    package.__path__ = []  # type: ignore[attr-defined]
+    overlays = ModuleType("kiln_pro.data_overlays")
+    overlays.load_overlay = loader  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "kiln_pro", package)
+    monkeypatch.setitem(sys.modules, "kiln_pro.data_overlays", overlays)
+    return loader
+
+
+def _material_depth() -> tuple[int, int, int]:
+    profile = get_material_profile("pla")
+    assert profile is not None
+    return (
+        len(profile.mechanical),
+        len(profile.use_case_ratings),
+        len(profile.agent_guidance),
+    )
+
+
+def _read_as(loader: _TieredOverlayLoader, tier: str) -> tuple[int, int, int]:
+    loader.tier = tier
+    return _material_depth()
+
+
+class TestPerCallerEntitlement:
+    """The tables are process-wide; the entitlement decision is not.
+
+    One hosted process serves every caller, so caching the merged data and the
+    entitlement behind one flag let whoever read first decide what everyone
+    after them got. Losing depth to that is a paywall that does not hold;
+    gaining it is a caution that goes silent.
+
+    Covers:
+        - a free caller keeps the public floor behind a paid caller
+        - a paid caller keeps curated depth behind a free caller
+        - the answer does not depend on who warmed the process
+        - the upgrade caution follows the caller, not the warm-up order
+        - the public safety floor survives a refused overlay in full
+        - the entitlement question is re-asked without re-merging
+        - a payload that really is different data IS re-merged
+        - no kiln-pro at all still degrades to the public floor
+    """
+
+    def test_free_caller_keeps_the_floor_after_a_paid_caller_warms_the_process(
+        self, tiered_overlay
+    ) -> None:
+        # No reset between the two: a reset is exactly what hides this.
+        assert _read_as(tiered_overlay, "pro") == (1, 1, 1)
+        assert _read_as(tiered_overlay, "free") == (0, 0, 0)
+
+    def test_paid_caller_keeps_depth_after_a_free_caller_warms_the_process(
+        self, tiered_overlay
+    ) -> None:
+        assert _read_as(tiered_overlay, "free") == (0, 0, 0)
+        assert _read_as(tiered_overlay, "pro") == (1, 1, 1)
+
+    def test_answer_does_not_depend_on_warm_up_order(self, tiered_overlay) -> None:
+        _reset_knowledge_base()
+        free_alone = _read_as(tiered_overlay, "free")
+        _reset_knowledge_base()
+        paid_alone = _read_as(tiered_overlay, "pro")
+        # If these matched, the rest of the test would prove nothing.
+        assert free_alone != paid_alone
+
+        _reset_knowledge_base()
+        free_first = _read_as(tiered_overlay, "free")
+        paid_second = _read_as(tiered_overlay, "pro")
+
+        _reset_knowledge_base()
+        paid_first = _read_as(tiered_overlay, "pro")
+        free_second = _read_as(tiered_overlay, "free")
+
+        assert free_first == free_second == free_alone
+        assert paid_first == paid_second == paid_alone
+
+    def test_the_caution_follows_the_caller_not_the_warm_up_order(
+        self, tiered_overlay
+    ) -> None:
+        """The dangerous direction: a paid caller silencing a free one's caution.
+
+        ``unestablished_caution`` says what could not be established. Answering
+        it from a process-wide "did the overlay merge" flag meant one paid read
+        turned every later free caller's caution into an empty string — read as
+        a clearance by the user who most needed the warning.
+        """
+        said = "Nobody characterised this."
+
+        def caution(tier: str) -> str:
+            tiered_overlay.tier = tier
+            return unestablished_caution("materials", said)
+
+        _reset_knowledge_base()
+        free_alone = caution("free")
+        _reset_knowledge_base()
+        paid_alone = caution("pro")
+        assert free_alone.startswith(said) and "kiln3d.com/pricing" in free_alone
+        assert paid_alone == ""
+
+        _reset_knowledge_base()
+        assert caution("free") == free_alone
+        assert caution("pro") == paid_alone
+
+        _reset_knowledge_base()
+        assert caution("pro") == paid_alone
+        assert caution("free") == free_alone
+
+    def test_refused_overlay_still_serves_the_whole_public_safety_floor(
+        self, tiered_overlay
+    ) -> None:
+        """Losing depth is correct; losing a hazard never is.
+
+        Compares the served table against the public JSON leaf by leaf rather
+        than spot-checking a field, because the floor is only a floor if all of
+        it is there.
+        """
+        import json
+
+        public = {
+            key: record
+            for key, record in json.loads(
+                (di._DATA_DIR / "materials.json").read_text(encoding="utf-8")
+            ).items()
+            if not key.startswith("_")
+        }
+
+        def floor_survives(expected: Any, served: Any) -> bool:
+            if isinstance(expected, dict):
+                if not isinstance(served, dict):
+                    return False
+                return all(
+                    floor_survives(value, served.get(key))
+                    for key, value in expected.items()
+                )
+            return expected == served
+
+        # A paid caller first, so a frozen cache would be serving their table.
+        _read_as(tiered_overlay, "pro")
+        tiered_overlay.tier = "free"
+        served = _get_kb().materials
+
+        assert set(served) == set(public), "the catalogue lost a material"
+        for material_id, record in public.items():
+            assert floor_survives(record, served[material_id]), material_id
+        # Thermal ceilings, food-contact status and process limits specifically.
+        pla = get_material_profile("pla")
+        assert pla is not None
+        assert pla.thermal["print_temp_range_c"] == [190, 220]
+        assert pla.thermal["max_service_temp_c"] == 50
+        assert pla.chemical["food_safe"] == "conditional"
+        assert pla.design_limits["min_wall_thickness_mm"] == 0.8
+
+    def test_entitlement_is_re_asked_but_the_same_payload_is_merged_once(
+        self, tiered_overlay
+    ) -> None:
+        tiered_overlay.tier = "pro"
+        first = _get_kb().materials
+        second = _get_kb().materials
+        # Asked every read — the entitlement answer is never cached...
+        assert tiered_overlay.calls == ["materials"] * 2
+        # ...but the merge behind the same payload is.
+        assert first is second
+
+    def test_a_different_payload_is_re_merged_rather_than_reused(
+        self, tiered_overlay
+    ) -> None:
+        """A field-level tier gate hands back a different object per caller.
+
+        kiln-pro projects such an overlay per dispatch, so "same kind" does not
+        mean "same data". Keying the merge on the payload object is what makes
+        that re-merge happen by itself instead of serving one caller's
+        projection to the next.
+        """
+        tiered_overlay.tier = "pro"
+        first = _get_kb().materials
+        tiered_overlay.paid = {"materials": {"pla": {"agent_guidance": ["other"]}}}
+        second = _get_kb().materials
+
+        assert second is not first
+        assert second["pla"]["agent_guidance"] == ["other"]
+
+    def test_no_kiln_pro_installed_serves_the_public_floor(self, monkeypatch) -> None:
+        # ``None`` in sys.modules is the documented "this import fails" marker.
+        # The submodule needs its own: an already-imported ``kiln_pro.x`` is
+        # served straight out of sys.modules without consulting its parent.
+        monkeypatch.setitem(sys.modules, "kiln_pro", None)
+        monkeypatch.setitem(sys.modules, "kiln_pro.data_overlays", None)
+        assert _material_depth() == (0, 0, 0)
+        profile = get_material_profile("pla")
+        assert profile is not None
+        assert profile.thermal["print_temp_range_c"] == [190, 220]
+        assert "pla" in {p.material_id for p in list_material_profiles()}
+        assert unestablished_caution("materials", "Nobody checked.").startswith(
+            "Nobody checked."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1740,9 +1985,11 @@ class TestFreePathCautions:
         assert "kiln3d.com/pricing" in est.caution
 
     def test_load_estimate_number_is_identical_on_both_paths(self, monkeypatch):
+        # No reset between the two callers: the knowledge base resolves
+        # entitlement per read, so the free read must not decide what the paid
+        # one gets (or the other way round).
         self._overlay(monkeypatch, None)
         free = estimate_load_capacity("pla", 50.0, 40.0)
-        _reset_knowledge_base()
         self._overlay(monkeypatch, {"load_tables": {"pla": {"notes": ["paid"]}}})
         paid = estimate_load_capacity("pla", 50.0, 40.0)
         assert free is not None and paid is not None
