@@ -1121,10 +1121,14 @@ def _install_mcp_request_context_capture() -> None:
             # a result into content blocks there is nothing left to attach
             # to, and rewriting serialised text to sneak one in is how a
             # wire format gets corrupted.
-            with contextlib.suppress(Exception):
-                from kiln.stage_link import attach_stage_link_async
-
-                await attach_stage_link_async(result)
+            # NOTE: no stage wiring here.  This hook runs with
+            # convert_result=True, so `result` is already a list of content
+            # blocks and any dict mutation is silently dropped — measured,
+            # after first writing it here and watching it do nothing.  The
+            # turn-it-over link is attached inside the render path
+            # (model_visualizer), where the value is still a dict; the
+            # inline-stage token is attached at the lowlevel CallToolRequest
+            # handler (kiln.local_stage), where the result object is real.
             return result
         finally:
             _current_mcp_request_context.reset(token)
@@ -12284,6 +12288,17 @@ def main() -> None:
             ).start()
     except Exception:
         logger.debug("community outbox startup drain skipped", exc_info=True)
+
+    # Inline-stage experiment (KILN_LOCAL_STAGE=1).  Runs HERE, after every
+    # tool and plugin has registered, because it stamps the mesh-producing
+    # tools — done any earlier it would stamp an empty registry.  A no-op
+    # with the flag unset, which is every install.
+    try:
+        from kiln import local_stage
+
+        local_stage.install(mcp)
+    except Exception:
+        logger.debug("local inline stage not installed", exc_info=True)
 
     mcp.run()
 
