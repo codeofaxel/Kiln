@@ -39,7 +39,6 @@ Reference for running Kiln yourself. Covers all environment variables, Docker de
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `KILN_DB_PATH` | No | `~/.kiln/kiln.db` | Path to SQLite database for jobs, events, print history, agent memory |
-| `KILN_DATA_DIR` | No | `~/.kiln` | Base data directory |
 
 ### Licensing
 
@@ -68,10 +67,6 @@ Reference for running Kiln yourself. Covers all environment variables, Docker de
 |---|---|---|---|
 | `KILN_FULFILLMENT_PROVIDER` | No | auto-detect | Explicit fulfillment provider: `craftcloud` |
 | `KILN_CRAFTCLOUD_API_KEY` | No | `""` | Craftcloud API key |
-| `KILN_CRAFTCLOUD_BASE_URL` | No | `https://api.craftcloud3d.com` | Override Craftcloud API base URL (staging: `https://api-stg.craftcloud3d.com`) |
-| `KILN_CRAFTCLOUD_MATERIAL_CATALOG_URL` | No | `https://customer-api.craftcloud3d.com/material-catalog` | Craftcloud material catalog endpoint (used to retrieve `materialConfigId`s) |
-| `KILN_CRAFTCLOUD_USE_WEBSOCKET` | No | `""` | Set to `1` to use WebSocket price polling (recommended by Craftcloud; requires `websockets` + `msgpack`) |
-| `KILN_CRAFTCLOUD_PAYMENT_MODE` | No | `craftcloud` | `craftcloud` (Craftcloud handles payment) or `partner` (platform handles payment separately) |
 
 ### Payment Providers
 
@@ -79,13 +74,6 @@ Reference for running Kiln yourself. Covers all environment variables, Docker de
 |---|---|---|---|
 | `KILN_STRIPE_SECRET_KEY` | No | `""` | Stripe secret API key for payment processing |
 | `KILN_STRIPE_WEBHOOK_SECRET` | No | `""` | Stripe webhook signing secret for event verification |
-| `KILN_STRIPE_PRICE_PRO` | No | `""` | Stripe Price ID for Pro monthly. Falls back to lookup key `pro_monthly`. |
-| `KILN_STRIPE_PRICE_PRO_ANNUAL` | No | `""` | Stripe Price ID for Pro annual. Falls back to lookup key `pro_annual`. |
-| `KILN_STRIPE_PRICE_BUSINESS` | No | `""` | Stripe Price ID for Business monthly. Falls back to lookup key `business_monthly`. |
-| `KILN_STRIPE_PRICE_BUSINESS_ANNUAL` | No | `""` | Stripe Price ID for Business annual. Falls back to lookup key `business_annual`. |
-| `KILN_STRIPE_PRICE_ENTERPRISE` | No | `""` | Stripe Price ID for Enterprise monthly. Falls back to lookup key `enterprise_monthly`. |
-| `KILN_STRIPE_PRICE_ENTERPRISE_ANNUAL` | No | `""` | Stripe Price ID for Enterprise annual. Falls back to lookup key `enterprise_annual`. |
-| `KILN_STRIPE_PRICE_PRINTER_OVERAGE` | No | `""` | Stripe Price ID for metered printer overage ($15/printer/mo). Falls back to lookup key `enterprise_printer_overage`. |
 | `KILN_CIRCLE_API_KEY` | No | `""` | Circle API key for crypto payments |
 
 ### AI / Agent
@@ -96,16 +84,6 @@ Reference for running Kiln yourself. Covers all environment variables, Docker de
 | `KILN_MESHY_API_KEY` | No | `""` | Meshy API key for AI 3D model generation |
 | `KILN_AGENT_ID` | No | `default` | Agent identifier for event attribution and memory |
 | `KILN_LLM_PRIVACY_MODE` | No | `1` (enabled) | Redact secrets from LLM context. Set `0` to disable |
-
-### External Provider Integrations *(As Integrations Launch)*
-
-Kiln does not operate a first-party marketplace/network. These settings are for third-party provider integrations.
-Legacy `KILN_NETWORK_*` variable names are retained for backward compatibility.
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `KILN_NETWORK_API_KEY` | No | `""` | API key for connected partner-network gateway integrations (legacy variable name) |
-| `KILN_NETWORK_BASE_URL` | No | — | Override partner-network integration API base URL (legacy variable name) |
 
 ### Safety & Confirmation
 
@@ -181,11 +159,6 @@ KILN_LOG_FORMAT=json
 
 # === Optional: Fulfillment (outsourced manufacturing) ===
 # KILN_CRAFTCLOUD_API_KEY=CHANGE_ME
-# KILN_CRAFTCLOUD_BASE_URL=https://api.craftcloud3d.com
-# KILN_CRAFTCLOUD_MATERIAL_CATALOG_URL=https://customer-api.craftcloud3d.com/material-catalog
-# KILN_CRAFTCLOUD_USE_WEBSOCKET=1
-# KILN_CRAFTCLOUD_PAYMENT_MODE=craftcloud
-# KILN_CRAFTCLOUD_BASE_URL=https://api-stg.craftcloud3d.com   # staging
 # KILN_STRIPE_SECRET_KEY=sk_live_CHANGE_ME
 
 # === Optional: LLM privacy (enabled by default) ===
