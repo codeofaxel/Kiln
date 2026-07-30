@@ -58,6 +58,12 @@ NETWORK_PRINTER_TYPES: tuple[str, ...] = tuple(
 #: Printer type -> display label.
 PRINTER_TYPE_LABELS: dict[str, str] = {b.slug: b.label for b in PRINTER_BACKENDS}
 
+#: Baud rate assumed for a USB printer that does not declare one.  Standard
+#: for most Marlin builds; boards flashed for 250000 must say so, which is
+#: why every door that creates a serial adapter has to carry the setting
+#: rather than assume this.
+DEFAULT_SERIAL_BAUDRATE = 115200
+
 
 def format_printer_types(
     *,

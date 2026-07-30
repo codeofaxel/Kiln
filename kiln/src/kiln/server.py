@@ -21,7 +21,8 @@ Environment variables
     Serial port path for USB printers (required when ``KILN_PRINTER_TYPE``
     is ``"serial"``).  E.g. ``"/dev/ttyUSB0"`` or ``"COM3"``.
 ``KILN_PRINTER_BAUDRATE``
-    Baud rate for serial printers (default 115200).
+    Baud rate for serial printers (default 115200; many Marlin boards are
+    flashed for 250000).
 ``KILN_PRINTER_SERIAL``
     Bambu printer serial number (required when ``KILN_PRINTER_TYPE``
     is ``"bambu"``).
@@ -285,7 +286,7 @@ from kiln.pipelines import (
 )
 from kiln.plugin_loader import register_all_plugins
 from kiln.plugins import PluginContext, PluginManager
-from kiln.printer_backends import format_printer_types
+from kiln.printer_backends import DEFAULT_SERIAL_BAUDRATE, format_printer_types
 from kiln.printer_intelligence import (
     diagnose_issue,
     get_material_settings,
@@ -1225,7 +1226,7 @@ def _get_adapter() -> PrinterAdapter:
                 "KILN_PRINTER_PORT environment variable is not set.  "
                 "Set it to the serial port path (e.g. /dev/ttyUSB0, /dev/ttyACM0, COM3)."
             )
-        baudrate = parse_int_env("KILN_PRINTER_BAUDRATE", 115200)
+        baudrate = parse_int_env("KILN_PRINTER_BAUDRATE", DEFAULT_SERIAL_BAUDRATE)
         _adapter = SerialPrinterAdapter(port=port, baudrate=baudrate)
     else:
         raise RuntimeError(
@@ -1452,7 +1453,7 @@ def _build_adapter_from_config_entry(name: str, entry: dict[str, Any]) -> Printe
         port = str(entry.get("port") or host or os.environ.get("KILN_PRINTER_PORT", ""))
         if not port:
             raise RuntimeError(f"Config entry {name!r} (serial) is missing 'port'.")
-        baudrate = int(entry.get("baudrate") or parse_int_env("KILN_PRINTER_BAUDRATE", 115200))
+        baudrate = int(entry.get("baudrate") or parse_int_env("KILN_PRINTER_BAUDRATE", DEFAULT_SERIAL_BAUDRATE))
         adapter = SerialPrinterAdapter(port=port, baudrate=baudrate)
     else:
         raise RuntimeError(
@@ -7031,6 +7032,7 @@ def register_printer(
     printer_model: str | None = None,
     persist: bool = True,
     verify_connection: bool = True,
+    baudrate: int | None = None,
 ) -> dict:
     """Register a new printer in the fleet.
 
@@ -7056,6 +7058,9 @@ def register_printer(
             sessions load the same printer. Default ``True``.
         verify_connection: For Bambu printers, immediately query AMS status
             after registration and return a proof summary. Default ``True``.
+        baudrate: Baud rate for serial printers.  Defaults to
+            ``DEFAULT_SERIAL_BAUDRATE``; many Marlin boards are flashed
+            for 250000 and will not talk at the default.
 
     Once registered the printer appears in ``fleet_status()`` and can be
     targeted by ``submit_job()``.
@@ -7166,8 +7171,10 @@ def register_printer(
         elif printer_type == "serial":
             # For serial printers, 'host' is the serial port path (e.g.
             # /dev/ttyUSB0) and 'api_key' is unused.
-            baudrate = 115200
-            adapter = SerialPrinterAdapter(port=host, baudrate=baudrate)
+            adapter = SerialPrinterAdapter(
+                port=host,
+                baudrate=baudrate or DEFAULT_SERIAL_BAUDRATE,
+            )
         else:
             return _error_dict(
                 f"Unsupported printer_type: {printer_type!r}. "
@@ -7190,6 +7197,7 @@ def register_printer(
                     access_code=api_key if printer_type == "bambu" else None,
                     serial=serial,
                     printer_model=printer_model,
+                    baudrate=baudrate,
                     set_active=True,
                 )
                 persisted_path = str(persisted)

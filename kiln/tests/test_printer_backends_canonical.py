@@ -100,11 +100,16 @@ def test_dispatchers_accept_exactly_the_registered_types(
 class _StubSerialAdapter:
     """Stands in for SerialPrinterAdapter, which opens the port on init."""
 
+    name = "serial"
+
     def __init__(self, port: str, baudrate: int = 115200, **_: object) -> None:
         self.port = port
         self.baudrate = baudrate
 
     def set_safety_profile(self, _profile: str) -> None:
+        return None
+
+    def disconnect(self) -> None:
         return None
 
 
@@ -143,6 +148,106 @@ def test_server_builds_a_serial_adapter_from_a_persisted_entry(
 
     assert isinstance(adapter, _StubSerialAdapter)
     assert adapter.port == "/dev/ttyUSB0"
+
+
+def test_auth_offers_every_registered_type() -> None:
+    """`kiln auth` is the manual add-a-printer door — it must not omit one.
+
+    It offered only the seven networked backends, so there was no CLI path
+    to add a USB printer at all.
+    """
+    from click import Choice
+
+    from kiln.cli.main import cli
+
+    auth = cli.commands["auth"]
+    choice = next(
+        p.type for p in auth.params if getattr(p, "name", "") == "printer_type"
+    )
+    assert isinstance(choice, Choice)
+    assert list(choice.choices) == list(PRINTER_TYPES)
+
+
+def test_auth_round_trips_a_usb_printer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Save a serial printer the way `kiln auth` does, then load it back."""
+    import kiln.printers
+    from kiln.cli.config import load_printer_config, save_printer, validate_printer_config
+    from kiln.cli.main import _make_adapter
+
+    monkeypatch.delenv("KILN_PRINTER_HOST", raising=False)
+    monkeypatch.setattr(kiln.printers, "SerialPrinterAdapter", _StubSerialAdapter)
+    config = tmp_path / "config.yaml"
+
+    save_printer(
+        "bench-usb", "serial", "/dev/ttyUSB0", baudrate=250000, config_path=config
+    )
+
+    cfg = load_printer_config("bench-usb", config_path=config)
+    ok, err = validate_printer_config(cfg)
+    assert ok, err
+
+    adapter = _make_adapter(cfg)
+    assert adapter.port == "/dev/ttyUSB0"
+    assert adapter.baudrate == 250000
+
+
+def test_auth_does_not_pin_the_default_baudrate(tmp_path: Path) -> None:
+    """An unstated baud rate stays unstated, so the default can move."""
+    import yaml
+
+    from kiln.cli.config import save_printer
+
+    config = tmp_path / "config.yaml"
+    save_printer("bench-usb", "serial", "/dev/ttyUSB0", config_path=config)
+
+    entry = yaml.safe_load(config.read_text())["printers"]["bench-usb"]
+    assert "baudrate" not in entry
+    assert entry["host"] == "/dev/ttyUSB0"
+
+
+def test_auth_rejects_baudrate_on_a_network_printer() -> None:
+    from click.testing import CliRunner
+
+    from kiln.cli.main import cli
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "auth", "--name", "voron", "--host", "http://voron.local",
+            "--type", "moonraker", "--baudrate", "250000",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--baudrate applies to --type serial only" in result.output
+
+
+def test_register_printer_persists_the_baudrate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The MCP door hardcoded 115200 and dropped it on the floor."""
+    import yaml
+
+    import kiln.cli.config as cli_config
+    import kiln.server as server
+
+    config = tmp_path / "config.yaml"
+    monkeypatch.setattr(cli_config, "get_config_path", lambda: config)
+    monkeypatch.setattr(server, "SerialPrinterAdapter", _StubSerialAdapter)
+
+    result = server.register_printer(
+        name="bench-usb",
+        printer_type="serial",
+        host="/dev/ttyUSB0",
+        baudrate=250000,
+        verify_connection=False,
+    )
+
+    assert not result.get("error"), result
+    entry = yaml.safe_load(config.read_text())["printers"]["bench-usb"]
+    assert entry["baudrate"] == 250000
 
 
 def test_config_validation_accepts_every_registered_type() -> None:
@@ -264,17 +369,18 @@ def test_no_module_restates_the_type_list_by_hand(relative_path: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_cli_type_choices_offer_every_network_backend() -> None:
-    from click import Choice
+def test_setup_wizard_offers_only_network_backends() -> None:
+    """`kiln setup` scans the LAN and asks for a host — USB has no place in it.
 
-    from kiln.cli.main import cli
+    ``auth`` is the door for a USB printer (see the round-trip test above);
+    this pins that the two stay deliberately different rather than drifting
+    into the same list by accident.
+    """
+    source = (_SRC / "cli" / "main.py").read_text(encoding="utf-8")
+    setup_body = source.split("def setup(", 1)[1]
 
-    auth = cli.commands["auth"]
-    choice = next(
-        p.type for p in auth.params if getattr(p, "name", "") == "printer_type"
-    )
-    assert isinstance(choice, Choice)
-    assert list(choice.choices) == list(NETWORK_PRINTER_TYPES)
+    assert "click.Choice(list(NETWORK_PRINTER_TYPES))" in setup_body
+    assert "click.Choice(list(PRINTER_TYPES))" not in setup_body
 
 
 # ---------------------------------------------------------------------------
