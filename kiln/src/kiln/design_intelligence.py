@@ -290,11 +290,14 @@ _UPGRADE_HINT_ENVIRONMENT = _UPGRADE_HINT_TEMPLATES["environment_compatibility"]
     product=_DEFAULT_UPGRADE_PRODUCT
 )
 # Free-tier bonding nudge: shown when a recommended material carries the
-# public common-knowledge `hard_to_bond` floor flag but no Pro overlay (so no
+# public common-knowledge `hard_to_bond` floor flag but no overlay depth (so no
 # precise verdict).  States the risk and points at the paid fix without
 # telling the user to abandon gluing.  `{name}` = material display name.
+# The withheld depth is the materials overlay's own `bonding` block, so
+# `{product}` resolves against that kind rather than naming a tier outright:
+# copy that hardcodes one cannot follow the gate if the band ever moves.
 _BONDING_FLOOR_NUDGE = (
-    "{name} bonds poorly with common glues. Kiln Pro names the adhesive "
+    "{name} bonds poorly with common glues. {product} names the adhesive "
     "and surface prep that will actually hold it. See https://kiln3d.com/pricing"
 )
 
@@ -452,7 +455,10 @@ class MaterialProfile:
                 "Use recommend_adhesive for specific adhesives and surface prep."
             )
         if self.bonding.get("hard_to_bond"):
-            return _BONDING_FLOOR_NUDGE.format(name=self.display_name)
+            return _BONDING_FLOOR_NUDGE.format(
+                name=self.display_name,
+                product=_upgrade_product_name("materials"),
+            )
         return ""
 
     def to_dict(self) -> dict[str, Any]:
