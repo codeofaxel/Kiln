@@ -13,6 +13,7 @@ import os
 import tempfile
 import time
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 from kiln.auto_orient import find_optimal_orientation
@@ -33,15 +34,44 @@ from kiln.generation_feedback import (
 from kiln.printability import analyze_printability
 
 
+def _intent_sidecar_exists(mesh_path: str) -> bool:
+    """True when a declared-intent sidecar sits next to *mesh_path*.
+
+    ``foo.stl`` → ``foo.stl.intent.json``.  Reading the file needs
+    kiln-pro; seeing that it exists does not, and that is the whole
+    point — an install that cannot verify a declared intent can still
+    tell the user one was declared instead of going quiet.
+    """
+    try:
+        p = Path(mesh_path)
+        sidecar = (
+            p.with_suffix(p.suffix + ".intent.json")
+            if p.suffix
+            else p.with_suffix(".intent.json")
+        )
+        return sidecar.is_file()
+    except (OSError, ValueError):
+        return False
+
+
 @dataclass
 class AuditGate:
-    """Single readiness gate inside the original-design audit."""
+    """Single readiness gate inside the original-design audit.
+
+    ``checked`` separates the two things a gate can mean.  ``checked``
+    True with ``passed`` True is "we ran this and it came out clean";
+    ``checked`` False is "this did not run", and then ``passed`` says
+    nothing at all — it is False so no reader mistakes an unrun check
+    for a clean one.  A gate that could not run is reported rather than
+    left out of the list, because an absent gate reads as no concern.
+    """
 
     name: str
     passed: bool
     severity: str
     message: str
     details: dict[str, Any] = field(default_factory=dict)
+    checked: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -651,9 +681,14 @@ def audit_original_design(
         gates.append(
             AuditGate(
                 name="advanced_mesh_diagnostics",
-                passed=True,
+                passed=False,
+                checked=False,
                 severity="info",
-                message="Advanced mesh diagnostics skipped (trimesh not installed).",
+                message=(
+                    "Advanced mesh diagnostics did not run — trimesh is not "
+                    "installed, so nothing here has been ruled out. Install "
+                    "trimesh to get this check."
+                ),
             )
         )
 
@@ -685,6 +720,7 @@ def audit_original_design(
     # for tier details.
     intent_critical_count = 0
     intent_warning_count = 0
+    intent_verification_ran = False
     try:
         from kiln_pro.bridge import pro_features
     except ImportError:
@@ -694,6 +730,7 @@ def audit_original_design(
             try:
                 iv = pro_features.intent_verification
                 intent_gates = iv.verify_intent_from_sidecar(file_path)
+                intent_verification_ran = True
             except Exception:  # noqa: BLE001
                 intent_gates = []
             for ig in intent_gates:
@@ -765,6 +802,45 @@ def audit_original_design(
                             )
                         )
 
+    # Say so when the intent check did not run.  Leaving it out of the
+    # gate list made the audit report a clean bill of health over checks
+    # that were never executed, which is the one direction that hurts.
+    # Two different silences, and the difference matters to the reader:
+    # a design with nothing declared has nothing to verify, while a
+    # design that DOES carry a declared intent this install cannot read
+    # is a real unknown.  Public Kiln can tell them apart, because the
+    # sidecar is a file it can see even when it cannot interpret it.
+    if not intent_verification_ran:
+        has_intent_sidecar = _intent_sidecar_exists(file_path)
+        gates.append(
+            AuditGate(
+                name="intent_verification",
+                passed=False,
+                checked=False,
+                severity="info",
+                message=(
+                    "This design has a declared intent recorded beside it, "
+                    "and this install cannot check the shape against it. "
+                    "Nothing here says the design does or does not match "
+                    "what was asked for. See https://kiln3d.com."
+                    if has_intent_sidecar
+                    else "No declared intent was recorded for this design, "
+                    "so there was nothing to check the shape against."
+                ),
+                details={"declared_intent_present": has_intent_sidecar},
+            )
+        )
+        if has_intent_sidecar:
+            next_actions_intent = (
+                "A declared intent for this design could not be checked "
+                "here — confirm the shape matches what you asked for "
+                "before printing."
+            )
+        else:
+            next_actions_intent = ""
+    else:
+        next_actions_intent = ""
+
     score = int(printability.score)
     if not mesh_validation.valid:
         score = min(score, 20)
@@ -824,6 +900,10 @@ def audit_original_design(
         next_actions.append(
             f"Regenerate using the design-aware prompt: {prompt.improved_prompt}"
         )
+    # A declared intent nobody could check is the reader's job now, so it
+    # belongs in the actions rather than only in the gate list.
+    if next_actions_intent:
+        next_actions.append(next_actions_intent)
     next_actions = _dedupe_strings(next_actions)
 
     ready_for_print = all(
