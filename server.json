@@ -8,7 +8,7 @@
     "url": "https://github.com/codeofaxel/Kiln",
     "source": "github"
   },
-  "websiteUrl": "https://kiln3d.com",
+  "websiteUrl": "https://kiln3d.com/?utm_source=mcp-registry&utm_medium=listing",
   "packages": [
     {
       "registryType": "pypi",

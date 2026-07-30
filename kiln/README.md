@@ -32,6 +32,8 @@ pip install kiln3d
 pip install -e ".[dev]"
 ```
 
+OS-specific walkthrough (Windows, WSL 2, Linux) at [kiln3d.com/install](https://kiln3d.com/install?utm_source=pypi&utm_medium=package-page).
+
 ### 2. Configure
 
 ```bash
@@ -75,6 +77,8 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 }
 ```
 
+Full documentation: [kiln3d.com/docs](https://kiln3d.com/docs?utm_source=pypi&utm_medium=package-page).
+
 ## Supported Printers
 
 Eight backends. The name in backticks is the `KILN_PRINTER_TYPE` value.
@@ -95,6 +99,8 @@ Two backends need an extra: `pip install 'kiln3d[elegoo]'` and `pip install
 Mode and Developer Mode turned on plus a current access code (printer screen →
 Settings → Network); a restarted printer issues a new code and the old one
 stops working.
+
+The full searchable list of tuned printer profiles is at [kiln3d.com/printers](https://kiln3d.com/printers?utm_source=pypi&utm_medium=package-page).
 
 ## Features
 
@@ -128,6 +134,8 @@ stops working.
 - **Webhooks** — HMAC-signed event notifications for job lifecycle
 - **OTA firmware updates** — check, update, and rollback printer firmware
 
+Features marked (Pro) need a paid tier — [kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=pypi&utm_medium=package-page).
+
 ## Architecture
 
 ```
@@ -158,4 +166,4 @@ cd kiln && python3 -m pytest tests/ -v
 
 ## License
 
-AGPL-3.0-or-later. Commercial licensing is available for companies that need proprietary use.
+AGPL-3.0-or-later. Commercial licensing is available for companies that need proprietary use — see [kiln3d.com/pricing](https://kiln3d.com/pricing?utm_source=pypi&utm_medium=package-page).
