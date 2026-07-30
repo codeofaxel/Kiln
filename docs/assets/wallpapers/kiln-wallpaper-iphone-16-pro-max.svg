@@ -4,8 +4,8 @@
 <ellipse cx="660" cy="1205" rx="515" ry="515" fill="url(#glow)"/>
 <path d="M 505.93 1212.46 L 503.92 1219.15 L 816.08 1219.15 L 814.07 1212.46 Z" fill="#FF6B2B"/>
 <path d="M 619.84 1070.77 L 548.43 1070.77 L 481.5 1293.9 L 838.5 1293.9 L 771.57 1070.77 L 700.16 1070.77" fill="none" stroke="#CCCCCC" stroke-width="5.58" stroke-linejoin="miter" stroke-linecap="butt"/>
-<text x="509.9" y="1457.2" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="105" font-weight="300" fill="#CCCCCC" text-anchor="middle" dominant-baseline="central">K</text>
-<rect x="601.8" y="1419.3" width="16.3" height="75.8" rx="2.1" fill="#FF6B2B"/>
-<text x="710.0" y="1457.2" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="105" font-weight="300" fill="#CCCCCC" text-anchor="middle" dominant-baseline="central">L</text>
-<text x="810.1" y="1457.2" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="105" font-weight="300" fill="#CCCCCC" text-anchor="middle" dominant-baseline="central">N</text>
+<path d="M162.7 -151.8V-338Q187.5 -368.2 212.5 -398Q237.5 -427.8 262.5 -457.6Q287.5 -487.5 312.6 -517.4L492.1 -727.5H672.4L365.3 -373H353.3ZM54.3 0V-727.5H204.5V-526.6V-342.5V-270.8V0ZM506.5 0 288.9 -329.8 379.3 -443.9 679.8 0Z" fill="#CCCCCC" transform="translate(514.32 1457.23) scale(0.105336)"/>
+<path d="M204.5 -727.5V0H54.3V-727.5Z" fill="#FF6B2B" transform="translate(605.49 1457.23) scale(0.105336)"/>
+<path d="M54.3 0V-727.5H204.5V-128.7H535V0Z" fill="#CCCCCC" transform="translate(651.71 1457.23) scale(0.105336)"/>
+<path d="M54.3 0V-727.5H212.6L446.3 -355.4Q457.1 -338.4 473.5 -309.7Q490 -281 508.6 -247.8Q527.1 -214.7 543.5 -184.3L526.5 -145.6Q524.7 -178.9 523.4 -222.1Q522 -265.3 521.4 -305.2Q520.8 -345 520.8 -367.5V-727.5H670.9V0H512.2L300.2 -337.1Q287.3 -357.8 267.1 -391.7Q247 -425.6 222.4 -469Q197.9 -512.4 171.2 -560.5L197.5 -577.6Q200.8 -523.9 202.3 -476.7Q203.7 -429.5 204.1 -393.7Q204.5 -357.9 204.5 -337.5V0Z" fill="#CCCCCC" transform="translate(729.30 1457.23) scale(0.105336)"/>
 </svg>

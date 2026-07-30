@@ -4,8 +4,8 @@
 <ellipse cx="1280" cy="749" rx="640" ry="640" fill="url(#glow)"/>
 <path d="M 1080.59 758.92 L 1077.99 767.59 L 1482.01 767.59 L 1479.41 758.92 Z" fill="#FF6B2B"/>
 <path d="M 1228.02 575.54 L 1135.61 575.54 L 1048.97 864.33 L 1511.03 864.33 L 1424.39 575.54 L 1331.98 575.54" fill="none" stroke="#CCCCCC" stroke-width="7.22" stroke-linejoin="miter" stroke-linecap="butt"/>
-<text x="1097.6" y="1076.1" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="128" font-weight="300" fill="#CCCCCC" text-anchor="middle" dominant-baseline="central">K</text>
-<rect x="1209.3" y="1030.0" width="19.8" height="92.2" rx="2.6" fill="#FF6B2B"/>
-<text x="1340.8" y="1076.1" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="128" font-weight="300" fill="#CCCCCC" text-anchor="middle" dominant-baseline="central">L</text>
-<text x="1462.4" y="1076.1" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="128" font-weight="300" fill="#CCCCCC" text-anchor="middle" dominant-baseline="central">N</text>
+<path d="M162.7 -151.8V-338Q187.5 -368.2 212.5 -398Q237.5 -427.8 262.5 -457.6Q287.5 -487.5 312.6 -517.4L492.1 -727.5H672.4L365.3 -373H353.3ZM54.3 0V-727.5H204.5V-526.6V-342.5V-270.8V0ZM506.5 0 288.9 -329.8 379.3 -443.9 679.8 0Z" fill="#CCCCCC" transform="translate(1102.98 1076.08) scale(0.128000)"/>
+<path d="M204.5 -727.5V0H54.3V-727.5Z" fill="#FF6B2B" transform="translate(1213.76 1076.08) scale(0.128000)"/>
+<path d="M54.3 0V-727.5H204.5V-128.7H535V0Z" fill="#CCCCCC" transform="translate(1269.93 1076.08) scale(0.128000)"/>
+<path d="M54.3 0V-727.5H212.6L446.3 -355.4Q457.1 -338.4 473.5 -309.7Q490 -281 508.6 -247.8Q527.1 -214.7 543.5 -184.3L526.5 -145.6Q524.7 -178.9 523.4 -222.1Q522 -265.3 521.4 -305.2Q520.8 -345 520.8 -367.5V-727.5H670.9V0H512.2L300.2 -337.1Q287.3 -357.8 267.1 -391.7Q247 -425.6 222.4 -469Q197.9 -512.4 171.2 -560.5L197.5 -577.6Q200.8 -523.9 202.3 -476.7Q203.7 -429.5 204.1 -393.7Q204.5 -357.9 204.5 -337.5V0Z" fill="#CCCCCC" transform="translate(1364.21 1076.08) scale(0.128000)"/>
 </svg>
