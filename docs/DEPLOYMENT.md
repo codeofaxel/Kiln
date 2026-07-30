@@ -28,7 +28,7 @@ Reference for running Kiln yourself. Covers all environment variables, Docker de
 | `KILN_AUTH_ENABLED` | No | `false` | Enable API key authentication (`1`, `true`, `yes`) |
 | `KILN_AUTH_KEY` | No | auto-generated | API key for client authentication. If omitted while auth is enabled, Kiln creates an ephemeral session key (value is not logged) |
 | `KILN_MCP_AUTH_TOKEN` | No | `""` | Bearer token for MCP transport-level auth |
-| `KILN_API_AUTH_TOKEN` | Yes for hosted REST | `""` | REST API bearer token. Required when binding REST to non-localhost addresses |
+| `KILN_API_AUTH_TOKEN` | No | `""` | Alternate name for the MCP bearer token, accepted for compatibility |
 | `KILN_WEBHOOK_ALLOW_REDIRECTS` | No | `false` | Allow webhook HTTP redirects. Disabled by default for SSRF safety |
 | `KILN_WEBHOOK_MAX_REDIRECTS` | No | `3` | Max redirect hops when redirects are enabled (capped at 10) |
 | `KILN_PLUGIN_POLICY` | No | `strict` | Third-party plugin policy: `strict` (default deny) or `permissive` |
@@ -39,13 +39,7 @@ Reference for running Kiln yourself. Covers all environment variables, Docker de
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `KILN_DB_PATH` | No | `~/.kiln/kiln.db` | Path to SQLite database for jobs, events, print history, agent memory |
-| `KILN_DATA_DIR` | No | `~/.kiln` | Base data directory (used in hosted Dockerfile for `/data`) |
-
-### Rate Limiting
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `KILN_RATE_LIMIT` | No | `60` | Maximum requests per minute per client (REST API). Set to `0` to disable |
+| `KILN_DATA_DIR` | No | `~/.kiln` | Base data directory |
 
 ### Licensing
 
@@ -167,16 +161,13 @@ KILN_PRINTER_API_KEY=CHANGE_ME_your_octoprint_api_key
 KILN_PRINTER_TYPE=octoprint
 
 # === Recommended: Security ===
-KILN_API_AUTH_TOKEN=CHANGE_ME_generate_a_strong_random_key
+KILN_MCP_AUTH_TOKEN=CHANGE_ME_generate_a_strong_random_key
 
 # === Optional: Database persistence ===
 KILN_DB_PATH=/data/kiln.db
 
 # === Optional: Structured logging for production ===
 KILN_LOG_FORMAT=json
-
-# === Optional: Rate limiting (requests per minute) ===
-KILN_RATE_LIMIT=60
 
 # === Optional: Marketplace access ===
 # KILN_MMF_API_KEY=CHANGE_ME_your_myminifactory_key          # Recommended (primary marketplace)
@@ -241,62 +232,26 @@ docker compose up -d
 
 ## Health Check & Verification
 
-### Health Endpoint
+One command checks the whole install — Python version, the Kiln package, your
+slicer, your printer config, and whether the printer actually answers — and
+tells you what to fix:
 
 ```bash
-curl http://localhost:8080/api/health
-# Expected: {"status": "ok", "version": "0.1.0"}
+kiln doctor
 ```
 
-### Verify Authentication
-
-```bash
-# Should return 401 if auth is enabled
-curl http://localhost:8080/api/tools
-
-# Should return 200 with tool list
-curl -H "Authorization: Bearer YOUR_AUTH_KEY" http://localhost:8080/api/tools
-```
-
-### Verify Printer Connectivity
-
-```bash
-curl -X POST \
-  -H "Authorization: Bearer YOUR_AUTH_KEY" \
-  -H "Content-Type: application/json" \
-  http://localhost:8080/api/tools/printer_status
-```
-
-### Check Rate Limiting
-
-Responses include rate limit headers:
-
-```
-X-RateLimit-Limit: 60
-X-RateLimit-Remaining: 59
-X-RateLimit-Reset: 1700000060
-```
-
-When rate limited, the server returns HTTP 429 with a `Retry-After` header.
-
-### Docker Health Check
-
-The hosted Dockerfile includes a built-in healthcheck:
-
-```bash
-docker inspect --format='{{json .State.Health}}' kiln-hosted
-```
+Add `--deep` when the printer is the part that isn't answering, or `--json`
+if something else needs to read the result.
 
 ---
 
 ## Security Checklist
 
-- [ ] Set a strong `KILN_API_AUTH_TOKEN` for hosted REST deployments
+- [ ] Set a strong `KILN_MCP_AUTH_TOKEN` if the server is reachable beyond localhost
 - [ ] Use `KILN_LOG_FORMAT=json` for production logging
-- [ ] Set `KILN_RATE_LIMIT` to an appropriate value
 - [ ] Ensure config files have `0600` permissions (automatic on Linux/macOS)
 - [ ] Mount `/data` as a persistent volume for database durability
 - [ ] Run the container as non-root
 - [ ] Never commit `.env` files or API keys to version control
 - [ ] Set `KILN_LLM_PRIVACY_MODE=1` (default) to redact secrets from LLM context
-- [ ] Set `KILN_CONFIRM_MODE=true` for hosted deployments to require confirmation for destructive operations
+- [ ] Set `KILN_CONFIRM_MODE=true` for unattended deployments to require confirmation for destructive operations
