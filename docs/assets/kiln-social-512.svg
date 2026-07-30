@@ -1,13 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
 <rect width="512" height="512" fill="#1A1A1A"/>
-<line x1="184.0" y1="275.0" x2="211.0" y2="185.0" stroke="#CCCCCC" stroke-width="2.25" stroke-linecap="butt"/>
-<line x1="328.0" y1="275.0" x2="301.0" y2="185.0" stroke="#CCCCCC" stroke-width="2.25" stroke-linecap="butt"/>
-<line x1="184.0" y1="275.0" x2="328.0" y2="275.0" stroke="#CCCCCC" stroke-width="2.25" stroke-linecap="butt"/>
-<line x1="211.0" y1="185.0" x2="239.8" y2="185.0" stroke="#CCCCCC" stroke-width="2.25" stroke-linecap="butt"/>
-<line x1="272.2" y1="185.0" x2="301.0" y2="185.0" stroke="#CCCCCC" stroke-width="2.25" stroke-linecap="butt"/>
-<line x1="200.2" y1="243.5" x2="311.8" y2="243.5" stroke="#FF6B2B" stroke-width="2.7" stroke-linecap="butt"/>
-<text x="224.9" y="410.0" font-family="'Inter','Helvetica Neue',sans-serif" font-size="46" font-weight="700" fill="#FFFFFF" text-anchor="middle" letter-spacing="0.25em">K</text>
-<text x="245.6" y="410.0" font-family="'Inter','Helvetica Neue',sans-serif" font-size="46" font-weight="700" fill="#FF6B2B" text-anchor="middle" letter-spacing="0.25em">I</text>
-<text x="266.3" y="410.0" font-family="'Inter','Helvetica Neue',sans-serif" font-size="46" font-weight="700" fill="#FFFFFF" text-anchor="middle" letter-spacing="0.25em">L</text>
-<text x="287.0" y="410.0" font-family="'Inter','Helvetica Neue',sans-serif" font-size="46" font-weight="700" fill="#FFFFFF" text-anchor="middle" letter-spacing="0.25em">N</text>
+<path d="M 193.86 242.15 L 193.05 244.85 L 318.95 244.85 L 318.14 242.15 Z" fill="#FF6B2B"/>
+<path d="M 239.8 185 L 211 185 L 184 275 L 328 275 L 301 185 L 272.2 185" fill="none" stroke="#CCCCCC" stroke-width="2.25" stroke-linejoin="miter" stroke-linecap="butt"/>
+<text x="256" y="410" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="46" font-weight="700" fill="#FFFFFF" text-anchor="middle" letter-spacing="-0.01em">Kiln</text>
 </svg>

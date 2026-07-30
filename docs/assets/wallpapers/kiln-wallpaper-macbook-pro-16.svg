@@ -1,37 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3456 2234" width="3456" height="2234">
-  <defs>
-    <radialGradient id="glow" cx="50%" cy="45.0%" r="25.0%">
-      <stop offset="0%" stop-color="#FF6B2B" stop-opacity="0.08"/>
-      <stop offset="100%" stop-color="#FF6B2B" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-
-  <!-- Background -->
-  <rect width="3456" height="2234" fill="#0D0D0D"/>
-
-  <!-- Subtle radial glow -->
-  <ellipse cx="1728" cy="1005" rx="864" ry="864" fill="url(#glow)"/>
-
-  <!-- Kiln icon -->
-  <g fill="none" stroke="#E8E8E8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
-    <!-- Left leg -->
-    <line x1="1382.4" y1="1160.8" x2="1513.7" y2="772.0"/>
-    <!-- Right leg -->
-    <line x1="2073.6" y1="1160.8" x2="1942.3" y2="772.0"/>
-    <!-- Bottom -->
-    <line x1="1382.4" y1="1160.8" x2="2073.6" y2="1160.8"/>
-    <!-- Top-left cap -->
-    <line x1="1513.7" y1="772.0" x2="1672.7" y2="772.0"/>
-    <!-- Top-right cap -->
-    <line x1="1783.3" y1="772.0" x2="1942.3" y2="772.0"/>
-  </g>
-
-  <!-- Orange heat bar -->
-  <line x1="1490.8" y1="901.5" x2="1965.2" y2="901.5" stroke="#FF6B2B" stroke-width="8" stroke-linecap="round"/>
-
-  <!-- Wordmark: K [I] L N -->
-  <text x="1464.4" y="1445.9" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="173" font-weight="300" fill="#E8E8E8" dominant-baseline="central">K</text>
-  <rect x="1625.4" y="1385.3" width="28" height="124" rx="2" fill="#FF6B2B"/>
-  <text x="1816.0" y="1445.9" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="173" font-weight="300" fill="#E8E8E8" dominant-baseline="central">L</text>
-  <text x="1991.6" y="1445.9" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="173" font-weight="300" fill="#E8E8E8" dominant-baseline="central">N</text>
+<defs><radialGradient id="glow" cx="50%" cy="45.0%" r="25.0%"><stop offset="0%" stop-color="#FF6B2B" stop-opacity="0.08"/><stop offset="100%" stop-color="#FF6B2B" stop-opacity="0"/></radialGradient></defs>
+<rect width="3456" height="2234" fill="#0D0D0D"/>
+<ellipse cx="1728" cy="1005" rx="864" ry="864" fill="url(#glow)"/>
+<path d="M 1460.29 1018.89 L 1456.8 1030.52 L 1999.2 1030.52 L 1995.71 1018.89 Z" fill="#FF6B2B"/>
+<path d="M 1658.21 772.7 L 1534.14 772.7 L 1417.83 1160.41 L 2038.17 1160.41 L 1921.86 772.7 L 1797.79 772.7" fill="none" stroke="#CCCCCC" stroke-width="9.69" stroke-linejoin="miter" stroke-linecap="butt"/>
+<text x="1481.8" y="1444.7" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="173" font-weight="300" fill="#CCCCCC" text-anchor="middle" dominant-baseline="central">K</text>
+<rect x="1632.5" y="1382.5" width="26.8" height="124.4" rx="3.5" fill="#FF6B2B"/>
+<text x="1810.1" y="1444.7" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="173" font-weight="300" fill="#CCCCCC" text-anchor="middle" dominant-baseline="central">L</text>
+<text x="1974.2" y="1444.7" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="173" font-weight="300" fill="#CCCCCC" text-anchor="middle" dominant-baseline="central">N</text>
 </svg>

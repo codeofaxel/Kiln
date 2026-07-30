@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 500" width="1500" height="500">
+<rect width="1500" height="500" fill="#1A1A1A"/>
+<path d="M 646.53 198.91 L 644.97 204.09 L 855.03 204.09 L 853.47 198.91 Z" fill="#FF6B2B"/>
+<path d="M 723 104 L 675 104 L 630 254 L 870 254 L 825 104 L 777 104" fill="none" stroke="#CCCCCC" stroke-width="4.31" stroke-linejoin="miter" stroke-linecap="butt"/>
+<text x="750" y="368" font-family="'Inter','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="54" font-weight="700" fill="#FFFFFF" text-anchor="middle">Let’s <tspan fill="#FF6B2B" font-style="italic" font-family="Georgia,'Times New Roman',serif">build.</tspan></text>
+</svg>

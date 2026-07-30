@@ -569,9 +569,13 @@ Logo files live in [`docs/assets/`](docs/assets/) — all vector SVG, scale to a
 | `kiln-logo-dark-notext.svg` | Mark only (dark bg) |
 | `kiln-favicon-256.svg` | Favicon / app icon |
 | `kiln-logo-transparent.svg` / `kiln-logo-transparent-dark.svg` | Transparent bg (for dark / light UIs) |
-| `kiln-pfp-1024.svg` / `kiln-pfp-1024-flat.svg` | Social profile picture, with / without glow (1024×1024) |
+| `kiln-mark-1024.svg` | Square mark tile — profile picture, app tile (1024×1024) |
+| `kiln-x-header-1500x500.svg` | Social header (1500×500) |
 | `wallpapers/kiln-wallpaper-iphone-*.svg` | iPhone wallpapers |
 | `wallpapers/kiln-wallpaper-macbook-*.svg` | MacBook wallpapers |
+
+Every file above is generated from one geometry, so the mark is identical across
+all of them. Please don't redraw it — scale the vector instead.
 </details>
 
 ## Support Development
