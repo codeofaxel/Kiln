@@ -12401,16 +12401,19 @@ def main() -> None:
     except Exception:
         logger.debug("community outbox startup drain skipped", exc_info=True)
 
-    # Inline-stage experiment (KILN_LOCAL_STAGE=1).  Runs HERE, after every
-    # tool and plugin has registered, because it stamps the mesh-producing
-    # tools — done any earlier it would stamp an empty registry.  A no-op
-    # with the flag unset, which is every install.
+    # The inline 3D stage.  Runs HERE, after every tool and plugin has
+    # registered, because it stamps the mesh-producing tools — done any
+    # earlier it would stamp an empty registry.
     try:
-        from kiln import local_stage
+        from kiln import local_stage, stage_cache
 
+        # Pull the stage document now, on a daemon thread, so the first
+        # design of a session finds it already cached instead of waiting on
+        # a download with an empty panel.
+        stage_cache.warm()
         local_stage.install(mcp)
     except Exception:
-        logger.debug("local inline stage not installed", exc_info=True)
+        logger.debug("inline stage not installed", exc_info=True)
 
     mcp.run()
 

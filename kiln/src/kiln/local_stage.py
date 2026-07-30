@@ -1,41 +1,40 @@
-"""EXPERIMENT (dark by default): serve the inline 3D stage from a LOCAL Kiln.
+"""Kiln's inline 3D stage, served by a locally installed Kiln.
 
-Set ``KILN_LOCAL_STAGE=1`` before starting the server to try it.  Unset —
-which is every install — nothing here runs and nothing changes.
+WHAT THIS IS
+------------
+When a make finishes, the host can open a 3D panel right in the
+conversation — drag to rotate, look underneath, check the back — instead of
+handing over a flat PNG.  That panel is an MCP App (SEP-1865): a ``ui://``
+HTML resource the host renders, pointed at by ``_meta.ui.resourceUri`` on
+the tools that produce geometry.
 
-WHAT IS BEING TESTED
---------------------
-Kiln's inline stage (the 3D panel that opens inside a conversation) is served
-today only by the hosted connector.  Everything needed to serve it from a
-local stdio server has been verified to work at the protocol level: the
-``ui://`` resource registers on a local FastMCP and reads back with the
-MCP-App mimetype, and ``_meta.ui.resourceUri`` survives ``tools/list``
-without having to retype a single tool's return annotation.
+It used to be reachable only through Kiln's hosted connection.  This module
+serves it from a local ``kiln serve``, using nothing but public Kiln: the
+stage document comes from :mod:`kiln.stage_cache`, the geometry from
+:mod:`kiln.mesh_payload`.  A free install gets the same stage as a paid one.
 
-The ONE thing local testing cannot answer is whether a HOST renders an MCP
-App offered over stdio, or only over a remote connector.  That is host
-behaviour.  This module exists to ask it, cheaply, before five pieces get
-built on the assumption.
+WHY THE GEOMETRY RIDES THE RESULT
+---------------------------------
+There are two ways to get a mesh into a rendered panel.  The lean one is a
+small token in the result plus a tool the panel calls back to fetch the
+geometry — that is what the hosted connector does, and it costs the
+conversation nothing.  Measured, on a local stdio server: the panel does
+NOT get permission to call tools back through the host, so that path leaves
+the stage sitting on its waiting animation forever with no way to say why.
 
-THE SHAPE, AND WHY
-------------------
-The payload does NOT ride the tool result.  Measured: putting it there costs
-~1.9 MB of base64 in the conversation per call, which would wreck the context
-window.  Instead the result carries a small opaque token, and the stage calls
-``kiln_viewer_payload`` itself to fetch the geometry — the same lean handoff
-the hosted connector already uses in production, so the payload costs the
-conversation nothing.
+So the payload rides the result.  That is not free — an 80k-triangle mesh
+is ~1.9 MB of base64, and a host that never renders a panel would be
+feeding that straight into the model's context.  Hence the gate below: the
+geometry is attached only for a host that has actually shown it supports
+MCP Apps.  Everyone else gets the ordinary result they get today, plus a
+resource and some ``_meta`` they will never look at.
 
-The token is an opaque id, never a path: it round-trips through the host, and
-absolute paths from a user's disk have no business in a conversation.
-
-Depends on kiln-pro for the stage bundle and the payload encoder.  If the
-test greenlights the idea, those move so a free local install gets it too;
-building that move first would be building on the guess.
+The still image is the floor under all of it, always.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import secrets
@@ -43,9 +42,72 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from kiln.mesh_payload import VIEWER_STRUCTURED_CONTENT_KEY, mesh_to_viewer_payload
+
 logger = logging.getLogger(__name__)
 
-_ENABLE_ENV = "KILN_LOCAL_STAGE"
+#: Opt out of the inline stage (matches ``KILN_NO_STAGE_LINKS`` next door).
+#: The stage is ON by default: a flag that decides whether a user can turn
+#: their own part over is a two-tier experience with no second tier.
+_OPT_OUT_ENV = "KILN_NO_LOCAL_STAGE"
+
+#: Registers the two support verbs — the panel's own fetch tool and a smoke
+#: test.  Off by default: neither is useful to a person or an agent, and a
+#: tool nobody should call does not belong on the standing tool surface.
+_DIAGNOSTICS_ENV = "KILN_LOCAL_STAGE_DIAGNOSTICS"
+
+#: Extension identifier from SEP-1865 — hosts negotiate MCP Apps under this.
+MCP_APPS_EXTENSION_ID = "io.modelcontextprotocol/ui"
+
+#: The spec-mandated mimetype for MCP App HTML resources (exact string).
+MCP_APP_MIME_TYPE = "text/html;profile=mcp-app"
+
+#: The ui:// URI tool declarations point at via _meta.ui.resourceUri.
+MESH_VIEWER_RESOURCE_URI = "ui://kiln/mesh-viewer"
+
+#: Resource name shown in host resource listings.
+MESH_VIEWER_RESOURCE_NAME = "kiln_mesh_viewer"
+
+#: Tools whose success result reliably names a mesh the user just made, so
+#: opening a 3D panel on it is what they wanted.  Deliberately a reviewed
+#: list and not "anything with a mesh-shaped key": a report or an estimate
+#: that happens to echo a path would open an empty panel on every call.
+VIEWER_TOOLS: frozenset[str] = frozenset(
+    {
+        "design_session",
+        "generate_coaster",
+        "generate_keychain",
+        "generate_nameplate",
+        "generate_bookmark",
+        "generate_fridge_magnet",
+        "generate_pet_tag",
+        "generate_ornament",
+        "generate_jewelry_tray",
+        "generate_soap_dish",
+        "generate_pen_cup",
+        "generate_wall_plaque",
+        "generate_license_plate_frame",
+        "generate_ashtray",
+        "generate_frisbee",
+        "generate_pet_bowl",
+        "generate_rolling_tray",
+        "generate_product_base",
+        "generate_decorated_product",
+        "split_mesh_to_fit",
+        "import_model_parts",
+        "compile_scad",
+        "generate_from_template",
+        "smart_generate_from_template",
+        "apply_geometric_texture",
+        "apply_image_texture",
+        "apply_procedural_texture",
+        "smart_decorate",
+        "generate_qr_decoration",
+        "auto_add_rubber_feet",
+        "preview_decorated_mesh",
+        "make_printable",
+    }
+)
 
 #: token -> mesh path.  Bounded; oldest dropped first.  In-memory only: a
 #: stage token is meaningless across a restart because the conversation that
@@ -56,9 +118,37 @@ _lock = threading.Lock()
 
 _MESH_SUFFIXES = frozenset({".stl", ".3mf", ".obj"})
 
+#: The encoder's budget for a payload that rides a conversation.  Lower than
+#: the encoder's own 8 MB default because this one is not a download — it is
+#: bytes inside a tool result, and a mesh past this gets the honest "too big"
+#: card plus the still image instead.
+_MAX_INLINE_PAYLOAD_BYTES = 6 * 1024 * 1024
+
+#: Set once a host reads the stage document — proof, not a guess, that this
+#: host renders MCP Apps.  Process-wide because a stdio server serves one
+#: host; the declared capability below is what covers the first call.
+_host_read_the_stage = False
+
+#: One log line per process, so the first real run answers "did this host
+#: take the geometry?" without anyone having to instrument it.
+_signal_logged = False
+
 
 def enabled() -> bool:
-    return (os.environ.get(_ENABLE_ENV) or "").strip().lower() in {"1", "true", "yes"}
+    """Whether the inline stage runs at all on this install."""
+    return (os.environ.get(_OPT_OUT_ENV) or "").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+def diagnostics_enabled() -> bool:
+    return (os.environ.get(_DIAGNOSTICS_ENV) or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
 
 def _mint(mesh_path: str) -> str:
@@ -75,10 +165,84 @@ def resolve(token: str) -> str | None:
         return _tokens.get(token)
 
 
+# ---------------------------------------------------------------------------
+# Does this host render MCP Apps?
+# ---------------------------------------------------------------------------
+
+
+def _declared_extensions(mcp: Any) -> dict[str, Any]:
+    """What the connected host declared it supports, as a flat dict.
+
+    Reads both keys the extension mechanism has been spelled with —
+    ``capabilities.extensions`` (SEP-1865) and ``capabilities.experimental``
+    (where SDKs park unrecognised extensions).  Never raises: no session,
+    an exotic SDK, or a host that declared nothing all read as "nothing".
+    """
+    out: dict[str, Any] = {}
+    try:
+        caps = mcp._mcp_server.request_context.session.client_params.capabilities
+    except Exception:  # noqa: BLE001 — no session is a legitimate answer
+        return out
+    # ``extensions`` is not a modelled field on every SDK, so it arrives as
+    # an extra rather than an attribute — check both places it can land.
+    for block in (
+        getattr(caps, "extensions", None),
+        (getattr(caps, "model_extra", None) or {}).get("extensions"),
+        getattr(caps, "experimental", None),
+    ):
+        if isinstance(block, dict):
+            out.update(block)
+    return out
+
+
+def host_renders_apps(mcp: Any) -> bool:
+    """Whether it is safe — and useful — to put geometry in the result.
+
+    Two positive signals, either one sufficient:
+
+    * the host **declared** the MCP Apps extension at initialize, or
+    * the host has **read the stage document** this session, which no host
+      does unless it is about to render the panel.
+
+    Absent both, the result stays lean.  That is the honest default: a host
+    that does not render the panel would be handed ~1.9 MB of base64 per
+    make and nothing to show for it.  A host that renders but declares
+    nothing pays for it once — its first make is a still image, and the
+    resource read it performs to draw that first panel turns the stage on
+    for the rest of the session.
+    """
+    if _host_read_the_stage:
+        return True
+    return MCP_APPS_EXTENSION_ID in _declared_extensions(mcp)
+
+
+def _log_signal_once(mcp: Any, attaching: bool) -> None:
+    """State, once, what this host declared and what we did about it."""
+    global _signal_logged
+    if _signal_logged:
+        return
+    _signal_logged = True
+    try:
+        info = mcp._mcp_server.request_context.session.client_params.clientInfo
+        who = f"{getattr(info, 'name', '?')}/{getattr(info, 'version', '?')}"
+    except Exception:  # noqa: BLE001
+        who = "unknown host"
+    logger.info(
+        "inline stage: host=%s declared=%s read_stage=%s -> geometry %s",
+        who,
+        sorted(_declared_extensions(mcp)) or "none",
+        _host_read_the_stage,
+        "attached" if attaching else "withheld (still image only)",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Reading a mesh back out of a finished tool call
+# ---------------------------------------------------------------------------
+
+
 def _mesh_from_result_json(text: str) -> str | None:
     """The mesh a serialised tool result names, if any."""
-    import json
-
     try:
         parsed = json.loads(text)
     except Exception:  # noqa: BLE001 — prose content, not a result envelope
@@ -90,42 +254,8 @@ def _mesh_from_result_json(text: str) -> str | None:
     return find_mesh_path(parsed)
 
 
-#: Where the panel reads an inline payload from.
-_VIEWER_KEY = "kiln_viewer"
-
-#: Above this the geometry is not worth putting on the wire with every
-#: result; those meshes fall back to the fetch path (and the still image).
-_MAX_INLINE_PAYLOAD_BYTES = 6 * 1024 * 1024
-
-
-def _inline_payload(token: str) -> dict | None:
-    """The viewer payload for a minted token, small enough to inline."""
-    import json
-
-    mesh = resolve(token)
-    if not mesh:
-        return None
-    try:
-        from kiln_pro._rest.mcp_apps import mesh_to_viewer_payload
-
-        payload = mesh_to_viewer_payload(mesh)
-    except Exception:  # noqa: BLE001 — no payload is not a failed tool call
-        logger.debug("inline payload unavailable", exc_info=True)
-        return None
-    if payload.get("downgraded"):
-        return payload  # the honest "too big" card is worth showing
-    try:
-        if len(json.dumps(payload)) > _MAX_INLINE_PAYLOAD_BYTES:
-            return None
-    except Exception:  # noqa: BLE001
-        return None
-    return payload
-
-
 def _result_as_dict(result: Any) -> dict | None:
     """The tool's own return value, parsed back out of its content blocks."""
-    import json
-
     for block in getattr(result, "content", None) or []:
         text = getattr(block, "text", None)
         if not isinstance(text, str):
@@ -145,9 +275,7 @@ def token_for_call_result(result: Any) -> str | None:
     Reads the SERIALISED result rather than a dict, because by the time a
     tool call reaches the one place every tool passes through, FastMCP has
     already converted the return value into content blocks — measured, not
-    assumed.  The token goes back as ``structuredContent``, which the stage
-    reads first and which costs the conversation nothing; rewriting the
-    serialised text to inject it would be how a wire format gets corrupted.
+    assumed.
 
     Never raises.
     """
@@ -175,6 +303,29 @@ def token_for_call_result(result: Any) -> str | None:
     except Exception as exc:  # noqa: BLE001 — a stage must never break a tool
         logger.debug("local stage token not minted: %s", exc)
     return None
+
+
+def _inline_payload(token: str) -> dict | None:
+    """The viewer payload for a minted token, encoded to the inline budget.
+
+    The budget is handed to the encoder rather than checked afterwards, so a
+    mesh too big to ride the wire comes back as the honest "too big" card the
+    panel can show — not as a silent ``None`` that leaves the stage waiting
+    on geometry nobody is going to send.
+    """
+    mesh = resolve(token)
+    if not mesh:
+        return None
+    try:
+        return mesh_to_viewer_payload(mesh, max_bytes=_MAX_INLINE_PAYLOAD_BYTES)
+    except Exception:  # noqa: BLE001 — no payload is not a failed tool call
+        logger.debug("inline payload unavailable", exc_info=True)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Installation
+# ---------------------------------------------------------------------------
 
 
 def _write_test_cube() -> str | None:
@@ -205,42 +356,57 @@ def _write_test_cube() -> str | None:
         return None
 
 
-def install(mcp: Any) -> dict[str, Any]:
-    """Register the stage resource + payload tool, and stamp mesh tools.
+def _register_resource(mcp: Any) -> bool:
+    """Register ``ui://kiln/mesh-viewer``, served from the on-disk cache.
 
-    Returns a small summary for the log.  Never raises: an experiment that
-    breaks the server is not an experiment anybody can run.
+    The document is read lazily, at ``resources/read`` — so a server that
+    started before the cache was warm still serves the stage the moment the
+    download lands, and one that never got a document raises there rather
+    than at boot.
     """
-    out: dict[str, Any] = {"enabled": enabled(), "resource": False,
-                           "payload_tool": False, "stamped": 0}
-    if not enabled():
-        return out
-    try:
-        from kiln_pro._rest.mcp_apps import (
-            MESH_VIEWER_RESOURCE_URI,
-            VIEWER_TOOLS,
-            mesh_to_viewer_payload,
-            register_mcp_apps,
-        )
-    except Exception:
-        logger.warning(
-            "%s is set but kiln-pro is not importable — the stage bundle and "
-            "payload encoder live there for now, so the local stage stays off.",
-            _ENABLE_ENV,
-        )
-        return out
+    from mcp.server.fastmcp.resources import FunctionResource
+    from pydantic import AnyUrl
 
-    try:
-        register_mcp_apps(mcp)
-        out["resource"] = True
-    except Exception:
-        logger.warning("local stage: resource registration failed", exc_info=True)
-        return out
+    from kiln import stage_cache
 
-    # The stage's own fetch.  Not useful to a human or an agent — the panel
-    # calls it.
+    def _document() -> str:
+        global _host_read_the_stage
+        doc = stage_cache.document()
+        if not doc:
+            # Nothing cached and nothing to invent.  The host reports the
+            # resource unavailable and the still image carries the result.
+            raise ValueError(
+                "Kiln's 3D stage has not been downloaded on this machine yet."
+            )
+        # Only a host about to render the panel asks for this.
+        _host_read_the_stage = True
+        return doc
+
+    mcp.add_resource(
+        FunctionResource(
+            uri=AnyUrl(MESH_VIEWER_RESOURCE_URI),
+            name=MESH_VIEWER_RESOURCE_NAME,
+            title="Kiln Mesh Viewer",
+            description=(
+                "Interactive inline 3D stage for Kiln mesh results — orbit, "
+                "zoom, and turntable on Kiln's dark stage."
+            ),
+            mime_type=MCP_APP_MIME_TYPE,
+            meta={"ui": {"prefersBorder": False}},
+            fn=_document,
+        )
+    )
+    return True
+
+
+def _register_diagnostics(mcp: Any, out: dict[str, Any]) -> None:
+    """The panel's own fetch verb and a smoke test.  Off by default."""
     try:
-        @mcp.tool(name="kiln_viewer_payload")
+        @mcp.tool(
+            name="kiln_viewer_payload",
+            meta={"ui": {"resourceUri": MESH_VIEWER_RESOURCE_URI,
+                         "visibility": ["app"]}},
+        )
         def kiln_viewer_payload(artifact_token: str) -> dict:
             """Internal support for Kiln's inline 3D viewer.
 
@@ -255,27 +421,21 @@ def install(mcp: Any) -> dict[str, Any]:
                 payload = mesh_to_viewer_payload(mesh)
             except Exception as exc:  # noqa: BLE001
                 return {"success": False, "error": f"Could not read that mesh: {exc}"}
-            return {"kiln_viewer": payload}
+            return {VIEWER_STRUCTURED_CONTENT_KEY: payload}
 
         out["payload_tool"] = True
     except Exception:
         logger.warning("local stage: payload tool failed", exc_info=True)
 
-    # An unmistakable name, so the experiment answers the question it asks.
-    # A machine running this flag typically also has the plain local server
-    # and the hosted connector attached, and all three offer the ordinary
-    # mesh tools — so asking for one of those would be answered by whichever
-    # server the host felt like, and a panel (or no panel) would prove
-    # nothing about THIS one.  Only this server has this tool.
     try:
         @mcp.tool(name="stage_smoke_test",
                   meta={"ui": {"resourceUri": MESH_VIEWER_RESOURCE_URI}})
         def stage_smoke_test() -> dict:
             """Open a small test cube on Kiln's 3D stage.
 
-            Diagnostic for the local inline-stage experiment: makes a 20mm
-            cube and hands it back the same way a real design would, so the
-            only question left is whether this app renders the panel.
+            Diagnostic: makes a 20mm cube and hands it back the same way a
+            real design would, so the only question left is whether this app
+            renders the panel.
             """
             mesh = _write_test_cube()
             if mesh is None:
@@ -285,7 +445,7 @@ def install(mcp: Any) -> dict[str, Any]:
                 "stl_path": mesh,
                 "message": (
                     "Made a 20mm test cube. If a 3D panel opened above this "
-                    "message, the local inline stage works."
+                    "message, the inline stage works."
                 ),
             }
 
@@ -293,84 +453,124 @@ def install(mcp: Any) -> dict[str, Any]:
     except Exception:
         logger.warning("local stage: smoke tool failed", exc_info=True)
 
-    # Point the mesh-producing tools at the stage.  Mutating meta after
-    # registration keeps this a pure add-on: no tool's signature, return
-    # annotation, or body is touched, so nothing can regress when the flag
-    # is off.
+
+def _stamp_tools(mcp: Any) -> int:
+    """Point the mesh-producing tools at the stage.
+
+    Mutating meta after registration keeps this a pure add-on: no tool's
+    signature, return annotation, or body is touched.
+    """
+    stamped = 0
+    registry = getattr(getattr(mcp, "_tool_manager", None), "_tools", None) or {}
+    for name, tool in registry.items():
+        if name not in VIEWER_TOOLS:
+            continue
+        meta = dict(getattr(tool, "meta", None) or {})
+        ui = dict(meta.get("ui") or {})
+        ui["resourceUri"] = MESH_VIEWER_RESOURCE_URI
+        meta["ui"] = ui
+        try:
+            tool.meta = meta
+            stamped += 1
+        except Exception:  # noqa: BLE001 — a frozen model is not fatal
+            continue
+    return stamped
+
+
+def _install_result_hook(mcp: Any) -> bool:
+    """Attach the token (and, for an MCP Apps host, the geometry) to results.
+
+    This has to happen at the LOWLEVEL handler.  The tool-manager hook that
+    the telemetry counters use runs with ``convert_result=True``, so the
+    value there is already a list of content blocks and a dict mutation is
+    silently lost — measured, after writing it the other way first.
+    """
+    from mcp.types import CallToolRequest
+
+    handlers = getattr(mcp._mcp_server, "request_handlers", None) or {}
+    prev = handlers.get(CallToolRequest)
+    if prev is None or getattr(prev, "_kiln_local_stage", False):
+        return False
+
+    async def _with_stage_token(req):
+        resp = await prev(req)
+        try:
+            inner = getattr(resp, "root", resp)
+            token = token_for_call_result(inner)
+            if token:
+                sc = getattr(inner, "structuredContent", None)
+                if not isinstance(sc, dict):
+                    # The tool had none.  Seed it from the result the tool
+                    # actually returned, because a host that prefers
+                    # structuredContent will show THIS and nothing else —
+                    # seeding it with only the token would hide the tool's
+                    # own output from the agent (measured: success, paths
+                    # and message all vanished from the visible result).
+                    sc = _result_as_dict(inner) or {}
+                else:
+                    sc = dict(sc)
+                artifact = dict(sc.get("artifact") or {})
+                artifact["artifact_token"] = token
+                sc["artifact"] = artifact
+                attaching = host_renders_apps(mcp)
+                _log_signal_once(mcp, attaching)
+                if attaching:
+                    payload = _inline_payload(token)
+                    if payload is not None:
+                        sc[VIEWER_STRUCTURED_CONTENT_KEY] = payload
+                inner.structuredContent = sc
+        except Exception:  # noqa: BLE001
+            logger.debug("local stage token not attached", exc_info=True)
+        return resp
+
+    _with_stage_token._kiln_local_stage = True
+    handlers[CallToolRequest] = _with_stage_token
+    return True
+
+
+def install(mcp: Any) -> dict[str, Any]:
+    """Register the stage resource and stamp the mesh tools.
+
+    Returns a small summary for the log.  Never raises: a 3D panel that
+    breaks the server is worse than no 3D panel.
+    """
+    out: dict[str, Any] = {"enabled": enabled(), "resource": False,
+                           "payload_tool": False, "stamped": 0}
+    if not enabled():
+        return out
+
     try:
-        registry = getattr(getattr(mcp, "_tool_manager", None), "_tools", None) or {}
-        for name, tool in registry.items():
-            if name not in VIEWER_TOOLS:
-                continue
-            meta = dict(getattr(tool, "meta", None) or {})
-            ui = dict(meta.get("ui") or {})
-            ui["resourceUri"] = MESH_VIEWER_RESOURCE_URI
-            meta["ui"] = ui
-            try:
-                tool.meta = meta
-                out["stamped"] += 1
-            except Exception:  # noqa: BLE001 — a frozen model is not fatal
-                continue
+        out["resource"] = _register_resource(mcp)
+    except Exception:
+        # FastMCP warns and keeps the first registration on a duplicate, so
+        # a second install is not the failure this catches — an exotic
+        # server object or an SDK without the resource API is.
+        logger.warning("local stage: resource registration failed", exc_info=True)
+        return out
+
+    if diagnostics_enabled():
+        _register_diagnostics(mcp, out)
+
+    try:
+        out["stamped"] = _stamp_tools(mcp)
     except Exception:
         logger.warning("local stage: tool stamping failed", exc_info=True)
 
-    # The token has to be attached at the LOWLEVEL handler.  The tool-manager
-    # hook that the telemetry counters use runs with convert_result=True, so
-    # the value there is already a list of content blocks and a dict mutation
-    # is silently lost — measured, after writing it the other way first.
     try:
-        from mcp.types import CallToolRequest
-
-        handlers = getattr(mcp._mcp_server, "request_handlers", None) or {}
-        prev = handlers.get(CallToolRequest)
-        if prev is not None and not getattr(prev, "_kiln_local_stage", False):
-
-            async def _with_stage_token(req):
-                resp = await prev(req)
-                try:
-                    inner = getattr(resp, "root", resp)
-                    token = token_for_call_result(inner)
-                    if token:
-                        sc = getattr(inner, "structuredContent", None)
-                        if not isinstance(sc, dict):
-                            # The tool had none.  Seed it from the result the
-                            # tool actually returned, because a host that
-                            # prefers structuredContent will show THIS and
-                            # nothing else — seeding it with only the token
-                            # would hide the tool's own output from the agent
-                            # (measured: success, paths and message all
-                            # vanished from the visible result).
-                            sc = _result_as_dict(inner) or {}
-                        else:
-                            sc = dict(sc)
-                        artifact = dict(sc.get("artifact") or {})
-                        artifact["artifact_token"] = token
-                        sc["artifact"] = artifact
-                        # Ship the geometry WITH the result, not just a ticket
-                        # to fetch it.  The panel's fetch path needs the host
-                        # to let a rendered panel call tools back, and a host
-                        # that doesn't leaves the stage sitting on its waiting
-                        # animation forever with no way to say why.  The panel
-                        # reads an inline payload first, so this makes the
-                        # stage independent of that permission.  The token
-                        # stays as the fallback for hosts that do allow it.
-                        payload = _inline_payload(token)
-                        if payload is not None:
-                            sc[_VIEWER_KEY] = payload
-                        inner.structuredContent = sc
-                except Exception:  # noqa: BLE001
-                    logger.debug("local stage token not attached", exc_info=True)
-                return resp
-
-            _with_stage_token._kiln_local_stage = True
-            handlers[CallToolRequest] = _with_stage_token
-            out["token_hook"] = True
+        out["token_hook"] = _install_result_hook(mcp)
     except Exception:
-        logger.warning("local stage: token hook failed", exc_info=True)
+        logger.warning("local stage: result hook failed", exc_info=True)
 
-    logger.info(
-        "local inline stage ON (experiment): resource=%s payload_tool=%s "
-        "stamped=%d token_hook=%s",
-        out["resource"], out["payload_tool"], out["stamped"], out.get("token_hook"),
+    logger.debug(
+        "inline stage ready: resource=%s stamped=%d hook=%s diagnostics=%s",
+        out["resource"], out["stamped"], out.get("token_hook"),
+        diagnostics_enabled(),
     )
     return out
+
+
+def _reset_for_tests() -> None:
+    global _host_read_the_stage, _signal_logged
+    _tokens.clear()
+    _host_read_the_stage = False
+    _signal_logged = False
