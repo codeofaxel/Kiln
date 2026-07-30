@@ -62,9 +62,9 @@ def test_every_backend_has_a_label() -> None:
     assert all(b.label.strip() for b in PRINTER_BACKENDS)
 
 
-def test_serial_is_the_only_non_networked_backend() -> None:
+def test_usb_is_the_only_non_networked_backend() -> None:
     """Discovery and the setup wizard ask for an IP, so they skip USB."""
-    assert set(PRINTER_TYPES) - set(NETWORK_PRINTER_TYPES) == {"serial"}
+    assert set(PRINTER_TYPES) - set(NETWORK_PRINTER_TYPES) == {"usb"}
 
 
 def test_duet_is_supported() -> None:
@@ -120,7 +120,7 @@ def test_cli_builds_a_serial_adapter(
     """`kiln` must drive a USB printer the server already accepts.
 
     ``register_printer`` persists the port path as ``host``; a hand-written
-    config.yaml uses ``port``.  Both reached "Unknown printer type: 'serial'"
+    config.yaml uses ``port``.  Both reached "Unknown printer type"
     before the CLI grew this branch.
     """
     import kiln.printers
@@ -128,7 +128,7 @@ def test_cli_builds_a_serial_adapter(
 
     monkeypatch.setattr(kiln.printers, "SerialPrinterAdapter", _StubSerialAdapter)
 
-    adapter = _make_adapter({"type": "serial", port_key: "/dev/ttyUSB0"})
+    adapter = _make_adapter({"type": "usb", port_key: "/dev/ttyUSB0"})
 
     assert isinstance(adapter, _StubSerialAdapter)
     assert adapter.port == "/dev/ttyUSB0"
@@ -143,11 +143,105 @@ def test_server_builds_a_serial_adapter_from_a_persisted_entry(
     monkeypatch.setattr(server, "SerialPrinterAdapter", _StubSerialAdapter)
 
     adapter = server._build_adapter_from_config_entry(
-        "bench-usb", {"type": "serial", "host": "/dev/ttyUSB0"}
+        "bench-usb", {"type": "usb", "host": "/dev/ttyUSB0"}
     )
 
     assert isinstance(adapter, _StubSerialAdapter)
     assert adapter.port == "/dev/ttyUSB0"
+
+
+@pytest.mark.parametrize(
+    ("door", "entry"),
+    [
+        ("config.yaml via _build_adapter_from_config_entry",
+         {"type": "serial", "host": "/dev/ttyUSB0"}),
+        ("config.yaml with the legacy key spelling",
+         {"printer_type": "serial", "host": "/dev/ttyUSB0"}),
+    ],
+)
+def test_a_config_pinning_the_old_slug_still_loads(
+    door: str, entry: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`type: serial` is in configs in the wild.  It must keep working.
+
+    The alias table existed before this rename but never ran on the YAML
+    path — `prusaconnect` configs were already silently unsupported.
+    """
+    import kiln.server as server
+
+    monkeypatch.setattr(server, "SerialPrinterAdapter", _StubSerialAdapter)
+
+    adapter = server._build_adapter_from_config_entry("bench-usb", entry)
+
+    assert isinstance(adapter, _StubSerialAdapter), door
+
+
+def test_register_printer_accepts_the_old_slug(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Agents read older docs; `printer_type="serial"` must not hard-fail."""
+    import kiln.cli.config as cli_config
+    import kiln.server as server
+
+    monkeypatch.setattr(cli_config, "get_config_path", lambda: tmp_path / "config.yaml")
+    monkeypatch.setattr(server, "SerialPrinterAdapter", _StubSerialAdapter)
+
+    result = server.register_printer(
+        name="legacy-usb",
+        printer_type="serial",
+        host="/dev/ttyUSB0",
+        verify_connection=False,
+    )
+
+    assert not result.get("error"), result
+
+
+def test_env_and_yaml_paths_normalize_alike(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The env path normalized and the YAML path did not — that was the bug."""
+    source = (_SRC / "server.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    assignments = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(t, ast.Name) and t.id == "_PRINTER_TYPE" for t in node.targets
+        )
+    ]
+    assert assignments, "no _PRINTER_TYPE assignment found — did it get renamed?"
+    for node in assignments:
+        rendered = ast.unparse(node)
+        assert "_normalize_printer_type" in rendered, (
+            f"_PRINTER_TYPE assigned without normalizing: {rendered}"
+        )
+
+
+def test_auth_still_accepts_the_old_type_spelling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A script running `--type serial` must not start failing at parse time.
+
+    click.Choice rejects a value before any of our code runs, so the alias
+    has to be honoured by the param type itself.
+    """
+    import yaml
+    from click.testing import CliRunner
+
+    import kiln.cli.config as cli_config
+
+    config = tmp_path / "config.yaml"
+    monkeypatch.setattr(cli_config, "get_config_path", lambda: config)
+
+    from kiln.cli.main import cli
+
+    result = CliRunner().invoke(
+        cli,
+        ["auth", "--name", "bench", "--host", "/dev/ttyUSB0", "--type", "serial"],
+    )
+
+    assert result.exit_code == 0, result.output
+    entry = yaml.safe_load(config.read_text())["printers"]["bench"]
+    assert entry["type"] == "usb", "the old spelling should be saved canonically"
 
 
 def test_auth_offers_every_registered_type() -> None:
@@ -181,7 +275,7 @@ def test_auth_round_trips_a_usb_printer(
     config = tmp_path / "config.yaml"
 
     save_printer(
-        "bench-usb", "serial", "/dev/ttyUSB0", baudrate=250000, config_path=config
+        "bench-usb", "usb", "/dev/ttyUSB0", baudrate=250000, config_path=config
     )
 
     cfg = load_printer_config("bench-usb", config_path=config)
@@ -200,7 +294,7 @@ def test_auth_does_not_pin_the_default_baudrate(tmp_path: Path) -> None:
     from kiln.cli.config import save_printer
 
     config = tmp_path / "config.yaml"
-    save_printer("bench-usb", "serial", "/dev/ttyUSB0", config_path=config)
+    save_printer("bench-usb", "usb", "/dev/ttyUSB0", config_path=config)
 
     entry = yaml.safe_load(config.read_text())["printers"]["bench-usb"]
     assert "baudrate" not in entry
@@ -221,7 +315,7 @@ def test_auth_rejects_baudrate_on_a_network_printer() -> None:
     )
 
     assert result.exit_code != 0
-    assert "--baudrate applies to --type serial only" in result.output
+    assert "--baudrate applies to --type usb only" in result.output
 
 
 def test_register_printer_persists_the_baudrate(
@@ -239,7 +333,7 @@ def test_register_printer_persists_the_baudrate(
 
     result = server.register_printer(
         name="bench-usb",
-        printer_type="serial",
+        printer_type="usb",
         host="/dev/ttyUSB0",
         baudrate=250000,
         verify_connection=False,
@@ -379,8 +473,8 @@ def test_setup_wizard_offers_only_network_backends() -> None:
     source = (_SRC / "cli" / "main.py").read_text(encoding="utf-8")
     setup_body = source.split("def setup(", 1)[1]
 
-    assert "click.Choice(list(NETWORK_PRINTER_TYPES))" in setup_body
-    assert "click.Choice(list(PRINTER_TYPES))" not in setup_body
+    assert "_PrinterTypeChoice(list(NETWORK_PRINTER_TYPES))" in setup_body
+    assert "_PrinterTypeChoice(list(PRINTER_TYPES))" not in setup_body
 
 
 # ---------------------------------------------------------------------------
@@ -393,11 +487,11 @@ def test_format_printer_types_renders_each_style() -> None:
     assert quoted.startswith("'") and "'duet'" in quoted and " and " not in quoted
 
     with_and = format_printer_types(conjunction="and")
-    assert with_and.endswith("and 'serial'")
+    assert with_and.endswith("and 'usb'")
 
     bare_or = format_printer_types(quote="", conjunction="or")
     assert "'" not in bare_or
-    assert bare_or.endswith("or serial")
+    assert bare_or.endswith("or usb")
 
 
 def test_format_printer_types_keeps_registry_order() -> None:

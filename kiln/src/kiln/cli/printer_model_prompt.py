@@ -66,7 +66,7 @@ _EXAMPLES_BY_TYPE: dict[str, list[str]] = {
     "moonraker": ["klipper_generic", "voron_2", "voron_0", "qidi_x_plus3", "k1_max"],
     "creality":  ["sparkx_i7", "k1_max", "k1c", "ender3_v4", "ender3_v3_ke"],
     "octoprint": ["ender3", "ender3_v2", "ender5", "prusa_mk3s"],
-    "serial":    ["ender3", "ender3_v2", "cr10", "prusa_mk3s"],
+    "usb":       ["ender3", "ender3_v2", "cr10", "prusa_mk3s"],
     "elegoo":    ["elegoo_centauri_carbon", "elegoo_neptune4"],
     "bambu":     ["bambu_a1", "bambu_a1_mini", "bambu_x1c",
                   "bambu_p1s", "bambu_p1p", "bambu_x1e"],
@@ -116,7 +116,7 @@ def prompt_for_printer_model(
 
     Args:
         printer_type: Backend type — ``bambu``, ``prusa``, ``moonraker``,
-            ``creality``, ``octoprint``, ``serial``, ``elegoo``.
+            ``creality``, ``octoprint``, ``usb``, ``elegoo``, ``duet``.
         serial: Optional serial number; used to suggest a default for
             Bambu printers.
         allow_skip: When True, an empty answer returns None (caller

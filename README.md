@@ -158,7 +158,7 @@ Claude Code uses your `~/.kiln/config.yaml` for printer credentials (set via `ki
 }
 ```
 
-Set `KILN_PRINTER_TYPE` to your backend: `octoprint`, `moonraker`, `bambu`, `prusalink`, `elegoo`, `duet`, or `serial` — or skip env vars entirely if you've run `kiln setup`.
+Set `KILN_PRINTER_TYPE` to your backend: `octoprint`, `moonraker`, `bambu`, `prusalink`, `elegoo`, `duet`, or `usb` — or skip env vars entirely if you've run `kiln setup`.
 
 **Any other LLM (OpenRouter)** — Kiln works with any model that supports OpenAI-compatible function calling, not just Claude:
 

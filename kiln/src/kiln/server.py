@@ -15,13 +15,14 @@ Environment variables
 ``KILN_PRINTER_TYPE``
     Printer backend type.  Supported values: ``"octoprint"``,
     ``"moonraker"``, ``"creality"``, ``"bambu"``, ``"elegoo"``,
-    ``"prusalink"``, ``"duet"``, and ``"serial"``.
+    ``"prusalink"``, ``"duet"``, and ``"usb"``.
     Defaults to ``"octoprint"``.
+    ``"serial"`` is accepted as a legacy alias for ``"usb"``.
 ``KILN_PRINTER_PORT``
     Serial port path for USB printers (required when ``KILN_PRINTER_TYPE``
-    is ``"serial"``).  E.g. ``"/dev/ttyUSB0"`` or ``"COM3"``.
+    is ``"usb"``).  E.g. ``"/dev/ttyUSB0"`` or ``"COM3"``.
 ``KILN_PRINTER_BAUDRATE``
-    Baud rate for serial printers (default 115200; many Marlin boards are
+    Baud rate for USB printers (default 115200; many Marlin boards are
     flashed for 250000).
 ``KILN_PRINTER_SERIAL``
     Bambu printer serial number (required when ``KILN_PRINTER_TYPE``
@@ -574,7 +575,10 @@ def _reload_env_config() -> None:
     if _yaml_has_printer and not _force_env:
         # YAML wins — override any env-derived values we just read.
         _PRINTER_HOST = str(_yaml_cfg.get("host", ""))
-        _PRINTER_TYPE = str(_yaml_cfg.get("type", "octoprint"))
+        # Normalize like the env path above: a config.yaml pinning a renamed
+        # type (prusaconnect, serial) reaches the dispatcher through here,
+        # and without this the alias table simply never ran on the YAML path.
+        _PRINTER_TYPE = _normalize_printer_type(str(_yaml_cfg.get("type", "octoprint")))
         # Bambu stores the LAN Access Code under `access_code`; every
         # other backend uses `api_key`.  Internally the server treats
         # them interchangeably via `_PRINTER_API_KEY`.
@@ -1237,7 +1241,7 @@ def _get_adapter() -> PrinterAdapter:
         _adapter = ElegooAdapter(host=host, mainboard_id=mainboard_id)
     elif printer_type == "prusalink":
         _adapter = PrusaLinkAdapter(host=host, api_key=api_key or None)
-    elif printer_type == "serial":
+    elif printer_type == "usb":
         port = os.environ.get("KILN_PRINTER_PORT", "")
         if not port:
             raise RuntimeError(
@@ -1422,7 +1426,9 @@ def _build_adapter_from_config_entry(name: str, entry: dict[str, Any]) -> Printe
     """
     host = str(entry.get("host") or "").strip()
     api_key = str(entry.get("api_key") or entry.get("access_code") or "").strip()
-    printer_type = str(entry.get("type") or entry.get("printer_type") or "").strip().lower()
+    printer_type = _normalize_printer_type(
+        str(entry.get("type") or entry.get("printer_type") or "").strip().lower()
+    )
     serial = str(entry.get("serial") or "").strip()
     printer_model = str(entry.get("printer_model") or "").strip()
 
@@ -1464,7 +1470,7 @@ def _build_adapter_from_config_entry(name: str, entry: dict[str, Any]) -> Printe
         adapter = ElegooAdapter(host=host, mainboard_id=mainboard_id)
     elif printer_type == "prusalink":
         adapter = PrusaLinkAdapter(host=host, api_key=api_key or None)
-    elif printer_type == "serial":
+    elif printer_type == "usb":
         # register_printer() persists a serial printer's port path as
         # `host`, so accept that too rather than demanding a `port` key
         # the tool that wrote the entry never emits.
@@ -7060,11 +7066,12 @@ def register_printer(
     Args:
         name: Unique human-readable name (e.g. "voron-350", "bambu-x1c").
         printer_type: Backend type -- "octoprint", "moonraker", "bambu",
-            "creality", "elegoo", "prusalink", "duet", or "serial".
-        host: Base URL or IP address of the printer.  For serial printers,
+            "creality", "elegoo", "prusalink", "duet", or "usb".
+            "serial" is accepted as a legacy alias for "usb".
+        host: Base URL or IP address of the printer.  For USB printers,
             this is the port path (e.g. "/dev/ttyUSB0", "COM3").
         api_key: API key (required for OctoPrint and Bambu, optional for
-            Moonraker/Creality, unused for serial).  For Bambu printers
+            Moonraker/Creality, unused for USB).  For Bambu printers
             this is the LAN Access Code.
         serial: Printer serial number (required for Bambu printers).
         verify_ssl: Whether to verify SSL certificates (default True).
@@ -7076,7 +7083,7 @@ def register_printer(
             sessions load the same printer. Default ``True``.
         verify_connection: For Bambu printers, immediately query AMS status
             after registration and return a proof summary. Default ``True``.
-        baudrate: Baud rate for serial printers.  Defaults to
+        baudrate: Baud rate for USB printers.  Defaults to
             ``DEFAULT_SERIAL_BAUDRATE``; many Marlin boards are flashed
             for 250000 and will not talk at the default.
 
@@ -7118,6 +7125,11 @@ def register_printer(
                 "printers in parallel (3 included, up to 50): "
                 "https://kiln3d.com/pricing"
             )
+        # Agents call this with whatever the docs they read said, and older
+        # docs say "serial".  Normalize before anything branches on it, so
+        # the tool honours the same aliases config.yaml and the env var do.
+        printer_type = _normalize_printer_type(printer_type)
+
         # Validate and clean the printer URL
         host, url_warnings = _validate_printer_url(host, printer_type=printer_type)
         if not host:
@@ -7186,8 +7198,8 @@ def register_printer(
             )
         elif printer_type == "prusalink":
             adapter = PrusaLinkAdapter(host=host, api_key=api_key or None)
-        elif printer_type == "serial":
-            # For serial printers, 'host' is the serial port path (e.g.
+        elif printer_type == "usb":
+            # For USB printers, 'host' is the serial port path (e.g.
             # /dev/ttyUSB0) and 'api_key' is unused.
             adapter = SerialPrinterAdapter(
                 port=host,
