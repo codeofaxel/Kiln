@@ -164,9 +164,20 @@ def mesh_to_viewer_payload(
     helper stays honest instead of guessing):
       * ``FileNotFoundError`` — path doesn't exist.
       * ``ValueError`` — no triangle geometry in the file.
+      * ``ImportError`` — trimesh missing.  It is a core dependency, so this
+        means a damaged or vendored install, not a normal one; the message
+        says how to fix it rather than leaving the caller to report "could
+        not read that mesh" about a mesh that is perfectly fine.
     """
     import numpy as np
-    import trimesh
+
+    try:
+        import trimesh
+    except ImportError:
+        raise ImportError(
+            "Kiln's 3D stage needs trimesh to read the mesh, and it is "
+            "missing from this install.  Reinstall Kiln, or: pip install trimesh"
+        ) from None
 
     path = Path(mesh_path)
     if not path.exists():
