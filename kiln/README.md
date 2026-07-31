@@ -104,8 +104,8 @@ The full searchable list of tuned printer profiles is at [kiln3d.com/printers](h
 
 ## Features
 
-- **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 887 MCP capabilities** for design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, fleet management, and fulfillment
-- **<!-- KILN_CLI_COUNT:OLD --> 234 CLI commands** with `--json` output for agent consumption
+- **<!-- KILN_MCP_CAPABILITY_COUNT:OLD --> 888 MCP capabilities** for design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, fleet management, and fulfillment
+- **<!-- KILN_CLI_COUNT:OLD --> 235 CLI commands** with `--json` output for agent consumption
 - **Multi-printer fleet** management with job queue and background scheduler
 - **Model marketplaces** — search/download from MyMiniFactory, Cults3D (Thingiverse deprecated — acquired by MMF, Feb 2026)
 - **Slicer integration** — PrusaSlicer and OrcaSlicer with auto-detection

@@ -2,9 +2,9 @@
   "manifest_version": "0.4",
   "name": "kiln",
   "display_name": "Kiln",
-  "version": "1.3.0",
-  "description": "AI agent control of real 3D printers — design, slice, print, monitor, and recover across Bambu Lab, Creality, Prusa, Elegoo, and more.",
-  "long_description": "Kiln is an open-source MCP server that lets AI agents (Claude Desktop, Claude Code, Codex, or any custom MCP client) drive real 3D printers end to end. In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result — over OctoPrint, Moonraker/Klipper, PrusaLink, Direct USB, and Bambu Lab's native protocol.\n\nThis bundle installs Kiln locally so it can reach a printer on your own network — Kiln is fundamentally a local-first tool, not a hosted service.",
+  "version": "1.3.1",
+  "description": "AI agent control of real 3D printers \u2014 design, slice, print, monitor, and recover across Bambu Lab, Creality, Prusa, Elegoo, and more.",
+  "long_description": "Kiln is an open-source MCP server that lets AI agents (Claude Desktop, Claude Code, Codex, or any custom MCP client) drive real 3D printers end to end. In a single conversation, an agent can design a part, slice it, queue it on the right printer, monitor the camera, recover from failures, and ship the result \u2014 over OctoPrint, Moonraker/Klipper, PrusaLink, Direct USB, and Bambu Lab's native protocol.\n\nThis bundle installs Kiln locally so it can reach a printer on your own network \u2014 Kiln is fundamentally a local-first tool, not a hosted service.",
   "author": {
     "name": "Kiln Contributors"
   },
@@ -17,18 +17,36 @@
     "url": "https://github.com/codeofaxel/Kiln"
   },
   "license": "AGPL-3.0-or-later",
-  "privacy_policies": ["https://www.kiln3d.com/privacy"],
+  "privacy_policies": [
+    "https://www.kiln3d.com/privacy"
+  ],
   "keywords": [
-    "3d-printing", "3d-printer", "bambu-lab", "prusa", "creality", "elegoo",
-    "octoprint", "moonraker", "klipper", "gcode", "slicer", "fabrication",
-    "manufacturing", "print-farm"
+    "3d-printing",
+    "3d-printer",
+    "bambu-lab",
+    "prusa",
+    "creality",
+    "elegoo",
+    "octoprint",
+    "moonraker",
+    "klipper",
+    "gcode",
+    "slicer",
+    "fabrication",
+    "manufacturing",
+    "print-farm"
   ],
   "server": {
     "type": "python",
     "entry_point": "src/server.py",
     "mcp_config": {
       "command": "uv",
-      "args": ["run", "--directory", "${__dirname}", "src/server.py"],
+      "args": [
+        "run",
+        "--directory",
+        "${__dirname}",
+        "src/server.py"
+      ],
       "env": {
         "KILN_PRINTER_HOST": "${user_config.printer_host}",
         "KILN_PRINTER_TYPE": "${user_config.printer_type}",
@@ -40,7 +58,7 @@
     "printer_host": {
       "type": "string",
       "title": "Printer host / URL",
-      "description": "URL of your 3D printer (OctoPrint, Moonraker, Creality, or Prusa Link). Optional — you can also register printers from inside the chat.",
+      "description": "URL of your 3D printer (OctoPrint, Moonraker, Creality, or Prusa Link). Optional \u2014 you can also register printers from inside the chat.",
       "required": false
     },
     "printer_type": {
@@ -58,7 +76,11 @@
     }
   },
   "compatibility": {
-    "platforms": ["darwin", "win32", "linux"],
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
     "runtimes": {
       "python": ">=3.10"
     }

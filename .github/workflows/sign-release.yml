@@ -55,7 +55,7 @@ jobs:
         run: cd kiln && python -m build --outdir ../dist/
 
       - name: Sign artifacts with Sigstore (keyless)
-        # sigstore/gh-action-sigstore-python v3.0.1
+        # sigstore/gh-action-sigstore-python v3.5.0
         uses: sigstore/gh-action-sigstore-python@790bc6befb9d733738f18d8f895854b453640ec9
         with:
           inputs: |

@@ -5,6 +5,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-07-31
+
 ### Added
 
 - **See your design in 3D wherever you run Kiln — free for everyone.** The
