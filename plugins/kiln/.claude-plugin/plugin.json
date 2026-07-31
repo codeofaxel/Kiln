@@ -1,7 +1,7 @@
 {
   "name": "kiln",
-  "version": "1.3.0",
-  "description": "AI agent infrastructure for 3D printing — design, slice, print, monitor, and recover on real printers (Bambu Lab, Creality, Prusa, Elegoo, OctoPrint, Moonraker/Klipper, Direct USB). Bundles the full Kiln MCP server. Requires uv.",
+  "version": "1.3.1",
+  "description": "AI agent infrastructure for 3D printing \u2014 design, slice, print, monitor, and recover on real printers (Bambu Lab, Creality, Prusa, Elegoo, OctoPrint, Moonraker/Klipper, Direct USB). Bundles the full Kiln MCP server. Requires uv.",
   "author": {
     "name": "Hadron Labs Inc.",
     "url": "https://kiln3d.com"
@@ -10,8 +10,19 @@
   "repository": "https://github.com/codeofaxel/Kiln",
   "license": "AGPL-3.0-or-later",
   "keywords": [
-    "3d-printing", "3d-printer", "bambu-lab", "prusa", "creality",
-    "elegoo", "octoprint", "moonraker", "klipper", "gcode", "slicer",
-    "fabrication", "manufacturing", "print-farm"
+    "3d-printing",
+    "3d-printer",
+    "bambu-lab",
+    "prusa",
+    "creality",
+    "elegoo",
+    "octoprint",
+    "moonraker",
+    "klipper",
+    "gcode",
+    "slicer",
+    "fabrication",
+    "manufacturing",
+    "print-farm"
   ]
 }
