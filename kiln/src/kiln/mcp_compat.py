@@ -23,16 +23,19 @@ so a direct import of it is an ImportError on every install that resolved
 ``tests/test_mcp_compat_is_the_only_door.py`` fails any new direct import
 rather than trusting the next author to remember this paragraph.
 
-STILL OWED, and the reason the 3D stage is not yet whole on SDK 2:
-``local_stage._install_result_hook`` wraps the lowlevel ``CallToolRequest``
-handler to mint the artifact tokens the stage renders from.  SDK 2 rekeyed
-that dispatch from request TYPE to method STRING (``"tools/call"``) and wraps
-each handler in a ``HandlerEntry``, reached via ``get_request_handler`` /
-``add_request_handler`` rather than a plain dict.  Until that hook is ported,
-an SDK-2 install registers the stage resource but never attaches a token, so
-the panel has nothing to draw and the still image carries the result.  The
-port belongs here, as the handler-accessor pair the hook can call on either
-major — not as a branch inside ``local_stage``.
+STILL OWED, and the reason the 3D stage is not yet whole on SDK 2: the host
+capability read.  ``local_stage._declared_extensions`` reaches
+``lowlevel_server(mcp).request_context`` — 1.x parks the request context on
+the lowlevel server, and SDK 2 removed that attribute outright and passes a
+``ServerRequestContext`` as the handler's FIRST ARGUMENT instead.  So on SDK 2
+that read raises, is caught, and reads as "the host declared nothing" — which
+means ``host_renders_apps`` is always False and geometry is never attached,
+even though the resource registers and the token hook now installs.  The fix
+belongs here as a ``client_capabilities(mcp, ctx=None)`` that prefers a passed
+``ctx`` and falls back to the 1.x attribute, with ``wrap_call_tool_result``
+handing its ``ctx`` down to the mutate callback.  Deliberately not added
+un-wired: an accessor with no callers is how a thing looks tested when it is
+not.
 """
 
 from __future__ import annotations
@@ -66,6 +69,7 @@ __all__ = [
     "MCP_SDK_MAJOR",
     "lowlevel_server",
     "set_instructions",
+    "wrap_call_tool_result",
 ]
 
 
@@ -88,3 +92,71 @@ def set_instructions(mcp: Any, text: str) -> None:
     rebuild-after-config-load path writes to the lowlevel server object.
     """
     lowlevel_server(mcp).instructions = text
+
+
+#: Marks our wrapper so a second install is a no-op rather than a second layer.
+_WRAPPED = "_kiln_wrapped_call_tool"
+
+
+def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
+    """Wrap the lowlevel ``tools/call`` handler so ``mutate`` sees each result.
+
+    ``mutate(result)`` is called with the tool result object AFTER the real
+    handler produced it, and mutates it in place; its return value is ignored
+    and it must not raise (callers wrap their own body).  The handler's own
+    return value is passed through untouched, so a wrapper that does nothing
+    is invisible.
+
+    Everything the two SDK majors disagree about lives here, because the
+    disagreement is total — the handler is keyed by request TYPE on 1.x and by
+    the method string ``"tools/call"`` on 2.x; it is called ``handler(req)``
+    on 1.x and ``handler(ctx, params)`` on 2.x; and 2.x stores it in a
+    ``HandlerEntry`` alongside the params type it must be re-registered with.
+    A caller that branched on any of that would be a second place that knows
+    which SDK is installed, which is the thing this module exists to prevent.
+
+    Returns True when a wrapper was installed, False when there was no handler
+    to wrap or ours is already in place.  Never raises for the ordinary
+    reasons; an exotic server object propagates, and callers decide.
+    """
+    server = lowlevel_server(mcp)
+
+    def _wrap(previous: Any) -> Any:
+        """Shared body: run the handler, let ``mutate`` see the result."""
+
+        def _apply(resp: Any) -> Any:
+            # 1.x hands back a ServerResult with the real result on ``.root``;
+            # 2.x hands back the CallToolResult itself, which has no ``.root``.
+            mutate(getattr(resp, "root", resp))
+            return resp
+
+        return _apply
+
+    if MCP_SDK_MAJOR >= 2:
+        entry = server.get_request_handler("tools/call")
+        if entry is None or getattr(entry.handler, _WRAPPED, False):
+            return False
+        previous, params_type = entry.handler, entry.params_type
+        apply = _wrap(previous)
+
+        async def _wrapped_v2(ctx: Any, params: Any) -> Any:
+            return apply(await previous(ctx, params))
+
+        setattr(_wrapped_v2, _WRAPPED, True)
+        server.add_request_handler("tools/call", params_type, _wrapped_v2)
+        return True
+
+    from mcp.types import CallToolRequest  # 1.x keys the dict by request type
+
+    handlers = getattr(server, "request_handlers", None) or {}
+    previous = handlers.get(CallToolRequest)
+    if previous is None or getattr(previous, _WRAPPED, False):
+        return False
+    apply = _wrap(previous)
+
+    async def _wrapped_v1(req: Any) -> Any:
+        return apply(await previous(req))
+
+    setattr(_wrapped_v1, _WRAPPED, True)
+    handlers[CallToolRequest] = _wrapped_v1
+    return True

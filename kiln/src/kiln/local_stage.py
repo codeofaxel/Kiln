@@ -42,7 +42,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from kiln.mcp_compat import lowlevel_server
+from kiln.mcp_compat import lowlevel_server, wrap_call_tool_result
 from kiln.mesh_payload import VIEWER_STRUCTURED_CONTENT_KEY, mesh_to_viewer_payload
 
 logger = logging.getLogger(__name__)
@@ -494,47 +494,39 @@ def _install_result_hook(mcp: Any) -> bool:
     value there is already a list of content blocks and a dict mutation is
     silently lost — measured, after writing it the other way first.
     """
-    from mcp.types import CallToolRequest
-
-    handlers = getattr(lowlevel_server(mcp), "request_handlers", None) or {}
-    prev = handlers.get(CallToolRequest)
-    if prev is None or getattr(prev, "_kiln_local_stage", False):
-        return False
-
-    async def _with_stage_token(req):
-        resp = await prev(req)
+    def _attach(inner: Any) -> None:
+        """Mutate one tool result in place.  Deliberately knows no SDK detail —
+        ``wrap_call_tool_result`` owns every difference between majors, and
+        this stays the description of WHAT to attach."""
         try:
-            inner = getattr(resp, "root", resp)
             token = token_for_call_result(inner)
-            if token:
-                sc = getattr(inner, "structuredContent", None)
-                if not isinstance(sc, dict):
-                    # The tool had none.  Seed it from the result the tool
-                    # actually returned, because a host that prefers
-                    # structuredContent will show THIS and nothing else —
-                    # seeding it with only the token would hide the tool's
-                    # own output from the agent (measured: success, paths
-                    # and message all vanished from the visible result).
-                    sc = _result_as_dict(inner) or {}
-                else:
-                    sc = dict(sc)
-                artifact = dict(sc.get("artifact") or {})
-                artifact["artifact_token"] = token
-                sc["artifact"] = artifact
-                attaching = host_renders_apps(mcp)
-                _log_signal_once(mcp, attaching)
-                if attaching:
-                    payload = _inline_payload(token)
-                    if payload is not None:
-                        sc[VIEWER_STRUCTURED_CONTENT_KEY] = payload
-                inner.structuredContent = sc
+            if not token:
+                return
+            sc = getattr(inner, "structuredContent", None)
+            if not isinstance(sc, dict):
+                # The tool had none.  Seed it from the result the tool
+                # actually returned, because a host that prefers
+                # structuredContent will show THIS and nothing else —
+                # seeding it with only the token would hide the tool's
+                # own output from the agent (measured: success, paths
+                # and message all vanished from the visible result).
+                sc = _result_as_dict(inner) or {}
+            else:
+                sc = dict(sc)
+            artifact = dict(sc.get("artifact") or {})
+            artifact["artifact_token"] = token
+            sc["artifact"] = artifact
+            attaching = host_renders_apps(mcp)
+            _log_signal_once(mcp, attaching)
+            if attaching:
+                payload = _inline_payload(token)
+                if payload is not None:
+                    sc[VIEWER_STRUCTURED_CONTENT_KEY] = payload
+            inner.structuredContent = sc
         except Exception:  # noqa: BLE001
             logger.debug("local stage token not attached", exc_info=True)
-        return resp
 
-    _with_stage_token._kiln_local_stage = True
-    handlers[CallToolRequest] = _with_stage_token
-    return True
+    return wrap_call_tool_result(mcp, _attach)
 
 
 def install(mcp: Any) -> dict[str, Any]:
