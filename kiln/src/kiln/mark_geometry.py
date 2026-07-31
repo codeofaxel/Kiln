@@ -101,6 +101,20 @@ class MarkGeometry:
         holes (letter counters, the inner band of an outlined mark)
         render correctly without any winding bookkeeping.
 
+        The union is wrapped in a tiny ``offset(delta=+eps)``.  Art
+        routinely contains sub-polygons that touch edge-on without
+        overlapping (a glyph stem meeting its diagonal, tangent strokes);
+        unioning tangent regions leaves a degenerate contact that
+        extrudes into pinched edges — 4+ triangles meeting along one
+        line, a non-manifold defect no mesh repair pass can sew (it is
+        not a hole).  Growing the evaluated region by eps first turns
+        every tangency into a real overlap, so the union comes out as one
+        clean contour and the extrusion is watertight.  eps is 0.05% of
+        the mark's largest dimension — microns at print scale, far below
+        anything a nozzle can express.  Growing only (never shrinking
+        back) is deliberate: a grow-then-shrink closing re-creates the
+        near-tangency on the way back in.
+
         The output must NOT be wrapped in OpenSCAD ``fill()`` by callers:
         fill() erases exactly the holes this representation preserves.
         """
@@ -128,6 +142,9 @@ class MarkGeometry:
         if not parts:
             return ""
         body = "\n    ".join(parts)
+        eps = max(self.width, self.height) * 5e-4
+        if eps > 0:
+            return f"offset(delta={eps:.4f}) union() {{\n    {body}\n}}"
         return f"union() {{\n    {body}\n}}"
 
 
