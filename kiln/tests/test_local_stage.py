@@ -109,7 +109,7 @@ class TestNeedsNothingButPublicKiln:
                     if name == "kiln_pro" or name.startswith("kiln_pro."):
                         raise ImportError("kiln_pro is not installed")
             sys.meta_path.insert(0, _Block())
-            from mcp.server.fastmcp import FastMCP
+            from kiln.mcp_compat import FastMCP
             from kiln import local_stage, stage_cache
             (stage_cache.cache_dir() / "mesh_viewer.html").write_text("<!DOCTYPE html>x")
             mcp = FastMCP("t")
@@ -165,7 +165,7 @@ class TestOnByDefault:
 
 
 def _fastmcp():
-    from mcp.server.fastmcp import FastMCP
+    from kiln.mcp_compat import FastMCP
 
     mcp = FastMCP("test")
 
@@ -329,20 +329,45 @@ class TestOnlyAnAppsHostGetsTheGeometry:
 
 def _run_hook(host, mesh_path):
     """Drive the real lowlevel hook over a result and return its
-    structuredContent."""
+    structuredContent.
+
+    The two majors hand the hook the connected host differently — 1.x
+    through a contextvar the dispatcher sets before every handler, 2.x as
+    the handler's first argument — so this is one of the few places that
+    branches on ``MCP_SDK_MAJOR`` (same shape as
+    ``test_mcp_compat_call_tool_wrapper._server_with_base_handler``).
+    """
     import anyio
-    from mcp.server.lowlevel.server import request_ctx
-    from mcp.types import CallToolRequest
+
+    from kiln.mcp_compat import MCP_SDK_MAJOR, lowlevel_server
 
     _cache_the_stage()
     mcp = _fastmcp()
     result = _Result({"success": True, "message": "made a thing", "stl_path": mesh_path})
-    handlers = mcp._mcp_server.request_handlers
+    server = lowlevel_server(mcp)
 
-    async def _base(_req):
+    if MCP_SDK_MAJOR >= 2:
+        entry = server.get_request_handler("tools/call")
+
+        async def _base(_ctx, _params):
+            return result
+
+        server.add_request_handler("tools/call", entry.params_type, _base)
+        local_stage.install(mcp)
+        handler = server.get_request_handler("tools/call").handler
+        # The connected host rides in as the request context argument.
+        anyio.run(handler, host._mcp_server.request_context, None)
+        return result.structuredContent
+
+    from mcp.server.lowlevel.server import request_ctx
+    from mcp.types import CallToolRequest
+
+    handlers = server.request_handlers
+
+    async def _base_v1(_req):
         return type("R", (), {"root": result})()
 
-    handlers[CallToolRequest] = _base
+    handlers[CallToolRequest] = _base_v1
     local_stage.install(mcp)
     # The connected host, where the real server reads it from: the
     # context var the lowlevel dispatcher sets before every handler.

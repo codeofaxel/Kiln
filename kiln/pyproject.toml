@@ -41,7 +41,7 @@ dependencies = [
     # hosted /mcp connector serves, and Dockerfile.api pins `mcp>=2.0` for
     # exactly that reason, so a `<2` here would declare kiln3d incompatible
     # with the SDK its own hosted deploy requires.  `kiln.mcp_compat` is how
-    # both majors are supported instead — see the port still owed there.
+    # both majors are supported instead.
     "mcp>=1.0",
     "requests>=2.25",
     "pyyaml>=5.4",
@@ -73,6 +73,15 @@ dependencies = [
     # it.  4.1 MB on disk, and its one requirement is the numpy above, so the
     # marginal cost of the correct behaviour is small.
     "trimesh>=4.0",
+    # httpx and python-dotenv are imported by kiln itself (the 3D stage's
+    # document fetch in ``stage_cache``/``stage_link``; the .env loading in
+    # ``server.main`` and the CLI) but until mcp 2.0 they were never declared
+    # — they rode in as mcp 1.x's own dependencies.  SDK 2 depends on httpx2
+    # and drops python-dotenv, so on a fresh `mcp>=2` install both imports
+    # fail their try/except guards and the features silently vanish: no
+    # stage document, no ~/.kiln/.env.  Declare what we import.
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]

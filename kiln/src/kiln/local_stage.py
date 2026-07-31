@@ -42,7 +42,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from kiln.mcp_compat import lowlevel_server
+from kiln.mcp_compat import client_capabilities, lowlevel_server, wrap_call_tool_result
 from kiln.mesh_payload import VIEWER_STRUCTURED_CONTENT_KEY, mesh_to_viewer_payload
 
 logger = logging.getLogger(__name__)
@@ -171,18 +171,21 @@ def resolve(token: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _declared_extensions(mcp: Any) -> dict[str, Any]:
+def _declared_extensions(mcp: Any, ctx: Any = None) -> dict[str, Any]:
     """What the connected host declared it supports, as a flat dict.
 
     Reads both keys the extension mechanism has been spelled with —
     ``capabilities.extensions`` (SEP-1865) and ``capabilities.experimental``
     (where SDKs park unrecognised extensions).  Never raises: no session,
     an exotic SDK, or a host that declared nothing all read as "nothing".
+
+    ``ctx`` is the request context a handler was invoked with; on SDK 2 it is
+    the only place the session lives, so callers inside the result hook must
+    forward it or a 2.x host always reads as "declared nothing".
     """
     out: dict[str, Any] = {}
-    try:
-        caps = lowlevel_server(mcp).request_context.session.client_params.capabilities
-    except Exception:  # noqa: BLE001 — no session is a legitimate answer
+    caps = client_capabilities(mcp, ctx)
+    if caps is None:
         return out
     # ``extensions`` is not a modelled field on every SDK, so it arrives as
     # an extra rather than an attribute — check both places it can land.
@@ -196,7 +199,7 @@ def _declared_extensions(mcp: Any) -> dict[str, Any]:
     return out
 
 
-def host_renders_apps(mcp: Any) -> bool:
+def host_renders_apps(mcp: Any, ctx: Any = None) -> bool:
     """Whether it is safe — and useful — to put geometry in the result.
 
     Two positive signals, either one sufficient:
@@ -221,24 +224,27 @@ def host_renders_apps(mcp: Any) -> bool:
     """
     if _host_read_the_stage:
         return True
-    return MCP_APPS_EXTENSION_ID in _declared_extensions(mcp)
+    return MCP_APPS_EXTENSION_ID in _declared_extensions(mcp, ctx)
 
 
-def _log_signal_once(mcp: Any, attaching: bool) -> None:
+def _log_signal_once(mcp: Any, attaching: bool, ctx: Any = None) -> None:
     """State, once, what this host declared and what we did about it."""
     global _signal_logged
     if _signal_logged:
         return
     _signal_logged = True
     try:
-        info = lowlevel_server(mcp).request_context.session.client_params.clientInfo
+        session = getattr(ctx, "session", None)
+        if session is None:
+            session = lowlevel_server(mcp).request_context.session
+        info = session.client_params.clientInfo
         who = f"{getattr(info, 'name', '?')}/{getattr(info, 'version', '?')}"
     except Exception:  # noqa: BLE001
         who = "unknown host"
     logger.info(
         "inline stage: host=%s declared=%s read_stage=%s -> geometry %s",
         who,
-        sorted(_declared_extensions(mcp)) or "none",
+        sorted(_declared_extensions(mcp, ctx)) or "none",
         _host_read_the_stage,
         "attached" if attaching else "withheld (still image only)",
     )
@@ -494,47 +500,41 @@ def _install_result_hook(mcp: Any) -> bool:
     value there is already a list of content blocks and a dict mutation is
     silently lost — measured, after writing it the other way first.
     """
-    from mcp.types import CallToolRequest
-
-    handlers = getattr(lowlevel_server(mcp), "request_handlers", None) or {}
-    prev = handlers.get(CallToolRequest)
-    if prev is None or getattr(prev, "_kiln_local_stage", False):
-        return False
-
-    async def _with_stage_token(req):
-        resp = await prev(req)
+    def _attach(inner: Any, ctx: Any) -> None:
+        """Mutate one tool result in place.  Deliberately knows no SDK detail —
+        ``wrap_call_tool_result`` owns every difference between majors, and
+        this stays the description of WHAT to attach.  ``ctx`` is the request
+        context of THIS call (None on 1.x), forwarded so the capability read
+        can see the session on SDK 2."""
         try:
-            inner = getattr(resp, "root", resp)
             token = token_for_call_result(inner)
-            if token:
-                sc = getattr(inner, "structuredContent", None)
-                if not isinstance(sc, dict):
-                    # The tool had none.  Seed it from the result the tool
-                    # actually returned, because a host that prefers
-                    # structuredContent will show THIS and nothing else —
-                    # seeding it with only the token would hide the tool's
-                    # own output from the agent (measured: success, paths
-                    # and message all vanished from the visible result).
-                    sc = _result_as_dict(inner) or {}
-                else:
-                    sc = dict(sc)
-                artifact = dict(sc.get("artifact") or {})
-                artifact["artifact_token"] = token
-                sc["artifact"] = artifact
-                attaching = host_renders_apps(mcp)
-                _log_signal_once(mcp, attaching)
-                if attaching:
-                    payload = _inline_payload(token)
-                    if payload is not None:
-                        sc[VIEWER_STRUCTURED_CONTENT_KEY] = payload
-                inner.structuredContent = sc
+            if not token:
+                return
+            sc = getattr(inner, "structuredContent", None)
+            if not isinstance(sc, dict):
+                # The tool had none.  Seed it from the result the tool
+                # actually returned, because a host that prefers
+                # structuredContent will show THIS and nothing else —
+                # seeding it with only the token would hide the tool's
+                # own output from the agent (measured: success, paths
+                # and message all vanished from the visible result).
+                sc = _result_as_dict(inner) or {}
+            else:
+                sc = dict(sc)
+            artifact = dict(sc.get("artifact") or {})
+            artifact["artifact_token"] = token
+            sc["artifact"] = artifact
+            attaching = host_renders_apps(mcp, ctx)
+            _log_signal_once(mcp, attaching, ctx)
+            if attaching:
+                payload = _inline_payload(token)
+                if payload is not None:
+                    sc[VIEWER_STRUCTURED_CONTENT_KEY] = payload
+            inner.structuredContent = sc
         except Exception:  # noqa: BLE001
             logger.debug("local stage token not attached", exc_info=True)
-        return resp
 
-    _with_stage_token._kiln_local_stage = True
-    handlers[CallToolRequest] = _with_stage_token
-    return True
+    return wrap_call_tool_result(mcp, _attach)
 
 
 def install(mcp: Any) -> dict[str, Any]:
