@@ -5,6 +5,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Your design now stands on your real print bed (free).** The 3D stage drew
+  the same square plate for everyone; where Kiln knows which printer is yours
+  it now draws that machine's actual bed, with its name on it — in the web
+  studio, in shared view links, and in the panel in your chat. A part too big
+  for the bed says so: on the model and in the size line.
+
 ## [1.3.1] - 2026-07-31
 
 ### Added
