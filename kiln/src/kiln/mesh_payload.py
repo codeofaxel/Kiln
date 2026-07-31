@@ -125,7 +125,10 @@ def _bbox_dict(bounds: Any) -> dict[str, list[float]]:
     return {
         "min": lo,
         "max": hi,
-        "size": [float(round(h - l, 4)) for l, h in zip(lo, hi)],
+        "size": [
+            float(round(high - low, 4))
+            for low, high in zip(lo, hi, strict=True)
+        ],
     }
 
 
