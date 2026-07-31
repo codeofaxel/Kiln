@@ -126,6 +126,53 @@ class TestSvgParser:
         assert m.width == pytest.approx(84.0, abs=0.5)  # 80 + width caps
         assert m.height == pytest.approx(4.0, abs=0.5)
 
+    def test_open_stroked_path_stays_open(self):
+        # Five-segment open path (no Z) — the top gap is deliberate.
+        # Sealing it draws a stroke-width band straight across the gap.
+        svg = (
+            '<svg viewBox="0 0 1024 640" xmlns="http://www.w3.org/2000/svg">'
+            '<path d="M 418.4 60 L 252 60 L 96 580 L 928 580 L 772 60 L 605.6 60"'
+            ' fill="none" stroke="black" stroke-width="20.15"/></svg>'
+        )
+        m = parse_svg_to_mark(svg)
+        assert m is not None
+        # 6 points → 5 stroke quads (NOT 6) + 6 joint octagons.
+        quads = [g for g in m.groups if len(g[0]) == 4]
+        octagons = [g for g in m.groups if len(g[0]) == 8]
+        assert len(quads) == 5
+        assert len(octagons) == 6
+        # No quad spans the top gap between x=418.4 and x=605.6 at y=60.
+        gap_lo, gap_hi = 418.4 - 512, 605.6 - 512  # recentered frame
+        for g in quads:
+            xs = sorted(x for x, _ in g[0])
+            assert not (
+                xs[0] == pytest.approx(gap_lo, abs=1.0)
+                and xs[-1] == pytest.approx(gap_hi, abs=1.0)
+            )
+
+    def test_stroked_path_with_z_still_closes(self):
+        svg = (
+            '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
+            '<path d="M 10 10 L 90 10 L 50 90 z"'
+            ' fill="none" stroke="black" stroke-width="4"/></svg>'
+        )
+        m = parse_svg_to_mark(svg)
+        assert m is not None
+        # Explicit Z: 3 points → 3 quads (closing segment kept) + 3 octagons.
+        quads = [g for g in m.groups if len(g[0]) == 4]
+        assert len(quads) == 3
+
+    def test_open_two_point_stroked_path(self):
+        # A path equivalent to <line> must stroke as a single segment.
+        svg = (
+            '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
+            '<path d="M 10 10 L 90 10" fill="none" stroke="black" stroke-width="4"/></svg>'
+        )
+        m = parse_svg_to_mark(svg)
+        assert m is not None
+        assert m.width == pytest.approx(84.0, abs=0.5)
+        assert m.height == pytest.approx(4.0, abs=0.5)
+
     def test_y_axis_flip_top_stays_top(self):
         # Ink only in the TOP half of the SVG (small y).  After compile
         # (Y-up frame), that geometry must sit at POSITIVE y.

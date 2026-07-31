@@ -362,12 +362,15 @@ def _flatten_arc(
     return pts
 
 
-def _parse_path_d(d: str) -> list[Ring]:
-    """Interpret a path ``d`` attribute into closed subpath rings.
+def _parse_path_d(d: str) -> list[tuple[Ring, bool]]:
+    """Interpret a path ``d`` attribute into ``(points, was_closed)`` subpaths.
 
     Supports the full SVG 1.1 command set with relative variants and
-    implicit command repetition.  Open subpaths are auto-closed — a
-    filled path renders as if closed, so the geometry must match.
+    implicit command repetition.  ``was_closed`` is True for an explicit
+    ``Z`` (or a subpath that returns to its start point).  Fill consumers
+    treat every subpath as closed — a filled path renders as if closed —
+    but stroke consumers must keep the distinction: sealing an open
+    stroked path draws a stroke-width band across a deliberate gap.
     """
     tokens: list[str] = []
     for m in re.finditer(r"[MmLlHhVvCcSsQqTtAaZz]|" + _FLOAT_RE.pattern, d):
@@ -379,8 +382,8 @@ def _parse_path_d(d: str) -> list[Ring]:
         return []
 
 
-def _interpret_path_tokens(tokens: list[str]) -> list[Ring]:
-    rings: list[Ring] = []
+def _interpret_path_tokens(tokens: list[str]) -> list[tuple[Ring, bool]]:
+    subpaths: list[tuple[Ring, bool]] = []
     ring: Ring = []
     cur: Point = (0.0, 0.0)
     start: Point = (0.0, 0.0)
@@ -395,10 +398,18 @@ def _interpret_path_tokens(tokens: list[str]) -> list[Ring]:
         i += n
         return vals
 
-    def _close_ring() -> None:
+    def _end_subpath(explicit_close: bool) -> None:
         nonlocal ring
-        if len(ring) >= 3:
-            rings.append(ring)
+        if explicit_close:
+            if len(ring) >= 3:
+                subpaths.append((ring, True))
+        elif len(ring) >= 2:
+            # No Z: closed only if the subpath returns to its start.
+            returns_to_start = (
+                len(ring) >= 3
+                and math.hypot(ring[0][0] - ring[-1][0], ring[0][1] - ring[-1][1]) < 1e-9
+            )
+            subpaths.append((ring, returns_to_start))
         ring = []
 
     while i < len(tokens):
@@ -408,7 +419,7 @@ def _interpret_path_tokens(tokens: list[str]) -> list[Ring]:
             i += 1
             if cmd in "Zz":
                 cur = start
-                _close_ring()
+                _end_subpath(True)
                 continue
         elif not cmd:
             break
@@ -419,7 +430,7 @@ def _interpret_path_tokens(tokens: list[str]) -> list[Ring]:
             x, y = _next_floats(2)
             if rel:
                 x, y = cur[0] + x, cur[1] + y
-            _close_ring()
+            _end_subpath(False)
             cur = start = (x, y)
             ring = [cur]
             cmd = "l" if rel else "L"  # subsequent implicit pairs are linetos
@@ -490,8 +501,8 @@ def _interpret_path_tokens(tokens: list[str]) -> list[Ring]:
         prev_cubic_ctrl = None
         prev_quad_ctrl = None
 
-    _close_ring()
-    return rings
+    _end_subpath(False)
+    return subpaths
 
 
 def _stroke_segments_to_rings(pts: list[Point], width: float, closed: bool) -> list[Ring]:
@@ -582,11 +593,12 @@ def parse_svg_to_mark(
         stroke_pts: list[tuple[list[Point], bool]] = []  # (points, closed)
 
         if tag == "path":
-            rings = _parse_path_d(elem.get("d", ""))
+            subpaths = _parse_path_d(elem.get("d", ""))
             if has_fill:
-                local_rings.extend(rings)
+                # Fill renders open subpaths as if closed — auto-close.
+                local_rings.extend(r for r, _ in subpaths if len(r) >= 3)
             elif has_stroke:
-                stroke_pts.extend((r, True) for r in rings)
+                stroke_pts.extend(subpaths)
         elif tag in ("polygon", "polyline"):
             pts = []
             for m in _FLOAT_RE.finditer(elem.get("points", "")):
