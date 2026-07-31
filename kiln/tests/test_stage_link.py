@@ -51,7 +51,8 @@ def _wire(monkeypatch, resp=None, record=None, token="bearer-abc"):
     calls = record if record is not None else []
 
     def _post(url, **kw):
-        calls.append({"url": url, "headers": kw.get("headers", {})})
+        calls.append({"url": url, "headers": kw.get("headers", {}),
+                      "data": kw.get("data")})
         return resp or _Resp()
 
     import httpx
@@ -68,6 +69,44 @@ class TestStageLinkForOneMesh:
         assert got["expires_at"] > time.time()
         assert calls[0]["url"].endswith("/api/view/mesh")
         assert calls[0]["headers"]["Authorization"] == "Bearer bearer-abc"
+
+    def test_the_installs_printer_rides_the_upload(self, tmp_path, monkeypatch):
+        """The /view page draws the maker's bed only if the upload names the
+        machine — resolved through the same stage_plate resolver the inline
+        stage uses, so the two surfaces cannot disagree."""
+        calls = _wire(monkeypatch)
+        monkeypatch.setattr(
+            "kiln.stage_plate.resolve_stage_plate",
+            lambda *a, **k: {"source": "printer", "printer_id": "prusa_mk4"},
+        )
+        assert stage_link.stage_link_for(_stl(tmp_path / "part.stl"))
+        assert calls[0]["data"] == {"printer": "prusa_mk4"}
+
+    def test_an_unknown_printer_uploads_without_a_claim(self, tmp_path, monkeypatch):
+        calls = _wire(monkeypatch)
+        monkeypatch.setattr(
+            "kiln.stage_plate.resolve_stage_plate",
+            lambda *a, **k: {"source": "default", "printer_id": None},
+        )
+        assert stage_link.stage_link_for(_stl(tmp_path / "part.stl"))
+        assert calls[0]["data"] is None
+
+    def test_a_printer_change_is_a_new_link_not_a_stale_bed(
+        self, tmp_path, monkeypatch
+    ):
+        """The cache is keyed by (bytes, printer): swapping the configured
+        machine between calls must re-stage, or the link keeps claiming the
+        old bed for its whole half-hour."""
+        calls = _wire(monkeypatch)
+        plate = {"source": "printer", "printer_id": "bambu_a1"}
+        monkeypatch.setattr(
+            "kiln.stage_plate.resolve_stage_plate", lambda *a, **k: plate
+        )
+        path = _stl(tmp_path / "part.stl")
+        assert stage_link.stage_link_for(path)["cached"] is False
+        plate["printer_id"] = "prusa_xl"
+        assert stage_link.stage_link_for(path)["cached"] is False
+        assert len(calls) == 2
 
     def test_sixteen_poses_of_one_mesh_upload_once(self, tmp_path, monkeypatch):
         """The inspection-sheet case — the whole reason the cache is keyed on bytes."""
