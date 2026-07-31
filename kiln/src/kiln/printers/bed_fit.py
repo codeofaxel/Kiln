@@ -181,6 +181,21 @@ def resolve_build_volume(
     return None
 
 
+def get_printer_display_name(printer_id: str | None) -> str | None:
+    """Catalogue display name for a CANONICAL printer id, or ``None``.
+
+    Exact lookup, no alias walking and no ``default`` fallback: callers that
+    put this in front of a user (the plate the 3D stage etches a machine's
+    name on) would rather show nothing than the wrong printer.  Pass an id
+    that :func:`resolve_build_volume` already canonicalised.
+    """
+    if not printer_id:
+        return None
+    entry = _load_printer_intelligence().get(printer_id)
+    name = (entry or {}).get("display_name")
+    return str(name) if name else None
+
+
 # ---------------------------------------------------------------------------
 # Bounding-box extraction
 # ---------------------------------------------------------------------------

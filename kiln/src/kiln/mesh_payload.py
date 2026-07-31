@@ -29,8 +29,29 @@ platform-endian, which is LE on every client Kiln targets)::
       "bbox": {"min": [x,y,z], "max": [x,y,z], "size": [x,y,z]},  # MESH space
       "downgraded": false,
       "decimated_from": N,             # only when a decimation backend ran
-      "source": {"filename": "<basename only>", "format": "stl"}
+      "source": {"filename": "<basename only>", "format": "stl"},
+      "plate": {...}                   # optional — see THE PLATE below
     }
+
+THE PLATE
+---------
+Optional, and produced by :mod:`kiln.stage_plate` rather than here — the bed
+is a fact about the install, not about the mesh, and this module reads no
+disk.  A door that knows the bed stamps it on; a door that does not (the
+hosted server, where one process serves every customer) omits it, and the
+stage falls back to its own reference plate::
+
+    "plate": {"x_mm": 256.0, "y_mm": 256.0, "z_mm": 256.0,
+              "printer_id": "bambu_a1", "label": "Bambu Lab A1",
+              "source": "printer"}      # or "default" — see below
+
+``source`` is what a consumer keys off, never the numbers alone.
+``"printer"`` means these really are a known machine's dimensions, so the
+stage may etch the name on the plate and outline the build envelope around an
+oversize part.  ``"default"`` means a reference plate standing in for a bed
+nobody named: draw it, claim nothing about it.  Dimensions are the machine's
+RATED build volume (the physical plate the part sits on), not the smaller
+usable envelope a calibrated install may know.
 
 AXIS CONVENTION
 ---------------
