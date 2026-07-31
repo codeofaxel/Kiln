@@ -23,7 +23,17 @@
       "hanging",
       "hanger",
       "carries",
-      "carrying"
+      "carrying",
+      "under load",
+      "load rating",
+      "load capacity",
+      "heavy load",
+      "static load",
+      "weight bearing",
+      "bear weight",
+      "bearing weight",
+      "holding weight",
+      "structural"
     ],
     "constraint_rules": {
       "material_exclude": [

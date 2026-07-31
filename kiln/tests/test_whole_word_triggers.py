@@ -110,6 +110,45 @@ def test_real_requirements_are_still_matched(text, expected):
     assert expected in _ids(text)
 
 
+# ---------------------------------------------------------------------------
+# Load-bearing had no bare "load" trigger at all
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text", [
+    "a part that goes under load",
+    "a shelf with a 10kg load rating",
+    "load capacity of 5kg",
+    "a weight bearing leg",
+    "must bear weight",
+    "it bears weight all day",          # plural, via "bear weight"
+    "holding weight overnight",
+    "a static load fixture",
+    "a heavy load hook",
+    "a structural rib",
+    "a structural gusset",
+])
+def test_stating_a_load_reads_as_load_bearing(text):
+    """The profile listed "load bearing" as a phrase but had no bare "load"
+    trigger, so a part that states its load was caught only by the word
+    "support".  Under-calling structural duty is the dangerous direction: a
+    wrong yes over-builds a part, a wrong no ships a shelf in PLA."""
+    assert "load_bearing" in _ids(text)
+
+
+@pytest.mark.parametrize("text", [
+    "load the filament",
+    "loading the model",
+    "download the file",
+    "upload a payload",
+    "reload the printer",
+    "a light load of infill",
+])
+def test_the_file_and_filament_senses_of_load_stay_quiet(text):
+    """"load" is ambiguous in this domain, so it is deliberately NOT a bare
+    trigger — only the unambiguous phrasings above are."""
+    assert "load_bearing" not in _ids(text)
+
+
 def test_every_trigger_in_every_profile_still_matches_itself():
     """Whole-word matching must not silently retire a trigger — each one still
     fires on a sentence that contains it."""
