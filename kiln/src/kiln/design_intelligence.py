@@ -30,6 +30,7 @@ import logging
 import math
 import re
 from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -1226,9 +1227,9 @@ def use_case_implies_skin_contact(use_case: str) -> bool:
         return False
     prof = _get_kb().requirements.get("against_skin") or {}
     low = use_case.lower()
-    if any(str(x).lower() in low for x in (prof.get("trigger_exclusions") or [])):
+    if any(matches_trigger(low, str(x)) for x in (prof.get("trigger_exclusions") or [])):
         return False
-    return any(str(t).lower() in low for t in (prof.get("triggers") or []))
+    return any(matches_trigger(low, str(t)) for t in (prof.get("triggers") or []))
 
 
 # ---------------------------------------------------------------------------
@@ -1478,15 +1479,43 @@ def _is_pla_family(material_id: str) -> bool:
     return material_id.lower() in _PLA_FAMILY_IDS
 
 
+@lru_cache(maxsize=2048)
+def _trigger_pattern(token: str) -> re.Pattern[str]:
+    """Compile one trigger word or phrase into a whole-word pattern.
+
+    Bounded at both ends, so ``art`` cannot match inside *part* and ``eat``
+    cannot match inside *heat*.  Each word may carry a plural suffix, and a
+    phrase tolerates any run of whitespace between its words so a wrapped
+    sentence still reads "cookie cutter" as one phrase.
+    """
+    return re.compile(
+        r"\b"
+        + r"\s+".join(re.escape(word) + r"(?:e?s)?" for word in token.split())
+        + r"\b"
+    )
+
+
+def matches_trigger(text: str, token: str) -> bool:
+    """True if *token* appears in *text* as whole words.
+
+    The single matcher behind every keyword and trigger lookup in this module.
+    Matched as bare substrings, the vocabularies fired from inside ordinary
+    words — ``art`` inside *part*, ``mate`` inside *material*, ``eat`` inside
+    *heat*, ``soft`` inside *software*, ``hot`` inside *photo*, ``oven`` inside
+    *proven* — which put a decorative reading on a structural part and a
+    food-contact reading on anything warm.
+
+    :param text: Haystack; callers lowercase before calling.
+    :param token: Trigger word or phrase, any case.
+    """
+    if not text or not token:
+        return False
+    return bool(_trigger_pattern(token.lower()).search(text))
+
+
 def _any_keyword(text: str, keywords: frozenset[str]) -> bool:
     """True if any keyword from the set appears as a whole word in text."""
-    for kw in keywords:
-        if " " in kw:
-            if kw in text:
-                return True
-        elif re.search(rf"\b{re.escape(kw)}\b", text):
-            return True
-    return False
+    return any(matches_trigger(text, kw) for kw in keywords)
 
 
 def _recommend_from_safety_floor(
@@ -2988,10 +3017,10 @@ def match_requirements(text: str) -> list[DesignConstraintSet]:
         # A profile may suppress its own homographs so a match stays credible
         # (against_skin: a napkin ring / band saw / watch stand is not worn).
         exclusions = data.get("trigger_exclusions", [])
-        if any(str(x).lower() in lower for x in exclusions):
+        if any(matches_trigger(lower, str(x)) for x in exclusions):
             continue
         triggers = data.get("triggers", [])
-        matched_triggers = [t for t in triggers if t.lower() in lower]
+        matched_triggers = [t for t in triggers if matches_trigger(lower, t)]
         if matched_triggers:
             results.append(
                 DesignConstraintSet(

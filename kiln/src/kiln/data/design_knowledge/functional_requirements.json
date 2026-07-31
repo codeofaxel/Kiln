@@ -17,7 +17,23 @@
       "shelf",
       "bracket",
       "hook",
-      "strong enough"
+      "strong enough",
+      "mounting",
+      "mounted",
+      "hanging",
+      "hanger",
+      "carries",
+      "carrying",
+      "under load",
+      "load rating",
+      "load capacity",
+      "heavy load",
+      "static load",
+      "weight bearing",
+      "bear weight",
+      "bearing weight",
+      "holding weight",
+      "structural"
     ],
     "constraint_rules": {
       "material_exclude": [
@@ -58,7 +74,11 @@
       "reservoir",
       "planter",
       "waterproof",
-      "leak"
+      "leak",
+      "leaking",
+      "leakproof",
+      "leak proof",
+      "holds water"
     ],
     "constraint_rules": {
       "material_prefer": [
@@ -92,7 +112,11 @@
       "UV",
       "patio",
       "yard",
-      "balcony"
+      "balcony",
+      "sunlight",
+      "sunny",
+      "sunshine",
+      "backyard"
     ],
     "constraint_rules": {
       "material_require": [
@@ -122,7 +146,8 @@
       "cup",
       "bowl",
       "utensil",
-      "food safe"
+      "food safe",
+      "eating"
     ],
     "constraint_rules": {
       "material_require": [
@@ -154,7 +179,13 @@
       "near heat",
       "oven",
       "warm",
-      "thermal"
+      "thermal",
+      "heated",
+      "heater",
+      "heatbed",
+      "heat bed",
+      "hotend",
+      "hot end"
     ],
     "constraint_rules": {
       "material_prefer": [
@@ -188,7 +219,11 @@
       "vibration",
       "cushion",
       "grip",
-      "squeeze"
+      "squeeze",
+      "bending",
+      "bendable",
+      "flexing",
+      "squeezing"
     ],
     "constraint_rules": {
       "material_require": [
@@ -217,7 +252,9 @@
       "kids",
       "tool",
       "bumps",
-      "protective"
+      "protective",
+      "dropped",
+      "dropping"
     ],
     "constraint_rules": {
       "material_prefer": [
@@ -248,7 +285,11 @@
       "mate",
       "align",
       "clearance",
-      "assembly"
+      "assembly",
+      "mating",
+      "aligned",
+      "aligning",
+      "alignment"
     ],
     "constraint_rules": {
       "material_prefer": [
@@ -326,7 +367,12 @@
       "against skin",
       "skin contact",
       "worn against",
-      "worn daily"
+      "worn daily",
+      "sunglasses",
+      "headband",
+      "armband",
+      "sweatband",
+      "cufflink"
     ],
     "trigger_exclusions": [
       "napkin ring",
@@ -365,7 +411,11 @@
       "jewelry stand",
       "jewellery box",
       "pendant lamp",
-      "pendant light"
+      "pendant light",
+      "sunglasses case",
+      "sunglasses holder",
+      "sunglasses stand",
+      "cufflink box"
     ],
     "constraint_rules": {
       "material_conditional": [
