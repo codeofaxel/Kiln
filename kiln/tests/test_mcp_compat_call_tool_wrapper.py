@@ -60,9 +60,9 @@ def _server_with_base_handler(result: _Result):
 
         server.add_request_handler("tools/call", entry.params_type, _base)
 
-        def _invoke():
+        def _invoke(ctx=None):
             handler = server.get_request_handler("tools/call").handler
-            return anyio.run(handler, None, None)
+            return anyio.run(handler, ctx, None)
 
         return mcp, _invoke
 
@@ -76,7 +76,8 @@ def _server_with_base_handler(result: _Result):
 
     handlers[CallToolRequest] = _base_v1
 
-    def _invoke():
+    def _invoke(ctx=None):
+        # 1.x handlers take no ctx; the wrapper hands the callback None.
         return anyio.run(handlers[CallToolRequest], None)
 
     return mcp, _invoke
@@ -88,7 +89,7 @@ def test_the_wrapper_actually_sees_the_result():
     result = _Result()
     mcp, invoke = _server_with_base_handler(result)
 
-    assert wrap_call_tool_result(mcp, lambda inner: inner.structuredContent.update(seen=True))
+    assert wrap_call_tool_result(mcp, lambda inner, ctx: inner.structuredContent.update(seen=True))
     invoke()
 
     assert result.structuredContent.get("seen") is True, (
@@ -101,7 +102,7 @@ def test_the_handlers_own_return_value_survives():
     just the stage — the failure mode worth being loudest about."""
     result = _Result()
     mcp, invoke = _server_with_base_handler(result)
-    wrap_call_tool_result(mcp, lambda inner: None)
+    wrap_call_tool_result(mcp, lambda inner, ctx: None)
 
     resp = invoke()
 
@@ -116,11 +117,31 @@ def test_installing_twice_does_not_stack():
     mcp, invoke = _server_with_base_handler(result)
 
     calls: list[int] = []
-    assert wrap_call_tool_result(mcp, lambda inner: calls.append(1)) is True
-    assert wrap_call_tool_result(mcp, lambda inner: calls.append(1)) is False
+    assert wrap_call_tool_result(mcp, lambda inner, ctx: calls.append(1)) is True
+    assert wrap_call_tool_result(mcp, lambda inner, ctx: calls.append(1)) is False
 
     invoke()
     assert len(calls) == 1
+
+
+def test_the_callback_receives_this_calls_request_context():
+    """On SDK 2 the per-call ctx is the ONLY place the session lives; a
+    wrapper that dropped it would make every host capability read answer
+    "declared nothing" — silently, per call.  On 1.x there is no per-call
+    ctx and None is the contract (the session lives on the server there)."""
+    result = _Result()
+    mcp, invoke = _server_with_base_handler(result)
+
+    seen: list = []
+    wrap_call_tool_result(mcp, lambda inner, ctx: seen.append((inner, ctx)))
+
+    if MCP_SDK_MAJOR >= 2:
+        sentinel = object()
+        invoke(sentinel)
+        assert seen == [(result, sentinel)]
+    else:
+        invoke()
+        assert seen == [(result, None)]
 
 
 def test_no_handler_to_wrap_is_a_false_not_a_crash():
@@ -137,4 +158,4 @@ def test_no_handler_to_wrap_is_a_false_not_a_crash():
 
         server.request_handlers.pop(CallToolRequest, None)
 
-    assert wrap_call_tool_result(mcp, lambda inner: None) is False
+    assert wrap_call_tool_result(mcp, lambda inner, ctx: None) is False
