@@ -435,14 +435,68 @@ def _bounding_box(vertices: list[tuple[float, ...]]) -> dict[str, float]:
     }
 
 
+def _edge_census(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    *,
+    weld_tolerance: float = 0.0,
+) -> dict[str, int]:
+    """Count how many triangles meet along each edge, split by defect class.
+
+    A closed surface has every edge shared by exactly two triangles.  The two
+    ways that fails are not the same problem and do not have the same fix:
+
+    * **boundary** — an edge on exactly one triangle.  The surface is open
+      there: a hole.  ``repair_stl_advanced`` can sew small ones shut.
+    * **pinch** — an edge on three or more triangles.  Two sheets of surface
+      meet along a line instead of enclosing a volume, so there is no hole to
+      sew and no repair pass here handles it; the geometry has to be built
+      differently upstream.
+
+    *weld_tolerance* snaps coordinates to a grid of that size before counting,
+    so a mesh whose shared vertices differ only in the last float bit is not
+    reported as riddled with holes.  Zero (the default) compares exactly,
+    which is what every caller has always done.
+
+    Returns:
+        Counts keyed ``total``, ``manifold``, ``boundary``, ``pinch``.
+    """
+    if weld_tolerance > 0.0:
+        def key(v: tuple[float, ...]) -> tuple[float, ...]:
+            return tuple(round(c / weld_tolerance) * weld_tolerance for c in v[:3])
+    else:
+        def key(v: tuple[float, ...]) -> tuple[float, ...]:
+            return tuple(v[:3])
+
+    edge_count: dict[tuple[tuple[float, ...], tuple[float, ...]], int] = {}
+    for tri in triangles:
+        welded = [key(v) for v in tri]
+        for i in range(3):
+            v_a, v_b = welded[i], welded[(i + 1) % 3]
+            if v_a == v_b:
+                continue  # Collapsed edge of a degenerate triangle.
+            # Canonical edge order for undirected comparison.
+            edge = (min(v_a, v_b), max(v_a, v_b))
+            edge_count[edge] = edge_count.get(edge, 0) + 1
+
+    counts = edge_count.values()
+    return {
+        "total": len(edge_count),
+        "manifold": sum(1 for c in counts if c == 2),
+        "boundary": sum(1 for c in counts if c == 1),
+        "pinch": sum(1 for c in counts if c >= 3),
+    }
+
+
 def _check_manifold(
     triangles: list[tuple[tuple[float, ...], ...]],
     warnings: list[str],
 ) -> bool:
     """Check if the mesh is manifold (watertight).
 
-    A manifold mesh has every edge shared by exactly two triangles.
-    Uses a dict to count edge occurrences in O(n) time.
+    A manifold mesh has every edge shared by exactly two triangles.  Counts
+    edges through :func:`_edge_census` in O(n) time and names which of the two
+    defect classes it found, because a hole and a pinch call for different
+    fixes.
 
     Returns:
         True if manifold, False otherwise (with a warning appended).
@@ -450,27 +504,25 @@ def _check_manifold(
     if not triangles:
         return False
 
-    edge_count: dict[tuple[tuple[float, ...], tuple[float, ...]], int] = {}
+    census = _edge_census(triangles)
+    if census["boundary"] == 0 and census["pinch"] == 0:
+        return True
 
-    for tri in triangles:
-        for i in range(3):
-            v_a = tri[i]
-            v_b = tri[(i + 1) % 3]
-            # Canonical edge order for undirected comparison.
-            edge = (min(v_a, v_b), max(v_a, v_b))
-            edge_count[edge] = edge_count.get(edge, 0) + 1
-
-    non_manifold = sum(1 for c in edge_count.values() if c != 2)
-
-    if non_manifold > 0:
-        warnings.append(
-            f"Mesh is not manifold (watertight): {non_manifold:,} edges are "
-            f"not shared by exactly 2 triangles.  Most slicers can handle "
-            f"this, but print quality may be affected."
+    parts: list[str] = []
+    if census["boundary"]:
+        parts.append(
+            f"{census['boundary']:,} open edges (holes in the surface)"
         )
-        return False
-
-    return True
+    if census["pinch"]:
+        parts.append(
+            f"{census['pinch']:,} pinched edges (3+ triangles meet along one "
+            f"line)"
+        )
+    warnings.append(
+        f"Mesh is not manifold (watertight): {' and '.join(parts)}.  Most "
+        f"slicers can handle this, but print quality may be affected."
+    )
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -989,7 +1041,57 @@ def repair_stl(
         "cleaned_triangles": len(cleaned),
         "degenerate_removed": degenerate_removed,
         "normals_recomputed": normals_fixed,
+        **_residual_defect_report(cleaned, hole_pass_ran=False),
     }
+
+
+def _residual_defect_report(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    *,
+    hole_pass_ran: bool,
+) -> dict[str, Any]:
+    """Describe what is still wrong with a mesh a repair pass just wrote.
+
+    A repair result that only lists what was removed lets "success" stand in
+    for "fixed": a caller whose mesh went in non-manifold and came out
+    unchanged reads zeros next to a happy path and assumes the mesh is now
+    clean.  This tail states the output's actual condition — watertight or
+    not — and, when defects remain, says which classes this pass repairs and
+    which it has no repair for, so the caller is never left inferring.
+    """
+    census = _edge_census(triangles)
+    report: dict[str, Any] = {
+        "is_watertight": census["boundary"] == 0 and census["pinch"] == 0,
+        "remaining_boundary_edges": census["boundary"],
+        "remaining_pinch_edges": census["pinch"],
+    }
+
+    unrepaired: list[str] = []
+    if census["boundary"]:
+        if hole_pass_ran:
+            unrepaired.append(
+                f"{census['boundary']:,} open edges remain: the hole-closing "
+                f"pass sews boundary loops of 3-50 edges, so larger or "
+                f"tangled holes were left as-is."
+            )
+        else:
+            unrepaired.append(
+                f"{census['boundary']:,} open edges remain: this pass only "
+                f"removes degenerate triangles and refreshes normals.  Run "
+                f"again with close_holes=True to sew small holes."
+            )
+    if census["pinch"]:
+        unrepaired.append(
+            f"{census['pinch']:,} pinched edges remain (3+ triangles meet "
+            f"along one line).  No repair pass here handles this class — it "
+            f"is not a hole, so hole closing cannot touch it.  The geometry "
+            f"has to be rebuilt where it was made (e.g. regenerate the "
+            f"model, or re-run the boolean/decoration step that produced "
+            f"it)."
+        )
+    if unrepaired:
+        report["unrepaired"] = unrepaired
+    return report
 
 
 def splice_mesh_at_z(
@@ -1937,6 +2039,7 @@ def repair_stl_advanced(
         "holes_closed": holes_closed,
         "triangles_added": len(new_triangles),
         "final_triangles": len(all_tris),
+        **_residual_defect_report(all_tris, hole_pass_ran=close_holes),
     }
 
 
@@ -3406,27 +3509,18 @@ def count_non_manifold_edges(file_path: str) -> dict[str, Any]:
     if errors or not tris:
         raise ValueError(f"Cannot parse mesh: {errors or ['No geometry']}")
 
-    edge_count: dict[tuple[tuple[float, ...], tuple[float, ...]], int] = {}
-    for tri in tris:
-        for j in range(3):
-            va, vb = tri[j], tri[(j + 1) % 3]
-            edge = (min(va, vb), max(va, vb))
-            edge_count[edge] = edge_count.get(edge, 0) + 1
-
-    total_edges = len(edge_count)
-    boundary = sum(1 for c in edge_count.values() if c == 1)
-    manifold = sum(1 for c in edge_count.values() if c == 2)
-    t_junction = sum(1 for c in edge_count.values() if c >= 3)
-    non_manifold = boundary + t_junction
+    census = _edge_census(tris)
+    total_edges = census["total"]
+    non_manifold = census["boundary"] + census["pinch"]
 
     return {
         "total_edges": total_edges,
-        "manifold_edges": manifold,
-        "boundary_edges": boundary,
-        "t_junction_edges": t_junction,
+        "manifold_edges": census["manifold"],
+        "boundary_edges": census["boundary"],
+        "t_junction_edges": census["pinch"],
         "non_manifold_edges": non_manifold,
         "is_watertight": non_manifold == 0,
-        "manifold_pct": round(manifold / total_edges * 100, 1) if total_edges > 0 else 0.0,
+        "manifold_pct": round(census["manifold"] / total_edges * 100, 1) if total_edges > 0 else 0.0,
     }
 
 

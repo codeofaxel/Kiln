@@ -64,6 +64,35 @@ class TestSvgParser:
         assert scad.count("paths=[[") == 1
         assert scad.count("],[") >= 1  # second path present
 
+    def test_to_scad_grows_union_to_dissolve_tangencies(self):
+        # Sub-polygons that touch edge-on without overlapping (a glyph
+        # stem meeting its diagonal) extrude into pinched, non-manifold
+        # edges unless the evaluated region is grown by an epsilon so the
+        # tangency becomes a real overlap.  The wrap must GROW only —
+        # a grow-then-shrink closing re-creates the near-tangency.
+        from kiln.mark_geometry import MarkGeometry
+
+        tangent = MarkGeometry(
+            groups=[
+                [[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]],
+                # Second square shares the x=10 edge exactly: tangent contact.
+                [[(10.0, 0.0), (20.0, 0.0), (20.0, 10.0), (10.0, 10.0)]],
+            ],
+            width=20.0,
+            height=10.0,
+        )
+        scad = tangent.to_scad()
+        assert scad.startswith("offset(delta=")
+        # Epsilon scales with the mark: 0.05% of the largest dimension.
+        assert "offset(delta=0.0100)" in scad
+        # Grow only — no matching negative offset shrinking back.
+        assert "offset(delta=-" not in scad
+
+    def test_to_scad_empty_mark_emits_nothing(self):
+        from kiln.mark_geometry import MarkGeometry
+
+        assert MarkGeometry().to_scad() == ""
+
     def test_curves_flatten_and_land_on_endpoints(self):
         svg = (
             '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
@@ -283,7 +312,9 @@ class TestEmbossIntegration:
         with open(svg_p, "w") as f:
             f.write(OFFSET_VIEWBOX_SVG)
         info = prepare_svg_for_emboss(svg_p, str(tmp_path))
-        assert info["openscad_polygons"].startswith("union()")
+        # Tangency-dissolving grow wrap, then the union of polygon groups.
+        assert info["openscad_polygons"].startswith("offset(delta=")
+        assert "union()" in info["openscad_polygons"]
         assert info["openscad_polygons_fill_safe"] is False
         # Centered content bounds — the placement translate becomes 0,0.
         assert info["content_x_min"] == pytest.approx(-info["content_width"] / 2)
@@ -334,6 +365,59 @@ class TestEmbossIntegration:
         assert "surface(" not in scad
         assert "difference" in scad
 
+    def test_tangent_subpolygons_deboss_is_watertight(self, tmp_path):
+        # Replays the pinched-edge incident: art whose sub-polygons touch
+        # edge-on (a glyph stem meeting its diagonal) used to extrude into
+        # 4-triangles-per-edge pinches that no repair pass could sew.  The
+        # grow-by-epsilon wrap in to_scad() must dissolve the tangency so
+        # the decorated mesh comes out 2-manifold in the first place.
+        import subprocess
+
+        if not _openscad_available():
+            pytest.skip("needs OpenSCAD")
+
+        from kiln.emboss_generator import generate_emboss_scad
+        from kiln.generation.validation import count_non_manifold_edges
+        from kiln.image_to_surface import prepare_svg_for_emboss
+
+        svg_p = os.path.join(str(tmp_path), "tangent.svg")
+        with open(svg_p, "w") as f:
+            # Two squares sharing the x=50 edge exactly: tangent contact.
+            f.write(
+                '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
+                '<rect x="10" y="10" width="40" height="40" fill="black"/>'
+                '<rect x="50" y="10" width="40" height="40" fill="black"/>'
+                "</svg>"
+            )
+        info = prepare_svg_for_emboss(svg_p, str(tmp_path))
+        stl = os.path.join(str(tmp_path), "cube.stl")
+        _write_cube_stl(stl, 40.0)
+        face = {
+            "face_name": "top",
+            "center": (0.0, 0.0, 40.0),
+            "normal": [0.0, 0.0, 1.0],
+            "width_mm": 40.0,
+            "height_mm": 40.0,
+        }
+        result = generate_emboss_scad(
+            model_path=stl,
+            content_info=info,
+            face=face,
+            output_dir=str(tmp_path),
+            depth_mm=1.2,
+            mode="deboss",
+            scale=0.7,
+        )
+        out_stl = os.path.join(str(tmp_path), "decorated.stl")
+        subprocess.run(
+            ["openscad", "-q", "-o", out_stl, "--export-format", "binstl",
+             result["scad_path"]],
+            capture_output=True,
+            check=True,
+        )
+        census = count_non_manifold_edges(out_stl)
+        assert census["is_watertight"], census
+
     def test_fill_wrapper_skipped_for_holed_marks(self, monkeypatch):
         from kiln import emboss_generator
 
@@ -355,6 +439,16 @@ class TestEmbossIntegration:
         }
         block2 = emboss_generator._svg_content_block(legacy, 1.0, 1.0, 0.0, 0.0)
         assert "fill()" in block2  # legacy hull-fragment path keeps the glue
+
+
+def _openscad_available() -> bool:
+    import subprocess
+
+    try:
+        subprocess.run(["openscad", "--version"], capture_output=True, check=True)
+        return True
+    except Exception:  # noqa: BLE001 — any failure means "not available"
+        return False
 
 
 def _write_cube_stl(path: str, size: float) -> None:
