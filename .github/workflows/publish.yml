@@ -138,39 +138,22 @@ jobs:
           name: dist-kiln
           path: dist/
 
-      - name: Install syft
-        # Anchore syft — pinned by version tag; binary self-verified
-        # via checksum in the installer script.
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
-            | sh -s -- -b /usr/local/bin v1.18.1
-          syft version
-
-      - name: Generate CycloneDX JSON SBOM
-        run: |
-          VERSION="${GITHUB_REF#refs/tags/}"
-          VERSION="${VERSION#v}"
-          syft dir:dist \
-            --output cyclonedx-json=sbom.cdx.json \
-            --source-name kiln3d \
-            --source-version "${VERSION:-dev}"
-
-      - name: Generate SPDX JSON SBOM
-        run: |
-          VERSION="${GITHUB_REF#refs/tags/}"
-          VERSION="${VERSION#v}"
-          syft dir:dist \
-            --output spdx-json=sbom.spdx.json \
-            --source-name kiln3d \
-            --source-version "${VERSION:-dev}"
-
-      - name: Attest CycloneDX SBOM
-        # actions/attest-sbom v2.2.0
-        uses: actions/attest-sbom@115c3be05ff3974bcbd596578934b3f9ce39bf68
-        with:
-          subject-path: 'dist/*'
-          sbom-path: sbom.cdx.json
-
+      # SBOMs are NOT generated here.  `sbom.yml` owns them end to end —
+      # it resolves the real runtime dependency set, scans it, refuses to
+      # publish an empty bill of materials, attests it, and uploads it.
+      #
+      # This job used to generate its own pair with `syft dir:dist` and
+      # upload them to the same release under the same filenames.  Both
+      # workflows fire on `release: published`, so the two uploads raced
+      # and the later one won.  `dir:dist` scans an unopened wheel, which
+      # syft catalogues as nothing, so the empty pair overwrote the real
+      # one roughly ten minutes after it landed — and the guard that would
+      # have caught it lives in the OTHER workflow, which had already
+      # passed on its own correct file.  Measured on v1.3.1: sbom.yml
+      # produced 46 components at 17:36; the asset served at 17:46 had 0.
+      #
+      # One artifact, one owner.  If SBOM coverage ever needs to block a
+      # publish, depend on sbom.yml rather than re-deriving it here.
       - name: Sign wheel + sdist with Sigstore (keyless)
         # sigstore/gh-action-sigstore-python v3.5.0
         uses: sigstore/gh-action-sigstore-python@790bc6befb9d733738f18d8f895854b453640ec9
@@ -188,25 +171,16 @@ jobs:
             dist/*.whl
             dist/*.tar.gz
 
-      - name: Upload SBOMs to the GitHub release
+      # Only the signing artifacts this job actually produces.  The SBOM
+      # filenames are deliberately absent: they belong to sbom.yml, and
+      # listing them here is what let an empty pair overwrite a good one.
+      - name: Upload signing artifacts to the GitHub release
         # softprops/action-gh-release v3.0.2
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
         with:
           files: |
-            sbom.cdx.json
-            sbom.spdx.json
             dist/*.sigstore
           fail_on_unmatched_files: false
-
-      - name: Upload SBOMs as workflow artifacts
-        # actions/upload-artifact v7.0.1
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: sbom-kiln-${{ github.event.release.tag_name || github.run_id }}
-          path: |
-            sbom.cdx.json
-            sbom.spdx.json
-          retention-days: 90
 
   publish-kiln:
     needs: supply-chain-kiln
