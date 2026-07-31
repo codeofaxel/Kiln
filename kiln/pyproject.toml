@@ -37,6 +37,11 @@ classifiers = [
     "Topic :: System :: Hardware",
 ]
 dependencies = [
+    # Deliberately NOT upper-bounded.  SDK 2.0 (2026-07-28) is the spec the
+    # hosted /mcp connector serves, and Dockerfile.api pins `mcp>=2.0` for
+    # exactly that reason, so a `<2` here would declare kiln3d incompatible
+    # with the SDK its own hosted deploy requires.  `kiln.mcp_compat` is how
+    # both majors are supported instead — see the port still owed there.
     "mcp>=1.0",
     "requests>=2.25",
     "pyyaml>=5.4",

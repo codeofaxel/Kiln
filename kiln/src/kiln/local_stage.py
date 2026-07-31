@@ -42,6 +42,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from kiln.mcp_compat import lowlevel_server
 from kiln.mesh_payload import VIEWER_STRUCTURED_CONTENT_KEY, mesh_to_viewer_payload
 
 logger = logging.getLogger(__name__)
@@ -180,7 +181,7 @@ def _declared_extensions(mcp: Any) -> dict[str, Any]:
     """
     out: dict[str, Any] = {}
     try:
-        caps = mcp._mcp_server.request_context.session.client_params.capabilities
+        caps = lowlevel_server(mcp).request_context.session.client_params.capabilities
     except Exception:  # noqa: BLE001 — no session is a legitimate answer
         return out
     # ``extensions`` is not a modelled field on every SDK, so it arrives as
@@ -230,7 +231,7 @@ def _log_signal_once(mcp: Any, attaching: bool) -> None:
         return
     _signal_logged = True
     try:
-        info = mcp._mcp_server.request_context.session.client_params.clientInfo
+        info = lowlevel_server(mcp).request_context.session.client_params.clientInfo
         who = f"{getattr(info, 'name', '?')}/{getattr(info, 'version', '?')}"
     except Exception:  # noqa: BLE001
         who = "unknown host"
@@ -371,10 +372,8 @@ def _register_resource(mcp: Any) -> bool:
     download lands, and one that never got a document raises there rather
     than at boot.
     """
-    from mcp.server.fastmcp.resources import FunctionResource
-    from pydantic import AnyUrl
-
     from kiln import stage_cache
+    from kiln.mcp_compat import FunctionResource
 
     def _document() -> str:
         global _host_read_the_stage
@@ -391,7 +390,10 @@ def _register_resource(mcp: Any) -> bool:
 
     mcp.add_resource(
         FunctionResource(
-            uri=AnyUrl(MESH_VIEWER_RESOURCE_URI),
+            # A plain str on purpose: SDK 1.x declares this ``AnyUrl`` and
+            # coerces the string for us, while 2.x declares it ``str`` and
+            # REJECTS an AnyUrl.  The string is the one input both accept.
+            uri=MESH_VIEWER_RESOURCE_URI,
             name=MESH_VIEWER_RESOURCE_NAME,
             title="Kiln Mesh Viewer",
             description=(
@@ -494,7 +496,7 @@ def _install_result_hook(mcp: Any) -> bool:
     """
     from mcp.types import CallToolRequest
 
-    handlers = getattr(mcp._mcp_server, "request_handlers", None) or {}
+    handlers = getattr(lowlevel_server(mcp), "request_handlers", None) or {}
     prev = handlers.get(CallToolRequest)
     if prev is None or getattr(prev, "_kiln_local_stage", False):
         return False
