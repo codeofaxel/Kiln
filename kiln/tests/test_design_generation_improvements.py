@@ -744,6 +744,72 @@ class TestSTLRepair:
         assert result["path"] == out_path
         assert os.path.isfile(out_path)
 
+    def test_clean_mesh_reports_watertight_with_no_unrepaired(self, tmp_path):
+        """A watertight input comes back watertight, with nothing flagged."""
+        from kiln.generation.validation import repair_stl
+
+        stl_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl_path, 10.0)
+
+        result = repair_stl(stl_path)
+        assert result["is_watertight"] is True
+        assert result["remaining_boundary_edges"] == 0
+        assert result["remaining_pinch_edges"] == 0
+        assert "unrepaired" not in result
+
+    def test_pinched_mesh_repair_admits_it_fixed_nothing(self, tmp_path):
+        """Pinched edges survive both passes, and the result says so.
+
+        Two cubes sharing one vertical edge produce the pinch class (an
+        edge on 4 triangles).  Neither repair pass handles it — the old
+        result reported zeros next to a happy path and let 'success'
+        stand in for 'fixed'.  The result must now state the mesh is
+        still not watertight and name the unhandled class.
+        """
+        from kiln.generation.validation import repair_stl, repair_stl_advanced
+
+        stl_path = str(tmp_path / "pinched.stl")
+        _write_pinched_stl(stl_path)
+
+        for repair in (repair_stl, repair_stl_advanced):
+            result = repair(stl_path, output_path=str(tmp_path / "out.stl"))
+            assert result["is_watertight"] is False
+            assert result["remaining_pinch_edges"] > 0
+            assert any("pinch" in note for note in result["unrepaired"])
+
+    def test_open_mesh_without_hole_pass_points_at_close_holes(self, tmp_path):
+        """The fast pass names the fix for holes it deliberately skips."""
+        from kiln.generation.validation import repair_stl
+
+        stl_path = str(tmp_path / "open.stl")
+        _write_open_box_stl(stl_path, 10.0)
+
+        result = repair_stl(stl_path)
+        assert result["is_watertight"] is False
+        assert result["remaining_boundary_edges"] > 0
+        assert any("close_holes=True" in note for note in result["unrepaired"])
+
+    def test_edge_census_weld_tolerance(self):
+        """A weld tolerance snaps near-identical vertices before counting.
+
+        Two triangles sharing an edge except for a sub-micron jitter read
+        as four boundary edges exactly, but as one welded manifold edge
+        under a tolerance above the jitter.
+        """
+        from kiln.generation.validation import _edge_census
+
+        jitter = 1e-6
+        tris = [
+            ((0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (0.0, 10.0, 0.0)),
+            ((10.0, jitter, 0.0), (0.0, 10.0 + jitter, 0.0), (5.0, 9.0, 5.0)),
+        ]
+        exact = _edge_census(tris)
+        assert exact["manifold"] == 0
+        assert exact["boundary"] == 6
+        welded = _edge_census(tris, weld_tolerance=1e-3)
+        assert welded["manifold"] == 1
+        assert welded["boundary"] == 4
+
 
 class TestDesignComposition:
     """Tests for compose_stls()."""
@@ -1884,6 +1950,54 @@ def _write_cube_stl(path: str, size: float) -> None:
             for v in tri:
                 fh.write(struct.pack("<3f", *v))
             fh.write(struct.pack("<H", 0))
+
+
+def _write_stl_triangles(path: str, tris: list) -> None:
+    """Write raw triangles as a binary STL (zero normals)."""
+    with open(path, "wb") as fh:
+        fh.write(b"\x00" * 80)
+        fh.write(struct.pack("<I", len(tris)))
+        for tri in tris:
+            fh.write(struct.pack("<3f", 0, 0, 0))
+            for v in tri:
+                fh.write(struct.pack("<3f", *v))
+            fh.write(struct.pack("<H", 0))
+
+
+def _cube_triangles(s: float, ox: float = 0.0, oy: float = 0.0) -> list:
+    """Triangles of an s-cube with its min corner at (ox, oy, 0)."""
+    tris = [
+        ((0, 0, 0), (s, 0, 0), (s, s, 0)),
+        ((0, 0, 0), (s, s, 0), (0, s, 0)),
+        ((0, 0, s), (s, s, s), (s, 0, s)),
+        ((0, 0, s), (0, s, s), (s, s, s)),
+        ((0, 0, 0), (s, 0, s), (s, 0, 0)),
+        ((0, 0, 0), (0, 0, s), (s, 0, s)),
+        ((0, s, 0), (s, s, 0), (s, s, s)),
+        ((0, s, 0), (s, s, s), (0, s, s)),
+        ((0, 0, 0), (0, s, 0), (0, s, s)),
+        ((0, 0, 0), (0, s, s), (0, 0, s)),
+        ((s, 0, 0), (s, 0, s), (s, s, s)),
+        ((s, 0, 0), (s, s, s), (s, s, 0)),
+    ]
+    return [
+        tuple((x + ox, y + oy, z) for x, y, z in tri) for tri in tris
+    ]
+
+
+def _write_pinched_stl(path: str) -> None:
+    """Two cubes touching along one vertical edge — the pinch class.
+
+    The edge (10,10,0)-(10,10,10) belongs to two faces of each cube, so
+    four triangles meet along it: non-manifold, and not a hole.
+    """
+    _write_stl_triangles(path, _cube_triangles(10.0) + _cube_triangles(10.0, 10.0, 10.0))
+
+
+def _write_open_box_stl(path: str, size: float) -> None:
+    """A cube missing its top face — boundary edges (an open hole)."""
+    tris = [t for t in _cube_triangles(size) if not all(v[2] == size for v in t)]
+    _write_stl_triangles(path, tris)
 
 
 def _write_box_stl(path: str, sx: float, sy: float, sz: float) -> None:
