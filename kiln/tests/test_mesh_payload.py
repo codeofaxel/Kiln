@@ -6,6 +6,13 @@ the mesh are indistinguishable until something tries to draw it.  The
 size-cap tests pin the downgrade branch by monkeypatching the decimation
 probe to ``None``, so they cannot flip if ``fast_simplification`` lands in
 the environment.
+
+Building the fixtures needs trimesh, which ships in the ``mesh-diagnostics``
+extra rather than the base install, so the module skips without it — the
+same guard ``test_mesh_diagnostics`` and ``test_print_gate_enrichment``
+already use.  The contract that holds with trimesh ABSENT is pinned
+separately, in ``test_mesh_payload_without_trimesh``, which is where it can
+still run.
 """
 
 from __future__ import annotations
@@ -14,10 +21,16 @@ import base64
 
 import numpy as np
 import pytest
-import trimesh
 
-from kiln import mesh_payload
-from kiln.mesh_payload import VIEWER_PAYLOAD_KIND, mesh_to_viewer_payload
+trimesh = pytest.importorskip(
+    "trimesh", reason="trimesh (mesh-diagnostics extra) required to build fixture meshes"
+)
+
+from kiln import mesh_payload  # noqa: E402
+from kiln.mesh_payload import (  # noqa: E402
+    VIEWER_PAYLOAD_KIND,
+    mesh_to_viewer_payload,
+)
 
 
 def _f32(b64: str) -> np.ndarray:

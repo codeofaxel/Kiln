@@ -31,6 +31,32 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
 
+    # STEP ISOLATION — every verdict step below carries a condition that
+    # survives an earlier red step.
+    #
+    # By default a failing step aborts the job and SKIPS the rest, so the
+    # first red gate blindfolds every gate after it.  On 2026-07-30 `Lint
+    # kiln` failed on an E741, and across the next eight runs nobody could
+    # see that `Run kiln tests` was ALSO red — one test module imported
+    # trimesh (an optional extra) at module scope, and pytest treats a
+    # collection ImportError as fatal for the whole run.  Fixing the lint is
+    # what revealed it.  A job that has been red a while reads as scenery, so
+    # the second failure sat unseen for ~21 hours.
+    #
+    # The verdicts are independent by construction — a dependency check, an
+    # install-context guard, two linters, a leak gate, two test suites — so
+    # ordering buys nothing and costs visibility.  The condition keeps the
+    # HARD contract (any red step still fails the job) while making every
+    # verdict visible in ONE run.
+    #
+    # `steps.deps.outcome == 'success'` rather than a plain `always()`:
+    # the installs are a real dependency chain, and running every verdict
+    # against a broken install produces a screenful of import errors instead
+    # of one honest message.  Because the installs run in sequence, the LAST
+    # one reporting success means all of them did.  The leak gate is the
+    # exception — it is stdlib-only and reads the checkout, so it needs no
+    # install and is gated on `!cancelled()` alone.  It is a security gate;
+    # it should be the last thing allowed to go dark.
     steps:
       - name: Checkout code
         uses: actions/checkout@v7.0.1
@@ -52,12 +78,15 @@ jobs:
           pip install -e "./octoprint-cli[dev]" --no-deps
 
       - name: Install linter
+        id: deps
         run: pip install ruff
 
       - name: Verify installed dependency graph
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: pip check
 
       - name: Verify kiln-pro is NOT installed in public CI
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         # The public Kiln test surface must pass standalone — no
         # leakage from the private kiln-pro overlay.  Past incident:
         # 4 adhesion tests passed locally (where kiln-pro was on
@@ -78,12 +107,17 @@ jobs:
           echo "✓ kiln-pro is correctly absent from the public CI environment"
 
       - name: Lint kiln
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: cd kiln && ruff check src/
 
       - name: Lint octoprint-cli
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: cd octoprint-cli && ruff check src/
 
       - name: Moat-comment leak gate
+        # Stdlib-only and reads the checkout, so it is gated on `!cancelled()`
+        # alone — no install can take this one dark.
+        if: ${{ !cancelled() }}
         # Public Kiln must not, in code OR shipped data JSON: narrate HOW the
         # kiln-pro overlay reasons, name its research PROVENANCE / source
         # bibliography, brand it "the moat", or name a private overlay PATH.
@@ -92,13 +126,15 @@ jobs:
         run: python3 scripts/audit_moat_comment_leak.py
 
       - name: Run kiln tests
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: cd kiln && python -m pytest tests/ -v --cov=kiln --cov-report=term-missing
 
       - name: Run octoprint-cli tests
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: cd octoprint-cli && python -m pytest tests/ -v --cov=octoprint_cli --cov-report=term-missing
 
       - name: Generate SBOM (CycloneDX)
-        if: matrix.python-version == '3.12'
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' && matrix.python-version == '3.12' }}
         run: |
           pip install cyclonedx-bom
           cyclonedx-py environment --output-format json -o sbom.json
@@ -106,7 +142,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload SBOM artifact
-        if: matrix.python-version == '3.12'
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' && matrix.python-version == '3.12' }}
         uses: actions/upload-artifact@v7
         with:
           name: sbom
