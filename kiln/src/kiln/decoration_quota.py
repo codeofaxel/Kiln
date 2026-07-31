@@ -107,8 +107,21 @@ class DecorationQuota:
 
     @staticmethod
     def _is_unlimited(tier: str) -> bool:
-        """Return True if the tier has unlimited decorations."""
-        return tier in ("pro", "business", "enterprise", "founder")
+        """Return True if the tier has unlimited decorations.
+
+        Stated as "metering is the free-tier behaviour" rather than as a list
+        of paid tiers.  Two reasons, and the second is why it was rewritten:
+
+        * a paid tier added later is unlimited without anyone remembering to
+          extend a list here, which is the direction that matches the pricing;
+        * the list had to name every tier to work, and one of them is internal.
+          A tier customers cannot buy should not be discoverable in a package
+          they can install.
+
+        ``_get_tier`` returns ``"free"`` on any failure, so an unresolvable
+        caller is metered — the conservative direction is preserved.
+        """
+        return (tier or "").strip().lower() not in ("", "free")
 
     # ------------------------------------------------------------------
     # File I/O

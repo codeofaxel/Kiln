@@ -55,7 +55,7 @@ def _telemetry_enabled() -> bool:
 # Heartbeats are for installed-user reachability, not for ephemeral
 # CI jobs that get a fresh ``$HOME`` per invocation — those generate
 # a brand-new ``installation_id`` per run and inflate active-install
-# counts by two orders of magnitude (the founder dashboard saw 462
+# counts by two orders of magnitude (the usage dashboard saw 462
 # "active installs" in 30d when the real number was ~4).  Suppressing
 # the heartbeat at the source is the only honest fix.
 _CI_ENV_VARS: tuple[str, ...] = (
@@ -373,7 +373,7 @@ def _send_heartbeat() -> None:
             # below already serializes this whole dict.  Encoding it twice
             # stored details as a jsonb STRING scalar server-side instead of
             # an object, which silently broke the ingest sanitizers and
-            # crashed the founder dashboard's tool-usage tile the first time
+            # crashed the usage dashboard's tool-usage tile the first time
             # anything tried to read it (kiln-pro migration 095, 2026-07-09).
             "p_details": {
                 "texture_names": stats.get("texture_names", {}),
