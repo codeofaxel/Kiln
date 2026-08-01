@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-08-01T08:10:08.143688+00:00",
-  "tool_count": 407,
+  "generated": "2026-08-01T18:25:06.286138+00:00",
+  "tool_count": 406,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -3247,6 +3247,18 @@
             "default": null,
             "title": "Preset Version Id"
           },
+          "preset_release_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Preset Release Id"
+          },
           "base_mesh_version_id": {
             "anyOf": [
               {
@@ -3298,76 +3310,6 @@
           "host_mesh_path"
         ],
         "title": "apply_decoration_presetArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "apply_signed_decoration_release",
-      "description": "Apply a SIGNED preset release to a host mesh \u2014 the verified, pinned path.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "design_versioning",
-      "parameters": {
-        "properties": {
-          "preset_release_id": {
-            "title": "Preset Release Id",
-            "type": "string"
-          },
-          "host_mesh_path": {
-            "title": "Host Mesh Path",
-            "type": "string"
-          },
-          "base_mesh_version_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Base Mesh Version Id"
-          },
-          "face": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Face"
-          },
-          "scale": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Scale"
-          },
-          "offset_x_mm": {
-            "default": 0.0,
-            "title": "Offset X Mm",
-            "type": "number"
-          },
-          "offset_y_mm": {
-            "default": 0.0,
-            "title": "Offset Y Mm",
-            "type": "number"
-          }
-        },
-        "required": [
-          "preset_release_id",
-          "host_mesh_path"
-        ],
-        "title": "apply_signed_decoration_releaseArguments",
         "type": "object"
       }
     },
@@ -3435,13 +3377,45 @@
       "category": "design_versioning",
       "parameters": {
         "properties": {
-          "feature_version_id": {
-            "title": "Feature Version Id",
-            "type": "string"
-          },
           "host_mesh_path": {
             "title": "Host Mesh Path",
             "type": "string"
+          },
+          "feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Feature Id"
+          },
+          "feature_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Feature Version Id"
+          },
+          "feature_release_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Feature Release Id"
           },
           "target_spec": {
             "anyOf": [
@@ -3485,7 +3459,6 @@
           }
         },
         "required": [
-          "feature_version_id",
           "host_mesh_path"
         ],
         "title": "attach_part_featureArguments",
