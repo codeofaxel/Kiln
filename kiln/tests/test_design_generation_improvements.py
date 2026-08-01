@@ -789,6 +789,141 @@ class TestSTLRepair:
         assert result["remaining_boundary_edges"] > 0
         assert any("close_holes=True" in note for note in result["unrepaired"])
 
+    def test_jittered_scan_mesh_is_welded_not_destroyed(self, tmp_path):
+        """Rounding-noise jitter must be welded, never 'closed' into ruin.
+
+        A perfect cube whose exporters wrote each face's corners
+        independently (nanometre jitter — the signature of scanned and
+        AI-generated meshes) used to read as 36 phantom open edges; the
+        hole-closer then stamped a reversed duplicate of every face and
+        the 'repaired' solid enclosed zero volume while reporting
+        watertight.  The weld pass must dissolve the phantom holes so
+        nothing gets sewn, and the volume must survive.
+        """
+        from kiln.generation.validation import (
+            _parse_stl,
+            _signed_volume,
+            repair_stl_advanced,
+        )
+
+        stl_path = str(tmp_path / "scan.stl")
+        _write_jittered_cube_stl(stl_path, 10.0, jitter=1e-6)
+
+        result = repair_stl_advanced(
+            stl_path, output_path=str(tmp_path / "out.stl"), close_holes=True
+        )
+        assert result["vertices_welded"] > 0
+        assert result["triangles_added"] == 0
+        assert result["is_watertight"] is True
+        tris, _ = _parse_stl(tmp_path / "out.stl", [])
+        assert abs(_signed_volume(tris)) == pytest.approx(1000.0, rel=0.01)
+
+    def test_fast_pass_welds_rounding_noise(self, tmp_path):
+        """The fast pass alone seals a jitter-only mesh, honestly."""
+        from kiln.generation.validation import repair_stl
+
+        stl_path = str(tmp_path / "scan.stl")
+        _write_jittered_cube_stl(stl_path, 10.0, jitter=1e-6)
+
+        result = repair_stl(stl_path)
+        assert result["vertices_welded"] > 0
+        assert result["remaining_boundary_edges"] == 0
+        assert result["is_watertight"] is True
+        assert result["enclosed_volume_mm3"] == pytest.approx(1000.0, rel=0.01)
+
+    def test_hole_closing_still_closes_real_holes(self, tmp_path):
+        """The guards must not stop legitimate hole closing."""
+        from kiln.generation.validation import (
+            _parse_stl,
+            _signed_volume,
+            repair_stl_advanced,
+        )
+
+        stl_path = str(tmp_path / "open.stl")
+        _write_open_box_stl(stl_path, 10.0)
+
+        result = repair_stl_advanced(
+            stl_path, output_path=str(tmp_path / "out.stl"), close_holes=True
+        )
+        assert result["holes_closed"] == 1
+        assert result["is_watertight"] is True
+        tris, _ = _parse_stl(tmp_path / "out.stl", [])
+        assert abs(_signed_volume(tris)) == pytest.approx(1000.0, rel=0.01)
+
+    def test_close_holes_refuses_to_restamp_surface(self, tmp_path):
+        """With welding disabled, the closer must refuse, not ruin.
+
+        Same jittered cube, weld_tolerance=0: the phantom loops are back,
+        and each fan the closer builds re-stamps an existing face.  The
+        duplicate guard must discard them all and say why, instead of
+        writing a zero-volume mesh certified watertight (the pre-guard
+        behavior).
+        """
+        from kiln.generation.validation import (
+            _parse_stl,
+            _signed_volume,
+            repair_stl_advanced,
+        )
+
+        stl_path = str(tmp_path / "scan.stl")
+        _write_jittered_cube_stl(stl_path, 10.0, jitter=1e-6)
+
+        result = repair_stl_advanced(
+            stl_path,
+            output_path=str(tmp_path / "out.stl"),
+            close_holes=True,
+            weld_tolerance=0,
+        )
+        assert result["triangles_added"] == 0
+        assert result["is_watertight"] is False
+        assert any("duplicate" in n or "already exist" in n
+                   for n in result["unrepaired"])
+        tris, _ = _parse_stl(tmp_path / "out.stl", [])
+        assert abs(_signed_volume(tris)) == pytest.approx(1000.0, rel=0.01)
+
+    def test_watertight_refuses_sheet_cancelling_surface(self, tmp_path):
+        """A closed surface enclosing no volume is not certified watertight.
+
+        Two copies of a cube, the second wound inside-out and offset by
+        10 nm: every edge pairs up within its own sheet, so the census is
+        clean — but the sheets cancel and a slicer would produce nothing.
+        The report must refuse the watertight claim and say why.
+        """
+        from kiln.generation.validation import repair_stl
+
+        s = 10.0
+        inner = [
+            tuple(tuple(c + 1e-5 for c in v) for v in reversed(tri))
+            for tri in _cube_triangles(s)
+        ]
+        stl_path = str(tmp_path / "pillow.stl")
+        _write_stl_triangles(stl_path, _cube_triangles(s) + inner)
+
+        result = repair_stl(stl_path, output_path=str(tmp_path / "out.stl"))
+        assert result["is_watertight"] is False
+        assert result["enclosed_volume_mm3"] < 1.0
+        assert any("encloses almost no volume" in n
+                   for n in result["unrepaired"])
+
+    def test_weld_preserves_distinct_close_features(self, tmp_path):
+        """Welding must not fuse legitimately separate nearby geometry."""
+        from kiln.generation.validation import (
+            _parse_stl,
+            _signed_volume,
+            repair_stl,
+        )
+
+        # Two 10 mm cubes with a 20 µm air gap — far above the weld
+        # radius, far below anything visually obvious.
+        tris = _cube_triangles(10.0) + _cube_triangles(10.0, 10.02, 0.0)
+        stl_path = str(tmp_path / "pair.stl")
+        _write_stl_triangles(stl_path, tris)
+
+        result = repair_stl(stl_path, output_path=str(tmp_path / "out.stl"))
+        assert result["vertices_welded"] == 0
+        out, _ = _parse_stl(tmp_path / "out.stl", [])
+        assert abs(_signed_volume(out)) == pytest.approx(2000.0, rel=0.01)
+
     def test_edge_census_weld_tolerance(self):
         """A weld tolerance snaps near-identical vertices before counting.
 
@@ -1983,6 +2118,25 @@ def _cube_triangles(s: float, ox: float = 0.0, oy: float = 0.0) -> list:
     return [
         tuple((x + ox, y + oy, z) for x, y, z in tri) for tri in tris
     ]
+
+
+def _write_jittered_cube_stl(path: str, size: float, *, jitter: float) -> None:
+    """A perfect cube whose faces do not share vertex coordinates.
+
+    Each vertex instance is displaced by up to *jitter* (deterministic),
+    mimicking exporters that tessellate faces independently — the source
+    of phantom open edges in scanned and AI-generated meshes.
+    """
+    import random
+
+    rng = random.Random(7)
+    tris = [
+        tuple(
+            tuple(c + rng.uniform(-jitter, jitter) for c in v) for v in tri
+        )
+        for tri in _cube_triangles(size)
+    ]
+    _write_stl_triangles(path, tris)
 
 
 def _write_pinched_stl(path: str) -> None:

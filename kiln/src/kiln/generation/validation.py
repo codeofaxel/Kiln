@@ -487,6 +487,150 @@ def _edge_census(
     }
 
 
+def _signed_volume(triangles: list[tuple[tuple[float, ...], ...]]) -> float:
+    """Signed enclosed volume via the divergence theorem, in mm³.
+
+    Exact for a closed surface with outward winding.  For an open surface
+    the number depends on the reference point, so triangles are centered
+    on their bounding-box midpoint first — that keeps before/after
+    comparisons on the SAME mesh meaningful, which is all the repair
+    guards need from it.
+    """
+    if not triangles:
+        return 0.0
+    xs = [v[0] for t in triangles for v in t]
+    ys = [v[1] for t in triangles for v in t]
+    zs = [v[2] for t in triangles for v in t]
+    cx = (min(xs) + max(xs)) / 2
+    cy = (min(ys) + max(ys)) / 2
+    cz = (min(zs) + max(zs)) / 2
+    total = 0.0
+    for a, b, c in triangles:
+        ax, ay, az = a[0] - cx, a[1] - cy, a[2] - cz
+        bx, by, bz = b[0] - cx, b[1] - cy, b[2] - cz
+        gx, gy, gz = c[0] - cx, c[1] - cy, c[2] - cz
+        total += (
+            ax * (by * gz - bz * gy)
+            - ay * (bx * gz - bz * gx)
+            + az * (bx * gy - by * gx)
+        )
+    return total / 6.0
+
+
+def _auto_weld_tolerance(
+    triangles: list[tuple[tuple[float, ...], ...]],
+) -> float:
+    """Default weld radius: 0.1 µm, or a millionth of the part's diagonal.
+
+    Two vertices closer than this cannot be a real design distinction —
+    it is at least 100× below anything a printer can express — while
+    float32 round-trip noise (the source of phantom "holes" in scanned
+    and AI-generated meshes) sits well inside it at any printable size.
+    """
+    if not triangles:
+        return 0.0
+    xs = [v[0] for t in triangles for v in t]
+    ys = [v[1] for t in triangles for v in t]
+    zs = [v[2] for t in triangles for v in t]
+    diag = math.sqrt(
+        (max(xs) - min(xs)) ** 2
+        + (max(ys) - min(ys)) ** 2
+        + (max(zs) - min(zs)) ** 2
+    )
+    return max(1e-4, diag * 1e-6)
+
+
+def _weld_vertices(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    tolerance: float,
+) -> tuple[list[tuple[tuple[float, ...], ...]], int]:
+    """Snap vertices within *tolerance* of each other onto one representative.
+
+    Grid-bucketed with a 27-cell neighbor search, so a pair straddling a
+    grid line still welds (plain grid snapping misses those).  The first
+    vertex seen in a neighborhood becomes the representative; later ones
+    within *tolerance* adopt its exact coordinates, which is what makes
+    the repaired file read as sealed to EVERY exact-comparison consumer
+    (slicers, analyzers), not just to this module's own census.
+
+    Returns:
+        (welded_triangles, count_of_vertex_instances_moved).
+    """
+    if tolerance <= 0.0 or not triangles:
+        return triangles, 0
+
+    inv = 1.0 / tolerance
+    tol_sq = tolerance * tolerance
+    # Exact-duplicate fast path first: most meshes repeat identical
+    # coordinates many times, and those need no neighbor search.
+    remap: dict[tuple[float, float, float], tuple[float, float, float]] = {}
+    cells: dict[tuple[int, int, int], list[tuple[float, float, float]]] = {}
+
+    def representative(p: tuple[float, float, float]) -> tuple[float, float, float]:
+        hit = remap.get(p)
+        if hit is not None:
+            return hit
+        ci, cj, ck = round(p[0] * inv), round(p[1] * inv), round(p[2] * inv)
+        for di in (-1, 0, 1):
+            for dj in (-1, 0, 1):
+                for dk in (-1, 0, 1):
+                    for q in cells.get((ci + di, cj + dj, ck + dk), ()):
+                        if (
+                            (q[0] - p[0]) ** 2
+                            + (q[1] - p[1]) ** 2
+                            + (q[2] - p[2]) ** 2
+                        ) <= tol_sq:
+                            remap[p] = q
+                            return q
+        cells.setdefault((ci, cj, ck), []).append(p)
+        remap[p] = p
+        return p
+
+    welded: list[tuple[tuple[float, ...], ...]] = []
+    moved = 0
+    for tri in triangles:
+        out = []
+        for v in tri:
+            p = (v[0], v[1], v[2])
+            r = representative(p)
+            if r != p:
+                moved += 1
+            out.append(r)
+        welded.append(tuple(out))
+    return welded, moved
+
+
+def _weld_for_repair(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    weld_tolerance: float | None,
+) -> tuple[list[tuple[tuple[float, ...], ...]], int, float]:
+    """Weld pass shared by both repair entry points, with its own guard.
+
+    ``None`` means the auto tolerance; ``0`` disables welding.  If welding
+    makes the edge census WORSE (a mesh with legitimate sub-tolerance
+    features, e.g. hairline necks), the weld is discarded and the original
+    coordinates kept — repair must never manufacture a defect.
+
+    Returns:
+        (triangles, vertex_instances_welded, tolerance_used).
+    """
+    tol = (
+        _auto_weld_tolerance(triangles)
+        if weld_tolerance is None
+        else max(0.0, weld_tolerance)
+    )
+    if tol <= 0.0:
+        return triangles, 0, tol
+    welded, moved = _weld_vertices(triangles, tol)
+    if not moved:
+        return triangles, 0, tol
+    before = _edge_census(triangles)
+    after = _edge_census(welded)
+    if (after["boundary"] + after["pinch"]) > (before["boundary"] + before["pinch"]):
+        return triangles, 0, tol
+    return welded, moved, tol
+
+
 def _check_manifold(
     triangles: list[tuple[tuple[float, ...], ...]],
     warnings: list[str],
@@ -988,18 +1132,25 @@ def repair_stl(
     file_path: str,
     *,
     output_path: str | None = None,
+    weld_tolerance: float | None = None,
 ) -> dict[str, Any]:
-    """Repair common STL issues: degenerate triangles, inconsistent normals.
+    """Repair common STL issues: rounding-noise seams, degenerate triangles.
 
-    Removes zero-area triangles and recomputes face normals from vertex
-    winding order.  Does not attempt topology repair (hole closing).
+    Welds vertices that are coincident up to *weld_tolerance* (scanned and
+    AI-generated meshes routinely carry sub-micron jitter that reads as
+    thousands of phantom open edges), removes zero-area triangles, and
+    recomputes face normals from winding order.  Does not attempt topology
+    repair (hole closing).
 
     Args:
         file_path: Path to the STL file.
         output_path: Output path.  Defaults to overwriting the input.
+        weld_tolerance: Weld radius in mm.  ``None`` (default) picks
+            0.1 µm or a millionth of the part diagonal, whichever is
+            larger; ``0`` disables welding.
 
     Returns:
-        Dict with repair statistics.
+        Dict with repair statistics and residual-defect report.
     """
     path = Path(file_path)
     errors: list[str] = []
@@ -1008,6 +1159,9 @@ def repair_stl(
         raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
     if not triangles:
         raise ValueError("STL contains no geometry.")
+
+    triangles_in = len(triangles)
+    triangles, vertices_welded, _ = _weld_for_repair(triangles, weld_tolerance)
 
     cleaned: list[tuple[tuple[float, ...], ...]] = []
     degenerate_removed = 0
@@ -1037,10 +1191,11 @@ def repair_stl(
 
     return {
         "path": out,
-        "original_triangles": len(triangles),
+        "original_triangles": triangles_in,
         "cleaned_triangles": len(cleaned),
         "degenerate_removed": degenerate_removed,
         "normals_recomputed": normals_fixed,
+        "vertices_welded": vertices_welded,
         **_residual_defect_report(cleaned, hole_pass_ran=False),
     }
 
@@ -1058,15 +1213,39 @@ def _residual_defect_report(
     clean.  This tail states the output's actual condition — watertight or
     not — and, when defects remain, says which classes this pass repairs and
     which it has no repair for, so the caller is never left inferring.
+
+    "Watertight" here is a claim about the SOLID, not just the topology:
+    a surface whose edges all pair up but whose sheets cancel (enclosing
+    ~zero volume) slices to nothing, so certifying it watertight would be
+    the exact lie this report exists to prevent.
     """
     census = _edge_census(triangles)
+    edges_closed = census["boundary"] == 0 and census["pinch"] == 0
     report: dict[str, Any] = {
-        "is_watertight": census["boundary"] == 0 and census["pinch"] == 0,
+        "is_watertight": edges_closed,
         "remaining_boundary_edges": census["boundary"],
         "remaining_pinch_edges": census["pinch"],
     }
 
     unrepaired: list[str] = []
+    if edges_closed:
+        volume = _signed_volume(triangles)
+        report["enclosed_volume_mm3"] = round(abs(volume), 4)
+        xs = [v[0] for t in triangles for v in t]
+        ys = [v[1] for t in triangles for v in t]
+        zs = [v[2] for t in triangles for v in t]
+        bbox_volume = (
+            (max(xs) - min(xs)) * (max(ys) - min(ys)) * (max(zs) - min(zs))
+        )
+        if bbox_volume > 0 and abs(volume) < bbox_volume * 1e-6:
+            report["is_watertight"] = False
+            unrepaired.append(
+                f"every edge pairs up, but the surface encloses almost no "
+                f"volume ({abs(volume):.4g} mm³ inside a {bbox_volume:.4g} "
+                f"mm³ bounding box) — opposing sheets cancel out.  This is "
+                f"not a printable solid; a slicer would produce nothing.  "
+                f"Rebuild the geometry upstream."
+            )
     if census["boundary"]:
         if hole_pass_ran:
             unrepaired.append(
@@ -1949,19 +2128,33 @@ def repair_stl_advanced(
     *,
     output_path: str | None = None,
     close_holes: bool = True,
+    weld_tolerance: float | None = None,
 ) -> dict[str, Any]:
-    """Enhanced STL repair: degenerate removal, normal recompute, hole closing.
+    """Enhanced STL repair: vertex weld, degenerate removal, hole closing.
 
-    Finds boundary edges (edges shared by only one triangle) and attempts
-    to close small holes by fan-triangulating the boundary loop.
+    Welds coincident vertices first (see :func:`repair_stl` — this is what
+    dissolves the phantom "holes" that rounding noise opens in scanned and
+    AI-generated meshes), then finds boundary edges (edges shared by only
+    one triangle) and attempts to close small holes by fan-triangulating
+    the boundary loop.
+
+    Hole closing is guarded so it can refuse rather than ruin: a sewing
+    triangle that merely duplicates existing surface is discarded (that
+    "hole" outline traces a face that is already there), and if closing
+    collapses the enclosed volume the whole closure is rolled back —
+    those loops were seams between misaligned sheets, not real openings,
+    and stitching them turns the solid inside-out against itself.
 
     Args:
         file_path: Path to the STL file.
         output_path: Output path.  Defaults to overwriting input.
         close_holes: Whether to attempt hole closing (default True).
+        weld_tolerance: Weld radius in mm.  ``None`` (default) picks
+            0.1 µm or a millionth of the part diagonal, whichever is
+            larger; ``0`` disables welding.
 
     Returns:
-        Dict with repair statistics.
+        Dict with repair statistics and residual-defect report.
     """
     path = Path(file_path)
     errors: list[str] = []
@@ -1970,6 +2163,12 @@ def repair_stl_advanced(
         raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
     if not triangles:
         raise ValueError("STL contains no geometry.")
+
+    triangles_in = len(triangles)
+    unrepaired_extra: list[str] = []
+
+    # Phase 0: Weld rounding-noise seams so phase 2 sees only real holes.
+    triangles, vertices_welded, _ = _weld_for_repair(triangles, weld_tolerance)
 
     # Phase 1: Remove degenerate triangles
     cleaned: list[tuple[tuple[float, ...], ...]] = []
@@ -2016,30 +2215,72 @@ def repair_stl_advanced(
                     boundary_edges.append((edge[0], edge[1]))
 
         # Try to form loops from boundary edges
+        duplicates_discarded = 0
         if boundary_edges:
+            existing_faces = {frozenset(t) for t in cleaned}
             loops = _find_boundary_loops(boundary_edges)
             for loop in loops:
                 if len(loop) < 3 or len(loop) > 50:
                     continue  # Skip trivially small or huge holes
                 # Fan triangulate from first vertex
                 center = loop[0]
-                for i in range(1, len(loop) - 1):
-                    new_triangles.append((center, loop[i], loop[i + 1]))
-                holes_closed += 1
+                fan = [
+                    (center, loop[i], loop[i + 1])
+                    for i in range(1, len(loop) - 1)
+                ]
+                # Guard 1: a real hole has no triangles spanning it.  A fan
+                # that reproduces existing faces is re-stamping the surface,
+                # not filling an opening — drop those triangles.
+                kept_fan = [t for t in fan if frozenset(t) not in existing_faces]
+                duplicates_discarded += len(fan) - len(kept_fan)
+                if kept_fan:
+                    new_triangles.extend(kept_fan)
+                    holes_closed += 1
+
+        if duplicates_discarded:
+            unrepaired_extra.append(
+                f"{duplicates_discarded} sewing triangle(s) discarded: their "
+                f"'hole' outlines trace faces that already exist, so sewing "
+                f"them would duplicate surface instead of closing an "
+                f"opening.  Those seams are usually rounding noise between "
+                f"sheets that do not share vertices."
+            )
+
+        # Guard 2: closing real holes never erases the solid.  If sewing
+        # collapsed the enclosed volume, the loops were seams between
+        # opposing sheets — roll the closure back and say so.
+        if new_triangles:
+            volume_before = abs(_signed_volume(cleaned))
+            volume_after = abs(_signed_volume(cleaned + new_triangles))
+            if volume_before > 1e-9 and volume_after < volume_before * 0.5:
+                unrepaired_extra.append(
+                    f"hole closing rolled back: sewing {holes_closed} "
+                    f"loop(s) collapsed the enclosed volume from "
+                    f"{volume_before:.4g} to {volume_after:.4g} mm³, so "
+                    f"they were not real openings.  The surface likely "
+                    f"contains duplicated or misaligned sheets — rebuild "
+                    f"upstream, or retry with a different weld_tolerance."
+                )
+                new_triangles = []
+                holes_closed = 0
 
     all_tris = cleaned + new_triangles
     out = output_path or file_path
     _write_binary_stl(all_tris, out)
 
+    report = _residual_defect_report(all_tris, hole_pass_ran=close_holes)
+    if unrepaired_extra:
+        report["unrepaired"] = report.get("unrepaired", []) + unrepaired_extra
     return {
         "path": out,
-        "original_triangles": len(triangles),
+        "original_triangles": triangles_in,
         "cleaned_triangles": len(cleaned),
         "degenerate_removed": degenerate_removed,
         "holes_closed": holes_closed,
         "triangles_added": len(new_triangles),
         "final_triangles": len(all_tris),
-        **_residual_defect_report(all_tris, hole_pass_ran=close_holes),
+        "vertices_welded": vertices_welded,
+        **report,
     }
 
 

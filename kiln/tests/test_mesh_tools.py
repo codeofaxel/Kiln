@@ -141,7 +141,9 @@ class TestRepairMesh:
 
         assert result["success"] is True
         assert result["repaired_triangles"] == 5
-        mock_repair.assert_called_once_with("/tmp/model.stl", output_path=None)
+        mock_repair.assert_called_once_with(
+            "/tmp/model.stl", output_path=None, weld_tolerance=None,
+        )
 
     @patch("kiln.server._check_auth", return_value=None)
     @patch("kiln.generation.validation.repair_stl")
@@ -150,7 +152,9 @@ class TestRepairMesh:
         result = mesh_tools["repair_mesh"](file_path="/tmp/in.stl", output_path="/tmp/fixed.stl")
 
         assert result["success"] is True
-        mock_repair.assert_called_once_with("/tmp/in.stl", output_path="/tmp/fixed.stl")
+        mock_repair.assert_called_once_with(
+            "/tmp/in.stl", output_path="/tmp/fixed.stl", weld_tolerance=None,
+        )
 
     def test_auth_failure(self, mesh_tools) -> None:
         with patch("kiln.server._check_auth", return_value=_auth_error()):
@@ -184,6 +188,7 @@ class TestRepairMesh:
         assert result["holes_closed"] == 2
         mock_advanced.assert_called_once_with(
             "/tmp/model.stl", output_path=None, close_holes=True,
+            weld_tolerance=None,
         )
 
 
@@ -205,6 +210,7 @@ class TestRepairMeshAdvanced:
         assert result["holes_closed"] == 3
         mock_repair.assert_called_once_with(
             "/tmp/model.stl", output_path=None, close_holes=True,
+            weld_tolerance=None,
         )
 
     @patch("kiln.server._check_auth", return_value=None)
@@ -217,6 +223,7 @@ class TestRepairMeshAdvanced:
 
         mock_repair.assert_called_once_with(
             "/tmp/model.stl", output_path=None, close_holes=False,
+            weld_tolerance=None,
         )
 
     def test_auth_failure(self, mesh_tools) -> None:
