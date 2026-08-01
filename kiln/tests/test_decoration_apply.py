@@ -180,3 +180,90 @@ def test_text_content_without_image_asset(mesh):
             content="text:KILN",
         )
     assert ds.call_args.kwargs["content"] == "text:KILN"
+
+
+def test_caller_placement_forwards_and_wins_over_selection_mapping(mesh, image):
+    """face/scale/offsets pass through; explicit face beats the
+    surface_selection → face mapping; omitted placement sends NOTHING, so
+    decorate_surface's own defaults stay the single authority."""
+    with patch("kiln.server.decorate_surface", return_value=_ok()) as ds:
+        apply_decoration_spec(
+            host_mesh_path=mesh,
+            pattern_family="logo_deboss",
+            image_asset_path=image,
+            surface_selection="horizontal_caps",  # maps to face="top"
+            face="front",                          # caller wins
+            scale=0.4,
+            offset_x_mm=-3.0,
+            offset_y_mm=2.0,
+        )
+    kw = ds.call_args.kwargs
+    assert kw["face"] == "front"
+    assert kw["scale"] == pytest.approx(0.4)
+    assert kw["offset_x_mm"] == pytest.approx(-3.0)
+    assert kw["offset_y_mm"] == pytest.approx(2.0)
+
+    with patch("kiln.server.decorate_surface", return_value=_ok()) as ds:
+        apply_decoration_spec(
+            host_mesh_path=mesh,
+            pattern_family="logo_deboss",
+            image_asset_path=image,
+            surface_selection="horizontal_caps",
+        )
+    kw = ds.call_args.kwargs
+    assert kw["face"] == "top"
+    assert "scale" not in kw
+    assert "offset_x_mm" not in kw and "offset_y_mm" not in kw
+
+
+def test_manual_offsets_clamp_to_the_face(tmp_path):
+    """An offset that would push the content off the face is clamped, and
+    the clamp is SAID — a successful carve with art hanging off the edge
+    is a wrong result wearing a success envelope.  Drives the REAL
+    generator, not a re-implementation of its math."""
+    from kiln.emboss_generator import generate_emboss_scad
+
+    dummy_stl = tmp_path / "dummy.stl"
+    dummy_stl.write_bytes(b"solid dummy\nendsolid dummy\n")
+    face = {
+        "face": "top",
+        "center": (0.0, 0.0, 10.0),
+        "width_mm": 80.0,
+        "height_mm": 60.0,
+        "normal": (0, 0, 1),
+        "area_mm2": 80.0 * 60.0,
+    }
+    content_info = {
+        "type": "openscad_text",
+        "text": "Hi",
+        "font": "Liberation Sans",
+    }
+
+    result = generate_emboss_scad(
+        model_path=str(dummy_stl),
+        content_info=content_info,
+        face=face,
+        output_dir=str(tmp_path),
+        scale=0.5,
+        depth_mm=0.8,
+        mode="deboss",
+        offset_x_mm=500.0,
+        offset_y_mm=-500.0,
+    )
+
+    assert any("clamped" in w for w in result.get("warnings", [])), (
+        "an off-face offset must be clamped AND said, not silently applied"
+    )
+
+    # And an in-bounds offset passes through unclamped, no warning.
+    quiet = generate_emboss_scad(
+        model_path=str(dummy_stl),
+        content_info=content_info,
+        face=face,
+        output_dir=str(tmp_path),
+        scale=0.5,
+        depth_mm=0.8,
+        mode="deboss",
+        offset_x_mm=5.0,
+    )
+    assert not any("clamped" in w and "offset" in w for w in quiet.get("warnings", []))

@@ -698,6 +698,26 @@ def generate_emboss_scad(
         placement, face, scale, offset_x_mm, offset_y_mm,
     )
 
+    # Keep the content ON the face.  The named placements above are
+    # face-relative and safe by construction, but MANUAL offsets arrive
+    # in raw mm — from a numeric field, an agent, or an API caller — and
+    # nothing else between here and the carve checks them against the
+    # face.  Unclamped, an offset can slide the art partly (or wholly)
+    # off the face and the carve still reports success; the drag UI never
+    # hits this only because dragging is bounded by the visible face.
+    # Clamp so the content box stays inside, and say so.
+    max_off_x = max((face_w - target_w) / 2.0, 0.0)
+    max_off_y = max((face_h - target_h) / 2.0, 0.0)
+    if abs(final_offset_x) > max_off_x or abs(final_offset_y) > max_off_y:
+        clamped_x = max(-max_off_x, min(max_off_x, final_offset_x))
+        clamped_y = max(-max_off_y, min(max_off_y, final_offset_y))
+        warnings.append(
+            f"placement offset ({final_offset_x:.1f}, {final_offset_y:.1f})mm "
+            f"would push the content off the {face_w:.0f}x{face_h:.0f}mm face — "
+            f"clamped to ({clamped_x:.1f}, {clamped_y:.1f})mm"
+        )
+        final_offset_x, final_offset_y = clamped_x, clamped_y
+
     # Offsets are FACE-LOCAL on every face: they ride an INNER translate
     # (post-rotation), so the face-aligning rotation itself defines the
     # in-plane axes and +offset_x/+offset_y always slide the content

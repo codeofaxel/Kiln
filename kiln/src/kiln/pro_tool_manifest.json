@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-01T05:02:44.087688+00:00",
+  "generated": "2026-08-01T08:10:08.143688+00:00",
   "tool_count": 407,
   "categories": {
     "product_generators": {
@@ -3258,6 +3258,40 @@
             ],
             "default": null,
             "title": "Base Mesh Version Id"
+          },
+          "face": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Face"
+          },
+          "scale": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scale"
+          },
+          "offset_x_mm": {
+            "default": 0.0,
+            "title": "Offset X Mm",
+            "type": "number"
+          },
+          "offset_y_mm": {
+            "default": 0.0,
+            "title": "Offset Y Mm",
+            "type": "number"
           }
         },
         "required": [
@@ -3293,6 +3327,40 @@
             ],
             "default": null,
             "title": "Base Mesh Version Id"
+          },
+          "face": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Face"
+          },
+          "scale": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scale"
+          },
+          "offset_x_mm": {
+            "default": 0.0,
+            "title": "Offset X Mm",
+            "type": "number"
+          },
+          "offset_y_mm": {
+            "default": 0.0,
+            "title": "Offset Y Mm",
+            "type": "number"
           }
         },
         "required": [
