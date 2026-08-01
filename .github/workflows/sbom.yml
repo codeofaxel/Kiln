@@ -142,11 +142,20 @@ jobs:
           subject-path: 'dist/*'
           sbom-path: sbom.cdx.json
 
+      # A manual run with a `ref` uploads too, so a released SBOM can be
+      # REPAIRED in place: the recovery path the release runbook promises
+      # ("re-run it against the tag, it re-uploads onto the existing
+      # release, no version bump") was gated to release events only, so
+      # it generated a correct pair and dropped it as a workflow
+      # artifact nobody serves.  `tag_name` is explicit because a
+      # dispatch runs from a branch, and softprops would otherwise target
+      # that branch instead of the tag being repaired.
       - name: Upload SBOMs as release assets
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || github.event.inputs.ref != ''
         # softprops/action-gh-release v3.0.2
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
         with:
+          tag_name: ${{ github.event.release.tag_name || github.event.inputs.ref }}
           files: |
             sbom.cdx.json
             sbom.spdx.json
