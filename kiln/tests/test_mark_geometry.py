@@ -365,57 +365,46 @@ class TestEmbossIntegration:
         assert "surface(" not in scad
         assert "difference" in scad
 
-    def test_tangent_subpolygons_deboss_is_watertight(self, tmp_path):
-        # Replays the pinched-edge incident: art whose sub-polygons touch
-        # edge-on (a glyph stem meeting its diagonal) used to extrude into
-        # 4-triangles-per-edge pinches that no repair pass could sew.  The
-        # grow-by-epsilon wrap in to_scad() must dissolve the tangency so
-        # the decorated mesh comes out 2-manifold in the first place.
+    def test_tangent_glyph_rings_deboss_is_watertight(self, tmp_path):
+        """Replays the pinched-edge incident with the geometry that caused it.
+
+        The rings below are the arm and stem of a real wordmark glyph, taken
+        from the mesh that surfaced this: one even-odd group whose sub-strokes
+        run tangent, the curve-flattened arm grazing the stem's straight edge.
+        Extruded as-is they produce edges carrying four triangles — a pinch no
+        repair pass can sew, because it is not a hole.  The grow-by-epsilon
+        wrap in to_scad() has to dissolve the tangency at the source.
+
+        Straight-edged stand-ins do NOT reproduce this (tangent squares union
+        cleanly); the flattened curve against a straight edge is the case that
+        does, which is why the fixture is real geometry rather than a sketch.
+        """
         import subprocess
 
         if not _openscad_available():
             pytest.skip("needs OpenSCAD")
 
-        from kiln.emboss_generator import generate_emboss_scad
         from kiln.generation.validation import count_non_manifold_edges
-        from kiln.image_to_surface import prepare_svg_for_emboss
 
-        svg_p = os.path.join(str(tmp_path), "tangent.svg")
-        with open(svg_p, "w") as f:
-            # Two squares sharing the x=50 edge exactly: tangent contact.
-            f.write(
-                '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
-                '<rect x="10" y="10" width="40" height="40" fill="black"/>'
-                '<rect x="50" y="10" width="40" height="40" fill="black"/>'
-                "</svg>"
-            )
-        info = prepare_svg_for_emboss(svg_p, str(tmp_path))
-        stl = os.path.join(str(tmp_path), "cube.stl")
-        _write_cube_stl(stl, 40.0)
-        face = {
-            "face_name": "top",
-            "center": (0.0, 0.0, 40.0),
-            "normal": [0.0, 0.0, 1.0],
-            "width_mm": 40.0,
-            "height_mm": 40.0,
-        }
-        result = generate_emboss_scad(
-            model_path=stl,
-            content_info=info,
-            face=face,
-            output_dir=str(tmp_path),
-            depth_mm=1.2,
-            mode="deboss",
-            scale=0.7,
+        mark = MarkGeometry(
+            groups=[[_GLYPH_ARM, _GLYPH_STEM]], width=98.896, height=116.4
         )
+        scad_p = os.path.join(str(tmp_path), "glyph.scad")
+        with open(scad_p, "w") as f:
+            f.write(
+                "difference() {\n"
+                "  translate([-120,-120,0]) cube([240,240,10]);\n"
+                f"  translate([0,0,9]) linear_extrude(height=2) {mark.to_scad()}\n"
+                "}\n"
+            )
         out_stl = os.path.join(str(tmp_path), "decorated.stl")
         subprocess.run(
-            ["openscad", "-q", "-o", out_stl, "--export-format", "binstl",
-             result["scad_path"]],
+            ["openscad", "-q", "-o", out_stl, "--export-format", "binstl", scad_p],
             capture_output=True,
             check=True,
         )
         census = count_non_manifold_edges(out_stl)
+        assert census["t_junction_edges"] == 0, census
         assert census["is_watertight"], census
 
     def test_fill_wrapper_skipped_for_holed_marks(self, monkeypatch):
@@ -440,6 +429,33 @@ class TestEmbossIntegration:
         block2 = emboss_generator._svg_content_block(legacy, 1.0, 1.0, 0.0, 0.0)
         assert "fill()" in block2  # legacy hull-fragment path keeps the glue
 
+
+# Real tangent sub-strokes of a wordmark glyph — the geometry that
+# produced the pinched edges this module's regression test replays.
+_GLYPH_ARM = [
+    (-32.1040, -33.9120), (-32.1040, -4.1200), (-31.6079, -3.5162),
+    (-31.1115, -2.9130), (-30.6149, -2.3102), (-30.1180, -1.7080),
+    (-29.6209, -1.1063), (-29.1235, -0.5050), (-28.6259, 0.0957),
+    (-28.1280, 0.6960), (-27.6299, 1.2958), (-27.1315, 1.8950), (-26.6329, 2.4937),
+    (-26.1340, 3.0920), (-25.6349, 3.6898), (-25.1355, 4.2870), (-24.6359, 4.8837),
+    (-24.1360, 5.4800), (-23.6360, 6.0760), (-23.1360, 6.6720), (-22.6360, 7.2680),
+    (-22.1360, 7.8640), (-21.6360, 8.4600), (-21.1360, 9.0560), (-20.6360, 9.6520),
+    (-20.1360, 10.2480), (-19.6360, 10.8440), (-19.1360, 11.4400),
+    (-18.6360, 12.0360), (-18.1360, 12.6320), (-17.6360, 13.2280),
+    (-17.1360, 13.8240), (-16.6360, 14.4200), (-16.1360, 15.0160),
+    (-15.6359, 15.6140), (-15.1357, 16.2120), (-14.6354, 16.8100),
+    (-14.1350, 17.4080), (-13.6344, 18.0060), (-13.1337, 18.6040),
+    (-12.6329, 19.2020), (-12.1320, 19.8000), (-11.6309, 20.3980),
+    (-11.1297, 20.9960), (-10.6284, 21.5940), (-10.1270, 22.1920),
+    (-9.6254, 22.7900), (-9.1237, 23.3880), (-8.6219, 23.9860), (-8.1200, 24.5840),
+    (20.6000, 58.2000), (49.4480, 58.2000), (0.3120, 1.4800), (-1.6080, 1.4800)
+]
+
+_GLYPH_STEM = [
+    (-49.4480, -58.2000), (-49.4480, 58.2000), (-25.4160, 58.2000),
+    (-25.4160, 26.0560), (-25.4160, -3.4000), (-25.4160, -14.8720),
+    (-25.4160, -58.2000)
+]
 
 def _openscad_available() -> bool:
     import subprocess
