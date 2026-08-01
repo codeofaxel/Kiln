@@ -69,44 +69,121 @@ MESH_VIEWER_RESOURCE_URI = "ui://kiln/mesh-viewer"
 #: Resource name shown in host resource listings.
 MESH_VIEWER_RESOURCE_NAME = "kiln_mesh_viewer"
 
-#: Tools whose success result reliably names a mesh the user just made, so
-#: opening a 3D panel on it is what they wanted.  Deliberately a reviewed
-#: list and not "anything with a mesh-shaped key": a report or an estimate
-#: that happens to echo a path would open an empty panel on every call.
+#: Tools whose success result reliably names a mesh the user just made or
+#: changed, so opening a 3D panel on it is what they wanted.
+#:
+#: THE ONE LIST, READ BY BOTH DOORS.  A local ``kiln serve`` stamps from it
+#: below; Kiln's hosted connector imports it rather than keeping a second
+#: copy.  It used to be two hand-typed frozensets, one per repo — identical
+#: the day they were written and with nothing to keep them that way, which is
+#: how ``import_external_mesh`` (the door CAD files and marketplace downloads
+#: arrive through) served a perfect viewer payload into a panel no host was
+#: ever told to draw.
+#:
+#: Reviewed, not derived — but the reviewing is anchored, not remembered.
+#: Every tool wired to the preview chokepoint belongs here unless kiln-pro's
+#: ``scripts/stage_coverage.yaml`` records a reason otherwise, and a new
+#: mesh-returning tool on neither list fails that repo's stage-coverage gate
+#: at conception.  The reasons a tool sits OUT: its output is a print or
+#: gcode artifact rather than a design mesh; it is a bookkeeping act on
+#: geometry the user has already seen (branch/save/sign ceremonies keep
+#: their PNG receipt, not a panel); it is an N-result batch; or the value it
+#: changes does not survive into the stage payload today (the color tools —
+#: a colored result shown gray reads as failure, so no panel until the
+#: payload carries color end to end).
 VIEWER_TOOLS: frozenset[str] = frozenset(
     {
-        "design_session",
-        "generate_coaster",
-        "generate_keychain",
-        "generate_nameplate",
-        "generate_bookmark",
-        "generate_fridge_magnet",
-        "generate_pet_tag",
-        "generate_ornament",
-        "generate_jewelry_tray",
-        "generate_soap_dish",
-        "generate_pen_cup",
-        "generate_wall_plaque",
-        "generate_license_plate_frame",
-        "generate_ashtray",
-        "generate_frisbee",
-        "generate_pet_bowl",
-        "generate_rolling_tray",
-        "generate_product_base",
-        "generate_decorated_product",
-        "split_mesh_to_fit",
-        "import_model_parts",
-        "compile_scad",
-        "generate_from_template",
-        "smart_generate_from_template",
+        "add_feature_during_print",
+        "add_mesh_chamfer",
+        "add_mesh_fillet",
+        "add_pin_joints",
+        "add_qr_to_product",
+        "apply_decoration",
+        "apply_decoration_preset",
+        "apply_design_reinforcements",
         "apply_geometric_texture",
         "apply_image_texture",
+        "apply_mid_print_decoration_plan",
         "apply_procedural_texture",
-        "smart_decorate",
-        "generate_qr_decoration",
+        "attach_part_feature",
         "auto_add_rubber_feet",
-        "preview_decorated_mesh",
+        "boolean_mesh_op",
+        "build_organic_mesh",
+        "center_model_on_bed",
+        "cherry_pick_decoration_modification",
+        "cherry_pick_feature_modification",
+        "cherry_pick_modification",
+        "compile_scad",
+        "compose_assembly_parts",
+        "compose_models",
+        "compose_part_from_primitives",
+        "decorate_during_print",
+        "decorate_surface",
+        "design_session",
+        "download_generated_model",
+        "extract_model_from_3mf",
+        "generate_ashtray",
+        "generate_bookmark",
+        "generate_coaster",
+        "generate_decorated_product",
+        "generate_fridge_magnet",
+        "generate_frisbee",
+        "generate_from_template",
+        "generate_jewelry_tray",
+        "generate_keychain",
+        "generate_license_plate_frame",
+        "generate_model_with_provider",
+        "generate_nameplate",
+        "generate_ornament",
+        "generate_pen_cup",
+        "generate_pet_bowl",
+        "generate_pet_tag",
+        "generate_product_base",
+        "generate_qr_decoration",
+        "generate_rolling_tray",
+        "generate_soap_dish",
+        "generate_wall_plaque",
+        "hollow_mesh_model",
+        "import_external_feature",
+        "import_external_mesh",
+        "import_model_parts",
+        "import_step_file",
+        "iterate_design",
         "make_printable",
+        "merge_decoration_preset_branches",
+        "merge_design_branches",
+        "merge_feature_branches",
+        "merge_mesh_files",
+        "merge_stl",
+        "mirror_mesh_model",
+        "optimize_print_orientation",
+        "optimize_template_params",
+        "plan_mid_print_decoration",
+        "prepare_ai_model_for_print",
+        "preview_decorated_mesh",
+        "preview_mid_print_session",
+        "rebase_design_branch",
+        "rebase_feature_branch",
+        "rebase_preset_branch",
+        "rebuild_design",
+        "recover_texture_detail",
+        "remove_mesh_floating_regions",
+        "repair_mesh",
+        "repair_mesh_advanced",
+        "rescale_model",
+        "rollback_design_version",
+        "rollback_feature",
+        "rotate_model",
+        "scale_mesh_to_fit",
+        "simplify_mesh_model",
+        "smart_decorate",
+        "smart_generate_from_template",
+        "smart_redesign",
+        "splice_mesh_at_z",
+        "split_mesh_by_component",
+        "split_mesh_to_fit",
+        "thicken_mesh_walls",
+        "tweak_and_compile_scad",
     }
 )
 
