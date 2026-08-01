@@ -71,6 +71,37 @@ def _mode_for_family(family: str) -> str:
     return "emboss" if family in _EMBOSS_FAMILIES else "deboss"
 
 
+def _resolved_via_preset(result: dict[str, Any]) -> dict[str, Any]:
+    """Demote decorate_surface's managed-asset warning on the preset path.
+
+    ``decorate_surface`` warns when it is handed a preset's stored artwork,
+    because that normally means a caller could not find the preset-apply
+    door and carved the raw asset with invented parameters.  Reaching it
+    from HERE is the opposite case: these parameters came out of the preset.
+
+    So the lineage is kept — it usefully records which preset produced the
+    geometry — and the warning is dropped.  A warning that fires loudest on
+    the one path doing it correctly is a warning people learn to ignore.
+    """
+    managed = result.get("managed_asset")
+    if not isinstance(managed, dict):
+        return result
+    result = dict(result)
+    result["managed_asset"] = {
+        **{k: v for k, v in managed.items() if k != "warning"},
+        "via_preset_apply": True,
+    }
+    warned = managed.get("warning")
+    warnings = result.get("warnings")
+    if isinstance(warnings, list) and warned in warnings:
+        remaining = [w for w in warnings if w != warned]
+        if remaining:
+            result["warnings"] = remaining
+        else:
+            result.pop("warnings", None)
+    return result
+
+
 def _decorated_path(result: dict[str, Any]) -> str | None:
     """Pull the produced mesh path out of decorate_surface's result dict."""
     for key in _PATH_KEYS:
@@ -174,6 +205,7 @@ def apply_decoration_spec(
 
     result = unwrap_tool_result(result)
     if isinstance(result, dict):
+        result = _resolved_via_preset(result)
         path = _decorated_path(result)
         if path and "decorated_model_path" not in result:
             result = {**result, "decorated_model_path": path}

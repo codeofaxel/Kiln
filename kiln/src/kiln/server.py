@@ -14642,6 +14642,48 @@ def check_ambient_conditions(
         return _error_dict(f"Failed to check ambient conditions: {exc}", code="AMBIENT_CHECK_ERROR")
 
 
+def _finish_decoration_result(result_dict: dict, *, content: str) -> dict:
+    """Common tail for every SUCCESSFUL decorate_surface exit.
+
+    Quota tile, managed-asset lineage, then the inspect bundle.  It is one
+    helper rather than a copy per exit because the two success paths (the
+    curved-wall text branch and the main carve) had already drifted into
+    duplicate tails once — a third would have been written the same way.
+
+    The lineage half is the honest-warning wire: carving the stored artwork
+    of a saved preset is legal and sometimes correct, but the result is NOT
+    that preset's recorded settings, and saying so is the only thing that
+    stops a blocked caller's fallback from being described as the real
+    thing.  Best-effort throughout — a decoration that already succeeded is
+    never failed by its own annotations.
+    """
+    try:
+        from kiln.decoration_quota import decoration_quota_status
+
+        result_dict["quota"] = decoration_quota_status()
+    except Exception:
+        pass
+
+    try:
+        from kiln.decoration.managed_assets import describe_managed_asset
+
+        managed = describe_managed_asset(content)
+        if managed:
+            result_dict["managed_asset"] = managed
+            warnings = result_dict.setdefault("warnings", [])
+            if isinstance(warnings, list):
+                warnings.append(managed["warning"])
+    except Exception:
+        logger.debug("managed-asset annotation failed", exc_info=True)
+
+    try:
+        from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
+
+        return attach_inspect_bundle(result_dict, level="quick")
+    except ImportError:
+        return result_dict
+
+
 @mcp.tool()
 def decorate_surface(
     model_path: str,
@@ -15015,20 +15057,7 @@ def decorate_surface(
                 record_event("decorations", detail="text_wall")
             except Exception:
                 pass
-            try:
-                from kiln.decoration_quota import decoration_quota_status
-
-                result_dict["quota"] = decoration_quota_status()
-            except Exception:
-                pass
-            try:
-                from kiln_pro.plugins.git_render_tools import (
-                    attach_inspect_bundle,
-                )
-
-                return attach_inspect_bundle(result_dict, level="quick")
-            except ImportError:
-                return result_dict
+            return _finish_decoration_result(result_dict, content=content)
 
         # --- Step 2: Find the target face (needed before SVG prep for sizing) ---
         from kiln.surface_intelligence import (
@@ -15407,17 +15436,7 @@ def decorate_surface(
         # sees where they stand ("2 of 3 used") before the wall instead of
         # only hitting it as an error next time. Best-effort — never blocks
         # a decoration that already succeeded.
-        try:
-            from kiln.decoration_quota import decoration_quota_status
-            result_dict["quota"] = decoration_quota_status()
-        except Exception:
-            pass
-
-        try:
-            from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
-            return attach_inspect_bundle(result_dict, level="quick")
-        except ImportError:
-            return result_dict
+        return _finish_decoration_result(result_dict, content=content)
 
     except FileNotFoundError as exc:
         return _error_dict(str(exc), code="FILE_NOT_FOUND")
