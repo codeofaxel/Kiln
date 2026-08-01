@@ -424,11 +424,19 @@ class _MeshToolsPlugin:
             one triangle) and closes small holes via fan triangulation — use it
             when the mesh is not watertight.
 
+            The result states the output's actual condition: ``is_watertight``,
+            remaining boundary/pinch edge counts, and — when defects survive
+            the pass — an ``unrepaired`` list saying which defect classes this
+            tool has no repair for (pinched edges, where 3+ triangles meet
+            along one line, are not holes and cannot be sewn; they must be
+            fixed where the geometry was made).  Read ``unrepaired`` before
+            telling the user the mesh is fixed.
+
             :param file_path: Path to the STL file to repair.
             :param output_path: Output path.  Defaults to overwriting the input.
             :param close_holes: Also close open holes and fix boundary edges
                 (slower; default False).
-            :returns: Dict with repair statistics.
+            :returns: Dict with repair statistics and residual-defect report.
             """
             return _repair_mesh_impl(
                 file_path, output_path,

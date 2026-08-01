@@ -109,6 +109,26 @@ def _cache_put(sha: str, url: str, expires_at: float) -> None:
     _cache[sha] = (url, expires_at)
 
 
+def _stage_printer_id() -> str | None:
+    """The canonical printer id this install can honestly claim, or ``None``.
+
+    Routed through :mod:`kiln.stage_plate` — the same resolver the inline
+    stage's payload uses — so the two surfaces can never disagree about whose
+    bed a design stands on.  ``None`` covers every unknown (no configured
+    model, unrecognised model, hosted process), and none of them are worth a
+    log line: the generic plate is the designed answer there.
+    """
+    try:
+        from kiln.stage_plate import resolve_stage_plate
+
+        plate = resolve_stage_plate()
+        if plate.get("source") == "printer":
+            return plate.get("printer_id") or None
+    except Exception:  # noqa: BLE001 — furniture, never a failed link
+        pass
+    return None
+
+
 def _sha256_of(path: Path) -> str | None:
     try:
         h = hashlib.sha256()
@@ -144,7 +164,14 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
     sha = _sha256_of(path)
     if sha is None:
         return None
-    cached = _cache_get(sha)
+    # This install's printer rides along so the staged page can draw the
+    # maker's real bed.  Resolved the same way the inline stage's payload
+    # is (kiln.stage_plate): a machine we can actually name, or nothing.
+    printer_id = _stage_printer_id()
+    # The printer is part of the link's identity: the token carries it, so a
+    # config change between calls must not serve a link claiming the old bed.
+    cache_key = f"{sha}:{printer_id or ''}"
+    cached = _cache_get(cache_key)
     if cached:
         # Same bytes already staged — the sixteen-pose case, and the
         # re-render-an-unchanged-design case, both land here.
@@ -172,6 +199,9 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
                 f"{_api_base()}/api/view/mesh",
                 headers={"Authorization": f"Bearer {token}"},
                 files={"file": (path.name, fh, "application/octet-stream")},
+                # The server canonicalises the claim and bakes it into the
+                # signed link, so the /view page draws THIS machine's bed.
+                data={"printer": printer_id} if printer_id else None,
                 timeout=_TIMEOUT_S,
             )
     except Exception as exc:  # noqa: BLE001 — any transport failure is a no-link
@@ -195,7 +225,7 @@ def stage_link_for(mesh_path: str | os.PathLike[str]) -> dict[str, Any] | None:
         expires_at = time.time() + (
             expires_in if isinstance(expires_in, (int, float)) else 1800
         )
-    _cache_put(sha, url, float(expires_at))
+    _cache_put(cache_key, url, float(expires_at))
     return {"viewer_url": url, "expires_at": float(expires_at), "cached": False}
 
 

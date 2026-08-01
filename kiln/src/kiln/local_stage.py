@@ -319,6 +319,22 @@ def token_for_call_result(result: Any) -> str | None:
     return None
 
 
+def _payload_for_mesh(mesh: str, **encode: Any) -> dict:
+    """Encode *mesh* and stamp this install's print bed onto it.
+
+    The one place a payload is built for the local stage.  Both doors below
+    go through it so neither can ship geometry with no bed under it — the
+    stage draws the plate from what arrives here, and a payload that names no
+    plate falls back to a reference square for a bed it knows nothing about.
+
+    Raises whatever the encoder raises; each door decides what to say about
+    it, since one of them is answering a person and the other is not.
+    """
+    from kiln.stage_plate import attach_stage_plate
+
+    return attach_stage_plate(mesh_to_viewer_payload(mesh, **encode))
+
+
 def _inline_payload(token: str) -> dict | None:
     """The viewer payload for a minted token, encoded to the inline budget.
 
@@ -331,7 +347,7 @@ def _inline_payload(token: str) -> dict | None:
     if not mesh:
         return None
     try:
-        return mesh_to_viewer_payload(mesh, max_bytes=_MAX_INLINE_PAYLOAD_BYTES)
+        return _payload_for_mesh(mesh, max_bytes=_MAX_INLINE_PAYLOAD_BYTES)
     except Exception:  # noqa: BLE001 — no payload is not a failed tool call
         logger.debug("inline payload unavailable", exc_info=True)
         return None
@@ -433,7 +449,7 @@ def _register_diagnostics(mcp: Any, out: dict[str, Any]) -> None:
             if not mesh:
                 return {"success": False, "error": "Unknown or expired viewer token."}
             try:
-                payload = mesh_to_viewer_payload(mesh)
+                payload = _payload_for_mesh(mesh)
             except Exception as exc:  # noqa: BLE001
                 return {"success": False, "error": f"Could not read that mesh: {exc}"}
             return {VIEWER_STRUCTURED_CONTENT_KEY: payload}
