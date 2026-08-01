@@ -18,6 +18,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Your logo now prints exactly the way you drew it (free)** — gaps stay open,
   corners stay sharp, dashed lines stay dashed.
 
+- **Repair says what it could not fix (free)** — instead of reporting success
+  on a mesh it left untouched, it names the defect and what to do about it.
+
+- **Decorated models come out as clean, watertight solids (free)** — carving a
+  logo or text no longer leaves hairline seams that make other tools reject
+  the file.
+
 ## [1.3.1] - 2026-07-31
 
 ### Added
