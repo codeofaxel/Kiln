@@ -19,8 +19,8 @@ import os
 import pytest
 
 from kiln.mark_geometry import (
-    MarkGeometry,
     _ring_area,
+    _stroke_segments_to_rings,
     is_bilevel_image,
     parse_svg_to_mark,
     trace_image_to_mark,
@@ -167,7 +167,7 @@ class TestSvgParser:
 
     def test_closed_stroke_has_no_caps(self):
         # Every point on a closed subpath is a joint, so linecap is
-        # irrelevant — the octagon plugs must survive regardless.
+        # irrelevant — the corner plugs must survive regardless.
         svg = (
             '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
             '<path d="M 10 10 L 90 10 L 50 90 z" fill="none" stroke="black"'
@@ -175,7 +175,7 @@ class TestSvgParser:
         )
         m = parse_svg_to_mark(svg)
         assert m is not None
-        assert len([g for g in m.groups if len(g[0]) == 8]) == 3  # one per corner
+        assert len(m.groups) == 6  # 3 segment quads + one join per corner
 
     def test_open_stroked_path_stays_open(self):
         # Five-segment open path (no Z) — the top gap is deliberate.
@@ -187,15 +187,12 @@ class TestSvgParser:
         )
         m = parse_svg_to_mark(svg)
         assert m is not None
-        # 6 points → 5 stroke quads (NOT 6) + 4 interior joint octagons
-        # (the 2 endpoints are butt caps, so they get no geometry).
-        quads = [g for g in m.groups if len(g[0]) == 4]
-        octagons = [g for g in m.groups if len(g[0]) == 8]
-        assert len(quads) == 5
-        assert len(octagons) == 4
-        # No quad spans the top gap between x=418.4 and x=605.6 at y=60.
+        # 6 points → 5 stroke quads (NOT 6) + 4 interior joins.  The 2
+        # endpoints are butt caps, so they contribute no geometry at all.
+        assert len(m.groups) == 9
+        # Nothing spans the top gap between x=418.4 and x=605.6 at y=60.
         gap_lo, gap_hi = 418.4 - 512, 605.6 - 512  # recentered frame
-        for g in quads:
+        for g in m.groups:
             xs = sorted(x for x, _ in g[0])
             assert not (
                 xs[0] == pytest.approx(gap_lo, abs=1.0)
@@ -210,9 +207,8 @@ class TestSvgParser:
         )
         m = parse_svg_to_mark(svg)
         assert m is not None
-        # Explicit Z: 3 points → 3 quads (closing segment kept) + 3 octagons.
-        quads = [g for g in m.groups if len(g[0]) == 4]
-        assert len(quads) == 3
+        # Explicit Z: 3 points → 3 quads (closing segment kept) + 3 joins.
+        assert len(m.groups) == 6
 
     def test_open_two_point_stroked_path(self):
         # A path equivalent to <line> must stroke as a single segment.
@@ -224,6 +220,94 @@ class TestSvgParser:
         assert m is not None
         assert m.width == pytest.approx(80.0, abs=0.01)
         assert m.height == pytest.approx(4.0, abs=0.5)
+
+    def test_miter_join_produces_the_exact_outer_corner(self):
+        # An L with a 90° turn: the miter tip must land on the true outer
+        # corner, so the stroked band reads as a square corner, not a nub.
+        rings = _stroke_segments_to_rings(
+            [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)], 20.0, False, "butt", "miter"
+        )
+        tips = [pt for ring in rings for pt in ring]
+        assert any(
+            x == pytest.approx(110.0) and y == pytest.approx(-10.0) for x, y in tips
+        )
+
+    @pytest.mark.parametrize(
+        ("join", "miterlimit", "expected_min_y"),
+        [
+            # Interior angle 53.13° → miter ratio 1/sin(θ/2) = 2.236, so the
+            # spike reaches 2.236 × half-width past the vertex.
+            ("miter", 4.0, -22.361),
+            ("miter", 2.0, -4.472),  # ratio over the limit → bevels instead
+            ("round", 4.0, -10.000),  # arc of exactly one half-width
+            ("bevel", 4.0, -4.472),  # flat chord between the outer corners
+        ],
+    )
+    def test_join_shape_matches_svg_geometry(self, join, miterlimit, expected_min_y):
+        rings = _stroke_segments_to_rings(
+            [(0.0, 200.0), (100.0, 0.0), (200.0, 200.0)],
+            20.0, False, "butt", join, miterlimit,
+        )
+        min_y = min(y for ring in rings for _, y in ring)
+        assert min_y == pytest.approx(expected_min_y, abs=0.001)
+
+    def test_miter_is_the_default_join(self):
+        pts = [(0.0, 200.0), (100.0, 0.0), (200.0, 200.0)]
+        default = _stroke_segments_to_rings(pts, 20.0, False)
+        explicit = _stroke_segments_to_rings(pts, 20.0, False, "butt", "miter", 4.0)
+        assert default == explicit
+
+    def test_linejoin_and_miterlimit_inherit_from_group(self):
+        svg = (
+            '<svg viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg">'
+            '<g stroke-linejoin="bevel">'
+            '<polyline points="0,200 100,0 200,200" fill="none"'
+            ' stroke="black" stroke-width="20"/></g></svg>'
+        )
+        m = parse_svg_to_mark(svg)
+        assert m is not None
+        # Bevel keeps the corner within one half-width of the apex; the
+        # default miter would spike 2.236 half-widths and stand taller.
+        assert m.height == pytest.approx(208.944, abs=0.01)
+        assert parse_svg_to_mark(
+            svg.replace('<g stroke-linejoin="bevel">', "<g>")
+        ).height == pytest.approx(226.833, abs=0.01)
+
+    def test_over_limit_miter_falls_back_to_bevel(self):
+        svg = (
+            '<svg viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg">'
+            '<polyline points="0,200 100,0 200,200" fill="none" stroke="black"'
+            ' stroke-width="20" stroke-miterlimit="{}"/></svg>'
+        )
+        # Ratio here is 2.236: a limit below it bevels, above it miters.
+        assert parse_svg_to_mark(svg.format(2)).height == pytest.approx(208.944, abs=0.01)
+        assert parse_svg_to_mark(svg.format(10)).height == pytest.approx(226.833, abs=0.01)
+
+    def test_collinear_points_need_no_join(self):
+        # Straight-through joints: the segment quads already abut, so a
+        # join ring there would be pure waste in the OpenSCAD output.
+        rings = _stroke_segments_to_rings(
+            [(0.0, 0.0), (50.0, 0.0), (100.0, 0.0)], 10.0, False
+        )
+        assert len(rings) == 2  # two segment quads, no join
+
+    @pytest.mark.parametrize("join", ["miter", "round", "bevel"])
+    @pytest.mark.parametrize("cap", ["butt", "round", "square"])
+    @pytest.mark.parametrize(
+        ("pts", "closed"),
+        [
+            ([(0.0, 0.0), (0.0, 0.0), (50.0, 0.0)], False),  # duplicate points
+            ([(5.0, 5.0), (5.0, 5.0), (5.0, 5.0)], True),  # all identical
+            ([(0.0, 0.0), (50.0, 0.0), (50.0, 50.0), (0.0, 0.0)], True),  # restates start
+            ([(0.0, 0.0), (50.0, 0.0)], True),  # too few points to close
+            ([(0.0, 0.0), (50.0, 0.0), (0.0, 0.0)], False),  # 180° cusp
+        ],
+    )
+    def test_degenerate_strokes_emit_no_junk(self, pts, closed, cap, join):
+        for ring in _stroke_segments_to_rings(pts, 10.0, closed, cap, join):
+            assert len(ring) >= 3
+            assert abs(_ring_area(ring)) > 1e-12
+            assert all(math.isfinite(v) for pt in ring for v in pt)
 
     def test_y_axis_flip_top_stays_top(self):
         # Ink only in the TOP half of the SVG (small y).  After compile

@@ -256,6 +256,7 @@ def _resolve_paint(elem: ET.Element, inherited: dict) -> dict:
             decls[k.strip().lower()] = v.strip()
     for key in (
         "fill", "stroke", "stroke-width", "stroke-linecap",
+        "stroke-linejoin", "stroke-miterlimit",
         "opacity", "fill-opacity", "display",
     ):
         val = decls.get(key, elem.get(key))
@@ -508,29 +509,68 @@ def _interpret_path_tokens(tokens: list[str]) -> list[tuple[Ring, bool]]:
     return subpaths
 
 
+def _dedupe_consecutive(pts: list[Point], closed: bool) -> list[Point]:
+    """Drop repeated points — they carry no direction, so joins on them
+    would be degenerate (and a closed subpath that restates its start
+    would grow a zero-length closing segment)."""
+    clean: list[Point] = [pts[0]]
+    for p in pts[1:]:
+        if math.hypot(p[0] - clean[-1][0], p[1] - clean[-1][1]) > 1e-9:
+            clean.append(p)
+    if (
+        closed
+        and len(clean) > 1
+        and math.hypot(clean[0][0] - clean[-1][0], clean[0][1] - clean[-1][1]) < 1e-9
+    ):
+        clean.pop()
+    return clean
+
+
 def _stroke_segments_to_rings(
-    pts: list[Point], width: float, closed: bool, linecap: str = "butt"
+    pts: list[Point],
+    width: float,
+    closed: bool,
+    linecap: str = "butt",
+    linejoin: str = "miter",
+    miterlimit: float = 4.0,
 ) -> list[Ring]:
-    """Expand a stroked polyline into filled quads + joint/cap geometry."""
+    """Expand a stroked polyline into filled quads + join/cap geometry.
+
+    One quad per segment, plus a plug at each interior joint for the wedge
+    the two quads leave on the outside of the turn (shaped by
+    ``stroke-linejoin``), plus an end treatment on open subpaths (shaped by
+    ``stroke-linecap``).  All rings UNION — the caller emits each as its own
+    even-odd group.
+    """
     if width <= 0 or len(pts) < 2:
         return []
+    pts = _dedupe_consecutive(pts, closed)
+    if closed and len(pts) < 3:
+        closed = False  # nothing left to close around
+    if len(pts) < 2:
+        return []
+
     rings: list[Ring] = []
     hw = width / 2
 
-    def _octagon(x: float, y: float) -> Ring:
+    def _arc(center: Point, start_angle: float, sweep: float) -> Ring:
+        steps = max(1, math.ceil(abs(sweep) / _ARC_MAX_STEP_RAD))
         return [
-            (x + hw * math.cos(math.pi * k / 4), y + hw * math.sin(math.pi * k / 4))
-            for k in range(8)
+            (
+                center[0] + hw * math.cos(start_angle + sweep * k / steps),
+                center[1] + hw * math.sin(start_angle + sweep * k / steps),
+            )
+            for k in range(steps + 1)
         ]
 
     seg_pairs = list(zip(pts, pts[1:], strict=False))
     if closed:
         seg_pairs.append((pts[-1], pts[0]))
+    dirs: list[Point] = []
     for (x1, y1), (x2, y2) in seg_pairs:
         dx, dy = x2 - x1, y2 - y1
         ln = math.hypot(dx, dy)
-        if ln < 1e-9:
-            continue
+        dirs.append((dx / ln, dy / ln))
         nx, ny = -dy / ln * hw, dx / ln * hw
         rings.append(
             [
@@ -541,24 +581,52 @@ def _stroke_segments_to_rings(
             ]
         )
 
-    # An interior joint needs a plug for the wedge the two quads leave on
-    # the outside of the turn.  A closed subpath is all joints; an open one
-    # ends at its two endpoints, which take a cap instead — and SVG's
-    # default cap is "butt", i.e. stop flat, no extra geometry at all.
-    for x, y in (pts if closed else pts[1:-1]):
-        rings.append(_octagon(x, y))
+    def _join_ring(p: Point, d1: Point, d2: Point) -> Ring | None:
+        cross = d1[0] * d2[1] - d1[1] * d2[0]
+        dot = d1[0] * d2[0] + d1[1] * d2[1]
+        if abs(cross) < 1e-12 and dot > 0:
+            return None  # straight through — the quads already abut
+        # The wedge opens on the outside of the turn: right of a left turn.
+        side = -1.0 if cross > 0 else 1.0
+        u1 = (-d1[1] * side, d1[0] * side)  # unit outward normals
+        u2 = (-d2[1] * side, d2[0] * side)
+        o1 = (p[0] + u1[0] * hw, p[1] + u1[1] * hw)
+        o2 = (p[0] + u2[0] * hw, p[1] + u2[1] * hw)
+
+        join = linejoin
+        if join == "miter":
+            denom = 1.0 + u1[0] * u2[0] + u1[1] * u2[1]
+            if denom > 1e-9:
+                mx = (u1[0] + u2[0]) / denom * hw
+                my = (u1[1] + u2[1]) / denom * hw
+                # |M - P| / hw is exactly SVG's miter ratio, 1/sin(theta/2).
+                if math.hypot(mx, my) <= miterlimit * hw:
+                    return [p, o1, (p[0] + mx, p[1] + my), o2]
+            join = "bevel"  # spike past the limit, or a 180° cusp
+        if join == "round":
+            a1 = math.atan2(u1[1], u1[0])
+            a2 = math.atan2(u2[1], u2[0])
+            sweep = (a2 - a1 + math.pi) % (2 * math.pi) - math.pi  # short way
+            return [p, *_arc(p, a1, sweep)]
+        return [p, o1, o2]  # bevel
+
+    joint_idx = range(len(pts)) if closed else range(1, len(pts) - 1)
+    for i in joint_idx:
+        ring = _join_ring(pts[i], dirs[i - 1], dirs[i])
+        # A 180° cusp bevels to three collinear points — no area, and a
+        # degenerate polygon downstream.  The segment quads already meet
+        # cleanly there, so dropping it loses nothing.
+        if ring and abs(_ring_area(ring)) > 1e-12:
+            rings.append(ring)
 
     if not closed and linecap in ("round", "square"):
-        for end, inward in ((pts[0], pts[1]), (pts[-1], pts[-2])):
+        # Outward direction at each end: away from the neighbouring point.
+        for end, out in ((pts[0], (-dirs[0][0], -dirs[0][1])), (pts[-1], dirs[-1])):
+            nx, ny = -out[1] * hw, out[0] * hw
             if linecap == "round":
-                rings.append(_octagon(*end))
+                rings.append(_arc(end, math.atan2(ny, nx), -math.pi))
                 continue
-            dx, dy = end[0] - inward[0], end[1] - inward[1]
-            ln = math.hypot(dx, dy)
-            if ln < 1e-9:
-                continue
-            ux, uy = dx / ln * hw, dy / ln * hw  # outward, half a width
-            nx, ny = -uy, ux
+            ux, uy = out[0] * hw, out[1] * hw  # extend half a width
             rings.append(
                 [
                     (end[0] + nx, end[1] + ny),
@@ -624,6 +692,11 @@ def parse_svg_to_mark(
         linecap = (paint.get("stroke-linecap") or "butt").strip().lower()
         if linecap not in ("butt", "round", "square"):
             linecap = "butt"
+        linejoin = (paint.get("stroke-linejoin") or "miter").strip().lower()
+        if linejoin not in ("miter", "round", "bevel"):
+            # SVG2 adds miter-clip/arcs; both degrade to their miter/round base.
+            linejoin = "round" if linejoin == "arcs" else "miter"
+        miterlimit = max(1.0, _num(paint.get("stroke-miterlimit"), 4.0))
 
         local_rings: list[Ring] = []
         stroke_pts: list[tuple[list[Point], bool]] = []  # (points, closed)
@@ -681,7 +754,9 @@ def parse_svg_to_mark(
                 [[_mat_apply(matrix, x, y) for x, y in ring] for ring in local_rings]
             )
         for pts, closed in stroke_pts:
-            expanded = _stroke_segments_to_rings(pts, stroke_w, closed, linecap)
+            expanded = _stroke_segments_to_rings(
+                pts, stroke_w, closed, linecap, linejoin, miterlimit
+            )
             if expanded:
                 # Stroke quads overlap at joints — they must UNION, not
                 # XOR, so each quad/octagon is its own even-odd group.
