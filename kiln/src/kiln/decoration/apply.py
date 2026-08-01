@@ -127,8 +127,19 @@ def apply_decoration_spec(
     image_asset_path: str | None = None,
     content: str | None = None,
     material: str = "PLA",
+    face: str | None = None,
+    scale: float | None = None,
+    offset_x_mm: float = 0.0,
+    offset_y_mm: float = 0.0,
 ) -> dict[str, Any]:
     """Carve a resolved decoration preset onto *host_mesh_path*.
+
+    Placement (``face`` / ``scale`` / ``offset_*``) belongs to the CALLER,
+    not the preset: a preset records the LOOK (art, depth, mode), but
+    where that look lands depends on the host mesh being decorated this
+    time.  All four are optional — omitted, the engine's own defaults
+    apply (auto face, centred, decorate_surface's default coverage), so
+    an unadorned call behaves exactly as before.
 
     :param host_mesh_path: STL/OBJ to decorate.
     :param pattern_family: One of the seven preset families (see
@@ -186,15 +197,28 @@ def apply_decoration_spec(
 
     from kiln.server import decorate_surface
 
+    # Caller placement wins over the surface-selection mapping; scale and
+    # offsets are forwarded only when supplied, so decorate_surface's own
+    # defaults stay the single authority for what "unspecified" means —
+    # a copy of its 0.7 here would drift the day that default moves.
+    placement: dict[str, Any] = {}
+    if scale is not None:
+        placement["scale"] = float(scale)
+    if offset_x_mm:
+        placement["offset_x_mm"] = float(offset_x_mm)
+    if offset_y_mm:
+        placement["offset_y_mm"] = float(offset_y_mm)
+
     result = decorate_surface(
         model_path=host_mesh_path,
         content=resolved_content,
-        face=_FACE_BY_SELECTION.get(surface_selection, "auto"),
+        face=(face or _FACE_BY_SELECTION.get(surface_selection, "auto")),
         depth_mm=float(depth_mm or 0.0),
         mode=_mode_for_family(family),
         material=material or "PLA",
         image_style=image_style,
         content_type="auto",
+        **placement,
     )
 
     # decorate_surface invoked in-process may return the FastMCP tool
