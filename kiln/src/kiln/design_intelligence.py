@@ -1518,6 +1518,25 @@ def _any_keyword(text: str, keywords: frozenset[str]) -> bool:
     return any(matches_trigger(text, kw) for kw in keywords)
 
 
+def _hotend_ceiling_warning(
+    over_ceiling: list[tuple[str, int]], max_hotend_temp_c: int
+) -> str:
+    """The honest answer when the hotend cannot melt anything in the catalogue.
+
+    Names the ceiling and the coolest filament that would clear it, so the
+    reply is actionable rather than a shrug.  Both recommendation paths use
+    this, so the free floor and the full catalogue answer an impossible printer
+    the same way.
+    """
+    coolest_id, coolest_temp = min(over_ceiling, key=lambda pair: pair[1])
+    return (
+        f"No material in the catalogue satisfied your constraints: the printer's "
+        f"hotend is capped at {max_hotend_temp_c}C and the coolest option "
+        f"({coolest_id}) needs {coolest_temp}C. Nothing here can be printed on "
+        f"this machine — raise the hotend ceiling or use a different printer."
+    )
+
+
 def _recommend_from_safety_floor(
     requirements_text: str,
     materials: dict[str, dict[str, Any]],
@@ -1615,6 +1634,7 @@ def _recommend_from_safety_floor(
     # ---- Score each material against the constraints -------------------
     scores: list[tuple[float, str, list[str], list[str]]] = []
     fired_filters: list[str] = []  # rationale building blocks
+    over_ceiling: list[tuple[str, int]] = []  # (material, its minimum temp)
 
     for mid, mdata in materials.items():
         score = 50.0  # neutral baseline
@@ -1644,6 +1664,16 @@ def _recommend_from_safety_floor(
 
         # Food contact: must be food_safe yes/conditional.
         if needs_food and food_safe not in ("yes", "conditional"):
+            continue
+
+        # Hotend ceiling: the printer physically cannot melt this filament,
+        # which is not a preference to be weighed against the others.  Scored
+        # as a penalty it stopped constraining anything the moment it applied
+        # to EVERY candidate — the deduction cancelled out and the remaining
+        # preferences decided, so a 180C hotend was recommended ASA (235C),
+        # and the recommendation got HOTTER as the ceiling got lower.
+        if min_print_temp and min_print_temp > max_hotend_temp_c:
+            over_ceiling.append((mdata.get("display_name") or mid, min_print_temp))
             continue
 
         # --- Soft scoring per fired filter --------------------------
@@ -1744,12 +1774,6 @@ def _recommend_from_safety_floor(
             warnings.append("not in the target printer's supported material set.")
             score -= 60
 
-        if min_print_temp and min_print_temp > max_hotend_temp_c:
-            warnings.append(
-                f"requires {min_print_temp}C hotend — printer max is {max_hotend_temp_c}C."
-            )
-            score -= 50
-
         needs_enclosure = warping in ("high", "very_high")
         if needs_enclosure and not printer_has_enclosure:
             warnings.append("requires enclosure for reliable printing — printer does not have one.")
@@ -1804,7 +1828,10 @@ def _recommend_from_safety_floor(
             thermal=pla_data.get("thermal", {}),
             chemical=pla_data.get("chemical", {}),
         )
-        warnings = ["No material in the safety-floor catalogue satisfied your constraints — falling back to PLA."]
+        if over_ceiling:
+            warnings = [_hotend_ceiling_warning(over_ceiling, max_hotend_temp_c)]
+        else:
+            warnings = ["No material in the safety-floor catalogue satisfied your constraints — falling back to PLA."]
         if verdict.is_load_bearing:
             warnings.append(_format_upgrade_nudge(verdict))
         return MaterialRecommendation(
@@ -1958,13 +1985,24 @@ def recommend_material_for_design(
 
     # Score each material
     scores: list[tuple[float, str, list[str], list[str]]] = []
+    over_ceiling: list[tuple[str, int]] = []  # (material, its minimum temp)
     for mid, mdata in kb.materials.items():
         score = 50.0  # baseline
         reasons: list[str] = []
         warnings: list[str] = []
 
-        # Hard exclusion
+        thermal = mdata.get("thermal", {}) or {}
+        min_print_temp = (thermal.get("print_temp_range_c") or [0, 0])[0]
+
+        # --- Hard exclusions (skip the material entirely) -----------
         if mid in excluded:
+            continue
+
+        # Hotend ceiling: the printer cannot melt this filament, so it is not
+        # a candidate to be scored against the others.  Same rule, same place
+        # in the loop, as the safety-floor path.
+        if min_print_temp and min_print_temp > max_hotend_temp_c:
+            over_ceiling.append((mdata.get("display_name") or mid, min_print_temp))
             continue
 
         if supported is not None and mid not in supported:
@@ -1992,19 +2030,12 @@ def recommend_material_for_design(
                         f"{mdata['display_name']} rated '{rating}' for {cs.display_name}."
                     )
 
-        # Printer capability filtering
-        thermal = mdata.get("thermal", {})
-        min_print_temp = thermal.get("print_temp_range_c", [0, 0])[0]
+        # Printer capability filtering (the hotend ceiling is a hard exclusion
+        # handled at the top of the loop).
         needs_enclosure = thermal.get("warping_tendency", "low") in (
             "high",
             "very_high",
         )
-
-        if min_print_temp > max_hotend_temp_c:
-            warnings.append(
-                f"Requires {min_print_temp}C hotend — printer max is {max_hotend_temp_c}C."
-            )
-            score -= 50  # heavy penalty but don't exclude
 
         if needs_enclosure and not printer_has_enclosure:
             warnings.append("Requires enclosure — printer does not have one.")
@@ -2030,11 +2061,23 @@ def recommend_material_for_design(
         pla = get_material_profile("pla")
         if pla is None:
             raise RuntimeError("PLA material profile not found in knowledge base")
+        # The warning has to SAY the constraints went unmet, in the same words
+        # the safety-floor path uses.  "PLA may not meet your requirements" is
+        # a hedge, and a caller reading it for a real miss cannot tell this
+        # apart from an ordinary recommendation — so a fallback here used to
+        # surface as an answer.
+        if over_ceiling:
+            unmet = _hotend_ceiling_warning(over_ceiling, max_hotend_temp_c)
+        else:
+            unmet = (
+                "No material in the catalogue satisfied your constraints — "
+                "falling back to PLA, which may not meet your requirements."
+            )
         return MaterialRecommendation(
             material=pla,
             score=50.0,
             reasons=["Fallback — all materials filtered out."],
-            warnings=["PLA may not meet your requirements."],
+            warnings=[unmet],
             design_limits_summary=pla.design_limits,
             alternatives=[],
         )
