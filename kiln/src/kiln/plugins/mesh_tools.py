@@ -368,19 +368,24 @@ class _MeshToolsPlugin:
             *,
             deep: bool,
             close_holes: bool,
+            weld_tolerance: str = "",
         ) -> dict:
             """Shared repair path for ``repair_mesh`` and its deprecated alias.
 
-            ``deep=False`` runs the fast pass (degenerate-triangle removal +
-            normal recompute).  ``deep=True`` runs the boundary-aware engine,
-            which also detects boundary edges and — when *close_holes* is
-            True — closes small holes via fan triangulation.
+            ``deep=False`` runs the fast pass (vertex weld + degenerate-triangle
+            removal + normal recompute).  ``deep=True`` runs the boundary-aware
+            engine, which also detects boundary edges and — when *close_holes*
+            is True — closes small holes via fan triangulation.  An empty
+            *weld_tolerance* means the engine's auto radius; a number is mm.
             """
             from kiln.server import _check_auth, _error_dict
 
             if err := _check_auth("generate"):
                 return err
             try:
+                weld: float | None = None
+                if weld_tolerance != "":
+                    weld = float(weld_tolerance)
                 if deep:
                     from kiln.generation.validation import repair_stl_advanced
 
@@ -388,12 +393,15 @@ class _MeshToolsPlugin:
                         file_path,
                         output_path=output_path or None,
                         close_holes=close_holes,
+                        weld_tolerance=weld,
                     )
                 else:
                     from kiln.generation.validation import repair_stl
 
                     result = repair_stl(
-                        file_path, output_path=output_path or None,
+                        file_path,
+                        output_path=output_path or None,
+                        weld_tolerance=weld,
                     )
                 response = {"success": True, **result}
                 try:
@@ -414,33 +422,47 @@ class _MeshToolsPlugin:
             file_path: str,
             output_path: str = "",
             close_holes: bool = False,
+            weld_tolerance: str = "",
         ) -> dict:
-            """Repair mesh defects: degenerate triangles, bad normals, open holes.
+            """Repair mesh defects: rounding-noise seams, degenerates, holes.
 
-            The default pass is fast and safe: removes zero-area triangles and
-            recomputes face normals.  Use it on meshes from AI generation
-            providers before slicing.  Pass ``close_holes=True`` for the deep
-            pass, which additionally finds boundary edges (edges shared by only
-            one triangle) and closes small holes via fan triangulation — use it
+            Every pass first welds vertices that are coincident up to a tiny
+            radius (0.1 µm by default) — scanned and AI-generated meshes
+            routinely carry float rounding jitter that reads as thousands of
+            phantom open edges, and welding is the honest fix for those.  The
+            default pass then removes zero-area triangles and recomputes face
+            normals.  Pass ``close_holes=True`` for the deep pass, which
+            additionally finds boundary edges (edges shared by only one
+            triangle) and closes small holes via fan triangulation — use it
             when the mesh is not watertight.
 
-            The result states the output's actual condition: ``is_watertight``,
-            remaining boundary/pinch edge counts, and — when defects survive
-            the pass — an ``unrepaired`` list saying which defect classes this
-            tool has no repair for (pinched edges, where 3+ triangles meet
-            along one line, are not holes and cannot be sewn; they must be
-            fixed where the geometry was made).  Read ``unrepaired`` before
-            telling the user the mesh is fixed.
+            Hole closing refuses rather than ruins: sewing triangles that
+            merely re-stamp existing surface are discarded, and a closure
+            that collapses the enclosed volume is rolled back with the
+            reason in ``unrepaired``.
+
+            The result states the output's actual condition: ``is_watertight``
+            (which also refuses to certify a sheet-cancelling zero-volume
+            surface), remaining boundary/pinch edge counts,
+            ``enclosed_volume_mm3`` when the surface closes up, and — when
+            defects survive the pass — an ``unrepaired`` list saying which
+            defect classes this tool has no repair for (pinched edges, where
+            3+ triangles meet along one line, are not holes and cannot be
+            sewn; they must be fixed where the geometry was made).  Read
+            ``unrepaired`` before telling the user the mesh is fixed.
 
             :param file_path: Path to the STL file to repair.
             :param output_path: Output path.  Defaults to overwriting the input.
             :param close_holes: Also close open holes and fix boundary edges
                 (slower; default False).
+            :param weld_tolerance: Weld radius in mm.  Empty = auto (0.1 µm or
+                a millionth of the part diagonal); "0" disables welding.
             :returns: Dict with repair statistics and residual-defect report.
             """
             return _repair_mesh_impl(
                 file_path, output_path,
                 deep=close_holes, close_holes=close_holes,
+                weld_tolerance=weld_tolerance,
             )
 
         @mcp.tool()
@@ -448,6 +470,7 @@ class _MeshToolsPlugin:
             file_path: str,
             output_path: str = "",
             close_holes: bool = True,
+            weld_tolerance: str = "",
         ) -> dict:
             """Deprecated alias for ``repair_mesh(close_holes=True)``.
 
@@ -458,11 +481,14 @@ class _MeshToolsPlugin:
             :param file_path: Path to the STL file.
             :param output_path: Output path.  Defaults to overwriting the input.
             :param close_holes: Whether to attempt closing holes (default True).
+            :param weld_tolerance: Weld radius in mm.  Empty = auto; "0"
+                disables welding.
             :returns: Dict with repair statistics.
             """
             return _repair_mesh_impl(
                 file_path, output_path,
                 deep=True, close_holes=close_holes,
+                weld_tolerance=weld_tolerance,
             )
 
         # ---------------------------------------------------------------
