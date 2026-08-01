@@ -13,6 +13,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   studio, in shared view links, and in the panel in your chat. A part too big
   for the bed says so: on the model and in the size line.
 
+### Fixed
+
+- **Your logo now prints exactly the way you drew it (free)** — gaps stay open,
+  corners stay sharp, dashed lines stay dashed.
+
 ## [1.3.1] - 2026-07-31
 
 ### Added
