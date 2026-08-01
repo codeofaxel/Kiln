@@ -946,3 +946,27 @@ class TestOpenscadVersionWarning:
         # must never be told they are on "2021".  The accurate version is its own field.
         assert "2021" not in w["message"]
         assert "2023" not in w["message"]
+
+
+class TestTextProbeContract:
+    """Every way the text probe fails to run is TextMeasureError.
+
+    ``_find_openscad`` RAISES ``FileNotFoundError`` when the binary is
+    missing — it never returns falsy.  Before this contract was pinned,
+    that exception escaped ``measure_text_block_mm`` untranslated, blew
+    through the caller's ``except TextMeasureError`` fallback, and a
+    missing binary crashed the whole generation instead of degrading to
+    heuristic fitting.
+    """
+
+    def test_missing_binary_raises_measure_error(self, monkeypatch):
+        from kiln import emboss_generator as eg
+
+        monkeypatch.setattr(eg, "_TEXT_METRICS_CACHE", {})
+
+        def missing_binary():
+            raise FileNotFoundError("OpenSCAD not found or not usable")
+
+        monkeypatch.setattr(eg, "_find_openscad", missing_binary)
+        with pytest.raises(eg.TextMeasureError):
+            eg.measure_text_block_mm("probe contract text", "Liberation Sans")

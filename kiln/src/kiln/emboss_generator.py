@@ -472,15 +472,28 @@ def measure_text_block_mm(
                     f'size={probe_size}, font="{escaped_font}");\n'
                 )
             stl = os.path.join(d, "probe.stl")
-            openscad = _find_openscad()
-            if not openscad:
-                raise TextMeasureError("OpenSCAD not found for text probe")
-            proc = subprocess.run(
-                [openscad, "-o", stl, scad],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
+            # _find_openscad() RAISES FileNotFoundError when the binary is
+            # missing — it never returns falsy.  Translate every way the
+            # probe can fail to run into TextMeasureError, the exception
+            # this function's contract promises and its callers catch to
+            # fall back to heuristic fitting.
+            try:
+                openscad = _find_openscad()
+            except FileNotFoundError as exc:
+                raise TextMeasureError(
+                    f"OpenSCAD not found for text probe: {exc}"
+                ) from exc
+            try:
+                proc = subprocess.run(
+                    [openscad, "-o", stl, scad],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                raise TextMeasureError(
+                    f"text probe did not run: {exc}"
+                ) from exc
             if proc.returncode != 0 or not os.path.exists(stl):
                 raise TextMeasureError(
                     f"text probe compile failed: {proc.stderr[-200:] if proc.stderr else 'no output'}"

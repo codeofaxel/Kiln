@@ -267,3 +267,48 @@ def test_manual_offsets_clamp_to_the_face(tmp_path):
         offset_x_mm=5.0,
     )
     assert not any("clamped" in w and "offset" in w for w in quiet.get("warnings", []))
+
+
+def test_offset_clamp_needs_no_openscad(tmp_path, monkeypatch):
+    """The CI replay: the offset clamp is computed and SAID on a machine
+    with no OpenSCAD.  Text measurement degrades to the heuristic fit
+    (``TextMeasureError`` caught inside the generator) — a missing
+    binary must never crash the carve, and must never un-say the clamp.
+    """
+    from kiln import emboss_generator as eg
+
+    monkeypatch.setattr(eg, "_TEXT_METRICS_CACHE", {})
+
+    def missing_binary():
+        raise FileNotFoundError("OpenSCAD not found or not usable")
+
+    monkeypatch.setattr(eg, "_find_openscad", missing_binary)
+
+    dummy_stl = tmp_path / "dummy.stl"
+    dummy_stl.write_bytes(b"solid dummy\nendsolid dummy\n")
+    face = {
+        "face": "top",
+        "center": (0.0, 0.0, 10.0),
+        "width_mm": 80.0,
+        "height_mm": 60.0,
+        "normal": (0, 0, 1),
+        "area_mm2": 80.0 * 60.0,
+    }
+    result = eg.generate_emboss_scad(
+        model_path=str(dummy_stl),
+        content_info={
+            "type": "openscad_text",
+            "text": "Hi",
+            "font": "Liberation Sans",
+        },
+        face=face,
+        output_dir=str(tmp_path),
+        scale=0.5,
+        depth_mm=0.8,
+        mode="deboss",
+        offset_x_mm=500.0,
+        offset_y_mm=-500.0,
+    )
+    assert any("clamped" in w for w in result.get("warnings", [])), (
+        "the clamp must survive the no-OpenSCAD fallback path"
+    )
