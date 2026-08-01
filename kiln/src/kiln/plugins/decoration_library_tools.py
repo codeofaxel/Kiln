@@ -212,14 +212,18 @@ class _DecorationLibraryPlugin:
             :param tag: Filter by tag (empty = show all).
             :returns: Dict with decoration count and list.
 
-            This is the decoration LIBRARY, keyed by name and applied with
-            :tool:`apply_decoration`.  It is not the only place a saved
-            decoration can live: with kiln-pro installed, versioned
-            decoration PRESETS (what the web's /decorations pages show)
-            live in their own store, are listed by
-            ``list_decoration_presets``, and are applied by
-            ``apply_decoration_preset`` using an id rather than a name.
-            If what you are looking for isn't here, look there.
+            This is the decoration LIBRARY: keyed by name, and it ADAPTS —
+            each recorded success stores proven settings for THAT material,
+            so applying picks the depth and mode your prints proved for
+            whatever you are printing in now.  It keeps no version history.
+
+            Kiln's other kind of saved decoration is a decoration PRESET
+            (kiln-pro; what the web's /decorations pages show): keyed by an
+            id because it has versions, branches and signed releases, and
+            applied at the exact settings its version recorded rather than
+            adapting to the material.  Listed by ``list_decoration_presets``,
+            applied by ``apply_decoration_preset``.  The library adapts, the
+            preset remembers — if what you want isn't here, look there.
             """
             from kiln.decoration_library import (
                 list_decorations as _list,
