@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-08-01T04:23:40.438615+00:00",
-  "tool_count": 403,
+  "generated": "2026-08-01T05:02:44.087688+00:00",
+  "tool_count": 407,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -3268,7 +3268,7 @@
       }
     },
     {
-      "name": "apply_decoration_preset_release_to_mesh",
+      "name": "apply_signed_decoration_release",
       "description": "Apply a SIGNED preset release to a host mesh \u2014 the verified, pinned path.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
@@ -3299,7 +3299,7 @@
           "preset_release_id",
           "host_mesh_path"
         ],
-        "title": "apply_decoration_preset_release_to_meshArguments",
+        "title": "apply_signed_decoration_releaseArguments",
         "type": "object"
       }
     },
@@ -4543,6 +4543,42 @@
       }
     },
     {
+      "name": "get_decoration_preset",
+      "description": "Fetch ONE decoration preset \u2014 the full record for a single preset or an exact version.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "preset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Preset Id"
+          },
+          "preset_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Preset Version Id"
+          }
+        },
+        "title": "get_decoration_presetArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "get_design",
       "description": "Fetch a single design's summary + branch list for the workshop detail view.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -4961,6 +4997,54 @@
       }
     },
     {
+      "name": "list_decoration_preset_releases",
+      "description": "List signed decoration-preset releases \u2014 and the id needed to apply one.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "preset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Preset Id"
+          },
+          "include_retired": {
+            "default": false,
+            "title": "Include Retired",
+            "type": "boolean"
+          }
+        },
+        "title": "list_decoration_preset_releasesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_decoration_preset_versions",
+      "description": "List every saved version of one decoration preset, oldest first.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "preset_id": {
+            "title": "Preset Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preset_id"
+        ],
+        "title": "list_decoration_preset_versionsArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "list_decoration_presets",
       "description": "List the latest version of every decoration preset.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -5161,6 +5245,35 @@
       "parameters": {
         "properties": {},
         "title": "list_feature_kindsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_feature_releases",
+      "description": "List signed feature releases \u2014 and the ids that reference them.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Feature Id"
+          },
+          "include_retired": {
+            "default": false,
+            "title": "Include Retired",
+            "type": "boolean"
+          }
+        },
+        "title": "list_feature_releasesArguments",
         "type": "object"
       }
     },
