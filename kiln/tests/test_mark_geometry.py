@@ -441,6 +441,106 @@ class TestSvgParser:
             assert abs(_ring_area(ring)) > 1e-12
             assert all(math.isfinite(v) for pt in ring for v in pt)
 
+    @pytest.mark.parametrize(
+        ("markup", "draws"),
+        [
+            ('stroke="black" stroke-width="4"', True),
+            ('stroke="black" stroke-width="4" stroke-opacity="0"', False),
+            ('stroke="black" stroke-width="4" opacity="0"', False),
+            ('stroke="black" stroke-width="4" style="stroke-opacity:0"', False),
+            # Carved geometry is binary — partial opacity still has to cut.
+            ('stroke="black" stroke-width="4" stroke-opacity="0.5"', True),
+        ],
+    )
+    def test_transparent_strokes_are_not_drawn(self, markup, draws):
+        svg = (
+            '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
+            f'<line x1="10" y1="10" x2="90" y2="10" {markup}/></svg>'
+        )
+        assert (parse_svg_to_mark(svg) is not None) is draws
+
+    def test_stroke_opacity_inherits_from_group(self):
+        svg = (
+            '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
+            '<g stroke-opacity="0">'
+            '<line x1="10" y1="10" x2="90" y2="10" stroke="black" stroke-width="4"/>'
+            "</g></svg>"
+        )
+        assert parse_svg_to_mark(svg) is None
+
+    @staticmethod
+    def _stroke_thickness(inner):
+        svg = (
+            '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
+            f"{inner}</svg>"
+        )
+        quad = next(g[0] for g in parse_svg_to_mark(svg).groups if len(g[0]) == 4)
+        return min(
+            math.hypot(quad[(i + 1) % 4][0] - quad[i][0], quad[(i + 1) % 4][1] - quad[i][1])
+            for i in range(4)
+        )
+
+    @pytest.mark.parametrize(
+        ("transform", "plain", "non_scaling"),
+        [
+            ("", 1.0, 1.0),
+            ('transform="scale(4)"', 4.0, 1.0),
+            ('transform="rotate(30)"', 1.0, 1.0),
+            ('transform="rotate(30) scale(4)"', 4.0, 1.0),
+            ('transform="translate(9,3) scale(2.5)"', 2.5, 1.0),
+            # One scalar width cannot be right in both axes under an
+            # anisotropic scale; sqrt|det| lands on the geometric mean.
+            ('transform="scale(2,8)"', 8.0, 2.0),
+        ],
+    )
+    def test_non_scaling_stroke_survives_ancestor_transforms(
+        self, transform, plain, non_scaling
+    ):
+        line = (
+            '<line x1="1" y1="5" x2="20" y2="5" stroke="black" stroke-width="1" {}/>'
+        )
+        effect = 'vector-effect="non-scaling-stroke"'
+        assert self._stroke_thickness(
+            f"<g {transform}>{line.format('')}</g>"
+        ) == pytest.approx(plain, abs=0.001)
+        assert self._stroke_thickness(
+            f"<g {transform}>{line.format(effect)}</g>"
+        ) == pytest.approx(non_scaling, abs=0.001)
+
+    def test_non_scaling_stroke_reads_from_style_attribute(self):
+        line = (
+            '<line x1="1" y1="5" x2="20" y2="5" stroke="black" stroke-width="1"'
+            ' style="vector-effect:non-scaling-stroke"/>'
+        )
+        assert self._stroke_thickness(
+            f'<g transform="scale(4)">{line}</g>'
+        ) == pytest.approx(1.0, abs=0.001)
+
+    def test_non_scaling_stroke_does_not_inherit(self):
+        # SVG marks vector-effect as Inherited: no, so putting it on a parent
+        # must not silently thin every stroke beneath it.
+        line = '<line x1="1" y1="5" x2="20" y2="5" stroke="black" stroke-width="1"/>'
+        assert self._stroke_thickness(
+            f'<g transform="scale(4)" vector-effect="non-scaling-stroke">{line}</g>'
+        ) == pytest.approx(4.0, abs=0.001)
+
+    def test_min_stroke_floor_outranks_non_scaling_shrink(self):
+        # The floor exists so a hairline still prints; it must not be
+        # undercut by dividing the width back down.
+        svg = (
+            '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
+            '<g transform="scale(10)"><line x1="1" y1="5" x2="20" y2="5"'
+            ' stroke="black" stroke-width="1"'
+            ' vector-effect="non-scaling-stroke"/></g></svg>'
+        )
+        m = parse_svg_to_mark(svg, min_stroke_units=0.5)
+        quad = next(g[0] for g in m.groups if len(g[0]) == 4)
+        thickness = min(
+            math.hypot(quad[(i + 1) % 4][0] - quad[i][0], quad[(i + 1) % 4][1] - quad[i][1])
+            for i in range(4)
+        )
+        assert thickness == pytest.approx(5.0, abs=0.001)  # floor 0.5 × scale 10
+
     def test_y_axis_flip_top_stays_top(self):
         # Ink only in the TOP half of the SVG (small y).  After compile
         # (Y-up frame), that geometry must sit at POSITIVE y.

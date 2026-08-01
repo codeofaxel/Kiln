@@ -271,12 +271,26 @@ def _resolve_paint(elem: ET.Element, inherited: dict) -> dict:
         "fill", "stroke", "stroke-width", "stroke-linecap",
         "stroke-linejoin", "stroke-miterlimit",
         "stroke-dasharray", "stroke-dashoffset",
-        "opacity", "fill-opacity", "display",
+        "opacity", "fill-opacity", "stroke-opacity", "display",
     ):
         val = decls.get(key, elem.get(key))
         if val is not None:
             paint[key] = val
     return paint
+
+
+def _elem_prop(elem: ET.Element, key: str) -> str | None:
+    """Read a NON-inherited presentation property off one element.
+
+    ``_resolve_paint`` is for properties that cascade; this is for the ones
+    that apply only where they are written, such as ``vector-effect``.
+    """
+    for part in elem.get("style", "").split(";"):
+        if ":" in part:
+            k, v = part.split(":", 1)
+            if k.strip().lower() == key:
+                return v.strip()
+    return elem.get(key)
 
 
 def _num(value: str | None, default: float = 0.0) -> float:
@@ -810,9 +824,24 @@ def parse_svg_to_mark(
         stroke = (paint.get("stroke") or "none").strip().lower()
         has_fill = fill not in ("none", "transparent") and fill not in _WHITE_FILLS
         has_stroke = stroke not in ("none", "transparent") and stroke not in _WHITE_FILLS
+        # Carved geometry is binary, so only fully transparent paint can be
+        # honored — a half-opaque mark still has to be one depth or none.
         if _num(paint.get("opacity"), 1.0) == 0 or _num(paint.get("fill-opacity"), 1.0) == 0:
             has_fill = False
-        stroke_w = max(_num(paint.get("stroke-width"), 1.0), min_stroke_units)
+        if _num(paint.get("opacity"), 1.0) == 0 or _num(paint.get("stroke-opacity"), 1.0) == 0:
+            has_stroke = False
+
+        stroke_w = _num(paint.get("stroke-width"), 1.0)
+        if (_elem_prop(elem, "vector-effect") or "").strip().lower() == "non-scaling-stroke":
+            # The width is meant to survive ancestor transforms, so pre-divide
+            # it by their scale and let the transform put it back.  Exact for
+            # any similarity (translate/rotate/uniform scale); under an
+            # anisotropic scale one scalar width cannot be right in both axes,
+            # so sqrt|det| puts it on the geometric mean of the two.
+            det = abs(matrix[0] * matrix[3] - matrix[1] * matrix[2])
+            if det > 1e-12:
+                stroke_w /= math.sqrt(det)
+        stroke_w = max(stroke_w, min_stroke_units)
         linecap = (paint.get("stroke-linecap") or "butt").strip().lower()
         if linecap not in ("butt", "round", "square"):
             linecap = "butt"
