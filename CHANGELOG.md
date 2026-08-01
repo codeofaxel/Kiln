@@ -5,6 +5,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Use a decoration you already saved (Pro).** A saved decoration — a logo, a
+  texture, a pattern — now goes straight onto a model at the exact depth and
+  placement it recorded, with fewer snags. Served via kiln-pro; see
+  https://kiln3d.com/pricing.
+
 ### Changed
 
 - **Your design now stands on your real print bed (free).** The 3D stage drew
