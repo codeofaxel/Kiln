@@ -17,6 +17,37 @@ from typing import Any
 _logger = logging.getLogger(__name__)
 
 
+def _not_found_error(name: str) -> dict[str, Any]:
+    """The library's not-found answer, redirecting when it's a PRESET.
+
+    A "saved decoration" in Kiln can live in either of two stores: this
+    library (keyed by a human name), or kiln-pro's decoration presets
+    (keyed by id — what the web's /decorations pages show).  One word over
+    two stores, so landing at the wrong door is the expected mistake, not
+    an exotic one.  When kiln-pro is installed, resolve the name over
+    there and hand back the call that works, instead of pointing at a list
+    that cannot contain what was asked for.
+
+    One helper for every door that can miss, so the two answers cannot
+    drift apart.  Free installs have no preset store, so the import simply
+    isn't there and the plain message stands.
+    """
+    try:
+        from kiln_pro.decoration.decoration_lookup import (  # type: ignore[import]
+            crossover_hint,
+        )
+
+        hint = crossover_hint(name, asked_store="library")
+    except Exception:
+        hint = None
+    if hint:
+        return {"success": False, "error": hint}
+    return {
+        "success": False,
+        "error": f"Decoration not found: {name!r}. Use list_decorations to see available.",
+    }
+
+
 class _DecorationLibraryPlugin:
     """Save and reuse decorations across models — photos, SVGs, QR codes, text."""
 
@@ -180,6 +211,19 @@ class _DecorationLibraryPlugin:
                 or ``texture`` (procedural/AI textures).  Empty = show all.
             :param tag: Filter by tag (empty = show all).
             :returns: Dict with decoration count and list.
+
+            This is the decoration LIBRARY: keyed by name, and it ADAPTS —
+            each recorded success stores proven settings for THAT material,
+            so applying picks the depth and mode your prints proved for
+            whatever you are printing in now.  It keeps no version history.
+
+            Kiln's other kind of saved decoration is a decoration PRESET
+            (kiln-pro; what the web's /decorations pages show): keyed by an
+            id because it has versions, branches and signed releases, and
+            applied at the exact settings its version recorded rather than
+            adapting to the material.  Listed by ``list_decoration_presets``,
+            applied by ``apply_decoration_preset``.  The library adapts, the
+            preset remembers — if what you want isn't here, look there.
             """
             from kiln.decoration_library import (
                 list_decorations as _list,
@@ -236,10 +280,7 @@ class _DecorationLibraryPlugin:
 
             decoration = _get(name)
             if decoration is None:
-                return {
-                    "success": False,
-                    "error": f"Decoration not found: {name!r}. Use list_decorations to see available.",
-                }
+                return _not_found_error(name)
 
             # Detect material from printer if not specified
             resolved_material = material
@@ -334,10 +375,7 @@ class _DecorationLibraryPlugin:
 
             decoration = _get(name)
             if decoration is None:
-                return {
-                    "success": False,
-                    "error": f"Decoration not found: {name!r}. Use list_decorations to see available.",
-                }
+                return _not_found_error(name)
 
             info = decoration.to_dict()
             info["success"] = True
