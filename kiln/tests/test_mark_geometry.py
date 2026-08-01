@@ -20,6 +20,7 @@ import os
 import pytest
 
 from kiln.mark_geometry import (
+    MarkGeometry,
     _dash_runs,
     _parse_dasharray,
     _ring_area,
