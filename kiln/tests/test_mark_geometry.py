@@ -123,8 +123,59 @@ class TestSvgParser:
         )
         m = parse_svg_to_mark(svg)
         assert m is not None
-        assert m.width == pytest.approx(84.0, abs=0.5)  # 80 + width caps
+        # SVG's default linecap is butt: the stroke stops dead at each
+        # endpoint, so the band is exactly the 80-unit span, not 80 + caps.
+        assert m.width == pytest.approx(80.0, abs=0.01)
         assert m.height == pytest.approx(4.0, abs=0.5)
+
+    @pytest.mark.parametrize(
+        ("cap", "expected_width"),
+        [("", 80.0), ('stroke-linecap="butt"', 80.0),
+         ('stroke-linecap="round"', 84.0), ('stroke-linecap="square"', 84.0)],
+    )
+    def test_linecap_controls_endpoint_overshoot(self, cap, expected_width):
+        svg = (
+            '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
+            f'<line x1="10" y1="10" x2="90" y2="10" stroke="black" stroke-width="4" {cap}/>'
+            "</svg>"
+        )
+        m = parse_svg_to_mark(svg)
+        assert m is not None
+        assert m.width == pytest.approx(expected_width, abs=0.01)
+        assert m.height == pytest.approx(4.0, abs=0.01)
+
+    def test_linecap_inherits_from_group(self):
+        svg = (
+            '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
+            '<g stroke-linecap="round">'
+            '<line x1="10" y1="10" x2="90" y2="10" stroke="black" stroke-width="4"/>'
+            "</g></svg>"
+        )
+        m = parse_svg_to_mark(svg)
+        assert m is not None
+        assert m.width == pytest.approx(84.0, abs=0.01)  # round cap inherited
+
+    def test_unknown_linecap_falls_back_to_butt(self):
+        svg = (
+            '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
+            '<line x1="10" y1="10" x2="90" y2="10" stroke="black"'
+            ' stroke-width="4" stroke-linecap="bogus"/></svg>'
+        )
+        m = parse_svg_to_mark(svg)
+        assert m is not None
+        assert m.width == pytest.approx(80.0, abs=0.01)
+
+    def test_closed_stroke_has_no_caps(self):
+        # Every point on a closed subpath is a joint, so linecap is
+        # irrelevant — the octagon plugs must survive regardless.
+        svg = (
+            '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
+            '<path d="M 10 10 L 90 10 L 50 90 z" fill="none" stroke="black"'
+            ' stroke-width="4" stroke-linecap="butt"/></svg>'
+        )
+        m = parse_svg_to_mark(svg)
+        assert m is not None
+        assert len([g for g in m.groups if len(g[0]) == 8]) == 3  # one per corner
 
     def test_open_stroked_path_stays_open(self):
         # Five-segment open path (no Z) — the top gap is deliberate.
@@ -136,11 +187,12 @@ class TestSvgParser:
         )
         m = parse_svg_to_mark(svg)
         assert m is not None
-        # 6 points → 5 stroke quads (NOT 6) + 6 joint octagons.
+        # 6 points → 5 stroke quads (NOT 6) + 4 interior joint octagons
+        # (the 2 endpoints are butt caps, so they get no geometry).
         quads = [g for g in m.groups if len(g[0]) == 4]
         octagons = [g for g in m.groups if len(g[0]) == 8]
         assert len(quads) == 5
-        assert len(octagons) == 6
+        assert len(octagons) == 4
         # No quad spans the top gap between x=418.4 and x=605.6 at y=60.
         gap_lo, gap_hi = 418.4 - 512, 605.6 - 512  # recentered frame
         for g in quads:
@@ -170,7 +222,7 @@ class TestSvgParser:
         )
         m = parse_svg_to_mark(svg)
         assert m is not None
-        assert m.width == pytest.approx(84.0, abs=0.5)
+        assert m.width == pytest.approx(80.0, abs=0.01)
         assert m.height == pytest.approx(4.0, abs=0.5)
 
     def test_y_axis_flip_top_stays_top(self):

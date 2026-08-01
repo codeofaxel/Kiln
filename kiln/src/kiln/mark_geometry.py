@@ -254,7 +254,10 @@ def _resolve_paint(elem: ET.Element, inherited: dict) -> dict:
         if ":" in part:
             k, v = part.split(":", 1)
             decls[k.strip().lower()] = v.strip()
-    for key in ("fill", "stroke", "stroke-width", "opacity", "fill-opacity", "display"):
+    for key in (
+        "fill", "stroke", "stroke-width", "stroke-linecap",
+        "opacity", "fill-opacity", "display",
+    ):
         val = decls.get(key, elem.get(key))
         if val is not None:
             paint[key] = val
@@ -505,12 +508,21 @@ def _interpret_path_tokens(tokens: list[str]) -> list[tuple[Ring, bool]]:
     return subpaths
 
 
-def _stroke_segments_to_rings(pts: list[Point], width: float, closed: bool) -> list[Ring]:
-    """Expand a stroked polyline into filled quads + joint octagons."""
+def _stroke_segments_to_rings(
+    pts: list[Point], width: float, closed: bool, linecap: str = "butt"
+) -> list[Ring]:
+    """Expand a stroked polyline into filled quads + joint/cap geometry."""
     if width <= 0 or len(pts) < 2:
         return []
     rings: list[Ring] = []
     hw = width / 2
+
+    def _octagon(x: float, y: float) -> Ring:
+        return [
+            (x + hw * math.cos(math.pi * k / 4), y + hw * math.sin(math.pi * k / 4))
+            for k in range(8)
+        ]
+
     seg_pairs = list(zip(pts, pts[1:], strict=False))
     if closed:
         seg_pairs.append((pts[-1], pts[0]))
@@ -528,12 +540,33 @@ def _stroke_segments_to_rings(pts: list[Point], width: float, closed: bool) -> l
                 (x1 - nx, y1 - ny),
             ]
         )
-    for x, y in pts:  # octagon at each joint fills the corner gaps
-        oct_ring = []
-        for k in range(8):
-            a = math.pi * k / 4
-            oct_ring.append((x + hw * math.cos(a), y + hw * math.sin(a)))
-        rings.append(oct_ring)
+
+    # An interior joint needs a plug for the wedge the two quads leave on
+    # the outside of the turn.  A closed subpath is all joints; an open one
+    # ends at its two endpoints, which take a cap instead — and SVG's
+    # default cap is "butt", i.e. stop flat, no extra geometry at all.
+    for x, y in (pts if closed else pts[1:-1]):
+        rings.append(_octagon(x, y))
+
+    if not closed and linecap in ("round", "square"):
+        for end, inward in ((pts[0], pts[1]), (pts[-1], pts[-2])):
+            if linecap == "round":
+                rings.append(_octagon(*end))
+                continue
+            dx, dy = end[0] - inward[0], end[1] - inward[1]
+            ln = math.hypot(dx, dy)
+            if ln < 1e-9:
+                continue
+            ux, uy = dx / ln * hw, dy / ln * hw  # outward, half a width
+            nx, ny = -uy, ux
+            rings.append(
+                [
+                    (end[0] + nx, end[1] + ny),
+                    (end[0] + nx + ux, end[1] + ny + uy),
+                    (end[0] - nx + ux, end[1] - ny + uy),
+                    (end[0] - nx, end[1] - ny),
+                ]
+            )
     return rings
 
 
@@ -588,6 +621,9 @@ def parse_svg_to_mark(
         if _num(paint.get("opacity"), 1.0) == 0 or _num(paint.get("fill-opacity"), 1.0) == 0:
             has_fill = False
         stroke_w = max(_num(paint.get("stroke-width"), 1.0), min_stroke_units)
+        linecap = (paint.get("stroke-linecap") or "butt").strip().lower()
+        if linecap not in ("butt", "round", "square"):
+            linecap = "butt"
 
         local_rings: list[Ring] = []
         stroke_pts: list[tuple[list[Point], bool]] = []  # (points, closed)
@@ -645,7 +681,7 @@ def parse_svg_to_mark(
                 [[_mat_apply(matrix, x, y) for x, y in ring] for ring in local_rings]
             )
         for pts, closed in stroke_pts:
-            expanded = _stroke_segments_to_rings(pts, stroke_w, closed)
+            expanded = _stroke_segments_to_rings(pts, stroke_w, closed, linecap)
             if expanded:
                 # Stroke quads overlap at joints — they must UNION, not
                 # XOR, so each quad/octagon is its own even-odd group.
