@@ -32,6 +32,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   logo or text no longer leaves hairline seams that make other tools reject
   the file.
 
+- **Material suggestions better respect your hotend (free)** — a filament your
+  printer can't melt is no longer offered. If nothing in the catalog clears
+  your printer's limit, Kiln says so, and names the coolest filament that
+  would.
+
+- **More split pieces come back with pins in them (Pro)** — when one cut passes
+  through several separate areas of a shape, like a panel with a brace behind
+  it, Kiln now fits pins in each area. It used to measure across the empty gap
+  between them and give up, so pieces that could have been pinned came back
+  plain.
+
+- **"Trust this browser" now actually works (Business/Enterprise)** — it used
+  to still demand your authenticator code on the next call. Admin actions
+  still require a fresh code.
+
+- **A cloud hiccup no longer reads as an empty library (Pro)** — if Kiln can't
+  reach your saved work for a moment, it now says the read failed instead of
+  answering with an empty list.
+
 ## [1.3.1] - 2026-07-31
 
 ### Added
