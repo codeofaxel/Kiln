@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-08-01T18:25:06.286138+00:00",
-  "tool_count": 406,
+  "generated": "2026-08-01T19:25:10.543591+00:00",
+  "tool_count": 408,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -6455,6 +6455,30 @@
       }
     },
     {
+      "name": "retire_decoration_preset_release",
+      "description": "Yank a preset release \u2014 record preserved, name stops resolving.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "release_id": {
+            "title": "Release Id",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "release_id"
+        ],
+        "title": "retire_decoration_preset_releaseArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "retire_design_branch",
       "description": "Mark a branch retired \u2014 preserves records, frees the name.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -6513,6 +6537,30 @@
           "branch_id"
         ],
         "title": "retire_feature_branchArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "retire_feature_release",
+      "description": "Yank a feature release \u2014 record preserved, name stops resolving.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "release_id": {
+            "title": "Release Id",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "release_id"
+        ],
+        "title": "retire_feature_releaseArguments",
         "type": "object"
       }
     },
