@@ -361,3 +361,55 @@ class TestNeverRaisesContract:
         with ThreadPoolExecutor(max_workers=8) as pool:
             results = list(pool.map(lambda _: stage_link.stage_link_for(p), range(24)))
         assert all(r and r["viewer_url"] for r in results), "a parallel caller got nothing"
+
+
+class TestGenericProductKeyIsFound:
+    """Regression for 2026-08-01: the inline stage opened EMPTY.
+
+    ``apply_geometric_texture`` reports its mesh under ``output_path``. The key
+    matcher required the key itself to say stl/3mf/mesh/obj, so a verified
+    ``.stl`` sitting under a generic product key was rejected — no mesh found,
+    no token minted, no geometry attached. The tool is still stamped as
+    stage-bearing, so the panel opened with its chrome and nothing inside: a
+    silent failure with no error anywhere to read.
+
+    The value's suffix is ground truth; the key name only disambiguates WHICH
+    mesh a result means. It must never veto a suffix that already checked out.
+    """
+
+    def test_mesh_under_a_generic_output_key_is_found(self):
+        assert (
+            stage_link.find_mesh_path({"status": "success", "output_path": "/t/a.stl"})
+            == "/t/a.stl"
+        )
+
+    def test_the_incident_result_shape_resolves(self):
+        """apply_geometric_texture's real return, verbatim in shape."""
+        got = stage_link.find_mesh_path(
+            {
+                "status": "success",
+                "output_path": "/t/coaster_lava_deboss.stl",
+                "input_path": "/t/coaster.stl",
+                "scad_path": "/t/coaster_deboss.scad",
+                "dat_path": "/t/lava_heightmap.dat",
+            }
+        )
+        assert got == "/t/coaster_lava_deboss.stl", "the product mesh must win"
+
+    def test_an_input_is_still_never_the_answer(self):
+        """Broadening the key match must not start linking the mesh handed IN —
+        a repair would hand back the broken version and call it the fix."""
+        assert stage_link.find_mesh_path({"input_path": "/t/in.stl"}) is None
+        assert stage_link.find_mesh_path({"source_mesh": "/t/in.stl"}) is None
+        assert (
+            stage_link.find_mesh_path(
+                {"input_path": "/t/in.stl", "output_path": "/t/out.stl"}
+            )
+            == "/t/out.stl"
+        )
+
+    def test_a_non_mesh_under_a_product_key_is_ignored(self):
+        """The suffix check is the other half of the pair: a generic key only
+        counts when the value is actually a mesh."""
+        for value in ("/t/out.scad", "/t/out.png", "/t/out.gcode", "/t/outdir"):
+            assert stage_link.find_mesh_path({"output_path": value}) is None, value

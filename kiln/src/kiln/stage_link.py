@@ -259,7 +259,18 @@ def _looks_like_mesh_key(key: str) -> bool:
     k = key.lower()
     if k.endswith("_path"):
         k = k[: -len("_path")]
-    return any(seg == part for part in k.split("_") for seg in _MESH_KEY_SEGMENTS)
+    parts = k.split("_")
+    if any(seg == part for part in parts for seg in _MESH_KEY_SEGMENTS):
+        return True
+    # A key that names itself the PRODUCT does not also have to say "stl".
+    # Every caller checks the value's suffix against _MESH_SUFFIXES, and that
+    # suffix is ground truth — the key name only disambiguates WHICH mesh a
+    # result means, so letting it veto a verified .stl is backwards.  Without
+    # this, a tool reporting its mesh under a generic ``output_path`` is
+    # invisible here: no token is minted, no geometry reaches the inline
+    # stage, and because the tool is still stamped as stage-bearing the panel
+    # opens EMPTY.  (2026-08-01: apply_geometric_texture, live.)
+    return any(part in _OUTPUT_MARKERS for part in parts)
 
 
 def _key_rank(key: str) -> int | None:
