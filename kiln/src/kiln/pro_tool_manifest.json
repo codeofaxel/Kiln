@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-07-30T05:42:38.785778+00:00",
-  "tool_count": 402,
+  "generated": "2026-07-31T22:49:02.366821+00:00",
+  "tool_count": 403,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -3213,8 +3213,63 @@
       }
     },
     {
+      "name": "apply_decoration_preset",
+      "description": "Apply a saved decoration preset to a mesh \u2014 the preset's own recorded settings, no signing required.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "host_mesh_path": {
+            "title": "Host Mesh Path",
+            "type": "string"
+          },
+          "preset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Preset Id"
+          },
+          "preset_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Preset Version Id"
+          },
+          "base_mesh_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Base Mesh Version Id"
+          }
+        },
+        "required": [
+          "host_mesh_path"
+        ],
+        "title": "apply_decoration_presetArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "apply_decoration_preset_release_to_mesh",
-      "description": "Apply a signed preset release to a host mesh.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Apply a SIGNED preset release to a host mesh \u2014 the verified, pinned path.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
