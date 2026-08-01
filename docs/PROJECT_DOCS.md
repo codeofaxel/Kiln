@@ -8,7 +8,7 @@
 
 ### Overview
 
-Kiln gives AI agents a safe, unified way to design, validate, and manufacture 3D-printed parts. Connect it to Claude (or any MCP-compatible agent) and your assistant can take a part from description to done: design it, check that it will actually print, slice it, print it on your printer, watch the print, and help recover when something goes wrong — through <!-- KILN_MCP_CAPABILITY_COUNT --> 888 MCP capabilities and a <!-- KILN_CLI_COUNT --> 235-command CLI.
+Kiln gives AI agents a safe, unified way to design, validate, and manufacture 3D-printed parts. Connect it to Claude (or any MCP-compatible agent) and your assistant can take a part from description to done: design it, check that it will actually print, slice it, print it on your printer, watch the print, and help recover when something goes wrong — through <!-- KILN_MCP_CAPABILITY_COUNT --> 893 MCP capabilities and a <!-- KILN_CLI_COUNT --> 235-command CLI.
 
 **Clarification:** Kiln does **not** operate its own marketplace or manufacturing network. It integrates with third-party marketplaces for model discovery and third-party fulfillment providers for outsourced manufacturing. Kiln is orchestration and agent infrastructure, not a supply-side platform.
 
@@ -37,11 +37,11 @@ All three modes use the same MCP tools and CLI commands. No printer and no insta
 
 The short version of the capability map. Everything below is reachable through the same MCP tools and CLI.
 
-- **Design.** Describe a part in plain language and Kiln designs it — no external AI service or API key required — then previews it and iterates with you. The preview includes an interactive 3D stage on every install: inline in apps that support panels, or a browser link to the same stage everywhere else. Common items (coasters, keychains, trays, nameplates, and more) route to dedicated generators. Parametric templates, STEP/STL import, and opt-in cloud generation providers round out the ways a design can start. A multi-part model can be imported with its named parts intact and turned into a buildable kit: the largest printable scale, proof the pieces physically fit, and plate-by-plate packing.
+- **Design.** Describe a part in plain language and Kiln designs it — no external AI service or API key required — then previews it and iterates with you. The preview includes an interactive 3D stage on every install: inline in apps that support panels, or a browser link to the same stage everywhere else. Where Kiln knows which printer is yours, the stage stands the model on that machine's actual bed and says when a part outgrows it. Common items (coasters, keychains, trays, nameplates, and more) route to dedicated generators. Parametric templates, STEP/STL import, and opt-in cloud generation providers round out the ways a design can start. A multi-part model can be imported with its named parts intact and turned into a buildable kit: the largest printable scale, proof the pieces physically fit, and plate-by-plate packing.
 - **See it in 3D.** Models render from every angle before printing, and on the hosted connection you can turn a design over interactively — inline in AI apps that support embedded panels, or through a shareable link.
 - **Validate before you print.** Every model can be checked for printability before it reaches a printer: overhangs, thin walls, bridging, bed adhesion, support needs, warping risk, and more — scored, graded, and paired with concrete fixes. Parts that physically can't succeed (too big for the plate, a material your hotend can't melt) are caught up front, free.
 - **Print and monitor.** Slice with your installed slicer, print on any supported printer, and monitor with camera snapshots, progress, temperatures, and health checks. Failed prints get diagnosis, guided recovery, and — on supported setups — resume from the layer where the print stopped.
-- **Decorate.** Photos, logos, QR codes, text, and procedural textures can be applied to models for single- or multi-color printing (paid tiers; see [pricing](https://kiln3d.com/pricing)).
+- **Decorate.** Photos, logos, QR codes, text, and procedural textures can be applied to models for single- or multi-color printing (paid tiers; see [pricing](https://kiln3d.com/pricing)). A decoration saved earlier can be re-applied by name at its recorded depth and placement.
 - **Learn.** Print outcomes feed material recommendations, per-printer settings, and calibration so the next print is smarter than the last. Community learning is anonymized and opt-in.
 - **Version.** Designs, decorations, and mechanical features can be branched, merged, reviewed, released, and signed — version control that understands manufacturing artifacts (Kiln Pro).
 
@@ -340,7 +340,7 @@ The MCP server starts via `kiln serve` or `python -m kiln serve`. The fastest se
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **<!-- KILN_MCP_TOOL_COUNT --> 881 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT --> 888 total MCP capabilities**. The everyday core is documented below by category; agents see the full, current catalog at connect time (`get_started` and `get_skill_manifest` return the complete map).
+Kiln exposes **<!-- KILN_MCP_TOOL_COUNT --> 886 MCP tools** and **<!-- KILN_MCP_CAPABILITY_COUNT --> 893 total MCP capabilities**. The everyday core is documented below by category; agents see the full, current catalog at connect time (`get_started` and `get_skill_manifest` return the complete map).
 
 Paid-tier tools are discoverable too: agents without a license receive a structured response naming the required tier, so they can tell you what's possible and where it lives ([pricing](https://kiln3d.com/pricing)).
 
@@ -868,4 +868,4 @@ Kiln's paid tiers ship through the private `kiln-pro` companion package ([kiln3d
 
 *Kiln is a project of Hadron Labs Inc.*
 
-<!-- DOCS_REVIEWED_FOR: 1.3.1 -->
+<!-- DOCS_REVIEWED_FOR: 1.3.2 -->
