@@ -14,7 +14,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
-- **Your design now stands on your real print bed (free).** The 3D stage drew
+- **Your design now stands on your real print bed.** The 3D stage drew
   the same square plate for everyone; where Kiln knows which printer is yours
   it now draws that machine's actual bed, with its name on it — in the web
   studio, in shared view links, and in the panel in your chat. A part too big
@@ -22,26 +22,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
-- **Your logo now prints exactly the way you drew it (free)** — gaps stay open,
+- **Your logo now prints exactly the way you drew it** — gaps stay open,
   corners stay sharp, dashed lines stay dashed.
 
-- **Repair says what it could not fix (free)** — instead of reporting success
+- **Repair says what it could not fix** — instead of reporting success
   on a mesh it left untouched, it names the defect and what to do about it.
 
-- **Decorated models come out as clean, watertight solids (free)** — carving a
+- **Decorated models come out as clean, watertight solids** — carving a
   logo or text no longer leaves hairline seams that make other tools reject
   the file.
 
-- **Material suggestions better respect your hotend (free)** — a filament your
-  printer can't melt is no longer offered. If nothing in the catalog clears
-  your printer's limit, Kiln says so, and names the coolest filament that
-  would.
+- **Material suggestions better respect your hotend.**
 
-- **More split pieces come back with pins in them (Pro)** — when one cut passes
-  through several separate areas of a shape, like a panel with a brace behind
-  it, Kiln now fits pins in each area. It used to measure across the empty gap
-  between them and give up, so pieces that could have been pinned came back
-  plain.
+- **More split pieces come back with pins in them (Pro)** — Kiln used to skip
+  pins on some cuts it can now handle, like a panel with a brace behind it.
 
 - **"Trust this browser" now actually works (Business/Enterprise)** — it used
   to still demand your authenticator code on the next call. Admin actions
