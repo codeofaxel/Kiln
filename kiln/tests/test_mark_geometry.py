@@ -13,12 +13,15 @@ If any of these regress, a user's logo renders as the amateur artifact
 set again — these tests are the structural proof they cannot.
 """
 
+import logging
 import math
 import os
 
 import pytest
 
 from kiln.mark_geometry import (
+    _dash_runs,
+    _parse_dasharray,
     _ring_area,
     _stroke_segments_to_rings,
     is_bilevel_image,
@@ -305,6 +308,135 @@ class TestSvgParser:
     )
     def test_degenerate_strokes_emit_no_junk(self, pts, closed, cap, join):
         for ring in _stroke_segments_to_rings(pts, 10.0, closed, cap, join):
+            assert len(ring) >= 3
+            assert abs(_ring_area(ring)) > 1e-12
+            assert all(math.isfinite(v) for pt in ring for v in pt)
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("10", [10.0, 10.0]),  # odd list repeats into dash/gap pairs
+            ("10 5 2", [10.0, 5.0, 2.0, 10.0, 5.0, 2.0]),
+            ("10,5", [10.0, 5.0]),
+            ("none", None),
+            ("5 -3", None),  # negative is invalid → solid, not blank
+            ("0 0", None),  # nothing to draw with
+            ("10%", None),  # viewport-relative; not tracked, so solid
+            ("", None),
+        ],
+    )
+    def test_dasharray_parsing(self, value, expected):
+        assert _parse_dasharray(value) == expected
+
+    def test_dashes_ink_the_on_fraction_of_the_path(self):
+        line = [(0.0, 0.0), (100.0, 0.0)]
+        runs = _dash_runs(line, False, [10.0, 10.0], 0.0)
+        assert [(r[0][0], r[-1][0]) for r in runs] == [
+            (0.0, 10.0), (20.0, 30.0), (40.0, 50.0), (60.0, 70.0), (80.0, 90.0)
+        ]
+
+    @pytest.mark.parametrize(
+        ("offset", "first_run"),
+        [
+            (0.0, (0.0, 10.0)),
+            (5.0, (0.0, 5.0)),  # starts halfway through a dash
+            (-5.0, (5.0, 15.0)),  # starts inside a gap
+            (10.0, (10.0, 20.0)),  # a whole dash into the pattern
+        ],
+    )
+    def test_dashoffset_shifts_the_pattern(self, offset, first_run):
+        runs = _dash_runs([(0.0, 0.0), (100.0, 0.0)], False, [10.0, 10.0], offset)
+        assert (runs[0][0][0], runs[0][-1][0]) == pytest.approx(first_run)
+
+    def test_dash_spanning_a_corner_keeps_the_vertex(self):
+        # Otherwise the dash would cut the corner as one straight chord and
+        # lose its join entirely.
+        runs = _dash_runs(
+            [(0.0, 0.0), (50.0, 0.0), (50.0, 50.0)], False, [100.0, 10.0], 0.0
+        )
+        assert runs[0] == [(0.0, 0.0), (50.0, 0.0), (50.0, 50.0)]
+
+    def test_closed_path_dashes_around_the_whole_perimeter(self):
+        square = [(0.0, 0.0), (60.0, 0.0), (60.0, 60.0), (0.0, 60.0)]
+        runs = _dash_runs(square, True, [30.0, 30.0], 0.0)
+        inked = sum(
+            math.hypot(r[i + 1][0] - r[i][0], r[i + 1][1] - r[i][1])
+            for r in runs
+            for i in range(len(r) - 1)
+        )
+        assert inked == pytest.approx(120.0)  # half of the 240 perimeter
+
+    def test_runaway_dasharray_falls_back_to_solid_and_says_so(self, caplog):
+        line = [(0.0, 0.0), (100000.0, 0.0)]
+        assert _dash_runs(line, False, [0.01, 0.01], 0.0) is None
+        with caplog.at_level(logging.WARNING, logger="kiln.mark_geometry"):
+            rings = _stroke_segments_to_rings(
+                line, 4.0, False, "butt", "miter", 4.0, [0.01, 0.01], 0.0
+            )
+        assert len(rings) == 1  # one solid quad, not a million dashes
+        assert "solid" in caplog.text
+
+    def test_dasharray_reaches_the_mark_through_svg(self):
+        svg = (
+            '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
+            '<line x1="0" y1="10" x2="100" y2="10" stroke="black"'
+            ' stroke-width="4" stroke-dasharray="10 10"/></svg>'
+        )
+        m = parse_svg_to_mark(svg)
+        assert m is not None
+        assert len(m.groups) == 5  # five 10-unit dashes across 100 units
+
+    def test_dasharray_inherits_from_group(self):
+        svg = (
+            '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'
+            '<g stroke-dasharray="10 10">'
+            '<line x1="0" y1="10" x2="100" y2="10" stroke="black" stroke-width="4"/>'
+            "</g></svg>"
+        )
+        assert len(parse_svg_to_mark(svg).groups) == 5
+
+    def test_dashed_stroke_still_caps_and_joins_each_dash(self):
+        # Square caps extend every dash by half a width at both ends, so a
+        # 10-unit dash inks 14 — proof the cap logic runs per dash.
+        line = [(0.0, 0.0), (100.0, 0.0)]
+        butt = _stroke_segments_to_rings(
+            line, 4.0, False, "butt", "miter", 4.0, [10.0, 10.0], 0.0
+        )
+        square = _stroke_segments_to_rings(
+            line, 4.0, False, "square", "miter", 4.0, [10.0, 10.0], 0.0
+        )
+        assert len(butt) == 5  # one quad per dash
+        assert len(square) == 15  # plus two cap quads per dash
+
+    @pytest.mark.parametrize(
+        ("cap", "draws"), [("round", True), ("square", True), ("butt", False)]
+    )
+    def test_zero_length_dash_is_a_dot_not_a_disappearance(self, cap, draws):
+        # "0 12" with round caps is THE SVG dotted-line idiom.  Treating a
+        # zero-length dash as nothing to draw silently erases the mark.
+        svg = (
+            '<svg viewBox="0 0 220 20" xmlns="http://www.w3.org/2000/svg">'
+            '<line x1="10" y1="10" x2="210" y2="10" stroke="black"'
+            f' stroke-width="7" stroke-dasharray="0 12" stroke-linecap="{cap}"/></svg>'
+        )
+        m = parse_svg_to_mark(svg)
+        if not draws:
+            assert m is None  # butt caps on zero-length dashes render nothing
+            return
+        assert m is not None
+        assert len(m.groups) == 34  # 17 dots, two half-caps apiece
+        assert m.height == pytest.approx(7.0, abs=0.01)  # one stroke width across
+
+    @pytest.mark.parametrize("pattern", [[10.0, 10.0], [3.0, 7.0], [25.0, 5.0]])
+    @pytest.mark.parametrize("offset", [0.0, 5.0, -13.0, 100.0])
+    @pytest.mark.parametrize("closed", [True, False])
+    def test_dashed_output_is_always_well_formed(self, pattern, offset, closed):
+        rings = _stroke_segments_to_rings(
+            [(0.0, 0.0), (60.0, 0.0), (60.0, 60.0), (0.0, 60.0)],
+            6.0, closed, "round", "miter", 4.0, pattern, offset,
+        )
+        assert rings
+        for ring in rings:
             assert len(ring) >= 3
             assert abs(_ring_area(ring)) > 1e-12
             assert all(math.isfinite(v) for pt in ring for v in pt)

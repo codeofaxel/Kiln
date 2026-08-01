@@ -33,6 +33,7 @@ import logging
 import math
 import re
 import xml.etree.ElementTree as ET
+from bisect import bisect_right
 from dataclasses import dataclass, field
 
 _logger = logging.getLogger(__name__)
@@ -46,6 +47,18 @@ Ring = list[Point]
 # tiny in the emitted SCAD.
 _BEZIER_SEGMENTS = 16
 _ARC_MAX_STEP_RAD = math.radians(6.0)
+
+# Dash ceiling: a user-supplied SVG can pair a hairline dasharray with a
+# long path, and every dash costs several polygons in the emitted SCAD.
+# Past this many the mark stops being printable detail, so the stroke is
+# drawn solid instead — loudly, never silently.
+_MAX_DASH_RUNS = 2000
+
+# A zero-length dash is SVG's dotted-line idiom ("0 12" with round caps):
+# it renders as a bare linecap.  Giving it this much length lets the cap
+# machinery draw the dot — far below one extruder track, so it never shows
+# up as length in the print.
+_DOT_EPS = 1e-6
 
 # Speck filter: rings whose area is below (this fraction of the mark's
 # bounding-box diagonal)² are anti-aliasing noise, not geometry.  Kept
@@ -257,6 +270,7 @@ def _resolve_paint(elem: ET.Element, inherited: dict) -> dict:
     for key in (
         "fill", "stroke", "stroke-width", "stroke-linecap",
         "stroke-linejoin", "stroke-miterlimit",
+        "stroke-dasharray", "stroke-dashoffset",
         "opacity", "fill-opacity", "display",
     ):
         val = decls.get(key, elem.get(key))
@@ -526,6 +540,87 @@ def _dedupe_consecutive(pts: list[Point], closed: bool) -> list[Point]:
     return clean
 
 
+def _parse_dasharray(value: str | None) -> list[float] | None:
+    """Interpret ``stroke-dasharray`` into dash/gap lengths, or None for solid.
+
+    Per SVG an odd-length list repeats to make dash/gap pairs, and a list
+    containing a negative value is invalid — invalid means solid, not
+    unrendered.  Percentages resolve against the viewport diagonal, which
+    this parser does not track, so they fall back to solid rather than
+    silently dashing at the wrong scale.
+    """
+    if not value:
+        return None
+    text = value.strip().lower()
+    if text in ("none", "inherit") or "%" in text:
+        return None
+    vals = [float(m.group(0)) for m in _FLOAT_RE.finditer(text)]
+    if not vals or any(v < 0 for v in vals) or sum(vals) <= 0:
+        return None
+    return vals * 2 if len(vals) % 2 else vals
+
+
+def _dash_runs(
+    pts: list[Point], closed: bool, pattern: list[float], offset: float
+) -> list[list[Point]] | None:
+    """Split a polyline into the drawn runs of a dash pattern.
+
+    Returns None when the pattern would produce more runs than the mark
+    can carry, so the caller can fall back to a solid stroke.
+    """
+    path = [*pts, pts[0]] if closed else list(pts)
+    cum = [0.0]
+    for a, b in zip(path, path[1:], strict=False):
+        cum.append(cum[-1] + math.hypot(b[0] - a[0], b[1] - a[1]))
+    total = cum[-1]
+    period = sum(pattern)
+    if total <= 0 or period <= 0:
+        return None
+
+    def _at(dist: float) -> Point:
+        i = min(max(bisect_right(cum, dist) - 1, 0), len(path) - 2)
+        span = cum[i + 1] - cum[i]
+        t = 0.0 if span <= 0 else (dist - cum[i]) / span
+        return (
+            path[i][0] + (path[i + 1][0] - path[i][0]) * t,
+            path[i][1] + (path[i + 1][1] - path[i][1]) * t,
+        )
+
+    runs: list[list[Point]] = []
+    # dashoffset is a distance INTO the pattern at the path's start, so the
+    # pattern's own origin sits that far back along the path.
+    cycle = -(offset % period)
+    while cycle < total:
+        pos = cycle
+        for i, length in enumerate(pattern):
+            lo, hi = pos, pos + length
+            pos = hi
+            if i % 2 or lo > total or hi < 0:
+                continue  # odd entries are gaps; even ones may fall off the path
+            is_dot = length <= 0  # a dot is authored zero-length, not clipped to it
+            lo, hi = max(lo, 0.0), min(hi, total)
+            if not is_dot and hi - lo <= _DOT_EPS:
+                continue  # the path boundary trimmed this dash away entirely
+            if is_dot:
+                # Zero-length dash: a dot, drawn by the linecap alone.
+                a = _at(lo)
+                b = _at(min(lo + _DOT_EPS, total))
+                if a == b:
+                    b = _at(max(lo - _DOT_EPS, 0.0))
+                if a == b:
+                    continue
+                run = [a, b]
+            else:
+                run = [_at(lo)]
+                run.extend(p for k, p in enumerate(path) if lo < cum[k] < hi)
+                run.append(_at(hi))
+            runs.append(run)
+            if len(runs) > _MAX_DASH_RUNS:
+                return None
+        cycle += period
+    return runs
+
+
 def _stroke_segments_to_rings(
     pts: list[Point],
     width: float,
@@ -533,6 +628,8 @@ def _stroke_segments_to_rings(
     linecap: str = "butt",
     linejoin: str = "miter",
     miterlimit: float = 4.0,
+    dasharray: list[float] | None = None,
+    dashoffset: float = 0.0,
 ) -> list[Ring]:
     """Expand a stroked polyline into filled quads + join/cap geometry.
 
@@ -549,6 +646,33 @@ def _stroke_segments_to_rings(
         closed = False  # nothing left to close around
     if len(pts) < 2:
         return []
+
+    if dasharray:
+        runs = _dash_runs(pts, closed, dasharray, dashoffset)
+        if runs is None:
+            _logger.warning(
+                "stroke-dasharray produces over %d dashes — drawing the stroke "
+                "solid instead", _MAX_DASH_RUNS,
+            )
+        else:
+            # Each dash is its own open run: capped at both ends, joined
+            # wherever it happens to span one of the original vertices.
+            rings: list[Ring] = []
+            for run in runs:
+                # A butt cap on a zero-length dash draws nothing.  The bound
+                # is loose because interpolating the dot's two points back
+                # out of the path leaves float dust on its length.
+                if linecap == "butt" and len(run) == 2 and (
+                    math.hypot(run[1][0] - run[0][0], run[1][1] - run[0][1])
+                    <= _DOT_EPS * 4
+                ):
+                    continue
+                rings.extend(
+                    _stroke_segments_to_rings(
+                        run, width, False, linecap, linejoin, miterlimit
+                    )
+                )
+            return rings
 
     rings: list[Ring] = []
     hw = width / 2
@@ -697,6 +821,8 @@ def parse_svg_to_mark(
             # SVG2 adds miter-clip/arcs; both degrade to their miter/round base.
             linejoin = "round" if linejoin == "arcs" else "miter"
         miterlimit = max(1.0, _num(paint.get("stroke-miterlimit"), 4.0))
+        dasharray = _parse_dasharray(paint.get("stroke-dasharray"))
+        dashoffset = _num(paint.get("stroke-dashoffset"), 0.0)
 
         local_rings: list[Ring] = []
         stroke_pts: list[tuple[list[Point], bool]] = []  # (points, closed)
@@ -755,7 +881,8 @@ def parse_svg_to_mark(
             )
         for pts, closed in stroke_pts:
             expanded = _stroke_segments_to_rings(
-                pts, stroke_w, closed, linecap, linejoin, miterlimit
+                pts, stroke_w, closed, linecap, linejoin, miterlimit,
+                dasharray, dashoffset,
             )
             if expanded:
                 # Stroke quads overlap at joints — they must UNION, not
