@@ -587,3 +587,33 @@ class TestObjectDisplayColors:
         not_a_zip.write_text("this is not a zip")
         assert object_display_colors(str(not_a_zip)) == {}
         assert object_display_colors(str(tmp_path / "missing.3mf")) == {}
+
+    def test_uniform_per_triangle_references_are_one_color(
+        self, tmp_path: Path
+    ) -> None:
+        """Kiln's own composer writes colorgroup + per-triangle references
+        (the shape three.js bakes to vertex colors); a single effective
+        color is a uniform part, not a painted one."""
+        xml = f"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+       xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">
+  <resources>
+    <m:colorgroup id="9">
+      <m:color color="#F72323" />
+      <m:color color="#2366F7" />
+    </m:colorgroup>
+    <object id="1" type="model" name="zone_0">
+      <mesh>
+        {_BASIC_VERTICES}
+        <triangles>
+          <triangle v1="0" v2="1" v3="2" pid="9" p1="1" />
+          <triangle v1="1" v2="3" v3="2" pid="9" p1="1" />
+        </triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build><item objectid="1" /></build>
+</model>"""
+        colors = object_display_colors(_make_3mf(tmp_path, xml))
+        assert colors == {"zone_0": (35, 102, 247)}

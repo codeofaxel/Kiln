@@ -254,3 +254,41 @@ class TestScenePartColorsSurvive:
         )
         assert payload["downgraded"] is True
         assert "vertex_colors" not in payload and "positions" not in payload
+
+
+class TestPartColorClaims:
+    """_part_rgba judges what a Scene part actually CLAIMS — a stated
+    material color counts; a texture's tint factor does not."""
+
+    def test_a_stated_material_color_counts(self):
+        mesh = trimesh.creation.box()
+        mesh.visual = trimesh.visual.TextureVisuals(
+            material=trimesh.visual.material.SimpleMaterial(diffuse=[10, 200, 30, 255])
+        )
+        rgba, explicit = mesh_payload._part_rgba(mesh, None)
+        assert explicit is True
+        assert rgba[0].tolist() == [10, 200, 30, 255]
+
+    def test_a_textured_part_claims_no_color(self):
+        """An image-textured material's main_color is the tint FACTOR
+        (usually pure white) — painting the part with it would show a solid
+        color the file never stated."""
+        Image = pytest.importorskip("PIL.Image", reason="texture fixture needs PIL")
+        mesh = trimesh.creation.box()
+        mesh.visual = trimesh.visual.TextureVisuals(
+            material=trimesh.visual.material.PBRMaterial(
+                baseColorFactor=[255, 255, 255, 255],
+                baseColorTexture=Image.new("RGB", (4, 4)),
+            )
+        )
+        rgba, explicit = mesh_payload._part_rgba(mesh, None)
+        assert explicit is False
+        assert rgba[0].tolist() == [170, 170, 170, 255]
+
+    def test_the_default_material_is_not_a_claim(self):
+        mesh = trimesh.creation.box()
+        mesh.visual = trimesh.visual.TextureVisuals(
+            material=trimesh.visual.material.SimpleMaterial()
+        )
+        _, explicit = mesh_payload._part_rgba(mesh, None)
+        assert explicit is False

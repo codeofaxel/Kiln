@@ -15,7 +15,6 @@ from kiln.multicolor_3mf import (
     compose_multicolor_3mf,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
@@ -594,3 +593,143 @@ def test_compose_hardware_warnings_in_result(stl_a: Path, stl_b: Path, tmp_path:
     assert result["success"] is True
     assert "hardware_warnings" in result
     assert any("hardened" in w.lower() for w in result["hardware_warnings"])
+
+
+# ---------------------------------------------------------------------------
+# Spec-visible colors — colorgroup + per-triangle references
+# ---------------------------------------------------------------------------
+
+
+def _model_xml(path: str) -> str:
+    with zipfile.ZipFile(path) as zf:
+        return zf.read("3D/3dmodel.model").decode("utf-8")
+
+
+def test_compose_writes_spec_visible_colorgroup(stl_a: Path, stl_b: Path, tmp_path: Path):
+    """Colors land where spec-compliant readers look, not only in the
+    slicer sidecar — one colorgroup entry per distinct part color, and a
+    reference on every triangle of a colored object (the exact shape
+    three.js' 3MFLoader bakes to vertex colors)."""
+    out = tmp_path / "out.3mf"
+    compose_multicolor_3mf(
+        [
+            ColorPart(stl_path=str(stl_a), extruder=1, color="#f72323"),
+            ColorPart(stl_path=str(stl_b), extruder=2, color="2366F7"),  # bare hex too
+        ],
+        output_path=str(out),
+    )
+    xml = _model_xml(str(out))
+    assert '<m:colorgroup id="3">' in xml  # objects 1..2, group takes the next id
+    assert '<m:color color="#F72323"/>' in xml
+    assert '<m:color color="#2366F7"/>' in xml
+    assert 'pid="3" p1="0"' in xml and 'pid="3" p1="1"' in xml
+    # Deliberately NO object-level pid — the proven three.js shape is
+    # per-triangle references only.
+    assert "pindex=" not in xml
+
+
+def test_compose_shares_one_palette_entry_per_distinct_color(
+    stl_a: Path, stl_b: Path, tmp_path: Path
+):
+    out = tmp_path / "out.3mf"
+    compose_multicolor_3mf(
+        [
+            ColorPart(stl_path=str(stl_a), extruder=1, color="#F72323"),
+            ColorPart(stl_path=str(stl_b), extruder=2, color="#f72323"),
+        ],
+        output_path=str(out),
+    )
+    assert _model_xml(str(out)).count("<m:color ") == 1
+
+
+def test_compose_without_colors_writes_no_colorgroup(stl_a: Path, tmp_path: Path):
+    out = tmp_path / "out.3mf"
+    compose_multicolor_3mf(
+        [ColorPart(stl_path=str(stl_a), extruder=1)], output_path=str(out),
+    )
+    xml = _model_xml(str(out))
+    assert "colorgroup" not in xml
+    assert "p1=" not in xml
+
+
+def test_compose_invalid_color_hint_is_not_a_color_claim(stl_a: Path, tmp_path: Path):
+    out = tmp_path / "out.3mf"
+    compose_multicolor_3mf(
+        [ColorPart(stl_path=str(stl_a), extruder=1, color="not-a-color")],
+        output_path=str(out),
+    )
+    assert "colorgroup" not in _model_xml(str(out))
+
+
+def test_spec_colors_survive_without_the_sidecar(stl_a: Path, stl_b: Path, tmp_path: Path):
+    """The 2026-08-01 gap, closed at the source: strip the slicer sidecar
+    and a spec reader still sees every part color."""
+    from kiln.threemf_parser import parse_colored_3mf
+
+    out = tmp_path / "out.3mf"
+    compose_multicolor_3mf(
+        [
+            ColorPart(stl_path=str(stl_a), extruder=1, color="#F72323"),
+            ColorPart(stl_path=str(stl_b), extruder=2, color="#2366F7"),
+        ],
+        output_path=str(out),
+    )
+    stripped = tmp_path / "stripped.3mf"
+    with zipfile.ZipFile(out) as src, zipfile.ZipFile(stripped, "w") as dst:
+        for name in src.namelist():
+            if name != "Metadata/model_settings.config":
+                dst.writestr(name, src.read(name))
+    mesh = parse_colored_3mf(str(stripped))
+    assert mesh.colors_found is True
+    assert {t.color for t in mesh.triangles} == {(247, 35, 35), (35, 102, 247)}
+
+
+# ---------------------------------------------------------------------------
+# Thumbnail — the colored render, with the compose never held hostage
+# ---------------------------------------------------------------------------
+
+
+def test_thumbnail_is_the_colored_render(stl_a: Path, stl_b: Path, tmp_path: Path):
+    """The embedded plate_1.png shows the parts in their real colors —
+    a grey thumbnail undersells a multicolor print on every slicer LCD."""
+    Image = pytest.importorskip("PIL.Image", reason="colored renderer needs PIL")
+
+    out = tmp_path / "out.3mf"
+    compose_multicolor_3mf(
+        [
+            ColorPart(stl_path=str(stl_a), extruder=1, color="#F72323"),
+            ColorPart(stl_path=str(stl_b), extruder=2, color="#2366F7"),
+        ],
+        output_path=str(out),
+    )
+    with zipfile.ZipFile(out) as zf:
+        assert "Metadata/plate_1.png" in zf.namelist()
+        import io
+
+        img = Image.open(io.BytesIO(zf.read("Metadata/plate_1.png"))).convert("RGB")
+    pixels = [img.getpixel((x, y)) for y in range(0, img.height, 4) for x in range(0, img.width, 4)]
+    reddish = sum(1 for r, g, b in pixels if r > 140 and g < 90 and b < 90)
+    bluish = sum(1 for r, g, b in pixels if b > 140 and r < 90 and g < 110)
+    assert reddish > 0 and bluish > 0, (
+        "the embedded thumbnail carries neither part color — it regressed to grey"
+    )
+
+
+def test_thumbnail_failure_never_fails_the_compose(
+    stl_a: Path, tmp_path: Path, monkeypatch
+):
+    import kiln.multicolor_3mf as m3
+
+    monkeypatch.setattr(
+        m3, "_render_colored_thumbnail",
+        lambda parsed: (_ for _ in ()).throw(RuntimeError("no renderer")),
+    )
+    monkeypatch.setattr(m3, "_generate_thumbnail_openscad", lambda paths: None)
+    out = tmp_path / "out.3mf"
+    result = compose_multicolor_3mf(
+        [ColorPart(stl_path=str(stl_a), extruder=1, color="#F72323")],
+        output_path=str(out),
+    )
+    assert result["success"] is True
+    with zipfile.ZipFile(out) as zf:
+        assert "Metadata/plate_1.png" not in zf.namelist()

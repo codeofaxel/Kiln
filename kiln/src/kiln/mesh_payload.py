@@ -208,12 +208,23 @@ def _part_rgba(part: Any, sidecar_rgb: tuple[int, int, int] | None) -> tuple[Any
         r, g, b = sidecar_rgb
         return np.tile(np.array([[r, g, b, 255]], np.uint8), (n, 1)), True
     # A material's main_color, unless it is trimesh's own default — that
-    # grey means "nobody said", not "somebody chose grey".
+    # grey means "nobody said", not "somebody chose grey".  An
+    # image-textured material is skipped outright: its main_color is the
+    # tint FACTOR (usually pure white), and painting the whole part with
+    # it would claim a color the file never stated.
     from trimesh.visual.color import DEFAULT_COLOR
 
     material = getattr(part.visual, "material", None)
     main = getattr(material, "main_color", None)
-    if main is not None and tuple(np.asarray(main)[:4]) != tuple(DEFAULT_COLOR):
+    textured = any(
+        getattr(material, attr, None) is not None
+        for attr in ("image", "baseColorTexture")
+    )
+    if (
+        not textured
+        and main is not None
+        and tuple(np.asarray(main)[:4]) != tuple(DEFAULT_COLOR)
+    ):
         rgba_row = np.asarray(main, dtype=np.uint8).reshape(1, 4)
         return np.tile(rgba_row, (n, 1)), True
     return np.tile(np.array([_NEUTRAL_RGBA], np.uint8), (n, 1)), False
