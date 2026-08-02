@@ -23,11 +23,14 @@ NOT get permission to call tools back through the host, so that path leaves
 the stage sitting on its waiting animation forever with no way to say why.
 
 So the payload rides the result.  That is not free — an 80k-triangle mesh
-is ~1.9 MB of base64, and a host that never renders a panel would be
-feeding that straight into the model's context.  Hence the gate below: the
-geometry is attached only for a host that has actually shown it supports
-MCP Apps.  Everyone else gets the ordinary result they get today, plus a
-resource and some ``_meta`` they will never look at.
+is ~1.9 MB of base64, and geometry nobody draws is fed straight into the
+model's context.  Hence the TWO gates below, both of which must pass: the
+host has actually shown it supports MCP Apps (else no panel ever opens),
+and the called tool is stamped to open the stage (else the host draws
+nothing for this result either — a slicer echoing the path it just sliced
+must not pay for a panel it cannot have).  Everyone else gets the ordinary
+result they get today, plus a resource and some ``_meta`` they will never
+look at.
 
 The still image is the floor under all of it, always.
 """
@@ -585,20 +588,53 @@ def _stamp_tools(mcp: Any) -> int:
     return stamped
 
 
+def _tool_opens_stage(mcp: Any, name: str | None) -> bool:
+    """Whether the named tool's declaration points at the stage.
+
+    The stamp on the registered tool object is the single decision — the
+    roster stamps the mesh tools, the diagnostics verbs stamp themselves at
+    registration — so nothing here keeps a second list.  A host only opens
+    the panel for a stamped tool, which means geometry attached to an
+    UNSTAMPED tool's result is dead weight: ``slice_model`` echoing the path
+    it just sliced was shipping megabytes of base64 no panel would ever draw.
+
+    Every unreadable shape fails OPEN.  Withholding geometry from a rendered
+    panel starves it for the whole call — the panel cannot call tools back
+    on a local stdio server — while attaching to a tool nobody panels costs
+    bytes once.  Only a tool this can SEE is unstamped is withheld.
+    """
+    if not name:
+        return True
+    try:
+        registry = getattr(getattr(mcp, "_tool_manager", None), "_tools", None)
+        if not isinstance(registry, dict) or name not in registry:
+            return True
+        meta = getattr(registry[name], "meta", None) or {}
+        ui = meta.get("ui") or {}
+        return ui.get("resourceUri") == MESH_VIEWER_RESOURCE_URI
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def _install_result_hook(mcp: Any) -> bool:
-    """Attach the token (and, for an MCP Apps host, the geometry) to results.
+    """Attach the token (and, for a panel that will open, the geometry).
 
     This has to happen at the LOWLEVEL handler.  The tool-manager hook that
     the telemetry counters use runs with ``convert_result=True``, so the
     value there is already a list of content blocks and a dict mutation is
     silently lost — measured, after writing it the other way first.
+
+    The geometry rides only when BOTH gates pass: the host renders MCP Apps
+    (else nobody draws it), and the tool is stamped to open the stage (else
+    the host draws nothing for this result either).  The token always rides.
     """
-    def _attach(inner: Any, ctx: Any) -> None:
+    def _attach(inner: Any, ctx: Any, name: str | None) -> None:
         """Mutate one tool result in place.  Deliberately knows no SDK detail —
         ``wrap_call_tool_result`` owns every difference between majors, and
         this stays the description of WHAT to attach.  ``ctx`` is the request
         context of THIS call (None on 1.x), forwarded so the capability read
-        can see the session on SDK 2."""
+        can see the session on SDK 2; ``name`` is the called tool when the
+        request shape yields one, else None (which reads as "attach")."""
         try:
             token = token_for_call_result(inner)
             if not token:
@@ -619,7 +655,7 @@ def _install_result_hook(mcp: Any) -> bool:
             sc["artifact"] = artifact
             attaching = host_renders_apps(mcp, ctx)
             _log_signal_once(mcp, attaching, ctx)
-            if attaching:
+            if attaching and _tool_opens_stage(mcp, name):
                 payload = _inline_payload(token)
                 if payload is not None:
                     sc[VIEWER_STRUCTURED_CONTENT_KEY] = payload

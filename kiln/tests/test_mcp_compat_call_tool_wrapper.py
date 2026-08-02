@@ -89,7 +89,7 @@ def test_the_wrapper_actually_sees_the_result():
     result = _Result()
     mcp, invoke = _server_with_base_handler(result)
 
-    assert wrap_call_tool_result(mcp, lambda inner, ctx: inner.structuredContent.update(seen=True))
+    assert wrap_call_tool_result(mcp, lambda inner, ctx, name: inner.structuredContent.update(seen=True))
     invoke()
 
     assert result.structuredContent.get("seen") is True, (
@@ -102,7 +102,7 @@ def test_the_handlers_own_return_value_survives():
     just the stage — the failure mode worth being loudest about."""
     result = _Result()
     mcp, invoke = _server_with_base_handler(result)
-    wrap_call_tool_result(mcp, lambda inner, ctx: None)
+    wrap_call_tool_result(mcp, lambda inner, ctx, name: None)
 
     resp = invoke()
 
@@ -117,8 +117,8 @@ def test_installing_twice_does_not_stack():
     mcp, invoke = _server_with_base_handler(result)
 
     calls: list[int] = []
-    assert wrap_call_tool_result(mcp, lambda inner, ctx: calls.append(1)) is True
-    assert wrap_call_tool_result(mcp, lambda inner, ctx: calls.append(1)) is False
+    assert wrap_call_tool_result(mcp, lambda inner, ctx, name: calls.append(1)) is True
+    assert wrap_call_tool_result(mcp, lambda inner, ctx, name: calls.append(1)) is False
 
     invoke()
     assert len(calls) == 1
@@ -133,7 +133,7 @@ def test_the_callback_receives_this_calls_request_context():
     mcp, invoke = _server_with_base_handler(result)
 
     seen: list = []
-    wrap_call_tool_result(mcp, lambda inner, ctx: seen.append((inner, ctx)))
+    wrap_call_tool_result(mcp, lambda inner, ctx, name: seen.append((inner, ctx)))
 
     if MCP_SDK_MAJOR >= 2:
         sentinel = object()
@@ -158,4 +158,35 @@ def test_no_handler_to_wrap_is_a_false_not_a_crash():
 
         server.request_handlers.pop(CallToolRequest, None)
 
-    assert wrap_call_tool_result(mcp, lambda inner, ctx: None) is False
+    assert wrap_call_tool_result(mcp, lambda inner, ctx, name: None) is False
+
+
+def test_the_callback_receives_the_tool_name():
+    """The stage decides per TOOL what to attach, so the name must survive
+    the wrapper — through whichever request shape this SDK uses.  A shape
+    that yields no name hands the callback None (the fail-open reading);
+    that path is covered by every other test here, which invokes with
+    params=None."""
+    result = _Result()
+    mcp, invoke = _server_with_base_handler(result)
+
+    seen: list = []
+    wrap_call_tool_result(mcp, lambda inner, ctx, name: seen.append(name))
+
+    from mcp.types import CallToolRequestParams
+
+    params = CallToolRequestParams(name="probe_tool", arguments={})
+    server = lowlevel_server(mcp)
+
+    if MCP_SDK_MAJOR >= 2:
+        handler = server.get_request_handler("tools/call").handler
+        anyio.run(handler, None, params)
+    else:
+        from mcp.types import CallToolRequest
+
+        req = CallToolRequest(method="tools/call", params=params)
+        anyio.run(server.request_handlers[CallToolRequest], req)
+
+    assert seen == ["probe_tool"], (
+        f"tool name did not reach the callback on SDK major {MCP_SDK_MAJOR}: {seen}"
+    )

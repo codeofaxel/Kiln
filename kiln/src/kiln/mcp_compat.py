@@ -115,17 +115,44 @@ def set_instructions(mcp: Any, text: str) -> None:
 _WRAPPED = "_kiln_wrapped_call_tool"
 
 
+def _call_tool_name(source: Any) -> str | None:
+    """Best-effort tool name from whatever a ``tools/call`` handler was handed.
+
+    2.x hands the handler the params object (``.name`` directly); 1.x hands
+    the whole request (``.params.name``, sometimes behind a ``.root``
+    wrapper).  Anything unreadable is ``None`` — the stage treats an unknown
+    name as "attach as before", so a shape this misses costs bytes on one
+    call, never a starved panel.
+    """
+    for obj in (
+        source,
+        getattr(source, "params", None),
+        getattr(getattr(source, "root", None), "params", None),
+    ):
+        name = getattr(obj, "name", None)
+        if isinstance(name, str) and name:
+            return name
+        if isinstance(obj, dict):
+            candidate = obj.get("name")
+            if isinstance(candidate, str) and candidate:
+                return candidate
+    return None
+
+
 def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
     """Wrap the lowlevel ``tools/call`` handler so ``mutate`` sees each result.
 
-    ``mutate(result, ctx)`` is called with the tool result object AFTER the
-    real handler produced it, and mutates it in place; its return value is
+    ``mutate(result, ctx, name)`` is called with the tool result object AFTER
+    the real handler produced it, and mutates it in place; its return value is
     ignored and it must not raise (callers wrap their own body).  ``ctx`` is
     the ``ServerRequestContext`` SDK 2 hands the handler — the only place the
     session (and so the host's declared capabilities) lives on 2.x — and None
     on 1.x, where ``client_capabilities`` reads the lowlevel server attribute
-    instead.  The handler's own return value is passed through untouched, so
-    a wrapper that does nothing is invisible.
+    instead.  ``name`` is the called tool's name when the request shape
+    yields one (best-effort via ``_call_tool_name``), else None — it lets the
+    stage decide per TOOL what to attach, not just per host.  The handler's
+    own return value is passed through untouched, so a wrapper that does
+    nothing is invisible.
 
     Everything the two SDK majors disagree about lives here, because the
     disagreement is total — the handler is keyed by request TYPE on 1.x and by
@@ -144,10 +171,10 @@ def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
     def _wrap(previous: Any) -> Any:
         """Shared body: run the handler, let ``mutate`` see the result."""
 
-        def _apply(resp: Any, ctx: Any) -> Any:
+        def _apply(resp: Any, ctx: Any, name: str | None) -> Any:
             # 1.x hands back a ServerResult with the real result on ``.root``;
             # 2.x hands back the CallToolResult itself, which has no ``.root``.
-            mutate(getattr(resp, "root", resp), ctx)
+            mutate(getattr(resp, "root", resp), ctx, name)
             return resp
 
         return _apply
@@ -160,7 +187,7 @@ def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
         apply = _wrap(previous)
 
         async def _wrapped_v2(ctx: Any, params: Any) -> Any:
-            return apply(await previous(ctx, params), ctx)
+            return apply(await previous(ctx, params), ctx, _call_tool_name(params))
 
         setattr(_wrapped_v2, _WRAPPED, True)
         server.add_request_handler("tools/call", params_type, _wrapped_v2)
@@ -175,7 +202,7 @@ def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
     apply = _wrap(previous)
 
     async def _wrapped_v1(req: Any) -> Any:
-        return apply(await previous(req), None)
+        return apply(await previous(req), None, _call_tool_name(req))
 
     setattr(_wrapped_v1, _WRAPPED, True)
     handlers[CallToolRequest] = _wrapped_v1

@@ -327,7 +327,7 @@ class TestOnlyAnAppsHostGetsTheGeometry:
         assert sc["message"] == "made a thing"
 
 
-def _run_hook(host, mesh_path):
+def _run_hook(host, mesh_path, tool_name=None):
     """Drive the real lowlevel hook over a result and return its
     structuredContent.
 
@@ -336,6 +336,10 @@ def _run_hook(host, mesh_path):
     the handler's first argument — so this is one of the few places that
     branches on ``MCP_SDK_MAJOR`` (same shape as
     ``test_mcp_compat_call_tool_wrapper._server_with_base_handler``).
+
+    ``tool_name`` shapes the request the wrapper inspects: named, the hook
+    knows which tool ran and applies the per-tool stamp gate; None mimics a
+    request shape the name extraction cannot read, which must fail open.
     """
     import anyio
 
@@ -345,6 +349,12 @@ def _run_hook(host, mesh_path):
     mcp = _fastmcp()
     result = _Result({"success": True, "message": "made a thing", "stl_path": mesh_path})
     server = lowlevel_server(mcp)
+
+    params = None
+    if tool_name is not None:
+        from mcp.types import CallToolRequestParams
+
+        params = CallToolRequestParams(name=tool_name, arguments={})
 
     if MCP_SDK_MAJOR >= 2:
         entry = server.get_request_handler("tools/call")
@@ -356,7 +366,7 @@ def _run_hook(host, mesh_path):
         local_stage.install(mcp)
         handler = server.get_request_handler("tools/call").handler
         # The connected host rides in as the request context argument.
-        anyio.run(handler, host._mcp_server.request_context, None)
+        anyio.run(handler, host._mcp_server.request_context, params)
         return result.structuredContent
 
     from mcp.server.lowlevel.server import request_ctx
@@ -369,11 +379,14 @@ def _run_hook(host, mesh_path):
 
     handlers[CallToolRequest] = _base_v1
     local_stage.install(mcp)
+    req = None
+    if params is not None:
+        req = CallToolRequest(method="tools/call", params=params)
     # The connected host, where the real server reads it from: the
     # context var the lowlevel dispatcher sets before every handler.
     token = request_ctx.set(host._mcp_server.request_context)
     try:
-        anyio.run(handlers[CallToolRequest], None)
+        anyio.run(handlers[CallToolRequest], req)
     finally:
         request_ctx.reset(token)
     return result.structuredContent
@@ -448,3 +461,47 @@ class TestStructuredContentPreservesTheToolsOutput:
         r = _Result(None)
         r.content = [_Block("not json at all")]
         assert local_stage._result_as_dict(r) is None
+
+
+class TestPayloadFollowsTheStamp:
+    """The per-tool gate: geometry rides only into a panel that will open.
+
+    A host opens the panel only for tools stamped ``_meta.ui.resourceUri``,
+    so geometry attached to an unstamped tool's result is dead weight — a
+    slicer echoing the path it just sliced was paying megabytes of base64
+    for a panel it cannot have.  The stamp on the registered tool is the
+    single decision; every unreadable shape fails OPEN, because a rendered
+    panel cannot fetch geometry it was never handed.
+    """
+
+    UI = local_stage.MCP_APPS_EXTENSION_ID
+
+    def _apps_host(self):
+        return _Host(_Caps(extensions={self.UI: {}}))
+
+    def test_a_stamped_tool_still_gets_the_geometry(self, tmp_path):
+        sc = _run_hook(self._apps_host(), _real_cube(tmp_path / "c.stl"),
+                       tool_name="compile_scad")
+        assert sc["kiln_viewer"]["kind"] == "kiln.mesh.v1"
+
+    def test_an_unstamped_tool_gets_the_token_but_not_the_geometry(self, tmp_path):
+        # list_materials registers in the harness and is NOT on the roster,
+        # so install() leaves it unstamped — no panel opens for its results.
+        sc = _run_hook(self._apps_host(), _real_cube(tmp_path / "c.stl"),
+                       tool_name="list_materials")
+        assert sc["artifact"]["artifact_token"], "the token is cheap and always rides"
+        assert "kiln_viewer" not in sc, (
+            "geometry attached for a tool whose declaration opens no panel"
+        )
+        assert sc["success"] is True, "the tool's own output must survive the gate"
+
+    def test_an_unreadable_name_fails_open(self, tmp_path):
+        # tool_name=None mimics a request shape the name extraction cannot
+        # read: the worst case must be yesterday's behavior (attach).
+        sc = _run_hook(self._apps_host(), _real_cube(tmp_path / "c.stl"))
+        assert sc["kiln_viewer"]["kind"] == "kiln.mesh.v1"
+
+    def test_a_tool_the_registry_does_not_know_fails_open(self, tmp_path):
+        sc = _run_hook(self._apps_host(), _real_cube(tmp_path / "c.stl"),
+                       tool_name="somebody_elses_tool")
+        assert sc["kiln_viewer"]["kind"] == "kiln.mesh.v1"
