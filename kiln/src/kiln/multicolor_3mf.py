@@ -86,8 +86,102 @@ logger = logging.getLogger(__name__)
 
 _THUMBNAIL_SIZE = 512
 
+#: Above this the pure-Python colored painter costs more than the OpenSCAD
+#: subprocess it replaces; the grey fallback takes over.
+_COLORED_THUMBNAIL_MAX_TRIANGLES = 200_000
 
-def _generate_thumbnail(stl_paths: list[str]) -> bytes | None:
+
+def _part_rgb_hex(color: str | None) -> str | None:
+    """Normalize a part's color hint to ``#RRGGBB``, or ``None``.
+
+    Accepts bare and ``#``-prefixed hex, 6 or 8 digits (alpha dropped).
+    Anything else is not a color claim.
+    """
+    if not color:
+        return None
+    value = color.strip().lstrip("#")
+    if len(value) == 8:
+        value = value[:6]
+    if len(value) != 6:
+        return None
+    try:
+        int(value, 16)
+    except ValueError:
+        return None
+    return "#" + value.upper()
+
+
+def _part_rgb(color: str | None) -> tuple[int, int, int] | None:
+    """The part's color hint as an RGB tuple, or ``None``."""
+    hex_color = _part_rgb_hex(color)
+    if hex_color is None:
+        return None
+    return (
+        int(hex_color[1:3], 16),
+        int(hex_color[3:5], 16),
+        int(hex_color[5:7], 16),
+    )
+
+
+def _generate_thumbnail(parsed: list[_ParsedPart]) -> bytes | None:
+    """Render the ``Metadata/plate_1.png`` thumbnail for the composed 3MF.
+
+    First choice is Kiln's own colored renderer — pure Python, no OpenSCAD
+    needed, and it paints the parts in their REAL colors: a multicolor 3MF
+    whose thumbnail is grey undersells the print on every slicer LCD and
+    file browser it lands in.  Falls back to the OpenSCAD grey render for
+    meshes too big to paint in Python, and to ``None`` when neither path
+    is available.  A thumbnail must never fail the compose.
+    """
+    if not parsed:
+        return None
+    total_triangles = sum(len(t) for _, _, t in parsed)
+    if total_triangles <= _COLORED_THUMBNAIL_MAX_TRIANGLES:
+        try:
+            data = _render_colored_thumbnail(parsed)
+            if data:
+                return data
+        except Exception:  # noqa: BLE001 — enrichment, never a compose failure
+            logger.debug(
+                "colored thumbnail failed — falling back to OpenSCAD",
+                exc_info=True,
+            )
+    return _generate_thumbnail_openscad([p.stl_path for p, _, _ in parsed])
+
+
+def _render_colored_thumbnail(parsed: list[_ParsedPart]) -> bytes | None:
+    """PNG bytes from the colored renderer, honoring per-part placement."""
+    from kiln.colored_renderer import render_colored_mesh
+    from kiln.threemf_parser import _DEFAULT_COLOR, ColoredTriangle
+
+    triangles: list[ColoredTriangle] = []
+    for part, vertices, faces in parsed:
+        rgb = _part_rgb(part.color) or _DEFAULT_COLOR
+        dx, dy, dz = part.x, part.y, part.z
+        for a, b, c in faces:
+            triangles.append(
+                ColoredTriangle(
+                    v0=(vertices[a][0] + dx, vertices[a][1] + dy, vertices[a][2] + dz),
+                    v1=(vertices[b][0] + dx, vertices[b][1] + dy, vertices[b][2] + dz),
+                    v2=(vertices[c][0] + dx, vertices[c][1] + dy, vertices[c][2] + dz),
+                    color=rgb,
+                )
+            )
+    if not triangles:
+        return None
+    result = render_colored_mesh(
+        triangles, width=_THUMBNAIL_SIZE, height=_THUMBNAIL_SIZE,
+    )
+    path = result.path
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(path)
+
+
+def _generate_thumbnail_openscad(stl_paths: list[str]) -> bytes | None:
     """Render a plate thumbnail PNG from STL files via OpenSCAD.
 
     Imports all STL parts into a single scene so the thumbnail shows
@@ -336,20 +430,54 @@ _ParsedPart = tuple[ColorPart, list[tuple[float, float, float]], list[tuple[int,
 
 
 def _build_model_xml(parsed: list[_ParsedPart]) -> str:
-    """Build ``3D/3dmodel.model`` XML containing all mesh objects."""
+    """Build ``3D/3dmodel.model`` XML containing all mesh objects.
+
+    Part colors are written where SPEC-COMPLIANT readers look, not only in
+    the slicer sidecar: one ``<m:colorgroup>`` entry per distinct part
+    color, referenced from every triangle of a colored object
+    (``pid``/``p1``).  That exact shape — colorgroup plus per-triangle
+    references, and deliberately NO object-level ``pid`` — is the one the
+    web viewer's color-preserve tests drive through three.js' real
+    3MFLoader, which bakes it to vertex colors; kiln.threemf_parser
+    resolves it too (a single effective color per object).  The sidecar
+    alone kept the colors invisible to every reader but the slicers that
+    wrote the convention.
+    """
+    palette: list[str] = []
+    part_pindex: dict[int, int] = {}
+    for obj_id, (part, _, _) in enumerate(parsed, start=1):
+        rgb_hex = _part_rgb_hex(part.color)
+        if rgb_hex is None:
+            continue
+        if rgb_hex not in palette:
+            palette.append(rgb_hex)
+        part_pindex[obj_id] = palette.index(rgb_hex)
+    # Object ids stay 1..N (model_settings.config references them); the
+    # color group takes the next free resource id.
+    colorgroup_id = len(parsed) + 1
+
     lines: list[str] = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<model unit="millimeter" xml:lang="en-US"',
         '  xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"',
+        '  xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"',
         '  xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06"',
         '  xmlns:bambu="http://bambulab.com/model/2021"',
         '  xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06">',
         '  <metadata name="Application">Kiln</metadata>',
         "  <resources>",
     ]
+    if palette:
+        lines.append(f'    <m:colorgroup id="{colorgroup_id}">')
+        lines += [f'      <m:color color="{c}"/>' for c in palette]
+        lines.append("    </m:colorgroup>")
 
     for obj_id, (part, vertices, triangles) in enumerate(parsed, start=1):
         name = _xml_escape(part.name or f"part_{obj_id}")
+        pindex = part_pindex.get(obj_id)
+        tri_ref = (
+            f' pid="{colorgroup_id}" p1="{pindex}"' if pindex is not None else ""
+        )
         lines += [
             f'    <object id="{obj_id}" type="model" name="{name}">',
             "      <mesh>",
@@ -362,7 +490,7 @@ def _build_model_xml(parsed: list[_ParsedPart]) -> str:
             "        <triangles>",
         ]
         for v1, v2, v3 in triangles:
-            lines.append(f'          <triangle v1="{v1}" v2="{v2}" v3="{v3}"/>')
+            lines.append(f'          <triangle v1="{v1}" v2="{v2}" v3="{v3}"{tri_ref}/>')
         lines += [
             "        </triangles>",
             "      </mesh>",
@@ -733,7 +861,7 @@ def compose_multicolor_3mf(
     # -----------------------------------------------------------------------
     # Generate plate thumbnail (best-effort, non-blocking)
     # -----------------------------------------------------------------------
-    thumbnail_data = _generate_thumbnail([p.stl_path for p in parts])
+    thumbnail_data = _generate_thumbnail(parsed)
 
     # -----------------------------------------------------------------------
     # Build and write the 3MF ZIP archive

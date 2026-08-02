@@ -454,11 +454,13 @@ def object_display_colors(file_path: str) -> dict[str, tuple[int, int, int]]:
     3MF colors live.
 
     Strongest source first per object: core-spec object-level
-    ``pid``/``pindex``, then the slicer sidecar.  Omitted rather than guessed:
+    ``pid``/``pindex``, then the slicer sidecar.  Per-triangle property
+    references resolve against the object's own color, and ONE effective
+    color is a uniform part (the shape Kiln's own composer writes so spec
+    readers can bake vertex colors).  Omitted rather than guessed:
 
-    * objects whose triangles carry their own color overrides — a uniform
-      bake of a painted object would render a solid color the file never
-      claimed;
+    * objects whose triangles resolve to MORE than one color — no single
+      color can honestly stand for a painted object;
     * everything, when two build objects share a name — trimesh renames
       duplicates with suffixes that can collide with real sibling names, so a
       name-keyed map could color the wrong part.
@@ -489,21 +491,36 @@ def object_display_colors(file_path: str) -> dict[str, tuple[int, int, int]]:
         if key in out:
             return {}  # duplicate names — refuse to guess which part is which
 
-        # A per-triangle pid or p1 means the color varies WITHIN the object.
-        triangles_el = mesh_el.find(f"{{{_CORE_NS}}}triangles")
-        painted = triangles_el is not None and any(
-            tri.get("pid") is not None or tri.get("p1") is not None
-            for tri in triangles_el.findall(f"{{{_CORE_NS}}}triangle")
-        )
-        if painted:
-            continue
-
-        color = _resolve_color(
+        base = _resolve_color(
             color_lookup, obj_el.get("pid"), obj_el.get("pindex"), default=None,
         )
-        if color is None:
+        if base is None:
             with contextlib.suppress(ValueError, TypeError):
-                color = sidecar_colors.get(int(oid))
+                base = sidecar_colors.get(int(oid))
+
+        # Per-triangle property references resolve against the object's own
+        # color.  One effective color is a uniform part; more than one is a
+        # painted object no single color can honestly stand for.
+        effective: set[tuple[int, int, int] | None] = set()
+        triangles_el = mesh_el.find(f"{{{_CORE_NS}}}triangles")
+        triangle_els = (
+            [] if triangles_el is None
+            else triangles_el.findall(f"{{{_CORE_NS}}}triangle")
+        )
+        for tri in triangle_els:
+            tri_pid, tri_p1 = tri.get("pid"), tri.get("p1")
+            if tri_pid is None and tri_p1 is None:
+                effective.add(base)
+            else:
+                effective.add(_resolve_color(
+                    color_lookup,
+                    tri_pid if tri_pid is not None else obj_el.get("pid"),
+                    tri_p1,
+                    default=base,
+                ))
+        if len(effective) > 1:
+            continue
+        color = effective.pop() if effective else base
         if color is not None:
             out[key] = color
     return out
