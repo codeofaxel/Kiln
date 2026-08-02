@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-01T19:25:10.543591+00:00",
+  "generated": "2026-08-02T23:10:55.370772+00:00",
   "tool_count": 408,
   "categories": {
     "product_generators": {
@@ -2260,7 +2260,7 @@
     },
     {
       "name": "auto_add_rubber_feet",
-      "description": "Add rubber foot positions to model bottom (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Add rubber foot positions to model bottom (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "decoration",
       "parameters": {
@@ -2434,7 +2434,7 @@
     },
     {
       "name": "generate_qr_decoration",
-      "description": "Generate a QR code heightmap for embossing onto 3D models (Business).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a QR code heightmap for embossing onto 3D models (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "category": "decoration",
       "parameters": {
@@ -2563,7 +2563,7 @@
     },
     {
       "name": "smart_decorate",
-      "description": "Intelligent decoration with auto-fix for printability (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Intelligent decoration with auto-fix for printability (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "decoration",
       "parameters": {
@@ -2764,7 +2764,7 @@
     },
     {
       "name": "inspect_mesh_view",
-      "description": "Look at a mesh the way a human orbits the 3D viewer \u2014 iteratively.",
+      "description": "Agent-side inspection camera: still PNG frames of a mesh from any pose, for YOUR eyes.",
       "tier": "free",
       "category": "design_inspection",
       "parameters": {
@@ -2879,7 +2879,7 @@
     },
     {
       "name": "rebuild_design",
-      "description": "Re-execute the full build pipeline from a saved recipe (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Re-execute the full build pipeline from a saved recipe (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_modification",
       "parameters": {
@@ -2903,7 +2903,7 @@
     },
     {
       "name": "smart_redesign",
-      "description": "Interpret a natural language instruction and modify the design (Business).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Interpret a natural language instruction and modify the design (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "category": "design_modification",
       "parameters": {
@@ -2932,7 +2932,7 @@
     },
     {
       "name": "build_organic_mesh",
-      "description": "Build a freeform/organic mesh from a smooth-blended primitive recipe.",
+      "description": "Build a freeform/organic mesh from a smooth-blended primitive recipe. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
       "tier": "free",
       "category": "design_session",
       "parameters": {
@@ -2967,7 +2967,7 @@
     },
     {
       "name": "design_session",
-      "description": "Conversational design generator \u2014 describe what you want in plain English, answer a few quick questions, save the brief, generate an STL with a sidecar report of which design checks it passes. Verbs: start, update, save, generate.",
+      "description": "Conversational design generator \u2014 describe what you want in plain English, answer a few quick questions, save the brief, generate an STL with a sidecar report of which design checks it passes. Verbs: start, update, save, generate. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
       "tier": "free",
       "category": "design_session",
       "parameters": {
@@ -3214,7 +3214,7 @@
     },
     {
       "name": "apply_decoration_preset",
-      "description": "Apply a saved decoration preset to a mesh \u2014 the preset's own recorded settings, no signing required.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Apply a saved decoration preset to a mesh \u2014 the preset's own recorded settings, no signing required. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -3372,7 +3372,7 @@
     },
     {
       "name": "attach_part_feature",
-      "description": "Attach a reusable PART feature onto a host mesh and compose the result.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Attach a reusable PART feature onto a host mesh and compose the result. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -3698,7 +3698,7 @@
     },
     {
       "name": "cherry_pick_decoration_modification",
-      "description": "Apply ONE field modification from source onto target.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Apply ONE field modification from source onto target. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -3744,7 +3744,7 @@
     },
     {
       "name": "cherry_pick_feature_modification",
-      "description": "Isolate ONE modification and project the target fingerprint after applying.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Isolate ONE modification and project the target fingerprint after applying. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -3790,7 +3790,7 @@
     },
     {
       "name": "cherry_pick_modification",
-      "description": "Apply one isolated semantic modification from a source branch onto a target branch (KILN-021 Priority 13).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Apply one isolated semantic modification from a source branch onto a target branch (KILN-021 Priority 13). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -4774,7 +4774,7 @@
     },
     {
       "name": "import_external_feature",
-      "description": "Import an external feature asset as a versioned feature.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Import an external feature asset as a versioned feature. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -4856,7 +4856,7 @@
     },
     {
       "name": "import_external_mesh",
-      "description": "Import external geometry (STL / OBJ / PLY / GLB / glTF / 3MF / STEP) as a first-class design version.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Import external geometry (STL / OBJ / PLY / GLB / glTF / 3MF / STEP) as a first-class design version. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -4914,7 +4914,7 @@
     },
     {
       "name": "import_model_parts",
-      "description": "Import a MULTI-PART model with its named parts intact.",
+      "description": "Import a MULTI-PART model with its named parts intact. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
       "tier": "free",
       "category": "design_versioning",
       "parameters": {
@@ -5402,7 +5402,7 @@
     },
     {
       "name": "merge_decoration_preset_branches",
-      "description": "Merge ``source_branch`` into ``target_branch`` semantically.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Merge ``source_branch`` into ``target_branch`` semantically. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -5458,7 +5458,7 @@
     },
     {
       "name": "merge_design_branches",
-      "description": "Record a merge of source into target with conflict resolution.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Record a merge of source into target with conflict resolution. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -5541,7 +5541,7 @@
     },
     {
       "name": "merge_feature_branches",
-      "description": "Record a merge \u2014 ``a = source.head``, ``b = target.head`` (bug-X2 correct).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Record a merge \u2014 ``a = source.head``, ``b = target.head`` (bug-X2 correct). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -5796,7 +5796,7 @@
     },
     {
       "name": "rebase_design_branch",
-      "description": "Rebase a design branch's divergent versions onto another.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Rebase a design branch's divergent versions onto another. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -5832,7 +5832,7 @@
     },
     {
       "name": "rebase_feature_branch",
-      "description": "Rebase a feature branch.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Rebase a feature branch. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -5868,7 +5868,7 @@
     },
     {
       "name": "rebase_preset_branch",
-      "description": "Rebase a decoration preset branch.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Rebase a decoration preset branch. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -6607,7 +6607,7 @@
     },
     {
       "name": "rollback_feature",
-      "description": "Append a new version whose content matches an earlier version.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Append a new version whose content matches an earlier version. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -11276,7 +11276,7 @@
     },
     {
       "name": "add_feature_during_print",
-      "description": "Slice a new mesh at pause_z and resume printing it (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Slice a new mesh at pause_z and resume printing it (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -11485,7 +11485,7 @@
     },
     {
       "name": "add_pin_joints",
-      "description": "Give two touching parts a REAL pin-and-socket joint.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Give two touching parts a REAL pin-and-socket joint. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -11642,7 +11642,7 @@
     },
     {
       "name": "apply_mid_print_decoration_plan",
-      "description": "Commit a planned mid-print decoration (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Commit a planned mid-print decoration (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -12145,7 +12145,7 @@
     },
     {
       "name": "decorate_during_print",
-      "description": "Add a decoration to an in-flight paused print (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Add a decoration to an in-flight paused print (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -12913,7 +12913,7 @@
     },
     {
       "name": "make_printable",
-      "description": "Turn any messy / AI-generated / organic mesh into a print-ready solid.\n\nFree tier: 2 print-ready fixes/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Turn any messy / AI-generated / organic mesh into a print-ready solid. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 2 print-ready fixes/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "print_intelligence",
       "parameters": {
@@ -13263,7 +13263,7 @@
     },
     {
       "name": "plan_mid_print_decoration",
-      "description": "Plan a mid-print decoration in one call (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Plan a mid-print decoration in one call (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -13524,7 +13524,7 @@
     },
     {
       "name": "preview_decorated_mesh",
-      "description": "Render a 3D preview of a mid-print decorated part (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Render a 3D preview of a mid-print decorated part (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -13586,7 +13586,7 @@
     },
     {
       "name": "preview_mid_print_session",
-      "description": "One-call approval gate for a mid-print decoration (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "One-call approval gate for a mid-print decoration (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "print_intelligence",
       "parameters": {
@@ -14112,7 +14112,7 @@
     },
     {
       "name": "split_mesh_to_fit",
-      "description": "Cut ONE solid into printable pieces that reassemble \u2014 the other honest answer to \"it doesn't fit\" (scale_mesh_to_fit shrinks; this cuts, so a functional part keeps its real dimensions).\n\nFree tier: 3 part splits/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Cut ONE solid into printable pieces that reassemble \u2014 the other honest answer to \"it doesn't fit\" (scale_mesh_to_fit shrinks; this cuts, so a functional part keeps its real dimensions). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 part splits/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "print_intelligence",
       "parameters": {
@@ -14351,7 +14351,7 @@
     },
     {
       "name": "generate_ashtray",
-      "description": "Generate an ashtray with optional branding and QR code.\n\nFree tier: 3 ashtrays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate an ashtray with optional branding and QR code. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 ashtrays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -14429,7 +14429,7 @@
     },
     {
       "name": "generate_bookmark",
-      "description": "Generate a bookmark with optional decoration and page clip.\n\nFree tier: 3 bookmarks/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a bookmark with optional decoration and page clip. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 bookmarks/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -14502,7 +14502,7 @@
     },
     {
       "name": "generate_coaster",
-      "description": "Generate a coaster with optional branding and QR code.\n\nFree tier: 3 coasters/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a coaster with optional branding and QR code. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 coasters/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -14565,7 +14565,7 @@
     },
     {
       "name": "generate_fridge_magnet",
-      "description": "Generate a printable fridge magnet with front decoration.\n\nFree tier: 3 fridge magnets/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a printable fridge magnet with front decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 fridge magnets/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -14653,7 +14653,7 @@
     },
     {
       "name": "generate_frisbee",
-      "description": "Generate a flying-disc frisbee with optional top decoration.\n\nFree tier: 3 frisbees/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a flying-disc frisbee with optional top decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 frisbees/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -14721,7 +14721,7 @@
     },
     {
       "name": "generate_jewelry_tray",
-      "description": "Generate a jewelry tray with optional decoration and QR code.\n\nFree tier: 3 jewelry trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a jewelry tray with optional decoration and QR code. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 jewelry trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -14819,7 +14819,7 @@
     },
     {
       "name": "generate_keychain",
-      "description": "Generate a 3D-printable keychain.\n\nFree tier: 3 keychains/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a 3D-printable keychain. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 keychains/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -14902,7 +14902,7 @@
     },
     {
       "name": "generate_license_plate_frame",
-      "description": "Generate a US-spec license plate frame.\n\nFree tier: 3 license plate frames/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a US-spec license plate frame. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 license plate frames/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -15010,7 +15010,7 @@
     },
     {
       "name": "generate_nameplate",
-      "description": "Generate a desk nameplate with two-line raised text.\n\nFree tier: 3 nameplates/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a desk nameplate with two-line raised text. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 nameplates/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -15093,7 +15093,7 @@
     },
     {
       "name": "generate_ornament",
-      "description": "Generate a hanging ornament with optional decoration.\n\nFree tier: 3 ornaments/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a hanging ornament with optional decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 ornaments/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -15171,7 +15171,7 @@
     },
     {
       "name": "generate_pen_cup",
-      "description": "Generate a desktop pen / brush cup with optional QR + decoration.\n\nFree tier: 3 pen cups/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a desktop pen / brush cup with optional QR + decoration. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 pen cups/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -15264,7 +15264,7 @@
     },
     {
       "name": "generate_pet_bowl",
-      "description": "Generate a tapered pet bowl optimized for FDM printing.\n\nFree tier: 3 pet bowls/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a tapered pet bowl optimized for FDM printing. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 pet bowls/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -15337,7 +15337,7 @@
     },
     {
       "name": "generate_pet_tag",
-      "description": "Generate a 3D-printable pet ID tag.\n\nFree tier: 3 pet tags/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a 3D-printable pet ID tag. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 pet tags/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -15422,7 +15422,7 @@
     },
     {
       "name": "generate_rolling_tray",
-      "description": "Generate a rolling tray \u2014 a shallow rectangular work tray with a concave *cove* inner wall, so loose contents sweep clean into a corner instead of catching a 90-degree edge.  Decorate the interior work surface and the exterior underside, both.\n\nFree tier: 3 rolling trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a rolling tray \u2014 a shallow rectangular work tray with a concave *cove* inner wall, so loose contents sweep clean into a corner instead of catching a 90-degree edge.  Decorate the interior work surface and the exterior underside, both. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 rolling trays/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -15515,7 +15515,7 @@
     },
     {
       "name": "generate_soap_dish",
-      "description": "Generate a draining soap dish with optional bottom branding.\n\nFree tier: 3 soap dishes/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a draining soap dish with optional bottom branding. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 soap dishes/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -15598,7 +15598,7 @@
     },
     {
       "name": "generate_wall_plaque",
-      "description": "Generate a wall-mountable photo plaque.\n\nFree tier: 3 wall plaques/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a wall-mountable photo plaque. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 wall plaques/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "product_generators",
       "parameters": {
@@ -15678,7 +15678,7 @@
     },
     {
       "name": "add_qr_to_product",
-      "description": "Add a scannable QR code to any product STL (Business).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Add a scannable QR code to any product STL (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "category": "product_intelligence",
       "parameters": {
@@ -15803,7 +15803,7 @@
     },
     {
       "name": "generate_decorated_product",
-      "description": "Generate a fully decorated product from a photo in one step (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a fully decorated product from a photo in one step (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "product_intelligence",
       "parameters": {
@@ -15857,7 +15857,7 @@
     },
     {
       "name": "generate_product_base",
-      "description": "Generate a 3D-printable product base shape from a template (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a 3D-printable product base shape from a template (Pro). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "product_intelligence",
       "parameters": {
@@ -17458,7 +17458,7 @@
     },
     {
       "name": "apply_geometric_texture",
-      "description": "Apply a procedural texture as physical surface relief.\n\nFree tier: 3 textures/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Apply a procedural texture as physical surface relief. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 textures/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "textures",
       "parameters": {
@@ -17688,7 +17688,7 @@
     },
     {
       "name": "apply_image_texture",
-      "description": "Apply a photo-based texture as a tiled deboss/emboss pattern.\n\nFree tier: 3 textures/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Apply a photo-based texture as a tiled deboss/emboss pattern. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 textures/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "textures",
       "parameters": {
@@ -17844,7 +17844,7 @@
     },
     {
       "name": "apply_procedural_texture",
-      "description": "Apply a multicolor procedural texture (requires AMS/MMU for multi-material printing).\n\nFree tier: 3 textures/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Apply a multicolor procedural texture (requires AMS/MMU for multi-material printing). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 textures/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "textures",
       "parameters": {
@@ -18229,7 +18229,7 @@
     },
     {
       "name": "recover_texture_detail",
-      "description": "Turn a model's painted-on detail into REAL printable relief.\n\nFree tier: 3 textures/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Turn a model's painted-on detail into REAL printable relief. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 textures/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "textures",
       "parameters": {

@@ -198,6 +198,11 @@ class SkillManifest:
             "generation": "generate_model(description) — text-to-3D (Gemini, Meshy, Tripo3D, Stability)",
             "generation_enhance": "build_generation_prompt(brief) — enhance with design intelligence",
             "preview": "preview_generated_model(model_id) — multi-angle visual check (mandatory)",
+            "show_in_3d": (
+                "import_external_mesh(mesh_path) — bring a mesh file in AND "
+                "open the interactive inline 3D stage on it (heavy meshes "
+                "auto-decimate; see discovery.inline_3d_stage)"
+            ),
             "slicing": "slice_model(file_path) — STL/3MF to gcode",
             "adaptive_slicing": "generate_adaptive_slicing_plan(file) — quality/time tradeoff",
             "printing": "start_print(file) — begin a print job",
@@ -376,6 +381,17 @@ def _build_discovery_section() -> dict[str, Any]:
             "label ('Requires Kiln Pro'/'Business') and upgrade URL in "
             "the description. Free-tier agents can surface these to users "
             "for upgrade messaging without kiln-pro installed locally."
+        ),
+        "inline_3d_stage": (
+            "Kiln has an interactive 3D stage — an inline panel the user "
+            "can orbit and zoom — opened automatically by the tools that "
+            "make or change a mesh (marked 'INLINE 3D STAGE' in their "
+            "descriptions). It rides those tools' results rather than "
+            "existing as a standalone viewer tool, so a tool search for "
+            "'viewer' won't surface it — never conclude Kiln ends at PNG "
+            "renders. To show a user's own mesh file in 3D, the door is "
+            "import_external_mesh; oversized meshes are decimated "
+            "automatically for the stage."
         ),
     }
 

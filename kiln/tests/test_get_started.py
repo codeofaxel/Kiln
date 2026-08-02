@@ -40,6 +40,7 @@ class TestGetStarted:
             "tool_discovery",
             "quick_start",
             "core_workflows",
+            "inline_3d_stage",
             "creating_models",
             "safety_tools",
             "session_recovery",
@@ -55,6 +56,30 @@ class TestGetStarted:
         assert isinstance(openscad, dict)
         # Must have at least one diagnostic key — not an empty dict.
         assert len(openscad) > 0
+
+    def test_teaches_the_inline_3d_stage(self):
+        """The stage is invisible in tool schemas (it rides _meta and the
+        result hook), so the mandated first call is where an agent learns it
+        exists at all.  A real session searched the tool surface for an
+        'interactive viewer', found only PNG tools, and told the user Kiln
+        has no 3D stage — onboarding must make that conclusion impossible."""
+        result = get_started()
+        stage = result["inline_3d_stage"]
+        blob = " ".join(stage.values())
+        assert "interactive" in blob and "3D stage" in blob
+        # The door for "show me this mesh file", by name.
+        assert "import_external_mesh" in stage["show_me_this_file"]
+        # Nothing in a docstring said heavy meshes are handled — the same
+        # session rejected the stage on mesh size when the payload path
+        # decimates automatically.
+        assert "decimated" in stage["show_me_this_file"]
+        # And it must not be findable only by luck: the searchable marker
+        # the stamped tool descriptions carry is named here.
+        assert "INLINE 3D STAGE" in stage["how_to_find_it"]
+
+    def test_show_a_mesh_file_workflow_names_the_stage_door(self):
+        wf = get_started()["core_workflows"]["show_a_mesh_file_in_3d"]
+        assert "import_external_mesh" in wf
 
     def test_safety_tools_includes_safety_status(self):
         result = get_started()

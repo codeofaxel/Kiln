@@ -685,8 +685,47 @@ class _UtilityToolsPlugin:
                         "search_all_models → download_and_upload → preflight_check → start_print"
                     ),
                     "slice_and_print": "upload_file (STL) → slice_and_print",
+                    "show_a_mesh_file_in_3d": (
+                        "import_external_mesh(mesh_path) — brings an STL/OBJ/3MF/"
+                        "STEP file in as a design AND opens the interactive 3D "
+                        "stage on it (see inline_3d_stage below). Where that "
+                        "tool isn't available (it ships with kiln-pro), "
+                        "visualize_model gives the PNG plus a browser stage "
+                        "link when signed in."
+                    ),
                     "monitor": "printer_status, printer_snapshot, await_print_completion",
                     "queue_jobs": "submit_job → job_status → queue_summary",
+                },
+                "inline_3d_stage": {
+                    "what": (
+                        "Kiln has an interactive 3D stage — an inline panel the "
+                        "user can orbit, zoom, and turn over — not just PNG "
+                        "renders. Tools that make or change a mesh (the "
+                        "generators, compile_scad, import_external_mesh, "
+                        "decoration and repair tools) open it automatically on "
+                        "success: inline in hosts that render MCP Apps panels "
+                        "(Kiln's hosted connection also attaches a browser "
+                        "stage link for hosts that don't). In a host without "
+                        "panels on a local install, visualize_model attaches "
+                        "a browser stage link of its own when the user is "
+                        "signed in — so there is always some way to let them "
+                        "turn the part over, and 'here is a PNG' is never the "
+                        "end of the answer."
+                    ),
+                    "how_to_find_it": (
+                        "The stage is attached to those tools' RESULTS (via "
+                        "_meta and structured content), so it is not a separate "
+                        "tool and won't show up under a name like 'viewer' — "
+                        "never conclude from a tool search that Kiln can only "
+                        "produce still images. Stage-opening tools say INLINE "
+                        "3D STAGE in their descriptions."
+                    ),
+                    "show_me_this_file": (
+                        "When the user asks to see a mesh file in 3D, the door "
+                        "is import_external_mesh — importing IS showing. Heavy "
+                        "meshes are decimated automatically for the stage; no "
+                        "mesh is too big to try."
+                    ),
                 },
                 "creating_models": {
                     "front_door": (
@@ -741,7 +780,10 @@ class _UtilityToolsPlugin:
                         "Render and SHOW a preview image every time you make or "
                         "change a model — and after EVERY iteration round, "
                         "automatically, without being asked (visualize_model / "
-                        "render_design_mesh). For complex or organic asks, tell "
+                        "render_design_mesh). Mesh-producing tools also open "
+                        "the interactive 3D stage on their own (see "
+                        "inline_3d_stage) — the PNG is the floor, not the "
+                        "ceiling. For complex or organic asks, tell "
                         "the user upfront that good results usually take a few "
                         "rounds — that's normal. Check each result yourself: "
                         "does it sit on the bed, is it printable, does it match "

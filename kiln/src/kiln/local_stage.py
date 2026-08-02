@@ -72,6 +72,25 @@ MESH_VIEWER_RESOURCE_URI = "ui://kiln/mesh-viewer"
 #: Resource name shown in host resource listings.
 MESH_VIEWER_RESOURCE_NAME = "kiln_mesh_viewer"
 
+#: Appended to every stage tool's description at stamp time, so the stage is
+#: discoverable where agents actually look — the tool listing that keyword
+#: search runs over.  The stage machinery itself is invisible in schemas: it
+#: rides ``_meta`` and the result hook, so before this clause no docstring
+#: anywhere said the panel exists, and an agent that searched the tool
+#: surface for "interactive 3D viewer" concluded — reasonably, wrongly —
+#: that Kiln ends at a PNG, and shipped seven stills to a user who had asked
+#: for the stage by name.  Derived from roster membership, never hand-typed
+#: per tool: a hand-copy across ninety-odd docstrings is drift with a head
+#: start.
+STAGE_DESCRIPTION_CLAUSE = (
+    "INLINE 3D STAGE: on success this tool also opens Kiln's interactive 3D "
+    "stage — an inline viewer panel the user can orbit, zoom, and turn over "
+    "— in hosts that render MCP Apps panels (Kiln's hosted connection "
+    "attaches a browser stage link for hosts that don't). Oversized meshes "
+    "are decimated automatically for the stage; the PNG preview is the "
+    "floor, not the whole experience."
+)
+
 #: Tools whose success result reliably names a mesh the user just made or
 #: changed, so opening a 3D panel on it is what they wanted.
 #:
@@ -566,10 +585,14 @@ def _register_diagnostics(mcp: Any, out: dict[str, Any]) -> None:
 
 
 def _stamp_tools(mcp: Any) -> int:
-    """Point the mesh-producing tools at the stage.
+    """Point the mesh-producing tools at the stage, and say so in words.
 
     Mutating meta after registration keeps this a pure add-on: no tool's
-    signature, return annotation, or body is touched.
+    signature, return annotation, or body is touched.  The description
+    clause rides the same pass: the ``_meta`` stamp is what a HOST reads,
+    but an AGENT deciding which tool to call reads descriptions — and a
+    capability that lives only in ``_meta`` is one no keyword search over
+    the tool surface can ever find.
     """
     stamped = 0
     registry = getattr(getattr(mcp, "_tool_manager", None), "_tools", None) or {}
@@ -584,6 +607,17 @@ def _stamp_tools(mcp: Any) -> int:
             tool.meta = meta
             stamped += 1
         except Exception:  # noqa: BLE001 — a frozen model is not fatal
+            continue
+        desc = getattr(tool, "description", None) or ""
+        if STAGE_DESCRIPTION_CLAUSE in desc:
+            continue  # second install — already said
+        try:
+            tool.description = (
+                f"{desc}\n\n{STAGE_DESCRIPTION_CLAUSE}"
+                if desc
+                else STAGE_DESCRIPTION_CLAUSE
+            )
+        except Exception:  # noqa: BLE001 — the _meta stamp above still holds
             continue
     return stamped
 

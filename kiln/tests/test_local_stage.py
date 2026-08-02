@@ -171,6 +171,7 @@ def _fastmcp():
 
     @mcp.tool(name="compile_scad")
     def compile_scad() -> dict:
+        """Compile OpenSCAD source into a mesh."""
         return {"success": True}
 
     @mcp.tool(name="list_materials")
@@ -204,6 +205,42 @@ class TestInstallOnARealFastMCP:
         assert local_stage.install(mcp)["resource"], (
             "a second install must not break the first"
         )
+
+    def test_stamped_tools_say_so_in_their_descriptions(self):
+        """The _meta stamp is host-facing; agents read DESCRIPTIONS.  A
+        2026-08-02 session keyword-searched the tool surface for the
+        interactive viewer, found nothing (the stage lived only in _meta and
+        the result hook), and shipped PNGs to a user who asked for the
+        stage.  The clause is the searchable surface of the capability."""
+        _cache_the_stage()
+        mcp = _fastmcp()
+        local_stage.install(mcp)
+        tools = mcp._tool_manager._tools
+        desc = tools["compile_scad"].description or ""
+        assert local_stage.STAGE_DESCRIPTION_CLAUSE in desc
+        # The words an agent would actually search with must be present.
+        for keyword in ("3D stage", "interactive", "inline", "orbit"):
+            assert keyword in desc, f"stage clause not findable by {keyword!r}"
+        # And the original docstring survives in front of it.
+        assert desc.index(local_stage.STAGE_DESCRIPTION_CLAUSE) > 0
+
+    def test_non_stage_tools_do_not_claim_a_panel(self):
+        _cache_the_stage()
+        mcp = _fastmcp()
+        local_stage.install(mcp)
+        desc = mcp._tool_manager._tools["list_materials"].description or ""
+        assert local_stage.STAGE_DESCRIPTION_CLAUSE not in desc, (
+            "a tool that opens no panel promising one teaches agents the "
+            "clause is noise"
+        )
+
+    def test_a_second_install_does_not_stutter_the_clause(self):
+        _cache_the_stage()
+        mcp = _fastmcp()
+        local_stage.install(mcp)
+        local_stage.install(mcp)
+        desc = mcp._tool_manager._tools["compile_scad"].description or ""
+        assert desc.count(local_stage.STAGE_DESCRIPTION_CLAUSE) == 1
 
     def test_a_cold_cache_still_installs(self):
         """No document downloaded yet is not a reason to break the server —
