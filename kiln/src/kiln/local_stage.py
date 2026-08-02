@@ -110,9 +110,9 @@ STAGE_DESCRIPTION_CLAUSE = (
 #: gcode artifact rather than a design mesh; it is a bookkeeping act on
 #: geometry the user has already seen (branch/save/sign ceremonies keep
 #: their PNG receipt, not a panel); it is an N-result batch; or the value it
-#: changes does not survive into the stage payload today (the color tools —
-#: a colored result shown gray reads as failure, so no panel until the
-#: payload carries color end to end).
+#: changes does not survive into the stage payload (a colored result shown
+#: gray reads as failure — the color tools sat out on exactly that until
+#: the encoder learned to bake per-part 3MF colors into vertex colors).
 VIEWER_TOOLS: frozenset[str] = frozenset(
     {
         "add_feature_during_print",
@@ -129,15 +129,20 @@ VIEWER_TOOLS: frozenset[str] = frozenset(
         "apply_procedural_texture",
         "attach_part_feature",
         "auto_add_rubber_feet",
+        "auto_color_by_height",
+        "auto_color_by_region",
+        "auto_multicolor_from_texture",
         "boolean_mesh_op",
         "build_organic_mesh",
         "center_model_on_bed",
+        "change_part_color",
         "cherry_pick_decoration_modification",
         "cherry_pick_feature_modification",
         "cherry_pick_modification",
         "compile_scad",
         "compose_assembly_parts",
         "compose_models",
+        "compose_multicolor_3mf",
         "compose_part_from_primitives",
         "decorate_during_print",
         "decorate_surface",

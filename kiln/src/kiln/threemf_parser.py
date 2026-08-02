@@ -73,11 +73,12 @@ class ColoredMesh:
 def _parse_hex_color(
     hex_str: str | None,
     *,
-    fallback: tuple[int, int, int] = _DEFAULT_COLOR,
-) -> tuple[int, int, int]:
+    fallback: tuple[int, int, int] | None = _DEFAULT_COLOR,
+) -> tuple[int, int, int] | None:
     """Parse ``#RRGGBB`` or ``#RRGGBBAA`` to an ``(R, G, B)`` tuple.
 
-    Returns *fallback* for ``None`` or malformed values.
+    Returns *fallback* (``None`` only when a caller passes it explicitly)
+    for ``None`` or malformed values.
     """
     if hex_str is None:
         return fallback
@@ -126,11 +127,12 @@ def _resolve_color(
     pid: str | None,
     pindex: str | None,
     *,
-    default: tuple[int, int, int],
-) -> tuple[int, int, int]:
+    default: tuple[int, int, int] | None,
+) -> tuple[int, int, int] | None:
     """Look up an RGB color from *pid* and *pindex* strings.
 
-    Returns *default* when the reference is missing or out of range.
+    Returns *default* (``None`` only when a caller passes it explicitly)
+    when the reference is missing or out of range.
     """
     if pid is None or pindex is None:
         return default
@@ -168,8 +170,13 @@ def _collect_object_triangles(
     color_lookup: dict[int, list[tuple[int, int, int]]],
     *,
     default_color: tuple[int, int, int],
+    fallback_color: tuple[int, int, int] | None = None,
 ) -> list[ColoredTriangle]:
-    """Extract colored triangles from a single ``<object>`` element."""
+    """Extract colored triangles from a single ``<object>`` element.
+
+    *fallback_color* is the object's slicer-sidecar color, consulted only
+    when the object carries no core-spec ``pid``/``pindex`` of its own.
+    """
     mesh_el = obj_el.find(f"{{{_CORE_NS}}}mesh")
     if mesh_el is None:
         return []
@@ -178,11 +185,14 @@ def _collect_object_triangles(
     if not vertices:
         return []
 
-    # Object-level color defaults
+    # Object-level color defaults: core spec first, then the sidecar
     obj_pid = obj_el.get("pid")
     obj_pindex = obj_el.get("pindex")
     obj_color = _resolve_color(
-        color_lookup, obj_pid, obj_pindex, default=default_color,
+        color_lookup,
+        obj_pid,
+        obj_pindex,
+        default=fallback_color if fallback_color is not None else default_color,
     )
 
     triangles: list[ColoredTriangle] = []
@@ -265,6 +275,59 @@ def _find_model_xml(zf: zipfile.ZipFile) -> str:
     )
 
 
+#: The BambuStudio / PrusaSlicer-family per-object settings sidecar — and
+#: where Kiln's own :func:`kiln.multicolor_3mf.compose_multicolor_3mf`
+#: records each part's color.  The core 3MF spec never sees these values.
+_SLICER_SETTINGS_PATH = "Metadata/model_settings.config"
+
+
+def _slicer_config_colors(zf: zipfile.ZipFile) -> dict[int, tuple[int, int, int]]:
+    """Object-id → RGB from the slicer settings sidecar, ``{}`` if absent.
+
+    Never raises: the sidecar is optional metadata, so a missing or
+    malformed one simply contributes no color information.
+    """
+    name = next(
+        (n for n in zf.namelist() if n.lower() == _SLICER_SETTINGS_PATH.lower()),
+        None,
+    )
+    if name is None:
+        return {}
+    try:
+        raw = zf.read(name)
+    except KeyError:
+        return {}
+    # Same XML hardening as the SVG path in mark_geometry: stdlib
+    # ElementTree refuses external entities, and billion-laughs needs
+    # <!ENTITY> declarations no legitimate settings file carries.
+    if re.search(rb"<!ENTITY", raw, re.IGNORECASE):
+        return {}
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        return {}
+    out: dict[int, tuple[int, int, int]] = {}
+    for obj in root.iter("object"):
+        oid = obj.get("id")
+        if oid is None:
+            continue
+        value = None
+        for md in obj.findall("metadata"):
+            if md.get("key") == "color":
+                value = (md.get("value") or "").strip()
+        if not value:
+            continue
+        # Written both bare (Kiln) and #-prefixed (BambuStudio).
+        parsed = _parse_hex_color(
+            value if value.startswith("#") else f"#{value}", fallback=None,
+        )
+        if parsed is None:
+            continue
+        with contextlib.suppress(ValueError, TypeError):
+            out[int(oid)] = parsed
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -277,9 +340,12 @@ def parse_colored_3mf(
 ) -> ColoredMesh:
     """Parse a 3MF file and extract triangles with per-face colors.
 
-    Supports both ``<basematerials>`` (core spec) and ``<m:colorgroup>``
-    (materials extension).  Falls back to *default_color* when no color
-    data is present.
+    Supports ``<basematerials>`` (core spec), ``<m:colorgroup>`` (materials
+    extension), and — as a per-object fallback when the core spec is silent —
+    the slicer settings sidecar (``Metadata/model_settings.config``), which is
+    the only place Kiln's own :func:`kiln.multicolor_3mf.compose_multicolor_3mf`
+    records part colors.  Falls back to *default_color* when no color data is
+    present.
 
     :param file_path: Path to a ``.3mf`` ZIP file.
     :param default_color: RGB tuple used when a triangle has no color.
@@ -296,6 +362,7 @@ def parse_colored_3mf(
             raise ValueError(
                 f"Model XML path '{model_path}' found in rels but missing from archive"
             ) from exc
+        sidecar_colors = _slicer_config_colors(zf)
 
     try:
         root = ET.fromstring(xml_bytes)
@@ -345,7 +412,10 @@ def parse_colored_3mf(
 
         # Collect direct mesh triangles
         tris = _collect_object_triangles(
-            obj_el, color_lookup, default_color=default_color,
+            obj_el,
+            color_lookup,
+            default_color=default_color,
+            fallback_color=sidecar_colors.get(obj_id),
         )
         all_triangles.extend(tris)
 
@@ -364,10 +434,76 @@ def parse_colored_3mf(
     # Compute color metadata
     distinct_colors = {t.color for t in all_triangles}
     has_non_default = any(c != default_color for c in distinct_colors)
-    colors_found = bool(color_lookup) and has_non_default
+    colors_found = (bool(color_lookup) or bool(sidecar_colors)) and has_non_default
 
     return ColoredMesh(
         triangles=all_triangles,
         colors_found=colors_found,
         color_count=len(distinct_colors),
     )
+
+
+def object_display_colors(file_path: str) -> dict[str, tuple[int, int, int]]:
+    """Uniform display color per build object, keyed the way trimesh keys a
+    Scene's geometry: the object's ``name`` attribute, else its id as a string.
+
+    This is the color half of the 3MF story for consumers that read GEOMETRY
+    through trimesh — trimesh 4.x drops every color a 3MF carries, core-spec
+    basematerials and slicer sidecar alike (measured 2026-08-01), so the
+    ``kiln.mesh.v1`` encoder asks this module, the one place that knows where
+    3MF colors live.
+
+    Strongest source first per object: core-spec object-level
+    ``pid``/``pindex``, then the slicer sidecar.  Omitted rather than guessed:
+
+    * objects whose triangles carry their own color overrides — a uniform
+      bake of a painted object would render a solid color the file never
+      claimed;
+    * everything, when two build objects share a name — trimesh renames
+      duplicates with suffixes that can collide with real sibling names, so a
+      name-keyed map could color the wrong part.
+
+    Never raises: color is enrichment (the caller keeps its mesh either way),
+    so any archive trouble reads as ``{}``.
+    """
+    try:
+        with zipfile.ZipFile(file_path, "r") as zf:
+            xml_bytes = zf.read(_find_model_xml(zf))
+            sidecar_colors = _slicer_config_colors(zf)
+        root = ET.fromstring(xml_bytes)
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile, ET.ParseError):
+        return {}
+
+    resources_el = root.find(f"{{{_CORE_NS}}}resources")
+    if resources_el is None:
+        return {}
+    color_lookup = _build_color_lookup(resources_el)
+
+    out: dict[str, tuple[int, int, int]] = {}
+    for obj_el in resources_el.findall(f"{{{_CORE_NS}}}object"):
+        oid = obj_el.get("id")
+        mesh_el = obj_el.find(f"{{{_CORE_NS}}}mesh")
+        if oid is None or mesh_el is None:
+            continue
+        key = obj_el.get("name") or oid
+        if key in out:
+            return {}  # duplicate names — refuse to guess which part is which
+
+        # A per-triangle pid or p1 means the color varies WITHIN the object.
+        triangles_el = mesh_el.find(f"{{{_CORE_NS}}}triangles")
+        painted = triangles_el is not None and any(
+            tri.get("pid") is not None or tri.get("p1") is not None
+            for tri in triangles_el.findall(f"{{{_CORE_NS}}}triangle")
+        )
+        if painted:
+            continue
+
+        color = _resolve_color(
+            color_lookup, obj_el.get("pid"), obj_el.get("pindex"), default=None,
+        )
+        if color is None:
+            with contextlib.suppress(ValueError, TypeError):
+                color = sidecar_colors.get(int(oid))
+        if color is not None:
+            out[key] = color
+    return out
