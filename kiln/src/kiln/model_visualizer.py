@@ -763,12 +763,19 @@ def visualize_model(
         successful = [v for v in views if v.get("path")]
         failed = [v for v in views if not v.get("path")]
 
-        # A preview is a picture of a 3D thing; the stage is the thing.  Every
-        # user-facing render in both packages funnels through here, so one wire
-        # gives every one of them the turn-it-over link instead of each tool
-        # remembering to ask.  Cost is bounded by the content-addressed cache
-        # in stage_link: a sixteen-pose inspection sheet of one mesh uploads
-        # once, and re-rendering an unchanged design uploads not at all.
+        # A preview is a picture of a 3D thing; the stage is the thing.  One
+        # wire here gives every caller that hands this result back the
+        # turn-it-over link instead of each tool remembering to ask.  Cost is
+        # bounded by the content-addressed cache in stage_link: a sixteen-pose
+        # inspection sheet of one mesh uploads once, and re-rendering an
+        # unchanged design uploads not at all.
+        #
+        # The link rides the ENVELOPE, not the view dicts inside it.  So a
+        # caller that keeps one entry out of ``views`` and drops the rest of
+        # this result does NOT inherit the link, and neither does one that
+        # serves a render from its own cache without calling here at all.
+        # Those attach their own by mesh path — the link is a fact about the
+        # bytes, not about any particular render of them.
         result = {
             "success": len(successful) > 0,
             "views": views,
