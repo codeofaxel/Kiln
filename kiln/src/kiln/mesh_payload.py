@@ -82,6 +82,20 @@ with the mesh OMITTED and ``{"downgraded": true, "reason": ..., counts,
 bbox}`` so the caller falls back to the still image.  A decimated payload
 is labeled ``decimated_from`` — never passed off as the original.
 
+VERTEX COLORS
+-------------
+``vertex_colors`` rides when the mesh explicitly claims colors — a single
+mesh whose visual carries them (PLY/OBJ), or a multi-part Scene whose parts
+do.  A multicolor 3MF is the Scene case, and trimesh alone loses it twice
+over: ``force="mesh"`` drops per-part visuals on concatenation, and the 3MF
+loader never reads colors at all — neither core-spec basematerials nor the
+slicer sidecar Kiln's own composer writes (measured 2026-08-01).  So the
+Scene is flattened HERE, with per-part colors baked to per-vertex RGBA
+(3MF part colors via :func:`kiln.threemf_parser.object_display_colors`).
+Decimation rebuilds the vertex set, so colors cross it by
+nearest-original-vertex transfer — exact for zone-constant colors away
+from the borders — or are dropped when scipy is missing, never guessed.
+
 Stateless: path in, dict out.  No disk writes, no caches, no network.
 """
 
@@ -168,6 +182,122 @@ def _to_viewer_space(xyz: Any) -> Any:
     return out
 
 
+#: The neutral part color for Scene parts that claim nothing — Kiln's
+#: canonical model grey (#AAAAAA), only ever shipped when SOME part in the
+#: scene carries a real color (the buffer is all-or-nothing per payload).
+_NEUTRAL_RGBA = (170, 170, 170, 255)
+
+
+def _part_rgba(part: Any, sidecar_rgb: tuple[int, int, int] | None) -> tuple[Any, bool]:
+    """``(N, 4)`` uint8 RGBA for one Scene part, and whether it is explicit.
+
+    Strongest claim first: colors the part's own visual carries (vertex or
+    face kind), then the 3MF sidecar color for this part, then a material's
+    stated color.  A part claiming nothing gets the neutral grey and
+    ``explicit=False`` — never a guess dressed as a color.
+    """
+    import numpy as np
+
+    n = len(part.vertices)
+    kind = getattr(part.visual, "kind", None)
+    if kind in ("vertex", "face"):
+        rgba = np.asarray(part.visual.vertex_colors, dtype=np.uint8)
+        if rgba.shape == (n, 4):
+            return rgba, True
+    if sidecar_rgb is not None:
+        r, g, b = sidecar_rgb
+        return np.tile(np.array([[r, g, b, 255]], np.uint8), (n, 1)), True
+    # A material's main_color, unless it is trimesh's own default — that
+    # grey means "nobody said", not "somebody chose grey".
+    from trimesh.visual.color import DEFAULT_COLOR
+
+    material = getattr(part.visual, "material", None)
+    main = getattr(material, "main_color", None)
+    if main is not None and tuple(np.asarray(main)[:4]) != tuple(DEFAULT_COLOR):
+        rgba_row = np.asarray(main, dtype=np.uint8).reshape(1, 4)
+        return np.tile(rgba_row, (n, 1)), True
+    return np.tile(np.array([_NEUTRAL_RGBA], np.uint8), (n, 1)), False
+
+
+def _scene_to_single_mesh(scene: Any, path: Path) -> Any:
+    """Concatenate a multi-part Scene into one Trimesh, colors included.
+
+    ``trimesh.load(force="mesh")`` flattens a Scene but loses each part's
+    color on the way — and for a 3MF it never had them: trimesh 4.x drops
+    both core-spec colors and the slicer sidecar Kiln's own composer writes
+    (measured 2026-08-01).  A multicolor 3MF is exactly the artifact where
+    the color IS the payoff, so the flattening happens here instead, baking
+    each part's color into per-vertex RGBA as it goes.  3MF part colors come
+    from :func:`kiln.threemf_parser.object_display_colors`, keyed by the
+    same names trimesh keys the Scene's geometry with.
+
+    Vertices are deliberately NOT merged across parts (``process=False``):
+    two color zones meet at shared coordinates, and merging would hand one
+    zone's vertices to the other's color.
+
+    Returns ``None`` for a Scene with no triangle geometry — the caller
+    already owns that refusal.
+    """
+    import numpy as np
+    import trimesh
+
+    sidecar: dict[str, tuple[int, int, int]] = {}
+    if path.suffix.lower() == ".3mf":
+        from kiln.threemf_parser import object_display_colors
+
+        sidecar = object_display_colors(str(path))
+
+    parts: list[Any] = []
+    part_rgba: list[Any] = []
+    any_explicit = False
+    for node_name in scene.graph.nodes_geometry:
+        transform, geom_name = scene.graph[node_name]
+        geom = scene.geometry.get(geom_name)
+        if not isinstance(geom, trimesh.Trimesh) or len(geom.faces) == 0:
+            continue
+        part = geom.copy()
+        if transform is not None:
+            part.apply_transform(transform)
+        rgba, explicit = _part_rgba(part, sidecar.get(geom_name))
+        parts.append(part)
+        part_rgba.append(rgba)
+        any_explicit = any_explicit or explicit
+
+    if not parts:
+        return None
+    offsets = np.cumsum([0] + [len(p.vertices) for p in parts])
+    combined = trimesh.Trimesh(
+        vertices=np.vstack([np.asarray(p.vertices, dtype=np.float64) for p in parts]),
+        faces=np.vstack(
+            [
+                np.asarray(p.faces, dtype=np.int64) + off
+                for p, off in zip(parts, offsets[:-1], strict=True)
+            ]
+        ),
+        process=False,
+    )
+    if any_explicit:
+        combined.visual = trimesh.visual.ColorVisuals(
+            mesh=combined, vertex_colors=np.vstack(part_rgba)
+        )
+    return combined
+
+
+def _transfer_vertex_colors(src_vertices: Any, src_rgba: Any, dst_vertices: Any) -> Any:
+    """Carry vertex colors across a decimation: nearest-original-vertex.
+
+    Decimation rebuilds the vertex set, so colors cannot ride through it.
+    Zone colors are piecewise-constant, which makes the nearest source
+    vertex exact everywhere but the zone borders.  Returns ``None`` when
+    scipy is unavailable — colors are then dropped, never guessed.
+    """
+    try:
+        from scipy.spatial import cKDTree
+    except ImportError:
+        return None
+    return src_rgba[cKDTree(src_vertices).query(dst_vertices, k=1)[1]]
+
+
 def mesh_to_viewer_payload(
     mesh_path: str | Path,
     *,
@@ -204,7 +334,14 @@ def mesh_to_viewer_payload(
     if not path.exists():
         raise FileNotFoundError(f"mesh not found: {path}")
 
-    mesh = trimesh.load(str(path), force="mesh")
+    loaded = trimesh.load(str(path))
+    if isinstance(loaded, trimesh.Scene):
+        # The Scene path bakes per-part colors (a multicolor 3MF's whole
+        # point) into vertex colors while flattening — force="mesh" loses
+        # them.
+        mesh = _scene_to_single_mesh(loaded, path)
+    else:
+        mesh = loaded
     if not isinstance(mesh, trimesh.Trimesh) or len(mesh.faces) == 0:
         raise ValueError(f"no triangle geometry in {path.name}")
 
@@ -217,7 +354,8 @@ def mesh_to_viewer_payload(
     }
 
     # Vertex colors ride along only when the visual explicitly carries them
-    # (trimesh reports kind == "vertex"); decimation drops them.
+    # (trimesh reports kind == "vertex") — read straight from a single mesh's
+    # file, or baked from a Scene's per-part colors above.
     has_colors = getattr(mesh.visual, "kind", None) == "vertex"
 
     # ---- Cap check: triangles AND encoded bytes, one decimation try ----
@@ -244,12 +382,32 @@ def mesh_to_viewer_payload(
         # Solve the triangle budget from BOTH caps using the mesh's own
         # vertex/triangle ratio, then decimate exactly once.
         ratio = orig_verts / orig_tris  # ~0.5 for closed manifolds
-        per_tri_raw = 12.0 + ratio * (12.0 + (12.0 if include_normals else 0.0))
+        per_tri_raw = 12.0 + ratio * (
+            12.0
+            + (12.0 if include_normals else 0.0)
+            + (4.0 if has_colors else 0.0)
+        )
         bytes_budget_tris = int(((max_bytes - 2048) * 3 / 4) / per_tri_raw)
         target = max(512, min(max_triangles, bytes_budget_tris))
+        pre_vertices = pre_rgba = None
+        if has_colors:
+            pre_vertices = np.asarray(mesh.vertices, dtype=np.float32)
+            pre_rgba = np.asarray(mesh.visual.vertex_colors, dtype=np.uint8)
         mesh = mesh.simplify_quadric_decimation(face_count=target)
         decimated_from = orig_tris
-        has_colors = False  # decimation does not preserve vertex colors
+        if has_colors:
+            # The backend rebuilds the vertex set without attributes, so the
+            # colors are carried across by nearest-original-vertex transfer —
+            # or dropped when scipy is absent, never guessed.
+            rgba = _transfer_vertex_colors(
+                pre_vertices, pre_rgba, np.asarray(mesh.vertices, dtype=np.float32)
+            )
+            if rgba is None:
+                has_colors = False
+            else:
+                mesh.visual = trimesh.visual.ColorVisuals(
+                    mesh=mesh, vertex_colors=rgba
+                )
 
     verts = np.asarray(mesh.vertices, dtype=np.float32)
     faces = np.asarray(mesh.faces, dtype=np.uint32)

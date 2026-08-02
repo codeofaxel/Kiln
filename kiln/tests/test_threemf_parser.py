@@ -10,6 +10,7 @@ import pytest
 
 from kiln.threemf_parser import (
     _parse_hex_color,
+    object_display_colors,
     parse_colored_3mf,
 )
 
@@ -18,12 +19,25 @@ from kiln.threemf_parser import (
 # ---------------------------------------------------------------------------
 
 
-def _make_3mf(tmp_path: Path, model_xml: str, *, name: str = "test.3mf") -> str:
-    """Create a 3MF ZIP with the given model XML and return its path."""
+def _make_3mf(
+    tmp_path: Path,
+    model_xml: str,
+    *,
+    name: str = "test.3mf",
+    settings_xml: str | None = None,
+) -> str:
+    """Create a 3MF ZIP with the given model XML and return its path.
+
+    *settings_xml*, when given, lands at ``Metadata/model_settings.config`` —
+    the slicer sidecar where the BambuStudio family (and Kiln's own composer)
+    records per-object colors.
+    """
     fpath = tmp_path / name
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("3D/3dmodel.model", model_xml)
+        if settings_xml is not None:
+            zf.writestr("Metadata/model_settings.config", settings_xml)
     fpath.write_bytes(buf.getvalue())
     return str(fpath)
 
@@ -372,3 +386,204 @@ class TestEdgeCases:
 </model>"""
         mesh = parse_colored_3mf(_make_3mf(tmp_path, xml))
         assert len(mesh.triangles) == 0
+
+
+# ---------------------------------------------------------------------------
+# Slicer sidecar (Metadata/model_settings.config)
+# ---------------------------------------------------------------------------
+
+
+_SIDECAR_MODEL = f"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources>
+    <object id="1" type="model" name="zone_0">
+      <mesh>
+        {_BASIC_VERTICES}
+        <triangles>
+          <triangle v1="0" v2="1" v3="2" />
+        </triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build><item objectid="1" /></build>
+</model>"""
+
+
+class TestSlicerSidecarColors:
+    """Colors recorded only in the slicer sidecar — the shape Kiln's own
+    ``compose_multicolor_3mf`` writes, invisible to the core spec."""
+
+    def test_sidecar_colors_an_object_the_core_spec_left_silent(
+        self, tmp_path: Path
+    ) -> None:
+        settings = """\
+<?xml version="1.0" encoding="utf-8"?>
+<config>
+  <object id="1">
+    <metadata key="name"  value="zone_0"/>
+    <metadata key="color" value="f72323"/>
+  </object>
+</config>"""
+        mesh = parse_colored_3mf(
+            _make_3mf(tmp_path, _SIDECAR_MODEL, settings_xml=settings)
+        )
+        assert mesh.colors_found is True
+        assert mesh.triangles[0].color == (247, 35, 35)
+
+    def test_core_spec_beats_the_sidecar(self, tmp_path: Path) -> None:
+        xml = f"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources>
+    <basematerials id="9">
+      <base name="Red" displaycolor="#FF0000" />
+    </basematerials>
+    <object id="1" type="model" pid="9" pindex="0">
+      <mesh>
+        {_BASIC_VERTICES}
+        <triangles>
+          <triangle v1="0" v2="1" v3="2" />
+        </triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build><item objectid="1" /></build>
+</model>"""
+        settings = """\
+<config>
+  <object id="1"><metadata key="color" value="00FF00"/></object>
+</config>"""
+        mesh = parse_colored_3mf(_make_3mf(tmp_path, xml, settings_xml=settings))
+        assert mesh.triangles[0].color == (255, 0, 0)
+
+    def test_a_hash_prefixed_sidecar_value_parses_too(self, tmp_path: Path) -> None:
+        """BambuStudio writes ``#RRGGBB``; Kiln's composer writes it bare."""
+        settings = """\
+<config>
+  <object id="1"><metadata key="color" value="#2366F7"/></object>
+</config>"""
+        mesh = parse_colored_3mf(
+            _make_3mf(tmp_path, _SIDECAR_MODEL, settings_xml=settings)
+        )
+        assert mesh.triangles[0].color == (35, 102, 247)
+
+    def test_a_malformed_sidecar_reads_as_no_color_information(
+        self, tmp_path: Path
+    ) -> None:
+        mesh = parse_colored_3mf(
+            _make_3mf(tmp_path, _SIDECAR_MODEL, settings_xml="<not-xml")
+        )
+        assert mesh.colors_found is False
+        assert mesh.triangles[0].color == (170, 170, 170)
+
+
+# ---------------------------------------------------------------------------
+# object_display_colors — the color half of the trimesh Scene trip
+# ---------------------------------------------------------------------------
+
+
+class TestObjectDisplayColors:
+    """Per-object uniform colors, keyed the way trimesh keys Scene geometry."""
+
+    def test_keys_follow_trimesh_naming(self, tmp_path: Path) -> None:
+        """A named object keys by name; a nameless one by its id string."""
+        xml = f"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources>
+    <basematerials id="9">
+      <base name="Red" displaycolor="#FF0000" />
+      <base name="Blue" displaycolor="#0000FF" />
+    </basematerials>
+    <object id="1" type="model" name="zone_0" pid="9" pindex="0">
+      <mesh>
+        {_BASIC_VERTICES}
+        <triangles><triangle v1="0" v2="1" v3="2" /></triangles>
+      </mesh>
+    </object>
+    <object id="2" type="model" pid="9" pindex="1">
+      <mesh>
+        {_BASIC_VERTICES}
+        <triangles><triangle v1="0" v2="1" v3="2" /></triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build><item objectid="1" /><item objectid="2" /></build>
+</model>"""
+        colors = object_display_colors(_make_3mf(tmp_path, xml))
+        assert colors == {"zone_0": (255, 0, 0), "2": (0, 0, 255)}
+
+    def test_sidecar_fills_in_when_the_core_spec_is_silent(
+        self, tmp_path: Path
+    ) -> None:
+        settings = """\
+<config>
+  <object id="1"><metadata key="color" value="f72323"/></object>
+</config>"""
+        colors = object_display_colors(
+            _make_3mf(tmp_path, _SIDECAR_MODEL, settings_xml=settings)
+        )
+        assert colors == {"zone_0": (247, 35, 35)}
+
+    def test_a_painted_object_is_omitted_not_flattened(self, tmp_path: Path) -> None:
+        """Per-triangle overrides mean no single color tells the truth."""
+        xml = f"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources>
+    <basematerials id="9">
+      <base name="Red" displaycolor="#FF0000" />
+      <base name="Blue" displaycolor="#0000FF" />
+    </basematerials>
+    <object id="1" type="model" name="painted" pid="9" pindex="0">
+      <mesh>
+        {_BASIC_VERTICES}
+        <triangles>
+          <triangle v1="0" v2="1" v3="2" />
+          <triangle v1="1" v2="3" v3="2" pid="9" p1="1" />
+        </triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build><item objectid="1" /></build>
+</model>"""
+        assert object_display_colors(_make_3mf(tmp_path, xml)) == {}
+
+    def test_duplicate_names_refuse_to_guess(self, tmp_path: Path) -> None:
+        """trimesh renames duplicates with suffixes that can collide with
+        real sibling names — a name-keyed map could color the wrong part."""
+        xml = f"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources>
+    <basematerials id="9">
+      <base name="Red" displaycolor="#FF0000" />
+    </basematerials>
+    <object id="1" type="model" name="zone_0" pid="9" pindex="0">
+      <mesh>
+        {_BASIC_VERTICES}
+        <triangles><triangle v1="0" v2="1" v3="2" /></triangles>
+      </mesh>
+    </object>
+    <object id="2" type="model" name="zone_0" pid="9" pindex="0">
+      <mesh>
+        {_BASIC_VERTICES}
+        <triangles><triangle v1="0" v2="1" v3="2" /></triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build><item objectid="1" /><item objectid="2" /></build>
+</model>"""
+        assert object_display_colors(_make_3mf(tmp_path, xml)) == {}
+
+    def test_an_uncolored_object_claims_nothing(self, tmp_path: Path) -> None:
+        assert object_display_colors(_make_3mf(tmp_path, _SIDECAR_MODEL)) == {}
+
+    def test_archive_trouble_reads_as_empty_never_raises(
+        self, tmp_path: Path
+    ) -> None:
+        not_a_zip = tmp_path / "junk.3mf"
+        not_a_zip.write_text("this is not a zip")
+        assert object_display_colors(str(not_a_zip)) == {}
+        assert object_display_colors(str(tmp_path / "missing.3mf")) == {}

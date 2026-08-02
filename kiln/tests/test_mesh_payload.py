@@ -159,3 +159,98 @@ class TestRefusesWhatItCannotEncode:
         p.write_text("solid empty\nendsolid empty\n")
         with pytest.raises(ValueError):
             mesh_to_viewer_payload(p)
+
+
+class TestScenePartColorsSurvive:
+    """A multicolor 3MF loads as a multi-part Scene, and each part's color
+    must arrive in the payload as per-vertex RGBA.  This is the promotion
+    condition for the color tools on the stage roster: a recolor rendered
+    gray reads as the tool failing.  The fixture is the real artifact —
+    ``compose_multicolor_3mf`` output, whose colors live only in the slicer
+    sidecar that trimesh never reads."""
+
+    RED = [247, 35, 35, 255]     # #f72323
+    BLUE = [35, 102, 247, 255]   # #2366f7
+
+    def _multicolor_3mf(self, tmp_path, *, dense=False, colored=True):
+        from kiln.multicolor_3mf import ColorPart, compose_multicolor_3mf
+
+        def make():
+            if dense:
+                return trimesh.creation.icosphere(subdivisions=3, radius=10.0)
+            return trimesh.creation.box(extents=(10.0, 10.0, 10.0))
+
+        lo, hi = make(), make()
+        hi.apply_translation((0.0, 0.0, 30.0))
+        lo_p, hi_p = tmp_path / "lo.stl", tmp_path / "hi.stl"
+        lo.export(str(lo_p))
+        hi.export(str(hi_p))
+        out = tmp_path / "multi.3mf"
+        compose_multicolor_3mf(
+            [
+                ColorPart(stl_path=str(lo_p), extruder=1, name="zone_lo",
+                          color="#f72323" if colored else None),
+                ColorPart(stl_path=str(hi_p), extruder=2, name="zone_hi",
+                          color="#2366f7" if colored else None),
+            ],
+            output_path=str(out),
+        )
+        return out
+
+    @staticmethod
+    def _rgba(payload):
+        return np.frombuffer(
+            base64.b64decode(payload["vertex_colors"]), dtype=np.uint8
+        ).reshape(-1, 4)
+
+    def test_each_parts_color_reaches_its_own_vertices(self, tmp_path):
+        payload = mesh_to_viewer_payload(self._multicolor_3mf(tmp_path))
+        assert payload["downgraded"] is False
+        rgba = self._rgba(payload)
+        pos = _f32(payload["positions"])
+        assert len(rgba) == payload["counts"]["vertices"]
+        # Distinct zone colors survive — the gray-out this class exists for
+        # shipped exactly zero of them.
+        assert {tuple(c) for c in rgba.tolist()} == {tuple(self.RED), tuple(self.BLUE)}
+        # And each lands on ITS part: viewer-space y is mesh-space z, the
+        # zones sit at z ∈ [-5, 5] and z ∈ [25, 35].
+        assert (rgba[pos[:, 1] < 15.0] == self.RED).all()
+        assert (rgba[pos[:, 1] > 15.0] == self.BLUE).all()
+
+    def test_a_colorless_multipart_scene_ships_no_color_buffer(self, tmp_path):
+        """No part claims a color → no buffer, same as today — the viewer's
+        own neutral default applies, never a fabricated per-vertex gray."""
+        payload = mesh_to_viewer_payload(
+            self._multicolor_3mf(tmp_path, colored=False)
+        )
+        assert payload["downgraded"] is False
+        assert "vertex_colors" not in payload
+
+    @pytest.mark.skipif(
+        mesh_payload._decimation_backend() is None,
+        reason="fast_simplification not installed — the downgrade branch covers this",
+    )
+    def test_zone_colors_survive_decimation(self, tmp_path):
+        """Decimation rebuilds the vertex set; the nearest-original-vertex
+        transfer must carry the zones across instead of dropping them."""
+        payload = mesh_to_viewer_payload(
+            self._multicolor_3mf(tmp_path, dense=True), max_triangles=1000
+        )
+        assert payload["downgraded"] is False
+        assert payload["decimated_from"] == 2560
+        rgba = self._rgba(payload)
+        pos = _f32(payload["positions"])
+        assert {tuple(c) for c in rgba.tolist()} == {tuple(self.RED), tuple(self.BLUE)}
+        assert (rgba[pos[:, 1] < 15.0] == self.RED).all()
+        assert (rgba[pos[:, 1] > 15.0] == self.BLUE).all()
+
+    def test_an_oversized_multicolor_mesh_still_downgrades_honestly(
+        self, tmp_path, monkeypatch
+    ):
+        """No backend → the downgrade card, never a color-stripped mesh."""
+        monkeypatch.setattr(mesh_payload, "_decimation_backend", lambda: None)
+        payload = mesh_to_viewer_payload(
+            self._multicolor_3mf(tmp_path, dense=True), max_triangles=1000
+        )
+        assert payload["downgraded"] is True
+        assert "vertex_colors" not in payload and "positions" not in payload
