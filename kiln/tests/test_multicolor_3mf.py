@@ -904,3 +904,42 @@ class TestComposePainted:
         compose_painted_3mf(_cube_soup(), ["#F72323"] * 12, output_path=str(out))
         with zipfile.ZipFile(out) as zf:
             assert "Metadata/plate_1.png" in zf.namelist()
+
+
+def test_painted_drops_degenerate_triangles_with_their_colors(tmp_path: Path):
+    """A triangle whose vertices collapse under exact dedup would emit
+    spec-forbidden repeated indices; it is dropped WITH its color and
+    counted, never silently kept or silently lost."""
+    from kiln.multicolor_3mf import compose_painted_3mf
+
+    out = tmp_path / "degen.3mf"
+    result = compose_painted_3mf(
+        [
+            ((0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (0.0, 10.0, 0.0)),
+            ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 10.0, 0.0)),
+        ],
+        ["#F72323", "#2366F7"],
+        output_path=str(out),
+    )
+    assert result["success"] is True
+    assert result["total_triangles"] == 1
+    assert result["degenerate_skipped"] == 1
+    # the degenerate face's color went with it — no phantom palette entry
+    assert result["colors"] == ["#F72323"]
+    import re
+
+    rows = re.findall(
+        r'<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"', _painted_model_xml(str(out)),
+    )
+    assert all(len({a, b, c}) == 3 for a, b, c in rows)
+
+
+def test_painted_all_degenerate_refuses(tmp_path: Path):
+    from kiln.multicolor_3mf import compose_painted_3mf
+
+    result = compose_painted_3mf(
+        [((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 10.0, 0.0))],
+        ["#F72323"],
+        output_path=str(tmp_path / "x.3mf"),
+    )
+    assert result["success"] is False

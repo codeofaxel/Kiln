@@ -1029,11 +1029,16 @@ def compose_painted_3mf(
         }
 
     # Exact-coordinate vertex dedup — the same discipline _parse_stl uses,
-    # so the emitted object is as watertight as the input mesh.
+    # so the emitted object is as watertight as the input mesh.  A triangle
+    # whose vertices collapse to fewer than three is dropped WITH its color
+    # (the spec forbids repeated indices, and a slicer meeting one may
+    # reject the whole file) — counted, never silent.
     vert_index: dict[tuple[float, float, float], int] = {}
     vertices: list[tuple[float, float, float]] = []
     faces: list[tuple[int, int, int]] = []
-    for tri in triangles:
+    kept_colors: list[str | None] = []
+    degenerate_skipped = 0
+    for tri, color in zip(triangles, triangle_colors, strict=True):
         idx = []
         for v in tri:
             key = (float(v[0]), float(v[1]), float(v[2]))
@@ -1043,11 +1048,17 @@ def compose_painted_3mf(
                 vert_index[key] = i
                 vertices.append(key)
             idx.append(i)
+        if len(set(idx)) < 3:
+            degenerate_skipped += 1
+            continue
         faces.append((idx[0], idx[1], idx[2]))
+        kept_colors.append(color)
+    if not faces:
+        return {"success": False, "error": "Every triangle was degenerate"}
 
     palette: list[str] = []
     tri_pindex: list[int | None] = []
-    for color in triangle_colors:
+    for color in kept_colors:
         rgb_hex = _part_rgb_hex(color)
         if rgb_hex is None:
             tri_pindex.append(None)
@@ -1166,7 +1177,7 @@ def compose_painted_3mf(
         "compose_painted_3mf: wrote %s (1 object, %d triangles, %d colors)",
         output_path, len(faces), len(palette),
     )
-    return {
+    result: dict[str, Any] = {
         "success": True,
         "output_path": output_path,
         "form": "painted_single_object",
@@ -1178,5 +1189,13 @@ def compose_painted_3mf(
             f"{len(faces):,} triangles across {len(palette)} colors.  "
             "Slicers that support color import (BambuStudio, OrcaSlicer) "
             "will offer to map each color to a filament on open."
+            if palette
+            else (
+                f"Created single-object 3MF with {len(faces):,} triangles "
+                "and no color hints."
+            )
         ),
     }
+    if degenerate_skipped:
+        result["degenerate_skipped"] = degenerate_skipped
+    return result
