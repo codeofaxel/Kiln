@@ -229,17 +229,31 @@ def _write_binary_stl(triangles: list[_Triangle], output_path: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _z_extent(triangles: list[_Triangle]) -> tuple[float, float]:
+    """The true vertex Z extent — the model's real bottom and top."""
+    zs = [v[2] for t in triangles for v in (t.v0, t.v1, t.v2)]
+    return min(zs), max(zs)
+
+
 def _assign_z_height(
     triangles: list[_Triangle],
     num_colors: int,
+    *,
+    z_extent: tuple[float, float] | None = None,
 ) -> list[int]:
-    """Assign each triangle to a color zone by Z-height band."""
+    """Assign each triangle to a color zone by Z-height band.
+
+    ``z_extent`` is the (min, max) height the bands divide — defaulting to
+    the triangles' VERTEX extent, the model's real bottom and top.  (It
+    used to be the centroid extent, which shifted every band edge inward
+    on any mesh whose top or bottom faces lean.)  The plane-split path
+    passes the extent it cut at, so each piece is judged against the same
+    edges it was cut to.
+    """
     if not triangles:
         return []
 
-    z_values = [t.centroid_z for t in triangles]
-    z_min = min(z_values)
-    z_max = max(z_values)
+    z_min, z_max = z_extent if z_extent is not None else _z_extent(triangles)
     z_range = z_max - z_min
 
     if z_range < 1e-9:
@@ -247,12 +261,11 @@ def _assign_z_height(
 
     band_size = z_range / num_colors
     assignments: list[int] = []
-    for z in z_values:
-        band = int((z - z_min) / band_size)
-        # Clamp the top-edge case
-        if band >= num_colors:
-            band = num_colors - 1
-        assignments.append(band)
+    for tri in triangles:
+        band = int((tri.centroid_z - z_min) / band_size)
+        # Clamp both edges (top-edge exactness; callers may pass a
+        # narrower extent than the triangles cover)
+        assignments.append(min(max(band, 0), num_colors - 1))
     return assignments
 
 
@@ -305,6 +318,122 @@ def _assign_random(
     """Random face assignment — artistic/abstract prints."""
     rng = random.Random(seed)
     return [rng.randint(0, num_colors - 1) for _ in triangles]
+
+
+# ---------------------------------------------------------------------------
+# Band-plane splitting — crisp color boundaries for the z_height method
+# ---------------------------------------------------------------------------
+#
+# Assigning whole triangles to bands makes the color boundary follow the
+# triangulation: a face whose centroid sits just above a band edge drags its
+# lower corners up into the wrong color, so the printed line where two
+# colors meet comes out as a sawtooth — and on a coarse mesh whose faces
+# are TALLER than the bands, centroid assignment degenerates into stripes.
+# Cutting every crossing triangle exactly at the band heights first makes
+# centroid assignment exact: each piece lies wholly inside one band, and
+# the boundary is the straight horizontal line the band math names.
+#
+# The normal/random methods need no analog: a facet has one orientation,
+# so per-facet assignment IS exact for them by construction.
+
+#: A vertex this close to a cut plane counts as ON it — touching is not
+#: crossing, and near-plane cuts would only mint sliver debris.
+_PLANE_EPS = 1e-9
+
+#: Pieces below this area are cut debris, not geometry (mm^2).
+_DEGENERATE_AREA_MM2 = 1e-12
+
+
+def _band_planes(z_min: float, z_max: float, num_colors: int) -> list[float]:
+    """The ``num_colors - 1`` interior cut heights dividing [z_min, z_max]."""
+    band = (z_max - z_min) / num_colors
+    return [z_min + band * i for i in range(1, num_colors)]
+
+
+def _split_triangle_at_plane(tri: _Triangle, z: float) -> list[_Triangle]:
+    """Cut one triangle at the horizontal plane ``z``.
+
+    Returns pieces that exactly cover the input (winding, normal, and
+    attribute preserved), or ``[tri]`` untouched when it does not truly
+    cross the plane.  Both halves are triangulated from one shared pair of
+    intersection points, so the cut edge is watertight by construction —
+    and adjacent triangles compute identical cut points from their shared
+    edge's identical endpoints.
+    """
+    verts = (tri.v0, tri.v1, tri.v2)
+    sides = tuple(
+        0.0 if abs(v[2] - z) <= _PLANE_EPS else v[2] - z for v in verts
+    )
+    if all(s >= 0.0 for s in sides) or all(s <= 0.0 for s in sides):
+        return [tri]
+
+    below: list[tuple[float, float, float]] = []
+    above: list[tuple[float, float, float]] = []
+    for i in range(3):
+        a, sa = verts[i], sides[i]
+        b, sb = verts[(i + 1) % 3], sides[(i + 1) % 3]
+        if sa <= 0.0:
+            below.append(a)
+        if sa >= 0.0:
+            above.append(a)
+        if (sa < 0.0 < sb) or (sb < 0.0 < sa):
+            t = (z - a[2]) / (b[2] - a[2])
+            cut = (a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]), z)
+            below.append(cut)
+            above.append(cut)
+
+    pieces: list[_Triangle] = []
+    for poly in (below, above):
+        for k in range(1, len(poly) - 1):
+            piece = _Triangle(
+                normal=tri.normal,
+                v0=poly[0],
+                v1=poly[k],
+                v2=poly[k + 1],
+                attr=tri.attr,
+            )
+            if piece.area > _DEGENERATE_AREA_MM2:
+                pieces.append(piece)
+    # All pieces degenerate (a triangle hugging the plane): keep the
+    # original — never trade real area for a cleaner cut.
+    return pieces or [tri]
+
+
+def _split_triangles_at_planes(
+    triangles: list[_Triangle], planes: list[float],
+) -> list[_Triangle]:
+    """Cut triangles at every plane so no output triangle spans one."""
+    for z in planes:
+        triangles = [
+            piece for tri in triangles for piece in _split_triangle_at_plane(tri, z)
+        ]
+    return triangles
+
+
+def _band_by_z_height(
+    triangles: list[_Triangle], num_colors: int,
+) -> tuple[list[_Triangle], list[int], float]:
+    """The z_height method, whole: split at the band planes, then assign.
+
+    The ONE door both color tools route the method through, so the band
+    edges, the cutting, and the assignment can never disagree.  Returns
+    ``(triangles, assignments, z_range)`` — the triangles are the
+    plane-split set (counts grow at the boundaries), every one of them
+    wholly inside its band, and ``z_range`` is the vertex-true height the
+    bands divide (what the band-height warning judges).
+    """
+    if not triangles:
+        return [], [], 0.0
+    z_min, z_max = _z_extent(triangles)
+    z_range = z_max - z_min
+    if num_colors >= 2 and z_range >= 1e-9:
+        triangles = _split_triangles_at_planes(
+            triangles, _band_planes(z_min, z_max, num_colors),
+        )
+    assignments = _assign_z_height(
+        triangles, num_colors, z_extent=(z_min, z_max),
+    )
+    return triangles, assignments, z_range
 
 
 # ---------------------------------------------------------------------------
@@ -905,10 +1034,12 @@ class _ColorToolsPlugin:
         ) -> dict:
             """Split a 3D model into horizontal color zones by Z-height.
 
-            Divides the model's Z-range into N equal bands and assigns
-            each face to the band containing its centroid.  Produces
-            separate STL files per zone and (if available) a multicolor
-            3MF ready for AMS/MMU printers.
+            Divides the model's height into N equal bands.  Faces that
+            cross a band edge are cut exactly at it, so the line where two
+            colors meet is the straight horizontal line the bands name —
+            never a sawtooth of whole faces, on any tessellation.
+            Produces separate STL files per zone and (if available) a
+            multicolor 3MF ready for AMS/MMU printers.
 
             Zero cloud dependencies — pure geometry.
 
@@ -916,7 +1047,8 @@ class _ColorToolsPlugin:
             :param num_colors: Number of color zones (default 4).
             :param color_palette: List of hex colors (e.g.
                 ``["#FF0000", "#00FF00"]``).  Defaults to white/red/black/grey.
-            :returns: Dict with zone STL paths, hex colors, face counts,
+            :returns: Dict with zone STL paths, hex colors, face counts
+                (boundary faces are cut, so counts can exceed the input's),
                 AMS slot mapping, weight estimates, and optional 3MF path.
             """
             path = Path(input_path)
@@ -942,14 +1074,14 @@ class _ColorToolsPlugin:
             output_dir = tempfile.mkdtemp(prefix="kiln_color_")
             base_name = path.stem
 
-            assignments = _assign_z_height(triangles, num_colors)
+            triangles, assignments, z_range = _band_by_z_height(
+                triangles, num_colors,
+            )
             zones = _split_and_write(
                 triangles, assignments, num_colors, palette, output_dir, base_name,
             )
             threemf_path, compose_err = _try_compose_3mf(zones, output_dir, base_name)
 
-            z_values = [t.centroid_z for t in triangles]
-            z_range = max(z_values) - min(z_values)
             warn = _band_height_warning(z_range, num_colors)
 
             response = _build_result(
@@ -979,7 +1111,9 @@ class _ColorToolsPlugin:
             """Split a 3D model into color zones by geometric region.
 
             Supports multiple assignment methods:
-              - ``"z_height"``: horizontal bands by Z-height (default)
+              - ``"z_height"``: horizontal bands by Z-height (default) —
+                faces crossing a band edge are cut exactly at it, so the
+                color boundary is a straight line on any tessellation
               - ``"normal"``: group by face normal direction
                 (top / bottom / sides)
               - ``"random"``: random face assignment for artistic prints
@@ -1024,9 +1158,14 @@ class _ColorToolsPlugin:
             output_dir = tempfile.mkdtemp(prefix="kiln_color_")
             base_name = path.stem
 
+            z_range: float | None = None
             if method == "z_height":
-                assignments = _assign_z_height(triangles, num_colors)
+                triangles, assignments, z_range = _band_by_z_height(
+                    triangles, num_colors,
+                )
             elif method == "normal":
+                # Per-facet by construction — a facet has ONE orientation,
+                # so there is no plane to cut at and nothing to split.
                 assignments = _assign_normal(triangles, num_colors)
             else:
                 assignments = _assign_random(triangles, num_colors)
@@ -1037,9 +1176,7 @@ class _ColorToolsPlugin:
             threemf_path, compose_err = _try_compose_3mf(zones, output_dir, base_name)
 
             warn: str | None = None
-            if method == "z_height":
-                z_values = [t.centroid_z for t in triangles]
-                z_range = max(z_values) - min(z_values)
+            if z_range is not None:
                 warn = _band_height_warning(z_range, num_colors)
 
             response = _build_result(

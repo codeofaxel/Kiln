@@ -26,6 +26,7 @@ from kiln.plugins.color_tools import (
     _assign_normal,
     _assign_random,
     _assign_z_height,
+    _band_by_z_height,
     _band_height_warning,
     _estimate_weight_g,
     _obj_face_to_triangle,
@@ -37,8 +38,10 @@ from kiln.plugins.color_tools import (
     _quantize_colors,
     _rgb_to_hex,
     _sample_face_color,
+    _split_triangle_at_plane,
     _Triangle,
     _write_binary_stl,
+    plugin,
 )
 
 # ---------------------------------------------------------------------------
@@ -1125,3 +1128,268 @@ class TestSampleFaceColor:
         color = _sample_face_color(face, uvs, img, 2, 2)
         assert color == (255, 0, 0)
 
+
+
+# ---------------------------------------------------------------------------
+# Band-plane splitting — crisp boundaries for the z_height method
+# ---------------------------------------------------------------------------
+
+
+class TestSplitTriangleAtPlane:
+    """The cutting primitive: pieces cover the input exactly, and a
+    triangle that does not truly cross is returned untouched."""
+
+    def _tall(self, z0=0.0, z1=10.0, z2=10.0):
+        return _Triangle(
+            normal=(1.0, 0.0, 0.0),
+            v0=(0.0, 0.0, z0),
+            v1=(0.0, 1.0, z1),
+            v2=(0.0, 2.0, z2),
+            attr=7,
+        )
+
+    def test_flat_triangle_is_untouched(self):
+        tri = _make_triangle(5, 5, 5)
+        assert _split_triangle_at_plane(tri, 5.0) == [tri]
+
+    def test_touching_from_below_is_not_crossing(self):
+        tri = self._tall(0.0, 5.0, 5.0)
+        assert _split_triangle_at_plane(tri, 5.0) == [tri]
+
+    def test_touching_from_above_is_not_crossing(self):
+        tri = self._tall(5.0, 10.0, 10.0)
+        assert _split_triangle_at_plane(tri, 5.0) == [tri]
+
+    def test_a_crossing_triangle_splits_area_exactly(self):
+        tri = self._tall()
+        pieces = _split_triangle_at_plane(tri, 4.0)
+        assert len(pieces) == 3  # triangle below the cut, quad above → 2
+        assert abs(sum(p.area for p in pieces) - tri.area) < 1e-9
+        for p in pieces:
+            zs = [p.v0[2], p.v1[2], p.v2[2]]
+            assert min(zs) >= -1e-9 and max(zs) <= 10.0 + 1e-9
+            # no piece spans the plane
+            assert max(zs) <= 4.0 + 1e-9 or min(zs) >= 4.0 - 1e-9
+
+    def test_cut_vertices_land_exactly_on_the_plane(self):
+        pieces = _split_triangle_at_plane(self._tall(), 4.0)
+        on_plane = {
+            v for p in pieces for v in (p.v0, p.v1, p.v2) if v[2] == 4.0
+        }
+        assert len(on_plane) == 2  # one shared pair, reused by both halves
+
+    def test_normal_attr_and_winding_survive(self):
+        tri = self._tall()
+        for p in _split_triangle_at_plane(tri, 4.0):
+            assert p.normal == tri.normal
+            assert p.attr == tri.attr
+            # winding: the geometric normal of every piece points the same
+            # way as the parent's
+            def geom_normal(t):
+                ux, uy, uz = (
+                    t.v1[0] - t.v0[0], t.v1[1] - t.v0[1], t.v1[2] - t.v0[2],
+                )
+                vx, vy, vz = (
+                    t.v2[0] - t.v0[0], t.v2[1] - t.v0[1], t.v2[2] - t.v0[2],
+                )
+                return (uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx)
+
+            gp, gt = geom_normal(p), geom_normal(tri)
+            assert gp[0] * gt[0] + gp[1] * gt[1] + gp[2] * gt[2] > 0
+
+    def test_vertex_within_epsilon_counts_as_on_the_plane(self):
+        tri = self._tall(4.0 + 1e-12, 10.0, 10.0)
+        assert _split_triangle_at_plane(tri, 4.0) == [tri]
+
+    def test_adjacent_triangles_cut_watertight(self):
+        """Two triangles sharing the crossing edge compute IDENTICAL cut
+        points from that edge — the cut line cannot open a seam."""
+        a = (0.0, 0.0, 0.0)
+        b = (1.0, 0.0, 8.0)
+        left = _Triangle(normal=(0, 1, 0), v0=a, v1=b, v2=(0.0, 0.0, 8.0))
+        right = _Triangle(normal=(0, 1, 0), v0=b, v1=a, v2=(1.0, 0.0, 0.0))
+        cuts_left = {
+            v
+            for p in _split_triangle_at_plane(left, 4.0)
+            for v in (p.v0, p.v1, p.v2)
+            if v[2] == 4.0
+        }
+        cuts_right = {
+            v
+            for p in _split_triangle_at_plane(right, 4.0)
+            for v in (p.v0, p.v1, p.v2)
+            if v[2] == 4.0
+        }
+        shared_edge_cut = (0.5, 0.0, 4.0)
+        assert shared_edge_cut in cuts_left
+        assert shared_edge_cut in cuts_right
+
+
+class TestBandByZHeight:
+    """The one door both tools route the z_height method through."""
+
+    def _wall(self, height=40.0):
+        """A rectangular wall of two triangles spanning the full height —
+        the barber-pole pathology: faces TALLER than any band."""
+        return [
+            _Triangle(
+                normal=(0.0, 1.0, 0.0),
+                v0=(0.0, 0.0, 0.0),
+                v1=(10.0, 0.0, 0.0),
+                v2=(10.0, 0.0, height),
+            ),
+            _Triangle(
+                normal=(0.0, 1.0, 0.0),
+                v0=(0.0, 0.0, 0.0),
+                v1=(10.0, 0.0, height),
+                v2=(0.0, 0.0, height),
+            ),
+        ]
+
+    def test_faces_taller_than_the_bands_fill_every_band(self):
+        """The regression this exists for: centroid assignment on tall
+        faces starved bands and striped walls; the split fills each band
+        with exactly its share."""
+        tris = self._wall()
+        split, assigns, z_range = _band_by_z_height(tris, 4)
+        assert z_range == 40.0
+        per_band_area = [0.0] * 4
+        for t, a in zip(split, assigns, strict=True):
+            per_band_area[a] += t.area
+        total = sum(t.area for t in tris)
+        for area in per_band_area:
+            assert abs(area - total / 4) < 1e-6
+
+    def test_every_piece_lies_wholly_inside_its_band(self):
+        tris = self._wall()
+        split, assigns, _ = _band_by_z_height(tris, 4)
+        for t, a in zip(split, assigns, strict=True):
+            lo, hi = a * 10.0, (a + 1) * 10.0
+            for v in (t.v0, t.v1, t.v2):
+                assert lo - 1e-9 <= v[2] <= hi + 1e-9
+
+    def test_area_is_conserved(self):
+        tris = self._wall()
+        split, _, _ = _band_by_z_height(tris, 4)
+        assert abs(sum(t.area for t in split) - sum(t.area for t in tris)) < 1e-9
+
+    def test_band_edges_come_from_vertex_extent_not_centroids(self):
+        """A leaning boundary face used to shrink the band range to the
+        centroid span, shifting every edge inward; the bands divide the
+        model's REAL height now."""
+        tris = self._wall(height=30.0)
+        split, assigns, z_range = _band_by_z_height(tris, 3)
+        assert z_range == 30.0
+        cut_heights = sorted(
+            {round(v[2], 9) for t in split for v in (t.v0, t.v1, t.v2)}
+        )
+        assert 10.0 in cut_heights and 20.0 in cut_heights
+
+    def test_single_band_never_splits(self):
+        tris = self._wall()
+        split, assigns, _ = _band_by_z_height(tris, 1)
+        assert split == tris
+        assert assigns == [0, 0]
+
+    def test_flat_model_never_splits(self):
+        tris = [_make_triangle(5, 5, 5), _make_triangle(5, 5, 5)]
+        split, assigns, z_range = _band_by_z_height(tris, 4)
+        assert split == tris
+        assert assigns == [0, 0]
+        assert z_range == 0.0
+
+    def test_empty_input(self):
+        assert _band_by_z_height([], 4) == ([], [], 0.0)
+
+
+class TestCrispBoundariesThroughTheTools:
+    """Both doors — auto_color_by_height AND auto_color_by_region's
+    default method — produce zones whose meeting line is exact."""
+
+    def _register(self):
+        tools = {}
+
+        class _FakeMcp:
+            def tool(self):
+                def deco(fn):
+                    tools[fn.__name__] = fn
+                    return fn
+
+                return deco
+
+        plugin.register(_FakeMcp())
+        return tools
+
+    def _wall_stl(self, height=40.0):
+        tris = [
+            _Triangle(
+                normal=(0.0, 1.0, 0.0),
+                v0=(0.0, 0.0, 0.0),
+                v1=(10.0, 0.0, 0.0),
+                v2=(10.0, 0.0, height),
+            ),
+            _Triangle(
+                normal=(0.0, 1.0, 0.0),
+                v0=(0.0, 0.0, 0.0),
+                v1=(10.0, 0.0, height),
+                v2=(0.0, 0.0, height),
+            ),
+        ]
+        return _make_stl_file(tris)
+
+    def _assert_exact_bands(self, result, num_colors, height):
+        assert result["success"] is True
+        band = height / num_colors
+        face_sum = 0
+        for zone in result["zones"]:
+            face_sum += zone["face_count"]
+            assert zone["face_count"] > 0, (
+                f"zone {zone} is empty — the tall-face pathology is back"
+            )
+            zs = [
+                v[2]
+                for t in _parse_binary_stl(zone["stl_path"])
+                for v in (t.v0, t.v1, t.v2)
+            ]
+            lo = band * zone["zone"]
+            hi = lo + band
+            assert min(zs) >= lo - 1e-5 and max(zs) <= hi + 1e-5, (
+                f"zone {zone['zone']} bleeds past its band edges"
+            )
+            # the boundary is REACHED, not just respected — a crisp line
+            # exists exactly at the band edge
+            assert abs(min(zs) - lo) < 1e-5 and abs(max(zs) - hi) < 1e-5
+        assert face_sum == result["total_faces"]
+
+    def test_height_tool_cuts_exact_bands(self):
+        tools = self._register()
+        stl = self._wall_stl()
+        try:
+            result = tools["auto_color_by_height"](input_path=stl, num_colors=4)
+            self._assert_exact_bands(result, 4, 40.0)
+        finally:
+            os.unlink(stl)
+
+    def test_region_tool_z_height_method_cuts_the_same_bands(self):
+        tools = self._register()
+        stl = self._wall_stl()
+        try:
+            result = tools["auto_color_by_region"](
+                input_path=stl, num_colors=4, method="z_height",
+            )
+            self._assert_exact_bands(result, 4, 40.0)
+        finally:
+            os.unlink(stl)
+
+    def test_normal_method_never_splits_faces(self):
+        """Per-facet methods are exact by construction — no cutting."""
+        tools = self._register()
+        stl = self._wall_stl()
+        try:
+            result = tools["auto_color_by_region"](
+                input_path=stl, num_colors=3, method="normal",
+            )
+            assert result["success"] is True
+            assert result["total_faces"] == 2
+        finally:
+            os.unlink(stl)
