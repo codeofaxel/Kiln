@@ -789,3 +789,118 @@ def test_compose_stamps_the_bambu_family_version(stl_a: Path, tmp_path: Path):
         [ColorPart(stl_path=str(stl_a), extruder=1)], output_path=str(out),
     )
     assert '<metadata name="BambuStudio:3mfVersion">1</metadata>' in _model_xml(str(out))
+
+
+# ---------------------------------------------------------------------------
+# compose_painted_3mf — one watertight object, colors per triangle
+# ---------------------------------------------------------------------------
+
+
+def _cube_soup(edge: float = 10.0):
+    """A closed cube as a triangle soup (12 triangles, outward winding)."""
+    lo, hi = 0.0, edge
+    c = {
+        (x, y, z): (lo if x == 0 else hi, lo if y == 0 else hi, lo if z == 0 else hi)
+        for x in (0, 1) for y in (0, 1) for z in (0, 1)
+    }
+    quads = [
+        # (corner indices as (x,y,z) bits), outward winding per face
+        (((0,0,0), (0,1,0), (1,1,0), (1,0,0))),   # bottom (z=lo, -z)
+        (((0,0,1), (1,0,1), (1,1,1), (0,1,1))),   # top (+z)
+        (((0,0,0), (1,0,0), (1,0,1), (0,0,1))),   # front (-y)
+        (((1,0,0), (1,1,0), (1,1,1), (1,0,1))),   # right (+x)
+        (((1,1,0), (0,1,0), (0,1,1), (1,1,1))),   # back (+y)
+        (((0,1,0), (0,0,0), (0,0,1), (0,1,1))),   # left (-x)
+    ]
+    tris = []
+    for a, b, c2, d in quads:
+        tris.append((c[a], c[b], c[c2]))
+        tris.append((c[a], c[c2], c[d]))
+    return tris
+
+
+def _painted_model_xml(path: str) -> str:
+    with zipfile.ZipFile(path) as zf:
+        return zf.read("3D/3dmodel.model").decode("utf-8")
+
+
+class TestComposePainted:
+    def test_one_watertight_object_with_per_triangle_colors(self, tmp_path: Path):
+        from kiln.multicolor_3mf import compose_painted_3mf
+
+        tris = _cube_soup()
+        colors = ["#F72323" if i < 2 else "#2366F7" for i in range(len(tris))]
+        out = tmp_path / "painted.3mf"
+        result = compose_painted_3mf(tris, colors, output_path=str(out))
+        assert result["success"] is True
+        assert result["form"] == "painted_single_object"
+        # exact-coordinate dedup: a closed cube has 8 vertices, not 36
+        assert result["total_vertices"] == 8
+        assert result["total_triangles"] == 12
+        assert result["colors"] == ["#F72323", "#2366F7"]
+
+        xml = _painted_model_xml(str(out))
+        assert xml.count("<object ") == 1
+        assert xml.count('pid="2" p1="0"') == 2   # the two red faces
+        assert xml.count('pid="2" p1="1"') == 10
+        assert '<metadata name="BambuStudio:3mfVersion">1</metadata>' in xml
+
+        # The emitted object is closed: every directed edge appears exactly
+        # once with its reverse — the property slicers call manifold.
+        import re
+
+        tri_rows = re.findall(
+            r'<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"', xml,
+        )
+        edges: dict[tuple[str, str], int] = {}
+        for a, b, c in tri_rows:
+            for e in ((a, b), (b, c), (c, a)):
+                edges[e] = edges.get(e, 0) + 1
+        assert all(count == 1 for count in edges.values())
+        assert all((b, a) in edges for (a, b) in edges)
+
+    def test_uncolored_triangles_carry_no_reference(self, tmp_path: Path):
+        from kiln.multicolor_3mf import compose_painted_3mf
+
+        tris = _cube_soup()
+        colors: list = ["#F72323"] * 2 + [None] * 10
+        out = tmp_path / "partial.3mf"
+        result = compose_painted_3mf(tris, colors, output_path=str(out))
+        assert result["success"] is True
+        xml = _painted_model_xml(str(out))
+        assert xml.count("p1=") == 2
+
+    def test_slicer_channels_are_present(self, tmp_path: Path):
+        from kiln.multicolor_3mf import compose_painted_3mf
+
+        out = tmp_path / "p.3mf"
+        compose_painted_3mf(
+            _cube_soup(), ["#F72323"] * 12, output_path=str(out), name="cube",
+        )
+        with zipfile.ZipFile(out) as zf:
+            names = zf.namelist()
+            assert "Metadata/model_settings.config" in names
+            assert "Metadata/Slic3r_PE_model.config" in names
+            cfg = zf.read("Metadata/Slic3r_PE_model.config").decode()
+        assert '<volume firstid="0" lastid="11">' in cfg
+
+    def test_refuses_dishonest_input(self, tmp_path: Path):
+        from kiln.multicolor_3mf import compose_painted_3mf
+
+        assert compose_painted_3mf([], [], output_path=str(tmp_path / "x.3mf"))[
+            "success"
+        ] is False
+        result = compose_painted_3mf(
+            _cube_soup(), ["#F72323"], output_path=str(tmp_path / "y.3mf"),
+        )
+        assert result["success"] is False
+        assert "length" in result["error"]
+
+    def test_thumbnail_is_embedded(self, tmp_path: Path):
+        pytest.importorskip("PIL.Image", reason="colored renderer needs PIL")
+        from kiln.multicolor_3mf import compose_painted_3mf
+
+        out = tmp_path / "t.3mf"
+        compose_painted_3mf(_cube_soup(), ["#F72323"] * 12, output_path=str(out))
+        with zipfile.ZipFile(out) as zf:
+            assert "Metadata/plate_1.png" in zf.namelist()

@@ -92,9 +92,14 @@ loader never reads colors at all — neither core-spec basematerials nor the
 slicer sidecar Kiln's own composer writes (measured 2026-08-01).  So the
 Scene is flattened HERE, with per-part colors baked to per-vertex RGBA
 (3MF part colors via :func:`kiln.threemf_parser.object_display_colors`).
-Decimation rebuilds the vertex set, so colors cross it by
-nearest-original-vertex transfer — exact for zone-constant colors away
-from the borders — or are dropped when scipy is missing, never guessed.
+A PAINTED 3MF — one object whose color varies per triangle, the form
+``compose_painted_3mf`` writes — has no honest per-part color, so it is
+rebuilt as a per-face-colored triangle soup from
+:func:`kiln.threemf_parser.parse_colored_3mf` instead, guarded to the
+files whose soup matches the loaded mesh.  Decimation rebuilds the
+vertex set, so colors cross it by nearest-original-vertex transfer —
+exact for zone-constant colors away from the borders — or are dropped
+when scipy is missing, never guessed.
 
 Stateless: path in, dict out.  No disk writes, no caches, no network.
 """
@@ -309,6 +314,61 @@ def _transfer_vertex_colors(src_vertices: Any, src_rgba: Any, dst_vertices: Any)
     return src_rgba[cKDTree(src_vertices).query(dst_vertices, k=1)[1]]
 
 
+def _painted_3mf_mesh(path: Path, flattened: Any) -> Any:
+    """Per-triangle colors of a painted 3MF, as a colored triangle soup.
+
+    A painted file — ONE object whose color varies per triangle, the form
+    ``compose_painted_3mf`` writes — defeats the per-part bake: no single
+    color tells the truth about the object, so ``object_display_colors``
+    rightly refuses it and the stage would show gray.  The per-triangle
+    truth is what ``threemf_parser.parse_colored_3mf`` already extracts;
+    this rebuilds the mesh from that soup, each face's three vertices
+    carrying its color (vertices are deliberately NOT shared across faces —
+    sharing would blend colors across the paint boundary).
+
+    ``parse_colored_3mf`` ignores build-item transforms, so the soup is
+    trusted only when it agrees with the trimesh-loaded *flattened* mesh on
+    triangle count and bounding box; any disagreement (instanced or
+    transformed items) returns ``None`` and the caller keeps the uncolored
+    mesh rather than a mispositioned one.
+    """
+    import zipfile
+
+    import numpy as np
+    import trimesh
+
+    from kiln.threemf_parser import parse_colored_3mf
+
+    try:
+        colored = parse_colored_3mf(str(path))
+    except (ValueError, OSError, zipfile.BadZipFile):
+        return None
+    if not colored.colors_found or not colored.triangles:
+        return None
+    if len(colored.triangles) != len(flattened.faces):
+        return None
+    soup = np.array(
+        [[t.v0, t.v1, t.v2] for t in colored.triangles], dtype=np.float64,
+    ).reshape(-1, 3)
+    if not (
+        np.allclose(soup.min(axis=0), flattened.bounds[0], atol=1e-4)
+        and np.allclose(soup.max(axis=0), flattened.bounds[1], atol=1e-4)
+    ):
+        return None
+    mesh = trimesh.Trimesh(
+        vertices=soup,
+        faces=np.arange(len(soup), dtype=np.int64).reshape(-1, 3),
+        process=False,
+    )
+    rgb = np.asarray([t.color for t in colored.triangles], dtype=np.uint8)
+    rgba = np.concatenate(
+        [np.repeat(rgb, 3, axis=0), np.full((len(soup), 1), 255, np.uint8)],
+        axis=1,
+    )
+    mesh.visual = trimesh.visual.ColorVisuals(mesh=mesh, vertex_colors=rgba)
+    return mesh
+
+
 def mesh_to_viewer_payload(
     mesh_path: str | Path,
     *,
@@ -364,9 +424,23 @@ def mesh_to_viewer_payload(
         "format": path.suffix.lstrip(".").lower(),
     }
 
+    # A 3MF that came through colorless may be PAINTED — one object whose
+    # color varies per triangle, which the per-part bake rightly refuses.
+    # The per-triangle soup carries that truth when it matches the mesh.
+    if (
+        path.suffix.lower() == ".3mf"
+        and getattr(mesh.visual, "kind", None) != "vertex"
+    ):
+        painted = _painted_3mf_mesh(path, mesh)
+        if painted is not None:
+            mesh = painted
+            orig_tris = int(len(mesh.faces))
+            orig_verts = int(len(mesh.vertices))
+
     # Vertex colors ride along only when the visual explicitly carries them
     # (trimesh reports kind == "vertex") — read straight from a single mesh's
-    # file, or baked from a Scene's per-part colors above.
+    # file, baked from a Scene's per-part colors above, or rebuilt from a
+    # painted file's per-triangle soup.
     has_colors = getattr(mesh.visual, "kind", None) == "vertex"
 
     # ---- Cap check: triangles AND encoded bytes, one decimation try ----

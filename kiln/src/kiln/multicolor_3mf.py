@@ -976,3 +976,207 @@ def compose_multicolor_3mf(
     )
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Painted single-object composer
+# ---------------------------------------------------------------------------
+
+
+def compose_painted_3mf(
+    triangles: list[tuple[
+        tuple[float, float, float],
+        tuple[float, float, float],
+        tuple[float, float, float],
+    ]],
+    triangle_colors: list[str | None],
+    *,
+    output_path: str | None = None,
+    name: str = "painted",
+) -> dict[str, Any]:
+    """Compose a 3MF of ONE object whose colors vary per triangle.
+
+    The other shape multicolor takes.  ``compose_multicolor_3mf`` writes one
+    solid object per color — right when every color region can stand as a
+    closed body (stacked Z-bands, a boss on a plate).  A coloring that
+    follows the SURFACE (faces grouped by orientation, random speckle) has
+    no such bodies: splitting the shell along it yields zero-thickness
+    sheets no slicer accepts (measured: "unable to create convex hull",
+    exit 206).  Here the mesh stays whole — one watertight object — and the
+    colors ride as core-spec per-triangle references, the painted-model
+    form slicers' color-to-filament import flows exist for.
+
+    :param triangles: The full mesh, one ``(v0, v1, v2)`` tuple per
+        triangle, each vertex an ``(x, y, z)``.  Vertices are deduplicated
+        by exact coordinates, so a watertight input stays watertight.
+    :param triangle_colors: One ``#RRGGBB`` hint per triangle (``None`` =
+        uncolored; such faces carry no reference and render neutral).
+    :param output_path: Where to write.  Defaults to a temp file.
+    :param name: The object name shown in slicers.
+    :returns: Dict with ``output_path``, ``colors`` (distinct palette
+        actually referenced), and counts.  ``{"success": False, ...}`` on
+        empty input or write failure — never raises.
+    """
+    if not triangles:
+        return {"success": False, "error": "No triangles to compose"}
+    if len(triangle_colors) != len(triangles):
+        return {
+            "success": False,
+            "error": (
+                f"triangle_colors length {len(triangle_colors)} != "
+                f"triangle count {len(triangles)}"
+            ),
+        }
+
+    # Exact-coordinate vertex dedup — the same discipline _parse_stl uses,
+    # so the emitted object is as watertight as the input mesh.
+    vert_index: dict[tuple[float, float, float], int] = {}
+    vertices: list[tuple[float, float, float]] = []
+    faces: list[tuple[int, int, int]] = []
+    for tri in triangles:
+        idx = []
+        for v in tri:
+            key = (float(v[0]), float(v[1]), float(v[2]))
+            i = vert_index.get(key)
+            if i is None:
+                i = len(vertices)
+                vert_index[key] = i
+                vertices.append(key)
+            idx.append(i)
+        faces.append((idx[0], idx[1], idx[2]))
+
+    palette: list[str] = []
+    tri_pindex: list[int | None] = []
+    for color in triangle_colors:
+        rgb_hex = _part_rgb_hex(color)
+        if rgb_hex is None:
+            tri_pindex.append(None)
+            continue
+        if rgb_hex not in palette:
+            palette.append(rgb_hex)
+        tri_pindex.append(palette.index(rgb_hex))
+
+    colorgroup_id = 2  # the single object is id 1
+    obj_name = _xml_escape(name)
+    lines: list[str] = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<model unit="millimeter" xml:lang="en-US"',
+        '  xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"',
+        '  xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"',
+        '  xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06"',
+        '  xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06">',
+        '  <metadata name="Application">Kiln</metadata>',
+        '  <metadata name="BambuStudio:3mfVersion">1</metadata>',
+        "  <resources>",
+    ]
+    if palette:
+        lines.append(f'    <m:colorgroup id="{colorgroup_id}">')
+        lines += [f'      <m:color color="{c}"/>' for c in palette]
+        lines.append("    </m:colorgroup>")
+    lines += [
+        f'    <object id="1" type="model" name="{obj_name}">',
+        "      <mesh>",
+        "        <vertices>",
+    ]
+    for x, y, z in vertices:
+        lines.append(f'          <vertex x="{x:.6f}" y="{y:.6f}" z="{z:.6f}"/>')
+    lines += [
+        "        </vertices>",
+        "        <triangles>",
+    ]
+    for (a, b, c), pindex in zip(faces, tri_pindex, strict=True):
+        ref = (
+            f' pid="{colorgroup_id}" p1="{pindex}"' if pindex is not None else ""
+        )
+        lines.append(f'          <triangle v1="{a}" v2="{b}" v3="{c}"{ref}/>')
+    lines += [
+        "        </triangles>",
+        "      </mesh>",
+        "    </object>",
+        "  </resources>",
+        "  <build>",
+        '    <item objectid="1" transform="1 0 0 0 1 0 0 0 1 0.000000 0.000000 0.000000"/>',
+        "  </build>",
+        "</model>",
+    ]
+    model_xml = "\n".join(lines)
+
+    settings = "\n".join([
+        '<?xml version="1.0" encoding="utf-8"?>',
+        "<config>",
+        '  <object id="1">',
+        f'    <metadata key="name"     value="{obj_name}"/>',
+        "  </object>",
+        "</config>",
+    ])
+    prusa_config = "\n".join([
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<config>",
+        ' <object id="1" instances_count="1">',
+        f'  <volume firstid="0" lastid="{len(faces) - 1}">',
+        f'   <metadata type="volume" key="name" value="{obj_name}"/>',
+        "  </volume>",
+        f'  <metadata type="object" key="name" value="{obj_name}"/>',
+        " </object>",
+        "</config>",
+    ])
+
+    thumbnail = None
+    if len(faces) <= _COLORED_THUMBNAIL_MAX_TRIANGLES:
+        try:
+            from kiln.threemf_parser import _DEFAULT_COLOR, ColoredTriangle
+
+            colored = [
+                ColoredTriangle(
+                    v0=tri[0], v1=tri[1], v2=tri[2],
+                    color=(
+                        _part_rgb(triangle_colors[i]) or _DEFAULT_COLOR
+                    ),
+                )
+                for i, tri in enumerate(triangles)
+            ]
+            from kiln.colored_renderer import render_colored_mesh
+
+            result = render_colored_mesh(
+                colored, width=_THUMBNAIL_SIZE, height=_THUMBNAIL_SIZE,
+            )
+            with open(result.path, "rb") as fh:
+                thumbnail = fh.read()
+            with contextlib.suppress(OSError):
+                os.remove(result.path)
+        except Exception:  # noqa: BLE001 — enrichment, never a compose failure
+            logger.debug("painted thumbnail failed", exc_info=True)
+
+    if output_path is None:
+        fd, output_path = tempfile.mkstemp(suffix=".3mf", prefix="kiln_painted_")
+        os.close(fd)
+    try:
+        with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("[Content_Types].xml", _CONTENT_TYPES)
+            zf.writestr("_rels/.rels", _RELS)
+            zf.writestr("3D/3dmodel.model", model_xml)
+            zf.writestr("Metadata/model_settings.config", settings)
+            zf.writestr("Metadata/Slic3r_PE_model.config", prusa_config)
+            if thumbnail:
+                zf.writestr("Metadata/plate_1.png", thumbnail)
+    except Exception as exc:  # noqa: BLE001 — mirror compose_multicolor_3mf
+        return {"success": False, "error": f"Failed to write 3MF archive: {exc}"}
+
+    logger.info(
+        "compose_painted_3mf: wrote %s (1 object, %d triangles, %d colors)",
+        output_path, len(faces), len(palette),
+    )
+    return {
+        "success": True,
+        "output_path": output_path,
+        "form": "painted_single_object",
+        "colors": palette,
+        "total_vertices": len(vertices),
+        "total_triangles": len(faces),
+        "message": (
+            f"Created painted multicolor 3MF: one watertight object, "
+            f"{len(faces):,} triangles across {len(palette)} colors.  "
+            "Slicers that support color import (BambuStudio, OrcaSlicer) "
+            "will offer to map each color to a filament on open."
+        ),
+    }

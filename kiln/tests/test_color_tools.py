@@ -1848,3 +1848,94 @@ class TestCappedThroughTheTools:
             assert all("watertight" not in z for z in result["zones"])
         finally:
             os.unlink(stl)
+
+
+class TestPaintedFormForSurfaceMethods:
+    """normal/random colorings follow the surface, so their printable 3MF
+    is ONE watertight painted object — never the zero-volume sheet split
+    that slicers reject (measured: exit 206, "unable to create convex
+    hull")."""
+
+    def _register(self):
+        tools = {}
+
+        class _FakeMcp:
+            def tool(self):
+                def deco(fn):
+                    tools[fn.__name__] = fn
+                    return fn
+
+                return deco
+
+        plugin.register(_FakeMcp())
+        return tools
+
+    def _closed_box_stl(self, edge=10.0):
+        lo, hi = 0.0, edge
+        c = {
+            (x, y, z): (lo if x == 0 else hi, lo if y == 0 else hi, lo if z == 0 else hi)
+            for x in (0, 1) for y in (0, 1) for z in (0, 1)
+        }
+        quads = [
+            ((0, 0, 0), (0, 1, 0), (1, 1, 0), (1, 0, 0)),
+            ((0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)),
+            ((0, 0, 0), (1, 0, 0), (1, 0, 1), (0, 0, 1)),
+            ((1, 0, 0), (1, 1, 0), (1, 1, 1), (1, 0, 1)),
+            ((1, 1, 0), (0, 1, 0), (0, 1, 1), (1, 1, 1)),
+            ((0, 1, 0), (0, 0, 0), (0, 0, 1), (0, 1, 1)),
+        ]
+        tris = []
+        for a, b, c2, d in quads:
+            tris.append(_Triangle(normal=(0, 0, 1), v0=c[a], v1=c[b], v2=c[c2]))
+            tris.append(_Triangle(normal=(0, 0, 1), v0=c[a], v1=c[c2], v2=c[d]))
+        return _make_stl_file(tris)
+
+    def _model_xml(self, path):
+        import zipfile
+
+        with zipfile.ZipFile(path) as zf:
+            return zf.read("3D/3dmodel.model").decode()
+
+    def test_normal_method_emits_one_painted_object(self):
+        tools = self._register()
+        stl = self._closed_box_stl()
+        try:
+            result = tools["auto_color_by_region"](
+                input_path=stl, num_colors=3, method="normal",
+            )
+            assert result["success"] is True
+            assert result["total_faces"] == 12  # never split
+            xml = self._model_xml(result["multicolor_3mf"])
+            assert xml.count("<object ") == 1
+            assert "m:colorgroup" in xml and "p1=" in xml
+            # zone STLs still written for inspection
+            for zone in result["zones"]:
+                assert Path(zone["stl_path"]).exists()
+        finally:
+            os.unlink(stl)
+
+    def test_random_method_emits_one_painted_object(self):
+        tools = self._register()
+        stl = self._closed_box_stl()
+        try:
+            result = tools["auto_color_by_region"](
+                input_path=stl, num_colors=4, method="random",
+            )
+            assert result["success"] is True
+            assert self._model_xml(result["multicolor_3mf"]).count("<object ") == 1
+        finally:
+            os.unlink(stl)
+
+    def test_z_height_still_emits_solid_parts(self):
+        """The banded form keeps one closed object PER COLOR — the painted
+        form is only for colorings with no solid per color."""
+        tools = self._register()
+        stl = self._closed_box_stl()
+        try:
+            result = tools["auto_color_by_region"](
+                input_path=stl, num_colors=2, method="z_height",
+            )
+            assert result["success"] is True
+            assert self._model_xml(result["multicolor_3mf"]).count("<object ") == 2
+        finally:
+            os.unlink(stl)

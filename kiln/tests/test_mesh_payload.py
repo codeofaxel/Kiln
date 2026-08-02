@@ -292,3 +292,64 @@ class TestPartColorClaims:
         )
         _, explicit = mesh_payload._part_rgba(mesh, None)
         assert explicit is False
+
+
+class TestPaintedFileColorsSurvive:
+    """A painted 3MF — one object, per-triangle colors — has no honest
+    per-part color, so the encoder rebuilds it as a per-face-colored soup
+    instead of showing gray."""
+
+    RED, BLUE = (247, 35, 35, 255), (35, 102, 247, 255)
+
+    def _painted_cube(self, tmp_path, transform=None):
+        from kiln.multicolor_3mf import compose_painted_3mf
+
+        mesh = trimesh.creation.box(extents=(10.0, 10.0, 10.0))
+        tris = [tuple(map(tuple, mesh.vertices[f])) for f in mesh.faces]
+        # top faces red (both verts at z=+5), everything else blue
+        colors = [
+            "#F72323" if all(v[2] > 4.9 for v in t) else "#2366F7" for t in tris
+        ]
+        out = tmp_path / "painted.3mf"
+        compose_painted_3mf(tris, colors, output_path=str(out))
+        if transform is not None:
+            import zipfile as z
+
+            moved = tmp_path / "moved.3mf"
+            with z.ZipFile(out) as src, z.ZipFile(moved, "w") as dst:
+                for n in src.namelist():
+                    data = src.read(n)
+                    if n == "3D/3dmodel.model":
+                        data = data.replace(
+                            b'transform="1 0 0 0 1 0 0 0 1 0.000000 0.000000 0.000000"',
+                            transform.encode(),
+                        )
+                    dst.writestr(n, data)
+            return moved
+        return out
+
+    def test_per_triangle_colors_reach_the_payload(self, tmp_path):
+        payload = mesh_to_viewer_payload(self._painted_cube(tmp_path))
+        assert payload["downgraded"] is False
+        # soup: three unshared vertices per face, so paint cannot bleed
+        assert payload["counts"]["vertices"] == payload["counts"]["triangles"] * 3
+        rgba = np.frombuffer(
+            base64.b64decode(payload["vertex_colors"]), dtype=np.uint8
+        ).reshape(-1, 3, 4)
+        pos = _f32(payload["positions"]).reshape(-1, 3, 3)
+        top = (pos[:, :, 1] > 4.9).all(axis=1)   # viewer y == mesh z
+        assert top.sum() == 2
+        assert {tuple(c) for f in rgba[top] for c in f.tolist()} == {self.RED}
+        assert {tuple(c) for f in rgba[~top] for c in f.tolist()} == {self.BLUE}
+
+    def test_a_transformed_item_is_refused_not_mispositioned(self, tmp_path):
+        """parse_colored_3mf ignores build transforms, so a moved item's
+        soup would sit at the wrong place — the guard keeps the honest
+        uncolored mesh instead."""
+        moved = self._painted_cube(
+            tmp_path,
+            transform='transform="1 0 0 0 1 0 0 0 1 50.000000 0.000000 0.000000"',
+        )
+        payload = mesh_to_viewer_payload(moved)
+        assert payload["downgraded"] is False
+        assert "vertex_colors" not in payload

@@ -1025,6 +1025,43 @@ def _try_compose_3mf(
         return None, str(exc)
 
 
+def _try_compose_painted_3mf(
+    triangles: list[_Triangle],
+    assignments: list[int],
+    palette: list[str],
+    output_dir: str,
+    base_name: str,
+) -> tuple[str | None, str | None]:
+    """Compose the painted single-object 3MF for surface-following colorings.
+
+    The normal and random methods color the SURFACE, not stackable bodies —
+    splitting the shell along their zones yields zero-thickness sheets no
+    slicer accepts (measured: exit 206, "unable to create convex hull").
+    The printable form keeps the mesh whole and paints per-triangle color
+    references into it; slicers' color-import flows map each color to a
+    filament.
+
+    :returns: ``(path, error)`` — path on success, error message on failure.
+    """
+    try:
+        from kiln.multicolor_3mf import compose_painted_3mf
+    except ImportError:
+        _logger.debug("multicolor_3mf not available — skipping 3MF composition")
+        return None, None
+
+    out_3mf = os.path.join(output_dir, f"{base_name}_multicolor.3mf")
+    result = compose_painted_3mf(
+        [(t.v0, t.v1, t.v2) for t in triangles],
+        [palette[a] if a < len(palette) else palette[a % len(palette)]
+         for a in assignments],
+        output_path=out_3mf,
+        name=base_name,
+    )
+    if not result.get("success"):
+        return None, str(result.get("error"))
+    return result.get("output_path", out_3mf), None
+
+
 def _hex_to_color_name(hex_color: str) -> str:
     """Return a human-readable color name for common hex values.
 
@@ -1593,6 +1630,13 @@ class _ColorToolsPlugin:
                 (top / bottom / sides)
               - ``"random"``: random face assignment for artistic prints
 
+            The 3MF takes whichever form actually prints: z_height bands
+            become one closed solid per color; normal/random colorings
+            follow the surface, so the mesh stays ONE watertight object
+            with the colors painted per triangle — slicers that support
+            color import (BambuStudio, OrcaSlicer) offer to map each
+            color to a filament on open.
+
             Zero cloud dependencies — pure geometry.
 
             :param input_path: Path to a binary STL file.
@@ -1650,7 +1694,17 @@ class _ColorToolsPlugin:
                 triangles, assignments, num_colors, palette, output_dir,
                 base_name, cap_planes=cap_planes,
             )
-            threemf_path, compose_err = _try_compose_3mf(zones, output_dir, base_name)
+            if method == "z_height":
+                # Stacked bands stand as closed solids — one object per color.
+                threemf_path, compose_err = _try_compose_3mf(
+                    zones, output_dir, base_name,
+                )
+            else:
+                # Surface-following colorings have no solid per color; the
+                # printable form is the whole mesh painted per triangle.
+                threemf_path, compose_err = _try_compose_painted_3mf(
+                    triangles, assignments, palette, output_dir, base_name,
+                )
 
             warn: str | None = None
             if z_range is not None:
