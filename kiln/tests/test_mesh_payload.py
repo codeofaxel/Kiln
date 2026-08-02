@@ -353,3 +353,48 @@ class TestPaintedFileColorsSurvive:
         payload = mesh_to_viewer_payload(moved)
         assert payload["downgraded"] is False
         assert "vertex_colors" not in payload
+
+    def test_a_multi_object_painted_file_is_refused_not_misordered(self, tmp_path):
+        """The soup follows the file's object order, the flattened mesh
+        follows the scene graph's — with two objects nothing proves they
+        agree, and colors on the wrong faces are worse than none.  Each
+        object here is internally two-colored, so the per-part bake (which
+        IS order-safe, keyed by name) rightly refuses and the soup is the
+        only candidate — it must decline the multi-object case."""
+        import zipfile as z
+
+        model = """<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+       xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">
+ <resources>
+  <m:colorgroup id="9">
+    <m:color color="#F72323"/><m:color color="#2366F7"/>
+  </m:colorgroup>
+  <object id="1" type="model" name="a"><mesh>
+    <vertices><vertex x="0" y="0" z="0"/><vertex x="10" y="0" z="0"/><vertex x="0" y="10" z="0"/><vertex x="0" y="0" z="10"/></vertices>
+    <triangles><triangle v1="0" v2="1" v3="2" pid="9" p1="0"/><triangle v1="0" v2="1" v3="3" pid="9" p1="0"/><triangle v1="0" v2="2" v3="3" pid="9" p1="1"/><triangle v1="1" v2="2" v3="3" pid="9" p1="1"/></triangles>
+  </mesh></object>
+  <object id="2" type="model" name="b"><mesh>
+    <vertices><vertex x="20" y="0" z="0"/><vertex x="30" y="0" z="0"/><vertex x="20" y="10" z="0"/><vertex x="20" y="0" z="10"/></vertices>
+    <triangles><triangle v1="0" v2="1" v3="2" pid="9" p1="1"/><triangle v1="0" v2="1" v3="3" pid="9" p1="1"/><triangle v1="0" v2="2" v3="3" pid="9" p1="0"/><triangle v1="1" v2="2" v3="3" pid="9" p1="0"/></triangles>
+  </mesh></object>
+ </resources>
+ <build><item objectid="1"/><item objectid="2"/></build>
+</model>"""
+        ct = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
+</Types>"""
+        rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Target="/3D/3dmodel.model" Id="rel-1" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
+</Relationships>"""
+        p = tmp_path / "two_painted.3mf"
+        with z.ZipFile(p, "w") as zf:
+            zf.writestr("[Content_Types].xml", ct)
+            zf.writestr("_rels/.rels", rels)
+            zf.writestr("3D/3dmodel.model", model)
+        payload = mesh_to_viewer_payload(p)
+        assert payload["downgraded"] is False
+        assert "vertex_colors" not in payload

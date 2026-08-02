@@ -471,6 +471,18 @@ def object_display_colors(file_path: str) -> dict[str, tuple[int, int, int]]:
     try:
         with zipfile.ZipFile(file_path, "r") as zf:
             xml_bytes = zf.read(_find_model_xml(zf))
+            # Every 3MF headed for the stage passes through here, and an XML
+            # parse is real money on a large mesh — a byte scan turns away
+            # the files that carry no color construct at all.  Sidecar-only
+            # colors still need the parse, so the sidecar is scanned too.
+            if b"colorgroup" not in xml_bytes and b"basematerials" not in xml_bytes:
+                sidecar_raw = b""
+                for member in zf.namelist():
+                    if member.lower() == _SLICER_SETTINGS_PATH.lower():
+                        sidecar_raw = zf.read(member)
+                        break
+                if b'key="color"' not in sidecar_raw:
+                    return {}
             sidecar_colors = _slicer_config_colors(zf)
         root = ET.fromstring(xml_bytes)
     except (OSError, ValueError, KeyError, zipfile.BadZipFile, ET.ParseError):

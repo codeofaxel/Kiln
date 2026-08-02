@@ -314,7 +314,7 @@ def _transfer_vertex_colors(src_vertices: Any, src_rgba: Any, dst_vertices: Any)
     return src_rgba[cKDTree(src_vertices).query(dst_vertices, k=1)[1]]
 
 
-def _painted_3mf_mesh(path: Path, flattened: Any) -> Any:
+def _painted_3mf_mesh(path: Path, flattened: Any, *, single_object: bool) -> Any:
     """Per-triangle colors of a painted 3MF, as a colored triangle soup.
 
     A painted file — ONE object whose color varies per triangle, the form
@@ -326,19 +326,49 @@ def _painted_3mf_mesh(path: Path, flattened: Any) -> Any:
     carrying its color (vertices are deliberately NOT shared across faces —
     sharing would blend colors across the paint boundary).
 
-    ``parse_colored_3mf`` ignores build-item transforms, so the soup is
-    trusted only when it agrees with the trimesh-loaded *flattened* mesh on
-    triangle count and bounding box; any disagreement (instanced or
-    transformed items) returns ``None`` and the caller keeps the uncolored
-    mesh rather than a mispositioned one.
+    Trusted narrowly, because a wrong color is worse than none:
+
+    * ``single_object`` only — the soup follows the file's object order and
+      the flattened mesh follows the scene graph's; with one object the two
+      cannot disagree, with several nothing here can prove they agree.
+    * ``parse_colored_3mf`` ignores build-item transforms, so the soup must
+      also match the flattened mesh on triangle count and bounding box; a
+      transformed or instanced item returns ``None`` and the caller keeps
+      the honest uncolored mesh rather than a mispositioned one.
+
+    A file whose XML carries no color construct at all is turned away by a
+    byte scan before the full parse — every plain 3MF passes through here,
+    and an XML parse is real money on a large mesh.
     """
     import zipfile
 
     import numpy as np
     import trimesh
 
-    from kiln.threemf_parser import parse_colored_3mf
+    from kiln.threemf_parser import (
+        _SLICER_SETTINGS_PATH,
+        _find_model_xml,
+        parse_colored_3mf,
+    )
 
+    if not single_object:
+        return None
+    try:
+        with zipfile.ZipFile(str(path)) as zf:
+            raw = zf.read(_find_model_xml(zf))
+            sidecar = b""
+            for member in zf.namelist():
+                if member.lower() == _SLICER_SETTINGS_PATH.lower():
+                    sidecar = zf.read(member)
+                    break
+    except (ValueError, OSError, KeyError, zipfile.BadZipFile):
+        return None
+    if (
+        b"colorgroup" not in raw
+        and b"basematerials" not in raw
+        and b'key="color"' not in sidecar
+    ):
+        return None
     try:
         colored = parse_colored_3mf(str(path))
     except (ValueError, OSError, zipfile.BadZipFile):
@@ -431,7 +461,14 @@ def mesh_to_viewer_payload(
         path.suffix.lower() == ".3mf"
         and getattr(mesh.visual, "kind", None) != "vertex"
     ):
-        painted = _painted_3mf_mesh(path, mesh)
+        painted = _painted_3mf_mesh(
+            path,
+            mesh,
+            single_object=(
+                not isinstance(loaded, trimesh.Scene)
+                or len(loaded.geometry) == 1
+            ),
+        )
         if painted is not None:
             mesh = painted
             orig_tris = int(len(mesh.faces))
