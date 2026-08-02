@@ -14,6 +14,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   most need to see before you print it, and the bed check comes with it: too big
   for your machine and the panel says so.
 
+### Fixed
+
+- **A 3D panel that never gets your model now says so** — it used to sit
+  empty indefinitely with nothing to read. It now tells you the 3D view
+  didn't arrive and points you at the preview image in the conversation,
+  which shows what was made. A panel still working on your model is
+  unaffected.
+
 ## [1.3.2] - 2026-08-01
 
 ### Added
