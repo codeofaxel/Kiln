@@ -3,6 +3,17 @@
 All notable changes to Kiln are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Changed
+
+- **3D stage for any object Kiln makes or changes, not just what it designs.** The
+  3D panel used to open for the models Kiln draws from scratch. Now it opens for
+  the rest of your work — a CAD file you brought in, a mesh Kiln repaired, a part
+  it scaled, hollowed, split, or merged. The model you didn't draw is the one you
+  most need to see before you print it, and the bed check comes with it: too big
+  for your machine and the panel says so.
+
 ## [1.3.2] - 2026-08-01
 
 ### Added
