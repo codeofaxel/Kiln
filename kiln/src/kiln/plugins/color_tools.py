@@ -103,11 +103,17 @@ class _Triangle:
 
 @dataclass
 class _ColorZone:
-    """Accumulates triangles assigned to one color zone."""
+    """Accumulates triangles assigned to one color zone.
+
+    ``watertight`` is judged only when capping ran (the z_height method):
+    ``True`` means the zone is a closed, consistently wound solid;
+    ``None`` means the question was never asked (per-facet methods).
+    """
 
     index: int
     color: str
     triangles: list[_Triangle] = field(default_factory=list)
+    watertight: bool | None = None
 
     @property
     def face_count(self) -> int:
@@ -357,8 +363,10 @@ def _split_triangle_at_plane(tri: _Triangle, z: float) -> list[_Triangle]:
     attribute preserved), or ``[tri]`` untouched when it does not truly
     cross the plane.  Both halves are triangulated from one shared pair of
     intersection points, so the cut edge is watertight by construction —
-    and adjacent triangles compute identical cut points from their shared
-    edge's identical endpoints.
+    and adjacent triangles derive the bit-identical cut point from their
+    shared edge: the interpolation always runs from the lexicographically
+    smaller endpoint, because the two faces traverse the edge in opposite
+    directions and ``a + t*(b - a)`` rounds differently from each end.
     """
     verts = (tri.v0, tri.v1, tri.v2)
     sides = tuple(
@@ -377,8 +385,13 @@ def _split_triangle_at_plane(tri: _Triangle, z: float) -> list[_Triangle]:
         if sa >= 0.0:
             above.append(a)
         if (sa < 0.0 < sb) or (sb < 0.0 < sa):
-            t = (z - a[2]) / (b[2] - a[2])
-            cut = (a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]), z)
+            lo, hi = (a, b) if a <= b else (b, a)
+            t = (z - lo[2]) / (hi[2] - lo[2])
+            cut = (
+                lo[0] + t * (hi[0] - lo[0]),
+                lo[1] + t * (hi[1] - lo[1]),
+                z,
+            )
             below.append(cut)
             above.append(cut)
 
@@ -412,28 +425,465 @@ def _split_triangles_at_planes(
 
 def _band_by_z_height(
     triangles: list[_Triangle], num_colors: int,
-) -> tuple[list[_Triangle], list[int], float]:
+) -> tuple[list[_Triangle], list[int], float, list[float]]:
     """The z_height method, whole: split at the band planes, then assign.
 
     The ONE door both color tools route the method through, so the band
     edges, the cutting, and the assignment can never disagree.  Returns
-    ``(triangles, assignments, z_range)`` — the triangles are the
-    plane-split set (counts grow at the boundaries), every one of them
-    wholly inside its band, and ``z_range`` is the vertex-true height the
-    bands divide (what the band-height warning judges).
+    ``(triangles, assignments, z_range, cap_planes)`` — the triangles are
+    the plane-split set (counts grow at the boundaries), every one of
+    them wholly inside its band, ``z_range`` is the vertex-true height
+    the bands divide (what the band-height warning judges), and
+    ``cap_planes`` is the exact list of heights the faces were cut at
+    (empty when nothing was cut) so the zones' cut rings can be capped
+    after bucketing at the same heights they were opened at.
     """
     if not triangles:
-        return [], [], 0.0
+        return [], [], 0.0, []
     z_min, z_max = _z_extent(triangles)
     z_range = z_max - z_min
+    planes: list[float] = []
     if num_colors >= 2 and z_range >= 1e-9:
-        triangles = _split_triangles_at_planes(
-            triangles, _band_planes(z_min, z_max, num_colors),
-        )
+        planes = _band_planes(z_min, z_max, num_colors)
+        triangles = _split_triangles_at_planes(triangles, planes)
     assignments = _assign_z_height(
         triangles, num_colors, z_extent=(z_min, z_max),
     )
-    return triangles, assignments, z_range
+    return triangles, assignments, z_range, planes
+
+
+# ---------------------------------------------------------------------------
+# Capping the cut loops — a zone of a closed model is itself a closed solid
+# ---------------------------------------------------------------------------
+#
+# Splitting at the band planes leaves every zone an OPEN shell: its cut
+# rings are boundary loops lying exactly at the plane heights, and
+# slicers refuse open shells (``manifold = no``).  Each zone is closed by
+# chaining its boundary edges at each cut plane into loops and
+# triangulating the enclosed region.  Holes stay holes — a hollow part's
+# ring cap is an annulus, never a filled disk.  Orientation comes from
+# the mesh, not a guess: the shell's winding makes each boundary loop's
+# REVERSAL the cap's traversal, so every directed edge of a capped zone
+# is used exactly once each way.  Loops that do not close (an input that
+# was open to begin with, or a non-manifold seam) are left alone —
+# capping never invents geometry the input did not imply.
+#
+# Loop vertices are compared exactly: the plane split derives identical
+# cut points on both sides of every cut, and the two zones meeting at a
+# plane share the same loop coordinates, so the caps facing each other
+# across a plane cover geometrically identical regions.
+
+
+def _boundary_edges(
+    triangles: list[_Triangle],
+) -> list[tuple[tuple[float, float, float], tuple[float, float, float]]]:
+    """Directed edges used by exactly one face.
+
+    An interior edge of a consistently wound surface appears once as
+    ``(a, b)`` and once as ``(b, a)``; a boundary edge has no reverse.
+    Edges with any other multiplicity are non-manifold seams — excluded,
+    so the loops through them fail to close and stay uncapped.
+    """
+    counts: dict[tuple, int] = {}
+    for t in triangles:
+        for a, b in ((t.v0, t.v1), (t.v1, t.v2), (t.v2, t.v0)):
+            if a != b:
+                counts[(a, b)] = counts.get((a, b), 0) + 1
+    return [
+        (a, b)
+        for (a, b), n in counts.items()
+        if n == 1 and (b, a) not in counts
+    ]
+
+
+def _chain_closed_loops(
+    edges: list[tuple[tuple[float, float, float], tuple[float, float, float]]],
+) -> list[list[tuple[float, float, float]]]:
+    """Chain directed edges into closed vertex loops.
+
+    Chains that dead-end are dropped — only a ring the geometry actually
+    closed is a cap candidate.  Vertices are matched by exact equality:
+    the plane split guarantees shared cut points bit-for-bit, so fuzzy
+    merging is neither needed nor wanted.
+    """
+    successors: dict[tuple, list[tuple]] = {}
+    for a, b in edges:
+        successors.setdefault(a, []).append(b)
+
+    loops: list[list[tuple[float, float, float]]] = []
+    while successors:
+        start = next(iter(successors))
+        loop: list[tuple[float, float, float]] | None = [start]
+        cur = start
+        while True:
+            nxts = successors.get(cur)
+            if not nxts:
+                loop = None  # open chain — consumed edges stay dropped
+                break
+            nxt = nxts.pop()
+            if not nxts:
+                del successors[cur]
+            if nxt == start:
+                break
+            loop.append(nxt)
+            cur = nxt
+        if loop is not None and len(loop) >= 3:
+            loops.append(loop)
+    return loops
+
+
+def _shoelace(loop: list[tuple[float, float, float]]) -> float:
+    """Signed area of the loop projected onto the XY plane."""
+    s = 0.0
+    n = len(loop)
+    for i in range(n):
+        x0, y0 = loop[i][0], loop[i][1]
+        x1, y1 = loop[(i + 1) % n][0], loop[(i + 1) % n][1]
+        s += x0 * y1 - x1 * y0
+    return 0.5 * s
+
+
+def _point_in_loop(x: float, y: float, loop: list) -> bool:
+    """Even-odd ray-crossing test in XY; loop entries index [0]=x, [1]=y."""
+    inside = False
+    n = len(loop)
+    for i in range(n):
+        x0, y0 = loop[i][0], loop[i][1]
+        x1, y1 = loop[(i + 1) % n][0], loop[(i + 1) % n][1]
+        if (y0 > y) != (y1 > y) and (
+            x0 + (y - y0) * (x1 - x0) / (y1 - y0) > x
+        ):
+            inside = not inside
+    return inside
+
+
+def _nest_loops(
+    loops: list[list[tuple[float, float, float]]],
+) -> list[tuple[list, list[list]]]:
+    """Group coplanar loops into ``(outer, holes)`` regions by containment.
+
+    Even containment depth is a region outer, odd depth is a hole in its
+    enclosing region — so an annulus caps as a ring, and a ring inside a
+    ring's hole becomes its own region (any nesting depth).
+    """
+    depths: list[int] = []
+    for i, lp in enumerate(loops):
+        px, py = lp[0][0], lp[0][1]
+        depths.append(
+            sum(
+                1
+                for j, other in enumerate(loops)
+                if j != i and _point_in_loop(px, py, other)
+            )
+        )
+    regions: list[tuple[list, list[list]]] = []
+    for i, lp in enumerate(loops):
+        if depths[i] % 2 != 0:
+            continue
+        holes = [
+            loops[j]
+            for j in range(len(loops))
+            if depths[j] == depths[i] + 1
+            and _point_in_loop(loops[j][0][0], loops[j][0][1], lp)
+        ]
+        regions.append((lp, holes))
+    return regions
+
+
+def _tri_sides(
+    ax: float, ay: float, bx: float, by: float,
+    cx: float, cy: float, px: float, py: float,
+) -> tuple[float, float, float]:
+    """Signed edge tests of (px, py) against triangle abc."""
+    d1 = (bx - ax) * (py - ay) - (by - ay) * (px - ax)
+    d2 = (cx - bx) * (py - by) - (cy - by) * (px - bx)
+    d3 = (ax - cx) * (py - cy) - (ay - cy) * (px - cx)
+    return d1, d2, d3
+
+
+def _strictly_inside_tri(
+    ax: float, ay: float, bx: float, by: float,
+    cx: float, cy: float, px: float, py: float,
+) -> bool:
+    """True when (px, py) is strictly inside triangle abc (either winding)."""
+    d1, d2, d3 = _tri_sides(ax, ay, bx, by, cx, cy, px, py)
+    return (d1 > 0 and d2 > 0 and d3 > 0) or (d1 < 0 and d2 < 0 and d3 < 0)
+
+
+def _inside_tri_closed(
+    ax: float, ay: float, bx: float, by: float,
+    cx: float, cy: float, px: float, py: float,
+) -> bool:
+    """True when (px, py) is inside or on triangle abc (either winding)."""
+    d1, d2, d3 = _tri_sides(ax, ay, bx, by, cx, cy, px, py)
+    return (d1 >= 0 and d2 >= 0 and d3 >= 0) or (d1 <= 0 and d2 <= 0 and d3 <= 0)
+
+
+def _merge_hole(outer: list, hole: list) -> list | None:
+    """Bridge one hole into the outer, returning one weakly simple polygon.
+
+    Working frame: ``outer`` counter-clockwise, ``hole`` clockwise,
+    entries ``(wx, wy, original_vertex)``.  The bridge runs from the
+    hole's rightmost vertex M to a mutually visible outer vertex found by
+    casting a +x ray from M; the bridge edges appear once in each
+    direction in the merged polygon, so they cancel in the final surface.
+    Returns ``None`` when no visible vertex exists (degenerate input).
+    """
+    mi = max(range(len(hole)), key=lambda i: hole[i][0])
+    mx, my = hole[mi][0], hole[mi][1]
+
+    n = len(outer)
+    best: tuple[float, int] | None = None
+    for i in range(n):
+        x0, y0 = outer[i][0], outer[i][1]
+        x1, y1 = outer[(i + 1) % n][0], outer[(i + 1) % n][1]
+        if (y0 > my) != (y1 > my):
+            xi = x0 + (my - y0) * (x1 - x0) / (y1 - y0)
+            if xi >= mx and (best is None or xi < best[0]):
+                best = (xi, i)
+    if best is None:
+        return None
+    xi, i = best
+    x0, y0 = outer[i][0], outer[i][1]
+    x1, y1 = outer[(i + 1) % n][0], outer[(i + 1) % n][1]
+
+    if xi == x0 and my == y0:
+        vis = i
+    elif xi == x1 and my == y1:
+        vis = (i + 1) % n
+    else:
+        # Candidate: the crossed edge's endpoint with the larger x.  A
+        # reflex outer vertex on or inside triangle (M, I, candidate)
+        # would block the bridge — among those, the one closest in angle
+        # to the ray (then closest to M) is guaranteed mutually visible.
+        vis = i if x0 > x1 else (i + 1) % n
+        px, py = outer[vis][0], outer[vis][1]
+        best_key: tuple[float, float] | None = None
+        for j in range(n):
+            if j == vis:
+                continue
+            jx, jy = outer[j][0], outer[j][1]
+            if (jx, jy) == (px, py):
+                continue  # a bridge duplicate of the candidate itself
+            prev = outer[(j - 1) % n]
+            nxt = outer[(j + 1) % n]
+            reflex = (
+                (jx - prev[0]) * (nxt[1] - jy) - (jy - prev[1]) * (nxt[0] - jx)
+            ) < 0
+            if not reflex:
+                continue
+            if not _inside_tri_closed(mx, my, xi, my, px, py, jx, jy):
+                continue
+            dx, dy = jx - mx, jy - my
+            dist = math.hypot(dx, dy)
+            if dist <= 0.0:
+                continue
+            key = (abs(dy) / dist, dist)  # angle off the +x ray, then range
+            if best_key is None or key < best_key:
+                best_key = key
+                vis = j
+                px, py = jx, jy
+
+    if (outer[vis][0], outer[vis][1]) == (mx, my):
+        return None
+
+    rotated = hole[mi:] + hole[:mi]
+    return (
+        outer[: vis + 1]
+        + rotated
+        + [rotated[0], outer[vis]]
+        + outer[vis + 1 :]
+    )
+
+
+def _ear_clip(poly: list) -> list[tuple] | None:
+    """Triangulate a weakly simple CCW polygon by ear clipping.
+
+    Entries are ``(wx, wy, original_vertex)``; emitted triangles are
+    ``(v_a, v_b, v_c)`` original vertices in working-frame CCW order.
+    Only strictly convex empty ears are clipped, so collinear loop
+    vertices (mid-edge cut points) are absorbed into their neighbours'
+    ears and every polygon edge is consumed exactly once — the edge
+    balance the capped zone's manifoldness rests on.  Returns ``None``
+    when no ear exists (self-intersecting or inconsistently wound
+    input): a missing cap degrades to an open zone, a wrong cap would
+    corrupt the solid.
+    """
+    verts = list(poly)
+    tris: list[tuple] = []
+    min_cross = 2.0 * _DEGENERATE_AREA_MM2  # cross == twice the area
+    search_from = 0
+    while len(verts) > 3:
+        n = len(verts)
+        clipped = False
+        for k in range(n):
+            ib = (search_from + k) % n
+            ia = (ib - 1) % n
+            ic = (ib + 1) % n
+            ax, ay = verts[ia][0], verts[ia][1]
+            bx, by = verts[ib][0], verts[ib][1]
+            cx, cy = verts[ic][0], verts[ic][1]
+            cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+            if cross <= min_cross:
+                continue
+            blocked = False
+            for j in range(n):
+                if j in (ia, ib, ic):
+                    continue
+                px, py = verts[j][0], verts[j][1]
+                if (px, py) in ((ax, ay), (bx, by), (cx, cy)):
+                    continue  # a bridge duplicate sitting ON a corner
+                if _strictly_inside_tri(ax, ay, bx, by, cx, cy, px, py):
+                    blocked = True
+                    break
+                # A vertex exactly ON the clip's new chord (a collinear
+                # mid-edge cut point) would be stranded behind it as a
+                # T-junction that breaks the zone's edge balance — steer
+                # the clip around it instead.
+                if (
+                    (cx - ax) * (py - ay) - (cy - ay) * (px - ax) == 0.0
+                    and min(ax, cx) <= px <= max(ax, cx)
+                    and min(ay, cy) <= py <= max(ay, cy)
+                ):
+                    blocked = True
+                    break
+            if blocked:
+                continue
+            tris.append((verts[ia][2], verts[ib][2], verts[ic][2]))
+            del verts[ib]
+            search_from = ia
+            clipped = True
+            break
+        if not clipped:
+            _logger.debug(
+                "cap triangulation found no ear (%d vertices left) — "
+                "leaving this region uncapped",
+                len(verts),
+            )
+            return None
+    a, b, c = verts
+    cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    if cross <= min_cross:
+        # A degenerate closing triangle means some boundary edge would
+        # go unpaired — an open zone is honest, a cracked cap is not.
+        _logger.debug(
+            "cap triangulation closed on a degenerate triangle — "
+            "leaving this region uncapped",
+        )
+        return None
+    tris.append((a[2], b[2], c[2]))
+    return tris
+
+
+def _cap_ring_loops(
+    loops: list[list[tuple[float, float, float]]],
+) -> list[_Triangle]:
+    """Triangulate the coplanar region bounded by ``loops`` into caps.
+
+    The loops arrive in the shell's boundary direction; the cap consumes
+    them REVERSED, which lands the standard orientation for free: region
+    outers counter-clockwise and holes clockwise when the cap faces +z
+    (zone below the plane), the mirror when it faces -z.  The cap normal
+    follows the winding by the right-hand rule.
+    """
+    reversed_loops = [lp[::-1] for lp in loops]
+    regions = _nest_loops(reversed_loops)
+    caps: list[_Triangle] = []
+    for outer, holes in regions:
+        area = _shoelace(outer)
+        if abs(area) <= _DEGENERATE_AREA_MM2:
+            _logger.debug("cap outer loop has no area — skipped")
+            continue
+        direction = 1.0 if area > 0.0 else -1.0
+        # Working frame mirrors y when the cap faces -z, so the
+        # triangulation always sees a CCW outer; emitting the mirrored
+        # order flips the real winding back to match the -z normal.
+        poly = [(v[0], direction * v[1], v) for v in outer]
+        consistent = True
+        pending_holes: list[list] = []
+        for h in holes:
+            h_area = _shoelace(h) * direction
+            if abs(h_area) <= _DEGENERATE_AREA_MM2:
+                continue  # a slit, not a hole
+            if h_area > 0.0:
+                _logger.debug(
+                    "cap hole wound like its outer — inconsistent shell, "
+                    "region left uncapped",
+                )
+                consistent = False
+                break
+            pending_holes.append([(v[0], direction * v[1], v) for v in h])
+        if not consistent:
+            continue
+        merged: list | None = poly
+        for h in sorted(
+            pending_holes, key=lambda hp: -max(p[0] for p in hp)
+        ):
+            merged = _merge_hole(merged, h)
+            if merged is None:
+                _logger.debug(
+                    "cap hole bridge failed — region left uncapped",
+                )
+                break
+        if merged is None:
+            continue
+        emitted = _ear_clip(merged)
+        if emitted is None:
+            continue
+        normal = (0.0, 0.0, direction)
+        caps.extend(
+            _Triangle(normal=normal, v0=a, v1=b, v2=c)
+            for a, b, c in emitted
+        )
+    return caps
+
+
+def _cap_zone_at_planes(
+    triangles: list[_Triangle], planes: list[float],
+) -> list[_Triangle]:
+    """Cap triangles closing a zone's cut rings at the band planes.
+
+    Only boundary edges whose endpoints both lie within ``_PLANE_EPS``
+    of a cut plane are candidates; a boundary anywhere else belongs to
+    the input's own geometry and is honestly left open.
+    """
+    if not triangles or not planes:
+        return []
+    boundary = _boundary_edges(triangles)
+    if not boundary:
+        return []
+    caps: list[_Triangle] = []
+    for z in planes:
+        ring = [
+            e
+            for e in boundary
+            if abs(e[0][2] - z) <= _PLANE_EPS
+            and abs(e[1][2] - z) <= _PLANE_EPS
+        ]
+        if not ring:
+            continue
+        loops = _chain_closed_loops(ring)
+        if not loops:
+            continue
+        caps.extend(_cap_ring_loops(loops))
+    return [c for c in caps if c.area > _DEGENERATE_AREA_MM2]
+
+
+def _is_edge_manifold(triangles: list[_Triangle]) -> bool:
+    """True when every directed edge is used exactly once each way —
+    a closed, consistently wound surface a slicer accepts."""
+    if not triangles:
+        return False
+    counts: dict[tuple, int] = {}
+    for t in triangles:
+        for a, b in ((t.v0, t.v1), (t.v1, t.v2), (t.v2, t.v0)):
+            if a == b:
+                return False
+            counts[(a, b)] = counts.get((a, b), 0) + 1
+    return all(
+        n == 1 and counts.get((b, a), 0) == 1
+        for (a, b), n in counts.items()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -501,8 +951,19 @@ def _split_and_write(
     palette: list[str],
     output_dir: str,
     base_name: str,
+    *,
+    cap_planes: list[float] | None = None,
 ) -> list[_ColorZone]:
-    """Bucket triangles by assignment, write per-zone STLs."""
+    """Bucket triangles by assignment, cap cut rings, write per-zone STLs.
+
+    ``cap_planes`` — the exact heights the z_height method cut at, from
+    :func:`_band_by_z_height`.  Each zone's cut rings at those planes
+    are closed with flat caps so a zone of a closed input is itself a
+    closed solid, and the zone's ``watertight`` verdict is recorded.
+    ``None`` (the normal/random methods) writes the buckets as-is:
+    those methods produce non-planar zone boundaries no flat cap could
+    close.
+    """
     zones: list[_ColorZone] = []
     for i in range(num_colors):
         color = palette[i] if i < len(palette) else palette[i % len(palette)]
@@ -512,6 +973,11 @@ def _split_and_write(
         zones[zone_idx].triangles.append(tri)
 
     for zone in zones:
+        if cap_planes is not None and zone.triangles:
+            zone.triangles.extend(
+                _cap_zone_at_planes(zone.triangles, cap_planes)
+            )
+            zone.watertight = _is_edge_manifold(zone.triangles)
         stl_path = os.path.join(output_dir, f"{base_name}_zone{zone.index}.stl")
         _write_binary_stl(zone.triangles, stl_path)
 
@@ -645,14 +1111,17 @@ def _build_result(
         zip(active_zones, zone_weights, strict=True), start=1
     ):
         stl_path = os.path.join(output_dir, f"{base_name}_zone{zone.index}.stl")
-        zone_details.append({
+        detail: dict[str, Any] = {
             "zone": zone.index,
             "color": zone.color,
             "face_count": zone.face_count,
             "stl_path": stl_path,
             "ams_slot": slot_num,
             "estimated_weight_g": weight,
-        })
+        }
+        if zone.watertight is not None:
+            detail["watertight"] = zone.watertight
+        zone_details.append(detail)
 
     result: dict[str, Any] = {
         "success": True,
@@ -1037,7 +1506,9 @@ class _ColorToolsPlugin:
             Divides the model's height into N equal bands.  Faces that
             cross a band edge are cut exactly at it, so the line where two
             colors meet is the straight horizontal line the bands name —
-            never a sawtooth of whole faces, on any tessellation.
+            never a sawtooth of whole faces, on any tessellation.  The
+            cut faces are capped at the band planes, so each zone of a
+            closed model is itself a closed solid ready to slice.
             Produces separate STL files per zone and (if available) a
             multicolor 3MF ready for AMS/MMU printers.
 
@@ -1048,8 +1519,9 @@ class _ColorToolsPlugin:
             :param color_palette: List of hex colors (e.g.
                 ``["#FF0000", "#00FF00"]``).  Defaults to white/red/black/grey.
             :returns: Dict with zone STL paths, hex colors, face counts
-                (boundary faces are cut, so counts can exceed the input's),
-                AMS slot mapping, weight estimates, and optional 3MF path.
+                (boundary faces are cut and capped, so counts can exceed
+                the input's), per-zone ``watertight`` verdicts, AMS slot
+                mapping, weight estimates, and optional 3MF path.
             """
             path = Path(input_path)
             if not path.exists():
@@ -1074,11 +1546,12 @@ class _ColorToolsPlugin:
             output_dir = tempfile.mkdtemp(prefix="kiln_color_")
             base_name = path.stem
 
-            triangles, assignments, z_range = _band_by_z_height(
+            triangles, assignments, z_range, cap_planes = _band_by_z_height(
                 triangles, num_colors,
             )
             zones = _split_and_write(
-                triangles, assignments, num_colors, palette, output_dir, base_name,
+                triangles, assignments, num_colors, palette, output_dir,
+                base_name, cap_planes=cap_planes,
             )
             threemf_path, compose_err = _try_compose_3mf(zones, output_dir, base_name)
 
@@ -1112,8 +1585,10 @@ class _ColorToolsPlugin:
 
             Supports multiple assignment methods:
               - ``"z_height"``: horizontal bands by Z-height (default) —
-                faces crossing a band edge are cut exactly at it, so the
-                color boundary is a straight line on any tessellation
+                faces crossing a band edge are cut exactly at it and the
+                cuts are capped, so the color boundary is a straight line
+                on any tessellation and each zone of a closed model is
+                itself a closed solid ready to slice
               - ``"normal"``: group by face normal direction
                 (top / bottom / sides)
               - ``"random"``: random face assignment for artistic prints
@@ -1159,8 +1634,9 @@ class _ColorToolsPlugin:
             base_name = path.stem
 
             z_range: float | None = None
+            cap_planes: list[float] | None = None
             if method == "z_height":
-                triangles, assignments, z_range = _band_by_z_height(
+                triangles, assignments, z_range, cap_planes = _band_by_z_height(
                     triangles, num_colors,
                 )
             elif method == "normal":
@@ -1171,7 +1647,8 @@ class _ColorToolsPlugin:
                 assignments = _assign_random(triangles, num_colors)
 
             zones = _split_and_write(
-                triangles, assignments, num_colors, palette, output_dir, base_name,
+                triangles, assignments, num_colors, palette, output_dir,
+                base_name, cap_planes=cap_planes,
             )
             threemf_path, compose_err = _try_compose_3mf(zones, output_dir, base_name)
 
