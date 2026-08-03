@@ -429,3 +429,58 @@ class TestAdvisoryWiredIntoEveryDoor:
         assert {
             "slice_model", "reslice_with_overrides", "slice_and_print",
         } <= callers
+
+
+class TestPartialFlattening:
+    """PrusaSlicer clamps gracefully when a painting names more filaments
+    than the config has (measured: 6 paint states on 2 extruders slices
+    exit-0, excess states folded onto the available tools) — so partial
+    loss is as silent as total loss.  Warn whenever colors are LOST."""
+
+    def _six_state_3mf(self, tmp_path):
+        colors = ["#F72323", "#FF9A1F", "#FFE81F", "#23C34A", "#2366F7", "#8A2BE2"]
+        tris = [
+            ((0, 0, 0), (10, 0, i), (5, 10, i + 1)) for i in range(6)
+        ]
+        return _painted_3mf_from(tmp_path, tris, colors)
+
+    def test_six_colors_two_slots_warns_partial(self, tmp_path):
+        path = self._six_state_3mf(tmp_path)
+        ini = tmp_path / "dual.ini"
+        ini.write_text("nozzle_diameter = 0.4,0.4\n")
+        g = tmp_path / "out.gcode"
+        g.write_text("T0\nG1 X1 E1\nT1\nG1 X2 E1\n; filament used [mm] = 10, 5\n")
+        block, warning = _multicolor_flatten_advisory(path, str(ini), str(g))
+        assert block is not None
+        assert block["colors_in_file"] == 6
+        assert "6 colors were folded together" in warning
+        assert "only 2 filaments" in warning
+
+    def test_enough_slots_stays_quiet(self, tmp_path):
+        path = self._six_state_3mf(tmp_path)
+        ini = tmp_path / "six.ini"
+        ini.write_text("nozzle_diameter = 0.4,0.4,0.4,0.4,0.4,0.4\n")
+        block, warning = _multicolor_flatten_advisory(path, str(ini), None)
+        assert block is None and warning is None
+
+    def test_two_color_two_slot_unchanged(self, tmp_path):
+        """The pre-existing suppression case must not regress: two colors,
+        two slots — nothing lost, nothing said."""
+        path = _painted_3mf_from(
+            tmp_path,
+            [((0, 0, 0), (10, 0, 0), (5, 10, 0)),
+             ((0, 0, 1), (10, 0, 1), (5, 10, 1))],
+            ["#F72323", "#2366F7"],
+        )
+        ini = tmp_path / "dual.ini"
+        ini.write_text("nozzle_diameter = 0.4,0.4\n")
+        block, warning = _multicolor_flatten_advisory(path, str(ini), None)
+        assert block is None and warning is None
+
+
+def _painted_3mf_from(tmp_path, tris, colors):
+    result = compose_painted_3mf(
+        tris, colors, output_path=str(tmp_path / "gauntlet_painted.3mf"),
+    )
+    assert result["success"], result
+    return result["output_path"]
