@@ -230,10 +230,18 @@ def _rotation_for_normal(normal: list[float]) -> str:
         return "rotate([90, 0, 0])\n        "  # FRONT
     if n[1] > 0.9:
         return "rotate([-90, 0, 0])\n        "  # BACK
+    # LEFT/RIGHT were swapped until 2026-08-03.  A rotation of +90 about
+    # Y sends the prism's local +Z to world +X, so it belongs to the
+    # face whose normal IS +X (right); -90 sends it to -X (left).  The
+    # old pairing pointed the prism INTO the body on both side faces,
+    # which swapped the roles of the cut depth and the 1.0mm outward
+    # overshoot — a side deboss then carved exactly the overshoot, 1.0mm,
+    # whatever depth was requested.  Front/back above are unaffected and
+    # were always correct.
     if n[0] < -0.9:
-        return "rotate([0, 90, 0])\n        "  # LEFT
+        return "rotate([0, -90, 0])\n        "  # LEFT  (+Z -> -X)
     if n[0] > 0.9:
-        return "rotate([0, -90, 0])\n        "  # RIGHT
+        return "rotate([0, 90, 0])\n        "  # RIGHT (+Z -> +X)
 
     # General axis-angle: rotate [0,0,1] → n
     z_axis = [0.0, 0.0, 1.0]
@@ -882,10 +890,20 @@ def generate_emboss_scad(
     # and producing a silent no-op subtraction.
     #
     # Fix: when the face normal points downward, the prism (post-rotate) lives
-    # at Z=[-h, 0] relative to the face center.  Shift it by +(depth_mm + 0.1)
-    # so the prism's far end rests at cz and its near end extends INTO the
-    # material at cz + depth_mm.  This mirrors the top-face behavior where
-    # we shift -depth_mm so the prism penetrates inward.
+    # at Z=[-h, 0] relative to the face center.  Shift it by +depth_mm so the
+    # prism's near end penetrates the material by exactly depth_mm and its far
+    # end stays 0.1mm proud of the surface.  This mirrors the top-face
+    # behavior, which shifts by -depth_mm for the same result.
+    #
+    # 2026-08-03: this shift used to be the full extrude_height
+    # (depth_mm + 0.1), which pushed the whole 0.1mm overlap INSIDE the
+    # material — measured 1.3mm of cut for 1.2mm requested.  Two things
+    # went wrong at once: the cut was 0.1mm too deep, and the overlap
+    # whose entire job is to stop the prism ending exactly ON the surface
+    # ended up exactly on it, so the bottom face carried zero tolerance
+    # against face-centroid drift while the top face carried 0.1mm.  The
+    # comment above already described the correct behaviour; only the
+    # arithmetic disagreed.
     extrude_height = depth_mm + 0.1
     # A cardinal face is "flat" only when its normal is ±world-Z (top /
     # bottom).  There, and ONLY there, is world-Z the face normal, so the
@@ -915,9 +933,11 @@ def generate_emboss_scad(
                 z_offset = 0.0
             elif normal[2] < -0.9:
                 # SVG/text deboss on a bottom face: prism was flipped by
-                # rotate([180,0,0]).  Shift up by full extrude_height so it
-                # penetrates upward into the body sitting above the face.
-                z_offset = extrude_height
+                # rotate([180,0,0]), so it spans [-extrude_height, 0]
+                # relative to the face.  Shift up by depth_mm — NOT by
+                # extrude_height — so it penetrates depth_mm into the body
+                # above and leaves the 0.1mm overlap proud of the surface.
+                z_offset = depth_mm
             else:
                 # SVG/text deboss on a top face: prism already points toward
                 # the body after (no) rotation; shift by -depth_mm so far
