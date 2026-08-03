@@ -640,16 +640,27 @@ def _multicolor_flatten_advisory(
         if evidence is None:
             return None, None
 
+        # How many filaments the FILE asks for vs how many the slice could
+        # express.  PrusaSlicer clamps gracefully (measured: 6 paint states
+        # on a 2-extruder config slices exit-0 with the excess states folded
+        # onto the available tools), so partial flattening is silent too —
+        # 6 colors quietly become 2.  Warn whenever colors are LOST, not
+        # only when everything collapses to one.
+        colors_needed = max(
+            len(evidence.get("extruders") or ()),
+            int(evidence.get("paint_states") or 0),
+            int(evidence.get("palette_colors") or 0),
+        )
         slots = _profile_filament_slots(profile_path)
         counted = _count_gcode_tools(gcode_path)
-        if slots >= 2 or (counted is not None and counted[1] >= 2):
-            # The config (or the measured output) expresses multiple
-            # filaments — the colors survived; nothing to warn about.
+        expressed = max(slots, counted[1] if counted is not None else 0)
+        if expressed >= colors_needed:
             return None, None
 
         block: dict[str, Any] = {
             "multicolor_input": True,
             "colors_flattened": True,
+            "colors_in_file": colors_needed,
             "profile_filament_slots": slots,
             **evidence,
         }
@@ -663,7 +674,7 @@ def _multicolor_flatten_advisory(
                 "filaments"
             )
         elif "paint_attribute" in evidence:
-            carries = "painted-on colors"
+            carries = f"painted-on colors in {colors_needed} filaments"
         else:
             carries = f"a {evidence['palette_colors']}-color palette"
         measured = (
@@ -671,15 +682,20 @@ def _multicolor_flatten_advisory(
             if counted is not None
             else ""
         )
+        if expressed <= 1:
+            lost = f"the whole object will print in ONE filament{measured}"
+        else:
+            lost = (
+                f"only {expressed} filaments were available, so its "
+                f"{colors_needed} colors were folded together{measured}"
+            )
         warning = (
-            f"Multicolor flattened: this 3MF carries {carries}, but it was "
-            "sliced with a single-filament configuration, so the whole "
-            f"object will print in ONE filament{measured}. To keep the "
-            "colors, slice this same 3MF in a multi-material slicer "
-            "(BambuStudio or OrcaSlicer with an AMS/multi-filament printer "
-            "profile) — the color-to-filament assignments are already in "
-            "the file — or rebuild the plate with the multi_material_print "
-            "tool to assign a material per part."
+            f"Multicolor flattened: this 3MF carries {carries}, but {lost}. "
+            "To keep the colors, slice this same 3MF in a multi-material "
+            "slicer (BambuStudio or OrcaSlicer with an AMS/multi-filament "
+            "printer profile) — the color-to-filament assignments are "
+            "already in the file — or rebuild the plate with the "
+            "multi_material_print tool to assign a material per part."
         )
         return block, warning
     except Exception:  # noqa: BLE001 — advisory only, never break slicing
