@@ -354,16 +354,21 @@ class TestPaintedFileColorsSurvive:
         assert payload["downgraded"] is False
         assert "vertex_colors" not in payload
 
-    def test_a_multi_object_painted_file_is_refused_not_misordered(self, tmp_path):
-        """The soup follows the file's object order, the flattened mesh
-        follows the scene graph's — with two objects nothing proves they
-        agree, and colors on the wrong faces are worse than none.  Each
-        object here is internally two-colored, so the per-part bake (which
-        IS order-safe, keyed by name) rightly refuses and the soup is the
-        only candidate — it must decline the multi-object case."""
+    def _two_object_painted(
+        self, tmp_path, *, name_b="b", item2_transform=None,
+    ):
+        """Two internally two-colored objects — the per-part bake (one
+        color per part) rightly refuses both, so the painted soup is the
+        only path to color.  Object ``a`` sits at x ∈ [0, 10] with its
+        z=0 / y=0 faces RED and the rest BLUE; object ``b`` sits at
+        x ∈ [20, 30] with the assignment inverted — so a soup applied in
+        the wrong object order is caught by color, not luck."""
         import zipfile as z
 
-        model = """<?xml version="1.0" encoding="UTF-8"?>
+        item2 = f'<item objectid="2" transform="{item2_transform}"/>' if (
+            item2_transform
+        ) else '<item objectid="2"/>'
+        model = f"""<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
        xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">
  <resources>
@@ -374,12 +379,12 @@ class TestPaintedFileColorsSurvive:
     <vertices><vertex x="0" y="0" z="0"/><vertex x="10" y="0" z="0"/><vertex x="0" y="10" z="0"/><vertex x="0" y="0" z="10"/></vertices>
     <triangles><triangle v1="0" v2="1" v3="2" pid="9" p1="0"/><triangle v1="0" v2="1" v3="3" pid="9" p1="0"/><triangle v1="0" v2="2" v3="3" pid="9" p1="1"/><triangle v1="1" v2="2" v3="3" pid="9" p1="1"/></triangles>
   </mesh></object>
-  <object id="2" type="model" name="b"><mesh>
+  <object id="2" type="model" name="{name_b}"><mesh>
     <vertices><vertex x="20" y="0" z="0"/><vertex x="30" y="0" z="0"/><vertex x="20" y="10" z="0"/><vertex x="20" y="0" z="10"/></vertices>
     <triangles><triangle v1="0" v2="1" v3="2" pid="9" p1="1"/><triangle v1="0" v2="1" v3="3" pid="9" p1="1"/><triangle v1="0" v2="2" v3="3" pid="9" p1="0"/><triangle v1="1" v2="2" v3="3" pid="9" p1="0"/></triangles>
   </mesh></object>
  </resources>
- <build><item objectid="1"/><item objectid="2"/></build>
+ <build><item objectid="1"/>{item2}</build>
 </model>"""
         ct = """<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -395,6 +400,138 @@ class TestPaintedFileColorsSurvive:
             zf.writestr("[Content_Types].xml", ct)
             zf.writestr("_rels/.rels", rels)
             zf.writestr("3D/3dmodel.model", model)
-        payload = mesh_to_viewer_payload(p)
+        return p
+
+    def test_a_multi_object_painted_file_colors_each_part_by_name(
+        self, tmp_path,
+    ):
+        """The soup follows the file's object order and the flattened mesh
+        follows the scene graph's — segments matched BY NAME prove the
+        two agree per part, so multi-object painted files now reach the
+        stage in color instead of neutral."""
+        payload = mesh_to_viewer_payload(self._two_object_painted(tmp_path))
+        assert payload["downgraded"] is False
+        assert payload["counts"]["triangles"] == 8
+        assert payload["counts"]["vertices"] == 24  # soup: no shared verts
+        rgba = np.frombuffer(
+            base64.b64decode(payload["vertex_colors"]), dtype=np.uint8
+        ).reshape(-1, 3, 4)
+        pos = _f32(payload["positions"]).reshape(-1, 3, 3)
+        # Back to mesh space: (vx, vy, vz) = (mx, mz, -my).
+        mesh_pos = np.stack(
+            [pos[:, :, 0], -pos[:, :, 2], pos[:, :, 1]], axis=2,
+        )
+        for face_verts, face_rgba in zip(mesh_pos, rgba, strict=True):
+            # Soup faces carry one color on all three vertices.
+            assert (face_rgba == face_rgba[0]).all()
+            a_side = face_verts[:, 0].mean() < 15.0
+            flat = bool(
+                np.allclose(face_verts[:, 2], 0.0, atol=1e-4)
+                or np.allclose(face_verts[:, 1], 0.0, atol=1e-4)
+            )
+            # In a the flat faces are RED; in b the SAME faces are BLUE —
+            # a swapped or misordered soup fails here.
+            expected = self.RED if a_side == flat else self.BLUE
+            assert tuple(face_rgba[0]) == expected
+
+    def test_duplicate_object_names_are_refused_not_guessed(self, tmp_path):
+        """Two objects sharing a name cannot be matched to their Scene
+        geometry by name — the honest answer is the uncolored mesh."""
+        payload = mesh_to_viewer_payload(
+            self._two_object_painted(tmp_path, name_b="a")
+        )
         assert payload["downgraded"] is False
         assert "vertex_colors" not in payload
+
+    def test_a_transformed_multi_object_item_is_refused(self, tmp_path):
+        """The segments sit in file coordinates; a moved build item's soup
+        would land at the wrong place, so it is refused like the
+        single-object case."""
+        payload = mesh_to_viewer_payload(
+            self._two_object_painted(
+                tmp_path,
+                item2_transform="1 0 0 0 1 0 0 0 1 5.000000 0.000000 0.000000",
+            )
+        )
+        assert payload["downgraded"] is False
+        assert "vertex_colors" not in payload
+
+    def test_a_slicer_painted_file_reaches_the_stage_in_color(self, tmp_path):
+        """The MakerWorld shape: per-triangle ``paint_color`` attributes
+        and NO colorgroup, basematerials, or sidecar — the form every
+        BambuStudio/OrcaSlicer-painted model ships in, which used to
+        render gray everywhere.  Painted states display through the
+        parser's deterministic palette."""
+        import zipfile as z
+
+        from kiln.threemf_parser import _PAINT_STATE_PALETTE
+
+        model = """<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+ <resources>
+  <object id="1" type="model" name="painted"><mesh>
+    <vertices><vertex x="0" y="0" z="0"/><vertex x="10" y="0" z="0"/><vertex x="0" y="10" z="0"/><vertex x="0" y="0" z="10"/></vertices>
+    <triangles><triangle v1="0" v2="1" v3="2" paint_color="4"/><triangle v1="0" v2="1" v3="3" paint_color="8"/><triangle v1="0" v2="2" v3="3"/><triangle v1="1" v2="2" v3="3"/></triangles>
+  </mesh></object>
+ </resources>
+ <build><item objectid="1"/></build>
+</model>"""
+        p = tmp_path / "bambu_painted.3mf"
+        with z.ZipFile(p, "w") as zf:
+            zf.writestr("3D/3dmodel.model", model)
+        payload = mesh_to_viewer_payload(p)
+        assert payload["downgraded"] is False
+        assert payload["counts"]["vertices"] == payload["counts"]["triangles"] * 3
+        state_1 = (*_PAINT_STATE_PALETTE[0], 255)
+        state_2 = (*_PAINT_STATE_PALETTE[1], 255)
+        grey = (170, 170, 170, 255)
+        rgba = np.frombuffer(
+            base64.b64decode(payload["vertex_colors"]), dtype=np.uint8
+        ).reshape(-1, 3, 4)
+        pos = _f32(payload["positions"]).reshape(-1, 3, 3)
+        for face_verts, face_rgba in zip(pos, rgba, strict=True):
+            got = tuple(face_rgba[0])
+            if np.allclose(face_verts[:, 1], 0.0, atol=1e-4):
+                assert got == state_1    # mesh z=0 face, painted filament 1
+            elif np.allclose(face_verts[:, 2], 0.0, atol=1e-4):
+                assert got == state_2    # mesh y=0 face, painted filament 2
+            else:
+                assert got == grey       # unpainted faces stay neutral
+
+    @pytest.mark.skipif(
+        mesh_payload._decimation_backend() is None,
+        reason="fast_simplification not installed — the downgrade branch covers this",
+    )
+    def test_painted_decimation_keeps_the_boundary_clean(self, tmp_path):
+        """A painted soup holds 2-3 coincident copies of every boundary
+        vertex with DIFFERENT colors; nearest-VERTEX transfer picks among
+        exact ties arbitrarily, speckling the paint boundary after
+        decimation.  The centroid transfer must keep exactly two colors
+        with a clean spatial split (nearest-vertex left 5 wrong-side
+        vertices on this exact fixture)."""
+        from kiln.multicolor_3mf import compose_painted_3mf
+
+        sphere = trimesh.creation.icosphere(subdivisions=3, radius=10.0)
+        tris = [tuple(map(tuple, sphere.vertices[f])) for f in sphere.faces]
+        colors = [
+            "#F72323" if cz > 0 else "#2366F7"
+            for cz in sphere.triangles_center[:, 2]
+        ]
+        out = tmp_path / "painted_dense.3mf"
+        compose_painted_3mf(tris, colors, output_path=str(out))
+        payload = mesh_to_viewer_payload(out, max_triangles=400)
+        assert payload["downgraded"] is False
+        assert payload["decimated_from"] == 1280
+        rgba = np.frombuffer(
+            base64.b64decode(payload["vertex_colors"]), dtype=np.uint8
+        ).reshape(-1, 4)
+        pos = _f32(payload["positions"])
+        # Both zones survive, and nothing else appears.
+        assert {tuple(c) for c in rgba.tolist()} == {self.RED, self.BLUE}
+        # Clean split: outside a band the width of one source face around
+        # the paint boundary (mesh z == viewer y), every vertex carries
+        # its own side's color.
+        band = 0.25
+        upper, lower = pos[:, 1] > band, pos[:, 1] < -band
+        assert (rgba[upper] == self.RED).all()
+        assert (rgba[lower] == self.BLUE).all()
