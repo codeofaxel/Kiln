@@ -20,6 +20,7 @@ This is a **free-tier** feature — no kiln-pro dependency.
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import json
 import logging
 import os
@@ -332,18 +333,50 @@ def _find_gmsh_cmd() -> str | None:
     return "gmsh" if shutil.which("gmsh") else None
 
 
-def _cadquery_available() -> bool:
-    """Return True if cadquery can be imported."""
-    try:
-        import cadquery  # noqa: F401
+def _module_installed(name: str) -> bool:
+    """True when *name* is importable from disk, WITHOUT importing it.
 
-        return True
-    except ImportError:
+    Asking by import is what a probe naturally wants to do and is the
+    wrong trade here.  Importing the OCCT bindings to answer "is the
+    kernel present?" costs 323 modules and ~247 MB resident (measured
+    2026-08-03), and :func:`check_step_support` is a registered tool —
+    so on the hosted server, a caller merely ASKING whether STEP is
+    supported permanently grew the process by a quarter of a gigabyte,
+    even when the answer was no and nothing was ever converted.
+
+    Nothing needs the import: every conversion path runs the kernel in a
+    CHILD interpreter (see :func:`_convert_via_ocp`), and each caller of
+    this probe consumes only its boolean.
+
+    The question this answers is deliberately weaker than "does it
+    import cleanly" — a partial or ABI-broken install can carry a valid
+    spec and still fail on import.  That gap is covered by the layer
+    underneath: the child has to succeed on its own merits, and its
+    failure surfaces as a normal conversion error naming the backend.
+    Paying a quarter gigabyte in the parent to sharpen a check the child
+    repeats for free is the wrong trade.
+
+    ``find_spec`` imports a submodule's PARENT packages in order to
+    search them, so the names probed here are top-level on purpose:
+    probing ``OCP.STEPControl`` would load the very thing this exists to
+    avoid.  It raises ``ModuleNotFoundError`` for a missing parent,
+    ``ValueError`` for a name whose ``__spec__`` is None, and
+    ``AttributeError`` against an exotic meta-path finder — all of which
+    mean "not usable here".
+    """
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError, AttributeError):
         return False
 
 
+def _cadquery_available() -> bool:
+    """Return True if cadquery is installed (not imported — see above)."""
+    return _module_installed("cadquery")
+
+
 def _ocp_available() -> bool:
-    """Return True if the bare OCCT bindings (``cadquery-ocp``) can be imported.
+    """Return True if the bare OCCT bindings (``cadquery-ocp``) are present.
 
     Deliberately probes the ``OCP`` MODULE rather than a distribution name:
     three different packages provide it (``cadquery-ocp-novtk``,
@@ -351,12 +384,7 @@ def _ocp_available() -> bool:
     already has any of them should just work.  See :data:`PIP_BACKEND` for
     which one we install and the measured reason why.
     """
-    try:
-        from OCP.STEPControl import STEPControl_Reader  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
+    return _module_installed("OCP")
 
 
 def check_step_support() -> dict[str, Any]:
