@@ -15,9 +15,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from kiln._vec import Vec3 as _Vec3
+from kiln._vec import cross as _cross
 from kiln._vec import dot as _dot
 from kiln._vec import face_normal as _face_normal
 from kiln._vec import normalize as _normalize
+from kiln._vec import sub as _sub
 
 if TYPE_CHECKING:
     from kiln.threemf_parser import ColoredTriangle
@@ -209,6 +211,116 @@ def _darken(color: tuple[int, int, int], *, factor: float = 0.75) -> tuple[int, 
 
 
 # ---------------------------------------------------------------------------
+# Smooth shading (crease-aware vertex-normal smoothing)
+# ---------------------------------------------------------------------------
+
+# Dihedral angles BELOW this threshold shade smoothly; at or above it the
+# edge stays hard.  35 degrees sits in the 30-40 degree band that CAD and
+# DCC tools conventionally default to for auto-smoothing: a cylinder wall
+# tessellated at 12+ sections has facet angles of at most 30 degrees (64
+# sections: ~5.6), so curved surfaces smooth, while cube edges, wall-to-cap
+# rims, and deliberate chamfers of 35+ degrees keep a crisp lighting break.
+_CREASE_ANGLE_DEG = 35.0
+_CREASE_COS = math.cos(math.radians(_CREASE_ANGLE_DEG))
+
+
+def _smooth_face_normals(
+    tri_verts: list[tuple[_Vec3, _Vec3, _Vec3]],
+) -> list[_Vec3]:
+    """Per-face lighting normals via crease-aware vertex-normal smoothing.
+
+    Flat facet normals make adjacent near-coplanar triangles — the tall
+    split-quad pairs of a tessellated cylinder wall — alternate slightly
+    in brightness, rendering a smooth wall as vertical zigzag striping
+    that is not in the geometry.  The classic fix: for each vertex of
+    each face, average the area-weighted normals of every face sharing
+    that exact vertex position whose dihedral angle to this face is
+    below ``_CREASE_ANGLE_DEG`` (so hard edges keep a hard lighting
+    break), then take the face's lighting normal as the renormalized
+    mean of its three vertex normals.
+
+    Vertices are matched by exact coordinate tuple: triangle soups
+    duplicate shared vertices bit-exactly (same source value, same
+    deterministic transform), and fuzzy merging could weld genuinely
+    distinct nearby vertices.
+
+    Area weighting falls out of the raw cross product (its magnitude is
+    twice the triangle area), so big faces dominate slivers at a shared
+    vertex.  Purely geometric: face colors never enter — paint is not
+    geometry, so brightness smooths across color boundaries while the
+    colors themselves stay exact.
+
+    :param tri_verts: One ``(v0, v1, v2)`` triple per face, any single
+        consistent space (the rotation to camera space is rigid, so
+        smoothing commutes with it).
+    :returns: One unit lighting normal per face; degenerate faces fall
+        back to their flat normal.
+    """
+    weighted: list[_Vec3] = []  # raw cross products (area-weighted normals)
+    unit: list[_Vec3] = []  # flat unit normals (crease tests + fallback)
+    for v0, v1, v2 in tri_verts:
+        w = _cross(_sub(v1, v0), _sub(v2, v0))
+        weighted.append(w)
+        unit.append(_normalize(w))
+
+    faces_at_vertex: dict[_Vec3, list[int]] = {}
+    for i, verts in enumerate(tri_verts):
+        for v in verts:
+            faces_at_vertex.setdefault(v, []).append(i)
+
+    # Fast path: when every normal in a vertex's fan lies within HALF
+    # the crease angle of the fan's mean direction, the triangle
+    # inequality guarantees every pair is within the crease — so the
+    # per-face filter passes the whole fan for every querying face and
+    # the vertex normal is the same for all of them.  Compute it once
+    # (identical sum, identical order — bit-exact with the slow path).
+    # This is the common case everywhere but crease rings and corners.
+    half_crease_cos = math.cos(math.radians(_CREASE_ANGLE_DEG / 2.0))
+    zero = (0.0, 0.0, 0.0)
+    fan_normal: dict[_Vec3, _Vec3 | None] = {}  # None → filter per face
+    for v, fan in faces_at_vertex.items():
+        mx = my = mz = 0.0
+        for j in fan:
+            uj = unit[j]
+            mx += uj[0]
+            my += uj[1]
+            mz += uj[2]
+        m = _normalize((mx, my, mz))
+        if m != zero and all(_dot(unit[j], m) >= half_crease_cos for j in fan):
+            ax = ay = az = 0.0
+            for j in fan:
+                wj = weighted[j]
+                ax += wj[0]
+                ay += wj[1]
+                az += wj[2]
+            fan_normal[v] = _normalize((ax, ay, az))
+        else:
+            fan_normal[v] = None
+
+    smoothed: list[_Vec3] = []
+    for i, verts in enumerate(tri_verts):
+        ui = unit[i]
+        sx = sy = sz = 0.0
+        for v in verts:
+            vn = fan_normal[v]
+            if vn is None:  # crease vertex — filter the fan per face
+                ax = ay = az = 0.0
+                for j in faces_at_vertex[v]:
+                    if _dot(unit[j], ui) >= _CREASE_COS:
+                        wj = weighted[j]
+                        ax += wj[0]
+                        ay += wj[1]
+                        az += wj[2]
+                vn = _normalize((ax, ay, az))
+            sx += vn[0]
+            sy += vn[1]
+            sz += vn[2]
+        sn = _normalize((sx, sy, sz))
+        smoothed.append(ui if sn == zero else sn)
+    return smoothed
+
+
+# ---------------------------------------------------------------------------
 # Core renderer
 # ---------------------------------------------------------------------------
 
@@ -334,11 +446,11 @@ def render_colored_mesh(
     # --- Pass 2b: Compute smooth normals for lighting --------------------
     #
     # Raw face normals cause visible faceting on curved surfaces (each
-    # triangle is a flat tile with uniform brightness).  Smooth normals
-    # average each face's normal with its same-color neighbors, giving
-    # a Gouraud-like gradual shading transition without per-pixel
-    # interpolation.  We still use the raw normal for back-face culling
-    # (must be exact) but use the smoothed normal for lighting only.
+    # triangle is a flat tile with uniform brightness).  Lighting instead
+    # uses crease-aware vertex-normal smoothing (see _smooth_face_normals)
+    # for a Gouraud-like gradual transition without per-pixel
+    # interpolation.  The raw normal is kept for back-face culling
+    # (must be exact); the smoothed normal is for lighting only.
 
     # Pre-compute all camera-space face normals
     _raw_normals: list[_Vec3] = []
@@ -346,30 +458,7 @@ def render_colored_mesh(
         t0, t1, t2 = transformed[i]
         _raw_normals.append(_face_normal(t0, t1, t2))
 
-    # Build neighbor sets (same-color faces sharing an edge)
-    _same_color_neighbors: dict[int, list[int]] = {}
-    for i, tri in enumerate(triangles):
-        neighbors: list[int] = []
-        verts = (tri.v0, tri.v1, tri.v2)
-        for j in range(3):
-            edge = tuple(sorted((verts[j], verts[(j + 1) % 3])))
-            for ni in _edge_to_faces.get(edge, []):  # type: ignore[arg-type]
-                if ni != i and triangles[ni].color == tri.color:
-                    neighbors.append(ni)
-        _same_color_neighbors[i] = neighbors
-
-    # Smooth: average face normal with neighbors' normals
-    _smooth_normals: list[_Vec3] = []
-    for i in range(n):
-        nx, ny, nz = _raw_normals[i]
-        count = 1
-        for ni in _same_color_neighbors.get(i, []):
-            nn = _raw_normals[ni]
-            nx += nn[0]
-            ny += nn[1]
-            nz += nn[2]
-            count += 1
-        _smooth_normals.append(_normalize((nx / count, ny / count, nz / count)))
+    _smooth_normals = _smooth_face_normals(transformed)
 
     # --- Pass 3: Compute per-face render data ---
 
