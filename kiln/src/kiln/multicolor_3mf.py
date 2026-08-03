@@ -796,7 +796,10 @@ def compose_multicolor_3mf(
         * ``output_path`` (str) — path to the created .3mf file
         * ``parts`` (int) — number of color parts
         * ``total_vertices`` (int)
-        * ``total_triangles`` (int)
+        * ``total_triangles`` (int) — triangles actually emitted
+        * ``degenerate_skipped`` (int) — only present when > 0: input
+          triangles dropped because their vertices collapse under exact
+          dedup (the 3MF spec forbids repeated indices)
         * ``message`` (str) — human summary
         * ``error`` (str) — only present on failure
 
@@ -871,6 +874,7 @@ def compose_multicolor_3mf(
     # Parse all STL files
     # -----------------------------------------------------------------------
     parsed: list[_ParsedPart] = []
+    degenerate_skipped = 0
     for part in parts:
         try:
             vertices, triangles = _parse_stl(part.stl_path)
@@ -879,12 +883,35 @@ def compose_multicolor_3mf(
                     "success": False,
                     "error": f"STL for part '{part.name or part.stl_path}' contains no triangles.",
                 }
-            parsed.append((part, vertices, triangles))
+            # Same guard as compose_painted_3mf: a triangle whose vertices
+            # collapse under exact dedup (common in real-world scans) would
+            # emit spec-forbidden repeated indices a strict reader may
+            # reject.  Skipped at construction so every downstream consumer
+            # — model XML, sidecar volume ranges, counts, thumbnail — sees
+            # only what is actually emitted.  Counted, never silent.
+            kept = [t for t in triangles if len(set(t)) == 3]
+            part_degenerate = len(triangles) - len(kept)
+            if part_degenerate:
+                degenerate_skipped += part_degenerate
+                logger.debug(
+                    "Skipped %d degenerate triangle(s) in %s",
+                    part_degenerate,
+                    Path(part.stl_path).name,
+                )
+            if not kept:
+                return {
+                    "success": False,
+                    "error": (
+                        f"STL for part '{part.name or part.stl_path}' "
+                        "contains only degenerate triangles."
+                    ),
+                }
+            parsed.append((part, vertices, kept))
             logger.debug(
                 "Parsed %s: %d vertices, %d triangles (extruder %d)",
                 Path(part.stl_path).name,
                 len(vertices),
-                len(triangles),
+                len(kept),
                 part.extruder,
             )
         except Exception as exc:
@@ -949,6 +976,8 @@ def compose_multicolor_3mf(
         "total_triangles": total_t,
         "extruder_map": extruder_summary,
     }
+    if degenerate_skipped:
+        result["degenerate_skipped"] = degenerate_skipped
 
     # Attach full safety report (all free)
     if safety_result is not None:
@@ -982,6 +1011,64 @@ def compose_multicolor_3mf(
 # Painted single-object composer
 # ---------------------------------------------------------------------------
 
+#: Highest paint state a single serialized string can carry and still be
+#: decoded identically by BOTH slicer families — see painted_state_string.
+#: PrusaSlicer master alone could encode up to 255 (an 0b1110-escaped 8-bit
+#: extension), but the Bambu/Orca fork's TriangleSelector::deserialize
+#: predates that extension and reads only the two-nibble form, and the
+#: escape string itself ("EC") would make PrusaSlicer's decoder read past
+#: the end of the bitstream.  16 is the shared ceiling.
+PAINTED_STATE_MAX = 16
+
+
+def painted_state_string(state: int) -> str:
+    """The slicers' native serialized paint state for a WHOLE triangle.
+
+    All three slicers store per-triangle painting as one hex string per
+    ``<triangle>``: PrusaSlicer under ``slic3rpe:mmu_segmentation``, and
+    BambuStudio/OrcaSlicer under ``paint_color`` — both consumed by
+    ``FacetsAnnotation::set_triangle_from_string``.
+
+    Derivation, from the readers' own sources (not from documentation):
+
+    * ``TriangleSelector::serialize`` (prusa3d/PrusaSlicer,
+      ``src/libslic3r/TriangleSelector.cpp``) encodes each triangle as a
+      bitstream of nibbles, bits appended LSB-first.  An UNSPLIT triangle
+      painted state ``n`` is::
+
+          nibble 0 bits: [split&1, split&2, ...]   split = 0 for unsplit
+          n in 1..2:   nibble 0 = n << 2           -> 0x4 / 0x8   (1 nibble)
+          n in 3..16:  nibble 0 = 0b1100 = 0xC,
+                       nibble 1 = n - 3            -> 2 nibbles
+
+    * ``FacetsAnnotation::get_triangle_as_string`` / ``…from_string``
+      (``src/libslic3r/Model.cpp``, both repos, byte-identical) hex-encode
+      one char per nibble with the string REVERSED: the first bitstream
+      nibble is the LAST character.  So state 3 is ``"0C"``, not ``"C0"``.
+
+    * The Bambu/Orca fork (SoftFever/OrcaSlicer,
+      ``src/libslic3r/TriangleSelector.cpp``) asserts ``n <= 16`` in its
+      serializer and decodes leaf states only as
+      ``(code & 0b1100) == 0b1100 ? next_nibble() + 3 : code >> 2`` — no
+      8-bit escape, hence :data:`PAINTED_STATE_MAX`.  Orca's own
+      ``CONST_FILAMENTS`` table (``Model.cpp``) pins the identical canon:
+      ``{"", "4", "8", "0C", "1C", …, "DC"}`` for filaments 0..16.
+
+    State ``k`` means "painted with filament/extruder ``k``" (1-based);
+    unpainted triangles carry NO attribute rather than a state-0 string.
+
+    :raises ValueError: on ``state < 1`` or ``state > PAINTED_STATE_MAX``.
+    """
+    if not 1 <= state <= PAINTED_STATE_MAX:
+        raise ValueError(
+            f"paint state must be 1..{PAINTED_STATE_MAX} (got {state}): "
+            "state 0 is 'unpainted' (omit the attribute), and both slicer "
+            "families agree on the wire format only up to state 16"
+        )
+    if state <= 2:
+        return format(state << 2, "X")
+    return format(state - 3, "X") + "C"
+
 
 def compose_painted_3mf(
     triangles: list[tuple[
@@ -1004,7 +1091,13 @@ def compose_painted_3mf(
     sheets no slicer accepts (measured: "unable to create convex hull",
     exit 206).  Here the mesh stays whole — one watertight object — and the
     colors ride as core-spec per-triangle references, the painted-model
-    form slicers' color-to-filament import flows exist for.
+    form slicers' color-to-filament import flows exist for.  Each colored
+    triangle ALSO carries the slicers' native painting state (see
+    :func:`painted_state_string`) under both attribute spellings, so
+    PrusaSlicer imports the painting as real per-triangle MMU segmentation
+    (measured: tool changes and both filaments in the gcode, where the
+    colorgroup alone produced neither) and the Bambu family opens the file
+    as a painted model.
 
     :param triangles: The full mesh, one ``(v0, v1, v2)`` tuple per
         triangle, each vertex an ``(x, y, z)``.  Vertices are deduplicated
@@ -1014,8 +1107,11 @@ def compose_painted_3mf(
     :param output_path: Where to write.  Defaults to a temp file.
     :param name: The object name shown in slicers.
     :returns: Dict with ``output_path``, ``colors`` (distinct palette
-        actually referenced), and counts.  ``{"success": False, ...}`` on
-        empty input or write failure — never raises.
+        actually referenced), and counts.  ``native_paint_truncated`` (int)
+        appears only when the palette exceeds :data:`PAINTED_STATE_MAX`
+        colors: triangles past the limit keep their spec colorgroup
+        reference but carry no native paint state.  ``{"success": False,
+        ...}`` on empty input or write failure — never raises.
     """
     if not triangles:
         return {"success": False, "error": "No triangles to compose"}
@@ -1095,10 +1191,28 @@ def compose_painted_3mf(
         "        </vertices>",
         "        <triangles>",
     ]
+    # Each colored triangle carries THREE channels: the core-spec
+    # colorgroup reference (generic readers + kiln.threemf_parser), and the
+    # slicers' native painting state under both spellings —
+    # slic3rpe:mmu_segmentation (PrusaSlicer; its reader has no colorgroup
+    # handling at all) and paint_color (BambuStudio/OrcaSlicer).  Same
+    # serialized value, one per spelling; palette index i maps to paint
+    # state i+1.  A palette past PAINTED_STATE_MAX keeps its colorgroup
+    # reference but gets no native state (a wrong state would repaint the
+    # triangle with someone else's filament) — counted, never silent.
+    native_paint_truncated = 0
     for (a, b, c), pindex in zip(faces, tri_pindex, strict=True):
-        ref = (
-            f' pid="{colorgroup_id}" p1="{pindex}"' if pindex is not None else ""
-        )
+        ref = ""
+        if pindex is not None:
+            ref = f' pid="{colorgroup_id}" p1="{pindex}"'
+            if pindex < PAINTED_STATE_MAX:
+                state = painted_state_string(pindex + 1)
+                ref += (
+                    f' slic3rpe:mmu_segmentation="{state}"'
+                    f' paint_color="{state}"'
+                )
+            else:
+                native_paint_truncated += 1
         lines.append(f'          <triangle v1="{a}" v2="{b}" v3="{c}"{ref}/>')
     lines += [
         "        </triangles>",
@@ -1198,4 +1312,11 @@ def compose_painted_3mf(
     }
     if degenerate_skipped:
         result["degenerate_skipped"] = degenerate_skipped
+    if native_paint_truncated:
+        result["native_paint_truncated"] = native_paint_truncated
+        result["message"] += (
+            f"  {native_paint_truncated:,} triangle(s) use colors beyond "
+            f"the {PAINTED_STATE_MAX}-filament native painting limit; they "
+            "keep their spec colors but slicers will not auto-paint them."
+        )
     return result
