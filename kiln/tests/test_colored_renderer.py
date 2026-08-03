@@ -500,3 +500,91 @@ class TestRenderMultiAngle:
     def test_empty_triangles_raises(self) -> None:
         with pytest.raises(ValueError, match="No triangles"):
             render_colored_mesh_multi_angle([])
+
+
+class TestSilhouetteContourStaysOnTheOutline:
+    """The contour marks the object against the BACKGROUND, nothing else.
+
+    It used to mark "an edge carried by exactly one VISIBLE face", which
+    back-face culling also reports for interior edges — the top rim of a
+    near wall, the seam where a boolean re-triangulates a surface — so a
+    hollow or unioned model got hairlines drawn across its body.  It hid
+    in single-colour previews because bright fills skip the contour, so a
+    grey control render looked clean while every painted one did not.
+    """
+
+    @staticmethod
+    def _open_box() -> list[ColoredTriangle]:
+        """A tray: solid walls with a cavity, so the near rim is interior.
+
+        Looking in from above, the near wall's top edge has a visible
+        outer face and a culled inner one, and it sits WELL INSIDE the
+        object's outline — pixels beyond it are the tray's interior, not
+        background.  That edge is the reproducer.
+        """
+        trimesh = pytest.importorskip("trimesh", reason="tray fixture needs trimesh")
+        outer = trimesh.creation.box(extents=[40, 40, 24])
+        cavity = trimesh.creation.box(extents=[32, 32, 20])
+        cavity.apply_translation([0, 0, 4])
+        tray = outer.difference(cavity)
+        # Dark enough that the contour is not skipped, and saturated so an
+        # object pixel is told apart from a neutral contour pixel by hue.
+        return [
+            ColoredTriangle(
+                v0=tuple(map(float, t[0])),
+                v1=tuple(map(float, t[1])),
+                v2=tuple(map(float, t[2])),
+                color=(70, 22, 22),
+            )
+            for t in tray.triangles
+        ]
+
+    def test_no_contour_is_drawn_inside_the_object(self, tmp_path: Path) -> None:
+        from PIL import Image
+
+        out = str(tmp_path / "tray.png")
+        render_colored_mesh(
+            self._open_box(),
+            output_path=out,
+            width=420,
+            height=340,
+            elevation=38.0,
+            azimuth=32.0,
+            supersample=2,
+        )
+        img = Image.open(out).convert("RGB")
+        w, h = img.size
+        px = img.load()
+
+        # The fill is red-dominant; the contour is a neutral grey lifted off
+        # the background.  So "object" is hue, not brightness.
+        def saturated(x: int, y: int) -> bool:
+            r, g, b = px[x, y]
+            return r - g > 12 and r - b > 12
+
+        rows = [[saturated(x, y) for x in range(w)] for y in range(h)]
+        assert sum(map(sum, rows)) > 4000, "fixture sanity: the tray fills the frame"
+
+        # A stray is a NON-object pixel with object on all four sides — it
+        # can only be something drawn over the body.  The legitimate
+        # outline ring never qualifies: it has background on one side.
+        # (Judging "object pixels that look wrong" instead would be
+        # circular, since a contour pixel is not object-coloured and so
+        # would never enter the set being judged.)
+        strays = []
+        for y in range(h):
+            row = rows[y]
+            for x in range(w):
+                if row[x]:
+                    continue
+                if not (any(row[:x]) and any(row[x + 1 :])):
+                    continue
+                above = any(rows[k][x] for k in range(y))
+                below = any(rows[k][x] for k in range(y + 1, h))
+                if above and below:
+                    strays.append((x, y))
+
+        assert not strays, (
+            f"{len(strays)} contour pixel(s) drawn inside the object, "
+            f"e.g. {strays[:5]} — the contour must only mark the outline"
+        )

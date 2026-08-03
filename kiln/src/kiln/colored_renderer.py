@@ -564,7 +564,7 @@ def render_colored_mesh(
     # Sort by depth descending (farthest first = largest Y first)
     face_data.sort(key=lambda fd: fd[0], reverse=True)
 
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
     img = Image.new("RGB", (rw, rh), background)
     draw = ImageDraw.Draw(img)
@@ -600,42 +600,56 @@ def render_colored_mesh(
     # strong on dark faces (which need contrast), invisible on bright
     # faces (which already pop against the background).
     #
-    # Detect silhouette edges: edges belonging to only ONE visible
-    # face (boundary between drawn face and culled/missing face).
-    _edge_info: dict[
-        tuple[tuple[int, int], tuple[int, int]],
-        list[tuple[int, int, int]],  # lit fill colors of adjacent visible faces
-    ] = {}
-    for _depth, pts, fill, _outline, _be in face_data:
-        for ei in range(3):
-            p0 = pts[ei]
-            p1 = pts[(ei + 1) % 3]
-            edge_key = (min(p0, p1), max(p0, p1))
-            _edge_info.setdefault(edge_key, []).append(fill)
+    # The outline is WHERE THE OBJECT MEETS THE BACKGROUND, and that is
+    # measured directly rather than inferred from adjacency.  The previous
+    # test — "an edge carried by exactly ONE visible face" — reads as a
+    # silhouette for plenty of interior edges too, because back-face
+    # culling strips the neighbour off any edge whose far side turns away:
+    # the seam where a boolean union re-triangulates a wall, and the
+    # terminator of a curved surface.  Both sit in the MIDDLE of an
+    # unbroken surface, so the contour was drawn as hairlines across the
+    # body of the model (measured on a mug with a handle: a full-height
+    # line down the wall plus two arcs at the handle junction).  It hid in
+    # single-colour previews only because bright fills skip the contour,
+    # so a grey control render looked clean while every painted one did
+    # not.  Silhouette-by-background-adjacency cannot draw inside the
+    # object at all: the ring is derived from the drawn mask's own border.
+    _silhouette = Image.new("L", (rw, rh), 0)
+    _sil_draw = ImageDraw.Draw(_silhouette)
+    for _depth, pts, _fill, _outline, _be in face_data:
+        _sil_draw.polygon(pts, fill=255)
 
-    for edge_key, fills in _edge_info.items():
-        if len(fills) != 1:
-            continue  # interior edge, skip
-        # Silhouette edge — compute adaptive brightness.
-        # Dark faces get a strong contour, bright faces get none.
-        face_lum = _luminance(fills[0])
-        # Only draw contour if face is darker than the background
-        bg_lum = _luminance((bg_r, bg_g, bg_b))
-        if face_lum > bg_lum + 30:
-            continue  # bright face — already has contrast, skip
-        # Strength: max for very dark faces, fading as face approaches bg
-        strength = max(0.0, min(1.0, 1.0 - (face_lum / max(1, bg_lum + 40))))
-        lift = int(50 * strength)
-        if lift < 5:
-            continue
-        sc = (
-            min(255, bg_r + lift + 20),
-            min(255, bg_g + lift + 20),
-            min(255, bg_b + lift + 20),
-        )
-        # Width scales with supersample factor so the contour survives
-        # LANCZOS downsampling (1px at 2x → invisible 0.5px otherwise)
-        draw.line([edge_key[0], edge_key[1]], fill=sc, width=max(1, ss))
+    # Inner border = mask minus its erosion.  Width tracks the supersample
+    # factor so the contour survives LANCZOS downsampling (a 1px ring at
+    # 2x would land at an invisible half-pixel).
+    _eroded = _silhouette.filter(ImageFilter.MinFilter(2 * ss + 1))
+    _ring = ImageChops.difference(_silhouette, _eroded)
+
+    # Adaptive, exactly as before, but evaluated per PIXEL against what was
+    # actually drawn there: bright pixels already contrast with the
+    # background and get nothing; dark ones get a lift toward it.
+    bg_lum = _luminance((bg_r, bg_g, bg_b))
+    _cutoff = bg_lum + 30
+    _denom = max(1, bg_lum + 40)
+    _lum = img.convert("L")
+
+    def _lift_of(value: int) -> int:
+        if value > _cutoff:
+            return 0  # bright pixel — already has contrast
+        lift = int(50 * max(0.0, min(1.0, 1.0 - (value / _denom))))
+        return lift if lift >= 5 else 0
+
+    _lift = _lum.point(_lift_of)
+    _ring = ImageChops.multiply(_ring, _lift.point(lambda v: 255 if v else 0))
+    _contour = Image.merge(
+        "RGB",
+        (
+            _lift.point(lambda v: min(255, bg_r + v + 20)),
+            _lift.point(lambda v: min(255, bg_g + v + 20)),
+            _lift.point(lambda v: min(255, bg_b + v + 20)),
+        ),
+    )
+    img.paste(_contour, (0, 0), _ring)
 
     # --- Downsample if supersampled ---
 
