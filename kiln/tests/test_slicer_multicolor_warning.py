@@ -153,16 +153,18 @@ class TestDetect3mfMulticolor:
 
     @pytest.mark.parametrize(
         "attribute",
-        ['paint_color="4"', 'slic3rpe:mmu_segmentation="0|4"'],
+        ["paint_color", "slic3rpe:mmu_segmentation"],
     )
     def test_native_paint_attribute_detected(self, tmp_path, attribute):
         """Slicer-native painted models (BambuStudio paint_color /
-        PrusaSlicer mmu_segmentation) are detected by byte marker even
-        with no colorgroup palette."""
+        PrusaSlicer mmu_segmentation) are detected when they carry two-plus
+        DISTINCT paint states — a painting that is one state everywhere is
+        one filament, and flattening it loses nothing."""
         path = tmp_path / "native_paint.3mf"
         model = (
             '<?xml version="1.0"?><model><resources><object id="1">'
-            f"<mesh><triangles><triangle v1=\"0\" v2=\"1\" v3=\"2\" {attribute}/>"
+            f"<mesh><triangles><triangle v1=\"0\" v2=\"1\" v3=\"2\" {attribute}=\"4\"/>"
+            f"<triangle v1=\"0\" v2=\"2\" v3=\"3\" {attribute}=\"8\"/>"
             "</triangles></mesh></object></resources></model>"
         )
         with zipfile.ZipFile(path, "w") as zf:
@@ -264,6 +266,9 @@ class TestMulticolorFlattenAdvisory:
         assert "multi_material_print" in warning
 
     def test_warns_on_painted_single_slot(self, tmp_path):
+        """Painted files now carry native paint attributes, so the
+        stronger painted-on evidence (distinct paint states) outranks the
+        palette count in the warning wording."""
         block, warning = _multicolor_flatten_advisory(
             _painted_3mf(tmp_path, ["#FF0000", "#FF0000", "#0000FF", None]),
             _single_slot_ini(tmp_path),
@@ -271,7 +276,8 @@ class TestMulticolorFlattenAdvisory:
         )
         assert block is not None
         assert warning is not None
-        assert "palette" in warning
+        assert "painted-on colors" in warning
+        assert block["paint_states"] == 2
 
     def test_warns_without_gcode_measurement(self, tmp_path):
         """No readable G-code: the structural evidence still warns, just
