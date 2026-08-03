@@ -507,9 +507,11 @@ def _detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
 
     * **multi-object** — two-plus DISTINCT per-object extruder values in
       the slicer sidecars or on ``slic3rpe:extruder`` build items;
-    * **painted single object** — slicer paint attributes
-      (``paint_color`` / ``mmu_segmentation``) or a two-plus-color
-      ``<m:colorgroup>`` palette in the model XML.
+    * **painted single object** — two-plus DISTINCT slicer paint states
+      (``paint_color`` / ``mmu_segmentation`` attribute values: a painting
+      that is one state everywhere is one filament, and flattening loses
+      nothing) or a two-plus-color ``<m:colorgroup>`` palette in the
+      model XML.
 
     Returns an evidence dict when multicolor, else ``None``.  NEVER
     raises: this feeds an advisory, so a corrupt archive, odd layout, or
@@ -519,6 +521,7 @@ def _detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
     try:
         extruders: set[int] = set()
         paint_attribute: str | None = None
+        paint_states: set[bytes] = set()
         palette_colors = 0
         with zipfile.ZipFile(input_path) as zf:
             for member in zf.namelist():
@@ -534,8 +537,13 @@ def _detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
                         int(m) for m in _ITEM_EXTRUDER_RE.findall(raw)
                     )
                     for marker in _PAINT_ATTRIBUTE_MARKERS:
-                        if marker in raw:
+                        values = set(
+                            re.findall(marker + b'="([^"]*)"', raw)
+                        )
+                        values.discard(b"")
+                        if len(values) >= 2:
                             paint_attribute = marker.decode()
+                            paint_states |= values
                             break
                     palette_colors = max(
                         palette_colors, len(_COLORGROUP_COLOR_RE.findall(raw)),
@@ -546,6 +554,7 @@ def _detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
             evidence["extruders"] = sorted(extruders)
         if paint_attribute is not None:
             evidence["paint_attribute"] = paint_attribute
+            evidence["paint_states"] = len(paint_states)
         if palette_colors >= 2:
             evidence["palette_colors"] = palette_colors
         return evidence or None
