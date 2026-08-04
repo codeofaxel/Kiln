@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-08-02T23:10:55.370772+00:00",
-  "tool_count": 408,
+  "generated": "2026-08-04T09:32:04.252760+00:00",
+  "tool_count": 410,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -2280,7 +2280,7 @@
     },
     {
       "name": "auto_multicolor_from_texture",
-      "description": "Segment a textured OBJ mesh into discrete color zones for multi-material printing.\n\nFree tier: 3 multicolor splits/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Segment a textured OBJ mesh into discrete color zones for multi-material printing. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 multicolor splits/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "decoration",
       "parameters": {
@@ -2473,6 +2473,86 @@
       }
     },
     {
+      "name": "paint_mesh_regions",
+      "description": "Paint mesh regions by id and write a painted 3MF.\n\nFree tier: 3 painted models/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "input_path": {
+            "title": "Input Path",
+            "type": "string"
+          },
+          "assignments": {
+            "additionalProperties": true,
+            "title": "Assignments",
+            "type": "object"
+          },
+          "preview_only": {
+            "default": false,
+            "title": "Preview Only",
+            "type": "boolean"
+          },
+          "crease_deg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Crease Deg"
+          },
+          "min_region_area_frac": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Min Region Area Frac"
+          },
+          "partition_hash": {
+            "default": "",
+            "title": "Partition Hash",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "branch_name": {
+            "default": "painted",
+            "title": "Branch Name",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "input_path",
+          "assignments"
+        ],
+        "title": "paint_mesh_regionsArguments",
+        "type": "object"
+      },
+      "quota": {
+        "bucket": "decoration",
+        "limit": 3,
+        "noun": "painted models",
+        "period": "month"
+      }
+    },
+    {
       "name": "register_brand_asset",
       "description": "Register a logo/image as a named brand asset (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -2558,6 +2638,66 @@
           "template_id"
         ],
         "title": "resolve_template_decorationArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "segment_mesh_regions",
+      "description": "Split a mesh into paintable surface regions and show them.",
+      "tier": "free",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "input_path": {
+            "title": "Input Path",
+            "type": "string"
+          },
+          "crease_deg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Crease Deg"
+          },
+          "max_regions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Regions"
+          },
+          "min_region_area_frac": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Min Region Area Frac"
+          },
+          "partition_hash": {
+            "default": "",
+            "title": "Partition Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "input_path"
+        ],
+        "title": "segment_mesh_regionsArguments",
         "type": "object"
       }
     },
@@ -2838,7 +2978,7 @@
     },
     {
       "name": "change_part_color",
-      "description": "Change a part's color in a design recipe and re-slice.",
+      "description": "Change a part's color in a design recipe and re-slice. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).",
       "tier": "free",
       "category": "design_modification",
       "parameters": {
