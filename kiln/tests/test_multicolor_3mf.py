@@ -661,6 +661,25 @@ def test_compose_invalid_color_hint_is_not_a_color_claim(stl_a: Path, tmp_path: 
     assert "colorgroup" not in _model_xml(str(out))
 
 
+def test_compose_accepts_css_shorthand_hex(stl_a: Path, stl_b: Path, tmp_path: Path):
+    """``#F00`` is a color claim.  It used to fail the six/eight-digit
+    parse, and a rejected hint is SILENT — the colorgroup was omitted
+    while the tool still returned success, still summarised the requested
+    colors and still mapped AMS slots, so the file came out grey with
+    nothing telling the user why."""
+    out = tmp_path / "out.3mf"
+    compose_multicolor_3mf(
+        [
+            ColorPart(stl_path=str(stl_a), extruder=1, color="#F00"),
+            ColorPart(stl_path=str(stl_b), extruder=2, color="06fc"),  # RGBA shorthand, bare
+        ],
+        output_path=str(out),
+    )
+    xml = _model_xml(str(out))
+    assert '<m:color color="#FF0000"/>' in xml
+    assert '<m:color color="#0066FF"/>' in xml
+
+
 def test_spec_colors_survive_without_the_sidecar(stl_a: Path, stl_b: Path, tmp_path: Path):
     """The 2026-08-01 gap, closed at the source: strip the slicer sidecar
     and a spec reader still sees every part color."""

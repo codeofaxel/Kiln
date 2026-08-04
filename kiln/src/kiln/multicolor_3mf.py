@@ -95,12 +95,20 @@ _COLORED_THUMBNAIL_MAX_TRIANGLES = 200_000
 def _part_rgb_hex(color: str | None) -> str | None:
     """Normalize a part's color hint to ``#RRGGBB``, or ``None``.
 
-    Accepts bare and ``#``-prefixed hex, 6 or 8 digits (alpha dropped).
-    Anything else is not a color claim.
+    Accepts bare and ``#``-prefixed hex: 6 or 8 digits (alpha dropped),
+    and the CSS shorthands ``#RGB`` / ``#RGBA`` (each nibble doubled).
+    Anything else is not a color claim.  Shorthand matters because a
+    rejected hint here is SILENT downstream — the colorgroup is simply
+    omitted while the composing tool still reports success, so a user
+    who wrote ``#F00`` got a grey file with no hint why.
     """
     if not color:
         return None
     value = color.strip().lstrip("#")
+    if len(value) == 4:
+        value = value[:3]
+    if len(value) == 3:
+        value = "".join(ch * 2 for ch in value)
     if len(value) == 8:
         value = value[:6]
     if len(value) != 6:
