@@ -502,6 +502,72 @@ class TestRenderMultiAngle:
             render_colored_mesh_multi_angle([])
 
 
+class TestDepthBufferOcclusion:
+    """Visibility is decided per PIXEL — the case a whole-face sort cannot
+    get right.  Faces sorted by centroid depth and painted back-to-front
+    mis-paint any screen overlap whose depth order crosses; on composed
+    multi-part plates that measured 3.9-10.8% wrong-colour pixels."""
+
+    @staticmethod
+    def _crossing_walls() -> list[ColoredTriangle]:
+        red = (255, 0, 0)
+        blue = (0, 0, 255)
+        # Wall A slopes near-left to far-right (y = x/2); wall B mirrors it
+        # (y = -x/2).  Viewed along +Y they project onto the SAME screen
+        # rectangle, with A nearer on the left half and B nearer on the
+        # right — no single per-face depth key orders that correctly.
+        a = [
+            (-10.0, -5.0, 0.0), (10.0, 5.0, 0.0),
+            (10.0, 5.0, 10.0), (-10.0, -5.0, 10.0),
+        ]
+        b = [
+            (-10.0, 5.0, 0.0), (10.0, -5.0, 0.0),
+            (10.0, -5.0, 10.0), (-10.0, 5.0, 10.0),
+        ]
+        tris: list[ColoredTriangle] = []
+        for quad, color in ((a, red), (b, blue)):
+            bl, br, tr, tl = quad
+            tris.append(ColoredTriangle(v0=bl, v1=br, v2=tr, color=color))
+            tris.append(ColoredTriangle(v0=bl, v1=tr, v2=tl, color=color))
+        return tris
+
+    def test_crossing_walls_show_the_nearer_color_on_both_sides(
+        self, tmp_path: Path
+    ) -> None:
+        from PIL import Image
+
+        width, height = 200, 150
+        out = tmp_path / "crossing.png"
+        render_colored_mesh(
+            self._crossing_walls(),
+            output_path=str(out),
+            width=width,
+            height=height,
+            elevation=0.0,
+            azimuth=0.0,
+            supersample=1,
+        )
+        img = Image.open(out).convert("RGB")
+
+        # Probe via the renderer's own fit: model x spans -10..10 (the
+        # wider axis), so sf = width * margin / 20; screen x = center +
+        # model_x * sf, screen y = center - (z - 5) * sf.
+        sf = width * 0.85 / 20.0
+
+        def probe(model_x: float, model_z: float) -> tuple[int, int, int]:
+            px = int(width / 2.0 + model_x * sf)
+            py = int(height / 2.0 - (model_z - 5.0) * sf)
+            return img.getpixel((px, py))
+
+        # Both probes sit in the screen regions the old whole-face sort
+        # painted with the FARTHER wall's color (draw order put a blue
+        # triangle last over the lower half and a red one over the upper).
+        left = probe(-5.0, 2.0)   # wall A (red) is nearer at x=-5
+        right = probe(5.0, 8.0)   # wall B (blue) is nearer at x=+5
+        assert left[0] > left[2], f"left probe should be red-dominant, got {left}"
+        assert right[2] > right[0], f"right probe should be blue-dominant, got {right}"
+
+
 class TestSilhouetteContourStaysOnTheOutline:
     """The contour marks the object against the BACKGROUND, nothing else.
 

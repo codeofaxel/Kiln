@@ -338,8 +338,9 @@ def render_colored_mesh(
 ) -> RenderResult:
     """Render colored triangles to a PNG image.
 
-    Uses painter's algorithm with per-face colors, directional lighting,
-    back-face culling, and optional supersampling for anti-aliasing.
+    Uses a per-pixel depth buffer with per-face colors, directional
+    lighting, back-face culling, and optional supersampling for
+    anti-aliasing.
 
     :param triangles: List of ColoredTriangle from threemf_parser.
     :param output_path: Where to write the PNG. Defaults to a temp file.
@@ -464,18 +465,21 @@ def render_colored_mesh(
 
     face_data: list[
         tuple[
-            float,  # depth (for sorting)
             list[tuple[int, int]],  # screen polygon (3 vertices)
             tuple[int, int, int],  # lit fill color
-            tuple[int, int, int],  # outline color (darker)
-            set[int],  # which edges (0,1,2) are color boundaries
         ]
+    ] = []
+    # Rasterization inputs aligned with face_data: float screen coordinates
+    # (no int truncation) and per-vertex camera-space depth for the z-buffer.
+    raster_data: list[
+        tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]
     ] = []
 
     unique_colors: set[tuple[int, int, int]] = set()
 
     # Track which face indices survive culling for boundary detection
     _visible_faces: set[int] = set()
+    _vis_to_draw: dict[int, int] = {}
 
     for i in range(n):
         t0, t1, t2 = transformed[i]
@@ -487,49 +491,40 @@ def render_colored_mesh(
         if raw_normal[1] > 0.1:
             continue
 
+        _vis_to_draw[i] = len(face_data)
         _visible_faces.add(i)
 
-        # Depth for painter's algorithm (mean Y of the three vertices)
-        depth = (t0[1] + t1[1] + t2[1]) / 3.0
-
         # Orthographic projection: X -> screen X, Z -> screen Y (inverted)
-        pts = [
-            (
-                int(half_rw + (v[0] - center_x) * sf),
-                int(half_rh - (v[2] - center_z) * sf),
-            )
-            for v in (t0, t1, t2)
-        ]
+        fxs = tuple(half_rw + (v[0] - center_x) * sf for v in (t0, t1, t2))
+        fys = tuple(half_rh - (v[2] - center_z) * sf for v in (t0, t1, t2))
+        pts = [(int(x), int(y)) for x, y in zip(fxs, fys)]
 
         # Lighting uses SMOOTH normal for gradual shading on curves
         smooth_normal = _smooth_normals[i]
         face_lum = _luminance(tri.color)
         brightness = _compute_brightness(smooth_normal, light_cam, face_luminance=face_lum)
         lit_color = _apply_brightness(tri.color, brightness)
-        # Neutral dark outline for color boundaries — a fixed dark gray
-        # prevents colored artifacts on curved surfaces where tinted
-        # outlines (green*0.7) create visible colored lines along zone
-        # transitions.  The color contrast between zones already
-        # communicates the boundary — the line just separates cleanly.
-        outline_color = (18, 18, 18)
 
         unique_colors.add(tri.color)
-        face_data.append((depth, pts, lit_color, outline_color, set()))  # boundaries filled below
+        face_data.append((pts, lit_color))
+        raster_data.append((fxs, fys, (t0[1], t1[1], t2[1])))
 
     # --- Pass 3b: Compute color boundary edges (post-culling) ---
     # Only mark an edge as a color boundary when BOTH adjacent faces
     # are visible and have different colors.  Silhouette edges (neighbor
     # culled or missing) are NOT boundaries — they get silhouette treatment.
-    _face_boundary_edges: dict[int, set[int]] = {}
+    # Each line remembers which faces legitimately own its pixels (the two
+    # sides of the edge), so the draw pass can keep it off geometry that
+    # occludes the edge.
+    _boundary_lines: list[tuple[int, int, tuple[int, ...]]] = []
     for i in _visible_faces:
         tri = triangles[i]
-        boundary: set[int] = set()
         verts = (tri.v0, tri.v1, tri.v2)
         for j in range(3):
             edge = tuple(sorted((verts[j], verts[(j + 1) % 3])))
             neighbors = _edge_to_faces.get(edge, [])  # type: ignore[arg-type]
             has_visible_same_color = False
-            has_visible_diff_color = False
+            visible_diff: list[int] = []
             for ni in neighbors:
                 if ni == i:
                     continue
@@ -538,32 +533,27 @@ def render_colored_mesh(
                 if triangles[ni].color == tri.color:
                     has_visible_same_color = True
                 else:
-                    has_visible_diff_color = True
+                    visible_diff.append(ni)
             # Mark as boundary ONLY if there's a visible neighbor with
             # different color.  Same-color or no visible neighbor → no outline.
-            if has_visible_diff_color and not has_visible_same_color:
-                boundary.add(j)
-        _face_boundary_edges[i] = boundary
+            if visible_diff and not has_visible_same_color:
+                owners = (
+                    _vis_to_draw[i],
+                    *(_vis_to_draw[ni] for ni in visible_diff),
+                )
+                _boundary_lines.append((_vis_to_draw[i], j, owners))
 
-    # Patch boundary sets into face_data (indexed by draw order)
-    _vis_list = sorted(_visible_faces)
-    _vis_to_draw: dict[int, int] = {}
-    draw_idx = 0
-    for i in range(n):
-        if i in _visible_faces:
-            _vis_to_draw[i] = draw_idx
-            draw_idx += 1
-    for i, boundary in _face_boundary_edges.items():
-        if boundary and i in _vis_to_draw:
-            di = _vis_to_draw[i]
-            old = face_data[di]
-            face_data[di] = (old[0], old[1], old[2], old[3], boundary)
-
-    # --- Pass 4: Sort back-to-front and draw ---
-
-    # Sort by depth descending (farthest first = largest Y first)
-    face_data.sort(key=lambda fd: fd[0], reverse=True)
-
+    # --- Pass 4: Depth-buffered rasterization ---
+    #
+    # One depth per PIXEL, not one per face: the previous pass sorted whole
+    # faces by centroid depth and painted back-to-front, and a single sort
+    # key cannot order faces whose screen overlap spans crossing depth
+    # ranges.  On a single watertight mesh that cost ~25 stray pixels; on
+    # composed multi-part plates — where long thin parts from different
+    # objects interleave — it measured 3.9-10.8% wrong-colour pixels, a
+    # solid wedge of one part's colour across another, in a feature whose
+    # whole claim is which colour goes where.
+    import numpy as np
     from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
     img = Image.new("RGB", (rw, rh), background)
@@ -583,16 +573,69 @@ def render_colored_mesh(
         lb = max(0, min(255, bg_b + shift))
         draw.line([(0, row), (rw, row)], fill=(lr, lg, lb))
 
-    for _depth, pts, fill, outline, boundary_edges in face_data:
-        # Fill the polygon without any outline — clean fill only
-        draw.polygon(pts, fill=fill)
+    # The camera looks along +Y, so smaller camera-space Y is nearer;
+    # the winner at each pixel is the face with the minimum interpolated
+    # depth among those covering the pixel's center.
+    zbuf = np.full((rh, rw), np.inf, dtype=np.float32)
+    owner = np.full((rh, rw), -1, dtype=np.int32)
+    for di, (fxs, fys, deps) in enumerate(raster_data):
+        x0 = max(int(min(fxs)), 0)
+        y0 = max(int(min(fys)), 0)
+        x1 = min(int(max(fxs)) + 1, rw)
+        y1 = min(int(max(fys)) + 1, rh)
+        if x0 >= x1 or y0 >= y1:
+            continue
+        ax, ay = fxs[0], fys[0]
+        bx, by = fxs[1], fys[1]
+        cx, cy = fxs[2], fys[2]
+        denom = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
+        if abs(denom) < 1e-12:
+            continue  # edge-on: zero screen area
+        ys_grid, xs_grid = np.mgrid[y0:y1, x0:x1]
+        px = xs_grid + 0.5  # pixel centers
+        py = ys_grid + 0.5
+        w0 = ((by - cy) * (px - cx) + (cx - bx) * (py - cy)) / denom
+        w1 = ((cy - ay) * (px - cx) + (ax - cx) * (py - cy)) / denom
+        w2 = 1.0 - w0 - w1
+        # The epsilon keeps shared-edge pixels covered by at least one of
+        # the two faces regardless of which side of the edge the center
+        # falls on — without it, watertight surfaces show background
+        # pinholes along triangle seams.
+        inside = (w0 >= -1e-7) & (w1 >= -1e-7) & (w2 >= -1e-7)
+        if not inside.any():
+            continue
+        depth = w0 * deps[0] + w1 * deps[1] + w2 * deps[2]
+        tile_z = zbuf[y0:y1, x0:x1]
+        tile_owner = owner[y0:y1, x0:x1]
+        win = inside & (depth < tile_z)
+        tile_z[win] = depth[win].astype(np.float32)
+        tile_owner[win] = di
 
-        # Draw outline ONLY on color-boundary edges (where neighbor
-        # has a different color).  This eliminates same-color seams.
-        for edge_idx in boundary_edges:
-            p0 = pts[edge_idx]
-            p1 = pts[(edge_idx + 1) % 3]
-            draw.line([p0, p1], fill=outline, width=1)
+    arr = np.asarray(img, dtype=np.uint8).copy()
+    if face_data:
+        colors = np.array([fill for _, fill in face_data], dtype=np.uint8)
+        drawn = owner >= 0
+        arr[drawn] = colors[owner[drawn]]
+
+    # Boundary lines: a neutral dark outline where different-colored faces
+    # meet — a fixed dark gray prevents colored artifacts on curved
+    # surfaces where tinted outlines (color*0.7) create visible colored
+    # lines along zone transitions.  Drawn only where one of the edge's own
+    # faces won the pixel, so an occluding part in front is never striped.
+    outline_rgb = np.array((18, 18, 18), dtype=np.uint8)
+    for di, edge_idx, owners in _boundary_lines:
+        fxs, fys, _deps = raster_data[di]
+        ex0, ey0 = fxs[edge_idx], fys[edge_idx]
+        ex1, ey1 = fxs[(edge_idx + 1) % 3], fys[(edge_idx + 1) % 3]
+        steps = int(max(abs(ex1 - ex0), abs(ey1 - ey0))) + 1
+        lx = np.rint(np.linspace(ex0, ex1, steps)).astype(np.int64)
+        ly = np.rint(np.linspace(ey0, ey1, steps)).astype(np.int64)
+        inb = (lx >= 0) & (lx < rw) & (ly >= 0) & (ly < rh)
+        lx, ly = lx[inb], ly[inb]
+        vis = np.isin(owner[ly, lx], owners)
+        arr[ly[vis], lx[vis]] = outline_rgb
+
+    img = Image.fromarray(arr)
 
     # --- Adaptive silhouette contour ---
     # Draw a subtle edge around the object outline so dark materials
@@ -616,7 +659,7 @@ def render_colored_mesh(
     # object at all: the ring is derived from the drawn mask's own border.
     _silhouette = Image.new("L", (rw, rh), 0)
     _sil_draw = ImageDraw.Draw(_silhouette)
-    for _depth, pts, _fill, _outline, _be in face_data:
+    for pts, _fill in face_data:
         _sil_draw.polygon(pts, fill=255)
 
     # Inner border = mask minus its erosion.  Width tracks the supersample
@@ -662,7 +705,7 @@ def render_colored_mesh(
     # distinct colors (informative) with decent contrast (readable).
     # color_diversity dominates so isometric (3+ colors visible) beats
     # a single-face view even if that face has extreme contrast.
-    _pixel_lums = [_luminance(f) for _, _, f, _, _ in face_data]
+    _pixel_lums = [_luminance(f) for _, f in face_data]
     contrast = (max(_pixel_lums) - min(_pixel_lums)) if _pixel_lums else 0.0
     # Quality = color diversity (dominant) + contrast (tiebreaker).
     # A view showing 3 colors is always better than one showing 1 color
