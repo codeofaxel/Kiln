@@ -424,3 +424,153 @@ class TestSearchDesignVersions:
         assert result["ok"] is True
         assert result["count"] == 0
         assert result["versions"] == []
+
+
+# ---------------------------------------------------------------------------
+# design_id is caller-supplied, and ~/.kiln/designs is per-machine
+# ---------------------------------------------------------------------------
+#
+# Two defects, found 2026-08-03, both in the same two lines.
+#
+# ``_design_dir`` built its path by f-string, so a design_id of "../../pwned"
+# resolved OUTSIDE the library and ``_ensure_design_dir`` then os.makedirs()'d
+# it — verified creating a real directory outside ~/.kiln before the fix.
+#
+# And nothing asked whether this machine is allowed to answer for a design
+# library at all.  The hosted server runs ONE ~/.kiln for every customer with
+# no persistent volume, so a save there collides with a stranger's and is
+# discarded on the next deploy, while ``search_design_versions`` — which walks
+# every directory under the root — hands one customer another's design names,
+# prompts and notes.
+#
+# Both checks live on the shared resolvers rather than on tool arguments,
+# because two of the six doors never receive a design_id directly: they parse
+# it out of a "design_id:N" reference.
+
+
+class TestDesignIdCannotEscapeTheRoot:
+    """A caller-supplied name must not select a directory outside the root."""
+
+    @pytest.mark.parametrize(
+        "hostile",
+        ["../../pwned", "../escaped", "..", ".", "a/b", "/etc", "", "   "],
+    )
+    def test_traversal_is_refused(self, monkeypatch, tmp_path, hostile):
+        monkeypatch.setattr("kiln.plugins.version_tools._DESIGNS_ROOT", str(tmp_path))
+        with pytest.raises(ValueError):
+            _design_dir(hostile)
+
+    @pytest.mark.parametrize(
+        "hostile", ["../../pwned", "..", "a/b", "/etc"]
+    )
+    def test_ensure_creates_nothing_outside_the_root(
+        self, monkeypatch, tmp_path, hostile
+    ):
+        """The sharp end: this call is the one that os.makedirs()."""
+        import os
+
+        root = tmp_path / "designs"
+        root.mkdir()
+        monkeypatch.setattr("kiln.plugins.version_tools._DESIGNS_ROOT", str(root))
+        before = set(os.listdir(tmp_path))
+        with pytest.raises(ValueError):
+            _ensure_design_dir(hostile)
+        assert set(os.listdir(tmp_path)) == before, (
+            "a refused design_id still created something next to the root"
+        )
+        assert not list(root.iterdir()), "a refused design_id created a directory"
+
+    def test_ordinary_ids_are_untouched(self, monkeypatch, tmp_path):
+        """The check must cost a real user nothing.
+
+        These are the shapes actually on disk in a real library — plain
+        slugs with hyphens, digits and underscores.
+        """
+        monkeypatch.setattr("kiln.plugins.version_tools._DESIGNS_ROOT", str(tmp_path))
+        for good in ("kiln-coaster", "my-mug-v3", "monitor-stand-450", "ok1", "a_b"):
+            assert _design_dir(good).endswith(good)
+            assert _ensure_design_dir(good).endswith(good)
+
+
+class TestDesignLibraryIsPerMachine:
+    """The hosted server has no per-account library, so it must not pretend."""
+
+    def test_every_resolver_refuses_on_hosted(self, monkeypatch, tmp_path):
+        from kiln.plugins.version_tools import _designs_root
+
+        monkeypatch.setattr("kiln.plugins.version_tools._DESIGNS_ROOT", str(tmp_path))
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        for call in (
+            lambda: _designs_root(),
+            lambda: _design_dir("my-mug-v3"),
+            lambda: _ensure_design_dir("my-mug-v3"),
+        ):
+            with pytest.raises(ValueError) as excinfo:
+                call()
+            assert "local Kiln install" in str(excinfo.value), (
+                "the refusal must name where the tool DOES work, or it "
+                "reads as Kiln being broken"
+            )
+
+    def test_local_install_is_unaffected(self, monkeypatch, tmp_path):
+        """The operator IS the caller locally; this must cost them nothing."""
+        monkeypatch.setattr("kiln.plugins.version_tools._DESIGNS_ROOT", str(tmp_path))
+        monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
+        assert _ensure_design_dir("my-mug-v3").endswith("my-mug-v3")
+
+    def test_search_does_not_read_a_shared_library(self, monkeypatch, tmp_path):
+        """The read side, which is worse than the write side.
+
+        ``search_design_versions`` walks every directory under the root, so
+        on a shared box it is the door that returns other customers' design
+        names, prompts and notes.  It resolves the root itself, which is why
+        it needed the shared resolver rather than a second expanduser.
+        """
+        monkeypatch.setattr("kiln.plugins.version_tools._DESIGNS_ROOT", str(tmp_path))
+        (tmp_path / "someone-elses-design").mkdir()
+        mcp = _make_mcp_with_tools()
+
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        result = mcp["search_design_versions"](query="a")
+        assert result["ok"] is False, (
+            "search returned a result set from a library shared with every "
+            "other tenant"
+        )
+        assert "local Kiln install" in result["error"]
+
+    def test_tools_return_an_envelope_not_a_stack_trace(self, monkeypatch, tmp_path):
+        """The refusal is a ValueError so the tools' own handlers shape it.
+
+        Every tool here already funnels exceptions into {"ok": False,
+        "error": ...}, which is why the fix needed no per-tool branch — but
+        that only holds while it stays true, so it is asserted rather than
+        assumed.
+        """
+        monkeypatch.setattr("kiln.plugins.version_tools._DESIGNS_ROOT", str(tmp_path))
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        mcp = _make_mcp_with_tools()
+
+        for name, kwargs in (
+            ("save_design_version", {"design_id": "m", "scad_source": "cube(1);"}),
+            ("list_design_versions", {"design_id": "m"}),
+            ("rollback_design_version", {"design_id": "m", "to_version_id": "m:1"}),
+            ("get_design_version", {"version_id": "m:1"}),
+            ("search_design_versions", {"query": "a"}),
+        ):
+            result = mcp[name](**kwargs)
+            assert isinstance(result, dict), f"{name} did not return a dict"
+            assert result.get("ok") is False, f"{name} reported success"
+            assert result.get("error"), f"{name} gave no reason"
+
+    def test_a_traversal_id_also_comes_back_as_an_envelope(
+        self, monkeypatch, tmp_path
+    ):
+        """Same contract for the other new refusal, on a local install."""
+        monkeypatch.setattr("kiln.plugins.version_tools._DESIGNS_ROOT", str(tmp_path))
+        monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
+        mcp = _make_mcp_with_tools()
+        result = mcp["save_design_version"](
+            design_id="../../pwned", scad_source="cube(1);"
+        )
+        assert result.get("ok") is False
+        assert "simple name" in result.get("error", "")
