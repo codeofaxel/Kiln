@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -453,6 +455,253 @@ def _maybe_overlay_calibration(
     return merged, cal_used
 
 
+# ---------------------------------------------------------------------------
+# Multicolor-flatten advisory
+#
+# A multicolor 3MF (per-object extruder assignments, or a painted
+# single object) sliced through a single-filament configuration prints
+# ENTIRELY in one filament — PrusaSlicer honors the geometry and drops
+# the color story (measured: two-color file, default single-extruder
+# config → 0 tool changes, second filament 0.00 mm).  Before this
+# advisory the tool returned a bare green success and the user found
+# out at the printer.  Warn, never block: slicing has already
+# succeeded when the advisory runs, and a detection failure of any
+# kind reads as "not multicolor".
+# ---------------------------------------------------------------------------
+
+# Slicer-native painted-model attributes: BambuStudio/OrcaSlicer write
+# ``paint_color`` and PrusaSlicer writes ``slic3rpe:mmu_segmentation``
+# on <triangle> elements.
+_PAINT_ATTRIBUTE_MARKERS = (b"paint_color", b"mmu_segmentation")
+
+# Per-object extruder assignment in the slicer sidecars
+# (Metadata/model_settings.config for BambuStudio,
+# Metadata/Slic3r_PE_model.config for the PrusaSlicer family).
+_SIDECAR_EXTRUDER_RE = re.compile(rb'key="extruder"\s+value="(\d+)"')
+
+# Per-build-item extruder attribute in the model XML (PrusaSlicer also
+# reads/writes this form).
+_ITEM_EXTRUDER_RE = re.compile(rb'slic3rpe:extruder="(\d+)"')
+
+# One palette entry inside <m:colorgroup>.  The trailing whitespace
+# class keeps ``<m:colorgroup`` itself from matching.
+_COLORGROUP_COLOR_RE = re.compile(rb"<m:color\s")
+
+# A tool-select command at line start in G-code (``T0``, ``T1`` ...).
+# Word boundary so ``T1`` matches but a hypothetical ``T1x`` doesn't;
+# mid-line forms like ``M104 T0 S200`` are heater targeting, not tool
+# changes, and correctly don't match.
+_GCODE_TOOL_RE = re.compile(r"T(\d+)\b")
+
+_SIDECAR_CONFIG_NAMES = {
+    "metadata/model_settings.config",
+    "metadata/slic3r_pe_model.config",
+}
+
+
+def _detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
+    """Cheap structural scan: does this 3MF ask for more than one filament?
+
+    Detects both multicolor forms without a full model parse (mirrors the
+    byte-scan idiom in ``threemf_parser.object_display_colors``):
+
+    * **multi-object** — two-plus DISTINCT per-object extruder values in
+      the slicer sidecars or on ``slic3rpe:extruder`` build items;
+    * **painted single object** — two-plus DISTINCT slicer paint states
+      (``paint_color`` / ``mmu_segmentation`` attribute values: a painting
+      that is one state everywhere is one filament, and flattening loses
+      nothing) or a two-plus-color ``<m:colorgroup>`` palette in the
+      model XML.
+
+    Returns an evidence dict when multicolor, else ``None``.  NEVER
+    raises: this feeds an advisory, so a corrupt archive, odd layout, or
+    any other trouble reads as "not multicolor" and slicing proceeds
+    untouched.
+    """
+    try:
+        extruders: set[int] = set()
+        paint_attribute: str | None = None
+        paint_states: set[bytes] = set()
+        palette_colors = 0
+        with zipfile.ZipFile(input_path) as zf:
+            for member in zf.namelist():
+                low = member.lower()
+                if low in _SIDECAR_CONFIG_NAMES:
+                    raw = zf.read(member)
+                    extruders.update(
+                        int(m) for m in _SIDECAR_EXTRUDER_RE.findall(raw)
+                    )
+                elif low.endswith(".model"):
+                    raw = zf.read(member)
+                    extruders.update(
+                        int(m) for m in _ITEM_EXTRUDER_RE.findall(raw)
+                    )
+                    for marker in _PAINT_ATTRIBUTE_MARKERS:
+                        values = set(
+                            re.findall(marker + b'="([^"]*)"', raw)
+                        )
+                        values.discard(b"")
+                        if len(values) >= 2:
+                            paint_attribute = marker.decode()
+                            paint_states |= values
+                            break
+                    palette_colors = max(
+                        palette_colors, len(_COLORGROUP_COLOR_RE.findall(raw)),
+                    )
+
+        evidence: dict[str, Any] = {}
+        if len(extruders) >= 2:
+            evidence["extruders"] = sorted(extruders)
+        if paint_attribute is not None:
+            evidence["paint_attribute"] = paint_attribute
+            evidence["paint_states"] = len(paint_states)
+        if palette_colors >= 2:
+            evidence["palette_colors"] = palette_colors
+        return evidence or None
+    except Exception:  # noqa: BLE001 — advisory only, never break slicing
+        return None
+
+
+def _profile_filament_slots(profile_path: str | None) -> int:
+    """How many filament slots the effective slicer config can express.
+
+    PrusaSlicer INI convention: per-extruder keys carry one
+    comma-separated value per extruder, so ``nozzle_diameter = 0.4,0.4``
+    is a two-extruder config.  No profile means the slicer's built-in
+    defaults, which are single-extruder — as is every bundled Kiln
+    profile today.  An unreadable profile reads as 1 (if it were truly
+    missing, ``slice_file`` would have failed before this runs).
+    """
+    if not profile_path:
+        return 1
+    try:
+        with open(profile_path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                key, sep, value = line.partition("=")
+                if sep and key.strip() == "nozzle_diameter":
+                    return max(
+                        1, len([v for v in value.split(",") if v.strip()]),
+                    )
+    except OSError:
+        pass
+    return 1
+
+
+def _count_gcode_tools(gcode_path: str | None) -> tuple[int, int] | None:
+    """``(tool_changes, distinct_tools)`` from one pass over the G-code.
+
+    Counts line-start ``T<n>`` commands — the form PrusaSlicer emits at
+    every filament change.  A tool CHANGE is a T command selecting a
+    different tool than the active one (the first selection arms, it
+    doesn't change).  Returns ``None`` when the file can't be read, so
+    the caller treats "couldn't measure" as no evidence either way.
+    """
+    if not gcode_path:
+        return None
+    try:
+        tools: set[int] = set()
+        changes = 0
+        active: int | None = None
+        with open(gcode_path, errors="replace") as fh:
+            for line in fh:
+                m = _GCODE_TOOL_RE.match(line)
+                if not m:
+                    continue
+                n = int(m.group(1))
+                tools.add(n)
+                if active is not None and n != active:
+                    changes += 1
+                active = n
+        return changes, len(tools)
+    except OSError:
+        return None
+
+
+def _multicolor_flatten_advisory(
+    input_path: str,
+    profile_path: str | None,
+    gcode_path: str | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Advisory for a multicolor 3MF that just sliced down to one filament.
+
+    Returns ``(info_block, warning_text)`` when the input 3MF carries a
+    multicolor story the effective configuration cannot express (single
+    filament slot, and the produced G-code — when readable — confirms no
+    second tool was used).  Returns ``(None, None)`` when the input isn't
+    a multicolor 3MF, the config expresses two-plus filaments, or the
+    G-code measurably uses two-plus tools.  Never raises and never
+    blocks — the slice already succeeded; this only makes the result
+    honest.
+    """
+    try:
+        if not input_path.lower().endswith(".3mf"):
+            return None, None
+        evidence = _detect_3mf_multicolor(input_path)
+        if evidence is None:
+            return None, None
+
+        # How many filaments the FILE asks for vs how many the slice could
+        # express.  PrusaSlicer clamps gracefully (measured: 6 paint states
+        # on a 2-extruder config slices exit-0 with the excess states folded
+        # onto the available tools), so partial flattening is silent too —
+        # 6 colors quietly become 2.  Warn whenever colors are LOST, not
+        # only when everything collapses to one.
+        colors_needed = max(
+            len(evidence.get("extruders") or ()),
+            int(evidence.get("paint_states") or 0),
+            int(evidence.get("palette_colors") or 0),
+        )
+        slots = _profile_filament_slots(profile_path)
+        counted = _count_gcode_tools(gcode_path)
+        expressed = max(slots, counted[1] if counted is not None else 0)
+        if expressed >= colors_needed:
+            return None, None
+
+        block: dict[str, Any] = {
+            "multicolor_input": True,
+            "colors_flattened": True,
+            "colors_in_file": colors_needed,
+            "profile_filament_slots": slots,
+            **evidence,
+        }
+        if counted is not None:
+            block["tool_changes"] = counted[0]
+            block["distinct_tools"] = counted[1]
+
+        if "extruders" in evidence:
+            carries = (
+                f"parts assigned to {len(evidence['extruders'])} different "
+                "filaments"
+            )
+        elif "paint_attribute" in evidence:
+            carries = f"painted-on colors in {colors_needed} filaments"
+        else:
+            carries = f"a {evidence['palette_colors']}-color palette"
+        measured = (
+            f" (measured: {counted[0]} tool changes in the G-code)"
+            if counted is not None
+            else ""
+        )
+        if expressed <= 1:
+            lost = f"the whole object will print in ONE filament{measured}"
+        else:
+            lost = (
+                f"only {expressed} filaments were available, so its "
+                f"{colors_needed} colors were folded together{measured}"
+            )
+        warning = (
+            f"Multicolor flattened: this 3MF carries {carries}, but {lost}. "
+            "To keep the colors, slice this same 3MF in a multi-material "
+            "slicer (BambuStudio or OrcaSlicer with an AMS/multi-filament "
+            "printer profile) — the color-to-filament assignments are "
+            "already in the file — or rebuild the plate with the "
+            "multi_material_print tool to assign a material per part."
+        )
+        return block, warning
+    except Exception:  # noqa: BLE001 — advisory only, never break slicing
+        return None, None
+
+
 class _SlicerToolsPlugin:
     """Slicer tools: slice, reslice, find slicer, list/get profiles.
 
@@ -617,6 +866,16 @@ class _SlicerToolsPlugin:
                                 response["profile_validation_warning"] = "Profile compatibility note: " + "; ".join(
                                     validation["warnings"]
                                 )
+
+                # Honest-messaging advisory: a multicolor 3MF sliced with
+                # a single-filament config prints entirely in one filament.
+                # Say so instead of returning a bare green success.
+                mc_block, mc_warning = _multicolor_flatten_advisory(
+                    input_path, effective_profile, _gcode_path,
+                )
+                if mc_warning:
+                    response["multicolor_flattened"] = mc_block
+                    response.setdefault("warnings", []).append(mc_warning)
 
                 # (Slice telemetry is recorded inside slicer.slice_file —
                 # the chokepoint every slicing path shares — so no
@@ -858,6 +1117,14 @@ class _SlicerToolsPlugin:
                             validation_result["warnings"]
                         )
 
+                # Multicolor-flatten advisory — same wire as slice_model.
+                mc_block, mc_warning = _multicolor_flatten_advisory(
+                    input_abs, effective_profile, _gcode_path,
+                )
+                if mc_warning:
+                    response["multicolor_flattened"] = mc_block
+                    response.setdefault("warnings", []).append(mc_warning)
+
                 return response
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
@@ -985,6 +1252,11 @@ class _SlicerToolsPlugin:
                     profile=profile,
                     printer_id=printer_id,
                 )
+
+                # The as-given input, for the multicolor-flatten advisory:
+                # the validation gate below may swap input_path for a
+                # repaired copy that no longer carries the color story.
+                _multicolor_source = input_path
 
                 # --- Pro+ calibration overlay ---
                 # Mirror slice_model: when kiln-pro is installed AND the user
@@ -1371,6 +1643,16 @@ class _SlicerToolsPlugin:
                     resp["warnings"] = ams_routing_warnings
                 if cal_used is not None:
                     resp["calibration_used"] = cal_used
+
+                # Multicolor-flatten advisory — same wire as slice_model.
+                # The print already started (warn, never block); the user
+                # can still cancel before wasting a spool.
+                mc_block, mc_warning = _multicolor_flatten_advisory(
+                    _multicolor_source, effective_profile, result.output_path,
+                )
+                if mc_warning:
+                    resp["multicolor_flattened"] = mc_block
+                    resp.setdefault("warnings", []).append(mc_warning)
 
                 # kiln-pro hook: when installed, generate an assembly
                 # manual alongside the print and add it to the

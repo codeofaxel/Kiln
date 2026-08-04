@@ -15,7 +15,6 @@ from kiln.multicolor_3mf import (
     compose_multicolor_3mf,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
@@ -594,3 +593,574 @@ def test_compose_hardware_warnings_in_result(stl_a: Path, stl_b: Path, tmp_path:
     assert result["success"] is True
     assert "hardware_warnings" in result
     assert any("hardened" in w.lower() for w in result["hardware_warnings"])
+
+
+# ---------------------------------------------------------------------------
+# Spec-visible colors — colorgroup + per-triangle references
+# ---------------------------------------------------------------------------
+
+
+def _model_xml(path: str) -> str:
+    with zipfile.ZipFile(path) as zf:
+        return zf.read("3D/3dmodel.model").decode("utf-8")
+
+
+def test_compose_writes_spec_visible_colorgroup(stl_a: Path, stl_b: Path, tmp_path: Path):
+    """Colors land where spec-compliant readers look, not only in the
+    slicer sidecar — one colorgroup entry per distinct part color, and a
+    reference on every triangle of a colored object (the exact shape
+    three.js' 3MFLoader bakes to vertex colors)."""
+    out = tmp_path / "out.3mf"
+    compose_multicolor_3mf(
+        [
+            ColorPart(stl_path=str(stl_a), extruder=1, color="#f72323"),
+            ColorPart(stl_path=str(stl_b), extruder=2, color="2366F7"),  # bare hex too
+        ],
+        output_path=str(out),
+    )
+    xml = _model_xml(str(out))
+    assert '<m:colorgroup id="3">' in xml  # objects 1..2, group takes the next id
+    assert '<m:color color="#F72323"/>' in xml
+    assert '<m:color color="#2366F7"/>' in xml
+    assert 'pid="3" p1="0"' in xml and 'pid="3" p1="1"' in xml
+    # Deliberately NO object-level pid — the proven three.js shape is
+    # per-triangle references only.
+    assert "pindex=" not in xml
+
+
+def test_compose_shares_one_palette_entry_per_distinct_color(
+    stl_a: Path, stl_b: Path, tmp_path: Path
+):
+    out = tmp_path / "out.3mf"
+    compose_multicolor_3mf(
+        [
+            ColorPart(stl_path=str(stl_a), extruder=1, color="#F72323"),
+            ColorPart(stl_path=str(stl_b), extruder=2, color="#f72323"),
+        ],
+        output_path=str(out),
+    )
+    assert _model_xml(str(out)).count("<m:color ") == 1
+
+
+def test_compose_without_colors_writes_no_colorgroup(stl_a: Path, tmp_path: Path):
+    out = tmp_path / "out.3mf"
+    compose_multicolor_3mf(
+        [ColorPart(stl_path=str(stl_a), extruder=1)], output_path=str(out),
+    )
+    xml = _model_xml(str(out))
+    assert "colorgroup" not in xml
+    assert "p1=" not in xml
+
+
+def test_compose_invalid_color_hint_is_not_a_color_claim(stl_a: Path, tmp_path: Path):
+    out = tmp_path / "out.3mf"
+    compose_multicolor_3mf(
+        [ColorPart(stl_path=str(stl_a), extruder=1, color="not-a-color")],
+        output_path=str(out),
+    )
+    assert "colorgroup" not in _model_xml(str(out))
+
+
+def test_spec_colors_survive_without_the_sidecar(stl_a: Path, stl_b: Path, tmp_path: Path):
+    """The 2026-08-01 gap, closed at the source: strip the slicer sidecar
+    and a spec reader still sees every part color."""
+    from kiln.threemf_parser import parse_colored_3mf
+
+    out = tmp_path / "out.3mf"
+    compose_multicolor_3mf(
+        [
+            ColorPart(stl_path=str(stl_a), extruder=1, color="#F72323"),
+            ColorPart(stl_path=str(stl_b), extruder=2, color="#2366F7"),
+        ],
+        output_path=str(out),
+    )
+    stripped = tmp_path / "stripped.3mf"
+    with zipfile.ZipFile(out) as src, zipfile.ZipFile(stripped, "w") as dst:
+        for name in src.namelist():
+            if name != "Metadata/model_settings.config":
+                dst.writestr(name, src.read(name))
+    mesh = parse_colored_3mf(str(stripped))
+    assert mesh.colors_found is True
+    assert {t.color for t in mesh.triangles} == {(247, 35, 35), (35, 102, 247)}
+
+
+# ---------------------------------------------------------------------------
+# Thumbnail — the colored render, with the compose never held hostage
+# ---------------------------------------------------------------------------
+
+
+def test_thumbnail_is_the_colored_render(stl_a: Path, stl_b: Path, tmp_path: Path):
+    """The embedded plate_1.png shows the parts in their real colors —
+    a grey thumbnail undersells a multicolor print on every slicer LCD."""
+    Image = pytest.importorskip("PIL.Image", reason="colored renderer needs PIL")
+
+    out = tmp_path / "out.3mf"
+    compose_multicolor_3mf(
+        [
+            ColorPart(stl_path=str(stl_a), extruder=1, color="#F72323"),
+            ColorPart(stl_path=str(stl_b), extruder=2, color="#2366F7"),
+        ],
+        output_path=str(out),
+    )
+    with zipfile.ZipFile(out) as zf:
+        assert "Metadata/plate_1.png" in zf.namelist()
+        import io
+
+        img = Image.open(io.BytesIO(zf.read("Metadata/plate_1.png"))).convert("RGB")
+    pixels = [img.getpixel((x, y)) for y in range(0, img.height, 4) for x in range(0, img.width, 4)]
+    reddish = sum(1 for r, g, b in pixels if r > 140 and g < 90 and b < 90)
+    bluish = sum(1 for r, g, b in pixels if b > 140 and r < 90 and g < 110)
+    assert reddish > 0 and bluish > 0, (
+        "the embedded thumbnail carries neither part color — it regressed to grey"
+    )
+
+
+def test_thumbnail_failure_never_fails_the_compose(
+    stl_a: Path, tmp_path: Path, monkeypatch
+):
+    import kiln.multicolor_3mf as m3
+
+    monkeypatch.setattr(
+        m3, "_render_colored_thumbnail",
+        lambda parsed: (_ for _ in ()).throw(RuntimeError("no renderer")),
+    )
+    monkeypatch.setattr(m3, "_generate_thumbnail_openscad", lambda paths: None)
+    out = tmp_path / "out.3mf"
+    result = compose_multicolor_3mf(
+        [ColorPart(stl_path=str(stl_a), extruder=1, color="#F72323")],
+        output_path=str(out),
+    )
+    assert result["success"] is True
+    with zipfile.ZipFile(out) as zf:
+        assert "Metadata/plate_1.png" not in zf.namelist()
+
+
+# ---------------------------------------------------------------------------
+# The PrusaSlicer channel and the Bambu-family version stamp
+# ---------------------------------------------------------------------------
+
+
+def test_compose_writes_the_prusa_model_config(stl_a: Path, stl_b: Path, tmp_path: Path):
+    """PrusaSlicer reads per-object extruders ONLY from
+    Metadata/Slic3r_PE_model.config — without it a multicolor 3MF prints
+    entirely with extruder 1 (measured: zero tool changes, second filament
+    0.00 mm).  Every object gets a full-range volume plus the extruder at
+    both volume and object level."""
+    out = tmp_path / "out.3mf"
+    compose_multicolor_3mf(
+        [
+            ColorPart(stl_path=str(stl_a), extruder=1, name="zone_0"),
+            ColorPart(stl_path=str(stl_b), extruder=2, name="zone_1"),
+        ],
+        output_path=str(out),
+    )
+    with zipfile.ZipFile(out) as zf:
+        cfg = zf.read("Metadata/Slic3r_PE_model.config").decode()
+    # stl_a has 2 triangles (deduped), stl_b has 1
+    assert '<object id="1" instances_count="1">' in cfg
+    assert '<volume firstid="0" lastid="1">' in cfg
+    assert '<object id="2" instances_count="1">' in cfg
+    assert '<volume firstid="0" lastid="0">' in cfg
+    for level in ("volume", "object"):
+        assert f'<metadata type="{level}" key="extruder" value="1"/>' in cfg
+        assert f'<metadata type="{level}" key="extruder" value="2"/>' in cfg
+    assert 'value="zone_0"' in cfg and 'value="zone_1"' in cfg
+
+
+def test_prusa_config_escapes_part_names(stl_a: Path, tmp_path: Path):
+    out = tmp_path / "out.3mf"
+    compose_multicolor_3mf(
+        [ColorPart(stl_path=str(stl_a), extruder=1, name='a<b>&"c"')],
+        output_path=str(out),
+    )
+    with zipfile.ZipFile(out) as zf:
+        cfg = zf.read("Metadata/Slic3r_PE_model.config").decode()
+    assert "a&lt;b&gt;&amp;&quot;c&quot;" in cfg
+    assert "<b>" not in cfg
+
+
+def test_compose_stamps_the_bambu_family_version(stl_a: Path, tmp_path: Path):
+    """Without the stamp OrcaSlicer misreads the file as 'generated by an
+    old OrcaSlicer version' and warns it loads geometry only.  The key is
+    inert in both forks' readers (sets an integer, never the is-project
+    flag), so BambuStudio's third-party color import is untouched."""
+    out = tmp_path / "out.3mf"
+    compose_multicolor_3mf(
+        [ColorPart(stl_path=str(stl_a), extruder=1)], output_path=str(out),
+    )
+    assert '<metadata name="BambuStudio:3mfVersion">1</metadata>' in _model_xml(str(out))
+
+
+# ---------------------------------------------------------------------------
+# compose_painted_3mf — one watertight object, colors per triangle
+# ---------------------------------------------------------------------------
+
+
+def _cube_soup(edge: float = 10.0):
+    """A closed cube as a triangle soup (12 triangles, outward winding)."""
+    lo, hi = 0.0, edge
+    c = {
+        (x, y, z): (lo if x == 0 else hi, lo if y == 0 else hi, lo if z == 0 else hi)
+        for x in (0, 1) for y in (0, 1) for z in (0, 1)
+    }
+    quads = [
+        # (corner indices as (x,y,z) bits), outward winding per face
+        (((0,0,0), (0,1,0), (1,1,0), (1,0,0))),   # bottom (z=lo, -z)
+        (((0,0,1), (1,0,1), (1,1,1), (0,1,1))),   # top (+z)
+        (((0,0,0), (1,0,0), (1,0,1), (0,0,1))),   # front (-y)
+        (((1,0,0), (1,1,0), (1,1,1), (1,0,1))),   # right (+x)
+        (((1,1,0), (0,1,0), (0,1,1), (1,1,1))),   # back (+y)
+        (((0,1,0), (0,0,0), (0,0,1), (0,1,1))),   # left (-x)
+    ]
+    tris = []
+    for a, b, c2, d in quads:
+        tris.append((c[a], c[b], c[c2]))
+        tris.append((c[a], c[c2], c[d]))
+    return tris
+
+
+def _painted_model_xml(path: str) -> str:
+    with zipfile.ZipFile(path) as zf:
+        return zf.read("3D/3dmodel.model").decode("utf-8")
+
+
+class TestComposePainted:
+    def test_one_watertight_object_with_per_triangle_colors(self, tmp_path: Path):
+        from kiln.multicolor_3mf import compose_painted_3mf
+
+        tris = _cube_soup()
+        colors = ["#F72323" if i < 2 else "#2366F7" for i in range(len(tris))]
+        out = tmp_path / "painted.3mf"
+        result = compose_painted_3mf(tris, colors, output_path=str(out))
+        assert result["success"] is True
+        assert result["form"] == "painted_single_object"
+        # exact-coordinate dedup: a closed cube has 8 vertices, not 36
+        assert result["total_vertices"] == 8
+        assert result["total_triangles"] == 12
+        assert result["colors"] == ["#F72323", "#2366F7"]
+
+        xml = _painted_model_xml(str(out))
+        assert xml.count("<object ") == 1
+        assert xml.count('pid="2" p1="0"') == 2   # the two red faces
+        assert xml.count('pid="2" p1="1"') == 10
+        assert '<metadata name="BambuStudio:3mfVersion">1</metadata>' in xml
+
+        # The emitted object is closed: every directed edge appears exactly
+        # once with its reverse — the property slicers call manifold.
+        import re
+
+        tri_rows = re.findall(
+            r'<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"', xml,
+        )
+        edges: dict[tuple[str, str], int] = {}
+        for a, b, c in tri_rows:
+            for e in ((a, b), (b, c), (c, a)):
+                edges[e] = edges.get(e, 0) + 1
+        assert all(count == 1 for count in edges.values())
+        assert all((b, a) in edges for (a, b) in edges)
+
+    def test_uncolored_triangles_carry_no_reference(self, tmp_path: Path):
+        from kiln.multicolor_3mf import compose_painted_3mf
+
+        tris = _cube_soup()
+        colors: list = ["#F72323"] * 2 + [None] * 10
+        out = tmp_path / "partial.3mf"
+        result = compose_painted_3mf(tris, colors, output_path=str(out))
+        assert result["success"] is True
+        xml = _painted_model_xml(str(out))
+        assert xml.count("p1=") == 2
+
+    def test_slicer_channels_are_present(self, tmp_path: Path):
+        from kiln.multicolor_3mf import compose_painted_3mf
+
+        out = tmp_path / "p.3mf"
+        compose_painted_3mf(
+            _cube_soup(), ["#F72323"] * 12, output_path=str(out), name="cube",
+        )
+        with zipfile.ZipFile(out) as zf:
+            names = zf.namelist()
+            assert "Metadata/model_settings.config" in names
+            assert "Metadata/Slic3r_PE_model.config" in names
+            cfg = zf.read("Metadata/Slic3r_PE_model.config").decode()
+        assert '<volume firstid="0" lastid="11">' in cfg
+
+    def test_refuses_dishonest_input(self, tmp_path: Path):
+        from kiln.multicolor_3mf import compose_painted_3mf
+
+        assert compose_painted_3mf([], [], output_path=str(tmp_path / "x.3mf"))[
+            "success"
+        ] is False
+        result = compose_painted_3mf(
+            _cube_soup(), ["#F72323"], output_path=str(tmp_path / "y.3mf"),
+        )
+        assert result["success"] is False
+        assert "length" in result["error"]
+
+    def test_thumbnail_is_embedded(self, tmp_path: Path):
+        pytest.importorskip("PIL.Image", reason="colored renderer needs PIL")
+        from kiln.multicolor_3mf import compose_painted_3mf
+
+        out = tmp_path / "t.3mf"
+        compose_painted_3mf(_cube_soup(), ["#F72323"] * 12, output_path=str(out))
+        with zipfile.ZipFile(out) as zf:
+            assert "Metadata/plate_1.png" in zf.namelist()
+
+
+# ---------------------------------------------------------------------------
+# Native painting channel — the slicers' own per-triangle state strings
+# ---------------------------------------------------------------------------
+
+
+def test_painted_state_string_canonical_values():
+    """Pin the exact wire strings, as data.
+
+    Derived from TriangleSelector::serialize + FacetsAnnotation::
+    get_triangle_as_string (prusa3d/PrusaSlicer, src/libslic3r/
+    TriangleSelector.cpp + Model.cpp): an unsplit triangle painted state n
+    is one nibble ``n << 2`` for n in 1..2, else two nibbles ``0xC`` then
+    ``n - 3``, hex-encoded nibble-REVERSED.  The decoder in
+    kiln.threemf_parser pins this same canon — a divergence must fail here,
+    not disagree silently."""
+    from kiln.multicolor_3mf import painted_state_string
+
+    assert painted_state_string(1) == "4"     # 1 << 2, single nibble
+    assert painted_state_string(2) == "8"     # 2 << 2, single nibble
+    assert painted_state_string(3) == "0C"    # first two-nibble state
+    assert painted_state_string(4) == "1C"
+    assert painted_state_string(16) == "DC"   # the shared ceiling
+
+
+def test_painted_state_string_matches_orca_const_filaments_table():
+    """OrcaSlicer's own Model.cpp carries the same canon as a literal
+    (CONST_FILAMENTS, filaments 1..16) — the independent cross-check."""
+    from kiln.multicolor_3mf import painted_state_string
+
+    orca_const_filaments = [
+        "4", "8", "0C", "1C", "2C", "3C", "4C", "5C",
+        "6C", "7C", "8C", "9C", "AC", "BC", "CC", "DC",
+    ]
+    assert [painted_state_string(k) for k in range(1, 17)] == orca_const_filaments
+
+
+def test_painted_state_string_refuses_out_of_range():
+    """State 0 is 'unpainted' (no attribute, never a string), and the
+    Bambu/Orca fork's decoder reads nothing past state 16 — encoding 17+
+    would repaint triangles or crash a reader."""
+    from kiln.multicolor_3mf import PAINTED_STATE_MAX, painted_state_string
+
+    assert PAINTED_STATE_MAX == 16
+    for bad in (0, -1, 17, 255):
+        with pytest.raises(ValueError):
+            painted_state_string(bad)
+
+
+def test_painted_triangles_carry_both_native_spellings(tmp_path: Path):
+    """Every colored triangle carries the SAME serialized state under both
+    attribute names — slic3rpe:mmu_segmentation (PrusaSlicer's reader has
+    zero colorgroup handling; this is the only channel it sees) and
+    paint_color (BambuStudio/OrcaSlicer).  Measured proof: this exact shape
+    took a two-color probe from 0 tool changes / one filament to 2 tool
+    changes / both filaments in PrusaSlicer CLI, and BambuStudio's own
+    export re-emits the identical strings."""
+    import re
+
+    from kiln.multicolor_3mf import compose_painted_3mf
+
+    tris = _cube_soup()
+    colors = ["#F72323" if i < 2 else "#2366F7" for i in range(len(tris))]
+    out = tmp_path / "native.3mf"
+    result = compose_painted_3mf(tris, colors, output_path=str(out))
+    assert result["success"] is True
+    assert "native_paint_truncated" not in result
+
+    xml = _painted_model_xml(str(out))
+    # The attribute's namespace prefix must actually be declared.
+    assert 'xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06"' in xml
+    rows = re.findall(r"<triangle [^>]*/>", xml)
+    assert len(rows) == 12
+    # Palette index 0 -> state 1 -> "4"; index 1 -> state 2 -> "8".
+    red = [r for r in rows if 'p1="0"' in r]
+    blue = [r for r in rows if 'p1="1"' in r]
+    assert len(red) == 2 and len(blue) == 10
+    for row in red:
+        assert 'slic3rpe:mmu_segmentation="4"' in row
+        assert 'paint_color="4"' in row
+    for row in blue:
+        assert 'slic3rpe:mmu_segmentation="8"' in row
+        assert 'paint_color="8"' in row
+
+
+def test_painted_uncolored_triangles_carry_no_native_state(tmp_path: Path):
+    """Unpainted means NO attribute — a state-0 string does not exist in
+    the wire format (serialize stores nothing for NONE)."""
+    import re
+
+    from kiln.multicolor_3mf import compose_painted_3mf
+
+    tris = _cube_soup()
+    colors: list = ["#F72323"] * 2 + [None] * 10
+    out = tmp_path / "partial_native.3mf"
+    compose_painted_3mf(tris, colors, output_path=str(out))
+    xml = _painted_model_xml(str(out))
+    rows = re.findall(r"<triangle [^>]*/>", xml)
+    bare = [r for r in rows if "p1=" not in r]
+    assert len(bare) == 10
+    for row in bare:
+        assert "mmu_segmentation" not in row
+        assert "paint_color" not in row
+
+
+def test_painted_palette_beyond_native_cap_truncates_honestly(tmp_path: Path):
+    """A 17th color cannot ride the native channel (state 17 exceeds the
+    fork-shared ceiling).  Its triangles keep the spec colorgroup
+    reference, get NO native state (a wrong state would repaint them with
+    someone else's filament), and the truncation is surfaced."""
+    import re
+
+    from kiln.multicolor_3mf import compose_painted_3mf
+
+    lower = _cube_soup()
+    upper = [
+        tuple((x, y, z + 10.0) for x, y, z in tri) for tri in _cube_soup()
+    ]
+    tris = lower + upper  # 24 triangles
+    colors = [f"#{i:02X}00{i:02X}" for i in range(17)] + ["#000000"] * 7
+    out = tmp_path / "overflow.3mf"
+    result = compose_painted_3mf(tris, colors, output_path=str(out))
+    assert result["success"] is True
+    assert result["native_paint_truncated"] == 1
+    assert "native painting limit" in result["message"]
+
+    xml = _painted_model_xml(str(out))
+    over = [
+        r for r in re.findall(r"<triangle [^>]*/>", xml) if 'p1="16"' in r
+    ]
+    assert len(over) == 1
+    assert "mmu_segmentation" not in over[0]
+    assert "paint_color" not in over[0]
+    # states 1..16 still present for the palette entries that fit
+    assert 'slic3rpe:mmu_segmentation="4"' in xml
+    assert 'slic3rpe:mmu_segmentation="DC"' in xml
+
+
+def test_banded_writer_carries_no_native_paint_attributes(
+    stl_a: Path, stl_b: Path, tmp_path: Path
+):
+    """The per-object BANDED writer must NOT gain the painting attributes:
+    its per-object extruder channels (sidecar + build items) already work
+    in every slicer, and painting the triangles too could double-assign
+    the same geometry to two different filament channels."""
+    out = tmp_path / "banded.3mf"
+    compose_multicolor_3mf(
+        [
+            ColorPart(stl_path=str(stl_a), extruder=1, color="#F72323"),
+            ColorPart(stl_path=str(stl_b), extruder=2, color="#2366F7"),
+        ],
+        output_path=str(out),
+    )
+    xml = _model_xml(str(out))
+    assert "mmu_segmentation" not in xml
+    assert "paint_color" not in xml
+
+
+# ---------------------------------------------------------------------------
+# Degenerate-triangle guard — the banded path
+# ---------------------------------------------------------------------------
+
+
+def test_banded_degenerate_triangle_skipped_and_counted(tmp_path: Path):
+    """A degenerate input triangle (repeated vertex after exact dedup —
+    common in real-world scans) would emit spec-forbidden repeated indices.
+    It is dropped at parse time and counted; every emitted row is valid and
+    the sidecar volume range matches what was actually emitted."""
+    import re
+
+    stl = _binary_stl(tmp_path, "degen.stl", [
+        # one real triangle
+        ((0.0, 0.0, 1.0), (0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (0.0, 10.0, 0.0)),
+        # one degenerate: two vertices identical
+        ((0.0, 0.0, 1.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 10.0, 0.0)),
+    ])
+    out = tmp_path / "degen.3mf"
+    result = compose_multicolor_3mf(
+        [ColorPart(stl_path=str(stl), extruder=1, name="scanned")],
+        output_path=str(out),
+    )
+    assert result["success"] is True
+    assert result["degenerate_skipped"] == 1
+    assert result["total_triangles"] == 1
+
+    with zipfile.ZipFile(out) as zf:
+        xml = zf.read("3D/3dmodel.model").decode()
+        cfg = zf.read("Metadata/Slic3r_PE_model.config").decode()
+    rows = re.findall(r'<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"', xml)
+    assert len(rows) == 1
+    assert all(len({a, b, c}) == 3 for a, b, c in rows)
+    # volume range derives from the EMITTED triangle count, not the input
+    assert '<volume firstid="0" lastid="0">' in cfg
+
+
+def test_banded_all_degenerate_part_refuses(tmp_path: Path):
+    """A part whose every triangle is degenerate is refused the same way
+    an empty part is — an honest error naming the part, never a hollow
+    zero-triangle object."""
+    stl = _binary_stl(tmp_path, "all_degen.stl", [
+        ((0.0, 0.0, 1.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 10.0, 0.0)),
+        ((0.0, 0.0, 1.0), (5.0, 5.0, 5.0), (5.0, 5.0, 5.0), (5.0, 5.0, 5.0)),
+    ])
+    result = compose_multicolor_3mf(
+        [ColorPart(stl_path=str(stl), extruder=1, name="scan_junk")],
+        output_path=str(tmp_path / "x.3mf"),
+    )
+    assert result["success"] is False
+    assert "degenerate" in result["error"]
+    assert "scan_junk" in result["error"]
+
+
+def test_banded_no_degenerate_key_on_clean_input(stl_a: Path, tmp_path: Path):
+    """degenerate_skipped surfaces ONLY when something was skipped."""
+    result = compose_multicolor_3mf(
+        [ColorPart(stl_path=str(stl_a), extruder=1)],
+        output_path=str(tmp_path / "clean.3mf"),
+    )
+    assert result["success"] is True
+    assert "degenerate_skipped" not in result
+
+
+def test_painted_drops_degenerate_triangles_with_their_colors(tmp_path: Path):
+    """A triangle whose vertices collapse under exact dedup would emit
+    spec-forbidden repeated indices; it is dropped WITH its color and
+    counted, never silently kept or silently lost."""
+    from kiln.multicolor_3mf import compose_painted_3mf
+
+    out = tmp_path / "degen.3mf"
+    result = compose_painted_3mf(
+        [
+            ((0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (0.0, 10.0, 0.0)),
+            ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 10.0, 0.0)),
+        ],
+        ["#F72323", "#2366F7"],
+        output_path=str(out),
+    )
+    assert result["success"] is True
+    assert result["total_triangles"] == 1
+    assert result["degenerate_skipped"] == 1
+    # the degenerate face's color went with it — no phantom palette entry
+    assert result["colors"] == ["#F72323"]
+    import re
+
+    rows = re.findall(
+        r'<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"', _painted_model_xml(str(out)),
+    )
+    assert all(len({a, b, c}) == 3 for a, b, c in rows)
+
+
+def test_painted_all_degenerate_refuses(tmp_path: Path):
+    from kiln.multicolor_3mf import compose_painted_3mf
+
+    result = compose_painted_3mf(
+        [((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 10.0, 0.0))],
+        ["#F72323"],
+        output_path=str(tmp_path / "x.3mf"),
+    )
+    assert result["success"] is False
