@@ -22,12 +22,76 @@ _logger = logging.getLogger(__name__)
 
 _DESIGNS_ROOT = "~/.kiln/designs"
 
+#: Said when the library cannot be answered for from here.  A refusal that
+#: does not name where the thing DOES work reads as Kiln being broken.
+_HOSTED_REFUSAL = (
+    "Your design library is not available on the hosted Kiln API: it lives "
+    "on the machine that made the designs, and this server keeps no "
+    "per-account copy of it. Run this from your local Kiln install or the "
+    "CLI, where your files are."
+)
 
-def _design_dir(design_id: str) -> str:
-    """Return the absolute path to the directory for *design_id*."""
+
+def _designs_root() -> str:
+    """The design-library root — the one place this module resolves it.
+
+    Refuses on the hosted multi-tenant deploy.  ``~/.kiln/designs`` is keyed
+    by names the CALLER picks, and the hosted server runs ONE ``~/.kiln`` for
+    every customer: two people who both have a "mug" share a directory, and
+    the box has no persistent volume, so whichever write won is discarded on
+    the next deploy.  A save that reports success there is wrong twice over.
+
+    The read side is worse than the write side and is why this sits at the
+    root rather than only on the per-design path: ``search_design_versions``
+    walks every directory under here and returns the recipe text it matches,
+    so on a shared box it answers one customer with another's design names,
+    prompts and notes.
+
+    Raises ``ValueError`` deliberately — every tool in this module already
+    funnels exceptions into its ``{"ok": False, "error": ...}`` envelope, so
+    the refusal reaches the caller as a stated reason instead of a stack
+    trace, without a single per-tool branch.
+    """
     import os
 
-    return os.path.expanduser(f"{_DESIGNS_ROOT}/{design_id}")
+    from kiln.runtime_env import is_hosted_multitenant
+
+    if is_hosted_multitenant():
+        raise ValueError(_HOSTED_REFUSAL)
+    return os.path.expanduser(_DESIGNS_ROOT)
+
+
+def _design_dir(design_id: str) -> str:
+    """Return the absolute path to the directory for *design_id*.
+
+    ``design_id`` is caller-supplied at every door in this module, and two
+    of those doors do not take it directly — ``compare_design_versions`` and
+    ``get_design_version`` pull it out of a ``design_id:N`` reference — so
+    the check belongs here, at the one path both routes pass through, and
+    not on the arguments of whichever tool someone remembers.
+
+    It used to be an f-string join, which meant ``"../../pwned"`` resolved
+    outside the library and ``_ensure_design_dir`` then created it.
+    """
+    import os
+
+    root = _designs_root()
+    if not isinstance(design_id, str) or not design_id.strip():
+        raise ValueError("design_id must be a non-empty name")
+
+    # Compare RESOLVED paths rather than screening the string for "/" and
+    # "..": the resolved parent is the property actually wanted, and it
+    # holds for spellings a blocklist misses, for symlinks, and for macOS's
+    # /var -> /private/var aliasing.  A design that does not exist yet still
+    # resolves — this decides where a write MAY land, so it must not depend
+    # on whether it has landed before.
+    real_root = os.path.realpath(root)
+    target = os.path.realpath(os.path.join(real_root, design_id))
+    if os.path.dirname(target) != real_root or target == real_root:
+        raise ValueError(
+            f"design_id must be a simple name, not a path: {design_id!r}"
+        )
+    return target
 
 
 def _ensure_design_dir(design_id: str) -> str:
@@ -507,7 +571,11 @@ class _VersionToolsPlugin:
             from kiln.design_recipe import load_recipe
 
             try:
-                root = os.path.expanduser(_DESIGNS_ROOT)
+                # Through the shared resolver, not expanduser again: this
+                # tool reads EVERY directory under the root, so on the
+                # shared hosted box it is the one door that hands a caller
+                # other customers' design names, prompts and notes.
+                root = _designs_root()
                 matches: list[dict[str, Any]] = []
                 q = query.lower()
 
