@@ -298,6 +298,15 @@ def slice_file(
         stem = Path(input_abs).stem
         out_file = os.path.join(out_dir, f"{stem}.gcode")
 
+    # Anything at out_file after the run must have been written BY the run.
+    # The path is deterministic (input stem into a shared output dir), so a
+    # previous slice of the same model leaves a complete-looking file here —
+    # and without this unlink the crash-salvage check below would read that
+    # STALE file and certify a slicer that died before writing anything as a
+    # fresh success: the previous model's toolpath, headed for start_print.
+    with contextlib.suppress(OSError):
+        os.unlink(out_file)
+
     # Build command
     cmd: list[str] = [
         slicer.path,

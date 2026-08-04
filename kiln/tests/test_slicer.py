@@ -131,15 +131,19 @@ class TestSliceFile:
         mock_run.stdout = "Done"
         mock_run.stderr = ""
 
+        def fake_slicer_run(*args, **kwargs):
+            # Written DURING the run, as the real slicer does — a file
+            # written up front is a stale leftover, which slice_file now
+            # removes before running.
+            expected_out.write_text("; gcode")
+            return mock_run
+
         with patch("kiln.slicer.find_slicer") as mock_find:
             mock_find.return_value = SlicerInfo(
                 path="/usr/bin/prusa-slicer", name="prusa-slicer", version="2.7.1"
             )
-            with patch("subprocess.run", return_value=mock_run):
-                # Create the expected output file so the post-check passes
+            with patch("subprocess.run", side_effect=fake_slicer_run):
                 out_dir.mkdir()
-                expected_out.write_text("; gcode")
-
                 result = slice_file(
                     str(stl),
                     output_dir=str(out_dir),
@@ -223,14 +227,16 @@ class TestSliceFile:
         mock_run.stdout = ""
         mock_run.stderr = ""
 
+        def fake_slicer_run(*args, **kwargs):
+            expected_out.write_text("; gcode")
+            return mock_run
+
         with patch("kiln.slicer.find_slicer") as mock_find:
             mock_find.return_value = SlicerInfo(
                 path="/usr/bin/prusa-slicer", name="prusa-slicer"
             )
-            with patch("subprocess.run", return_value=mock_run):
+            with patch("subprocess.run", side_effect=fake_slicer_run):
                 out_dir.mkdir()
-                expected_out.write_text("; gcode")
-
                 result = slice_file(
                     str(stl),
                     output_dir=str(out_dir),
@@ -251,13 +257,16 @@ class TestSliceFile:
         mock_run.stdout = ""
         mock_run.stderr = ""
 
+        def fake_slicer_run(*args, **kwargs):
+            expected_out.write_text("; gcode")
+            return mock_run
+
         with patch("kiln.slicer.find_slicer") as mock_find:
             mock_find.return_value = SlicerInfo(
                 path="/usr/bin/prusa-slicer", name="prusa-slicer"
             )
-            with patch("subprocess.run", return_value=mock_run) as mock_subprocess:
+            with patch("subprocess.run", side_effect=fake_slicer_run) as mock_subprocess:
                 out_dir.mkdir()
-                expected_out.write_text("; gcode")
                 slice_file(
                     str(stl),
                     output_dir=str(out_dir),
@@ -455,24 +464,38 @@ class TestCrashAfterFinishing:
     is fully exported.  Salvage is narrow: signal deaths only, and only
     with the summary footer present; a reported error exit never salvages."""
 
-    def _run(self, tmp_path, returncode, gcode_body):
+    def _run(self, tmp_path, returncode, gcode_body, *, stale_body=None):
         stl = tmp_path / "model.stl"
         stl.write_bytes(b"solid test\nendsolid test\n")
         out_dir = tmp_path / "output"
         out_dir.mkdir()
         expected_out = out_dir / "model.gcode"
-        if gcode_body is not None:
-            expected_out.write_text(gcode_body)
+        if stale_body is not None:
+            # Leftover from a previous slice of the same model: the output
+            # path is deterministic (input stem into the output dir), so
+            # this is exactly what a crashed run finds already on disk.
+            expected_out.write_text(stale_body)
 
         mock_run = MagicMock()
         mock_run.returncode = returncode
         mock_run.stdout = "Slicing result exported"
         mock_run.stderr = ""
+
+        def fake_slicer_run(*args, **kwargs):
+            # The mocked slicer writes DURING the run, as the real one does.
+            # An earlier version of this helper wrote the file up front,
+            # which made a stale leftover indistinguishable from fresh
+            # output — the blindness that let the crash-salvage certify a
+            # previous model's toolpath as this run's success.
+            if gcode_body is not None:
+                expected_out.write_text(gcode_body)
+            return mock_run
+
         with patch("kiln.slicer.find_slicer") as mock_find:
             mock_find.return_value = SlicerInfo(
                 path="/usr/bin/prusa-slicer", name="prusa-slicer"
             )
-            with patch("subprocess.run", return_value=mock_run):
+            with patch("subprocess.run", side_effect=fake_slicer_run):
                 return slice_file(str(stl), output_dir=str(out_dir))
 
     def test_signal_death_with_complete_output_is_salvaged(self, tmp_path):
@@ -500,3 +523,38 @@ class TestCrashAfterFinishing:
     def test_signal_death_with_no_output_still_fails(self, tmp_path):
         with pytest.raises(SlicerError, match="exited with code -11"):
             self._run(tmp_path, -11, None)
+
+    def test_stale_gcode_from_a_previous_run_is_not_salvaged(self, tmp_path):
+        """A slicer killed BEFORE writing anything must fail even though a
+        previous run's complete file sits at the deterministic output path.
+        Salvaging that file returns the PREVIOUS model's toolpath with
+        success=True — and that path feeds start_print, so the failure
+        mode is a real print of the wrong geometry."""
+        with pytest.raises(SlicerError, match="exited with code -11"):
+            self._run(
+                tmp_path, -11, None,
+                stale_body="G1 X9\n; filament used [mm] = 99.00\n; end\n",
+            )
+
+    def test_stale_gcode_survives_alongside_a_fresh_salvage(self, tmp_path):
+        """A leftover file must not poison the LEGITIMATE salvage either:
+        when this run does write complete G-code before the signal death,
+        the fresh output wins."""
+        result = self._run(
+            tmp_path, -11,
+            "G1 X1\nT1\n; filament used [mm] = 427.40\n; end\n",
+            stale_body="G1 X9\n; filament used [mm] = 99.00\n; end\n",
+        )
+        assert result.success is True
+        assert "verified complete" in result.message
+
+    def test_stale_gcode_does_not_mask_an_exit_zero_run_that_wrote_nothing(
+        self, tmp_path
+    ):
+        """Same leftover, non-signal shape: a slicer that exits 0 without
+        writing must not have last run's file vouch for it."""
+        with pytest.raises(SlicerError, match="output file was not created"):
+            self._run(
+                tmp_path, 0, None,
+                stale_body="G1 X9\n; filament used [mm] = 99.00\n; end\n",
+            )
