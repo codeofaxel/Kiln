@@ -299,6 +299,48 @@ def _parse_ascii_stl(
     return vertices, triangles
 
 
+def _parse_mesh_file(
+    mesh_path: str,
+) -> tuple[list[tuple[float, float, float]], list[tuple[int, int, int]]]:
+    """Parse an STL, OBJ, or GLB mesh → deduplicated (vertices, triangles).
+
+    STL is parsed natively; OBJ and GLB reuse the generation-pipeline
+    parsers and are re-indexed into the same compact form.
+    """
+    ext = Path(mesh_path).suffix.lower()
+    if ext in ("", ".stl"):
+        return _parse_stl(mesh_path)
+    if ext not in (".obj", ".glb"):
+        raise ValueError(
+            f"Unsupported mesh format {ext!r} for {mesh_path} "
+            "(need .stl, .obj, or .glb)"
+        )
+
+    from kiln.generation import validation as _validation
+
+    errors: list[str] = []
+    if ext == ".obj":
+        raw_tris, _ = _validation._parse_obj(Path(mesh_path), errors)
+    else:
+        raw_tris, _ = _validation._parse_glb(Path(mesh_path), errors)
+    if errors:
+        raise ValueError(f"Failed to parse {mesh_path}: {'; '.join(errors)}")
+
+    vertex_map: dict[tuple[float, float, float], int] = {}
+    vertices: list[tuple[float, float, float]] = []
+    triangles: list[tuple[int, int, int]] = []
+    for tri in raw_tris:
+        indices: list[int] = []
+        for v in tri:
+            pt = (float(v[0]), float(v[1]), float(v[2]))
+            if pt not in vertex_map:
+                vertex_map[pt] = len(vertices)
+                vertices.append(pt)
+            indices.append(vertex_map[pt])
+        triangles.append((indices[0], indices[1], indices[2]))
+    return vertices, triangles
+
+
 # ---------------------------------------------------------------------------
 # 3MF XML / ZIP builders
 # ---------------------------------------------------------------------------
@@ -450,8 +492,8 @@ def _build_project_settings(flush_matrix_str: str) -> str:
 
 
 def _stl_bounding_box(stl_path: str) -> tuple[float, float, float, float, float, float]:
-    """Return (min_x, min_y, min_z, max_x, max_y, max_z) for an STL file."""
-    vertices, _ = _parse_stl(stl_path)
+    """Return (min_x, min_y, min_z, max_x, max_y, max_z) for a mesh file."""
+    vertices, _ = _parse_mesh_file(stl_path)
     if not vertices:
         return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     xs = [v[0] for v in vertices]
@@ -530,6 +572,7 @@ def auto_arrange_parts(
             )
         _model_id, build_volume = resolved
         plate_width = build_volume[0]
+        plate_depth = build_volume[1]
 
     # Assign default groups (each spec is its own group if not specified).
     # Track group per spec in a parallel list so the result-build pass never
@@ -541,35 +584,53 @@ def auto_arrange_parts(
         groups.setdefault(g, []).append(spec)
         spec_groups.append(g)
 
-    # For each group, determine the bounding box by taking the union of all parts
+    # For each group, take the union bounding box of all its parts.  The
+    # union MIN matters as much as the size: meshes are frequently centered
+    # on the origin (negative min), and placing one at a cursor position
+    # without subtracting its min leaves it hanging off the plate corner.
     group_order = sorted(groups.keys())
-    group_bboxes: dict[int, tuple[float, float]] = {}  # group → (width, depth)
+    # group → (min_x, min_y, width, depth) of the union bbox
+    group_bboxes: dict[int, tuple[float, float, float, float]] = {}
     for g in group_order:
-        max_w, max_d = 0.0, 0.0
+        mn_x = mn_y = float("inf")
+        mx_x = mx_y = float("-inf")
         for spec in groups[g]:
             try:
-                mn_x, mn_y, _, mx_x, mx_y, _ = _stl_bounding_box(spec["stl_path"])
-                max_w = max(max_w, mx_x - mn_x)
-                max_d = max(max_d, mx_y - mn_y)
+                b_mn_x, b_mn_y, _, b_mx_x, b_mx_y, _ = _stl_bounding_box(spec["stl_path"])
             except Exception:
-                max_w = max(max_w, 50.0)   # fallback if STL unreadable
-                max_d = max(max_d, 50.0)
-        group_bboxes[g] = (max_w, max_d)
+                b_mn_x, b_mn_y = 0.0, 0.0   # fallback if mesh unreadable
+                b_mx_x, b_mx_y = 50.0, 50.0
+            mn_x, mn_y = min(mn_x, b_mn_x), min(mn_y, b_mn_y)
+            mx_x, mx_y = max(mx_x, b_mx_x), max(mx_y, b_mx_y)
+        group_bboxes[g] = (mn_x, mn_y, mx_x - mn_x, mx_y - mn_y)
 
     # Simple row layout: place groups left-to-right, wrap to next row when
-    # the plate width would be exceeded.
-    group_positions: dict[int, tuple[float, float]] = {}
+    # the plate width would be exceeded.  Each group is translated so its
+    # union bbox min lands on the cursor; parts within a group share one
+    # translation, preserving their relative positions.
+    group_positions: dict[int, tuple[float, float]] = {}  # group → translation
     cursor_x, cursor_y, row_depth = 0.0, 0.0, 0.0
+    used_w, used_d = 0.0, 0.0
     for g in group_order:
-        w, d = group_bboxes[g]
+        mn_x, mn_y, w, d = group_bboxes[g]
         if cursor_x > 0 and cursor_x + w > plate_width:
             # Wrap to next row
             cursor_x = 0.0
             cursor_y += row_depth + gap_mm
             row_depth = 0.0
-        group_positions[g] = (cursor_x, cursor_y)
+        group_positions[g] = (cursor_x - mn_x, cursor_y - mn_y)
+        used_w = max(used_w, cursor_x + w)
+        used_d = max(used_d, cursor_y + d)
         cursor_x += w + gap_mm
         row_depth = max(row_depth, d)
+
+    # Center the whole arrangement on the plate when it fits.
+    shift_x = (plate_width - used_w) / 2.0 if 0.0 < used_w <= plate_width else 0.0
+    shift_y = (plate_depth - used_d) / 2.0 if 0.0 < used_d <= plate_depth else 0.0
+    if shift_x or shift_y:
+        group_positions = {
+            g: (tx + shift_x, ty + shift_y) for g, (tx, ty) in group_positions.items()
+        }
 
     # Build final ColorPart list with positions
     result: list[ColorPart] = []
@@ -612,10 +673,10 @@ def compose_multicolor_3mf(
         * Any slicer that supports 3MF Core + multiple objects
 
     Args:
-        parts: List of :class:`ColorPart`.  Each part needs an STL path and
-            extruder number.  Extruder numbers map directly to Bambu AMS
-            trays (1-indexed).  Parts are placed in the same world space as
-            their source STLs — no transforms applied.
+        parts: List of :class:`ColorPart`.  Each part needs a mesh path
+            (.stl, .obj, or .glb) and extruder number.  Extruder numbers map
+            directly to Bambu AMS trays (1-indexed).  Each part is placed at
+            its ``x/y/z`` translation on top of its source coordinates.
         output_path: Where to write the .3mf.  Defaults to a system temp
             file (path returned in the result dict).
 
@@ -646,6 +707,7 @@ def compose_multicolor_3mf(
     # -----------------------------------------------------------------------
     # Validate inputs
     # -----------------------------------------------------------------------
+    seen_placements: dict[tuple[str, float, float, float], int] = {}
     for i, part in enumerate(parts):
         if not os.path.isfile(part.stl_path):
             return {
@@ -660,6 +722,27 @@ def compose_multicolor_3mf(
                     "Extruders are 1-indexed on Bambu AMS."
                 ),
             }
+        # The same mesh twice at the same position is always a mistake: the
+        # copies would print stacked into one footprint (double-extruded).
+        # Distinct meshes at one position are legitimate (body + inlay).
+        placement = (
+            os.path.abspath(part.stl_path),
+            round(part.x, 3),
+            round(part.y, 3),
+            round(part.z, 3),
+        )
+        if placement in seen_placements:
+            return {
+                "success": False,
+                "error": (
+                    f"Parts {seen_placements[placement] + 1} and {i + 1} are the "
+                    f"same mesh ({Path(part.stl_path).name}) at the same position "
+                    f"({part.x:.1f}, {part.y:.1f}, {part.z:.1f}) — they would print "
+                    "stacked on top of each other. Run the parts through "
+                    "auto_arrange_parts() or give each copy distinct x/y."
+                ),
+            }
+        seen_placements[placement] = i
 
     # -----------------------------------------------------------------------
     # Material safety check (always free — full report, hardware warnings,
@@ -703,7 +786,7 @@ def compose_multicolor_3mf(
     parsed: list[_ParsedPart] = []
     for part in parts:
         try:
-            vertices, triangles = _parse_stl(part.stl_path)
+            vertices, triangles = _parse_mesh_file(part.stl_path)
             if not triangles:
                 return {
                     "success": False,

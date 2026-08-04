@@ -761,116 +761,232 @@ class TestAmsPassthrough:
 
 
 # ---------------------------------------------------------------------------
-# TestMultiMaterial3MF
+# TestMulticolorPlacement
 # ---------------------------------------------------------------------------
 
-class TestMultiMaterial3MF:
-    """Tests for the build_multi_material_3mf helper function."""
-
-    def test_build_two_object_3mf(self, tmp_path):
-        import zipfile
-
-        from kiln.generation.validation import build_multi_material_3mf
-
-        # Create two minimal STL files
-        stl_content = (
-            b"solid test\n"
-            b"  facet normal 0 0 1\n"
-            b"    outer loop\n"
-            b"      vertex 0 0 0\n"
-            b"      vertex 1 0 0\n"
-            b"      vertex 0 1 0\n"
-            b"    endloop\n"
-            b"  endfacet\n"
-            b"endsolid test\n"
+def _make_square_stl(size: float = 10.0) -> str:
+    """ASCII STL: flat square plate spanning [0, size] x [0, size] at z=0."""
+    fd, path = tempfile.mkstemp(suffix=".stl")
+    with os.fdopen(fd, "w") as f:
+        f.write(
+            "solid sq\n"
+            "  facet normal 0 0 1\n    outer loop\n"
+            f"      vertex 0 0 0\n      vertex {size} 0 0\n      vertex {size} {size} 0\n"
+            "    endloop\n  endfacet\n"
+            "  facet normal 0 0 1\n    outer loop\n"
+            f"      vertex 0 0 0\n      vertex {size} {size} 0\n      vertex 0 {size} 0\n"
+            "    endloop\n  endfacet\n"
+            "endsolid sq\n"
         )
-        stl_a = tmp_path / "part_a.stl"
-        stl_b = tmp_path / "part_b.stl"
-        stl_a.write_bytes(stl_content)
-        stl_b.write_bytes(stl_content)
+    return path
 
-        output = str(tmp_path / "multi.3mf")
-        result = build_multi_material_3mf(
-            [
-                {"file_path": str(stl_a), "filament_index": 0, "material_name": "PLA", "color": "#FF0000"},
-                {"file_path": str(stl_b), "filament_index": 1, "material_name": "PETG", "color": "#0000FF"},
-            ],
-            output_path=output,
+
+def _read_3mf_placements(path_3mf: str) -> tuple[list[dict], list[str]]:
+    """Parse a 3MF into per-item placement facts.
+
+    Returns ([{tx, ty, extruder, world_bbox}], zip_namelist).  Every build
+    item MUST carry a transform — an item without one is the coincident-
+    copies defect coming back.
+    """
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    ns = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
+    slic3r_extruder = "{http://schemas.slic3r.org/3mf/2017/06}extruder"
+    with zipfile.ZipFile(path_3mf) as zf:
+        names = zf.namelist()
+        root = ET.fromstring(zf.read("3D/3dmodel.model"))
+
+    obj_bboxes: dict[str, tuple[float, float, float, float]] = {}
+    for obj in root.findall(".//m:object", ns):
+        xs, ys = [], []
+        for v in obj.findall(".//m:vertex", ns):
+            xs.append(float(v.get("x")))
+            ys.append(float(v.get("y")))
+        obj_bboxes[obj.get("id")] = (min(xs), min(ys), max(xs), max(ys))
+
+    items: list[dict] = []
+    for item in root.findall(".//m:item", ns):
+        transform = item.get("transform")
+        assert transform is not None, "build item has no transform (stacked at origin)"
+        vals = [float(t) for t in transform.split()]
+        tx, ty = vals[9], vals[10]
+        extruder = item.get(slic3r_extruder)
+        mn_x, mn_y, mx_x, mx_y = obj_bboxes[item.get("objectid")]
+        items.append(
+            {
+                "tx": tx,
+                "ty": ty,
+                "extruder": int(extruder) if extruder is not None else None,
+                "world_bbox": (mn_x + tx, mn_y + ty, mx_x + tx, mx_y + ty),
+            }
         )
+    return items, names
 
-        assert result == output
-        assert zipfile.is_zipfile(output)
 
-        # Verify 3MF structure
-        with zipfile.ZipFile(output) as zf:
-            names = zf.namelist()
-            assert "[Content_Types].xml" in names
-            assert "_rels/.rels" in names
-            assert "3D/3dmodel.model" in names
+def _xy_disjoint(a: tuple, b: tuple) -> bool:
+    return a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1]
 
-            # Check model XML has two objects and basematerials
-            model_xml = zf.read("3D/3dmodel.model").decode()
-            assert "basematerials" in model_xml
-            assert "PLA" in model_xml
-            assert "PETG" in model_xml
-            assert 'pindex="0"' in model_xml
-            assert 'pindex="1"' in model_xml
 
-    def test_empty_objects_raises(self):
-        import pytest
+_AMS_FOUR_PLA_TRAYS = {
+    "success": True,
+    "units": [
+        {
+            "trays": [
+                {"slot": 0, "tray_type": "PLA", "tray_color": "FF0000FF"},
+                {"slot": 1, "tray_type": "PLA", "tray_color": "00FF00FF"},
+                {"slot": 2, "tray_type": "PLA", "tray_color": "0000FFFF"},
+                {"slot": 3, "tray_type": "PLA", "tray_color": "FFFF00FF"},
+            ]
+        }
+    ],
+}
 
-        from kiln.generation.validation import build_multi_material_3mf
 
-        with pytest.raises(ValueError, match="At least one object"):
-            build_multi_material_3mf([])
+class TestMulticolorPlacement:
+    """Geometric invariants of the 3MFs the multicolor tools emit.
 
-    def test_missing_file_raises(self, tmp_path):
-        from kiln.generation.validation import build_multi_material_3mf
+    Regression suite for the coincident-copies defect: multi_color_copies
+    once emitted every copy at the origin with no transform, so N copies
+    sliced into a single footprint at ~N x the extrusion.  Assertions here
+    are numeric (positions, footprint spans, per-object extruders) — never
+    the presence of a string.
+    """
 
-        with __import__("pytest").raises(ValueError):
-            build_multi_material_3mf(
-                [{"file_path": str(tmp_path / "missing.stl"), "filament_index": 0}],
-                output_path=str(tmp_path / "out.3mf"),
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    @patch("kiln.server.run_reslice_and_print")
+    @patch("kiln.server.ams_status")
+    def test_multi_color_copies_are_spaced_on_plate(self, mock_ams, mock_reslice, _auth):
+        mock_ams.return_value = _AMS_FOUR_PLA_TRAYS
+        mock_reslice.return_value = {"success": True, "gcode_path": "/tmp/out.gcode"}
+
+        from kiln.server import multi_color_copies
+
+        model = _make_square_stl(size=10.0)
+        try:
+            result = multi_color_copies(model_path=model, spacing_mm=10.0)
+        finally:
+            os.unlink(model)
+
+        assert result.get("multi_color_copies") is True
+        items, names = _read_3mf_placements(result["multi_color_3mf"])
+        assert len(items) == 4
+
+        # Per-copy extruders 1..4, in both slicer dialects
+        assert [it["extruder"] for it in items] == [1, 2, 3, 4]
+        assert "Metadata/model_settings.config" in names
+
+        # Copies occupy disjoint footprints, on the plate
+        boxes = [it["world_bbox"] for it in items]
+        for i in range(len(boxes)):
+            for j in range(i + 1, len(boxes)):
+                assert _xy_disjoint(boxes[i], boxes[j]), (boxes[i], boxes[j])
+        for b in boxes:
+            assert b[0] >= 0.0 and b[1] >= 0.0
+            assert b[2] <= 256.0 and b[3] <= 256.0
+
+        # Four 10mm squares + three 10mm gaps — the footprint really spans
+        union_w = max(b[2] for b in boxes) - min(b[0] for b in boxes)
+        assert abs(union_w - 70.0) < 0.01
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    @patch("kiln.server.ams_status")
+    def test_manual_slots_without_filament_refused(self, mock_ams, _auth):
+        mock_ams.return_value = _AMS_FOUR_PLA_TRAYS
+
+        from kiln.server import multi_color_copies
+
+        model = _make_square_stl()
+        try:
+            result = multi_color_copies(model_path=model, ams_slots=[0, 7])
+        finally:
+            os.unlink(model)
+
+        assert result["success"] is False
+        assert "NO_MATERIAL" in result["error"]["code"]
+        assert "7" in result["error"]["message"]
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    @patch("kiln.server.run_reslice_and_print")
+    @patch("kiln.server.ams_status", side_effect=RuntimeError("printer offline"))
+    def test_manual_slots_proceed_with_warning_when_ams_unreachable(
+        self, _ams, mock_reslice, _auth
+    ):
+        mock_reslice.return_value = {"success": True, "gcode_path": "/tmp/out.gcode"}
+
+        from kiln.server import multi_color_copies
+
+        model = _make_square_stl()
+        try:
+            result = multi_color_copies(model_path=model, ams_slots=[0, 1])
+        finally:
+            os.unlink(model)
+
+        assert result.get("multi_color_copies") is True
+        assert "ams_warning" in result
+        items, _ = _read_3mf_placements(result["multi_color_3mf"])
+        assert len(items) == 2
+        assert items[0]["tx"] != items[1]["tx"]
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    @patch("kiln.server.run_reslice_and_print")
+    def test_multi_material_print_objects_do_not_stack(self, mock_reslice, _auth):
+        import json
+
+        mock_reslice.return_value = {"success": True, "gcode_path": "/tmp/out.gcode"}
+
+        from kiln.server import multi_material_print
+
+        paths = [_make_square_stl(size=10.0), _make_square_stl(size=10.0)]
+        try:
+            result = multi_material_print(
+                objects_json=json.dumps(
+                    [
+                        {"file_path": paths[0], "material_id": "pla"},
+                        {"file_path": paths[1], "material_id": "pla_matte"},
+                    ]
+                ),
+                auto_ams=False,
             )
+        finally:
+            for pth in paths:
+                os.unlink(pth)
 
-    def test_xml_escaping_special_chars(self, tmp_path):
-        """Material/object names with XML special chars are properly escaped."""
-        import zipfile
+        assert result.get("multi_material") is True
+        items, names = _read_3mf_placements(result["multi_material_3mf"])
+        assert len(items) == 2
+        assert {it["extruder"] for it in items} == {1, 2}
+        assert "Metadata/model_settings.config" in names
+        assert _xy_disjoint(items[0]["world_bbox"], items[1]["world_bbox"])
 
-        from kiln.generation.validation import build_multi_material_3mf
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    @patch("kiln.server.run_reslice_and_print")
+    def test_multi_material_print_same_group_stays_coincident(self, mock_reslice, _auth):
+        import json
 
-        stl_content = (
-            b"solid test\n"
-            b"  facet normal 0 0 1\n"
-            b"    outer loop\n"
-            b"      vertex 0 0 0\n"
-            b"      vertex 1 0 0\n"
-            b"      vertex 0 1 0\n"
-            b"    endloop\n"
-            b"  endfacet\n"
-            b"endsolid test\n"
-        )
-        stl_path = tmp_path / "part.stl"
-        stl_path.write_bytes(stl_content)
-        out = str(tmp_path / "escaped.3mf")
-        build_multi_material_3mf(
-            [{
-                "file_path": str(stl_path),
-                "filament_index": 0,
-                "name": 'Part "A" <test>',
-                "material_name": 'PLA & "Silk"',
-                "color": "#FF0000",
-            }],
-            output_path=out,
-        )
-        with zipfile.ZipFile(out) as zf:
-            model_xml = zf.read("3D/3dmodel.model").decode()
-        # Special chars must be escaped
-        assert "&amp;" in model_xml
-        assert "&quot;" in model_xml
-        assert "&lt;" in model_xml
-        # Raw unescaped chars must NOT appear in attribute values
-        assert 'name="PLA & "' not in model_xml
+        mock_reslice.return_value = {"success": True, "gcode_path": "/tmp/out.gcode"}
+
+        from kiln.server import multi_material_print
+
+        paths = [_make_square_stl(size=20.0), _make_square_stl(size=6.0)]
+        try:
+            result = multi_material_print(
+                objects_json=json.dumps(
+                    [
+                        {"file_path": paths[0], "material_id": "pla", "group": 0},
+                        {"file_path": paths[1], "material_id": "pla_matte", "group": 0},
+                    ]
+                ),
+                auto_ams=False,
+            )
+        finally:
+            for pth in paths:
+                os.unlink(pth)
+
+        assert result.get("multi_material") is True
+        items, _ = _read_3mf_placements(result["multi_material_3mf"])
+        assert len(items) == 2
+        assert (items[0]["tx"], items[0]["ty"]) == (items[1]["tx"], items[1]["ty"])
 
 
 # ---------------------------------------------------------------------------

@@ -13449,14 +13449,19 @@ def multi_material_print(
         )
 
     Each object in the JSON array supports:
-        - ``file_path`` (required): Path to STL/OBJ mesh file.
+        - ``file_path`` (required): Path to STL/OBJ/GLB mesh file.
         - ``material_id`` (required): Material identifier (e.g. ``"petg"``).
         - ``name`` (optional): Display name for the object.
         - ``color`` (optional): Hex color override (e.g. ``"#FF0000"``).
+        - ``group`` (optional): Objects sharing a group index are placed
+          coincident (for meshes that share one coordinate space, like a
+          body and its inlay). By default every object is its own group
+          and gets its own spot on the plate.
 
     The tool automatically:
         1. Looks up each material's properties (temps, colors)
-        2. Builds a multi-object 3MF with per-object material assignments
+        2. Arranges the objects side by side on the plate (per ``group``)
+           and builds a multi-object 3MF with per-object material assignments
         3. Generates merged slicer overrides (uses the highest-temp material)
         4. Checks AMS slots for matching materials
         5. Slices and prints with correct AMS mapping
@@ -13515,6 +13520,22 @@ def multi_material_print(
                     f"File not found: {obj['file_path']}",
                     code="NOT_FOUND",
                 )
+            file_ext = _os.path.splitext(obj["file_path"])[1].lower()
+            if file_ext not in (".stl", ".obj", ".glb"):
+                return _error_dict(
+                    f"Object at index {i} has unsupported format {file_ext!r} "
+                    f"(need .stl, .obj, or .glb).",
+                    code="VALIDATION_ERROR",
+                )
+            if "group" in obj:
+                try:
+                    obj["group"] = int(obj["group"])
+                except (TypeError, ValueError):
+                    return _error_dict(
+                        f"Object at index {i} has non-integer 'group': "
+                        f"{obj['group']!r}.",
+                        code="VALIDATION_ERROR",
+                    )
 
         # Step 1: Look up material properties for each object
         from kiln.design_intelligence import get_material_profile
@@ -13614,15 +13635,43 @@ def multi_material_print(
                     code="MATERIAL_INCOMPATIBLE",
                 )
 
-        # Step 2: Build multi-material 3MF
-        from kiln.generation.validation import build_multi_material_3mf
+        # Step 2: Arrange on the plate, then compose the multi-material 3MF.
+        # Each object is its own arrangement group by default, so separate
+        # objects land side by side instead of stacked at the origin.
+        # Objects that must stay coincident (a body and an inlay sharing one
+        # coordinate space) declare the same "group" index.
+        from kiln.multicolor_3mf import auto_arrange_parts, compose_multicolor_3mf
+
+        part_specs: list[dict[str, Any]] = []
+        for i, (obj, built) in enumerate(zip(objects, build_objects, strict=True)):
+            part_specs.append(
+                {
+                    "stl_path": built["file_path"],
+                    "extruder": built["filament_index"] + 1,
+                    "name": built["name"],
+                    "color": built["color"],
+                    "material": built["material_name"],
+                    "group": obj.get("group", i),
+                }
+            )
 
         output_3mf = _os.path.join(tempfile.gettempdir(), "kiln_multi_material.3mf")
         try:
-            build_multi_material_3mf(build_objects, output_path=output_3mf)
+            try:
+                positioned = auto_arrange_parts(part_specs, printer_id=printer_id)
+            except ValueError:
+                # printer_id not in the supported-model catalog — arrange on
+                # the default plate size instead of refusing the print.
+                positioned = auto_arrange_parts(part_specs)
+            compose_result = compose_multicolor_3mf(positioned, output_path=output_3mf)
         except Exception as exc:
             return _error_dict(
                 f"Failed to build multi-material 3MF: {exc}",
+                code="INTERNAL_ERROR",
+            )
+        if not compose_result.get("success"):
+            return _error_dict(
+                f"Failed to build multi-material 3MF: {compose_result.get('error')}",
                 code="INTERNAL_ERROR",
             )
 
@@ -13756,8 +13805,14 @@ def multi_material_print(
         if isinstance(result, dict):
             result["multi_material"] = True
             result["objects"] = [
-                {"name": o["name"], "material": o["material_name"], "filament_index": o["filament_index"]}
-                for o in build_objects
+                {
+                    "name": o["name"],
+                    "material": o["material_name"],
+                    "filament_index": o["filament_index"],
+                    "x_mm": round(positioned[i].x, 2),
+                    "y_mm": round(positioned[i].y, 2),
+                }
+                for i, o in enumerate(build_objects)
             ]
             result["materials_used"] = list(unique_mat_ids)
             result["dominant_material"] = dominant_mat
@@ -13890,7 +13945,9 @@ def multi_color_copies(
     :param material: Material type filter for AMS auto-detect
         (default ``"PLA"``).  Only trays matching this type are used.
     :param spacing_mm: Gap between copies on the plate (default 10 mm).
-    :param printer_id: Printer model ID for slicer profile selection.
+        Copies are arranged side by side, centered on the plate.
+    :param printer_id: Printer model ID for slicer profile selection and
+        plate-size lookup when arranging the copies.
     :param slicer_path: Explicit path to slicer binary.
     :returns: Dict with print result, object details, and AMS mapping.
     """
@@ -13915,6 +13972,7 @@ def multi_color_copies(
         # --- Resolve AMS slots and colors ---
         resolved_slots: list[int] = []
         resolved_colors: list[str] = []
+        ams_warning: str | None = None
 
         if ams_slots is not None:
             # Manual mode: user specified exact slots
@@ -13924,6 +13982,32 @@ def multi_color_copies(
                     f"copies ({copies}) doesn't match ams_slots length "
                     f"({len(resolved_slots)}). Provide one slot per copy.",
                     code="VALIDATION_ERROR",
+                )
+            # Best-effort: verify the requested slots actually hold filament,
+            # so a 6-copy request against a 4-tray AMS fails now, not mid-print.
+            try:
+                ams_check = ams_status()
+            except Exception:
+                ams_check = None
+            if ams_check and ams_check.get("success"):
+                loaded_slots = {
+                    int(tray.get("slot", 0))
+                    for unit in ams_check.get("units", [])
+                    for tray in unit.get("trays", [])
+                    if (tray.get("tray_type") or "").strip()
+                }
+                missing = sorted(s for s in resolved_slots if s not in loaded_slots)
+                if missing:
+                    return _error_dict(
+                        f"AMS slot(s) {missing} have no filament loaded. "
+                        f"Loaded slots: {sorted(loaded_slots)}. Pick loaded "
+                        f"slots or load filament first.",
+                        code="NO_MATERIAL",
+                    )
+            else:
+                ams_warning = (
+                    "Could not verify ams_slots against the AMS — proceeding "
+                    "with the requested slots unchecked."
                 )
         else:
             # Auto-detect mode: query AMS for loaded trays
@@ -14000,30 +14084,45 @@ def multi_color_copies(
         while len(resolved_colors) < n_copies:
             resolved_colors.append(default_colors[len(resolved_colors) % len(default_colors)])
 
-        # --- Build multi-material 3MF ---
-        # Each copy gets a unique filament_index so the slicer treats them
-        # as separate materials → the printer uses different AMS slots.
-        from kiln.generation.validation import build_multi_material_3mf
+        # --- Arrange the copies and build the multi-color 3MF ---
+        # Each copy is its own arrangement group, so the copies land side by
+        # side (spacing_mm apart) — never stacked at the origin — and gets a
+        # unique extruder so the printer pulls from different AMS slots.
+        from kiln.multicolor_3mf import auto_arrange_parts, compose_multicolor_3mf
 
         model_name = os.path.splitext(os.path.basename(model_path))[0]
-        build_objects: list[dict[str, Any]] = []
+        part_specs: list[dict[str, Any]] = []
         for i in range(n_copies):
-            build_objects.append(
+            part_specs.append(
                 {
-                    "file_path": model_path,
-                    "filament_index": i,
+                    "stl_path": model_path,
+                    "extruder": i + 1,
                     "name": f"{model_name}_color_{i + 1}",
                     "color": resolved_colors[i],
-                    "material_name": material,
+                    "material": material,
+                    "group": i,
                 }
             )
 
         output_3mf = os.path.join(tempfile.gettempdir(), f"kiln_multi_color_{model_name}.3mf")
         try:
-            build_multi_material_3mf(build_objects, output_path=output_3mf)
+            try:
+                positioned = auto_arrange_parts(
+                    part_specs, gap_mm=spacing_mm, printer_id=printer_id
+                )
+            except ValueError:
+                # printer_id not in the supported-model catalog — arrange on
+                # the default plate size instead of refusing the print.
+                positioned = auto_arrange_parts(part_specs, gap_mm=spacing_mm)
+            compose_result = compose_multicolor_3mf(positioned, output_path=output_3mf)
         except Exception as exc:
             return _error_dict(
                 f"Failed to build multi-color 3MF: {exc}",
+                code="INTERNAL_ERROR",
+            )
+        if not compose_result.get("success"):
+            return _error_dict(
+                f"Failed to build multi-color 3MF: {compose_result.get('error')}",
                 code="INTERNAL_ERROR",
             )
 
@@ -14052,16 +14151,20 @@ def multi_color_copies(
             result["copies"] = n_copies
             result["objects"] = [
                 {
-                    "name": o["name"],
-                    "color": o["color"],
+                    "name": p.name,
+                    "color": p.color,
                     "ams_slot": resolved_slots[i],
+                    "x_mm": round(p.x, 2),
+                    "y_mm": round(p.y, 2),
                 }
-                for i, o in enumerate(build_objects)
+                for i, p in enumerate(positioned)
             ]
             result["ams_mapping"] = [
                 {"copy": i + 1, "slot": s, "color": resolved_colors[i]} for i, s in enumerate(resolved_slots)
             ]
             result["multi_color_3mf"] = output_3mf
+            if ams_warning:
+                result["ams_warning"] = ams_warning
 
         return result
     except Exception as exc:
