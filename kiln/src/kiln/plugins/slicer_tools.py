@@ -507,11 +507,17 @@ def _detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
 
     * **multi-object** — two-plus DISTINCT per-object extruder values in
       the slicer sidecars or on ``slic3rpe:extruder`` build items;
-    * **painted single object** — two-plus DISTINCT slicer paint states
-      (``paint_color`` / ``mmu_segmentation`` attribute values: a painting
-      that is one state everywhere is one filament, and flattening loses
-      nothing) or a two-plus-color ``<m:colorgroup>`` palette in the
-      model XML.
+    * **painted single object** — two-plus distinct FILAMENTS referenced
+      by the painting channel (``paint_color`` / ``mmu_segmentation``
+      values decoded to their leaf states: a painting that references one
+      filament everywhere loses nothing when flattened, and state 0 — the
+      unpainted portion of a partially painted triangle — is the object's
+      base filament, so it counts) or a two-plus-color ``<m:colorgroup>``
+      palette in the model XML.  Distinct attribute STRINGS are not the
+      metric: sub-triangle painting multiplies split shapes without
+      touching a new filament, which made every correctly sliced painted
+      3MF warn that colors were lost, including on a profile that could
+      print them.
 
     Returns an evidence dict when multicolor, else ``None``.  NEVER
     raises: this feeds an advisory, so a corrupt archive, odd layout, or
@@ -519,9 +525,11 @@ def _detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
     untouched.
     """
     try:
+        from kiln.threemf_parser import _decode_paint_states
+
         extruders: set[int] = set()
         paint_attribute: str | None = None
-        paint_states: set[bytes] = set()
+        paint_filaments: set[int] = set()
         palette_colors = 0
         with zipfile.ZipFile(input_path) as zf:
             for member in zf.namelist():
@@ -541,10 +549,18 @@ def _detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
                             re.findall(marker + b'="([^"]*)"', raw)
                         )
                         values.discard(b"")
-                        if len(values) >= 2:
+                        if not values:
+                            continue
+                        for value in values:
+                            decoded = _decode_paint_states(
+                                value.decode("ascii", errors="replace")
+                            )
+                            if decoded is None:
+                                continue  # malformed string = no evidence
+                            paint_filaments.update(decoded[0])
+                        if paint_filaments:
                             paint_attribute = marker.decode()
-                            paint_states |= values
-                            break
+                        break
                     palette_colors = max(
                         palette_colors, len(_COLORGROUP_COLOR_RE.findall(raw)),
                     )
@@ -552,9 +568,9 @@ def _detect_3mf_multicolor(input_path: str) -> dict[str, Any] | None:
         evidence: dict[str, Any] = {}
         if len(extruders) >= 2:
             evidence["extruders"] = sorted(extruders)
-        if paint_attribute is not None:
+        if paint_attribute is not None and len(paint_filaments) >= 2:
             evidence["paint_attribute"] = paint_attribute
-            evidence["paint_states"] = len(paint_states)
+            evidence["paint_filaments"] = len(paint_filaments)
         if palette_colors >= 2:
             evidence["palette_colors"] = palette_colors
         return evidence or None
@@ -648,7 +664,7 @@ def _multicolor_flatten_advisory(
         # only when everything collapses to one.
         colors_needed = max(
             len(evidence.get("extruders") or ()),
-            int(evidence.get("paint_states") or 0),
+            int(evidence.get("paint_filaments") or 0),
             int(evidence.get("palette_colors") or 0),
         )
         slots = _profile_filament_slots(profile_path)

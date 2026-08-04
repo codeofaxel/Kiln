@@ -175,6 +175,46 @@ class TestDetect3mfMulticolor:
             "paint_color", "mmu_segmentation",
         )
 
+    def test_sub_triangle_painting_counts_filaments_not_strings(self, tmp_path):
+        """Sub-triangle painting multiplies distinct attribute STRINGS
+        without touching a new filament.  Here three distinct strings —
+        state 1 painted whole ("4"), and two split shapes whose leaves are
+        states 1 and 0 ("041" / "045") — reference two filaments: paint
+        state 1 plus the base filament under the unpainted halves.
+        Counting strings read this as three and warned that a correctly
+        sliced two-filament painting was losing colors."""
+        path = tmp_path / "split_paint.3mf"
+        model = (
+            '<?xml version="1.0"?><model><resources><object id="1">'
+            '<mesh><triangles>'
+            '<triangle v1="0" v2="1" v3="2" paint_color="4"/>'
+            '<triangle v1="0" v2="2" v3="3" paint_color="041"/>'
+            '<triangle v1="1" v2="2" v3="3" paint_color="045"/>'
+            "</triangles></mesh></object></resources></model>"
+        )
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("3D/3dmodel.model", model)
+        evidence = _detect_3mf_multicolor(str(path))
+        assert evidence is not None
+        assert evidence["paint_filaments"] == 2
+
+    def test_single_state_sub_triangle_painting_is_one_filament(self, tmp_path):
+        """A painting that is state 1 everywhere — even via distinct full
+        and split encodings — references one filament; flattening it loses
+        nothing, so it must not read as multicolor.  ("4" is state 1
+        whole; "441" is a two-way split whose leaves are both state 1.)"""
+        path = tmp_path / "one_state.3mf"
+        model = (
+            '<?xml version="1.0"?><model><resources><object id="1">'
+            '<mesh><triangles>'
+            '<triangle v1="0" v2="1" v3="2" paint_color="4"/>'
+            '<triangle v1="0" v2="2" v3="3" paint_color="441"/>'
+            "</triangles></mesh></object></resources></model>"
+        )
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("3D/3dmodel.model", model)
+        assert _detect_3mf_multicolor(str(path)) is None
+
     def test_corrupt_zip_reads_as_not_multicolor(self, tmp_path):
         corrupt = tmp_path / "corrupt.3mf"
         corrupt.write_bytes(b"this is not a zip archive")
@@ -267,8 +307,8 @@ class TestMulticolorFlattenAdvisory:
 
     def test_warns_on_painted_single_slot(self, tmp_path):
         """Painted files now carry native paint attributes, so the
-        stronger painted-on evidence (distinct paint states) outranks the
-        palette count in the warning wording."""
+        stronger painted-on evidence (distinct paint filaments) outranks
+        the palette count in the warning wording."""
         block, warning = _multicolor_flatten_advisory(
             _painted_3mf(tmp_path, ["#FF0000", "#FF0000", "#0000FF", None]),
             _single_slot_ini(tmp_path),
@@ -277,7 +317,7 @@ class TestMulticolorFlattenAdvisory:
         assert block is not None
         assert warning is not None
         assert "painted-on colors" in warning
-        assert block["paint_states"] == 2
+        assert block["paint_filaments"] == 2
 
     def test_warns_without_gcode_measurement(self, tmp_path):
         """No readable G-code: the structural evidence still warns, just
