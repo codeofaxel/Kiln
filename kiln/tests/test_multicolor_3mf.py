@@ -781,3 +781,49 @@ def test_parse_mesh_file_rejects_unknown_ext(tmp_path: Path):
     bad.write_text("ply")
     with pytest.raises(ValueError, match="Unsupported mesh format"):
         _parse_mesh_file(str(bad))
+
+
+# ---------------------------------------------------------------------------
+# Metadata/Slic3r_PE_model.config — the dialect PrusaSlicer actually honors
+#
+# Measured with a real 4-extruder PrusaSlicer profile: without this file
+# every object printed with extruder 1 (filament used 888/0/0/0 mm); with
+# it, usage split across all four and T0..T3 tool changes appeared.  The
+# slic3rpe:extruder item attribute alone is NOT read.
+# ---------------------------------------------------------------------------
+
+
+def test_compose_writes_slic3r_pe_config(stl_a: Path, stl_b: Path, tmp_path: Path):
+    import xml.etree.ElementTree as ET
+
+    out = str(tmp_path / "pe.3mf")
+    result = compose_multicolor_3mf(
+        [
+            ColorPart(str(stl_a), extruder=1, name="body"),
+            ColorPart(str(stl_b), extruder=3, name="accent"),
+        ],
+        output_path=out,
+    )
+    assert result["success"] is True
+    with zipfile.ZipFile(out) as zf:
+        assert "Metadata/Slic3r_PE_model.config" in zf.namelist()
+        root = ET.fromstring(zf.read("Metadata/Slic3r_PE_model.config"))
+
+    extruders = {}
+    for obj in root.findall("object"):
+        for md in obj.findall("metadata"):
+            if md.get("type") == "object" and md.get("key") == "extruder":
+                extruders[obj.get("id")] = int(md.get("value"))
+        # every object also carries a volume-level assignment with a real
+        # triangle range — PrusaSlicer applies extruders per volume
+        vol = obj.find("volume")
+        assert vol is not None
+        assert int(vol.get("lastid")) >= int(vol.get("firstid"))
+        vol_extruder = [
+            int(md.get("value"))
+            for md in vol.findall("metadata")
+            if md.get("key") == "extruder"
+        ]
+        assert vol_extruder == [extruders[obj.get("id")]]
+
+    assert extruders == {"1": 1, "2": 3}

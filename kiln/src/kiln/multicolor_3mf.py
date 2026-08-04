@@ -6,11 +6,14 @@ BambuStudio (Bambu A1/X1/P1 + AMS), PrusaSlicer (MMU / ERCF), Cura, and
 any 3MF-capable slicer.
 
 The .3mf format is a ZIP archive. Each part becomes a separate ``<object>``
-in ``3D/3dmodel.model``. Extruder assignments live in two places for maximum
-slicer compatibility:
+in ``3D/3dmodel.model``. Extruder assignments live in three places for
+maximum slicer compatibility:
 
 * ``Metadata/model_settings.config`` — BambuStudio reads ``extruder`` here.
-* ``slic3rpe:extruder`` attribute on each ``<item>`` — PrusaSlicer reads this.
+* ``Metadata/Slic3r_PE_model.config`` — PrusaSlicer reads ``extruder`` here
+  (measured: with a 4-extruder profile it ignores the item attribute below).
+* ``slic3rpe:extruder`` attribute on each ``<item>`` — informational for
+  other 3MF consumers.
 
 **Two distinct use cases, one tool:**
 
@@ -460,6 +463,35 @@ def _build_model_settings(parsed: list[_ParsedPart]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _build_slic3r_pe_config(parsed: list[_ParsedPart]) -> str:
+    """Build ``Metadata/Slic3r_PE_model.config`` for PrusaSlicer.
+
+    PrusaSlicer reads per-object extruder assignments from this file —
+    measured with a 4-extruder profile, it ignores the ``slic3rpe:extruder``
+    attribute on ``<item>`` (everything printed with extruder 1 until this
+    file was present).  The attribute is still written for slicers that do
+    read it; this file is what makes the assignment actually arrive.
+    """
+    lines: list[str] = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<config>",
+    ]
+    for obj_id, (part, _, triangles) in enumerate(parsed, start=1):
+        name = _xml_escape(part.name or f"part_{obj_id}")
+        lines += [
+            f'  <object id="{obj_id}">',
+            f'    <metadata type="object" key="name" value="{name}"/>',
+            f'    <metadata type="object" key="extruder" value="{part.extruder}"/>',
+            f'    <volume firstid="0" lastid="{len(triangles) - 1}">',
+            f'      <metadata type="volume" key="name" value="{name}"/>',
+            f'      <metadata type="volume" key="extruder" value="{part.extruder}"/>',
+            "    </volume>",
+            "  </object>",
+        ]
+    lines.append("</config>")
+    return "\n".join(lines)
+
+
 def _build_project_settings(flush_matrix_str: str) -> str:
     """Build ``Metadata/project_settings.config`` for BambuStudio.
 
@@ -827,6 +859,7 @@ def compose_multicolor_3mf(
             zf.writestr("_rels/.rels",                  _RELS)
             zf.writestr("3D/3dmodel.model",             _build_model_xml(parsed))
             zf.writestr("Metadata/model_settings.config", _build_model_settings(parsed))
+            zf.writestr("Metadata/Slic3r_PE_model.config", _build_slic3r_pe_config(parsed))
             if flush_matrix_str:
                 zf.writestr(
                     "Metadata/project_settings.config",

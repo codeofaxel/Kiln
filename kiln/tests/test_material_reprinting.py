@@ -874,7 +874,8 @@ class TestMulticolorPlacement:
 
         # Per-copy extruders 1..4, in both slicer dialects
         assert [it["extruder"] for it in items] == [1, 2, 3, 4]
-        assert "Metadata/model_settings.config" in names
+        assert "Metadata/model_settings.config" in names       # BambuStudio
+        assert "Metadata/Slic3r_PE_model.config" in names      # PrusaSlicer
 
         # Copies occupy disjoint footprints, on the plate
         boxes = [it["world_bbox"] for it in items]
