@@ -90,7 +90,10 @@ logger = logging.getLogger(__name__)
 _THUMBNAIL_SIZE = 512
 
 
-def _generate_thumbnail(stl_paths: list[str]) -> bytes | None:
+def _generate_thumbnail(
+    stl_paths: list[str],
+    offsets: list[tuple[float, float, float]] | None = None,
+) -> bytes | None:
     """Render a plate thumbnail PNG from STL files via OpenSCAD.
 
     Imports all STL parts into a single scene so the thumbnail shows
@@ -98,6 +101,13 @@ def _generate_thumbnail(stl_paths: list[str]) -> bytes | None:
     full render) so non-manifold meshes work, and applies a neutral
     grey color with the DeepOcean colorscheme for high contrast on
     printer LCDs.
+
+    Args:
+        stl_paths: Mesh files to render.
+        offsets: Optional per-part ``(x, y, z)`` plate translations,
+            parallel to *stl_paths*.  Without them, N spaced copies of
+            one mesh render stacked — a thumbnail showing one object
+            for a four-object plate.
 
     Returns PNG bytes suitable for embedding as ``Metadata/plate_1.png``
     in a 3MF archive, or ``None`` if OpenSCAD is unavailable.
@@ -114,11 +124,15 @@ def _generate_thumbnail(stl_paths: list[str]) -> bytes | None:
         if not binary:
             return None
 
-        # Build a SCAD file that imports all parts with a neutral colour
-        # so the model is visible against any colorscheme background.
+        # Build a SCAD file that imports all parts (at their plate
+        # positions when given) with a neutral colour so the model is
+        # visible against any colorscheme background.
+        if offsets is None:
+            offsets = [(0.0, 0.0, 0.0)] * len(stl_paths)
         imports = "\n".join(
-            f'  import("{Path(p).resolve()}");'
-            for p in stl_paths
+            f'  translate([{ox:.4f}, {oy:.4f}, {oz:.4f}]) '
+            f'import("{Path(p).resolve()}");'
+            for p, (ox, oy, oz) in zip(stl_paths, offsets, strict=True)
             if os.path.isfile(p)
         )
         if not imports:
@@ -848,7 +862,10 @@ def compose_multicolor_3mf(
     # -----------------------------------------------------------------------
     # Generate plate thumbnail (best-effort, non-blocking)
     # -----------------------------------------------------------------------
-    thumbnail_data = _generate_thumbnail([p.stl_path for p in parts])
+    thumbnail_data = _generate_thumbnail(
+        [p.stl_path for p in parts],
+        offsets=[(p.x, p.y, p.z) for p in parts],
+    )
 
     # -----------------------------------------------------------------------
     # Build and write the 3MF ZIP archive
