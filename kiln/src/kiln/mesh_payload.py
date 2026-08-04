@@ -82,29 +82,6 @@ with the mesh OMITTED and ``{"downgraded": true, "reason": ..., counts,
 bbox}`` so the caller falls back to the still image.  A decimated payload
 is labeled ``decimated_from`` — never passed off as the original.
 
-VERTEX COLORS
--------------
-``vertex_colors`` rides when the mesh explicitly claims colors — a single
-mesh whose visual carries them (PLY/OBJ), or a multi-part Scene whose parts
-do.  A multicolor 3MF is the Scene case, and trimesh alone loses it twice
-over: ``force="mesh"`` drops per-part visuals on concatenation, and the 3MF
-loader never reads colors at all — neither core-spec basematerials nor the
-slicer sidecar Kiln's own composer writes (measured 2026-08-01).  So the
-Scene is flattened HERE, with per-part colors baked to per-vertex RGBA
-(3MF part colors via :func:`kiln.threemf_parser.object_display_colors`).
-A PAINTED 3MF — objects whose color varies per triangle, whether written
-as core-spec per-triangle references (``compose_painted_3mf``) or as the
-slicer ``paint_color`` / ``slic3rpe:mmu_segmentation`` attribute — has
-no honest per-part color, so it is rebuilt as a per-face-colored
-triangle soup from :func:`kiln.threemf_parser.parse_colored_3mf`
-instead, guarded to the files whose soup provably matches the loaded
-mesh: whole-mesh count+bbox agreement for a single object, per-object
-name-matched ``ColoredMesh.segments`` for several.  Decimation rebuilds
-the vertex set, so colors cross it by nearest-original-vertex transfer —
-nearest face centroid for a painted soup, whose coincident boundary
-copies would otherwise speckle — or are dropped when scipy is missing,
-never guessed.
-
 Stateless: path in, dict out.  No disk writes, no caches, no network.
 """
 
@@ -191,291 +168,6 @@ def _to_viewer_space(xyz: Any) -> Any:
     return out
 
 
-#: The neutral part color for Scene parts that claim nothing — Kiln's
-#: canonical model grey (#AAAAAA), only ever shipped when SOME part in the
-#: scene carries a real color (the buffer is all-or-nothing per payload).
-_NEUTRAL_RGBA = (170, 170, 170, 255)
-
-
-def _part_rgba(part: Any, sidecar_rgb: tuple[int, int, int] | None) -> tuple[Any, bool]:
-    """``(N, 4)`` uint8 RGBA for one Scene part, and whether it is explicit.
-
-    Strongest claim first: colors the part's own visual carries (vertex or
-    face kind), then the 3MF sidecar color for this part, then a material's
-    stated color.  A part claiming nothing gets the neutral grey and
-    ``explicit=False`` — never a guess dressed as a color.
-    """
-    import numpy as np
-
-    n = len(part.vertices)
-    kind = getattr(part.visual, "kind", None)
-    if kind in ("vertex", "face"):
-        rgba = np.asarray(part.visual.vertex_colors, dtype=np.uint8)
-        if rgba.shape == (n, 4):
-            return rgba, True
-    if sidecar_rgb is not None:
-        r, g, b = sidecar_rgb
-        return np.tile(np.array([[r, g, b, 255]], np.uint8), (n, 1)), True
-    # A material's main_color, unless it is trimesh's own default — that
-    # grey means "nobody said", not "somebody chose grey".  An
-    # image-textured material is skipped outright: its main_color is the
-    # tint FACTOR (usually pure white), and painting the whole part with
-    # it would claim a color the file never stated.
-    from trimesh.visual.color import DEFAULT_COLOR
-
-    material = getattr(part.visual, "material", None)
-    main = getattr(material, "main_color", None)
-    textured = any(
-        getattr(material, attr, None) is not None
-        for attr in ("image", "baseColorTexture")
-    )
-    if (
-        not textured
-        and main is not None
-        and tuple(np.asarray(main)[:4]) != tuple(DEFAULT_COLOR)
-    ):
-        rgba_row = np.asarray(main, dtype=np.uint8).reshape(1, 4)
-        return np.tile(rgba_row, (n, 1)), True
-    return np.tile(np.array([_NEUTRAL_RGBA], np.uint8), (n, 1)), False
-
-
-def _scene_to_single_mesh(scene: Any, path: Path) -> Any:
-    """Concatenate a multi-part Scene into one Trimesh, colors included.
-
-    ``trimesh.load(force="mesh")`` flattens a Scene but loses each part's
-    color on the way — and for a 3MF it never had them: trimesh 4.x drops
-    both core-spec colors and the slicer sidecar Kiln's own composer writes
-    (measured 2026-08-01).  A multicolor 3MF is exactly the artifact where
-    the color IS the payoff, so the flattening happens here instead, baking
-    each part's color into per-vertex RGBA as it goes.  3MF part colors come
-    from :func:`kiln.threemf_parser.object_display_colors`, keyed by the
-    same names trimesh keys the Scene's geometry with.
-
-    Vertices are deliberately NOT merged across parts (``process=False``):
-    two color zones meet at shared coordinates, and merging would hand one
-    zone's vertices to the other's color.
-
-    Returns ``None`` for a Scene with no triangle geometry — the caller
-    already owns that refusal.
-    """
-    import numpy as np
-    import trimesh
-
-    sidecar: dict[str, tuple[int, int, int]] = {}
-    if path.suffix.lower() == ".3mf":
-        from kiln.threemf_parser import object_display_colors
-
-        sidecar = object_display_colors(str(path))
-
-    parts: list[Any] = []
-    part_rgba: list[Any] = []
-    any_explicit = False
-    for node_name in scene.graph.nodes_geometry:
-        transform, geom_name = scene.graph[node_name]
-        geom = scene.geometry.get(geom_name)
-        if not isinstance(geom, trimesh.Trimesh) or len(geom.faces) == 0:
-            continue
-        part = geom.copy()
-        if transform is not None:
-            part.apply_transform(transform)
-        rgba, explicit = _part_rgba(part, sidecar.get(geom_name))
-        parts.append(part)
-        part_rgba.append(rgba)
-        any_explicit = any_explicit or explicit
-
-    if not parts:
-        return None
-    offsets = np.cumsum([0] + [len(p.vertices) for p in parts])
-    combined = trimesh.Trimesh(
-        vertices=np.vstack([np.asarray(p.vertices, dtype=np.float64) for p in parts]),
-        faces=np.vstack(
-            [
-                np.asarray(p.faces, dtype=np.int64) + off
-                for p, off in zip(parts, offsets[:-1], strict=True)
-            ]
-        ),
-        process=False,
-    )
-    if any_explicit:
-        combined.visual = trimesh.visual.ColorVisuals(
-            mesh=combined, vertex_colors=np.vstack(part_rgba)
-        )
-    return combined
-
-
-def _transfer_vertex_colors(
-    src_vertices: Any, src_rgba: Any, dst_vertices: Any, *, src_faces: Any = None
-) -> Any:
-    """Carry vertex colors across a decimation.
-
-    Decimation rebuilds the vertex set, so colors cannot ride through it.
-    An indexed mesh transfers by nearest ORIGINAL VERTEX — zone colors are
-    piecewise-constant, which makes that exact everywhere but the zone
-    borders.  A painted SOUP cannot: every boundary vertex exists as 2–3
-    coincident copies with DIFFERENT face colors, and "nearest" among
-    exact ties is an arbitrary pick — boundary speckle.  So when
-    *src_faces* is given (the painted-soup source, where color is
-    per-face by construction), the transfer keys on nearest source FACE
-    CENTROID instead: centroids are never coincident across a paint
-    boundary, so the split stays spatially clean.  Returns ``None`` when
-    scipy is unavailable — colors are then dropped, never guessed.
-    """
-    try:
-        from scipy.spatial import cKDTree
-    except ImportError:
-        return None
-    if src_faces is not None:
-        centroids = src_vertices[src_faces].mean(axis=1)
-        nearest_face = cKDTree(centroids).query(dst_vertices, k=1)[1]
-        # Soup faces carry one color on all three vertices — read the first.
-        return src_rgba[src_faces[nearest_face, 0]]
-    return src_rgba[cKDTree(src_vertices).query(dst_vertices, k=1)[1]]
-
-
-def _painted_3mf_mesh(
-    path: Path, flattened: Any, *, scene: Any, baked_colors: bool
-) -> Any:
-    """Per-triangle colors of a painted 3MF, as a colored triangle soup.
-
-    A painted file — an object whose color varies per triangle, whether
-    written as core-spec per-triangle references (``compose_painted_3mf``)
-    or as the slicer painting attribute every BambuStudio / OrcaSlicer /
-    PrusaSlicer-painted model carries — defeats the per-part bake: no
-    single color tells the truth about the object, so
-    ``object_display_colors`` rightly refuses it and the stage would show
-    gray.  The per-triangle truth is what
-    ``threemf_parser.parse_colored_3mf`` already extracts; this rebuilds
-    the mesh from that soup, each face's three vertices carrying its color
-    (vertices are deliberately NOT shared across faces — sharing would
-    blend colors across the paint boundary).
-
-    Trusted narrowly, because a wrong color is worse than none:
-
-    * ONE object (*scene* ``None`` or single-geometry): the soup follows
-      the file's object order and the flattened mesh follows the scene
-      graph's; with one object the two cannot disagree, so the whole-mesh
-      guard suffices — triangle count and bounding box must agree
-      (``parse_colored_3mf`` ignores build-item transforms, so a
-      transformed or instanced item fails the bbox check and the caller
-      keeps the honest uncolored mesh rather than a mispositioned one).
-    * SEVERAL objects: ordering is proven per part instead of assumed —
-      each Scene geometry is matched to its ``ColoredMesh.segments`` entry
-      BY NAME (the same name-else-id convention ``object_display_colors``
-      keys by), refusing on duplicate names, on any count disagreement,
-      on a non-identity node transform (the segment's soup sits in file
-      coordinates), and on any segment whose soup bounds disagree with
-      that geometry's.  The soup is then assembled in scene-graph order,
-      so every face's color lands on the part that owns it.
-
-    A file whose archive carries no color construct at all — core-spec,
-    sidecar, or painting attribute — is turned away by a byte scan before
-    the full parse; and when the per-part bake already produced colors
-    (*baked_colors*), only a painting attribute justifies second-guessing
-    it with a soup.
-    """
-    import zipfile
-
-    import numpy as np
-    import trimesh
-
-    from kiln.threemf_parser import (
-        _SLICER_SETTINGS_PATH,
-        _bytes_have_paint,
-        _find_model_xml,
-        parse_colored_3mf,
-    )
-
-    try:
-        with zipfile.ZipFile(str(path)) as zf:
-            raw = zf.read(_find_model_xml(zf))
-            sidecar = b""
-            for member in zf.namelist():
-                if member.lower() == _SLICER_SETTINGS_PATH.lower():
-                    sidecar = zf.read(member)
-                    break
-    except (ValueError, OSError, KeyError, zipfile.BadZipFile):
-        return None
-    has_paint = _bytes_have_paint(raw)
-    if (
-        b"colorgroup" not in raw
-        and b"basematerials" not in raw
-        and b'key="color"' not in sidecar
-        and not has_paint
-    ):
-        return None
-    if baked_colors and not has_paint:
-        # The per-part bake already carried every color this file states.
-        return None
-    try:
-        colored = parse_colored_3mf(str(path))
-    except (ValueError, OSError, zipfile.BadZipFile):
-        return None
-    if not colored.colors_found or not colored.triangles:
-        return None
-
-    if scene is None or len(scene.geometry) == 1:
-        if len(colored.triangles) != len(flattened.faces):
-            return None
-        tris = colored.triangles
-        soup = np.array(
-            [[t.v0, t.v1, t.v2] for t in tris], dtype=np.float64,
-        ).reshape(-1, 3)
-        if not (
-            np.allclose(soup.min(axis=0), flattened.bounds[0], atol=1e-4)
-            and np.allclose(soup.max(axis=0), flattened.bounds[1], atol=1e-4)
-        ):
-            return None
-    else:
-        by_key: dict[str, Any] = {}
-        for seg in colored.segments:
-            if seg.key in by_key:
-                return None  # duplicate names — cannot prove which part is which
-            by_key[seg.key] = seg
-        if sum(seg.count for seg in colored.segments) != len(colored.triangles):
-            return None
-        tris = []
-        for node_name in scene.graph.nodes_geometry:
-            transform, geom_name = scene.graph[node_name]
-            geom = scene.geometry.get(geom_name)
-            if not isinstance(geom, trimesh.Trimesh) or len(geom.faces) == 0:
-                continue
-            if transform is not None and not np.allclose(
-                transform, np.eye(4), atol=1e-9
-            ):
-                return None  # a moved instance's soup would sit at the wrong place
-            seg = by_key.get(geom_name)
-            if seg is None or seg.count != len(geom.faces):
-                return None
-            seg_tris = colored.triangles[seg.start:seg.start + seg.count]
-            seg_soup = np.array(
-                [[t.v0, t.v1, t.v2] for t in seg_tris], dtype=np.float64,
-            ).reshape(-1, 3)
-            if not (
-                np.allclose(seg_soup.min(axis=0), geom.bounds[0], atol=1e-4)
-                and np.allclose(seg_soup.max(axis=0), geom.bounds[1], atol=1e-4)
-            ):
-                return None
-            tris.extend(seg_tris)
-        if len(tris) != len(flattened.faces):
-            return None
-        soup = np.array(
-            [[t.v0, t.v1, t.v2] for t in tris], dtype=np.float64,
-        ).reshape(-1, 3)
-
-    mesh = trimesh.Trimesh(
-        vertices=soup,
-        faces=np.arange(len(soup), dtype=np.int64).reshape(-1, 3),
-        process=False,
-    )
-    rgb = np.asarray([t.color for t in tris], dtype=np.uint8)
-    rgba = np.concatenate(
-        [np.repeat(rgb, 3, axis=0), np.full((len(soup), 1), 255, np.uint8)],
-        axis=1,
-    )
-    mesh.visual = trimesh.visual.ColorVisuals(mesh=mesh, vertex_colors=rgba)
-    return mesh
-
-
 def mesh_to_viewer_payload(
     mesh_path: str | Path,
     *,
@@ -512,14 +204,7 @@ def mesh_to_viewer_payload(
     if not path.exists():
         raise FileNotFoundError(f"mesh not found: {path}")
 
-    loaded = trimesh.load(str(path))
-    if isinstance(loaded, trimesh.Scene):
-        # The Scene path bakes per-part colors (a multicolor 3MF's whole
-        # point) into vertex colors while flattening — force="mesh" loses
-        # them.
-        mesh = _scene_to_single_mesh(loaded, path)
-    else:
-        mesh = loaded
+    mesh = trimesh.load(str(path), force="mesh")
     if not isinstance(mesh, trimesh.Trimesh) or len(mesh.faces) == 0:
         raise ValueError(f"no triangle geometry in {path.name}")
 
@@ -531,30 +216,8 @@ def mesh_to_viewer_payload(
         "format": path.suffix.lstrip(".").lower(),
     }
 
-    # A 3MF may be PAINTED — objects whose color varies per triangle,
-    # which the per-part bake rightly refuses (and which the bake cannot
-    # even see when the painting rides the slicer paint attribute).  The
-    # per-triangle soup carries that truth when it provably matches the
-    # loaded mesh — whole-mesh agreement for a single object, per-object
-    # name-matched segments for several.
-    painted_soup = False
-    if path.suffix.lower() == ".3mf":
-        painted = _painted_3mf_mesh(
-            path,
-            mesh,
-            scene=loaded if isinstance(loaded, trimesh.Scene) else None,
-            baked_colors=getattr(mesh.visual, "kind", None) == "vertex",
-        )
-        if painted is not None:
-            mesh = painted
-            painted_soup = True
-            orig_tris = int(len(mesh.faces))
-            orig_verts = int(len(mesh.vertices))
-
     # Vertex colors ride along only when the visual explicitly carries them
-    # (trimesh reports kind == "vertex") — read straight from a single mesh's
-    # file, baked from a Scene's per-part colors above, or rebuilt from a
-    # painted file's per-triangle soup.
+    # (trimesh reports kind == "vertex"); decimation drops them.
     has_colors = getattr(mesh.visual, "kind", None) == "vertex"
 
     # ---- Cap check: triangles AND encoded bytes, one decimation try ----
@@ -581,40 +244,12 @@ def mesh_to_viewer_payload(
         # Solve the triangle budget from BOTH caps using the mesh's own
         # vertex/triangle ratio, then decimate exactly once.
         ratio = orig_verts / orig_tris  # ~0.5 for closed manifolds
-        per_tri_raw = 12.0 + ratio * (
-            12.0
-            + (12.0 if include_normals else 0.0)
-            + (4.0 if has_colors else 0.0)
-        )
+        per_tri_raw = 12.0 + ratio * (12.0 + (12.0 if include_normals else 0.0))
         bytes_budget_tris = int(((max_bytes - 2048) * 3 / 4) / per_tri_raw)
         target = max(512, min(max_triangles, bytes_budget_tris))
-        pre_vertices = pre_rgba = pre_faces = None
-        if has_colors:
-            pre_vertices = np.asarray(mesh.vertices, dtype=np.float32)
-            pre_rgba = np.asarray(mesh.visual.vertex_colors, dtype=np.uint8)
-            if painted_soup:
-                # Soup colors are per-face; transferring by face centroid
-                # avoids the coincident-copy speckle at paint boundaries.
-                pre_faces = np.asarray(mesh.faces, dtype=np.int64)
         mesh = mesh.simplify_quadric_decimation(face_count=target)
         decimated_from = orig_tris
-        if has_colors:
-            # The backend rebuilds the vertex set without attributes, so the
-            # colors are carried across by nearest-original-vertex transfer
-            # (nearest face centroid for a painted soup) — or dropped when
-            # scipy is absent, never guessed.
-            rgba = _transfer_vertex_colors(
-                pre_vertices,
-                pre_rgba,
-                np.asarray(mesh.vertices, dtype=np.float32),
-                src_faces=pre_faces,
-            )
-            if rgba is None:
-                has_colors = False
-            else:
-                mesh.visual = trimesh.visual.ColorVisuals(
-                    mesh=mesh, vertex_colors=rgba
-                )
+        has_colors = False  # decimation does not preserve vertex colors
 
     verts = np.asarray(mesh.vertices, dtype=np.float32)
     faces = np.asarray(mesh.faces, dtype=np.uint32)

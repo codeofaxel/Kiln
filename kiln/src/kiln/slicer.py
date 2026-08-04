@@ -211,30 +211,6 @@ def _get_version(slicer_path: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _gcode_output_is_complete(out_file: str) -> bool:
-    """Whether *out_file* looks like a finished slice, not a truncated one.
-
-    Slicers write their summary footer (the ``filament used`` statistics
-    block) only after the last toolpath is out, so a process killed
-    mid-write never gets there.  Distinguishes "crashed AFTER finishing"
-    from "crashed while writing" when the slicer dies on a signal:
-    PrusaSlicer 2.9.4's CLI segfaults in its object-conflict bookkeeping
-    (Print::export_gcode → ConflictResult assignment) on some multi-object
-    files — stacked parts meeting at an exactly-coincident plane, the
-    shape Kiln's banded multicolor compose produces — after exporting a
-    complete, correct file.
-    """
-    try:
-        with open(out_file, "rb") as fh:
-            fh.seek(0, os.SEEK_END)
-            size = fh.tell()
-            fh.seek(max(0, size - 65536))
-            tail = fh.read()
-    except OSError:
-        return False
-    return b"filament used" in tail
-
-
 def slice_file(
     input_path: str,
     *,
@@ -335,12 +311,7 @@ def slice_file(
     except OSError as exc:
         raise SlicerError(f"Failed to run slicer: {exc}") from exc
 
-    crashed_after_finishing = (
-        result.returncode != 0
-        and result.returncode < 0  # killed by a signal, not a reported error
-        and _gcode_output_is_complete(out_file)
-    )
-    if result.returncode != 0 and not crashed_after_finishing:
+    if result.returncode != 0:
         stderr_snippet = (result.stderr or "").strip()[:500]
         raise SlicerError(f"Slicer exited with code {result.returncode}. stderr: {stderr_snippet}")
 
@@ -368,18 +339,11 @@ def slice_file(
     except Exception:  # noqa: BLE001 — stats must never fail a slice
         logger.debug("slice telemetry recording failed", exc_info=True)
 
-    message = f"Sliced {Path(input_abs).name} -> {Path(out_file).name}"
-    if crashed_after_finishing:
-        message += (
-            f" (the slicer crashed on exit AFTER writing complete G-code — "
-            f"signal {-result.returncode}; the output was verified complete "
-            f"and kept)"
-        )
     return SliceResult(
         success=True,
         output_path=out_file,
         slicer=slicer.name,
-        message=message,
+        message=f"Sliced {Path(input_abs).name} -> {Path(out_file).name}",
         stdout=(result.stdout or "").strip(),
         stderr=(result.stderr or "").strip(),
     )

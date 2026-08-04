@@ -10,8 +10,7 @@ in ``3D/3dmodel.model``. Extruder assignments live in two places for maximum
 slicer compatibility:
 
 * ``Metadata/model_settings.config`` — BambuStudio reads ``extruder`` here.
-* ``Metadata/Slic3r_PE_model.config`` — the PrusaSlicer family reads
-  per-object extruders here (and only here — verified against its reader).
+* ``slic3rpe:extruder`` attribute on each ``<item>`` — PrusaSlicer reads this.
 
 **Two distinct use cases, one tool:**
 
@@ -87,102 +86,8 @@ logger = logging.getLogger(__name__)
 
 _THUMBNAIL_SIZE = 512
 
-#: Above this the pure-Python colored painter costs more than the OpenSCAD
-#: subprocess it replaces; the grey fallback takes over.
-_COLORED_THUMBNAIL_MAX_TRIANGLES = 200_000
 
-
-def _part_rgb_hex(color: str | None) -> str | None:
-    """Normalize a part's color hint to ``#RRGGBB``, or ``None``.
-
-    Accepts bare and ``#``-prefixed hex, 6 or 8 digits (alpha dropped).
-    Anything else is not a color claim.
-    """
-    if not color:
-        return None
-    value = color.strip().lstrip("#")
-    if len(value) == 8:
-        value = value[:6]
-    if len(value) != 6:
-        return None
-    try:
-        int(value, 16)
-    except ValueError:
-        return None
-    return "#" + value.upper()
-
-
-def _part_rgb(color: str | None) -> tuple[int, int, int] | None:
-    """The part's color hint as an RGB tuple, or ``None``."""
-    hex_color = _part_rgb_hex(color)
-    if hex_color is None:
-        return None
-    return (
-        int(hex_color[1:3], 16),
-        int(hex_color[3:5], 16),
-        int(hex_color[5:7], 16),
-    )
-
-
-def _generate_thumbnail(parsed: list[_ParsedPart]) -> bytes | None:
-    """Render the ``Metadata/plate_1.png`` thumbnail for the composed 3MF.
-
-    First choice is Kiln's own colored renderer — pure Python, no OpenSCAD
-    needed, and it paints the parts in their REAL colors: a multicolor 3MF
-    whose thumbnail is grey undersells the print on every slicer LCD and
-    file browser it lands in.  Falls back to the OpenSCAD grey render for
-    meshes too big to paint in Python, and to ``None`` when neither path
-    is available.  A thumbnail must never fail the compose.
-    """
-    if not parsed:
-        return None
-    total_triangles = sum(len(t) for _, _, t in parsed)
-    if total_triangles <= _COLORED_THUMBNAIL_MAX_TRIANGLES:
-        try:
-            data = _render_colored_thumbnail(parsed)
-            if data:
-                return data
-        except Exception:  # noqa: BLE001 — enrichment, never a compose failure
-            logger.debug(
-                "colored thumbnail failed — falling back to OpenSCAD",
-                exc_info=True,
-            )
-    return _generate_thumbnail_openscad([p.stl_path for p, _, _ in parsed])
-
-
-def _render_colored_thumbnail(parsed: list[_ParsedPart]) -> bytes | None:
-    """PNG bytes from the colored renderer, honoring per-part placement."""
-    from kiln.colored_renderer import render_colored_mesh
-    from kiln.threemf_parser import _DEFAULT_COLOR, ColoredTriangle
-
-    triangles: list[ColoredTriangle] = []
-    for part, vertices, faces in parsed:
-        rgb = _part_rgb(part.color) or _DEFAULT_COLOR
-        dx, dy, dz = part.x, part.y, part.z
-        for a, b, c in faces:
-            triangles.append(
-                ColoredTriangle(
-                    v0=(vertices[a][0] + dx, vertices[a][1] + dy, vertices[a][2] + dz),
-                    v1=(vertices[b][0] + dx, vertices[b][1] + dy, vertices[b][2] + dz),
-                    v2=(vertices[c][0] + dx, vertices[c][1] + dy, vertices[c][2] + dz),
-                    color=rgb,
-                )
-            )
-    if not triangles:
-        return None
-    result = render_colored_mesh(
-        triangles, width=_THUMBNAIL_SIZE, height=_THUMBNAIL_SIZE,
-    )
-    path = result.path
-    try:
-        with open(path, "rb") as fh:
-            return fh.read()
-    finally:
-        with contextlib.suppress(OSError):
-            os.remove(path)
-
-
-def _generate_thumbnail_openscad(stl_paths: list[str]) -> bytes | None:
+def _generate_thumbnail(stl_paths: list[str]) -> bytes | None:
     """Render a plate thumbnail PNG from STL files via OpenSCAD.
 
     Imports all STL parts into a single scene so the thumbnail shows
@@ -431,62 +336,20 @@ _ParsedPart = tuple[ColorPart, list[tuple[float, float, float]], list[tuple[int,
 
 
 def _build_model_xml(parsed: list[_ParsedPart]) -> str:
-    """Build ``3D/3dmodel.model`` XML containing all mesh objects.
-
-    Part colors are written where SPEC-COMPLIANT readers look, not only in
-    the slicer sidecar: one ``<m:colorgroup>`` entry per distinct part
-    color, referenced from every triangle of a colored object
-    (``pid``/``p1``).  That exact shape — colorgroup plus per-triangle
-    references, and deliberately NO object-level ``pid`` — is the one the
-    web viewer's color-preserve tests drive through three.js' real
-    3MFLoader, which bakes it to vertex colors; kiln.threemf_parser
-    resolves it too (a single effective color per object).  The sidecar
-    alone kept the colors invisible to every reader but the slicers that
-    wrote the convention.
-    """
-    palette: list[str] = []
-    part_pindex: dict[int, int] = {}
-    for obj_id, (part, _, _) in enumerate(parsed, start=1):
-        rgb_hex = _part_rgb_hex(part.color)
-        if rgb_hex is None:
-            continue
-        if rgb_hex not in palette:
-            palette.append(rgb_hex)
-        part_pindex[obj_id] = palette.index(rgb_hex)
-    # Object ids stay 1..N (model_settings.config references them); the
-    # color group takes the next free resource id.
-    colorgroup_id = len(parsed) + 1
-
+    """Build ``3D/3dmodel.model`` XML containing all mesh objects."""
     lines: list[str] = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<model unit="millimeter" xml:lang="en-US"',
         '  xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"',
-        '  xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"',
         '  xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06"',
         '  xmlns:bambu="http://bambulab.com/model/2021"',
         '  xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06">',
         '  <metadata name="Application">Kiln</metadata>',
-        # The Bambu-family project-version stamp.  Without it OrcaSlicer
-        # classifies a file carrying slicer sidecars as "generated by an old
-        # OrcaSlicer version" and warns it is loading geometry only.  Safe by
-        # both forks' readers (verified in bbs_3mf.cpp, Orca and Bambu): the
-        # key only sets an integer version — a file is treated as a
-        # BambuStudio/OrcaSlicer PROJECT solely when the Application metadata
-        # starts with their names, which ours never does.
-        '  <metadata name="BambuStudio:3mfVersion">1</metadata>',
         "  <resources>",
     ]
-    if palette:
-        lines.append(f'    <m:colorgroup id="{colorgroup_id}">')
-        lines += [f'      <m:color color="{c}"/>' for c in palette]
-        lines.append("    </m:colorgroup>")
 
     for obj_id, (part, vertices, triangles) in enumerate(parsed, start=1):
         name = _xml_escape(part.name or f"part_{obj_id}")
-        pindex = part_pindex.get(obj_id)
-        tri_ref = (
-            f' pid="{colorgroup_id}" p1="{pindex}"' if pindex is not None else ""
-        )
         lines += [
             f'    <object id="{obj_id}" type="model" name="{name}">',
             "      <mesh>",
@@ -499,7 +362,7 @@ def _build_model_xml(parsed: list[_ParsedPart]) -> str:
             "        <triangles>",
         ]
         for v1, v2, v3 in triangles:
-            lines.append(f'          <triangle v1="{v1}" v2="{v2}" v3="{v3}"{tri_ref}/>')
+            lines.append(f'          <triangle v1="{v1}" v2="{v2}" v3="{v3}"/>')
         lines += [
             "        </triangles>",
             "      </mesh>",
@@ -520,39 +383,6 @@ def _build_model_xml(parsed: list[_ParsedPart]) -> str:
         )
     lines += ["  </build>", "</model>"]
 
-    return "\n".join(lines)
-
-
-def _build_prusa_model_config(parsed: list[_ParsedPart]) -> str:
-    """Build ``Metadata/Slic3r_PE_model.config`` — the PrusaSlicer channel.
-
-    PrusaSlicer reads per-object settings ONLY from this file: each object
-    carries a ``<volume firstid lastid>`` spanning its triangles plus an
-    ``extruder`` config entry (verified against the reader in
-    ``src/libslic3r/Format/3mf.cpp`` — the ``slic3rpe:extruder`` build-item
-    attribute this composer also writes appears nowhere in it).  Without
-    this file a multicolor 3MF sliced in the PrusaSlicer family prints
-    entirely with extruder 1 — no tool change, colors silently gone.
-    """
-    lines: list[str] = [
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        "<config>",
-    ]
-    for obj_id, (part, _, triangles) in enumerate(parsed, start=1):
-        if not triangles:
-            continue  # a rangeless volume would make the reader reject the file
-        name = _xml_escape(part.name or f"part_{obj_id}")
-        lines += [
-            f' <object id="{obj_id}" instances_count="1">',
-            f'  <volume firstid="0" lastid="{len(triangles) - 1}">',
-            f'   <metadata type="volume" key="name" value="{name}"/>',
-            f'   <metadata type="volume" key="extruder" value="{part.extruder}"/>',
-            "  </volume>",
-            f'  <metadata type="object" key="name" value="{name}"/>',
-            f'  <metadata type="object" key="extruder" value="{part.extruder}"/>',
-            " </object>",
-        ]
-    lines.append("</config>")
     return "\n".join(lines)
 
 
@@ -796,10 +626,7 @@ def compose_multicolor_3mf(
         * ``output_path`` (str) — path to the created .3mf file
         * ``parts`` (int) — number of color parts
         * ``total_vertices`` (int)
-        * ``total_triangles`` (int) — triangles actually emitted
-        * ``degenerate_skipped`` (int) — only present when > 0: input
-          triangles dropped because their vertices collapse under exact
-          dedup (the 3MF spec forbids repeated indices)
+        * ``total_triangles`` (int)
         * ``message`` (str) — human summary
         * ``error`` (str) — only present on failure
 
@@ -874,7 +701,6 @@ def compose_multicolor_3mf(
     # Parse all STL files
     # -----------------------------------------------------------------------
     parsed: list[_ParsedPart] = []
-    degenerate_skipped = 0
     for part in parts:
         try:
             vertices, triangles = _parse_stl(part.stl_path)
@@ -883,35 +709,12 @@ def compose_multicolor_3mf(
                     "success": False,
                     "error": f"STL for part '{part.name or part.stl_path}' contains no triangles.",
                 }
-            # Same guard as compose_painted_3mf: a triangle whose vertices
-            # collapse under exact dedup (common in real-world scans) would
-            # emit spec-forbidden repeated indices a strict reader may
-            # reject.  Skipped at construction so every downstream consumer
-            # — model XML, sidecar volume ranges, counts, thumbnail — sees
-            # only what is actually emitted.  Counted, never silent.
-            kept = [t for t in triangles if len(set(t)) == 3]
-            part_degenerate = len(triangles) - len(kept)
-            if part_degenerate:
-                degenerate_skipped += part_degenerate
-                logger.debug(
-                    "Skipped %d degenerate triangle(s) in %s",
-                    part_degenerate,
-                    Path(part.stl_path).name,
-                )
-            if not kept:
-                return {
-                    "success": False,
-                    "error": (
-                        f"STL for part '{part.name or part.stl_path}' "
-                        "contains only degenerate triangles."
-                    ),
-                }
-            parsed.append((part, vertices, kept))
+            parsed.append((part, vertices, triangles))
             logger.debug(
                 "Parsed %s: %d vertices, %d triangles (extruder %d)",
                 Path(part.stl_path).name,
                 len(vertices),
-                len(kept),
+                len(triangles),
                 part.extruder,
             )
         except Exception as exc:
@@ -930,7 +733,7 @@ def compose_multicolor_3mf(
     # -----------------------------------------------------------------------
     # Generate plate thumbnail (best-effort, non-blocking)
     # -----------------------------------------------------------------------
-    thumbnail_data = _generate_thumbnail(parsed)
+    thumbnail_data = _generate_thumbnail([p.stl_path for p in parts])
 
     # -----------------------------------------------------------------------
     # Build and write the 3MF ZIP archive
@@ -941,9 +744,6 @@ def compose_multicolor_3mf(
             zf.writestr("_rels/.rels",                  _RELS)
             zf.writestr("3D/3dmodel.model",             _build_model_xml(parsed))
             zf.writestr("Metadata/model_settings.config", _build_model_settings(parsed))
-            zf.writestr(
-                "Metadata/Slic3r_PE_model.config", _build_prusa_model_config(parsed),
-            )
             if flush_matrix_str:
                 zf.writestr(
                     "Metadata/project_settings.config",
@@ -976,8 +776,6 @@ def compose_multicolor_3mf(
         "total_triangles": total_t,
         "extruder_map": extruder_summary,
     }
-    if degenerate_skipped:
-        result["degenerate_skipped"] = degenerate_skipped
 
     # Attach full safety report (all free)
     if safety_result is not None:
@@ -1004,319 +802,4 @@ def compose_multicolor_3mf(
         + f" Next step: upload_file('{output_path}') then start_print()."
     )
 
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Painted single-object composer
-# ---------------------------------------------------------------------------
-
-#: Highest paint state a single serialized string can carry and still be
-#: decoded identically by BOTH slicer families — see painted_state_string.
-#: PrusaSlicer master alone could encode up to 255 (an 0b1110-escaped 8-bit
-#: extension), but the Bambu/Orca fork's TriangleSelector::deserialize
-#: predates that extension and reads only the two-nibble form, and the
-#: escape string itself ("EC") would make PrusaSlicer's decoder read past
-#: the end of the bitstream.  16 is the shared ceiling.
-PAINTED_STATE_MAX = 16
-
-
-def painted_state_string(state: int) -> str:
-    """The slicers' native serialized paint state for a WHOLE triangle.
-
-    All three slicers store per-triangle painting as one hex string per
-    ``<triangle>``: PrusaSlicer under ``slic3rpe:mmu_segmentation``, and
-    BambuStudio/OrcaSlicer under ``paint_color`` — both consumed by
-    ``FacetsAnnotation::set_triangle_from_string``.
-
-    Derivation, from the readers' own sources (not from documentation):
-
-    * ``TriangleSelector::serialize`` (prusa3d/PrusaSlicer,
-      ``src/libslic3r/TriangleSelector.cpp``) encodes each triangle as a
-      bitstream of nibbles, bits appended LSB-first.  An UNSPLIT triangle
-      painted state ``n`` is::
-
-          nibble 0 bits: [split&1, split&2, ...]   split = 0 for unsplit
-          n in 1..2:   nibble 0 = n << 2           -> 0x4 / 0x8   (1 nibble)
-          n in 3..16:  nibble 0 = 0b1100 = 0xC,
-                       nibble 1 = n - 3            -> 2 nibbles
-
-    * ``FacetsAnnotation::get_triangle_as_string`` / ``…from_string``
-      (``src/libslic3r/Model.cpp``, both repos, byte-identical) hex-encode
-      one char per nibble with the string REVERSED: the first bitstream
-      nibble is the LAST character.  So state 3 is ``"0C"``, not ``"C0"``.
-
-    * The Bambu/Orca fork (SoftFever/OrcaSlicer,
-      ``src/libslic3r/TriangleSelector.cpp``) asserts ``n <= 16`` in its
-      serializer and decodes leaf states only as
-      ``(code & 0b1100) == 0b1100 ? next_nibble() + 3 : code >> 2`` — no
-      8-bit escape, hence :data:`PAINTED_STATE_MAX`.  Orca's own
-      ``CONST_FILAMENTS`` table (``Model.cpp``) pins the identical canon:
-      ``{"", "4", "8", "0C", "1C", …, "DC"}`` for filaments 0..16.
-
-    State ``k`` means "painted with filament/extruder ``k``" (1-based);
-    unpainted triangles carry NO attribute rather than a state-0 string.
-
-    :raises ValueError: on ``state < 1`` or ``state > PAINTED_STATE_MAX``.
-    """
-    if not 1 <= state <= PAINTED_STATE_MAX:
-        raise ValueError(
-            f"paint state must be 1..{PAINTED_STATE_MAX} (got {state}): "
-            "state 0 is 'unpainted' (omit the attribute), and both slicer "
-            "families agree on the wire format only up to state 16"
-        )
-    if state <= 2:
-        return format(state << 2, "X")
-    return format(state - 3, "X") + "C"
-
-
-def compose_painted_3mf(
-    triangles: list[tuple[
-        tuple[float, float, float],
-        tuple[float, float, float],
-        tuple[float, float, float],
-    ]],
-    triangle_colors: list[str | None],
-    *,
-    output_path: str | None = None,
-    name: str = "painted",
-) -> dict[str, Any]:
-    """Compose a 3MF of ONE object whose colors vary per triangle.
-
-    The other shape multicolor takes.  ``compose_multicolor_3mf`` writes one
-    solid object per color — right when every color region can stand as a
-    closed body (stacked Z-bands, a boss on a plate).  A coloring that
-    follows the SURFACE (faces grouped by orientation, random speckle) has
-    no such bodies: splitting the shell along it yields zero-thickness
-    sheets no slicer accepts (measured: "unable to create convex hull",
-    exit 206).  Here the mesh stays whole — one watertight object — and the
-    colors ride as core-spec per-triangle references, the painted-model
-    form slicers' color-to-filament import flows exist for.  Each colored
-    triangle ALSO carries the slicers' native painting state (see
-    :func:`painted_state_string`) under both attribute spellings, so
-    PrusaSlicer imports the painting as real per-triangle MMU segmentation
-    (measured: tool changes and both filaments in the gcode, where the
-    colorgroup alone produced neither) and the Bambu family opens the file
-    as a painted model.
-
-    :param triangles: The full mesh, one ``(v0, v1, v2)`` tuple per
-        triangle, each vertex an ``(x, y, z)``.  Vertices are deduplicated
-        by exact coordinates, so a watertight input stays watertight.
-    :param triangle_colors: One ``#RRGGBB`` hint per triangle (``None`` =
-        uncolored; such faces carry no reference and render neutral).
-    :param output_path: Where to write.  Defaults to a temp file.
-    :param name: The object name shown in slicers.
-    :returns: Dict with ``output_path``, ``colors`` (distinct palette
-        actually referenced), and counts.  ``native_paint_truncated`` (int)
-        appears only when the palette exceeds :data:`PAINTED_STATE_MAX`
-        colors: triangles past the limit keep their spec colorgroup
-        reference but carry no native paint state.  ``{"success": False,
-        ...}`` on empty input or write failure — never raises.
-    """
-    if not triangles:
-        return {"success": False, "error": "No triangles to compose"}
-    if len(triangle_colors) != len(triangles):
-        return {
-            "success": False,
-            "error": (
-                f"triangle_colors length {len(triangle_colors)} != "
-                f"triangle count {len(triangles)}"
-            ),
-        }
-
-    # Exact-coordinate vertex dedup — the same discipline _parse_stl uses,
-    # so the emitted object is as watertight as the input mesh.  A triangle
-    # whose vertices collapse to fewer than three is dropped WITH its color
-    # (the spec forbids repeated indices, and a slicer meeting one may
-    # reject the whole file) — counted, never silent.
-    vert_index: dict[tuple[float, float, float], int] = {}
-    vertices: list[tuple[float, float, float]] = []
-    faces: list[tuple[int, int, int]] = []
-    kept_colors: list[str | None] = []
-    degenerate_skipped = 0
-    for tri, color in zip(triangles, triangle_colors, strict=True):
-        idx = []
-        for v in tri:
-            key = (float(v[0]), float(v[1]), float(v[2]))
-            i = vert_index.get(key)
-            if i is None:
-                i = len(vertices)
-                vert_index[key] = i
-                vertices.append(key)
-            idx.append(i)
-        if len(set(idx)) < 3:
-            degenerate_skipped += 1
-            continue
-        faces.append((idx[0], idx[1], idx[2]))
-        kept_colors.append(color)
-    if not faces:
-        return {"success": False, "error": "Every triangle was degenerate"}
-
-    palette: list[str] = []
-    tri_pindex: list[int | None] = []
-    for color in kept_colors:
-        rgb_hex = _part_rgb_hex(color)
-        if rgb_hex is None:
-            tri_pindex.append(None)
-            continue
-        if rgb_hex not in palette:
-            palette.append(rgb_hex)
-        tri_pindex.append(palette.index(rgb_hex))
-
-    colorgroup_id = 2  # the single object is id 1
-    obj_name = _xml_escape(name)
-    lines: list[str] = [
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        '<model unit="millimeter" xml:lang="en-US"',
-        '  xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"',
-        '  xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"',
-        '  xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06"',
-        '  xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06">',
-        '  <metadata name="Application">Kiln</metadata>',
-        '  <metadata name="BambuStudio:3mfVersion">1</metadata>',
-        "  <resources>",
-    ]
-    if palette:
-        lines.append(f'    <m:colorgroup id="{colorgroup_id}">')
-        lines += [f'      <m:color color="{c}"/>' for c in palette]
-        lines.append("    </m:colorgroup>")
-    lines += [
-        f'    <object id="1" type="model" name="{obj_name}">',
-        "      <mesh>",
-        "        <vertices>",
-    ]
-    for x, y, z in vertices:
-        lines.append(f'          <vertex x="{x:.6f}" y="{y:.6f}" z="{z:.6f}"/>')
-    lines += [
-        "        </vertices>",
-        "        <triangles>",
-    ]
-    # Each colored triangle carries THREE channels: the core-spec
-    # colorgroup reference (generic readers + kiln.threemf_parser), and the
-    # slicers' native painting state under both spellings —
-    # slic3rpe:mmu_segmentation (PrusaSlicer; its reader has no colorgroup
-    # handling at all) and paint_color (BambuStudio/OrcaSlicer).  Same
-    # serialized value, one per spelling; palette index i maps to paint
-    # state i+1.  A palette past PAINTED_STATE_MAX keeps its colorgroup
-    # reference but gets no native state (a wrong state would repaint the
-    # triangle with someone else's filament) — counted, never silent.
-    native_paint_truncated = 0
-    for (a, b, c), pindex in zip(faces, tri_pindex, strict=True):
-        ref = ""
-        if pindex is not None:
-            ref = f' pid="{colorgroup_id}" p1="{pindex}"'
-            if pindex < PAINTED_STATE_MAX:
-                state = painted_state_string(pindex + 1)
-                ref += (
-                    f' slic3rpe:mmu_segmentation="{state}"'
-                    f' paint_color="{state}"'
-                )
-            else:
-                native_paint_truncated += 1
-        lines.append(f'          <triangle v1="{a}" v2="{b}" v3="{c}"{ref}/>')
-    lines += [
-        "        </triangles>",
-        "      </mesh>",
-        "    </object>",
-        "  </resources>",
-        "  <build>",
-        '    <item objectid="1" transform="1 0 0 0 1 0 0 0 1 0.000000 0.000000 0.000000"/>',
-        "  </build>",
-        "</model>",
-    ]
-    model_xml = "\n".join(lines)
-
-    settings = "\n".join([
-        '<?xml version="1.0" encoding="utf-8"?>',
-        "<config>",
-        '  <object id="1">',
-        f'    <metadata key="name"     value="{obj_name}"/>',
-        "  </object>",
-        "</config>",
-    ])
-    prusa_config = "\n".join([
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        "<config>",
-        ' <object id="1" instances_count="1">',
-        f'  <volume firstid="0" lastid="{len(faces) - 1}">',
-        f'   <metadata type="volume" key="name" value="{obj_name}"/>',
-        "  </volume>",
-        f'  <metadata type="object" key="name" value="{obj_name}"/>',
-        " </object>",
-        "</config>",
-    ])
-
-    thumbnail = None
-    if len(faces) <= _COLORED_THUMBNAIL_MAX_TRIANGLES:
-        try:
-            from kiln.threemf_parser import _DEFAULT_COLOR, ColoredTriangle
-
-            colored = [
-                ColoredTriangle(
-                    v0=tri[0], v1=tri[1], v2=tri[2],
-                    color=(
-                        _part_rgb(triangle_colors[i]) or _DEFAULT_COLOR
-                    ),
-                )
-                for i, tri in enumerate(triangles)
-            ]
-            from kiln.colored_renderer import render_colored_mesh
-
-            result = render_colored_mesh(
-                colored, width=_THUMBNAIL_SIZE, height=_THUMBNAIL_SIZE,
-            )
-            with open(result.path, "rb") as fh:
-                thumbnail = fh.read()
-            with contextlib.suppress(OSError):
-                os.remove(result.path)
-        except Exception:  # noqa: BLE001 — enrichment, never a compose failure
-            logger.debug("painted thumbnail failed", exc_info=True)
-
-    if output_path is None:
-        fd, output_path = tempfile.mkstemp(suffix=".3mf", prefix="kiln_painted_")
-        os.close(fd)
-    try:
-        with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("[Content_Types].xml", _CONTENT_TYPES)
-            zf.writestr("_rels/.rels", _RELS)
-            zf.writestr("3D/3dmodel.model", model_xml)
-            zf.writestr("Metadata/model_settings.config", settings)
-            zf.writestr("Metadata/Slic3r_PE_model.config", prusa_config)
-            if thumbnail:
-                zf.writestr("Metadata/plate_1.png", thumbnail)
-    except Exception as exc:  # noqa: BLE001 — mirror compose_multicolor_3mf
-        return {"success": False, "error": f"Failed to write 3MF archive: {exc}"}
-
-    logger.info(
-        "compose_painted_3mf: wrote %s (1 object, %d triangles, %d colors)",
-        output_path, len(faces), len(palette),
-    )
-    result: dict[str, Any] = {
-        "success": True,
-        "output_path": output_path,
-        "form": "painted_single_object",
-        "colors": palette,
-        "total_vertices": len(vertices),
-        "total_triangles": len(faces),
-        "message": (
-            f"Created painted multicolor 3MF: one watertight object, "
-            f"{len(faces):,} triangles across {len(palette)} colors.  "
-            "Slicers that support color import (BambuStudio, OrcaSlicer) "
-            "will offer to map each color to a filament on open."
-            if palette
-            else (
-                f"Created single-object 3MF with {len(faces):,} triangles "
-                "and no color hints."
-            )
-        ),
-    }
-    if degenerate_skipped:
-        result["degenerate_skipped"] = degenerate_skipped
-    if native_paint_truncated:
-        result["native_paint_truncated"] = native_paint_truncated
-        result["message"] += (
-            f"  {native_paint_truncated:,} triangle(s) use colors beyond "
-            f"the {PAINTED_STATE_MAX}-filament native painting limit; they "
-            "keep their spec colors but slicers will not auto-paint them."
-        )
     return result

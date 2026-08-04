@@ -15,11 +15,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from kiln._vec import Vec3 as _Vec3
-from kiln._vec import cross as _cross
 from kiln._vec import dot as _dot
 from kiln._vec import face_normal as _face_normal
 from kiln._vec import normalize as _normalize
-from kiln._vec import sub as _sub
 
 if TYPE_CHECKING:
     from kiln.threemf_parser import ColoredTriangle
@@ -211,116 +209,6 @@ def _darken(color: tuple[int, int, int], *, factor: float = 0.75) -> tuple[int, 
 
 
 # ---------------------------------------------------------------------------
-# Smooth shading (crease-aware vertex-normal smoothing)
-# ---------------------------------------------------------------------------
-
-# Dihedral angles BELOW this threshold shade smoothly; at or above it the
-# edge stays hard.  35 degrees sits in the 30-40 degree band that CAD and
-# DCC tools conventionally default to for auto-smoothing: a cylinder wall
-# tessellated at 12+ sections has facet angles of at most 30 degrees (64
-# sections: ~5.6), so curved surfaces smooth, while cube edges, wall-to-cap
-# rims, and deliberate chamfers of 35+ degrees keep a crisp lighting break.
-_CREASE_ANGLE_DEG = 35.0
-_CREASE_COS = math.cos(math.radians(_CREASE_ANGLE_DEG))
-
-
-def _smooth_face_normals(
-    tri_verts: list[tuple[_Vec3, _Vec3, _Vec3]],
-) -> list[_Vec3]:
-    """Per-face lighting normals via crease-aware vertex-normal smoothing.
-
-    Flat facet normals make adjacent near-coplanar triangles — the tall
-    split-quad pairs of a tessellated cylinder wall — alternate slightly
-    in brightness, rendering a smooth wall as vertical zigzag striping
-    that is not in the geometry.  The classic fix: for each vertex of
-    each face, average the area-weighted normals of every face sharing
-    that exact vertex position whose dihedral angle to this face is
-    below ``_CREASE_ANGLE_DEG`` (so hard edges keep a hard lighting
-    break), then take the face's lighting normal as the renormalized
-    mean of its three vertex normals.
-
-    Vertices are matched by exact coordinate tuple: triangle soups
-    duplicate shared vertices bit-exactly (same source value, same
-    deterministic transform), and fuzzy merging could weld genuinely
-    distinct nearby vertices.
-
-    Area weighting falls out of the raw cross product (its magnitude is
-    twice the triangle area), so big faces dominate slivers at a shared
-    vertex.  Purely geometric: face colors never enter — paint is not
-    geometry, so brightness smooths across color boundaries while the
-    colors themselves stay exact.
-
-    :param tri_verts: One ``(v0, v1, v2)`` triple per face, any single
-        consistent space (the rotation to camera space is rigid, so
-        smoothing commutes with it).
-    :returns: One unit lighting normal per face; degenerate faces fall
-        back to their flat normal.
-    """
-    weighted: list[_Vec3] = []  # raw cross products (area-weighted normals)
-    unit: list[_Vec3] = []  # flat unit normals (crease tests + fallback)
-    for v0, v1, v2 in tri_verts:
-        w = _cross(_sub(v1, v0), _sub(v2, v0))
-        weighted.append(w)
-        unit.append(_normalize(w))
-
-    faces_at_vertex: dict[_Vec3, list[int]] = {}
-    for i, verts in enumerate(tri_verts):
-        for v in verts:
-            faces_at_vertex.setdefault(v, []).append(i)
-
-    # Fast path: when every normal in a vertex's fan lies within HALF
-    # the crease angle of the fan's mean direction, the triangle
-    # inequality guarantees every pair is within the crease — so the
-    # per-face filter passes the whole fan for every querying face and
-    # the vertex normal is the same for all of them.  Compute it once
-    # (identical sum, identical order — bit-exact with the slow path).
-    # This is the common case everywhere but crease rings and corners.
-    half_crease_cos = math.cos(math.radians(_CREASE_ANGLE_DEG / 2.0))
-    zero = (0.0, 0.0, 0.0)
-    fan_normal: dict[_Vec3, _Vec3 | None] = {}  # None → filter per face
-    for v, fan in faces_at_vertex.items():
-        mx = my = mz = 0.0
-        for j in fan:
-            uj = unit[j]
-            mx += uj[0]
-            my += uj[1]
-            mz += uj[2]
-        m = _normalize((mx, my, mz))
-        if m != zero and all(_dot(unit[j], m) >= half_crease_cos for j in fan):
-            ax = ay = az = 0.0
-            for j in fan:
-                wj = weighted[j]
-                ax += wj[0]
-                ay += wj[1]
-                az += wj[2]
-            fan_normal[v] = _normalize((ax, ay, az))
-        else:
-            fan_normal[v] = None
-
-    smoothed: list[_Vec3] = []
-    for i, verts in enumerate(tri_verts):
-        ui = unit[i]
-        sx = sy = sz = 0.0
-        for v in verts:
-            vn = fan_normal[v]
-            if vn is None:  # crease vertex — filter the fan per face
-                ax = ay = az = 0.0
-                for j in faces_at_vertex[v]:
-                    if _dot(unit[j], ui) >= _CREASE_COS:
-                        wj = weighted[j]
-                        ax += wj[0]
-                        ay += wj[1]
-                        az += wj[2]
-                vn = _normalize((ax, ay, az))
-            sx += vn[0]
-            sy += vn[1]
-            sz += vn[2]
-        sn = _normalize((sx, sy, sz))
-        smoothed.append(ui if sn == zero else sn)
-    return smoothed
-
-
-# ---------------------------------------------------------------------------
 # Core renderer
 # ---------------------------------------------------------------------------
 
@@ -446,11 +334,11 @@ def render_colored_mesh(
     # --- Pass 2b: Compute smooth normals for lighting --------------------
     #
     # Raw face normals cause visible faceting on curved surfaces (each
-    # triangle is a flat tile with uniform brightness).  Lighting instead
-    # uses crease-aware vertex-normal smoothing (see _smooth_face_normals)
-    # for a Gouraud-like gradual transition without per-pixel
-    # interpolation.  The raw normal is kept for back-face culling
-    # (must be exact); the smoothed normal is for lighting only.
+    # triangle is a flat tile with uniform brightness).  Smooth normals
+    # average each face's normal with its same-color neighbors, giving
+    # a Gouraud-like gradual shading transition without per-pixel
+    # interpolation.  We still use the raw normal for back-face culling
+    # (must be exact) but use the smoothed normal for lighting only.
 
     # Pre-compute all camera-space face normals
     _raw_normals: list[_Vec3] = []
@@ -458,7 +346,30 @@ def render_colored_mesh(
         t0, t1, t2 = transformed[i]
         _raw_normals.append(_face_normal(t0, t1, t2))
 
-    _smooth_normals = _smooth_face_normals(transformed)
+    # Build neighbor sets (same-color faces sharing an edge)
+    _same_color_neighbors: dict[int, list[int]] = {}
+    for i, tri in enumerate(triangles):
+        neighbors: list[int] = []
+        verts = (tri.v0, tri.v1, tri.v2)
+        for j in range(3):
+            edge = tuple(sorted((verts[j], verts[(j + 1) % 3])))
+            for ni in _edge_to_faces.get(edge, []):  # type: ignore[arg-type]
+                if ni != i and triangles[ni].color == tri.color:
+                    neighbors.append(ni)
+        _same_color_neighbors[i] = neighbors
+
+    # Smooth: average face normal with neighbors' normals
+    _smooth_normals: list[_Vec3] = []
+    for i in range(n):
+        nx, ny, nz = _raw_normals[i]
+        count = 1
+        for ni in _same_color_neighbors.get(i, []):
+            nn = _raw_normals[ni]
+            nx += nn[0]
+            ny += nn[1]
+            nz += nn[2]
+            count += 1
+        _smooth_normals.append(_normalize((nx / count, ny / count, nz / count)))
 
     # --- Pass 3: Compute per-face render data ---
 
@@ -564,7 +475,7 @@ def render_colored_mesh(
     # Sort by depth descending (farthest first = largest Y first)
     face_data.sort(key=lambda fd: fd[0], reverse=True)
 
-    from PIL import Image, ImageChops, ImageDraw, ImageFilter
+    from PIL import Image, ImageDraw
 
     img = Image.new("RGB", (rw, rh), background)
     draw = ImageDraw.Draw(img)
@@ -600,56 +511,42 @@ def render_colored_mesh(
     # strong on dark faces (which need contrast), invisible on bright
     # faces (which already pop against the background).
     #
-    # The outline is WHERE THE OBJECT MEETS THE BACKGROUND, and that is
-    # measured directly rather than inferred from adjacency.  The previous
-    # test — "an edge carried by exactly ONE visible face" — reads as a
-    # silhouette for plenty of interior edges too, because back-face
-    # culling strips the neighbour off any edge whose far side turns away:
-    # the seam where a boolean union re-triangulates a wall, and the
-    # terminator of a curved surface.  Both sit in the MIDDLE of an
-    # unbroken surface, so the contour was drawn as hairlines across the
-    # body of the model (measured on a mug with a handle: a full-height
-    # line down the wall plus two arcs at the handle junction).  It hid in
-    # single-colour previews only because bright fills skip the contour,
-    # so a grey control render looked clean while every painted one did
-    # not.  Silhouette-by-background-adjacency cannot draw inside the
-    # object at all: the ring is derived from the drawn mask's own border.
-    _silhouette = Image.new("L", (rw, rh), 0)
-    _sil_draw = ImageDraw.Draw(_silhouette)
-    for _depth, pts, _fill, _outline, _be in face_data:
-        _sil_draw.polygon(pts, fill=255)
+    # Detect silhouette edges: edges belonging to only ONE visible
+    # face (boundary between drawn face and culled/missing face).
+    _edge_info: dict[
+        tuple[tuple[int, int], tuple[int, int]],
+        list[tuple[int, int, int]],  # lit fill colors of adjacent visible faces
+    ] = {}
+    for _depth, pts, fill, _outline, _be in face_data:
+        for ei in range(3):
+            p0 = pts[ei]
+            p1 = pts[(ei + 1) % 3]
+            edge_key = (min(p0, p1), max(p0, p1))
+            _edge_info.setdefault(edge_key, []).append(fill)
 
-    # Inner border = mask minus its erosion.  Width tracks the supersample
-    # factor so the contour survives LANCZOS downsampling (a 1px ring at
-    # 2x would land at an invisible half-pixel).
-    _eroded = _silhouette.filter(ImageFilter.MinFilter(2 * ss + 1))
-    _ring = ImageChops.difference(_silhouette, _eroded)
-
-    # Adaptive, exactly as before, but evaluated per PIXEL against what was
-    # actually drawn there: bright pixels already contrast with the
-    # background and get nothing; dark ones get a lift toward it.
-    bg_lum = _luminance((bg_r, bg_g, bg_b))
-    _cutoff = bg_lum + 30
-    _denom = max(1, bg_lum + 40)
-    _lum = img.convert("L")
-
-    def _lift_of(value: int) -> int:
-        if value > _cutoff:
-            return 0  # bright pixel — already has contrast
-        lift = int(50 * max(0.0, min(1.0, 1.0 - (value / _denom))))
-        return lift if lift >= 5 else 0
-
-    _lift = _lum.point(_lift_of)
-    _ring = ImageChops.multiply(_ring, _lift.point(lambda v: 255 if v else 0))
-    _contour = Image.merge(
-        "RGB",
-        (
-            _lift.point(lambda v: min(255, bg_r + v + 20)),
-            _lift.point(lambda v: min(255, bg_g + v + 20)),
-            _lift.point(lambda v: min(255, bg_b + v + 20)),
-        ),
-    )
-    img.paste(_contour, (0, 0), _ring)
+    for edge_key, fills in _edge_info.items():
+        if len(fills) != 1:
+            continue  # interior edge, skip
+        # Silhouette edge — compute adaptive brightness.
+        # Dark faces get a strong contour, bright faces get none.
+        face_lum = _luminance(fills[0])
+        # Only draw contour if face is darker than the background
+        bg_lum = _luminance((bg_r, bg_g, bg_b))
+        if face_lum > bg_lum + 30:
+            continue  # bright face — already has contrast, skip
+        # Strength: max for very dark faces, fading as face approaches bg
+        strength = max(0.0, min(1.0, 1.0 - (face_lum / max(1, bg_lum + 40))))
+        lift = int(50 * strength)
+        if lift < 5:
+            continue
+        sc = (
+            min(255, bg_r + lift + 20),
+            min(255, bg_g + lift + 20),
+            min(255, bg_b + lift + 20),
+        )
+        # Width scales with supersample factor so the contour survives
+        # LANCZOS downsampling (1px at 2x → invisible 0.5px otherwise)
+        draw.line([edge_key[0], edge_key[1]], fill=sc, width=max(1, ss))
 
     # --- Downsample if supersampled ---
 
