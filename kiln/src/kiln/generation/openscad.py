@@ -388,6 +388,13 @@ class OpenSCADProvider(GenerationProvider):
                         cwd=work_dir,
                     )
                 except subprocess.TimeoutExpired:
+                    # Logged, not just stored on the job: the job record
+                    # is in-process only, and a durable log line is what
+                    # a later bug report has to go on.
+                    logger.error(
+                        "OpenSCAD compile timed out after %ss (%s)",
+                        self._timeout, scad_path,
+                    )
                     job = GenerationJob(
                         id=job_id,
                         provider=self.name,
@@ -410,6 +417,10 @@ class OpenSCADProvider(GenerationProvider):
 
             if result.returncode != 0:
                 stderr = (result.stderr or "").strip()[:500]
+                logger.error(
+                    "OpenSCAD compile failed (exit %s, %s): %s",
+                    result.returncode, scad_path, stderr,
+                )
                 job = GenerationJob(
                     id=job_id,
                     provider=self.name,
@@ -424,6 +435,7 @@ class OpenSCADProvider(GenerationProvider):
                 return job
 
             if not os.path.isfile(out_path) or os.path.getsize(out_path) == 0:
+                logger.error("OpenSCAD compile produced no output file (%s)", scad_path)
                 job = GenerationJob(
                     id=job_id,
                     provider=self.name,

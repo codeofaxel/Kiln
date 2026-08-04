@@ -11,22 +11,12 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-_DEFAULT_LOG_DIR = os.path.join(str(Path.home()), ".kiln", "logs")
+from kiln import redaction
 
-# Patterns that match sensitive values in log messages.
-_SCRUB_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r'(api_key["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}{\]]+)', re.IGNORECASE), r"\1***REDACTED***"),
-    (re.compile(r'(token["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}{\]]+)', re.IGNORECASE), r"\1***REDACTED***"),
-    (re.compile(r'(password["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}{\]]+)', re.IGNORECASE), r"\1***REDACTED***"),
-    (re.compile(r'(access_code["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}{\]]+)', re.IGNORECASE), r"\1***REDACTED***"),
-    (re.compile(r"(Authorization:\s*Bearer\s+)(\S+)", re.IGNORECASE), r"\1***REDACTED***"),
-    (re.compile(r"(Authorization:\s*Basic\s+)(\S+)", re.IGNORECASE), r"\1***REDACTED***"),
-    (re.compile(r'(secret["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}{\]]+)', re.IGNORECASE), r"\1***REDACTED***"),
-]
+_DEFAULT_LOG_DIR = os.path.join(str(Path.home()), ".kiln", "logs")
 
 
 class ScrubFilter(logging.Filter):
@@ -49,10 +39,43 @@ class ScrubFilter(logging.Filter):
 
 
 def _scrub(text: str) -> str:
-    """Apply all scrub patterns to *text*."""
-    for pattern, replacement in _SCRUB_PATTERNS:
-        text = pattern.sub(replacement, text)
-    return text
+    """Redact secrets from *text* via the shared pattern set.
+
+    Deliberately secrets-only: the log file stays on the user's own
+    machine, so local IPs and file paths remain readable for local
+    debugging.  Text that LEAVES the machine goes through
+    :func:`kiln.redaction.redact_for_report` instead (see
+    :func:`read_log_tail`).
+    """
+    return redaction.redact_secrets(text, marker="***REDACTED***")
+
+
+def read_log_tail(max_bytes: int = 16 * 1024, log_dir: str | None = None) -> str | None:
+    """Return the redacted tail of the rotating log, for bug reports.
+
+    Reads the last *max_bytes* of ``kiln.log`` and runs the FULL boundary
+    redaction (secrets + private IPs + home-directory usernames) so the
+    result is safe to attach to a report that leaves the machine.
+    Returns ``None`` when there is no log or it can't be read — a report
+    must never fail because its attachment did.
+    """
+    log_dir = log_dir or os.environ.get("KILN_LOG_DIR", _DEFAULT_LOG_DIR)
+    log_path = os.path.join(log_dir, "kiln.log")
+    try:
+        size = os.path.getsize(log_path)
+        with open(log_path, "rb") as fh:
+            if size > max_bytes:
+                fh.seek(size - max_bytes)
+            data = fh.read(max_bytes)
+    except OSError:
+        return None
+    if not data:
+        return None
+    text = data.decode("utf-8", "replace")
+    # A mid-file start leaves a partial first line; drop it.
+    if size > max_bytes and "\n" in text:
+        text = text.split("\n", 1)[1]
+    return redaction.redact_for_report(text)
 
 
 def configure_logging(
