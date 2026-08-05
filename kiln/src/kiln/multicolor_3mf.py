@@ -15,17 +15,27 @@ maximum slicer compatibility:
 * ``slic3rpe:extruder`` attribute on each ``<item>`` — informational for
   other 3MF consumers.
 
-One measured limitation to know about (Bambu Studio 02.06, 2026-08): it
-loads third-party 3MFs "geometry and color data only" (its own words on
-import). Per-object extruder assignments ARE honored, but print settings
-inside the file — including a prime-tower position written to
-``project_settings.config`` or a ``<plate>`` block — are ignored, and its
-default tower spot can land outside the printable area (it did on an A1,
-producing "A G-code path goes beyond plate boundaries"). The composed
-file is correct; a user slicing there just moves the prime tower onto the
-plate first. Kiln's own slicing path (PrusaSlicer/OrcaSlicer CLI) is
-unaffected. Multi-extruder results carry this as ``slicer_note`` so
-agents can warn the user up front.
+One limitation to know about, relevant only when a user hand-loads the
+composed 3MF into Bambu Studio (Kiln's own slicing never goes through
+that GUI). Measured 2026-08 on Bambu Studio 02.06 with an A1, and
+corroborated against Bambu's own tracker:
+
+* Bambu Studio imports third-party 3MFs "geometry and color data only"
+  (its own dialog on load) — per-object extruder assignments from
+  ``model_settings.config`` ARE honored (verified: 4 filaments used, 75
+  filament changes), but print settings inside the file, including a
+  prime-tower position written to ``project_settings.config`` or a
+  ``<plate>`` block, are ignored. This is their documented design, not a
+  quirk of our file: bambulab/BambuStudio#7775, #2491.
+* Its own DEFAULT prime-tower placement can land outside the plate,
+  producing "A G-code path goes beyond plate boundaries". This is not
+  caused by anything we write and is not fixable from our side — it is
+  tracked upstream as an open issue that also affects natively-created
+  A1 projects (bambulab/BambuStudio#7375). Verified remedy: drag the
+  prime tower onto the plate; the same project then slices clean.
+
+Multi-extruder results carry this as ``slicer_note`` so agents can pass
+it on at the moment they hand the file over — and stay silent otherwise.
 
 **Two distinct use cases, one tool:**
 
@@ -96,19 +106,17 @@ from kiln.preview_render import downscale_png, effective_supersample
 logger = logging.getLogger(__name__)
 
 # Attached to multi-extruder compose results (and relayed by the tools that
-# emit these files) so the user hears about the Bambu Studio detour from us,
-# not from a red error banner. Measured 2026-08 on Bambu Studio 02.06: it
-# loads third-party 3MFs "geometry and color data only" — filament
-# assignments survive, print settings don't, and its default prime-tower
-# spot overhung an A1 plate.
+# emit these files) so the rare user who hand-loads the 3MF into Bambu
+# Studio hears about the detour from us, not from a red error banner.
+# Everything in this note is measured (2026-08, Bambu Studio 02.06 on an
+# A1) or documented upstream — see the module docstring for the citations.
 MULTI_EXTRUDER_SLICER_NOTE = (
-    "Printing through Kiln uses this file as-is. If you open it in Bambu "
-    "Studio instead: it imports third-party 3MFs as geometry and color "
-    "only, so the per-object filament assignments are kept but print "
-    "settings are re-derived there, and its default prime-tower position "
-    "can sit outside the plate (error: 'A G-code path goes beyond plate "
-    "boundaries'). Move the prime tower onto the plate in Bambu Studio "
-    "before slicing there."
+    "This only matters if you hand-load the 3MF into Bambu Studio: it "
+    "imports third-party files as geometry and color only (its stated "
+    "policy), and its default prime-tower spot can sit off the plate — "
+    "not a defect in this file. Drag the prime tower onto the plate "
+    "there and it slices clean with all colors intact. Kiln's own print "
+    "path slices this file as-is (verified in PrusaSlicer)."
 )
 
 # ---------------------------------------------------------------------------
