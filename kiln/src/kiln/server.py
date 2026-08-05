@@ -13468,6 +13468,11 @@ def multi_material_print(
 
     Requires PrusaSlicer or OrcaSlicer installed locally.
 
+    The emitted 3MF (``multi_material_3mf`` in the result) also opens in
+    Bambu Studio, which keeps the per-object materials but re-derives
+    print settings itself — the result's ``slicer_note`` explains this;
+    relay it to the user when handing over the file.
+
     Args:
         objects_json: JSON array of objects with ``file_path`` and
             ``material_id`` keys (see example above).
@@ -13818,6 +13823,8 @@ def multi_material_print(
             result["dominant_material"] = dominant_mat
             result["ams_mapping"] = ams_info if ams_info else None
             result["multi_material_3mf"] = output_3mf
+            if compose_result.get("slicer_note"):
+                result["slicer_note"] = compose_result["slicer_note"]
             # Warn when AMS mapping was not established
             if len(unique_filaments) > 1 and not ams_info:
                 result["ams_warning"] = (
@@ -13934,6 +13941,11 @@ def multi_color_copies(
 
     Requires PrusaSlicer or OrcaSlicer installed locally.  The printer
     must be idle and have an AMS with loaded filament.
+
+    The emitted 3MF (``multi_color_3mf`` in the result) also opens in
+    Bambu Studio, which keeps the per-copy colors but re-derives print
+    settings itself — the result's ``slicer_note`` explains this; relay
+    it to the user when handing over the file.
 
     :param model_path: Path to the model file (STL or OBJ).
     :param copies: Number of copies.  Auto-detected from AMS if omitted.
@@ -14163,6 +14175,8 @@ def multi_color_copies(
                 {"copy": i + 1, "slot": s, "color": resolved_colors[i]} for i, s in enumerate(resolved_slots)
             ]
             result["multi_color_3mf"] = output_3mf
+            if compose_result.get("slicer_note"):
+                result["slicer_note"] = compose_result["slicer_note"]
             if ams_warning:
                 result["ams_warning"] = ams_warning
 

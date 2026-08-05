@@ -827,3 +827,30 @@ def test_compose_writes_slic3r_pe_config(stl_a: Path, stl_b: Path, tmp_path: Pat
         assert vol_extruder == [extruders[obj.get("id")]]
 
     assert extruders == {"1": 1, "2": 3}
+
+
+# ---------------------------------------------------------------------------
+# slicer_note — the Bambu Studio detour is announced, not discovered
+# ---------------------------------------------------------------------------
+
+
+def test_compose_multi_extruder_carries_slicer_note(stl_a: Path, stl_b: Path, tmp_path: Path):
+    result = compose_multicolor_3mf(
+        [
+            ColorPart(str(stl_a), extruder=1, name="body"),
+            ColorPart(str(stl_b), extruder=2, name="accent"),
+        ],
+        output_path=str(tmp_path / "note.3mf"),
+    )
+    assert result["success"] is True
+    assert "Bambu Studio" in result["slicer_note"]
+    assert "prime" in result["slicer_note"].lower()
+
+
+def test_compose_single_extruder_has_no_slicer_note(stl_a: Path, tmp_path: Path):
+    result = compose_multicolor_3mf(
+        [ColorPart(str(stl_a), extruder=1, name="solo")],
+        output_path=str(tmp_path / "solo.3mf"),
+    )
+    assert result["success"] is True
+    assert "slicer_note" not in result

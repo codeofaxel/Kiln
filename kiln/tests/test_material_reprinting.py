@@ -877,6 +877,9 @@ class TestMulticolorPlacement:
         assert "Metadata/model_settings.config" in names       # BambuStudio
         assert "Metadata/Slic3r_PE_model.config" in names      # PrusaSlicer
 
+        # The Bambu Studio manual-import caveat reaches the tool caller
+        assert "Bambu Studio" in result["slicer_note"]
+
         # Copies occupy disjoint footprints, on the plate
         boxes = [it["world_bbox"] for it in items]
         for i in range(len(boxes)):

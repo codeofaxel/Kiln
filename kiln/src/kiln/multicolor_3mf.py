@@ -15,6 +15,18 @@ maximum slicer compatibility:
 * ``slic3rpe:extruder`` attribute on each ``<item>`` — informational for
   other 3MF consumers.
 
+One measured limitation to know about (Bambu Studio 02.06, 2026-08): it
+loads third-party 3MFs "geometry and color data only" (its own words on
+import). Per-object extruder assignments ARE honored, but print settings
+inside the file — including a prime-tower position written to
+``project_settings.config`` or a ``<plate>`` block — are ignored, and its
+default tower spot can land outside the printable area (it did on an A1,
+producing "A G-code path goes beyond plate boundaries"). The composed
+file is correct; a user slicing there just moves the prime tower onto the
+plate first. Kiln's own slicing path (PrusaSlicer/OrcaSlicer CLI) is
+unaffected. Multi-extruder results carry this as ``slicer_note`` so
+agents can warn the user up front.
+
 **Two distinct use cases, one tool:**
 
 1. **Multi-color single object** — parts share the same XY origin (they overlap
@@ -82,6 +94,22 @@ from typing import Any
 from kiln.preview_render import downscale_png, effective_supersample
 
 logger = logging.getLogger(__name__)
+
+# Attached to multi-extruder compose results (and relayed by the tools that
+# emit these files) so the user hears about the Bambu Studio detour from us,
+# not from a red error banner. Measured 2026-08 on Bambu Studio 02.06: it
+# loads third-party 3MFs "geometry and color data only" — filament
+# assignments survive, print settings don't, and its default prime-tower
+# spot overhung an A1 plate.
+MULTI_EXTRUDER_SLICER_NOTE = (
+    "Printing through Kiln uses this file as-is. If you open it in Bambu "
+    "Studio instead: it imports third-party 3MFs as geometry and color "
+    "only, so the per-object filament assignments are kept but print "
+    "settings are re-derived there, and its default prime-tower position "
+    "can sit outside the plate (error: 'A G-code path goes beyond plate "
+    "boundaries'). Move the prime tower onto the plate in Bambu Studio "
+    "before slicing there."
+)
 
 # ---------------------------------------------------------------------------
 # Thumbnail generation
@@ -735,6 +763,10 @@ def compose_multicolor_3mf(
         * ``total_vertices`` (int)
         * ``total_triangles`` (int)
         * ``message`` (str) — human summary
+        * ``slicer_note`` (str) — multi-extruder plates only: what to tell
+          the user if they open the file in Bambu Studio themselves (it
+          re-derives print settings and may need its prime tower moved
+          onto the plate). Relay this to the user.
         * ``error`` (str) — only present on failure
 
     Example::
@@ -909,6 +941,8 @@ def compose_multicolor_3mf(
         "total_triangles": total_t,
         "extruder_map": extruder_summary,
     }
+    if len({p.extruder for p, _, _ in parsed}) > 1:
+        result["slicer_note"] = MULTI_EXTRUDER_SLICER_NOTE
 
     # Attach full safety report (all free)
     if safety_result is not None:
