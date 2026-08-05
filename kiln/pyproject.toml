@@ -112,7 +112,7 @@ mesh-diagnostics = []
 # never open a STEP file; `kiln install-step-backend` installs it for the
 # ones who do.  Anyone who already has full cadquery keeps working — the OCP
 # backend uses whichever build provides the `OCP` module.
-step = ["cadquery-ocp-novtk>=7.9"]
+step = ["cadquery-ocp-novtk>=7.9.3.1.1"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
