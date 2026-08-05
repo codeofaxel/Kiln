@@ -253,6 +253,68 @@ class TestLiveResolution:
 # ---------------------------------------------------------------------------
 
 
+class TestReconcileFederation:
+    """A reconciled resolution reaches the community pool — the parity the
+    2026-08-05 audit found missing: watched endings federated, user reports
+    federated, but the start-anchored rows this whole module exists to save
+    resolved locally and the shared corpus never heard about them.
+    ``unknown`` still federates NOTHING — a non-verdict is not a sample.
+    """
+
+    def test_reconciled_success_contributes_to_community(self, tmp_kiln_env, monkeypatch):
+        import kiln.community_autofire as caf
+
+        calls: list[dict] = []
+        monkeypatch.setattr(
+            caf, "contribute_resolved_outcome",
+            lambda **kw: calls.append(kw) or {"contributed": True},
+        )
+        hook.open_pending_outcome("bambu-a1", "/tmp/ashtray.gcode.3mf")
+        hook.reconcile_pending_outcomes(
+            printer_name="bambu-a1",
+            gcode_state="finish",
+            current_job_label="ashtray",
+        )
+        assert len(calls) == 1
+        assert calls[0]["outcome"] == "success"
+        assert calls[0]["printer_name"] == "bambu-a1"
+
+    def test_reconciled_failure_contributes_with_mode(self, tmp_kiln_env, monkeypatch):
+        import kiln.community_autofire as caf
+
+        calls: list[dict] = []
+        monkeypatch.setattr(
+            caf, "contribute_resolved_outcome",
+            lambda **kw: calls.append(kw) or {"contributed": True},
+        )
+        hook.open_pending_outcome("bambu-a1", "vase.3mf")
+        hook.reconcile_pending_outcomes(
+            printer_name="bambu-a1",
+            gcode_state="failed",
+            print_error_code=0x07_00_02_00,
+            current_job_label="vase",
+        )
+        assert len(calls) == 1
+        assert calls[0]["outcome"] == "failed"
+        assert calls[0]["failure_mode"] == "filament_runout"
+
+    def test_unknown_resolution_contributes_nothing(self, tmp_kiln_env, monkeypatch):
+        import kiln.community_autofire as caf
+
+        calls: list[dict] = []
+        monkeypatch.setattr(
+            caf, "contribute_resolved_outcome",
+            lambda **kw: calls.append(kw) or {"contributed": True},
+        )
+        hook.open_pending_outcome("bambu-a1", "ashtray.3mf")
+        hook.reconcile_pending_outcomes(
+            printer_name="bambu-a1",
+            gcode_state="idle",
+            current_job_label=None,
+        )
+        assert calls == []
+
+
 class TestReconnectReconciliation:
     def test_terminal_finish_with_matching_label_resolves_success(self, tmp_kiln_env):
         from kiln.persistence import get_db

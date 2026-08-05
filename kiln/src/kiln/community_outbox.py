@@ -170,6 +170,20 @@ def _suppressed_under_test() -> bool:
         )
 
 
+def _hosted_aggregate_process() -> bool:
+    """True on the shared multi-tenant server, where contributions lie.
+
+    One process serving every tenant is not a user's machine: its
+    ``~/.kiln`` conflates all callers, so a row it contributes carries
+    nobody's real print.  The heartbeat has refused to send from this
+    process since it shipped (``heartbeat.py``, same env flag); the
+    community wire never got the check, leaving ``POST /api/tools/*``
+    callers able to enqueue into the Fly box's outbox and publish to the
+    shared corpus.  Same flag, same refusal, both ends of the queue.
+    """
+    return os.environ.get("KILN_HOSTED_MULTITENANT") == "1"
+
+
 def _db() -> sqlite3.Connection:
     global _conn
     if _conn is None:
@@ -236,8 +250,9 @@ def enqueue(dedupe_key: str, record: dict[str, Any], *, kind: str = DEFAULT_KIND
     drain's network I/O.
 
     No-ops under a test/CI runner still pointed at the real per-user
-    outbox — see :func:`_suppressed_under_test`."""
-    if _suppressed_under_test():
+    outbox — see :func:`_suppressed_under_test` — and on the hosted
+    multi-tenant server, whose outbox is nobody's machine."""
+    if _suppressed_under_test() or _hosted_aggregate_process():
         return False
     with _db_lock:
         conn = _db()
@@ -376,11 +391,30 @@ def drain(batch: int = _DRAIN_BATCH, *, max_rows: int = _DRAIN_MAX_ROWS) -> dict
     replays at most one row).  ``_drain_lock`` admits a single drain at a time;
     a second concurrent caller returns ``sent=0`` immediately.
     """
-    if _suppressed_under_test():
+    if _suppressed_under_test() or _hosted_aggregate_process():
         # A test runner pointed at the REAL outbox: ensure_senders() below
         # imports the live senders, which POST to the shared production
         # corpus.  Refuse — a suite must never publish to other users.
+        # The hosted multi-tenant box refuses for the same reason from the
+        # other side: its rows describe no real machine.
         return {"sent": 0, "failed": 0, "remaining": 0, "purged": 0}
+    try:
+        from kiln.community_sync import network_sends_suppressed
+
+        wire_guarded = network_sends_suppressed()
+    except Exception:  # noqa: BLE001 — guard unavailable, fall through to send
+        wire_guarded = False
+    if wire_guarded:
+        # The check above protects the real per-user DB and stands down for
+        # a custom KILN_DB_PATH — which is exactly how the 2026-08-05 leak
+        # ran: a suite with a relocated HOME exercised the outbox "safely"
+        # and the drain published its fixtures to production.  DB isolation
+        # and network safety are different questions; this one is asked at
+        # the chokepoint every sender KIND passes through, so a sender
+        # registered next year is covered without knowing this exists.
+        # (``KILN_COMMUNITY_TEST_SEND=1`` is the explicit escape for tests
+        # that exercise the drain with a mocked sender.)
+        return {"sent": 0, "failed": 0, "remaining": _count_pending(), "purged": 0}
     if not _drain_lock.acquire(blocking=False):
         # Another drain owns the queue right now — don't double-send.
         return {"sent": 0, "failed": 0, "remaining": _count_pending(), "purged": 0}
@@ -558,6 +592,27 @@ def translate_outcome(outcome: str | None) -> str | None:
     return _OUTCOME_TRANSLATION.get(str(outcome).strip().lower())
 
 
+def canonical_printer_model(model: str | None) -> str:
+    """One noun per machine model, everywhere the corpus is touched.
+
+    The corpus aggregates BY this string: rows written as ``"Bambu A1"``
+    and rows written as ``"bambu_a1"`` are the same machine that will
+    never be counted together (both spellings were live in production by
+    2026-08-05, in an eight-row table).  Every writer normalizes here at
+    the contribution door, and the read side (the insight endpoint)
+    applies the same function to its query — one definition, imported,
+    never re-derived.
+
+    ``"Bambu A1"`` → ``"bambu_a1"``; a slug already in canonical form
+    passes through unchanged; empty/None → ``"unknown"`` (matching the
+    door's existing fallback).
+    """
+    import re as _re
+
+    slug = _re.sub(r"[^a-z0-9]+", "_", (model or "").strip().lower()).strip("_")
+    return slug or "unknown"
+
+
 def print_contribution_key(
     job_id: str | None,
     geometric_signature: str,
@@ -627,7 +682,9 @@ def contribute_print_outcome(
     record.update(
         {
             "geometric_signature": signature,
-            "printer_model": printer_model or "unknown",
+            # Normalized HERE, the one door every path passes through, so
+            # the corpus never again holds two spellings of one machine.
+            "printer_model": canonical_printer_model(printer_model),
             "material": material or "unknown",
             "outcome": mapped,
             "print_time_seconds": int(print_time_seconds) if print_time_seconds else 0,

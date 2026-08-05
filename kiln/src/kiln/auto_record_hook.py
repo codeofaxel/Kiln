@@ -518,6 +518,30 @@ def reconcile_pending_outcomes(
                 update["failure_mode"] = failure_mode
             db.save_print_outcome(update)
             resolved.append({**row, "outcome": outcome, "notes": note})
+            # Federate the resolution.  Watched endings and user reports
+            # already reach the community pool through their own doors;
+            # until 2026-08-05 a reconciled ending reached only the local
+            # DB, so every print that outlived its session was missing
+            # from the shared corpus.  ``unknown`` contributes nothing
+            # (translate_outcome refuses non-verdicts), and the shared
+            # dedupe key collapses any later refinement of this job.
+            if outcome in ("success", "failed"):
+                try:
+                    from kiln import community_autofire
+
+                    community_autofire.contribute_resolved_outcome(
+                        outcome=outcome,
+                        printer_file_name=row.get("file_name"),
+                        job_id=row.get("job_id"),
+                        printer_name=printer_name,
+                        material=row.get("material_type"),
+                        failure_mode=failure_mode,
+                    )
+                except Exception:
+                    _logger.debug(
+                        "reconcile federation skipped (best-effort)",
+                        exc_info=True,
+                    )
             _logger.info(
                 "reconcile_pending_outcomes: %r (started %s) → %r",
                 row.get("file_name") or row["job_id"],

@@ -145,3 +145,103 @@ def auto_contribute_completion(
     except Exception:
         logger.debug("auto community contribution skipped (best-effort)", exc_info=True)
         return {"contributed": False, "reason": "error"}
+
+
+def resolve_adapter_model(adapter: Any) -> str | None:
+    """The adapter's model string, via every spelling an adapter actually has.
+
+    ``adapter.get_printer_info()`` is a method NO production adapter
+    implements — every community call site that used it got an
+    AttributeError into a bare except and contributed
+    ``printer_model="unknown"`` (the heartbeat hit the identical bug on
+    2026-07-25: 630 of 670 rows NULL — and was fixed with this fallback
+    chain while the community sites were not).  One resolver, imported by
+    every contribution path, so the next adapter attribute rename is one
+    edit instead of a re-run of that incident.
+    """
+    if adapter is None:
+        return None
+    try:
+        info = adapter.get_printer_info()
+        model = getattr(info, "model", None) or getattr(info, "printer_model", None)
+        if model:
+            return str(model)
+    except Exception:  # noqa: BLE001 — the method that never existed
+        pass
+    for attr in ("printer_model", "_printer_model", "model"):
+        try:
+            value = getattr(adapter, attr, None)
+        except Exception:  # noqa: BLE001 — property raised; try the next
+            continue
+        if value:
+            return str(value)
+    return None
+
+
+def contribute_resolved_outcome(
+    *,
+    outcome: str,
+    printer_file_name: str | None,
+    job_id: str | None = None,
+    printer_name: str | None = None,
+    material: str | None = None,
+    failure_mode: str | None = None,
+) -> dict[str, Any]:
+    """Contribute a reconciliation-resolved outcome to the community pool.
+
+    The federation twin of :func:`auto_contribute_completion`, for prints
+    resolved AFTER the fact.  ``reconcile_pending_outcomes`` settles rows
+    a live process never watched end — start a print, close the session,
+    reconnect tomorrow — and until 2026-08-05 those resolutions wrote the
+    LOCAL outcome row and stopped: the community pool only ever learned
+    from watched endings, so the long unattended prints (where the data
+    matters most) were systematically missing from the corpus the local
+    fix was built to save.  This is NOT the bulk-history door — the
+    moonraker importer's non-contribution stance is unchanged; these are
+    prints Kiln itself started, one at a time, resolved by the machine's
+    own terminal testimony.
+
+    Same guarantees as its twin: silent, never raises, non-verdict
+    outcomes contribute nothing (``unknown`` stays a known unknown), and
+    the shared dedupe key means a later user refinement of the same job
+    collapses instead of double-shipping.  The canonical model comes from
+    the adapter's self-reported model when the registry can answer,
+    ``printer_name`` otherwise — the door normalizes either.
+    """
+    try:
+        from kiln import community_outbox
+
+        if community_outbox.translate_outcome(outcome) is None:
+            return {"contributed": False, "reason": "non_quality_outcome"}
+        signature = geometric_signature_for(printer_file_name)
+        if not signature:
+            return {"contributed": False, "reason": "no_geometry"}
+
+        printer_model: str | None = None
+        if printer_name:
+            try:
+                from kiln.server import _registry
+
+                printer_model = resolve_adapter_model(_registry.get(printer_name))
+            except Exception:
+                logger.debug(
+                    "resolved-outcome model lookup unavailable", exc_info=True
+                )
+
+        extra: dict[str, Any] = {}
+        if failure_mode:
+            extra["failure_mode"] = failure_mode
+        return community_outbox.contribute_print_outcome(
+            outcome=outcome,
+            geometric_signature=signature,
+            job_id=job_id,
+            printer_file_name=printer_file_name,
+            printer_model=printer_model or printer_name,
+            material=material,
+            extra=extra,
+        )
+    except Exception:
+        logger.debug(
+            "resolved-outcome contribution skipped (best-effort)", exc_info=True
+        )
+        return {"contributed": False, "reason": "error"}

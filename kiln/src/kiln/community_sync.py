@@ -89,6 +89,39 @@ def community_sharing_enabled() -> bool:
 community_opt_in_enabled = community_sharing_enabled
 
 
+def network_sends_suppressed() -> bool:
+    """True when this process must not POST to the shared community corpus.
+
+    The write-side guards each protected a STORE: ``daily_stats``
+    protects the real stats file, ``community_outbox`` protects the real
+    per-user outbox DB — and both stand down when a test points them at
+    its own path, because a custom path means "I want to exercise this
+    store."  The hole (found 2026-08-05, seven fixture rows live in the
+    production corpus): isolating the store is exactly what DISARMS the
+    outbox guard, and the sender under it had no guard of its own — so a
+    suite with a relocated HOME could exercise the outbox "safely" and
+    still publish ``sig123`` to every real user.  Store isolation and
+    network safety are different questions; this answers the second one,
+    independent of any path.
+
+    A test that really wants the send path (with a mocked or sandboxed
+    network) says so explicitly: ``KILN_COMMUNITY_TEST_SEND=1``.  An
+    accidental send can never opt itself in.
+    """
+    if os.environ.get("KILN_COMMUNITY_TEST_SEND") == "1":
+        return False
+    import sys as _sys
+
+    if os.environ.get("PYTEST_CURRENT_TEST") or "pytest" in _sys.modules:
+        return True
+    try:
+        from kiln.heartbeat import _is_ci_environment
+
+        return _is_ci_environment()
+    except Exception:  # noqa: BLE001 — heartbeat absent, fall back to env
+        return any(os.environ.get(v) for v in ("CI", "PYTEST_CURRENT_TEST"))
+
+
 def sync_community_print(record: dict[str, Any], send_id: str | None = None) -> bool:
     """Send a single community print record to Supabase.
 
@@ -106,6 +139,9 @@ def sync_community_print(record: dict[str, Any], send_id: str | None = None) -> 
     """
     if not community_opt_in_enabled():
         _logger.debug("Community sync skipped — opt-in not enabled")
+        return False
+    if network_sends_suppressed():
+        _logger.debug("Community sync refused — test/CI runner (wire guard)")
         return False
 
     try:
@@ -156,7 +192,7 @@ def sync_community_print(record: dict[str, Any], send_id: str | None = None) -> 
 
 def sync_community_print_async(record: dict[str, Any]) -> None:
     """Fire community sync in a daemon thread — never blocks."""
-    if not community_opt_in_enabled():
+    if not community_opt_in_enabled() or network_sends_suppressed():
         return
     t = threading.Thread(
         target=sync_community_print,
@@ -299,6 +335,16 @@ def fetch_community_insights(
         return None
     if not printer_model or not material:
         return None
+
+    # One noun per machine, applied BEFORE both the query and the cache
+    # key.  Previously the cache key lowercased/sanitized while the query
+    # went out raw — so "Bambu A1" and "bambu a1" shared one cache file
+    # while querying two different cohorts, and whichever fired first
+    # answered for the other (1-hour TTL).  The door normalizes writes
+    # with this same function; the read must speak the same language.
+    from kiln.community_outbox import canonical_printer_model
+
+    printer_model = canonical_printer_model(printer_model)
 
     cache_path = _cache_path(printer_model, material)
     if use_cache:

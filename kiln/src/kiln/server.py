@@ -8981,7 +8981,9 @@ def await_print_completion(
             jd_at_entry.get("settings") or {}
         ).get("material")
         try:
-            printer_model_at_entry = getattr(adapter.get_printer_info(), "model", None)
+            from kiln.community_autofire import resolve_adapter_model
+
+            printer_model_at_entry = resolve_adapter_model(adapter)
         except Exception:
             logger.debug(
                 "await_print_completion: printer model lookup skipped", exc_info=True

@@ -487,20 +487,29 @@ def record_print_outcome(
             # second opinion about the vocabulary is what let one print ship
             # twice under two different words.  ``translate_outcome`` is the
             # one authority; a cancelled print translates to nothing.
+            # The geometry key: the caller's file_hash when supplied, else
+            # resolved from the printed file the same way the monitors do.
+            # Requiring the CALLER to pass file_hash made the auto-record
+            # hook a silent no-op here — ``fire_terminal_state_hook`` never
+            # passes one, so every hook-observed ending (the most common
+            # automatic path) contributed nothing while looking wired.
+            _signature = file_hash
+            if not _signature:
+                from kiln import community_autofire as _caf
+
+                _signature = _caf.geometric_signature_for(file_name)
             if (
                 community_opt_in_enabled()
-                and file_hash
+                and _signature
                 and community_outbox.translate_outcome(outcome) is not None
             ):
                 resolved_model: str | None = None
                 try:
-                    adapter = _srv._registry.get(printer_name)
-                    if adapter is not None:
-                        info = adapter.get_printer_info()
-                        resolved_model = (
-                            getattr(info, "model", None)
-                            or getattr(info, "printer_model", None)
-                        )
+                    from kiln.community_autofire import resolve_adapter_model
+
+                    resolved_model = resolve_adapter_model(
+                        _srv._registry.get(printer_name)
+                    )
                 except Exception:
                     _logger.debug("Could not resolve printer_model for community push", exc_info=True)
 
@@ -518,7 +527,7 @@ def record_print_outcome(
                 # one row instead of shipping a second copy of itself.
                 community_outbox.contribute_print_outcome(
                     outcome=outcome,
-                    geometric_signature=file_hash,
+                    geometric_signature=_signature,
                     job_id=job_id,
                     printer_file_name=file_name,
                     printer_model=resolved_model or printer_name,
@@ -528,7 +537,11 @@ def record_print_outcome(
                             _js.dumps(settings or {}, sort_keys=True).encode(),
                         ).hexdigest()[:16],
                         "settings": settings,
-                        "quality_grade": _grade_map.get(quality_grade or "", "B"),
+                        # An ungraded print carries no grade.  The old
+                        # default ("B") minted a quality verdict nobody
+                        # gave — the corpus's job is to hold what was
+                        # SAID, and grade absence is data too.
+                        "quality_grade": _grade_map.get(quality_grade or "") or None,
                         "failure_mode": failure_mode,
                     },
                 )

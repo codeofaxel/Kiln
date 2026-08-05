@@ -47,6 +47,66 @@ def _capture_request():
 @pytest.fixture(autouse=True)
 def _opt_in(monkeypatch):
     monkeypatch.setenv("KILN_COMMUNITY_OPT_IN", "true")
+    # This file EXERCISES the wire function against a mocked urllib, so it
+    # opts into the send path explicitly.  Everywhere else the wire guard
+    # (``network_sends_suppressed``) refuses under a test runner by
+    # default — the guard's own tests below delete this env again.
+    monkeypatch.setenv("KILN_COMMUNITY_TEST_SEND", "1")
+
+
+class TestWireGuard:
+    """The 2026-08-05 leak, pinned: a test runner must be physically unable
+    to POST to the production corpus unless it says so by name.
+
+    Seven fixture rows (``sig123``) reached the real ``community_prints``
+    table because the outbox's DB guard stands down for a custom
+    ``KILN_DB_PATH`` — the standard test isolation — and the sender under
+    it had no guard at all.  These tests replay that shape and assert the
+    wire now refuses.
+    """
+
+    def test_sender_refuses_under_test_runner_by_default(self, monkeypatch):
+        from kiln import community_sync
+
+        monkeypatch.delenv("KILN_COMMUNITY_TEST_SEND", raising=False)
+        with mock.patch("urllib.request.urlopen") as urlopen:
+            ok = community_sync.sync_community_print(
+                {"geometric_signature": "sig123", "outcome": "success"}
+            )
+        assert ok is False
+        urlopen.assert_not_called()
+
+    def test_async_sender_refuses_under_test_runner_by_default(self, monkeypatch):
+        from kiln import community_sync
+
+        monkeypatch.delenv("KILN_COMMUNITY_TEST_SEND", raising=False)
+        with mock.patch("threading.Thread") as thread:
+            community_sync.sync_community_print_async(
+                {"geometric_signature": "sig123", "outcome": "success"}
+            )
+        thread.assert_not_called()
+
+    def test_explicit_escape_reaches_the_wire(self):
+        # The autouse fixture set the escape; the wire runs (into the mock).
+        from kiln import community_sync
+
+        captured, fake = _capture_request()
+        with mock.patch("urllib.request.urlopen", side_effect=fake):
+            ok = community_sync.sync_community_print(
+                {"geometric_signature": "abc", "outcome": "success"}
+            )
+        assert ok is True
+        assert captured["url"].endswith("/rest/v1/community_prints")
+
+    def test_guard_answers_independent_of_db_path(self, monkeypatch, tmp_path):
+        """The exact disarm that shipped the leak: a custom KILN_DB_PATH
+        stands the OUTBOX guard down (correctly — DB isolation), and must
+        not stand the WIRE guard down with it."""
+        from kiln import community_sync
+
+        monkeypatch.delenv("KILN_COMMUNITY_TEST_SEND", raising=False)
+        monkeypatch.setenv("KILN_DB_PATH", str(tmp_path / "kiln.db"))
+        assert community_sync.network_sends_suppressed() is True
 
 
 def test_plain_insert_when_no_send_id():

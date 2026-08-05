@@ -506,10 +506,19 @@ class _IntelligenceToolsPlugin:
 
                     result["community"] = {
                         "available": False,
+                        # ``None`` covers two different worlds and this copy
+                        # must not pick one for the user: a signed-out or
+                        # offline machine, OR a reachable pool that simply
+                        # has nothing in it yet.  Telling a signed-in user
+                        # with an empty pool to "sign in" reports the
+                        # product's own quiet as the user's fault.
                         "note": (
-                            "Community totals need a Kiln account and a "
-                            "connection. Signing in is free and takes a few "
-                            "seconds."
+                            "Community totals aren't available right now — "
+                            "either this machine isn't signed in to Kiln, "
+                            "or the shared pool has no prints to report "
+                            "yet. Signing in is free and takes a few "
+                            "seconds; if you're already signed in, there's "
+                            "nothing to fix on your side."
                         ),
                         **signin_hint_fields(),
                     }

@@ -30,6 +30,13 @@ def ob(tmp_path, monkeypatch):
     # exit they restore to this no-op, not the live network call.
     monkeypatch.setattr(_cs, "sync_community_print", lambda *a, **k: False)
 
+    # These tests exercise the drain machinery, so they opt into sends
+    # explicitly — safe because the line above guarantees the sender is a
+    # no-op.  Without this env the drain-level wire guard (added after the
+    # 2026-08-05 sig123 leak) would refuse before the sender is consulted;
+    # the guard's own test below deletes it again.
+    monkeypatch.setenv("KILN_COMMUNITY_TEST_SEND", "1")
+
     _ob.close()  # drop any connection cached by another test
     yield _ob
     _ob.close()
@@ -42,6 +49,49 @@ def _rec(sig: str = "abc") -> dict:
         "material": "PLA",
         "outcome": "success",
     }
+
+
+def test_drain_wire_guard_refuses_without_explicit_escape(ob, monkeypatch):
+    """The leak replay: isolated DB (enqueue works), no escape env — the
+    drain must refuse BEFORE any sender runs, even one wired to a bomb."""
+    import kiln.community_sync as _cs
+
+    def _bomb(*a, **k):  # pragma: no cover — reaching this IS the failure
+        raise AssertionError("wire guard bypassed: sender was invoked")
+
+    monkeypatch.setattr(_cs, "sync_community_print", _bomb)
+    monkeypatch.delenv("KILN_COMMUNITY_TEST_SEND", raising=False)
+    assert ob.enqueue("leak1", _rec("sig123")) is True  # DB half still works
+    result = ob.drain()
+    assert result["sent"] == 0
+    assert result["remaining"] == 1  # queued, not lost — a later real drain lands it
+
+
+def test_canonical_printer_model_one_noun_per_machine(ob):
+    # The two spellings found live in production, eight rows in.
+    assert ob.canonical_printer_model("Bambu A1") == "bambu_a1"
+    assert ob.canonical_printer_model("bambu_a1") == "bambu_a1"
+    assert ob.canonical_printer_model("  Prusa MK4  ") == "prusa_mk4"
+    assert ob.canonical_printer_model("Voron 2.4 350") == "voron_2_4_350"
+    assert ob.canonical_printer_model(None) == "unknown"
+    assert ob.canonical_printer_model("") == "unknown"
+
+
+def test_contribution_door_normalizes_printer_model(ob):
+    ob.contribute_print_outcome(
+        outcome="success",
+        geometric_signature="abc",
+        job_id="j-norm",
+        printer_model="Bambu A1",
+    )
+    row = ob._db().execute(
+        "SELECT payload FROM community_outbox WHERE dedupe_key = ?",
+        ("print:j-norm",),
+    ).fetchone()
+    assert row is not None
+    import json as _json
+
+    assert _json.loads(row["payload"])["printer_model"] == "bambu_a1"
 
 
 def test_enqueue_then_pending(ob):

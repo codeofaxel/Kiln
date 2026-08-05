@@ -242,7 +242,7 @@ class _PrintWatcher:
             except Exception:
                 _logger.debug("watch auto-contribute: job fetch skipped", exc_info=True)
             try:
-                printer_model = getattr(self._adapter.get_printer_info(), "model", None)
+                printer_model = community_autofire.resolve_adapter_model(self._adapter)
             except Exception:
                 _logger.debug("watch auto-contribute: printer model skipped", exc_info=True)
             community_autofire.auto_contribute_completion(

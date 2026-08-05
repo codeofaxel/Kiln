@@ -110,7 +110,9 @@ def test_completed_contributes_success_with_geo_signature():
     assert key == "print:job-7"
     assert record["geometric_signature"] == "geo16char0000000"
     assert record["outcome"] == "success"  # completed -> success
-    assert record["printer_model"] == "Bambu A1"
+    # The door canonicalizes: one noun per machine, everywhere the corpus
+    # is touched ("Bambu A1" and "bambu_a1" were both live in prod).
+    assert record["printer_model"] == "bambu_a1"
     assert record["material"] == "PLA"
     assert record["print_time_seconds"] == 3600
     assert "file_hash" not in record  # geometric signature only
