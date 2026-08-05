@@ -90,3 +90,114 @@ def test_pro_api_call_allows_api_and_license_key_overrides(tmp_path, monkeypatch
 
     assert captured["url"] == "http://localhost:8742/api/tools/estimate_plate_part_costs"
     assert captured["headers"]["Authorization"] == "Bearer license-token"
+
+
+# ---------------------------------------------------------------------------
+# report_issue: local crash evidence rides the forwarded payload
+#
+# The stub forwarder runs on the USER's machine; the hosted server the
+# report lands on can never read this disk.  Without this wire, a
+# kiln3d-only install files reports with no log attached — the gap that
+# left 203 installs with essentially zero failure telemetry.
+# ---------------------------------------------------------------------------
+
+
+def _paired_env(tmp_path, monkeypatch):
+    auth_dir = tmp_path / ".kiln"
+    auth_dir.mkdir()
+    (auth_dir / "auth_tokens.json").write_text(
+        json.dumps({"access_token": "oauth-token"}), encoding="utf-8",
+    )
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+    monkeypatch.delenv("KILN_API_URL", raising=False)
+    monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+
+
+def test_report_issue_forward_attaches_redacted_log_tail(tmp_path, monkeypatch):
+    _paired_env(tmp_path, monkeypatch)
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "kiln.log").write_text(
+        "ERROR OpenSCAD failed (exit 1) for /Users/janedoe/box.scad "
+        "at 192.168.1.9\n"
+    )
+    monkeypatch.setenv("KILN_LOG_DIR", str(log_dir))
+    captured = {}
+
+    def fake_urlopen(req, timeout):
+        captured["data"] = req.data
+        return _FakeUrlopenResponse(b'{"status": "ok"}')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    _pro_api_call("report_issue", description="the render tool crashed")
+
+    sent = json.loads(captured["data"])
+    tail = sent["context"]["log_tail"]
+    assert "OpenSCAD failed" in tail
+    # Redacted BEFORE leaving the machine — not trusted to the server.
+    assert "janedoe" not in tail
+    assert "192.168.1.9" not in tail
+    assert sent["description"] == "the render tool crashed"
+
+
+def test_report_issue_forward_keeps_caller_supplied_tail(tmp_path, monkeypatch):
+    _paired_env(tmp_path, monkeypatch)
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "kiln.log").write_text("SERVER-SIDE LINE\n")
+    monkeypatch.setenv("KILN_LOG_DIR", str(log_dir))
+    captured = {}
+
+    def fake_urlopen(req, timeout):
+        captured["data"] = req.data
+        return _FakeUrlopenResponse(b'{"status": "ok"}')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    _pro_api_call(
+        "report_issue",
+        description="attaching my own capture",
+        context={"log_tail": "CALLER LINE\n", "app_version": "1.3.2"},
+    )
+
+    sent = json.loads(captured["data"])
+    assert sent["context"]["log_tail"] == "CALLER LINE\n"
+    assert sent["context"]["app_version"] == "1.3.2"
+
+
+def test_report_issue_forward_survives_missing_log(tmp_path, monkeypatch):
+    _paired_env(tmp_path, monkeypatch)
+    monkeypatch.setenv("KILN_LOG_DIR", str(tmp_path / "no-such-dir"))
+    captured = {}
+
+    def fake_urlopen(req, timeout):
+        captured["data"] = req.data
+        return _FakeUrlopenResponse(b'{"status": "ok"}')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = _pro_api_call("report_issue", description="no log on this box")
+
+    assert result == {"status": "ok"}
+    assert "context" not in json.loads(captured["data"])
+
+
+def test_other_tools_do_not_read_the_log(tmp_path, monkeypatch):
+    """Only report_issue carries crash evidence — no surprise payloads."""
+    _paired_env(tmp_path, monkeypatch)
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "kiln.log").write_text("ERROR should never travel\n")
+    monkeypatch.setenv("KILN_LOG_DIR", str(log_dir))
+    captured = {}
+
+    def fake_urlopen(req, timeout):
+        captured["data"] = req.data
+        return _FakeUrlopenResponse(b'{"status": "ok"}')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    _pro_api_call("generate_coaster", shape="hex")
+
+    assert json.loads(captured["data"]) == {"shape": "hex"}

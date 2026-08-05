@@ -11698,6 +11698,34 @@ _PRO_TOOL_TIERS: dict[str, str] = {}
 _PRO_TOOL_QUOTA: dict[str, dict] = {}
 
 
+def _with_local_log_tail(kwargs: dict) -> dict:
+    """Attach the redacted local log tail to a forwarded bug report.
+
+    The ``report_issue`` stub runs HERE, on the user's machine — the
+    hosted server the report lands on can never read this disk, so the
+    crash evidence in ``~/.kiln/logs/kiln.log`` has to ride in the
+    payload (the server accepts it as ``context.log_tail`` and
+    re-redacts it on arrival).  ``read_log_tail`` strips secrets,
+    private IPs, and home-directory usernames BEFORE the text leaves
+    the process.
+
+    A caller-supplied tail is never overwritten, and a report must
+    never fail because its attachment did.
+    """
+    try:
+        context = kwargs.get("context") or {}
+        if not isinstance(context, dict) or context.get("log_tail"):
+            return kwargs
+        from kiln.log_config import read_log_tail
+
+        tail = read_log_tail()
+        if not tail:
+            return kwargs
+        return {**kwargs, "context": {**context, "log_tail": tail}}
+    except Exception:  # noqa: BLE001 — the report matters more than its attachment
+        return kwargs
+
+
 def _pro_api_call(tool_name: str, **kwargs) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
 
@@ -11785,6 +11813,14 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
         if allowance:
             payload["quota"] = dict(allowance)
         return payload
+
+    # Bug reports carry local crash evidence.  This forwarder is the ONE
+    # code path every report_issue call from a kiln3d-only install takes,
+    # so the attach lives here — after the bearer check (a refused call
+    # reads no log), before the payload is serialized.
+    if tool_name == "report_issue":
+        kwargs = _with_local_log_tail(kwargs)
+
     import json
     import urllib.error
     import urllib.request
