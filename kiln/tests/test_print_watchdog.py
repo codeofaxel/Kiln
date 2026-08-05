@@ -16,8 +16,13 @@ import pytest
 
 from kiln.print_watchdog import (
     DEFAULT_BED_DROP_C,
+    DEFAULT_NO_RISE_TIMEOUT_S,
+    DEFAULT_POLL_INTERVAL,
     DEFAULT_STALL_SECONDS,
     DEFAULT_TOOL_DROP_C,
+    HEATING_RISE_C,
+    MIN_ACTIVE_TARGET_C,
+    REACHED_MARGIN_C,
     Flag,
     PrintWatchdog,
 )
@@ -123,8 +128,12 @@ def _make_watchdog(
 class TestToolTempDrop:
     def test_triggers_when_tool_drops_below_threshold(self):
         wd, adapter, _, anomalies = _make_watchdog()
-        # Drop hotend 35°C below a 220°C target — exceeds default 30°C threshold.
+        # Reach the setpoint first so the drop check is armed — a gap
+        # present before first reach is a warmup ramp, not a drop.
         adapter.state.tool_temp_target = 220.0
+        adapter.state.tool_temp_actual = 220.0
+        assert wd.step() is None
+        # Drop hotend 35°C below the target — exceeds default 30°C threshold.
         adapter.state.tool_temp_actual = 220.0 - (DEFAULT_TOOL_DROP_C + 5.0)
 
         flag = wd.step()
@@ -170,7 +179,10 @@ class TestToolTempDrop:
 class TestBedTempDrop:
     def test_triggers_when_bed_drops_below_threshold(self):
         wd, adapter, _, _ = _make_watchdog()
+        # Reach the setpoint first so the drop check is armed.
         adapter.state.bed_temp_target = 60.0
+        adapter.state.bed_temp_actual = 60.0
+        assert wd.step() is None
         adapter.state.bed_temp_actual = 60.0 - (DEFAULT_BED_DROP_C + 2.0)
 
         flag = wd.step()
@@ -228,6 +240,274 @@ class TestPrintError:
 
         assert flag is not None
         assert adapter.emergency_stops == 1
+
+
+
+
+# --------------------------------------------------------------------------
+# Warmup grace
+# --------------------------------------------------------------------------
+
+
+class TestWarmupGrace:
+    """A heater on its way to its target must not be read as a failed one."""
+
+    def test_cold_start_ramp_does_not_trip(self):
+        wd, adapter, clock, _ = _make_watchdog()
+        adapter.state.tool_temp_target = 220.0
+        adapter.state.bed_temp_target = 60.0
+
+        for i in range(72):  # a three minute ramp from ambient
+            frac = i / 71
+            adapter.state.tool_temp_actual = 25.0 + (220.0 - 25.0) * frac
+            adapter.state.bed_temp_actual = 25.0 + (60.0 - 25.0) * frac
+            adapter.job.current_layer += 1
+            assert wd.step() is None
+            clock.advance(DEFAULT_POLL_INTERVAL)
+
+        assert adapter.emergency_stops == 0
+
+    def test_check_starts_once_the_heater_arrives(self):
+        wd, adapter, _, _ = _make_watchdog()
+        adapter.state.tool_temp_target = 220.0
+        adapter.state.tool_temp_actual = 25.0
+        assert wd.step() is None  # far below target, but on its way up
+
+        adapter.state.tool_temp_actual = 220.0
+        assert wd.step() is None  # arrived
+        adapter.state.tool_temp_actual = 220.0 - (DEFAULT_TOOL_DROP_C + 5.0)
+
+        flag = wd.step()
+
+        assert flag is not None
+        assert flag.rule == "tool_drop"
+
+    def test_heater_that_never_heats_is_reported(self):
+        wd, adapter, clock, anomalies = _make_watchdog()
+        adapter.state.tool_temp_target = 220.0
+        adapter.state.tool_temp_actual = 25.0
+        assert wd.step() is None
+
+        clock.advance(DEFAULT_NO_RISE_TIMEOUT_S - DEFAULT_POLL_INTERVAL)
+        assert wd.step() is None  # not yet: the deadline has not passed
+        clock.advance(DEFAULT_POLL_INTERVAL * 2)
+
+        flag = wd.step()
+
+        assert flag is not None
+        assert flag.rule == "tool_not_heating"
+        assert flag.kind == "red"
+        assert flag.context["no_rise_seconds"] >= DEFAULT_NO_RISE_TIMEOUT_S
+        assert adapter.emergency_stops == 1
+        assert anomalies[0].rule == "tool_not_heating"
+
+    def test_bed_that_never_heats_is_reported(self):
+        wd, adapter, clock, _ = _make_watchdog()
+        adapter.state.bed_temp_target = 60.0
+        adapter.state.bed_temp_actual = 20.0
+        assert wd.step() is None
+        clock.advance(DEFAULT_NO_RISE_TIMEOUT_S + 1.0)
+
+        flag = wd.step()
+
+        assert flag is not None
+        assert flag.rule == "bed_not_heating"
+        assert flag.kind == "red"
+        assert adapter.emergency_stops == 1
+
+    def test_a_slow_climb_is_accepted_at_any_speed(self):
+        """The rule is whether a heater is still climbing, not how fast."""
+        wd, adapter, clock, _ = _make_watchdog()
+        adapter.state.tool_temp_target = 220.0
+        adapter.state.tool_temp_actual = 25.0
+        rise_per_poll = HEATING_RISE_C / 4  # far slower than any real heater
+
+        for _ in range(int(DEFAULT_NO_RISE_TIMEOUT_S / DEFAULT_POLL_INTERVAL) * 3):
+            adapter.state.tool_temp_actual += rise_per_poll
+            adapter.job.current_layer += 1
+            assert wd.step() is None
+            clock.advance(DEFAULT_POLL_INTERVAL)
+
+        assert adapter.emergency_stops == 0
+
+    def test_a_heater_that_stops_climbing_is_reported(self):
+        wd, adapter, clock, _ = _make_watchdog()
+        adapter.state.tool_temp_target = 220.0
+        adapter.state.tool_temp_actual = 100.0
+        wd.step()
+        clock.advance(DEFAULT_NO_RISE_TIMEOUT_S + 1.0)
+        adapter.job.current_layer += 1
+
+        flag = wd.step()
+
+        assert flag is not None
+        assert flag.rule == "tool_not_heating"
+
+    def test_stall_timer_holds_while_warming_then_releases(self):
+        wd, adapter, clock, _ = _make_watchdog()
+        adapter.state.tool_temp_target = 220.0
+        adapter.state.tool_temp_actual = 25.0
+        wd.step()
+
+        clock.advance(DEFAULT_STALL_SECONDS + 30.0)
+        adapter.state.tool_temp_actual = 100.0  # still climbing
+        assert wd.step() is None  # no stall while warming
+
+        adapter.state.tool_temp_actual = 220.0  # arrived; the hold ends
+        wd.step()
+        clock.advance(DEFAULT_STALL_SECONDS + 1.0)
+
+        flag = wd.step()
+
+        assert flag is not None
+        assert flag.rule == "stalled_layer"
+
+    def test_missing_reading_does_not_stop_the_check(self):
+        wd, adapter, _, _ = _make_watchdog()
+        adapter.state.tool_temp_target = 220.0
+        adapter.state.tool_temp_actual = 220.0
+        assert wd.step() is None  # arrived
+        adapter.state.tool_temp_actual = None  # one reading goes missing
+        assert wd.step() is None
+        adapter.state.tool_temp_actual = 220.0 - (DEFAULT_TOOL_DROP_C + 5.0)
+
+        flag = wd.step()
+
+        assert flag is not None
+        assert flag.rule == "tool_drop"
+
+    def test_missing_reading_does_not_restart_the_timer(self):
+        wd, adapter, clock, _ = _make_watchdog()
+        adapter.state.tool_temp_target = 220.0
+        adapter.state.tool_temp_actual = 25.0
+        assert wd.step() is None
+        clock.advance(DEFAULT_NO_RISE_TIMEOUT_S - 10.0)
+
+        adapter.state.tool_temp_actual = None  # missing near the deadline
+        adapter.job.current_layer += 1  # keep the stall rule quiet
+        assert wd.step() is None
+
+        clock.advance(20.0)
+        adapter.state.tool_temp_actual = 25.0
+        adapter.job.current_layer += 1
+
+        flag = wd.step()
+
+        assert flag is not None
+        assert flag.rule == "tool_not_heating"
+
+    def test_a_setpoint_change_does_not_restart_the_timer(self):
+        """The timer measures time since the last rise, whatever the target."""
+        wd, adapter, clock, _ = _make_watchdog()
+        adapter.state.tool_temp_actual = 200.0  # stuck here for the whole test
+        adapter.state.tool_temp_target = 240.0
+        assert wd.step() is None
+
+        clock.advance(DEFAULT_NO_RISE_TIMEOUT_S / 2)
+        adapter.state.tool_temp_target = 220.0  # target changes, heater does not move
+        adapter.job.current_layer += 1
+        assert wd.step() is None
+
+        clock.advance(DEFAULT_NO_RISE_TIMEOUT_S / 2 + 1.0)
+        adapter.state.tool_temp_target = 240.0
+        adapter.job.current_layer += 1
+
+        flag = wd.step()
+
+        assert flag is not None
+        assert flag.rule == "tool_not_heating"
+
+    def test_a_small_steady_shortfall_is_never_reported(self):
+        wd, adapter, clock, _ = _make_watchdog()
+        adapter.state.tool_temp_target = 220.0
+        adapter.state.tool_temp_actual = 220.0 - (REACHED_MARGIN_C - 2.0)
+
+        for _ in range(int(DEFAULT_NO_RISE_TIMEOUT_S / DEFAULT_POLL_INTERVAL) + 20):
+            adapter.job.current_layer += 1
+            assert wd.step() is None
+            clock.advance(DEFAULT_POLL_INTERVAL)
+
+        adapter.state.tool_temp_actual = 220.0 - (DEFAULT_TOOL_DROP_C + 5.0)
+
+        flag = wd.step()
+
+        assert flag is not None
+        assert flag.rule == "tool_drop"
+
+    def test_a_second_print_checks_from_scratch(self):
+        wd, adapter, clock, _ = _make_watchdog()
+        adapter.state.tool_temp_target = 220.0
+        adapter.state.tool_temp_actual = 220.0
+        wd.step()
+
+        adapter.state.state = "idle"
+        adapter.state.tool_temp_actual = 25.0
+        wd.step()
+        clock.advance(300.0)
+
+        adapter.state.state = "printing"  # second print, same target, cold again
+        for i in range(72):
+            adapter.state.tool_temp_actual = 25.0 + (220.0 - 25.0) * (i / 71)
+            adapter.job.current_layer += 1
+            assert wd.step() is None
+            clock.advance(DEFAULT_POLL_INTERVAL)
+
+        adapter.state.tool_temp_actual = 220.0 - (DEFAULT_TOOL_DROP_C + 5.0)
+
+        flag = wd.step()
+
+        assert flag is not None
+        assert flag.rule == "tool_drop"
+
+    def test_raising_the_target_is_treated_as_warming(self):
+        wd, adapter, _, _ = _make_watchdog()
+        adapter.state.tool_temp_target = 200.0
+        adapter.state.tool_temp_actual = 200.0
+        assert wd.step() is None  # arrived at 200
+
+        adapter.state.tool_temp_target = 240.0  # now 40 below the new target
+        assert wd.step() is None
+
+        adapter.state.tool_temp_actual = 240.0
+        assert wd.step() is None  # arrived again
+        adapter.state.tool_temp_actual = 240.0 - (DEFAULT_TOOL_DROP_C + 5.0)
+
+        flag = wd.step()
+
+        assert flag is not None
+        assert flag.rule == "tool_drop"
+
+    def test_switching_a_heater_off_and_on_is_treated_as_warming(self):
+        wd, adapter, _, _ = _make_watchdog()
+        adapter.state.tool_temp_target = 220.0
+        adapter.state.tool_temp_actual = 220.0
+        assert wd.step() is None
+
+        adapter.state.tool_temp_target = MIN_ACTIVE_TARGET_C - 1.0  # M104 S0
+        adapter.state.tool_temp_actual = 150.0
+        assert wd.step() is None
+
+        adapter.state.tool_temp_target = 220.0  # back on, still cool
+        adapter.state.tool_temp_actual = 120.0
+        assert wd.step() is None
+
+        assert adapter.emergency_stops == 0
+
+    def test_switching_the_bed_off_and_on_is_treated_as_warming(self):
+        wd, adapter, _, _ = _make_watchdog()
+        adapter.state.bed_temp_target = 60.0
+        adapter.state.bed_temp_actual = 60.0
+        assert wd.step() is None
+
+        adapter.state.bed_temp_target = MIN_ACTIVE_TARGET_C - 1.0
+        adapter.state.bed_temp_actual = 40.0
+        assert wd.step() is None
+
+        adapter.state.bed_temp_target = 60.0
+        adapter.state.bed_temp_actual = 30.0
+        assert wd.step() is None
+
+        assert adapter.emergency_stops == 0
 
 
 # --------------------------------------------------------------------------
