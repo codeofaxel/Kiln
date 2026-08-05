@@ -50,7 +50,7 @@ dependencies = [
     "zeroconf>=0.80",
     "rich>=12.0",
     "paho-mqtt>=2.0",
-    "cryptography>=41.0",
+    "cryptography>=50.0.0",
     # websockets powers the web->printer bridge's dial-out client
     # (``kiln.bridge_client``) — a core dep, not an extra, so the
     # documented `kiln bridge enable` works on a fresh install instead
@@ -93,7 +93,7 @@ postgres = ["psycopg2-binary>=2.9.12"]
 # The REST API ships in kiln-pro itself; install it directly from the
 # private repo (see kiln3d.com/docs) — don't promise it here.
 stripe = ["stripe>=15.3.0"]
-payments = ["stripe>=15.3.0", "cryptography>=41.0"]
+payments = ["stripe>=15.3.0", "cryptography>=50.0.0"]
 # The backend is named `usb`; `serial` stays as an alias so the install
 # line in older docs keeps working.
 usb = ["pyserial>=3.5"]
