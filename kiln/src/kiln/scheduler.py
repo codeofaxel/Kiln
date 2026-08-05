@@ -108,11 +108,18 @@ class JobScheduler:
         error_msg: str,
         failed_list: list[dict[str, str]],
         printer_name: str | None = None,
+        machine_reported: bool = False,
     ) -> bool:
         """Try to re-queue a failed job if retries remain.
 
         Returns ``True`` if the job was re-queued, ``False`` if it was
         permanently marked as failed (appended to *failed_list*).
+
+        *machine_reported* marks the exhausting failure as the PRINTER's own
+        verdict (error state observed while the job was being watched) rather
+        than the queue's (stuck-timeout guess, unregistered printer, dispatch
+        error).  Only a machine verdict is eligible for community
+        contribution — see :meth:`_auto_record_outcome`.
         """
         count = self._retry_counts.get(job_id, 0)
         if count < self._max_retries:
@@ -161,7 +168,10 @@ class JobScheduler:
             source="scheduler",
         )
         if printer_name:
-            self._auto_record_outcome(job_id, printer_name, "failed", error_msg=error_msg)
+            self._auto_record_outcome(
+                job_id, printer_name, "failed", error_msg=error_msg,
+                contribute=machine_reported,
+            )
         failed_list.append({"job_id": job_id, "error": error_msg})
         return False
 
@@ -205,8 +215,22 @@ class JobScheduler:
         outcome: str,
         error_msg: str | None = None,
         determined_by: str = "observed",
+        contribute: bool = False,
     ) -> None:
-        """Best-effort auto-record a print outcome to the learning database."""
+        """Best-effort auto-record a print outcome to the learning database.
+
+        *contribute* federates the resolution to the community pool (opt-in
+        gated, best-effort).  Call sites set it ONLY for machine-testimony
+        verdicts about prints this scheduler watched: a job seen printing
+        that ended idle (success), or one whose printer reported an error
+        state mid-watch (failed).  The queue's own words — stuck-timeout
+        ("may be disconnected or hung" is a guess, and a real print over the
+        timeout is still running), unregistered printer, safety latch — are
+        queue events, not verdicts on the model, and contributing them would
+        poison a corpus keyed by the model's geometry.  ``unknown`` and
+        ``cancelled`` never contribute (the helper refuses non-verdicts, and
+        the call sites don't ask).
+        """
         if not self._persistence:
             return
         try:
@@ -262,6 +286,33 @@ class JobScheduler:
                 }
             )
             logger.debug("Auto-recorded %s outcome for job %s", outcome, job_id)
+            # Federate the resolution.  The adapter layer's own doors
+            # (watched terminal edge, reconcile-on-reconnect) federate the
+            # endings THEY resolve; a row this scheduler settles — via its
+            # queue knowledge, when the adapter couldn't attribute the
+            # ending — reached only the local DB until 2026-08-05, so
+            # queue-managed prints were systematically missing from the
+            # shared corpus.  Best-effort in its own try: a federation
+            # hiccup must never disturb the local record above.
+            if contribute and outcome in ("success", "failed"):
+                try:
+                    from kiln import community_autofire
+
+                    community_autofire.contribute_resolved_outcome(
+                        outcome=outcome,
+                        printer_file_name=job.file_name if job else None,
+                        job_id=job_id,
+                        printer_name=printer_name,
+                        material=(
+                            job.metadata.get("material_type")
+                            if job and job.metadata else None
+                        ),
+                    )
+                except Exception:
+                    logger.debug(
+                        "scheduler community contribution skipped (best-effort)",
+                        exc_info=True,
+                    )
         except Exception:
             logger.debug("Failed to auto-record outcome for job %s (non-fatal)", job_id, exc_info=True)
 
@@ -370,9 +421,14 @@ class JobScheduler:
                             determined_by="observed",
                         )
                     elif job_id in self._seen_printing:
+                        # Watched printing, now idle with no error: the
+                        # machine's own testimony that the print ended
+                        # cleanly — the one resolution here that is a
+                        # verdict about the MODEL, so it may federate.
                         self._auto_record_outcome(
                             job_id, printer_name, "success",
                             determined_by="observed",
+                            contribute=True,
                         )
                     else:
                         self._auto_record_outcome(
@@ -389,9 +445,19 @@ class JobScheduler:
 
                 elif state.state == PrinterStatus.ERROR:
                     error_msg = f"Printer {printer_name} entered error state"
+                    # A machine-reported error is a print verdict only for a
+                    # job this loop actually SAW printing — an error on a
+                    # never-seen job may predate the print (it may never have
+                    # started), and blaming the model for it would be a
+                    # guess.  Captured before _requeue_or_fail, which
+                    # discards the seen-printing mark on both branches.
+                    machine_reported = job_id in self._seen_printing
                     with self._lock:
                         self._active_jobs.pop(job_id, None)
-                    self._requeue_or_fail(job_id, error_msg, failed, printer_name=printer_name)
+                    self._requeue_or_fail(
+                        job_id, error_msg, failed, printer_name=printer_name,
+                        machine_reported=machine_reported,
+                    )
 
                 elif state.state == PrinterStatus.PRINTING:
                     # Promote STARTING -> PRINTING when the printer confirms

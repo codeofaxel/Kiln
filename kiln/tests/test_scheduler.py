@@ -1497,3 +1497,245 @@ class TestOutcomeHonesty:
         assert row["outcome"] == "cancelled"
         assert queue.get_job(job_id).status == JobStatus.CANCELLED
         assert job_id not in scheduler.active_jobs
+
+
+class TestSchedulerFederation:
+    """A scheduler-resolved verdict reaches the community pool — the same
+    parity the reconcile path gained on 2026-08-05.  The scheduler settles
+    exactly the rows the adapter layer could not attribute, and until this
+    wire those resolutions stopped at the local DB, so queue-managed prints
+    were missing from the shared corpus.
+
+    Only MACHINE testimony federates: watched-printing→idle (success) and a
+    printer error observed mid-watch (failed).  The queue's own words —
+    stuck-timeout guess, unknown, cancelled, error on a never-watched job —
+    contribute nothing; a guessed sample poisons a geometry-keyed corpus.
+    """
+
+    def _scheduler_with_db(
+        self, queue, registry, event_bus, tmp_path, max_retries=0,
+    ):
+        from kiln.persistence import KilnDB
+
+        db = KilnDB(str(tmp_path / "sched.db"))
+        return JobScheduler(
+            queue, registry, event_bus, poll_interval=0.1,
+            max_retries=max_retries, persistence=db,
+        ), db
+
+    def _open_pending(self, db, file_name="benchy.gcode"):
+        """Seed the pending row a real start_print would have opened — the
+        scheduler is a RESOLVER and stays silent with nothing owed."""
+        db.open_pending_outcome("start:printer-1:1", "printer-1", file_name)
+
+    def _capture_contributions(self, monkeypatch):
+        import kiln.community_autofire as caf
+
+        calls: list[dict] = []
+        monkeypatch.setattr(
+            caf, "contribute_resolved_outcome",
+            lambda **kw: calls.append(kw) or {"contributed": True},
+        )
+        return calls
+
+    def test_observed_success_contributes_to_community(
+        self, queue, registry, event_bus, tmp_path, monkeypatch,
+    ):
+        calls = self._capture_contributions(monkeypatch)
+        scheduler, db = self._scheduler_with_db(queue, registry, event_bus, tmp_path)
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(
+            file_name="benchy.gcode", metadata={"material_type": "PETG"},
+        )
+        scheduler.tick()  # dispatch
+        self._open_pending(db)
+
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.PRINTING
+        )
+        scheduler.tick()  # the scheduler SEES the job printing
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.IDLE
+        )
+        scheduler.tick()
+
+        assert len(calls) == 1
+        assert calls[0]["outcome"] == "success"
+        assert calls[0]["job_id"] == job_id
+        assert calls[0]["printer_name"] == "printer-1"
+        assert calls[0]["printer_file_name"] == "benchy.gcode"
+        assert calls[0]["material"] == "PETG"
+
+    def test_machine_error_after_watched_printing_contributes_failed(
+        self, queue, registry, event_bus, tmp_path, monkeypatch,
+    ):
+        calls = self._capture_contributions(monkeypatch)
+        scheduler, db = self._scheduler_with_db(queue, registry, event_bus, tmp_path)
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+        scheduler.tick()  # dispatch
+        self._open_pending(db)
+
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.PRINTING
+        )
+        scheduler.tick()  # watched printing
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.ERROR
+        )
+        scheduler.tick()
+
+        row = db.get_print_outcome(job_id)
+        assert row is not None and row["outcome"] == "failed"
+        assert len(calls) == 1
+        assert calls[0]["outcome"] == "failed"
+
+    def test_error_on_never_watched_job_contributes_nothing(
+        self, queue, registry, event_bus, tmp_path, monkeypatch,
+    ):
+        """An error on a job never seen printing may predate the print —
+        the local row still records failed, but the corpus gets no sample."""
+        calls = self._capture_contributions(monkeypatch)
+        scheduler, db = self._scheduler_with_db(queue, registry, event_bus, tmp_path)
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+        scheduler.tick()  # dispatch; adapter still reports IDLE
+        self._open_pending(db)
+
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.ERROR
+        )
+        scheduler.tick()
+
+        row = db.get_print_outcome(job_id)
+        assert row is not None and row["outcome"] == "failed"
+        assert calls == []
+
+    def test_unknown_resolution_contributes_nothing(
+        self, queue, registry, event_bus, tmp_path, monkeypatch,
+    ):
+        calls = self._capture_contributions(monkeypatch)
+        scheduler, db = self._scheduler_with_db(queue, registry, event_bus, tmp_path)
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+        scheduler.tick()  # dispatch; never seen printing
+        self._open_pending(db)
+
+        scheduler.tick()  # idle → honest unknown
+
+        row = db.get_print_outcome(job_id)
+        assert row is not None and row["outcome"] == "unknown"
+        assert calls == []
+
+    def test_cancelled_job_contributes_nothing(
+        self, queue, registry, event_bus, tmp_path, monkeypatch,
+    ):
+        calls = self._capture_contributions(monkeypatch)
+        scheduler, db = self._scheduler_with_db(queue, registry, event_bus, tmp_path)
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+        scheduler.tick()  # dispatch
+        self._open_pending(db)
+
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.PRINTING
+        )
+        scheduler.tick()  # watched printing
+        queue.cancel(job_id)
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.IDLE
+        )
+        scheduler.tick()
+
+        row = db.get_print_outcome(job_id)
+        assert row is not None and row["outcome"] == "cancelled"
+        assert calls == []
+
+    def test_stuck_timeout_guess_contributes_nothing(
+        self, queue, registry, event_bus, tmp_path, monkeypatch,
+    ):
+        """The stuck-job timeout is the queue's guess ('may be disconnected
+        or hung') — a real print over the timeout is still running, so
+        federating it would write false failures against live geometry."""
+        calls = self._capture_contributions(monkeypatch)
+        scheduler, db = self._scheduler_with_db(queue, registry, event_bus, tmp_path)
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+        scheduler.tick()  # dispatch
+        self._open_pending(db)
+
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.PRINTING
+        )
+        scheduler.tick()  # watched printing
+        queue.get_job(job_id).started_at = time.time() - 7300  # past 2h cap
+        scheduler.tick()  # stuck detection fires
+
+        row = db.get_print_outcome(job_id)
+        assert row is not None and row["outcome"] == "failed"
+        assert calls == []
+
+    def test_decided_row_contributes_nothing(
+        self, queue, registry, event_bus, tmp_path, monkeypatch,
+    ):
+        """A row an agent already decided is the deciding path's to
+        federate — the scheduler neither rewrites nor re-ships it."""
+        calls = self._capture_contributions(monkeypatch)
+        scheduler, db = self._scheduler_with_db(queue, registry, event_bus, tmp_path)
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+        scheduler.tick()  # dispatch
+
+        db.save_print_outcome({
+            "job_id": job_id, "printer_name": "printer-1",
+            "outcome": "failed", "agent_id": "mcp",
+            "determined_by": "user_reported",
+        })
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.PRINTING
+        )
+        scheduler.tick()
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.IDLE
+        )
+        scheduler.tick()
+
+        assert calls == []
+
+    def test_contribution_failure_never_disturbs_local_record(
+        self, queue, registry, event_bus, tmp_path, monkeypatch,
+    ):
+        import kiln.community_autofire as caf
+
+        def _boom(**kw):
+            raise RuntimeError("federation endpoint offline")
+
+        monkeypatch.setattr(caf, "contribute_resolved_outcome", _boom)
+        scheduler, db = self._scheduler_with_db(queue, registry, event_bus, tmp_path)
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+        scheduler.tick()  # dispatch
+        self._open_pending(db)
+
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.PRINTING
+        )
+        scheduler.tick()
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.IDLE
+        )
+        result = scheduler.tick()  # must not raise
+
+        assert job_id in result["completed"]
+        row = db.get_print_outcome(job_id)
+        assert row is not None
+        assert row["outcome"] == "success"
+        assert row["determined_by"] == "observed"
