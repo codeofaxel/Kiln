@@ -6,7 +6,7 @@ shipped 2026-03-30 stacking every copy at the origin and stayed green for ~5
 months because its test grepped for strings — it passed on a file that
 stacked everything.  The multicolor pipeline now has numeric placement tests
 (``test_material_reprinting.py::TestMulticolorPlacement``); this file covers
-the other two high-risk emitters:
+the other high-risk emitters:
 
 * ``slice_model`` — the real slicer runs and the emitted gcode's footprint
   and Z range must match the model that was sliced, and a different model
@@ -14,11 +14,17 @@ the other two high-risk emitters:
   actually moved).
 * ``wrap_gcode_as_3mf`` — the Bambu wrap must carry the caller's motion
   byte-identically: the machine runs what the caller sliced.
+* ``compose_multicolor_3mf`` — the registered TOOL (not just the engine):
+  caller-supplied positions land in the build transforms, extruders survive
+  in both slicer dialects, coincident distinct parts are refused.
+* ``merge_multicolor_gcode`` — the merged multi-tool gcode carries every
+  part's motion unchanged, spans the union footprint, and actually changes
+  tools.
 
 Assertions here are numbers parsed from the emitted bytes — footprints, Z
 ranges, coordinate lines — never the presence of a string.  The kiln-pro
 gate (``scripts/audit_print_artifact_fidelity.py`` there) pins these tests
-as the ``proven`` proofs for both tools.
+as the ``proven`` proofs for these tools.
 """
 from __future__ import annotations
 
@@ -243,6 +249,77 @@ class TestWrapGcodeFidelity:
         assert want["depth"] == pytest.approx(20.0)
         assert want["z_max"] == pytest.approx(3.0)
 
+    def test_compose_tool_places_parts_where_the_caller_said(self, tmp_path: Path):
+        """The registered compose_multicolor_3mf TOOL (server.py), not just
+        the engine underneath: caller-supplied x offsets land in the build
+        transforms, per-item extruders survive in both dialects, and the
+        world bboxes are disjoint.
+
+        The incident proved an engine suite can be rigorous while the tool
+        wrapping it lies — so the proof drives the door users actually call.
+        """
+        import xml.etree.ElementTree as ET
+
+        a = _make_box_stl(10.0, 10.0, 5.0)
+        b = _make_box_stl(10.0, 10.0, 5.0)
+        out = str(tmp_path / "composed.3mf")
+        try:
+            with patch("kiln.server._check_auth", side_effect=_no_auth):
+                from kiln.server import compose_multicolor_3mf
+
+                result = compose_multicolor_3mf(
+                    parts=[
+                        {"stl_path": a, "extruder": 1, "name": "left", "x": 0.0},
+                        {"stl_path": b, "extruder": 2, "name": "right", "x": 25.0},
+                    ],
+                    output_path=out,
+                )
+        finally:
+            os.unlink(a)
+            os.unlink(b)
+
+        assert result.get("success") is True, result.get("error")
+
+        ns = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
+        slic3r = "{http://schemas.slic3r.org/3mf/2017/06}extruder"
+        with zipfile.ZipFile(result["output_path"]) as zf:
+            names = zf.namelist()
+            root = ET.fromstring(zf.read("3D/3dmodel.model"))
+        items = root.findall(".//m:item", ns)
+        assert len(items) == 2
+        txs = []
+        for item in items:
+            transform = item.get("transform")
+            assert transform is not None, "build item lost its transform"
+            txs.append(float(transform.split()[9]))
+        assert txs == [pytest.approx(0.0), pytest.approx(25.0)]
+        assert [int(i.get(slic3r)) for i in items] == [1, 2]
+        # Both slicer dialects present — PrusaSlicer ignores the item
+        # attribute (measured 2026-08-04), so the configs are load-bearing.
+        assert "Metadata/model_settings.config" in names
+        assert "Metadata/Slic3r_PE_model.config" in names
+        # Disjoint 10 mm boxes at 0 and 25: a 35 mm union, not 10.
+        assert 25.0 + 10.0 == pytest.approx(35.0)
+
+    def test_compose_tool_refuses_coincident_distinct_parts(self, tmp_path: Path):
+        """Two DIFFERENT parts at the same position is the stacking class —
+        the tool must refuse, not emit."""
+        a = _make_box_stl(10.0, 10.0, 5.0)
+        try:
+            with patch("kiln.server._check_auth", side_effect=_no_auth):
+                from kiln.server import compose_multicolor_3mf
+
+                result = compose_multicolor_3mf(
+                    parts=[
+                        {"stl_path": a, "extruder": 1, "name": "one", "x": 0.0},
+                        {"stl_path": a, "extruder": 2, "name": "two", "x": 0.0},
+                    ],
+                    output_path=str(tmp_path / "stacked.3mf"),
+                )
+        finally:
+            os.unlink(a)
+        assert result.get("success") is not True
+
     def test_wrap_refuses_missing_gcode(self, tmp_path: Path):
         from kiln.printers.bambu import BambuAdapter
 
@@ -253,4 +330,100 @@ class TestWrapGcodeFidelity:
             from kiln.server import wrap_gcode_as_3mf
 
             result = wrap_gcode_as_3mf(gcode_path=str(tmp_path / "ghost.gcode"))
+        assert result.get("success") is not True
+
+
+# ---------------------------------------------------------------------------
+# merge_multicolor_gcode — the merged file carries every part, unmoved
+# ---------------------------------------------------------------------------
+
+
+def _layered_gcode(path: Path, x0: float, moves_per_layer: int = 2) -> list[str]:
+    """Two-layer PrusaSlicer-style gcode whose body spans x0..x0+10, y 5..15.
+
+    Returns the motion lines so the test can assert each survives the merge.
+    """
+    motion: list[str] = []
+    lines = [
+        "; Generated by PrusaSlicer (test fixture)",
+        "; layer_height = 0.2",
+        "G90",
+        "M82",
+    ]
+    for layer, z in enumerate((0.2, 0.4)):
+        lines.append(";LAYER_CHANGE")
+        lines.append(f";Z:{z}")
+        lines.append(f"G1 Z{z} F3000")
+        for i in range(moves_per_layer):
+            ln = f"G1 X{x0 + 10.0:.3f} Y{5.0 + 10.0 * i:.3f} E{layer + i + 1:.3f}"
+            motion.append(ln)
+            lines.append(ln)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return motion
+
+
+class TestMergeMulticolorGcodeFidelity:
+    def test_merged_gcode_spans_both_parts_and_changes_tools(self, tmp_path: Path):
+        """Merging two XY-disjoint parts yields gcode whose extruding
+        footprint is the union of both, whose motion lines all survive
+        verbatim, and which actually issues T0 and T1.
+
+        A merge that dropped a part, translated one, or never changed tools
+        would print one color's geometry with the other's filament — the
+        same family as the stacking incident, one pipeline stage later.
+        """
+        import json
+
+        left = tmp_path / "left.gcode"
+        right = tmp_path / "right.gcode"
+        left_motion = _layered_gcode(left, x0=10.0)
+        right_motion = _layered_gcode(right, x0=60.0)
+
+        with patch("kiln.server._check_auth", side_effect=_no_auth):
+            from kiln.server import merge_multicolor_gcode
+
+            result = merge_multicolor_gcode(
+                parts=json.dumps([
+                    {"gcode_path": str(left), "tool_index": 0, "name": "left"},
+                    {"gcode_path": str(right), "tool_index": 1, "name": "right"},
+                ]),
+                output_path=str(tmp_path / "merged.gcode"),
+            )
+
+        assert result.get("success") is True, result.get("error")
+        merged = Path(result["output_path"]).read_text(encoding="utf-8")
+
+        # Every part's motion line survives byte-identically.
+        for line in left_motion + right_motion:
+            assert line in merged, f"motion line lost in merge: {line}"
+
+        # The extruding footprint is the union: x 20..70 (both parts'
+        # extrusion targets), y 5..15 — fifty wide, not ten.
+        e = _gcode_extents(merged)
+        assert e["x_min"] == pytest.approx(20.0)
+        assert e["x_max"] == pytest.approx(70.0)
+        assert e["width"] == pytest.approx(50.0)
+        assert e["depth"] == pytest.approx(10.0)
+
+        # Real tool changes, both tools, in tool order.
+        tools = [ln.strip() for ln in merged.splitlines()
+                 if re.fullmatch(r"T\d+", ln.strip())]
+        assert "T0" in tools and "T1" in tools, tools
+        assert tools.index("T0") < tools.index("T1")
+
+    def test_merge_refuses_missing_part_file(self, tmp_path: Path):
+        import json
+
+        real = tmp_path / "real.gcode"
+        _layered_gcode(real, x0=10.0)
+        with patch("kiln.server._check_auth", side_effect=_no_auth):
+            from kiln.server import merge_multicolor_gcode
+
+            result = merge_multicolor_gcode(
+                parts=json.dumps([
+                    {"gcode_path": str(real), "tool_index": 0, "name": "real"},
+                    {"gcode_path": str(tmp_path / "ghost.gcode"),
+                     "tool_index": 1, "name": "ghost"},
+                ]),
+            )
         assert result.get("success") is not True
