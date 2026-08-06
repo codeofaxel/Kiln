@@ -150,6 +150,40 @@ class TestReadLogTail:
         assert tail.startswith("row ")  # partial first line dropped
         assert "row 1999" in tail
 
+    def test_opt_out_returns_none_without_reading(self, tmp_path, monkeypatch):
+        """KILN_REPORT_NO_LOG=1 declines attachment at the one shared helper."""
+        (tmp_path / "kiln.log").write_text("ERROR something worth reporting\n")
+        monkeypatch.setenv("KILN_REPORT_NO_LOG", "1")
+        assert read_log_tail(log_dir=str(tmp_path)) is None
+
+    def test_opt_out_accepts_the_usual_truthy_spellings(self, tmp_path, monkeypatch):
+        (tmp_path / "kiln.log").write_text("ERROR something\n")
+        for val in ("1", "true", "yes", "on", "TRUE", "On"):
+            monkeypatch.setenv("KILN_REPORT_NO_LOG", val)
+            assert read_log_tail(log_dir=str(tmp_path)) is None, val
+
+    def test_unset_or_falsey_still_attaches(self, tmp_path, monkeypatch):
+        (tmp_path / "kiln.log").write_text("ERROR something\n")
+        monkeypatch.delenv("KILN_REPORT_NO_LOG", raising=False)
+        assert read_log_tail(log_dir=str(tmp_path)) is not None
+        for val in ("0", "false", "no", ""):
+            monkeypatch.setenv("KILN_REPORT_NO_LOG", val)
+            assert read_log_tail(log_dir=str(tmp_path)) is not None, val
+
+    def test_opt_out_is_independent_of_llm_privacy_mode(self, tmp_path, monkeypatch):
+        """Two unrelated privacy surfaces, two switches — never one."""
+        (tmp_path / "kiln.log").write_text("ERROR something\n")
+        monkeypatch.setenv("KILN_LLM_PRIVACY_MODE", "0")
+        monkeypatch.delenv("KILN_REPORT_NO_LOG", raising=False)
+        # LLM mode off must NOT suppress the report attachment...
+        assert read_log_tail(log_dir=str(tmp_path)) is not None
+        # ...nor must it disable the redaction that attachment carries.
+        monkeypatch.setenv("KILN_LLM_PRIVACY_MODE", "0")
+        (tmp_path / "kiln.log").write_text("at 192.168.1.9 by /Users/janedoe\n")
+        tail = read_log_tail(log_dir=str(tmp_path))
+        assert "192.168.1.9" not in tail
+        assert "janedoe" not in tail
+
     def test_missing_log_returns_none(self, tmp_path):
         assert read_log_tail(log_dir=str(tmp_path / "nope")) is None
 

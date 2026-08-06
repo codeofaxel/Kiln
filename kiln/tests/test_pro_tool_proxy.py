@@ -201,3 +201,26 @@ def test_other_tools_do_not_read_the_log(tmp_path, monkeypatch):
     _pro_api_call("generate_coaster", shape="hex")
 
     assert json.loads(captured["data"]) == {"shape": "hex"}
+
+
+def test_report_issue_forward_honours_the_opt_out(tmp_path, monkeypatch):
+    """The opt-out set in the one shared helper reaches this door too."""
+    _paired_env(tmp_path, monkeypatch)
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "kiln.log").write_text("ERROR should not travel\n")
+    monkeypatch.setenv("KILN_LOG_DIR", str(log_dir))
+    monkeypatch.setenv("KILN_REPORT_NO_LOG", "1")
+    captured = {}
+
+    def fake_urlopen(req, timeout):
+        captured["data"] = req.data
+        return _FakeUrlopenResponse(b'{"status": "ok"}')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    _pro_api_call("report_issue", description="declined the log attachment")
+
+    sent = json.loads(captured["data"])
+    assert "context" not in sent
+    assert sent["description"] == "declined the log attachment"

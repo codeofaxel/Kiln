@@ -50,6 +50,21 @@ def _scrub(text: str) -> str:
     return redaction.redact_secrets(text, marker="***REDACTED***")
 
 
+#: Opt out of attaching the log to bug reports.  Set to 1/true/yes/on.
+LOG_TAIL_OPT_OUT_ENV = "KILN_REPORT_NO_LOG"
+
+
+def log_tail_opted_out() -> bool:
+    """True when the user has declined log attachment on bug reports.
+
+    Deliberately its OWN switch, not a mode of ``KILN_LLM_PRIVACY_MODE``:
+    one env var governing two unrelated privacy surfaces is what made
+    disabling LLM redaction silently disable report redaction.
+    """
+    raw = (os.environ.get(LOG_TAIL_OPT_OUT_ENV) or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def read_log_tail(max_bytes: int = 16 * 1024, log_dir: str | None = None) -> str | None:
     """Return the redacted tail of the rotating log, for bug reports.
 
@@ -58,7 +73,15 @@ def read_log_tail(max_bytes: int = 16 * 1024, log_dir: str | None = None) -> str
     result is safe to attach to a report that leaves the machine.
     Returns ``None`` when there is no log or it can't be read — a report
     must never fail because its attachment did.
+
+    Returns ``None`` immediately when the user has opted out.  The check
+    lives HERE, in the one helper every capture path calls (the report
+    CLI, the hosted-tool forwarder, and the server-side attach), so the
+    opt-out cannot be honoured on one door and forgotten on another.
+    Nothing is read from disk at all in that case.
     """
+    if log_tail_opted_out():
+        return None
     log_dir = log_dir or os.environ.get("KILN_LOG_DIR", _DEFAULT_LOG_DIR)
     log_path = os.path.join(log_dir, "kiln.log")
     try:

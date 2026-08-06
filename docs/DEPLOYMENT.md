@@ -84,6 +84,7 @@ Reference for running Kiln yourself. Covers all environment variables, Docker de
 | `KILN_MESHY_API_KEY` | No | `""` | Meshy API key for AI 3D model generation |
 | `KILN_AGENT_ID` | No | `default` | Agent identifier for event attribution and memory |
 | `KILN_LLM_PRIVACY_MODE` | No | `1` (enabled) | Redact secrets from LLM context. Set `0` to disable |
+| `KILN_REPORT_NO_LOG` | No | unset | Set `1` to keep the activity log out of bug reports. Reports still send your description; nothing is read from the log file at all. Independent of `KILN_LLM_PRIVACY_MODE` — report redaction is always on either way |
 
 ### Safety & Confirmation
 
