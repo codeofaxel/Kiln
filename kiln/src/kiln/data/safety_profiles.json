@@ -651,7 +651,7 @@
   },
   "ratrig_vcore3": {
     "display_name": "Rat Rig V-Core 3 / V-Core 3.1",
-    "max_hotend_temp": 300.0,
+    "max_hotend_temp": 285.0,
     "max_bed_temp": 120.0,
     "max_chamber_temp": null,
     "max_feedrate": 25000.0,
@@ -662,7 +662,7 @@
       300,
       300
     ],
-    "notes": "CoreXY kit. Limits depend on hotend choice. Usually EVA toolhead.",
+    "notes": "CoreXY kit. The hotend ceiling is a property of the hotend the builder fitted, not of the machine, so 285C here is the as-built default: it is what RatRig's own firmware ships for every NTC-sensor hotend they support, including the one they name as standard. A PT1000-sensor hotend is rated higher - select that variant rather than overriding this number. Usually EVA toolhead.",
     "variants": {
       "pt1000_hotend": {
         "display_name": "RatRig V-Core 3 + PT1000-sensor hotend",
@@ -949,7 +949,7 @@
   "ender3_s1_pro": {
     "display_name": "Creality Ender 3 S1 Pro",
     "max_hotend_temp": 300.0,
-    "max_bed_temp": 110.0,
+    "max_bed_temp": 100.0,
     "max_chamber_temp": null,
     "max_feedrate": 8000.0,
     "min_safe_z": 0.0,
@@ -959,7 +959,7 @@
       220,
       270
     ],
-    "notes": "Sprite Pro full-metal direct-drive extruder, rated 300C against 260C for the base S1. Creality describes the hot end as 'full metal' and does not state that the hot zone is PTFE-free, so do not assume it. Open-frame bed-slinger, so ABS and ASA still warp without an enclosure."
+    "notes": "Sprite Pro full-metal direct-drive extruder, rated 300C against 260C for the base S1. Bed is 100C per Creality's spec table - a distributor listing says 110, and the manufacturer's own figure is the one enforced here. Creality describes the hot end as 'full metal' and does not state that the hot zone is PTFE-free, so do not assume it. Open-frame bed-slinger, so ABS and ASA still warp without an enclosure."
   },
   "aon_hylo": {
     "display_name": "AON3D Hylo",

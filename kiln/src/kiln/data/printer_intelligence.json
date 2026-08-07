@@ -1654,7 +1654,7 @@
       300,
       300
     ],
-    "max_hotend_temp": 300,
+    "max_hotend_temp": 285,
     "max_bed_temp": 120,
     "has_input_shaping": true
   },
@@ -2361,7 +2361,7 @@
       270
     ],
     "max_hotend_temp": 300,
-    "max_bed_temp": 110,
+    "max_bed_temp": 100,
     "has_input_shaping": false
   },
   "aon_hylo": {
