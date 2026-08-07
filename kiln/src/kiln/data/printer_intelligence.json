@@ -1317,7 +1317,7 @@
       300,
       300
     ],
-    "max_hotend_temp": 300,
+    "max_hotend_temp": 270,
     "max_bed_temp": 120,
     "has_input_shaping": true
   },
@@ -1616,7 +1616,7 @@
       120,
       120
     ],
-    "max_hotend_temp": 300,
+    "max_hotend_temp": 270,
     "max_bed_temp": 120,
     "has_input_shaping": true
   },

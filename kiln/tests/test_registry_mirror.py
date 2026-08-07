@@ -48,8 +48,16 @@ from pathlib import Path
 _DATA = Path(__file__).resolve().parent.parent / "src" / "kiln" / "data"
 _SAFETY = _DATA / "safety_profiles.json"
 _REGISTRY = _DATA / "printer_intelligence.json"
+_DESIGN = _DATA / "design_knowledge" / "printer_profiles.json"
 
 _MIRRORED_FIELDS = ("max_hotend_temp", "max_bed_temp")
+
+# The design-knowledge profile writes the same two quantities under different
+# key names.  Same physical fact, third spelling.
+_DESIGN_ALIASES = {
+    "max_hotend_temp": "max_hotend_temp_c",
+    "max_bed_temp": "max_bed_temp_c",
+}
 
 
 def _load(path: Path) -> dict:
@@ -129,4 +137,43 @@ def test_variants_are_never_below_the_base_they_modify() -> None:
     assert not inverted, (
         "curated variants sit BELOW the base profile they modify: "
         + "; ".join(sorted(inverted))
+    )
+
+
+def test_the_design_knowledge_profile_carries_the_same_ceilings() -> None:
+    """The third door, which the two-file mirror could never see.
+
+    ``max_hotend_temp`` is written down in THREE public files, not two.
+    ``design_knowledge/printer_profiles.json`` spells it ``max_hotend_temp_c``
+    and feeds the design/material advice path, so a printer can be corrected
+    in the safety file and the registry and still hand out the old number
+    from here.
+
+    That is exactly what happened to the Vorons: the V0/V2.4 ceiling was
+    audited down off an uncited 300 on 2026-08-07, and this file was not in
+    the brief because the mirror test did not know it existed.  A guard that
+    compares two of three files reports agreement while the odd one out keeps
+    answering — the same failure mode as the drift this module was written
+    for, one file further along.
+    """
+    safety = _load(_SAFETY)
+    design = _load(_DESIGN)
+
+    mismatches: list[str] = []
+    for pid, profile in design.items():
+        if pid.startswith("_") or not isinstance(profile, dict):
+            continue
+        curated = safety.get(pid)
+        if not isinstance(curated, dict):
+            continue
+        for field, alias in _DESIGN_ALIASES.items():
+            theirs, mine = curated.get(field), profile.get(alias)
+            if theirs is None or mine is None:
+                continue
+            if float(mine) != float(theirs):
+                mismatches.append(f"{pid}.{alias}: {mine} vs safety {theirs}")
+
+    assert not mismatches, (
+        "design-knowledge profiles disagree with the safety ceiling: "
+        + "; ".join(sorted(mismatches))
     )

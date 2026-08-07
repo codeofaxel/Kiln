@@ -367,8 +367,8 @@
       "y": 220,
       "z": 250
     },
-    "max_hotend_temp_c": 260,
-    "max_bed_temp_c": 100,
+    "max_hotend_temp_c": 250,
+    "max_bed_temp_c": 110,
     "has_enclosure": false,
     "has_direct_drive": false,
     "supported_materials": [
@@ -428,7 +428,7 @@
       "y": 300,
       "z": 300
     },
-    "max_hotend_temp_c": 300,
+    "max_hotend_temp_c": 270,
     "max_bed_temp_c": 120,
     "has_enclosure": true,
     "has_direct_drive": true,
@@ -1266,7 +1266,7 @@
       "y": 120,
       "z": 120
     },
-    "max_hotend_temp_c": 300,
+    "max_hotend_temp_c": 270,
     "max_bed_temp_c": 120,
     "has_enclosure": true,
     "has_direct_drive": true,
@@ -1297,7 +1297,7 @@
       "y": 300,
       "z": 300
     },
-    "max_hotend_temp_c": 300,
+    "max_hotend_temp_c": 285,
     "max_bed_temp_c": 120,
     "has_enclosure": false,
     "has_direct_drive": true,
@@ -1804,7 +1804,7 @@
       "z": 270
     },
     "max_hotend_temp_c": 300,
-    "max_bed_temp_c": 110,
+    "max_bed_temp_c": 100,
     "has_enclosure": false,
     "has_direct_drive": true,
     "supported_materials": [

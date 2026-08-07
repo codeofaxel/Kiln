@@ -622,7 +622,7 @@
   },
   "voron_0": {
     "display_name": "Voron 0 / 0.2",
-    "max_hotend_temp": 300.0,
+    "max_hotend_temp": 270.0,
     "max_bed_temp": 120.0,
     "max_chamber_temp": 65.0,
     "max_feedrate": 30000.0,
@@ -633,11 +633,24 @@
       120,
       120
     ],
-    "notes": "Compact enclosed CoreXY kit. Limits depend on hotend choice."
+    "notes": "Compact enclosed CoreXY kit. 270C IS NOT A HOTEND RATING. It is the max_temp this machine's own designer ships in every current config for it, sitting above a sensor_type line left blank for the builder to fill in - an unconfigured default, not a measurement of anything. It is here because the alternative was a rounder number that traced to nothing. No hotend ceiling is published for this machine and that is a real absence rather than a gap in the research: it is a kit, the hotend is not the kit maker's product, so they have no number to state. The honest way up is to select the variant matching the hotend actually fitted; see variants.",
+    "variants": {
+      "e3d_revo_voron": {
+        "display_name": "Voron 0 / 0.2 + E3D Revo Voron",
+        "description": "An E3D Revo Voron fitted to the V0.2 hotend mount. The ceiling belongs to that assembly - heater, thermistor, heat break and nozzle rated together as one part - and not to the machine.",
+        "max_hotend_temp": 300.0,
+        "requires": [
+          "An E3D Revo Voron is actually fitted. This ceiling is not transferable to another hotend, and not to another Revo either: the Revo range is several different parts with different ratings, and only this one was checked against this machine.",
+          "CHECK THE CORE VOLTAGE AGAINST YOUR PSU. Revo cores are sold in 12V and 24V and the part alone does not tell you which you have. This is a kit whose builder chooses the power supply, so there is no printer-to-voltage lookup to fall back on - read it off the machine. A 12V cartridge on a 24V rail dissipates roughly four times its rating.",
+          "printer.cfg declares the matching sensor_type AND a max_temp at or above what you intend to print. This machine ships with sensor_type commented out and max_temp 270, so until the builder fills in both, its own firmware aborts the print above 270 no matter what Kiln permits."
+        ],
+        "notes": "300C is the part maker's figure for the complete assembly. A nozzle change can impose its own LOWER limit that this field cannot express - a hardened steel nozzle in an aluminium block is not suitable above 240C - and selecting this variant does not lift that."
+      }
+    }
   },
   "voron_2": {
     "display_name": "Voron 2.4 / Trident",
-    "max_hotend_temp": 300.0,
+    "max_hotend_temp": 270.0,
     "max_bed_temp": 120.0,
     "max_chamber_temp": 65.0,
     "max_feedrate": 30000.0,
@@ -648,7 +661,20 @@
       300,
       300
     ],
-    "notes": "Full-size enclosed CoreXY kit. Typical configs use Dragon/Rapido hotend."
+    "notes": "Full-size enclosed CoreXY kit. 270C IS NOT A HOTEND RATING - same reading as voron_0: it is the max_temp this machine's own designer ships above a blank sensor_type line, an unconfigured default rather than a measurement. No hotend ceiling is published for this machine because it is a kit and the hotend is not the kit maker's product. Select the variant matching the hotend you fitted. NOT EVERY COMMON HOTEND HAS ONE: Dragon and Rapido builds have no variant here, because those parts ship no heater and no thermistor and their maker states no operating temperature, so there is nothing to enforce and Kiln will not invent a figure to fill the space. SOME COMMON BUILDS BELONG BELOW 270 AND YOU HAVE TO SET THAT YOURSELF: an E3D V6 run with its silicone sock fitted, which is how a V6 is normally assembled, is rated 260C by its maker - below this base. There is no variant for that, because a variant may only raise a ceiling and never lower one; set the lower limit as max_temp in your own printer.cfg, which is the backstop that actually stops the heater.",
+    "variants": {
+      "e3d_revo_voron": {
+        "display_name": "Voron 2.4 / Trident + E3D Revo Voron",
+        "description": "An E3D Revo Voron fitted to the Stealthburner printhead. The ceiling belongs to that assembly - heater, thermistor, heat break and nozzle rated together as one part - and not to the machine.",
+        "max_hotend_temp": 300.0,
+        "requires": [
+          "An E3D Revo Voron is actually fitted. This ceiling is not transferable to another hotend, and not to another Revo either: the Revo range is several different parts with different ratings, and only this one was checked against this machine.",
+          "CHECK THE CORE VOLTAGE AGAINST YOUR PSU. Revo cores are sold in 12V and 24V and the part alone does not tell you which you have. This is a kit whose builder chooses the power supply, so there is no printer-to-voltage lookup to fall back on - read it off the machine. A 12V cartridge on a 24V rail dissipates roughly four times its rating.",
+          "printer.cfg declares the matching sensor_type AND a max_temp at or above what you intend to print. This machine ships with sensor_type commented out and max_temp 270, so until the builder fills in both, its own firmware aborts the print above 270 no matter what Kiln permits."
+        ],
+        "notes": "300C is the part maker's figure for the complete assembly. A nozzle change can impose its own LOWER limit that this field cannot express - a hardened steel nozzle in an aluminium block is not suitable above 240C - and selecting this variant does not lift that."
+      }
+    }
   },
   "ratrig_vcore3": {
     "display_name": "Rat Rig V-Core 3 / V-Core 3.1",
