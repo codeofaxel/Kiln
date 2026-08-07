@@ -48,7 +48,7 @@ class _FleetToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        @_srv.requires_tier(_srv.LicenseTier.PRO)
+        @_srv.requires_tier(_srv.LicenseTier.BUSINESS)
         def fleet_analytics() -> dict:
             """Get fleet historical analytics: per-printer success rates, utilization, job throughput.
 
@@ -215,7 +215,7 @@ class _FleetToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        @_srv.requires_tier(_srv.LicenseTier.PRO)
+        @_srv.requires_tier(_srv.LicenseTier.BUSINESS)
         def route_print_job(
             file_path: str,
             *,
@@ -257,7 +257,7 @@ class _FleetToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        @_srv.requires_tier(_srv.LicenseTier.PRO)
+        @_srv.requires_tier(_srv.LicenseTier.BUSINESS)
         def fleet_submit_job(
             file_path: str,
             *,
@@ -299,7 +299,7 @@ class _FleetToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        @_srv.requires_tier(_srv.LicenseTier.PRO)
+        @_srv.requires_tier(_srv.LicenseTier.BUSINESS)
         def fleet_job_status(job_id: str) -> dict:
             """Get the status of a fleet-managed print job.
 
@@ -323,7 +323,7 @@ class _FleetToolsPlugin:
         # ------------------------------------------------------------------
 
         @mcp.tool()
-        @_srv.requires_tier(_srv.LicenseTier.PRO)
+        @_srv.requires_tier(_srv.LicenseTier.BUSINESS)
         def fleet_utilization() -> dict:
             """Get fleet utilization metrics — busy/idle/offline counts and utilization %.
 

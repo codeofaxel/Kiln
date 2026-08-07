@@ -17,7 +17,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
-- **Jobs go to the printer that's been finishing them (Pro).** When Kiln has
+- **Jobs go to the printer that's been finishing them (Business).** When Kiln has
   more than one printer to choose from, it weighs each machine's own print
   history alongside whether the material fits, so a machine that has been
   struggling stops drawing new work. A printer Kiln hasn't seen finish
