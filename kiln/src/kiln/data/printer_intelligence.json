@@ -181,7 +181,7 @@
       220,
       250
     ],
-    "max_hotend_temp": 260,
+    "max_hotend_temp": 250,
     "max_bed_temp": 110,
     "has_input_shaping": false
   },

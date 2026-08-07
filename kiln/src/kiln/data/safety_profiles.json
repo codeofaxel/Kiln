@@ -128,7 +128,7 @@
   },
   "ender3_v2": {
     "display_name": "Creality Ender 3 V2",
-    "max_hotend_temp": 260.0,
+    "max_hotend_temp": 250.0,
     "max_bed_temp": 110.0,
     "max_chamber_temp": null,
     "max_feedrate": 7500.0,
@@ -139,7 +139,7 @@
       220,
       250
     ],
-    "notes": "Ender 3 V2 dimensions. Stock PTFE-lined hotend. A generic all-metal upgrade does not raise this ceiling; see variants.",
+    "notes": "Ender 3 V2 dimensions. Stock PTFE-lined hotend. 250C is Creality's own published figure (official manual, equipment-parameters table); the firmware would accept 260. Where a manufacturer gives two answers the lower one is enforced - see _meta.field_semantics.two_published_answers. A generic all-metal upgrade does not raise this ceiling; see variants.",
     "variants": {
       "e3d_revo_cr_reflashed": {
         "display_name": "Creality Ender 3 V2 + E3D Revo CR (firmware reflashed)",
@@ -410,17 +410,18 @@
     "notes": "CR-10 SE dimensions (220x220x265). Klipper-class direct-drive open-frame printer."
   },
   "_meta": {
-    "version": "1.2.0",
+    "version": "1.3.0",
     "description": "Per-printer safety profiles for Kiln G-code validation. The 'default' profile applies when no printer-specific profile matches.",
     "updated": "2026-08-07",
     "field_semantics": {
-      "max_hotend_temp": "THE MACHINE'S RATED CAPABILITY in C, mirrored from printer_intelligence.json (the manufacturer-spec registry). It is enforced as a CRITICAL block rule by the G-code interceptor. It is NOT a guard band: do not hand-type a margin into it. A value above the rating grants rope the machine was never rated for; a value below it silently caps hardware the owner paid for. Both directions are caught by a test.",
+      "max_hotend_temp": "THE MACHINE'S RATED CAPABILITY in C, mirrored from printer_intelligence.json (the manufacturer-spec registry). It is enforced as a CRITICAL block rule by the G-code interceptor. It is NOT a guard band: do not hand-type a margin into it. A value above the rating grants rope the machine was never rated for; a value below it silently caps hardware the owner paid for. Both directions are caught by test_registry_mirror.py, which runs in public CI because both files it compares are public.",
       "max_bed_temp": "Same contract as max_hotend_temp, for the heated bed.",
       "policy_margin": "Safety MARGIN lives separately and is named: _PTFE_SAFE_MAX (240C) in server.py clamps PTFE-lined hotends below their rating, because the liner degrades before the machine does. That is what a guard band should look like — one named constant derived from a material fact, not a per-printer round number. Add new margins the same way.",
       "why_this_exists": "Until 2026-07-20 this file and the registry disagreed on 17 values. printer_intelligence had been backfilled from manufacturer specs; this file never had an equivalent pass, so it had collapsed 250/260/290-rated machines into a round 300. Nothing compared them.",
       "variants": "OPTIONAL per-profile map of curated HARDWARE VARIANTS: {variant_id: {field: value}}. The base profile describes the printer AS SHIPPED. A variant describes the same printer after a documented, named hardware change, and restates ONLY the fields that change - everything else is inherited. This is the one place a limit may be HIGHER than the base. A variant is SELECTED by the operator (select_printer_variant); the number always comes from here. There is no code path from a user-supplied value into a variant.",
       "variant_requires": "A variant's `requires` list is the set of preconditions that make its ceiling true - a specific named part, a firmware reflash, an install ordering, a supply voltage. Selecting the variant IS the operator's attestation that these are met; Kiln cannot verify them remotely. When a part's own documentation would lead an operator to believe a precondition is unnecessary, state the precondition FIRST and name it in the variant id, so satisfying the documentation cannot be mistaken for satisfying the requirement. Where a precondition cannot be made explicit, ship NO variant.",
-      "variant_sourcing": "Sourcing for these numbers is NOT in this file and must not be added to it - no urls, no source fields, and no prose about which vendors publish what. Each variant traces to a manufacturer primary source recorded privately; that record is the research, and the research does not ship. What ships here is the enforced value plus the preconditions an operator must have met, because both are needed to print safely. Sourcing metadata appearing in this file is a leak, not documentation."
+      "variant_sourcing": "Sourcing for these numbers is NOT in this file and must not be added to it - no urls, no source fields, and no prose about which vendors publish what. Each variant traces to a manufacturer primary source recorded privately; that record is the research, and the research does not ship. What ships here is the enforced value plus the preconditions an operator must have met, because both are needed to print safely. Sourcing metadata appearing in this file is a leak, not documentation.",
+      "two_published_answers": "WHEN A MANUFACTURER PUBLISHES TWO DIFFERENT NUMBERS FOR ONE MACHINE, TAKE THE LOWER. Decided 2026-08-07. A vendor's manual and its firmware routinely disagree: the manual states what they rate the machine at, the firmware states what it will actually accept, and neither is wrong. This file used to answer that two ways - max_hotend_temp is described as the RATED CAPABILITY, while prusa_mk4 carries a comment saying the ceiling 'tracks achievable capability, not marketing'. Both readings gave the same answer on the mk4 (spec 300, firmware 290 -> 290) so the contradiction went unnoticed until ender3_v2, where the manual says 250 and the firmware allows 260. Lower-of-the-two reproduces the mk4 result and is the only reading conservative in both directions. Record BOTH figures in the notes so the next reader can see it was a choice."
     },
     "variant_bucketing_rule": "IF SHARED OR AGGREGATED PRINTER INTELLIGENCE IS EVER BUILT ON TOP OF THIS DATA, READ THIS FIRST. A curated profile describes a printer as shipped; a variant describes one person's modified machine. They are different objects and must never merge into one number. (1) Any shared or aggregated printer intelligence keys on (model, variant), NEVER model alone. (2) A machine whose variant is UNDECLARED contributes to NOTHING - not to the base bucket, not to a catch-all. Undeclared is not a synonym for stock. (3) The (model, variant) bucket must exist before any data is written into it; do not create it by first write. A tweaked printer feeding the base model's pool would silently teach every stock owner of that model a number their hardware cannot survive. Existing federation rails already carry the cohort-key discipline this extends - see canonical_printer_model() in kiln/community_outbox.py."
   },
