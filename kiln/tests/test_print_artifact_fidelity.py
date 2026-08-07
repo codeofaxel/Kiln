@@ -427,3 +427,351 @@ class TestMergeMulticolorGcodeFidelity:
                 ]),
             )
         assert result.get("success") is not True
+
+
+# ---------------------------------------------------------------------------
+# auto_color_by_height / auto_color_by_region — zone split into a real 3MF
+# ---------------------------------------------------------------------------
+
+
+def _read_3mf_items(path_3mf: str):
+    """(items, names): per-item (tx, extruder) + zip namelist."""
+    import xml.etree.ElementTree as ET
+
+    ns = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
+    slic3r = "{http://schemas.slic3r.org/3mf/2017/06}extruder"
+    with zipfile.ZipFile(path_3mf) as zf:
+        names = zf.namelist()
+        root = ET.fromstring(zf.read("3D/3dmodel.model"))
+    items = []
+    total_triangles = 0
+    for obj in root.findall(".//m:object", ns):
+        total_triangles += len(obj.findall(".//m:triangle", ns))
+    for item in root.findall(".//m:item", ns):
+        ext = item.get(slic3r)
+        items.append(int(ext) if ext is not None else None)
+    return items, names, total_triangles
+
+
+def _call_color_tool(name: str, **kwargs: Any) -> dict:
+    from kiln.plugins.color_tools import _ColorToolsPlugin
+
+    tools: dict[str, Any] = {}
+
+    class _FakeMcp:
+        def tool(self, name: str | None = None):
+            def decorator(fn):
+                tools[name or fn.__name__] = fn
+                return fn
+
+            return decorator
+
+    _ColorToolsPlugin().register(_FakeMcp())
+    with patch("kiln.server._check_auth", side_effect=_no_auth):
+        return tools[name](**kwargs)
+
+
+class TestAutoColorFidelity:
+    """The zone splitters emit a REAL multicolor 3MF through the composer:
+    per-zone extruders must be distinct, every input triangle must land in
+    exactly one zone (none dropped, none doubled), and the zone count must
+    follow ``num_colors`` — the mutating credit."""
+
+    def test_height_bands_reach_the_3mf(self, tmp_path: Path):
+        stl = _make_box_stl(20.0, 20.0, 10.0)
+        try:
+            r3 = _call_color_tool("auto_color_by_height",
+                                  input_path=stl, num_colors=3)
+            assert r3.get("success") is True, r3.get("error")
+            extruders, names, triangles = _read_3mf_items(r3["multicolor_3mf"])
+            assert len(extruders) == 3, extruders
+            assert sorted(extruders) == [1, 2, 3], extruders
+            # A solid box's 12 triangles split at 2 band boundaries: side
+            # walls gain triangles at each cut, none vanish.
+            assert triangles >= 12, triangles
+            assert "Metadata/model_settings.config" in names
+            assert "Metadata/Slic3r_PE_model.config" in names
+
+            r2 = _call_color_tool("auto_color_by_height",
+                                  input_path=stl, num_colors=2)
+            assert r2.get("success") is True, r2.get("error")
+            extruders2, _n, _t = _read_3mf_items(r2["multicolor_3mf"])
+            assert len(extruders2) == 2, (extruders, extruders2)
+        finally:
+            os.unlink(stl)
+
+    def test_region_split_reaches_the_3mf(self, tmp_path: Path):
+        stl = _make_box_stl(20.0, 20.0, 10.0)
+        try:
+            # z_height is the deterministic method (normal-clustering on a
+            # box whose STL stores one shared facet normal degenerates to a
+            # single zone, and random is seed-dependent).
+            r = _call_color_tool("auto_color_by_region",
+                                 input_path=stl, num_colors=2, method="z_height")
+            assert r.get("success") is True, r.get("error")
+            extruders, names, triangles = _read_3mf_items(r["multicolor_3mf"])
+            assert sorted(extruders) == [1, 2], extruders
+            assert triangles >= 12, triangles  # band cuts add triangles, never drop
+            assert "Metadata/model_settings.config" in names
+        finally:
+            os.unlink(stl)
+
+
+# ---------------------------------------------------------------------------
+# Slicer-adjacent emitters
+# ---------------------------------------------------------------------------
+
+
+def _register_plugin(plugin_cls) -> dict:
+    tools: dict[str, Any] = {}
+
+    class _FakeMcp:
+        def tool(self, name: str | None = None):
+            def decorator(fn):
+                tools[name or fn.__name__] = fn
+                return fn
+
+            return decorator
+
+    plugin_cls().register(_FakeMcp())
+    return tools
+
+
+def _extents_of(path: str):
+    import trimesh
+
+    mesh = trimesh.load(path, force="mesh")
+    return sorted(round(float(e), 2) for e in mesh.extents)
+
+
+@pytest.mark.skipif(not _slicer_available(), reason="no PrusaSlicer/OrcaSlicer installed")
+class TestSlicerAdjacentFidelity:
+    def test_reslice_override_moves_the_layer_count(self, tmp_path: Path):
+        """The whole point of an override is that it CHANGES the bytes:
+        0.2 mm vs 0.4 mm layers over the same 10 mm box must roughly halve
+        the number of printed layers."""
+        import json
+
+        from kiln.plugins.slicer_tools import _SlicerToolsPlugin
+
+        tools = _register_plugin(_SlicerToolsPlugin)
+        stl = _make_box_stl(20.0, 20.0, 10.0)
+
+        def _layers(gcode_path: str) -> int:
+            text = Path(gcode_path).read_text(encoding="utf-8")
+            return text.count(";LAYER_CHANGE")
+
+        try:
+            with patch("kiln.server._check_auth", side_effect=_no_auth):
+                fine = tools["reslice_with_overrides"](
+                    input_path=stl, output_dir=str(tmp_path / "fine"),
+                    overrides=json.dumps({"layer_height": "0.2"}),
+                )
+                coarse = tools["reslice_with_overrides"](
+                    input_path=stl, output_dir=str(tmp_path / "coarse"),
+                    overrides=json.dumps({"layer_height": "0.4"}),
+                )
+            assert fine.get("success") is True, fine.get("error")
+            assert coarse.get("success") is True, coarse.get("error")
+            n_fine = _layers(fine.get("raw_gcode_path") or fine["output_path"])
+            n_coarse = _layers(coarse.get("raw_gcode_path") or coarse["output_path"])
+            assert n_fine > 0 and n_coarse > 0
+            ratio = n_fine / n_coarse
+            assert 1.7 <= ratio <= 2.3, (n_fine, n_coarse)
+        finally:
+            os.unlink(stl)
+
+    def test_slice_and_estimate_claims_match_the_bytes(self, tmp_path: Path):
+        """The estimate is ABOUT the emitted gcode: the sliced file must
+        exist, its footprint must describe the model, and the claimed
+        filament/time must be positive numbers consistent with a real
+        print, not echoes of nothing."""
+        from kiln.plugins.estimate_tools import _EstimateToolsPlugin
+
+        tools = _register_plugin(_EstimateToolsPlugin)
+        stl = _make_box_stl(20.0, 20.0, 10.0)
+        try:
+            with patch("kiln.server._check_auth", side_effect=_no_auth):
+                r = tools["slice_and_estimate"](input_path=stl)
+            assert r.get("success") is True, r.get("error")
+            gcode = r["slice"]["output_path"]
+            e = _gcode_extents(Path(gcode).read_text(encoding="utf-8"))
+            assert 19.5 <= e["width"] <= 34.0, e
+            assert 9.0 <= e["z_max"] <= 11.0, e
+            est = r["estimate"]
+            assert est["filament_used_mm"] and est["filament_used_mm"] > 100
+            assert est["estimated_time_seconds"] and est["estimated_time_seconds"] > 60
+        finally:
+            os.unlink(stl)
+
+
+# ---------------------------------------------------------------------------
+# Bambu plate tools — synthetic .gcode.3mf with two labeled objects
+# ---------------------------------------------------------------------------
+
+_PLATE_LEFT = [
+    "G1 X10.000 Y10.000 Z0.200 F3000",
+    "G1 X30.000 Y10.000 E1.500",
+    "G1 X30.000 Y30.000 E1.500",
+    "G1 X10.000 Y30.000 E1.500",
+    "G1 X10.000 Y10.000 E1.500",
+]
+_PLATE_RIGHT = [
+    "G1 X60.000 Y10.000 Z0.200 F3000",
+    "G1 X80.000 Y10.000 E1.500",
+    "G1 X80.000 Y30.000 E1.500",
+    "G1 X60.000 Y30.000 E1.500",
+    "G1 X60.000 Y10.000 E1.500",
+]
+
+
+def _write_plate_3mf(path: Path) -> Path:
+    """A minimal Bambu-style .gcode.3mf: two labeled objects on plate 1."""
+    import json
+
+    gcode = "\n".join([
+        "; model label id: 11,22",
+        "M83",
+        "G28",
+        "M104 S220",
+        "; start printing object, unique label id: 11",
+        *_PLATE_LEFT,
+        "; stop printing object, unique label id: 11",
+        "; start printing object, unique label id: 22",
+        *_PLATE_RIGHT,
+        "; stop printing object, unique label id: 22",
+        "M104 S0",
+        "M84",
+    ]) + "\n"
+    plate_json = {
+        "bbox_objects": [
+            {"name": "left_box.stl", "bbox": [10, 10, 30, 30], "area": 400.0,
+             "layer_height": 0.2},
+            {"name": "right_box.stl", "bbox": [60, 10, 80, 30], "area": 400.0,
+             "layer_height": 0.2},
+        ],
+        "bed_type": "textured_plate",
+        "nozzle_diameter": 0.4,
+    }
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("Metadata/plate_1.gcode", gcode)
+        zf.writestr("Metadata/plate_1.json", json.dumps(plate_json))
+    return path
+
+
+class TestPlateObjectFidelity:
+    def test_extract_keeps_only_the_requested_object(self, tmp_path: Path):
+        plate = _write_plate_3mf(tmp_path / "plate.gcode.3mf")
+        with patch("kiln.server._check_auth", side_effect=_no_auth):
+            from kiln.server import extract_plate_object
+
+            r = extract_plate_object(file_path=str(plate), object_name="left",
+                                     output_dir=str(tmp_path))
+        assert r.get("success") is True, r.get("error")
+        text = Path(r["output_path"]).read_text(encoding="utf-8")
+        e = _gcode_extents(text)
+        # ONLY the left object's extrusion: x 10..30, never 60..80.
+        assert e["x_min"] == pytest.approx(10.0) and e["x_max"] == pytest.approx(30.0), e
+        for line in _PLATE_LEFT[1:]:
+            assert line in text, line
+        for line in _PLATE_RIGHT[1:]:
+            assert line not in text, line
+        # Machine start/end sequences survive.
+        assert "G28" in text and "M84" in text
+
+    def test_print_plate_object_uploads_the_extracted_gcode(self, tmp_path: Path):
+        plate = _write_plate_3mf(tmp_path / "plate.gcode.3mf")
+        uploaded: list[str] = []
+
+        def _capture(*a, **k):
+            uploaded.append(a[0] if a else k.get("file_path") or next(iter(k.values())))
+            return {"success": True}
+
+        with patch("kiln.server._check_auth", side_effect=_no_auth), \
+                patch("kiln.server.upload_file", side_effect=_capture), \
+                patch("kiln.server.start_print", return_value={"success": True}):
+            from kiln.server import print_plate_object
+
+            r = print_plate_object(file_path=str(plate), object_name="right")
+        assert r.get("success") is True, r.get("error")
+        assert uploaded, "nothing was uploaded"
+        text = Path(uploaded[0]).read_text(encoding="utf-8")
+        e = _gcode_extents(text)
+        # The machine received ONLY the right object's motion.
+        assert e["x_min"] == pytest.approx(60.0) and e["x_max"] == pytest.approx(80.0), e
+
+
+class TestMeshExportFidelity:
+    def test_export_model_3mf_preserves_the_geometry(self, tmp_path: Path):
+        import xml.etree.ElementTree as ET
+
+        from kiln.plugins.mesh_tools import _MeshToolsPlugin
+
+        tools = _register_plugin(_MeshToolsPlugin)
+        stl = _make_box_stl(20.0, 20.0, 10.0)
+        out = str(tmp_path / "box.3mf")
+        try:
+            with patch("kiln.server._check_auth", side_effect=_no_auth):
+                r = tools["export_model_3mf"](file_path=stl, output_path=out)
+            assert r.get("success") is True, r.get("error")
+            ns = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
+            with zipfile.ZipFile(r["path"]) as zf:
+                root = ET.fromstring(zf.read("3D/3dmodel.model"))
+            objects = root.findall(".//m:object", ns)
+            assert len(objects) == 1
+            tris = root.findall(".//m:triangle", ns)
+            assert len(tris) == 12
+            xs = [float(v.get("x")) for v in root.findall(".//m:vertex", ns)]
+            zs = [float(v.get("z")) for v in root.findall(".//m:vertex", ns)]
+            assert max(xs) - min(xs) == pytest.approx(20.0)
+            assert max(zs) - min(zs) == pytest.approx(10.0)
+        finally:
+            os.unlink(stl)
+
+    def test_rotate_model_swaps_the_axes(self):
+        stl = _make_box_stl(20.0, 20.0, 10.0)
+        try:
+            with patch("kiln.server._check_auth", side_effect=_no_auth):
+                from kiln.server import rotate_model
+
+                r = rotate_model(input_path=stl, rotation_x=90)
+            assert r.get("success") is True, r.get("error")
+            assert _extents_of(r["output_path"]) == [10.0, 20.0, 20.0]
+            # Identity credit: the source is untouched.
+            assert _extents_of(stl) == [10.0, 20.0, 20.0]
+        finally:
+            os.unlink(stl)
+
+
+def _step_available() -> bool:
+    try:
+        import build123d  # noqa: F401
+
+        from kiln.step_import import _ocp_available
+
+        return _ocp_available()
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _step_available(), reason="no OCP/build123d STEP stack")
+class TestStepImportFidelity:
+    def test_step_box_converts_with_true_dimensions(self, tmp_path: Path):
+        """A 20x15x10 STEP box must emit a mesh artifact with exactly those
+        extents — CAD import that rescales or drops a body hands the
+        machine a wrong-size part."""
+        from build123d import Box, export_step
+
+        from kiln.plugins.step_tools import _StepToolsPlugin
+
+        step_path = str(tmp_path / "box.step")
+        export_step(Box(20.0, 15.0, 10.0), step_path)
+
+        tools = _register_plugin(_StepToolsPlugin)
+        with patch("kiln.server._check_auth", side_effect=_no_auth):
+            r = tools["import_step_file"](file_path=step_path,
+                                          output_dir=str(tmp_path))
+        assert r.get("status") == "ok", r
+        art = r["output_path"]
+        assert _extents_of(art) == [10.0, 15.0, 20.0]
+        assert r.get("body_count") == 1

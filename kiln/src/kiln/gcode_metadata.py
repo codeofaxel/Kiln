@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import re
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -30,6 +31,13 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _MAX_HEADER_LINES: int = 200  # Scan more than gcode.py's 100 to catch Cura footers
+# PrusaSlicer writes its totals (estimated printing time, filament used) at
+# the END of the file — a header-only scan answered "unknown" for time and
+# filament on every PrusaSlicer gcode, which is Kiln's primary slicer.
+# 1000, not a mirror of the header window: PrusaSlicer appends its whole
+# config dump (~350+ lines) AFTER the totals, so a small tail window reads
+# only config and misses the numbers it exists to find.
+_MAX_FOOTER_LINES: int = 1000
 
 
 # ---------------------------------------------------------------------------
@@ -384,6 +392,18 @@ def extract_metadata(file_path: str) -> GCodeMetadata:
                 if i >= _MAX_HEADER_LINES:
                     break
                 lines.append(line)
+            else:
+                # Whole file fit in the header window — nothing more to scan.
+                return _extract_from_lines(lines)
+        # PrusaSlicer's totals live in the FOOTER.  Read the tail and feed
+        # both windows; _extract_from_lines keeps the first match, so header
+        # values (Bambu/Orca style) still win on any conflict.
+        with open(file_path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - 64 * 1024))
+            tail_text = fh.read().decode(errors="replace")
+        lines.extend(tail_text.splitlines()[-_MAX_FOOTER_LINES:])
         return _extract_from_lines(lines)
     except (FileNotFoundError, PermissionError, OSError) as exc:
         logger.warning("Could not read G-code file for metadata: %s", exc)
@@ -400,7 +420,12 @@ def extract_metadata_from_content(content: str) -> GCodeMetadata:
     :returns: A :class:`GCodeMetadata` with whatever fields could be parsed.
     """
     try:
-        lines = content.splitlines()[:_MAX_HEADER_LINES]
+        all_lines = content.splitlines()
+        if len(all_lines) <= _MAX_HEADER_LINES + _MAX_FOOTER_LINES:
+            lines = all_lines
+        else:
+            # Header + footer, same two windows as extract_metadata.
+            lines = all_lines[:_MAX_HEADER_LINES] + all_lines[-_MAX_FOOTER_LINES:]
         return _extract_from_lines(lines)
     except Exception as exc:
         logger.warning("Unexpected error extracting metadata from content: %s", exc)

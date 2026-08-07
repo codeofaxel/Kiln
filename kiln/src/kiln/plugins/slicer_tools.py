@@ -1040,6 +1040,28 @@ class _SlicerToolsPlugin:
                             exc,
                         )
 
+                # Overrides with NO resolvable printer profile used to be
+                # dropped on the floor while the response still stamped
+                # applied_overrides — a receipt for work that never happened
+                # (measured 2026-08-06: layer_height 0.2 vs 0.4 both sliced
+                # at the default 0.3).  A partial .ini loaded over the
+                # slicer's own defaults is exactly PrusaSlicer's override
+                # semantics, so orphaned overrides get a profile of their own.
+                if parsed_overrides and not effective_profile:
+                    import tempfile as _tempfile
+
+                    _tmp_dir = os.path.join(
+                        _tempfile.gettempdir(), "kiln_slicer_profiles",
+                    )
+                    os.makedirs(_tmp_dir, mode=0o700, exist_ok=True)
+                    with _tempfile.NamedTemporaryFile(
+                        mode="w", encoding="utf-8", dir=_tmp_dir,
+                        prefix="overrides_", suffix=".ini", delete=False,
+                    ) as _fh:
+                        for _key, _value in parsed_overrides.items():
+                            _fh.write(f"{_key} = {_value}\n")
+                        effective_profile = _fh.name
+
                 # -- Safety-validate temperature overrides --
                 validation_result: dict[str, Any] | None = None
                 _temp_keys = {

@@ -449,13 +449,32 @@ class TestEdgeCases:
         assert meta.slicer is None
 
     def test_metadata_beyond_max_lines(self) -> None:
-        """Metadata after _MAX_HEADER_LINES should not be picked up."""
+        """Metadata in the MIDDLE of a long file is not picked up.
+
+        The scan reads two windows — the header (Bambu/Orca style) and the
+        footer (PrusaSlicer writes its totals at the END, ~350 lines above
+        EOF under its config dump; a header-only scan answered "unknown"
+        for time and filament on every PrusaSlicer file).  A value outside
+        both windows stays invisible.
+        """
         lines = ["; unrelated comment\n"] * 250
         lines.append("; filament_type = PLA\n")
+        lines.extend(["; more padding\n"] * 1100)
         content = "".join(lines)
         meta = extract_metadata_from_content(content)
-        # PLA is at line 251, beyond the 200-line limit
+        # PLA sits past the 200-line header and more than 1000 lines above
+        # the end — outside both windows.
         assert meta.material is None
+
+    def test_footer_totals_are_picked_up(self) -> None:
+        """The PrusaSlicer shape: totals at the end, under a config dump."""
+        lines = ["; header comment\n"] + ["G1 X0 Y0 E1\n"] * 500
+        lines.append("; estimated printing time (normal mode) = 8m 42s\n")
+        lines.append("; filament used [mm] = 849.94\n")
+        lines.extend(["; prusaslicer_config = padding\n"] * 300)
+        meta = extract_metadata_from_content("".join(lines))
+        assert meta.estimated_time_seconds == 522
+        assert meta.filament_used_mm == 849.94
 
     def test_metadata_within_max_lines(self) -> None:
         lines = ["; unrelated comment\n"] * 150
