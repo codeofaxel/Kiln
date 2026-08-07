@@ -743,7 +743,9 @@ def test_thumbnail_failure_never_fails_the_compose(
         m3, "_render_colored_thumbnail",
         lambda parsed: (_ for _ in ()).throw(RuntimeError("no renderer")),
     )
-    monkeypatch.setattr(m3, "_generate_thumbnail_openscad", lambda paths: None)
+    monkeypatch.setattr(
+        m3, "_generate_thumbnail_openscad", lambda paths, offsets=None: None,
+    )
     out = tmp_path / "out.3mf"
     result = compose_multicolor_3mf(
         [ColorPart(stl_path=str(stl_a), extruder=1, color="#F72323")],
@@ -1183,3 +1185,263 @@ def test_painted_all_degenerate_refuses(tmp_path: Path):
         output_path=str(tmp_path / "x.3mf"),
     )
     assert result["success"] is False
+
+
+# ---------------------------------------------------------------------------
+# auto_arrange_parts — placement geometry
+#
+# Regression territory for the coincident-copies defect: the user-facing
+# multicolor pipeline once emitted every copy at the origin, so N copies
+# sliced into a single footprint.  These tests assert numeric geometry
+# (translations, world-space bounding boxes), never string presence.
+# ---------------------------------------------------------------------------
+
+
+def _square_stl(
+    tmp_path: Path, name: str, size: float = 10.0, offset: tuple[float, float] = (0.0, 0.0)
+) -> Path:
+    """Flat square plate spanning [ox, ox+size] x [oy, oy+size] at z=0."""
+    ox, oy = offset
+    triangles = [
+        ((0.0, 0.0, 1.0), (ox, oy, 0.0), (ox + size, oy, 0.0), (ox + size, oy + size, 0.0)),
+        ((0.0, 0.0, 1.0), (ox, oy, 0.0), (ox + size, oy + size, 0.0), (ox, oy + size, 0.0)),
+    ]
+    return _binary_stl(tmp_path, name, triangles)
+
+
+def _world_xy_bbox(part: ColorPart) -> tuple[float, float, float, float]:
+    """Translated (min_x, min_y, max_x, max_y) of a positioned part."""
+    from kiln.multicolor_3mf import _stl_bounding_box
+
+    mn_x, mn_y, _, mx_x, mx_y, _ = _stl_bounding_box(part.stl_path)
+    return (mn_x + part.x, mn_y + part.y, mx_x + part.x, mx_y + part.y)
+
+
+def _xy_disjoint(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> bool:
+    return a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1]
+
+
+def test_arrange_copies_of_same_file_do_not_overlap(tmp_path: Path):
+    from kiln.multicolor_3mf import auto_arrange_parts
+
+    square = _square_stl(tmp_path, "sq.stl", size=10.0)
+    parts = auto_arrange_parts(
+        [{"stl_path": str(square), "extruder": i + 1, "group": i} for i in range(4)],
+        plate_width=256.0,
+        plate_depth=256.0,
+        gap_mm=10.0,
+    )
+    boxes = [_world_xy_bbox(p) for p in parts]
+    for i in range(4):
+        for j in range(i + 1, 4):
+            assert _xy_disjoint(boxes[i], boxes[j]), (boxes[i], boxes[j])
+    # Four 10mm squares + three 10mm gaps → the footprint actually moved.
+    union_w = max(b[2] for b in boxes) - min(b[0] for b in boxes)
+    assert abs(union_w - 70.0) < 0.01
+
+
+def test_arrange_normalizes_origin_centered_mesh(tmp_path: Path):
+    """A mesh centered on the origin must not hang off the plate corner."""
+    from kiln.multicolor_3mf import auto_arrange_parts
+
+    centered = _square_stl(tmp_path, "centered.stl", size=10.0, offset=(-5.0, -5.0))
+    parts = auto_arrange_parts(
+        [{"stl_path": str(centered), "extruder": 1}],
+        plate_width=256.0,
+        plate_depth=256.0,
+    )
+    mn_x, mn_y, mx_x, mx_y = _world_xy_bbox(parts[0])
+    assert mn_x >= 0.0 and mn_y >= 0.0
+    assert mx_x <= 256.0 and mx_y <= 256.0
+
+
+def test_arrange_centers_layout_on_plate(tmp_path: Path):
+    from kiln.multicolor_3mf import auto_arrange_parts
+
+    square = _square_stl(tmp_path, "sq.stl", size=10.0)
+    parts = auto_arrange_parts(
+        [{"stl_path": str(square), "extruder": 1}],
+        plate_width=100.0,
+        plate_depth=80.0,
+    )
+    mn_x, mn_y, mx_x, mx_y = _world_xy_bbox(parts[0])
+    assert abs(mn_x - 45.0) < 0.01 and abs(mx_x - 55.0) < 0.01
+    assert abs(mn_y - 35.0) < 0.01 and abs(mx_y - 45.0) < 0.01
+
+
+def test_arrange_printer_id_sets_plate_depth(tmp_path: Path, monkeypatch):
+    """The printer's build volume must drive BOTH plate dimensions."""
+    import kiln.printers.bed_fit as bed_fit
+    from kiln.multicolor_3mf import auto_arrange_parts
+
+    monkeypatch.setattr(
+        bed_fit, "resolve_build_volume", lambda _pid: ("m", (100.0, 80.0, 50.0))
+    )
+    square = _square_stl(tmp_path, "sq.stl", size=10.0)
+    parts = auto_arrange_parts(
+        [{"stl_path": str(square), "extruder": 1}],
+        printer_id="mock_printer",
+    )
+    mn_x, mn_y, _, _ = _world_xy_bbox(parts[0])
+    # Centered on a 100x80 plate — the y-center proves depth was resolved,
+    # not left at the 256 default (which would center at y=123).
+    assert abs(mn_x - 45.0) < 0.01
+    assert abs(mn_y - 35.0) < 0.01
+
+
+def test_arrange_same_group_shares_translation(tmp_path: Path):
+    """Parts in one group keep their relative positions (body + inlay)."""
+    from kiln.multicolor_3mf import auto_arrange_parts
+
+    body = _square_stl(tmp_path, "body.stl", size=20.0)
+    inlay = _square_stl(tmp_path, "inlay.stl", size=6.0, offset=(7.0, 7.0))
+    parts = auto_arrange_parts(
+        [
+            {"stl_path": str(body), "extruder": 1, "group": 0},
+            {"stl_path": str(inlay), "extruder": 2, "group": 0},
+        ],
+        plate_width=256.0,
+        plate_depth=256.0,
+    )
+    assert (parts[0].x, parts[0].y) == (parts[1].x, parts[1].y)
+
+
+# ---------------------------------------------------------------------------
+# compose_multicolor_3mf — coincident-copy refusal
+# ---------------------------------------------------------------------------
+
+
+def test_compose_refuses_same_mesh_coincident(stl_a: Path, tmp_path: Path):
+    result = compose_multicolor_3mf(
+        [
+            ColorPart(str(stl_a), extruder=1, name="copy_1"),
+            ColorPart(str(stl_a), extruder=2, name="copy_2"),
+        ],
+        output_path=str(tmp_path / "stacked.3mf"),
+    )
+    assert result["success"] is False
+    assert "same position" in result["error"]
+    assert "auto_arrange_parts" in result["error"]
+
+
+def test_compose_same_mesh_distinct_positions_ok(stl_a: Path, tmp_path: Path):
+    result = compose_multicolor_3mf(
+        [
+            ColorPart(str(stl_a), extruder=1, name="copy_1"),
+            ColorPart(str(stl_a), extruder=2, name="copy_2", x=30.0),
+        ],
+        output_path=str(tmp_path / "spaced.3mf"),
+    )
+    assert result["success"] is True
+
+
+def test_compose_distinct_meshes_coincident_allowed(stl_a: Path, stl_b: Path, tmp_path: Path):
+    """Different meshes at one position are a multi-color unit — legitimate."""
+    result = compose_multicolor_3mf(
+        [
+            ColorPart(str(stl_a), extruder=1, name="body"),
+            ColorPart(str(stl_b), extruder=2, name="inlay"),
+        ],
+        output_path=str(tmp_path / "unit.3mf"),
+    )
+    assert result["success"] is True
+
+
+# ---------------------------------------------------------------------------
+# _parse_mesh_file — OBJ/GLB support
+# ---------------------------------------------------------------------------
+
+
+def test_compose_obj_part_works(tmp_path: Path):
+    obj_path = tmp_path / "part.obj"
+    obj_path.write_text(
+        "v 0 0 0\nv 10 0 0\nv 10 10 0\nv 0 10 0\nf 1 2 3\nf 1 3 4\n"
+    )
+    result = compose_multicolor_3mf(
+        [ColorPart(str(obj_path), extruder=1, name="obj_part")],
+        output_path=str(tmp_path / "obj.3mf"),
+    )
+    assert result["success"] is True
+    assert result["total_triangles"] == 2
+
+
+def test_parse_mesh_file_rejects_unknown_ext(tmp_path: Path):
+    from kiln.multicolor_3mf import _parse_mesh_file
+
+    bad = tmp_path / "part.ply"
+    bad.write_text("ply")
+    with pytest.raises(ValueError, match="Unsupported mesh format"):
+        _parse_mesh_file(str(bad))
+
+
+# ---------------------------------------------------------------------------
+# Metadata/Slic3r_PE_model.config — the dialect PrusaSlicer actually honors
+#
+# Measured with a real 4-extruder PrusaSlicer profile: without this file
+# every object printed with extruder 1 (filament used 888/0/0/0 mm); with
+# it, usage split across all four and T0..T3 tool changes appeared.  The
+# slic3rpe:extruder item attribute alone is NOT read.
+# ---------------------------------------------------------------------------
+
+
+def test_compose_writes_slic3r_pe_config(stl_a: Path, stl_b: Path, tmp_path: Path):
+    import xml.etree.ElementTree as ET
+
+    out = str(tmp_path / "pe.3mf")
+    result = compose_multicolor_3mf(
+        [
+            ColorPart(str(stl_a), extruder=1, name="body"),
+            ColorPart(str(stl_b), extruder=3, name="accent"),
+        ],
+        output_path=out,
+    )
+    assert result["success"] is True
+    with zipfile.ZipFile(out) as zf:
+        assert "Metadata/Slic3r_PE_model.config" in zf.namelist()
+        root = ET.fromstring(zf.read("Metadata/Slic3r_PE_model.config"))
+
+    extruders = {}
+    for obj in root.findall("object"):
+        for md in obj.findall("metadata"):
+            if md.get("type") == "object" and md.get("key") == "extruder":
+                extruders[obj.get("id")] = int(md.get("value"))
+        # every object also carries a volume-level assignment with a real
+        # triangle range — PrusaSlicer applies extruders per volume
+        vol = obj.find("volume")
+        assert vol is not None
+        assert int(vol.get("lastid")) >= int(vol.get("firstid"))
+        vol_extruder = [
+            int(md.get("value"))
+            for md in vol.findall("metadata")
+            if md.get("key") == "extruder"
+        ]
+        assert vol_extruder == [extruders[obj.get("id")]]
+
+    assert extruders == {"1": 1, "2": 3}
+
+
+# ---------------------------------------------------------------------------
+# slicer_note — the Bambu Studio detour is announced, not discovered
+# ---------------------------------------------------------------------------
+
+
+def test_compose_multi_extruder_carries_slicer_note(stl_a: Path, stl_b: Path, tmp_path: Path):
+    result = compose_multicolor_3mf(
+        [
+            ColorPart(str(stl_a), extruder=1, name="body"),
+            ColorPart(str(stl_b), extruder=2, name="accent"),
+        ],
+        output_path=str(tmp_path / "note.3mf"),
+    )
+    assert result["success"] is True
+    assert "Bambu Studio" in result["slicer_note"]
+    assert "prime" in result["slicer_note"].lower()
+
+
+def test_compose_single_extruder_has_no_slicer_note(stl_a: Path, tmp_path: Path):
+    result = compose_multicolor_3mf(
+        [ColorPart(str(stl_a), extruder=1, name="solo")],
+        output_path=str(tmp_path / "solo.3mf"),
+    )
+    assert result["success"] is True
+    assert "slicer_note" not in result

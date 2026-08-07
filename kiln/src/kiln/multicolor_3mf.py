@@ -6,12 +6,36 @@ BambuStudio (Bambu A1/X1/P1 + AMS), PrusaSlicer (MMU / ERCF), Cura, and
 any 3MF-capable slicer.
 
 The .3mf format is a ZIP archive. Each part becomes a separate ``<object>``
-in ``3D/3dmodel.model``. Extruder assignments live in two places for maximum
-slicer compatibility:
+in ``3D/3dmodel.model``. Extruder assignments live in three places for
+maximum slicer compatibility:
 
 * ``Metadata/model_settings.config`` — BambuStudio reads ``extruder`` here.
-* ``Metadata/Slic3r_PE_model.config`` — the PrusaSlicer family reads
-  per-object extruders here (and only here — verified against its reader).
+* ``Metadata/Slic3r_PE_model.config`` — PrusaSlicer reads ``extruder`` here
+  (measured: with a 4-extruder profile it ignores the item attribute below).
+* ``slic3rpe:extruder`` attribute on each ``<item>`` — informational for
+  other 3MF consumers.
+
+One limitation to know about, relevant only when a user hand-loads the
+composed 3MF into Bambu Studio (Kiln's own slicing never goes through
+that GUI). Measured 2026-08 on Bambu Studio 02.06 with an A1, and
+corroborated against Bambu's own tracker:
+
+* Bambu Studio imports third-party 3MFs "geometry and color data only"
+  (its own dialog on load) — per-object extruder assignments from
+  ``model_settings.config`` ARE honored (verified: 4 filaments used, 75
+  filament changes), but print settings inside the file, including a
+  prime-tower position written to ``project_settings.config`` or a
+  ``<plate>`` block, are ignored. This is their documented design, not a
+  quirk of our file: bambulab/BambuStudio#7775, #2491.
+* Its own DEFAULT prime-tower placement can land outside the plate,
+  producing "A G-code path goes beyond plate boundaries". This is not
+  caused by anything we write and is not fixable from our side — it is
+  tracked upstream as an open issue that also affects natively-created
+  A1 projects (bambulab/BambuStudio#7375). Verified remedy: drag the
+  prime tower onto the plate; the same project then slices clean.
+
+Multi-extruder results carry this as ``slicer_note`` so agents can pass
+it on at the moment they hand the file over — and stay silent otherwise.
 
 **Two distinct use cases, one tool:**
 
@@ -80,6 +104,20 @@ from typing import Any
 from kiln.preview_render import downscale_png, effective_supersample
 
 logger = logging.getLogger(__name__)
+
+# Attached to multi-extruder compose results (and relayed by the tools that
+# emit these files) so the rare user who hand-loads the 3MF into Bambu
+# Studio hears about the detour from us, not from a red error banner.
+# Everything in this note is measured (2026-08, Bambu Studio 02.06 on an
+# A1) or documented upstream — see the module docstring for the citations.
+MULTI_EXTRUDER_SLICER_NOTE = (
+    "This only matters if you hand-load the 3MF into Bambu Studio: it "
+    "imports third-party files as geometry and color only (its stated "
+    "policy), and its default prime-tower spot can sit off the plate — "
+    "not a defect in this file. Drag the prime tower onto the plate "
+    "there and it slices clean with all colors intact. Kiln's own print "
+    "path slices this file as-is (verified in PrusaSlicer)."
+)
 
 # ---------------------------------------------------------------------------
 # Thumbnail generation
@@ -155,7 +193,10 @@ def _generate_thumbnail(parsed: list[_ParsedPart]) -> bytes | None:
                 "colored thumbnail failed — falling back to OpenSCAD",
                 exc_info=True,
             )
-    return _generate_thumbnail_openscad([p.stl_path for p, _, _ in parsed])
+    return _generate_thumbnail_openscad(
+        [p.stl_path for p, _, _ in parsed],
+        [(p.x, p.y, p.z) for p, _, _ in parsed],
+    )
 
 
 def _render_colored_thumbnail(parsed: list[_ParsedPart]) -> bytes | None:
@@ -190,7 +231,10 @@ def _render_colored_thumbnail(parsed: list[_ParsedPart]) -> bytes | None:
             os.remove(path)
 
 
-def _generate_thumbnail_openscad(stl_paths: list[str]) -> bytes | None:
+def _generate_thumbnail_openscad(
+    stl_paths: list[str],
+    offsets: list[tuple[float, float, float]] | None = None,
+) -> bytes | None:
     """Render a plate thumbnail PNG from STL files via OpenSCAD.
 
     Imports all STL parts into a single scene so the thumbnail shows
@@ -198,6 +242,13 @@ def _generate_thumbnail_openscad(stl_paths: list[str]) -> bytes | None:
     full render) so non-manifold meshes work, and applies a neutral
     grey color with the DeepOcean colorscheme for high contrast on
     printer LCDs.
+
+    Args:
+        stl_paths: Mesh files to render.
+        offsets: Optional per-part ``(x, y, z)`` plate translations,
+            parallel to *stl_paths*.  Without them, N spaced copies of
+            one mesh render stacked — a thumbnail showing one object
+            for a four-object plate.
 
     Returns PNG bytes suitable for embedding as ``Metadata/plate_1.png``
     in a 3MF archive, or ``None`` if OpenSCAD is unavailable.
@@ -214,11 +265,15 @@ def _generate_thumbnail_openscad(stl_paths: list[str]) -> bytes | None:
         if not binary:
             return None
 
-        # Build a SCAD file that imports all parts with a neutral colour
-        # so the model is visible against any colorscheme background.
+        # Build a SCAD file that imports all parts (at their plate
+        # positions when given) with a neutral colour so the model is
+        # visible against any colorscheme background.
+        if offsets is None:
+            offsets = [(0.0, 0.0, 0.0)] * len(stl_paths)
         imports = "\n".join(
-            f'  import("{Path(p).resolve()}");'
-            for p in stl_paths
+            f'  translate([{ox:.4f}, {oy:.4f}, {oz:.4f}]) '
+            f'import("{Path(p).resolve()}");'
+            for p, (ox, oy, oz) in zip(stl_paths, offsets, strict=True)
             if os.path.isfile(p)
         )
         if not imports:
@@ -402,6 +457,48 @@ def _parse_ascii_stl(
     return vertices, triangles
 
 
+def _parse_mesh_file(
+    mesh_path: str,
+) -> tuple[list[tuple[float, float, float]], list[tuple[int, int, int]]]:
+    """Parse an STL, OBJ, or GLB mesh → deduplicated (vertices, triangles).
+
+    STL is parsed natively; OBJ and GLB reuse the generation-pipeline
+    parsers and are re-indexed into the same compact form.
+    """
+    ext = Path(mesh_path).suffix.lower()
+    if ext in ("", ".stl"):
+        return _parse_stl(mesh_path)
+    if ext not in (".obj", ".glb"):
+        raise ValueError(
+            f"Unsupported mesh format {ext!r} for {mesh_path} "
+            "(need .stl, .obj, or .glb)"
+        )
+
+    from kiln.generation import validation as _validation
+
+    errors: list[str] = []
+    if ext == ".obj":
+        raw_tris, _ = _validation._parse_obj(Path(mesh_path), errors)
+    else:
+        raw_tris, _ = _validation._parse_glb(Path(mesh_path), errors)
+    if errors:
+        raise ValueError(f"Failed to parse {mesh_path}: {'; '.join(errors)}")
+
+    vertex_map: dict[tuple[float, float, float], int] = {}
+    vertices: list[tuple[float, float, float]] = []
+    triangles: list[tuple[int, int, int]] = []
+    for tri in raw_tris:
+        indices: list[int] = []
+        for v in tri:
+            pt = (float(v[0]), float(v[1]), float(v[2]))
+            if pt not in vertex_map:
+                vertex_map[pt] = len(vertices)
+                vertices.append(pt)
+            indices.append(vertex_map[pt])
+        triangles.append((indices[0], indices[1], indices[2]))
+    return vertices, triangles
+
+
 # ---------------------------------------------------------------------------
 # 3MF XML / ZIP builders
 # ---------------------------------------------------------------------------
@@ -538,9 +635,11 @@ def _build_prusa_model_config(parsed: list[_ParsedPart]) -> str:
     carries a ``<volume firstid lastid>`` spanning its triangles plus an
     ``extruder`` config entry (verified against the reader in
     ``src/libslic3r/Format/3mf.cpp`` — the ``slic3rpe:extruder`` build-item
-    attribute this composer also writes appears nowhere in it).  Without
-    this file a multicolor 3MF sliced in the PrusaSlicer family prints
-    entirely with extruder 1 — no tool change, colors silently gone.
+    attribute this composer also writes appears nowhere in it, and a
+    4-extruder profile confirmed it end to end: everything printed with
+    extruder 1 until this file was present).  Without this file a
+    multicolor 3MF sliced in the PrusaSlicer family prints entirely with
+    extruder 1 — no tool change, colors silently gone.
     """
     lines: list[str] = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -628,8 +727,8 @@ def _build_project_settings(flush_matrix_str: str) -> str:
 
 
 def _stl_bounding_box(stl_path: str) -> tuple[float, float, float, float, float, float]:
-    """Return (min_x, min_y, min_z, max_x, max_y, max_z) for an STL file."""
-    vertices, _ = _parse_stl(stl_path)
+    """Return (min_x, min_y, min_z, max_x, max_y, max_z) for a mesh file."""
+    vertices, _ = _parse_mesh_file(stl_path)
     if not vertices:
         return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     xs = [v[0] for v in vertices]
@@ -708,6 +807,7 @@ def auto_arrange_parts(
             )
         _model_id, build_volume = resolved
         plate_width = build_volume[0]
+        plate_depth = build_volume[1]
 
     # Assign default groups (each spec is its own group if not specified).
     # Track group per spec in a parallel list so the result-build pass never
@@ -719,35 +819,53 @@ def auto_arrange_parts(
         groups.setdefault(g, []).append(spec)
         spec_groups.append(g)
 
-    # For each group, determine the bounding box by taking the union of all parts
+    # For each group, take the union bounding box of all its parts.  The
+    # union MIN matters as much as the size: meshes are frequently centered
+    # on the origin (negative min), and placing one at a cursor position
+    # without subtracting its min leaves it hanging off the plate corner.
     group_order = sorted(groups.keys())
-    group_bboxes: dict[int, tuple[float, float]] = {}  # group → (width, depth)
+    # group → (min_x, min_y, width, depth) of the union bbox
+    group_bboxes: dict[int, tuple[float, float, float, float]] = {}
     for g in group_order:
-        max_w, max_d = 0.0, 0.0
+        mn_x = mn_y = float("inf")
+        mx_x = mx_y = float("-inf")
         for spec in groups[g]:
             try:
-                mn_x, mn_y, _, mx_x, mx_y, _ = _stl_bounding_box(spec["stl_path"])
-                max_w = max(max_w, mx_x - mn_x)
-                max_d = max(max_d, mx_y - mn_y)
+                b_mn_x, b_mn_y, _, b_mx_x, b_mx_y, _ = _stl_bounding_box(spec["stl_path"])
             except Exception:
-                max_w = max(max_w, 50.0)   # fallback if STL unreadable
-                max_d = max(max_d, 50.0)
-        group_bboxes[g] = (max_w, max_d)
+                b_mn_x, b_mn_y = 0.0, 0.0   # fallback if mesh unreadable
+                b_mx_x, b_mx_y = 50.0, 50.0
+            mn_x, mn_y = min(mn_x, b_mn_x), min(mn_y, b_mn_y)
+            mx_x, mx_y = max(mx_x, b_mx_x), max(mx_y, b_mx_y)
+        group_bboxes[g] = (mn_x, mn_y, mx_x - mn_x, mx_y - mn_y)
 
     # Simple row layout: place groups left-to-right, wrap to next row when
-    # the plate width would be exceeded.
-    group_positions: dict[int, tuple[float, float]] = {}
+    # the plate width would be exceeded.  Each group is translated so its
+    # union bbox min lands on the cursor; parts within a group share one
+    # translation, preserving their relative positions.
+    group_positions: dict[int, tuple[float, float]] = {}  # group → translation
     cursor_x, cursor_y, row_depth = 0.0, 0.0, 0.0
+    used_w, used_d = 0.0, 0.0
     for g in group_order:
-        w, d = group_bboxes[g]
+        mn_x, mn_y, w, d = group_bboxes[g]
         if cursor_x > 0 and cursor_x + w > plate_width:
             # Wrap to next row
             cursor_x = 0.0
             cursor_y += row_depth + gap_mm
             row_depth = 0.0
-        group_positions[g] = (cursor_x, cursor_y)
+        group_positions[g] = (cursor_x - mn_x, cursor_y - mn_y)
+        used_w = max(used_w, cursor_x + w)
+        used_d = max(used_d, cursor_y + d)
         cursor_x += w + gap_mm
         row_depth = max(row_depth, d)
+
+    # Center the whole arrangement on the plate when it fits.
+    shift_x = (plate_width - used_w) / 2.0 if 0.0 < used_w <= plate_width else 0.0
+    shift_y = (plate_depth - used_d) / 2.0 if 0.0 < used_d <= plate_depth else 0.0
+    if shift_x or shift_y:
+        group_positions = {
+            g: (tx + shift_x, ty + shift_y) for g, (tx, ty) in group_positions.items()
+        }
 
     # Build final ColorPart list with positions
     result: list[ColorPart] = []
@@ -790,10 +908,10 @@ def compose_multicolor_3mf(
         * Any slicer that supports 3MF Core + multiple objects
 
     Args:
-        parts: List of :class:`ColorPart`.  Each part needs an STL path and
-            extruder number.  Extruder numbers map directly to Bambu AMS
-            trays (1-indexed).  Parts are placed in the same world space as
-            their source STLs — no transforms applied.
+        parts: List of :class:`ColorPart`.  Each part needs a mesh path
+            (.stl, .obj, or .glb) and extruder number.  Extruder numbers map
+            directly to Bambu AMS trays (1-indexed).  Each part is placed at
+            its ``x/y/z`` translation on top of its source coordinates.
         output_path: Where to write the .3mf.  Defaults to a system temp
             file (path returned in the result dict).
 
@@ -809,6 +927,10 @@ def compose_multicolor_3mf(
           triangles dropped because their vertices collapse under exact
           dedup (the 3MF spec forbids repeated indices)
         * ``message`` (str) — human summary
+        * ``slicer_note`` (str) — multi-extruder plates only: what to tell
+          the user if they open the file in Bambu Studio themselves (it
+          re-derives print settings and may need its prime tower moved
+          onto the plate). Relay this to the user.
         * ``error`` (str) — only present on failure
 
     Example::
@@ -827,6 +949,7 @@ def compose_multicolor_3mf(
     # -----------------------------------------------------------------------
     # Validate inputs
     # -----------------------------------------------------------------------
+    seen_placements: dict[tuple[str, float, float, float], int] = {}
     for i, part in enumerate(parts):
         if not os.path.isfile(part.stl_path):
             return {
@@ -841,6 +964,27 @@ def compose_multicolor_3mf(
                     "Extruders are 1-indexed on Bambu AMS."
                 ),
             }
+        # The same mesh twice at the same position is always a mistake: the
+        # copies would print stacked into one footprint (double-extruded).
+        # Distinct meshes at one position are legitimate (body + inlay).
+        placement = (
+            os.path.abspath(part.stl_path),
+            round(part.x, 3),
+            round(part.y, 3),
+            round(part.z, 3),
+        )
+        if placement in seen_placements:
+            return {
+                "success": False,
+                "error": (
+                    f"Parts {seen_placements[placement] + 1} and {i + 1} are the "
+                    f"same mesh ({Path(part.stl_path).name}) at the same position "
+                    f"({part.x:.1f}, {part.y:.1f}, {part.z:.1f}) — they would print "
+                    "stacked on top of each other. Run the parts through "
+                    "auto_arrange_parts() or give each copy distinct x/y."
+                ),
+            }
+        seen_placements[placement] = i
 
     # -----------------------------------------------------------------------
     # Material safety check (always free — full report, hardware warnings,
@@ -885,7 +1029,7 @@ def compose_multicolor_3mf(
     degenerate_skipped = 0
     for part in parts:
         try:
-            vertices, triangles = _parse_stl(part.stl_path)
+            vertices, triangles = _parse_mesh_file(part.stl_path)
             if not triangles:
                 return {
                     "success": False,
@@ -986,6 +1130,8 @@ def compose_multicolor_3mf(
     }
     if degenerate_skipped:
         result["degenerate_skipped"] = degenerate_skipped
+    if len({p.extruder for p, _, _ in parsed}) > 1:
+        result["slicer_note"] = MULTI_EXTRUDER_SLICER_NOTE
 
     # Attach full safety report (all free)
     if safety_result is not None:

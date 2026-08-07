@@ -5,6 +5,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Report a problem and Kiln sends the evidence with it.** Bug reports now
+  include the tail of Kiln's activity log, so we can see what actually broke
+  instead of guessing from a description. Only when you report something,
+  never in the background — and your account name, folder paths, and local
+  network addresses are stripped on your machine first. No setting can turn
+  that scrubbing off.
+
 ### Changed
 
 - **3D stage for any object Kiln makes or changes, not just what it designs.** The
@@ -21,6 +30,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   didn't arrive and points you at the preview image in the conversation,
   which shows what was made. A panel still working on your model is
   unaffected.
+
+- **A crash in the 3D geometry engine now leaves a record.** OpenSCAD
+  failures showed you an error and wrote nothing down, so a bug report
+  carried no trace of what actually broke.
 
 ## [1.3.2] - 2026-08-01
 

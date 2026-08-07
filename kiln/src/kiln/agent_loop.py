@@ -93,41 +93,16 @@ def _is_privacy_mode_enabled() -> bool:
     return val not in ("0", "false", "no")
 
 
-# Pre-compiled patterns for sensitive data redaction
-_PRIVATE_IP_RE = re.compile(
-    r"\b(?:"
-    r"192\.168\.\d{1,3}\.\d{1,3}"
-    r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
-    r"|172\.(?:1[6-9]|2[0-9]|3[01])\.\d{1,3}\.\d{1,3}"
-    r")\b"
-)
-
-_BEARER_RE = re.compile(r"(Bearer\s+)\S+", re.IGNORECASE)
-_AUTH_HEADER_RE = re.compile(r"(Authorization\s*:\s*)\S+", re.IGNORECASE)
-_API_KEY_KV_RE = re.compile(
-    r"((?:api[_-]?key|apikey|secret[_-]?key|access[_-]?token|auth[_-]?token)"
-    r"\s*[:=]\s*)\S+",
-    re.IGNORECASE,
-)
-_KILN_SECRET_RE = re.compile(r"(KILN_\w*(?:KEY|SECRET)\s*=\s*)\S+", re.IGNORECASE)
-_HEX_TOKEN_RE = re.compile(
-    r"((?:key|token|secret|password|credential|api_key|apikey)"
-    r"\s*[:=]\s*[\"']?)([0-9a-fA-F]{32,})([\"']?)",
-    re.IGNORECASE,
-)
-_BASE64_TOKEN_RE = re.compile(
-    r"((?:key|token|secret|password|credential|api_key|apikey)"
-    r"\s*[:=]\s*[\"']?)([A-Za-z0-9+/=]{20,})([\"']?)",
-    re.IGNORECASE,
-)
-
-
 def _redact_sensitive_data(text: str) -> str:
     """Redact sensitive data from text before sending to external LLM APIs.
 
     Strips API keys, private IP addresses, and secret environment variable
-    values.  Controlled by the KILN_LLM_PRIVACY_MODE env var (enabled
-    by default).
+    values via the shared pattern set in :mod:`kiln.redaction`.  Home
+    paths are deliberately KEPT — the model must echo real paths back
+    into tool calls.  Controlled by the KILN_LLM_PRIVACY_MODE env var
+    (enabled by default); that switch governs LLM traffic only — the
+    bug-report boundary redacts unconditionally via
+    ``redaction.redact_for_report``.
 
     Args:
         text: The text to redact.
@@ -138,26 +113,10 @@ def _redact_sensitive_data(text: str) -> str:
     if not text or not _is_privacy_mode_enabled():
         return text
 
-    # Bearer tokens and Authorization headers
-    text = _BEARER_RE.sub(r"\1[REDACTED]", text)
-    text = _AUTH_HEADER_RE.sub(r"\1[REDACTED]", text)
+    from kiln import redaction
 
-    # Generic api_key / secret_key / access_token key-value pairs
-    text = _API_KEY_KV_RE.sub(r"\1[REDACTED]", text)
-
-    # KILN_*_KEY= and KILN_*_SECRET= env var values
-    text = _KILN_SECRET_RE.sub(r"\1[REDACTED]", text)
-
-    # Long hex tokens preceded by key-like labels (32+ hex chars)
-    text = _HEX_TOKEN_RE.sub(r"\1[REDACTED]\3", text)
-
-    # Base64 tokens preceded by key-like labels (20+ base64 chars)
-    text = _BASE64_TOKEN_RE.sub(r"\1[REDACTED]\3", text)
-
-    # Private IP addresses (RFC 1918)
-    text = _PRIVATE_IP_RE.sub("[REDACTED]", text)
-
-    return text
+    text = redaction.redact_secrets(text)
+    return redaction.redact_private_ips(text)
 
 
 # ---------------------------------------------------------------------------

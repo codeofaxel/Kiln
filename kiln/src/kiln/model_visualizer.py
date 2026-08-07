@@ -721,6 +721,13 @@ def visualize_model(
                     cmd, capture_output=True, text=True, timeout=timeout,
                 )
             except subprocess.TimeoutExpired:
+                # Logged, not just returned: the returned dict dies with
+                # the tool call, and this failure class is exactly what a
+                # later bug report needs a durable record of.
+                logger.error(
+                    "OpenSCAD render timed out after %ss (view %s, %s)",
+                    timeout, label, scad_path,
+                )
                 views.append({
                     "angle": label,
                     "description": description,
@@ -731,6 +738,10 @@ def visualize_model(
 
             if result.returncode != 0:
                 stderr = (result.stderr or "").strip()[:200]
+                logger.error(
+                    "OpenSCAD render failed (exit %s, view %s, %s): %s",
+                    result.returncode, label, scad_path, stderr,
+                )
                 views.append({
                     "angle": label,
                     "description": description,
@@ -740,6 +751,10 @@ def visualize_model(
                 continue
 
             if not os.path.isfile(png_path) or os.path.getsize(png_path) == 0:
+                logger.error(
+                    "OpenSCAD render produced empty output (view %s, %s)",
+                    label, scad_path,
+                )
                 views.append({
                     "angle": label,
                     "description": description,
