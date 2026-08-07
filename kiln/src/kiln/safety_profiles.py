@@ -818,9 +818,6 @@ class ClampedSettings:
     settings: dict[str, Any]
     clamped: tuple[str, ...] = ()
 
-    def __bool__(self) -> bool:  # pragma: no cover - convenience
-        return bool(self.clamped)
-
 
 def clamp_settings_to_profile(
     settings: dict[str, Any] | None,

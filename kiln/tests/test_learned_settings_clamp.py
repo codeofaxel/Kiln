@@ -87,16 +87,23 @@ class TestTheLocalLearningAggregateIsHeldToo:
         assert len(held.clamped) == 2, "each clamp is stated for the rationale"
 
     def test_the_tool_source_wires_the_clamp(self):
-        """A behavioural test cannot easily reach the tool body (it needs the
-        DB and the MCP registration), so pin the WIRE: the helper is imported
-        and called in the module that produces the recommendation."""
+        """A behavioural test cannot easily reach the tool body — it needs the
+        DB and the MCP registration — so pin the WIRE instead, by AST rather
+        than by substring: a mention in a comment or a docstring must not
+        count, and a reformatting must not break the test."""
+        import ast
         import inspect
 
         from kiln.plugins import learning_tools
 
-        src = inspect.getsource(learning_tools)
-        assert "clamp_settings_to_profile" in src
-        assert "clamp_settings_to_profile(recommended" in src
+        tree = ast.parse(inspect.getsource(learning_tools))
+        called = any(
+            isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "clamp_settings_to_profile"
+            for n in ast.walk(tree)
+        )
+        assert called, "get_optimal_settings must route its aggregate through the clamp"
 
 
 class TestTheClampNeverRemovesTheLimit:
