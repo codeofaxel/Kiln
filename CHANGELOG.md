@@ -17,6 +17,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Custom printer limits can no longer exceed Kiln's tested limits.** Setting
+  your own temperature or speed limit above what Kiln has tested for that
+  printer now requires noting that you've physically modified it — an
+  all-metal hotend, say. Kiln's own limits are unchanged, and nothing you've
+  already set is lost.
+
 - **Jobs go to the printer that's been finishing them (Business).** When Kiln has
   more than one printer to choose from, it weighs each machine's own print
   history alongside whether the material fits, so a machine that has been
