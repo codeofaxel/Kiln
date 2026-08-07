@@ -90,6 +90,7 @@ except ImportError:
 from kiln.cli.config import _normalize_printer_type, _validate_printer_url, save_printer
 from kiln.cloud_sync import CloudSyncManager, SyncConfig
 from kiln.cost_estimator import CostEstimator
+from kiln.errors import HostedUnavailableError
 from kiln.events import Event, EventBus, EventType
 
 try:
@@ -2091,9 +2092,48 @@ def _get_registry() -> PrinterRegistry:
     return _registry
 
 
+#: Said when the queue cannot be answered for from here.  A refusal that
+#: does not name where the thing DOES work reads as Kiln being broken.
+_QUEUE_HOSTED_REFUSAL = (
+    "Your print queue is not available on the hosted Kiln API: it lives on "
+    "the machine attached to your printer, and this server keeps no "
+    "per-account queue. Run this from your local Kiln install or the CLI, "
+    "or connect that machine through the Kiln bridge and your queue "
+    "follows."
+)
+
+
 def _get_queue() -> PrintQueue:
-    """Return the lazily-initialised job queue."""
+    """Return the lazily-initialised job queue.
+
+    Refuses on the hosted multi-tenant deploy.  ``~/.kiln/queue.db`` has
+    schema ``jobs(id, file_name, printer_name, status, submitted_by, ...)``
+    with no tenant column, and the hosted server runs ONE ``~/.kiln`` for
+    every customer — so a job submitted there is listed back to every other
+    tenant (a file name carries client names and part numbers) and can be
+    cancelled by any of them.  Measured, not theorised.
+
+    The guard sits HERE rather than on a list of tool names because this is
+    the one resolver every reader passes through.  A name list was the
+    first attempt and it was already incomplete: ``await_print_completion``
+    and ``analyze_print_failure`` both read a job by id and return the full
+    record, and three MCP resources read the queue too.  The name list is
+    kept as a fast path in kiln-pro's dispatcher — it answers before any
+    work happens and can word the refusal per tool — but the boundary is
+    this function, so a door added next year inherits it.
+
+    Inert on a local install: the operator IS the caller there, nothing
+    arms the hosted flag, and the queue works exactly as before.  The
+    hosted app never constructs the queue or the scheduler at boot (only
+    ``main()`` does, and that is the local stdio server), so this can only
+    fire on a real hosted tool call.
+    """
     global _queue  # noqa: PLW0603
+    from kiln.errors import HostedUnavailableError
+    from kiln.runtime_env import is_hosted_multitenant
+
+    if is_hosted_multitenant():
+        raise HostedUnavailableError(_QUEUE_HOSTED_REFUSAL)
     if _queue is None:
         _queue = PrintQueue(db_path=os.path.join(str(Path.home()), ".kiln", "queue.db"))
     return _queue
@@ -9134,6 +9174,11 @@ def await_print_completion(
                     "progress_log": progress_log[-20:],
                 })
 
+        except HostedUnavailableError as exc:
+            # Only the job_id branch reads the queue; printer-based tracking
+            # never gets here.  Answer with the queue's own reason rather
+            # than an "unexpected error".
+            return _error_dict(str(exc), code="HOSTED_UNAVAILABLE")
         except (PrinterError, RuntimeError) as exc:
             return _error_dict(f"Failed to poll print status: {exc}. Check that the printer is online.")
         except Exception as exc:
@@ -9426,6 +9471,10 @@ def analyze_print_failure(job_id: str) -> dict:
                 "related_events": job_events[-20:],
             },
         }
+    except HostedUnavailableError as exc:
+        # The queue's refusal, verbatim — not an "unexpected error": it
+        # names the machine where the job record actually lives.
+        return _error_dict(str(exc), code="HOSTED_UNAVAILABLE")
     except Exception as exc:
         logger.exception("Unexpected error in analyze_print_failure")
         return _error_dict(f"Unexpected error in analyze_print_failure: {exc}", code="INTERNAL_ERROR")
