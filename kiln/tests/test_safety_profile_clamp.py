@@ -148,7 +148,9 @@ class TestTheFuzzyDoorClampsToo:
         community({**_BASE, "max_hotend_temp": 200.0})
         assert sp.get_profile("ender3_custom_build").max_hotend_temp == 200.0
 
-    def test_a_community_key_with_no_curated_twin_clamps_to_the_real_match(self):
+    def test_a_community_key_with_no_curated_twin_clamps_to_the_real_match(
+        self, community
+    ):
         """The second-order version of the same mistake, found on review.
 
         Clamping against the curated entry filed under the COMMUNITY's key
@@ -169,7 +171,7 @@ class TestTheFuzzyDoorClampsToo:
         got = sp.get_profile("ender3_pro_custom")
         assert got.max_hotend_temp == sp._cache["ender3"].max_hotend_temp
 
-    def test_a_short_community_key_cannot_become_a_wildcard(self):
+    def test_a_short_community_key_cannot_become_a_wildcard(self, community):
         """A one-letter key prefix-matches almost everything.  It must still be
         measured against whatever the request really resolves to."""
         path = sp._COMMUNITY_FILE
