@@ -12,7 +12,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   instead of guessing from a description. Only when you report something,
   never in the background — and your account name, folder paths, and local
   network addresses are stripped on your machine first. No setting can turn
-  that scrubbing off.
+  that scrubbing off — and if you'd rather send only what you write, set
+  `KILN_REPORT_NO_LOG=1`.
 
 ### Changed
 
