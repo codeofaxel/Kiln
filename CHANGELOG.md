@@ -36,6 +36,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   failures showed you an error and wrote nothing down, so a bug report
   carried no trace of what actually broke.
 
+- **Printing several copies in different colors now works.** Each copy gets
+  its own spot on the bed — they used to all be placed in the same place.
+
 ## [1.3.2] - 2026-08-01
 
 ### Added
