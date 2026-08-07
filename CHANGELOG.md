@@ -17,6 +17,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Jobs go to the printer that's been finishing them (Pro).** When Kiln has
+  more than one printer to choose from, it weighs each machine's own print
+  history alongside whether the material fits, so a machine that has been
+  struggling stops drawing new work. A printer Kiln hasn't seen finish
+  anything yet counts as unknown, never as bad.
+
 - **3D stage for any object Kiln makes or changes, not just what it designs.** The
   3D panel used to open for the models Kiln draws from scratch. Now it opens for
   the rest of your work — a CAD file you brought in, a mesh Kiln repaired, a part
