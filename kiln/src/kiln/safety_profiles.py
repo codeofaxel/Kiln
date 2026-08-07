@@ -154,9 +154,32 @@ def _load() -> None:
 
 
 def _load_community() -> None:
-    """Load community profiles from ``~/.kiln/community_profiles.json``."""
+    """Load community profiles from ``~/.kiln/community_profiles.json``.
+
+    Skipped entirely on the hosted multi-tenant deploy, where the file is
+    one shared ``~/.kiln`` for every customer.  A community entry
+    OVERRIDES the bundled curated ceiling, so on a shared box one caller
+    could raise another's ``max_hotend_temp`` — an Ender-3's bundled
+    260 °C exists because of its PTFE-lined hotend, and a stranger's
+    500 °C is a fume-and-fire claim that ``validate_gcode`` would then
+    honour.
+
+    Skipping is deliberately NOT the same as refusing.  The read side of
+    this module feeds the G-code validator and must answer at every tier
+    on every deploy — refusing here would remove the ceiling altogether,
+    which is a worse outcome than the override it prevents.  Falling
+    through to the bundled curated profile is strictly safer than both:
+    the packaged limits are identical for every caller and are the
+    numbers the validator was designed around.
+    """
     global _community_loaded
     if _community_loaded:
+        return
+
+    from kiln.runtime_env import is_hosted_multitenant
+
+    if is_hosted_multitenant():
+        _community_loaded = True
         return
 
     if not _COMMUNITY_FILE.exists():
