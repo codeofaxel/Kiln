@@ -272,6 +272,39 @@ class TestTheStageDocumentComesFromTheCache:
         anyio.run(mcp.read_resource, local_stage.MESH_VIEWER_RESOURCE_URI)
         assert local_stage.host_renders_apps(blank) is True
 
+    def test_a_rendering_host_gets_the_payload_verb_with_the_stage(self, tmp_path):
+        """Door parity, the widget's return path: a stamped declaration
+        promises the rendered View a working ``kiln_viewer_payload`` on
+        THIS door.  The verb stays off the standing tool surface until a
+        host proves it renders panels (the stage read) — and from that
+        moment, which precedes the View's first ``tools/call``, the View
+        can never call into a missing verb.  (2026-08-06: a token-only
+        lean result plus an unregistered verb starves the panel into the
+        viewer's "3D view never arrived" card.)
+        """
+        import anyio
+
+        _cache_the_stage()
+        mcp = _fastmcp()
+        local_stage.install(mcp)
+        assert "kiln_viewer_payload" not in mcp._tool_manager._tools
+
+        anyio.run(mcp.read_resource, local_stage.MESH_VIEWER_RESOURCE_URI)
+        assert "kiln_viewer_payload" in mcp._tool_manager._tools
+
+        # Idempotent across repeat reads — one verb, no duplicate warning.
+        anyio.run(mcp.read_resource, local_stage.MESH_VIEWER_RESOURCE_URI)
+        assert list(mcp._tool_manager._tools).count("kiln_viewer_payload") == 1
+
+        # And it genuinely serves: a minted token round-trips to the
+        # kiln.mesh.v1 payload; a bogus token gets the honest refusal.
+        fn = mcp._tool_manager._tools["kiln_viewer_payload"].fn
+        token = local_stage._mint(_real_cube(tmp_path / "cube.stl"))
+        served = fn(artifact_token=token)
+        payload = served[local_stage.VIEWER_STRUCTURED_CONTENT_KEY]
+        assert payload["kind"] == "kiln.mesh.v1"
+        assert fn(artifact_token="no-such-token")["success"] is False
+
     def test_a_cold_cache_refuses_rather_than_serving_an_empty_stage(self):
         import anyio
 

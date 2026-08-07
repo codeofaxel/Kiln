@@ -512,6 +512,14 @@ def _register_resource(mcp: Any) -> bool:
             )
         # Only a host about to render the panel asks for this.
         _host_read_the_stage = True
+        # Door parity: every stamped declaration promises the rendered View
+        # a working fetch verb on THIS door (the View lazy-fetches when a
+        # result carries a token but no inline geometry).  The read is the
+        # earliest proof a View will exist, and it precedes the View's first
+        # tools/call — so registering here keeps the verb off the standing
+        # tool surface for hosts that never render panels, while a host
+        # that does render can never call into a missing verb.
+        _register_payload_verb(mcp)
         return doc
 
     mcp.add_resource(
@@ -534,9 +542,22 @@ def _register_resource(mcp: Any) -> bool:
     return True
 
 
-def _register_diagnostics(mcp: Any, out: dict[str, Any]) -> None:
-    """The panel's own fetch verb and a smoke test.  Off by default."""
+def _register_payload_verb(mcp: Any) -> bool:
+    """Register ``kiln_viewer_payload`` — the View's lazy mesh fetch.
+
+    Idempotent and never raises.  Called from two places: the stage-document
+    read (door parity — a host that renders the panel gets the verb before
+    its View's first ``tools/call``; see ``_document``) and the diagnostics
+    path (which forces it at install for smoke-testing).  Serves the
+    operator's own local files at full fidelity — the hosted door's
+    charge-on-keep wall guards artifact tokens, which never exist here;
+    a local token resolves only to a mesh this machine already made.
+    """
     try:
+        registry = getattr(getattr(mcp, "_tool_manager", None), "_tools", None)
+        if isinstance(registry, dict) and "kiln_viewer_payload" in registry:
+            return True
+
         @mcp.tool(
             name="kiln_viewer_payload",
             meta={"ui": {"resourceUri": MESH_VIEWER_RESOURCE_URI,
@@ -558,9 +579,15 @@ def _register_diagnostics(mcp: Any, out: dict[str, Any]) -> None:
                 return {"success": False, "error": f"Could not read that mesh: {exc}"}
             return {VIEWER_STRUCTURED_CONTENT_KEY: payload}
 
-        out["payload_tool"] = True
+        return True
     except Exception:
         logger.warning("local stage: payload tool failed", exc_info=True)
+        return False
+
+
+def _register_diagnostics(mcp: Any, out: dict[str, Any]) -> None:
+    """The smoke test, plus the fetch verb forced at install.  Off by default."""
+    out["payload_tool"] = _register_payload_verb(mcp)
 
     try:
         @mcp.tool(name="stage_smoke_test",
