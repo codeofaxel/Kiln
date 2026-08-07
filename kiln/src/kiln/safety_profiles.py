@@ -329,11 +329,15 @@ def get_profile(printer_id: str) -> SafetyProfile:
         if profile is not None:
             return profile
 
-    # Try fuzzy prefix match (e.g. "ender-3-v2" → "ender3").
+    # Try fuzzy prefix match (e.g. "ender-3-v2" → "ender3").  The community
+    # entry goes through the SAME clamp the exact-match branch uses: a fuzzy
+    # hit resolves to a community key that usually has a curated twin under
+    # that very key, so there is something to clamp against and skipping it
+    # would just be a second door onto the first door's bug.
     for key in _community_cache:
         for candidate in candidates:
             if candidate.startswith(key) or key.startswith(candidate):
-                return _community_cache[key]
+                return _clamp_to_curated(_community_cache[key], _cache.get(key))
     for key in _cache:
         for candidate in candidates:
             if candidate.startswith(key) or key.startswith(candidate):
@@ -441,6 +445,150 @@ def profile_to_dict(profile: SafetyProfile) -> dict[str, Any]:
         "build_volume": profile.build_volume,
         "notes": profile.notes,
     }
+
+
+# ---------------------------------------------------------------------------
+# Clamping a recommendation to the machine's curated ceiling
+# ---------------------------------------------------------------------------
+
+#: Recommendation / override keys that name an ABSOLUTE temperature or flow,
+#: mapped to the :class:`SafetyProfile` ceiling each must not exceed.
+#:
+#: Only unambiguous keys are listed.  A bare ``speed`` is deliberately absent:
+#: the learning stores record it in mm/s while ``max_feedrate`` is mm/min, and
+#: a clamp that guesses units is worse than no clamp.  Feedrate is already held
+#: at the G-code boundary by ``validate_gcode`` and the interceptor's
+#: ``max_feedrate`` rule, which see the real units.
+_SETTING_CEILINGS: dict[str, str] = {
+    # Hotend — slicer keys, learning-store keys, and the community corpus's
+    # free-form settings dicts all land here.
+    "temperature": "max_hotend_temp",
+    "first_layer_temperature": "max_hotend_temp",
+    "temp_tool": "max_hotend_temp",
+    "tool_temp": "max_hotend_temp",
+    "nozzle_temp": "max_hotend_temp",
+    "nozzle_temp_c": "max_hotend_temp",
+    "nozzle_temperature": "max_hotend_temp",
+    "hotend_temp": "max_hotend_temp",
+    "hotend_temperature": "max_hotend_temp",
+    # Bed.
+    "bed_temperature": "max_bed_temp",
+    "first_layer_bed_temperature": "max_bed_temp",
+    "temp_bed": "max_bed_temp",
+    "bed_temp": "max_bed_temp",
+    "bed_temp_c": "max_bed_temp",
+    # Chamber.
+    "chamber_temperature": "max_chamber_temp",
+    "chamber_temp": "max_chamber_temp",
+    "chamber_temp_c": "max_chamber_temp",
+    # Volumetric flow.
+    "max_volumetric_speed": "max_volumetric_flow",
+    "filament_max_volumetric_speed": "max_volumetric_flow",
+    "max_volumetric_speed_mm3s": "max_volumetric_flow",
+}
+
+
+@dataclass(frozen=True)
+class ClampedSettings:
+    """Result of :func:`clamp_settings_to_profile`.
+
+    Attributes:
+        settings: The settings dict, with any over-ceiling value replaced by
+            the curated ceiling.  A copy; the input is never mutated.
+        clamped: One human-readable line per key that was lowered, suitable
+            for a ``rationale`` list or a log line.  Empty when nothing was
+            over the ceiling, which is the ordinary case.
+    """
+
+    settings: dict[str, Any]
+    clamped: tuple[str, ...] = ()
+
+    def __bool__(self) -> bool:  # pragma: no cover - convenience
+        return bool(self.clamped)
+
+
+def clamp_settings_to_profile(
+    settings: dict[str, Any] | None,
+    printer_id: str | None,
+) -> ClampedSettings:
+    """Hold a recommended or applied setting under the machine's curated ceiling.
+
+    The read-side twin of :func:`_clamp_to_curated`.  That one stops a
+    community profile from RAISING a limit; this one stops any number produced
+    downstream of a limit — a community median, a learned aggregate, a replayed
+    recovery fix, a calibrated flow figure — from being handed to a slicer or a
+    printer ABOVE it.  Same rule, other end of the pipe: a value more
+    conservative than the ceiling passes through untouched, a value less
+    conservative is replaced by the ceiling.
+
+    This never refuses.  A setting nobody has a ceiling for, an unknown
+    printer, an unparseable value, or a missing profile all return the input
+    unchanged — clamping down to nothing would remove the limit rather than
+    enforce it, which is the failure this whole path exists to prevent.  When
+    the printer IS known, its ceiling comes from :func:`get_profile`, the same
+    authority ``validate_gcode`` consults, so a recommendation can never
+    disagree with the enforcement that will judge it.
+
+    A ``hardware_modified`` community profile needs no special case here: it
+    has already been honoured by :func:`get_profile`, so its declared ceiling
+    is simply the ceiling this clamps against.
+
+    Args:
+        settings: Recommendation / override dict.  Never mutated.
+        printer_id: The machine the settings are for.  ``None`` means there is
+            nothing curated to clamp against and the settings pass through.
+    """
+    if not isinstance(settings, dict) or not settings:
+        return ClampedSettings(dict(settings) if isinstance(settings, dict) else {})
+    if not printer_id:
+        return ClampedSettings(dict(settings))
+
+    try:
+        profile = get_profile(printer_id)
+    except KeyError:
+        # No profile at all — nothing to clamp against.  Pass through rather
+        # than invent a ceiling.
+        return ClampedSettings(dict(settings))
+
+    out = dict(settings)
+    notes: list[str] = []
+    for key, ceiling_field in _SETTING_CEILINGS.items():
+        if key not in out:
+            continue
+        ceiling = getattr(profile, ceiling_field, None)
+        if not isinstance(ceiling, (int, float)):
+            continue  # e.g. a printer with no chamber, or no published flow cap
+        raw = out[key]
+        if isinstance(raw, bool):
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if value <= ceiling:
+            continue
+        # Keep the caller's own type — the slicer-override surface is
+        # string-typed and the learning stores are numeric.  int() truncates,
+        # which rounds toward the conservative side.
+        if isinstance(raw, str):
+            out[key] = f"{ceiling:g}"
+        elif isinstance(raw, int):
+            out[key] = int(ceiling)
+        else:
+            out[key] = ceiling
+        notes.append(
+            f"{key} {value:g} exceeds {profile.display_name}'s "
+            f"{ceiling_field} of {ceiling:g}; using {ceiling:g}"
+        )
+
+    if notes:
+        logger.warning(
+            "clamped %d setting(s) to %s's curated limits: %s",
+            len(notes),
+            profile.id,
+            "; ".join(notes),
+        )
+    return ClampedSettings(out, tuple(notes))
 
 
 # ---------------------------------------------------------------------------

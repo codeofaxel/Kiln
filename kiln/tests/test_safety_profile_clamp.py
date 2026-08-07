@@ -124,3 +124,84 @@ class TestTheHostedOverlayIsStillSkipped:
         sp._community_loaded = False
         sp._community_cache.clear()
         assert sp.get_profile("ender3").max_hotend_temp == curated
+
+
+class TestTheFuzzyDoorClampsToo:
+    """The first pass clamped the exact-match branch and left the fuzzy one.
+
+    ``get_profile`` falls back to a prefix match, and that branch returned the
+    community entry raw — so any printer id that prefix-matched a community key
+    without being curated itself walked straight past the clamp.  Reproduced
+    2026-08-07: ``get_profile('ender3_custom_build')`` answered 500 C while
+    ``get_profile('ender3')`` answered 260.  Same bug, second door.
+    """
+
+    @pytest.mark.parametrize(
+        "printer_id", ["ender3_custom_build", "ender3zzz", "ender3-with-a-mod"]
+    )
+    def test_a_fuzzy_match_cannot_raise_the_ceiling(self, community, printer_id):
+        curated = sp.get_profile("ender3").max_hotend_temp
+        community({**_BASE, "max_hotend_temp": 500.0})
+        assert sp.get_profile(printer_id).max_hotend_temp == curated
+
+    def test_a_fuzzy_match_still_honours_a_tightening(self, community):
+        community({**_BASE, "max_hotend_temp": 200.0})
+        assert sp.get_profile("ender3_custom_build").max_hotend_temp == 200.0
+
+
+class TestClampSettingsToProfile:
+    """The read-side twin: a number produced DOWNSTREAM of a limit — a
+    community median, a learned aggregate, a replayed recovery fix — must not
+    be handed to a slicer or a printer above that limit."""
+
+    def test_an_over_ceiling_temperature_is_lowered(self):
+        curated = sp.get_profile("ender3")
+        held = sp.clamp_settings_to_profile({"temp_tool": 300.0}, "ender3")
+        assert held.settings["temp_tool"] == curated.max_hotend_temp
+        assert held.clamped, "a clamp must be stated, not applied silently"
+
+    def test_a_conservative_setting_passes_through_untouched(self):
+        held = sp.clamp_settings_to_profile({"temp_tool": 200.0, "temp_bed": 50.0}, "ender3")
+        assert held.settings == {"temp_tool": 200.0, "temp_bed": 50.0}
+        assert not held.clamped
+
+    def test_the_input_is_never_mutated(self):
+        original = {"temp_tool": 300.0}
+        sp.clamp_settings_to_profile(original, "ender3")
+        assert original == {"temp_tool": 300.0}
+
+    def test_an_unrecognised_key_is_left_alone(self):
+        """A clamp that guesses is worse than no clamp — `speed` is mm/s in the
+        learning stores and mm/min in max_feedrate, so it is deliberately not
+        in the table."""
+        held = sp.clamp_settings_to_profile({"speed": 99999, "notes": "x"}, "ender3")
+        assert held.settings == {"speed": 99999, "notes": "x"}
+
+    def test_no_printer_means_nothing_to_clamp_against(self):
+        """Same call _clamp_to_curated makes for an unknown printer.  Refusing
+        here would remove the limit rather than enforce it."""
+        held = sp.clamp_settings_to_profile({"temp_tool": 300.0}, None)
+        assert held.settings["temp_tool"] == 300.0
+
+    def test_a_string_valued_override_stays_a_string(self):
+        """The slicer-override surface is string-typed."""
+        held = sp.clamp_settings_to_profile(
+            {"first_layer_bed_temperature": "195"}, "ender3"
+        )
+        value = held.settings["first_layer_bed_temperature"]
+        assert isinstance(value, str) and value == "110"
+
+    def test_a_missing_chamber_ceiling_is_not_invented(self):
+        """A printer with no published chamber limit has nothing to clamp to."""
+        profile = sp.get_profile("ender3")
+        if profile.max_chamber_temp is not None:
+            pytest.skip("ender3 publishes a chamber ceiling")
+        held = sp.clamp_settings_to_profile({"chamber_temp": 500.0}, "ender3")
+        assert held.settings["chamber_temp"] == 500.0
+
+    def test_a_declared_hardware_modification_is_still_honoured(self, community):
+        """get_profile already honours the declaration, so the clamp inherits
+        it — the operator who fitted an all-metal hotend keeps their ceiling."""
+        community({**_BASE, "max_hotend_temp": 300.0, "hardware_modified": True})
+        held = sp.clamp_settings_to_profile({"temp_tool": 290.0}, "ender3")
+        assert held.settings["temp_tool"] == 290.0

@@ -420,7 +420,7 @@ def predict_settings(
     ).fetchall()
 
     if rows:
-        return _aggregate_prediction(rows, source="exact_match")
+        return _aggregate_prediction(rows, source="exact_match", printer_model=printer_model)
 
     # Strategy 2: similar geometric signature
     rows = db._conn.execute(
@@ -435,7 +435,7 @@ def predict_settings(
     ).fetchall()
 
     if rows:
-        return _aggregate_prediction(rows, source="similar_geometry")
+        return _aggregate_prediction(rows, source="similar_geometry", printer_model=printer_model)
 
     # Strategy 3: material defaults on this printer
     rows = db._conn.execute(
@@ -449,7 +449,7 @@ def predict_settings(
     ).fetchall()
 
     if rows:
-        return _aggregate_prediction(rows, source="material_default")
+        return _aggregate_prediction(rows, source="material_default", printer_model=printer_model)
 
     return SettingsPrediction(
         recommended_settings={},
@@ -461,7 +461,9 @@ def predict_settings(
     )
 
 
-def _aggregate_prediction(rows: list, *, source: str) -> SettingsPrediction:
+def _aggregate_prediction(
+    rows: list, *, source: str, printer_model: str | None = None
+) -> SettingsPrediction:
     """Aggregate settings from successful print records into a prediction."""
     all_settings: list[dict[str, Any]] = []
     for row in rows:
@@ -493,6 +495,15 @@ def _aggregate_prediction(rows: list, *, source: str) -> SettingsPrediction:
                 from collections import Counter
 
                 merged[key] = Counter(values).most_common(1)[0][0]
+
+    # The rows are other people's prints on other people's machines, and the
+    # settings dict they carry is free-form — whatever the recording caller
+    # put in it.  A median over that is a fine starting point and a poor
+    # ceiling, so hold it under this machine's curated limits before handing
+    # it back.  Tighter-than-curated medians pass through untouched.
+    from kiln.safety_profiles import clamp_settings_to_profile
+
+    merged = clamp_settings_to_profile(merged, printer_model).settings
 
     n_prints = len(rows)
     confidence_map = {"exact_match": 0.9, "similar_geometry": 0.7, "material_default": 0.4}

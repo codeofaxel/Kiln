@@ -669,6 +669,7 @@ def recommend_settings(
     """
     import kiln.server as _srv
     from kiln.persistence import get_db
+    from kiln.safety_profiles import clamp_settings_to_profile
 
     if err := _srv._check_auth("learning"):
         return err
@@ -782,6 +783,16 @@ def recommend_settings(
         if cal_overrides:
             recommended.update(cal_overrides)
 
+        # Last, after every contributor has had its say: hold the aggregate
+        # under this machine's curated ceilings.  A median is only as sane as
+        # the outcomes behind it, and nothing upstream checks what temperature
+        # a recorded print claimed — so one row logged against the wrong
+        # machine can carry a hotter number into every later recommendation.
+        # Clamped down, never up, and a clamp is stated in the rationale
+        # rather than applied silently.
+        _clamped = clamp_settings_to_profile(recommended, printer_name)
+        recommended = _clamped.settings
+
         result: dict[str, Any] = {
             "success": True,
             "has_data": True,
@@ -810,8 +821,8 @@ def recommend_settings(
             ],
             "safety_notice": _LEARNING_SAFETY_NOTICE,
         }
-        if cal_rationale:
-            result["rationale"] = list(cal_rationale)
+        if cal_rationale or _clamped.clamped:
+            result["rationale"] = list(cal_rationale) + list(_clamped.clamped)
         if cal_used is not None:
             result["calibration_used"] = cal_used
 
