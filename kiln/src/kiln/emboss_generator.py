@@ -1440,7 +1440,7 @@ def check_boolean_success(input_stl: str, output_stl: str, *, tolerance: float =
 
 
 # ---------------------------------------------------------------------------
-# QR code OpenSCAD module — Pro feature, lives in kiln-pro
+# QR code OpenSCAD module — Business feature, lives in kiln-pro
 # ---------------------------------------------------------------------------
 
 def generate_qr_openscad_module(
@@ -1449,7 +1449,7 @@ def generate_qr_openscad_module(
     target_size_mm: float = 38.0,
     border: int = 1,
 ) -> tuple[str, dict]:
-    """Generate an OpenSCAD module for a QR code (Pro feature).
+    """Generate an OpenSCAD module for a QR code (Business feature).
 
     QR code generation is a paid feature. The implementation lives in
     the kiln-pro package.
@@ -1460,7 +1460,7 @@ def generate_qr_openscad_module(
         from kiln_pro.decoration.qr_openscad import generate_qr_openscad_module as _impl
     except ImportError:
         raise ImportError(
-            "QR code generation is a Pro feature. "
+            "QR code generation is a Business feature. "
             "Upgrade at https://kiln3d.com/pricing"
         ) from None
     return _impl(url, module_name=module_name, target_size_mm=target_size_mm, border=border)

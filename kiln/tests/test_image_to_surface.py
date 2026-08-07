@@ -127,10 +127,17 @@ class TestGenerateTextImage:
 # ---------------------------------------------------------------------------
 
 class TestGenerateQrData:
-    def test_raises_import_error(self, tmp_path):
+    def test_names_the_tier_that_actually_includes_it(self, tmp_path):
+        """The stub refuses, and must name the RIGHT tier.
+
+        It said "Pro feature" while every gate in kiln-pro checks
+        Business — so a Pro customer could read this, upgrade to Pro,
+        and still not have QR codes.  A refusal that misdirects the
+        upgrade is worse than a refusal.
+        """
         from kiln.image_to_surface import generate_qr_data
 
-        with pytest.raises(ImportError, match="Pro feature"):
+        with pytest.raises(ImportError, match="Business feature"):
             generate_qr_data("https://kiln3d.com", str(tmp_path))
 
 

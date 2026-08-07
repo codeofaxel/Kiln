@@ -1672,16 +1672,16 @@ def rasterize_svg_to_png(
 
 
 def generate_qr_data(content: str, output_dir: str) -> dict:
-    """Generate a QR code heightmap — requires kiln-pro (Pro feature).
+    """Generate a QR code heightmap — requires kiln-pro (Business feature).
 
     QR code decoration is a paid feature. The implementation lives in
     the kiln-pro package. This stub raises ImportError to direct users
-    to upgrade.
+    to the tier that actually includes it.
 
     See ``kiln_pro.decoration.qr_decorator.generate_qr_data`` for the
     real implementation.
     """
     raise ImportError(
-        "QR code decoration is a Pro feature. "
-        "Upgrade at https://kiln3d.com/pricing"
+        "QR code decoration is a Business feature. "
+        "See https://kiln3d.com/pricing"
     )
