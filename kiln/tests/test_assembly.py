@@ -477,10 +477,10 @@ class TestProLicenseCheckSemantics:
     """_has_pro_license must reflect the CALLER's tier, not the process.
 
     On a hosted multi-tenant server the process itself holds a valid
-    license, so a process-level check (pro_features.has_valid_license)
-    would wave every caller — free included — past the part limit.  The
-    check must route through check_pro, which consults the per-request
-    tier override first.
+    license, so a process-level check — asking whether THIS PROCESS is
+    licensed — would wave every caller, free included, past the part
+    limit.  The check must route through check_pro, which consults the
+    per-request tier override first.
     """
 
     @staticmethod
