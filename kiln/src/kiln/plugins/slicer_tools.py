@@ -964,7 +964,7 @@ class _SlicerToolsPlugin:
 
             import json as _json
 
-            from kiln.slicer_profiles import resolve_slicer_profile, validate_profile_for_printer
+            from kiln.slicer_profiles import profile_with_overrides, resolve_slicer_profile, validate_profile_for_printer
 
             # -- Validate input file --
             input_abs = os.path.abspath(input_path)
@@ -1044,23 +1044,11 @@ class _SlicerToolsPlugin:
                 # dropped on the floor while the response still stamped
                 # applied_overrides — a receipt for work that never happened
                 # (measured 2026-08-06: layer_height 0.2 vs 0.4 both sliced
-                # at the default 0.3).  A partial .ini loaded over the
-                # slicer's own defaults is exactly PrusaSlicer's override
-                # semantics, so orphaned overrides get a profile of their own.
-                if parsed_overrides and not effective_profile:
-                    import tempfile as _tempfile
-
-                    _tmp_dir = os.path.join(
-                        _tempfile.gettempdir(), "kiln_slicer_profiles",
-                    )
-                    os.makedirs(_tmp_dir, mode=0o700, exist_ok=True)
-                    with _tempfile.NamedTemporaryFile(
-                        mode="w", encoding="utf-8", dir=_tmp_dir,
-                        prefix="overrides_", suffix=".ini", delete=False,
-                    ) as _fh:
-                        for _key, _value in parsed_overrides.items():
-                            _fh.write(f"{_key} = {_value}\n")
-                        effective_profile = _fh.name
+                # at the default 0.3).  One shared helper now guarantees the
+                # overrides reach the slicer whatever the base profile is.
+                effective_profile = profile_with_overrides(
+                    effective_profile, parsed_overrides,
+                )
 
                 # -- Safety-validate temperature overrides --
                 validation_result: dict[str, Any] | None = None
@@ -1284,7 +1272,7 @@ class _SlicerToolsPlugin:
                 from kiln.printers import PrinterError
                 from kiln.registry import PrinterNotFoundError
                 from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
-                from kiln.slicer_profiles import resolve_slicer_profile
+                from kiln.slicer_profiles import profile_with_overrides, resolve_slicer_profile
 
                 effective_printer_id, effective_profile = _srv._resolve_slice_profile_context(
                     profile=profile,
@@ -1513,12 +1501,30 @@ class _SlicerToolsPlugin:
                         if k not in adhesion_overrides:  # don't override explicit user settings
                             adhesion_overrides[k] = v
 
-                # Re-resolve profile with adhesion overrides merged in
-                if adhesion_overrides and effective_printer_id:
-                    try:
-                        effective_profile = resolve_slicer_profile(effective_printer_id, overrides=adhesion_overrides)
-                    except Exception:
-                        _logger.debug("Profile override injection failed", exc_info=True)
+                # Re-resolve profile with adhesion overrides merged in.
+                # The printer-id path is the richer merge (bundled profile +
+                # overrides); the helper is the floor for everything else.
+                # That floor is load-bearing, not tidiness: a Bambu whose
+                # MODEL is unset or unmappable ("bambu", "my-printer") has a
+                # known printer TYPE and no profile id, and this block used
+                # to drop its overrides — including the three settings
+                # wrap_gcode_as_3mf requires (relative extrusion, empty
+                # start/end gcode).  The slice then came out with absolute E
+                # and PrusaSlicer's own start gcode, and got wrapped into a
+                # Bambu 3MF that assumes the opposite.  Wrong file, not
+                # untuned settings.
+                if adhesion_overrides:
+                    merged: str | None = None
+                    if effective_printer_id:
+                        try:
+                            merged = resolve_slicer_profile(
+                                effective_printer_id, overrides=adhesion_overrides,
+                            )
+                        except Exception:
+                            _logger.debug("Profile override injection failed", exc_info=True)
+                    effective_profile = merged or profile_with_overrides(
+                        effective_profile, adhesion_overrides,
+                    )
 
                 # --- Bed-fit safety gate (Layer 1) ---
                 # Blocks off-bed / oversized geometry before slicing (auto-

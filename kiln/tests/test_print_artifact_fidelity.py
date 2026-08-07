@@ -775,3 +775,83 @@ class TestStepImportFidelity:
         art = r["output_path"]
         assert _extents_of(art) == [10.0, 15.0, 20.0]
         assert r.get("body_count") == 1
+
+
+# ---------------------------------------------------------------------------
+# Overrides must REACH the slicer, whatever the base profile
+# ---------------------------------------------------------------------------
+
+
+class TestOverridesReachTheSlicer:
+    """The engine-level guarantee behind two fixed defects.
+
+    ``resolve_slicer_profile`` merges overrides into a bundled profile, but
+    needs a printer id — and callers reach the slicer without one more often
+    than it looks: a printer whose TYPE is known while its MODEL is unset or
+    unmappable ("bambu", "my-printer") resolves to no profile id.  Every
+    such caller silently dropped its overrides.
+    """
+
+    def test_helper_merges_over_a_base_and_stands_alone_without_one(
+        self, tmp_path: Path,
+    ):
+        from kiln.slicer_profiles import profile_with_overrides
+
+        base = tmp_path / "base.ini"
+        base.write_text("layer_height = 0.2\nfill_density = 15%\n", encoding="utf-8")
+
+        merged = profile_with_overrides(str(base), {"layer_height": "0.4",
+                                                    "brim_width": "8"})
+        body = Path(merged).read_text(encoding="utf-8")
+        # Replaced in place, not duplicated; untouched keys survive; new keys added.
+        assert body.count("layer_height") == 1
+        assert "layer_height = 0.4" in body
+        assert "fill_density = 15%" in body
+        assert "brim_width = 8" in body
+
+        alone = profile_with_overrides(None, {"layer_height": "0.4"})
+        assert "layer_height = 0.4" in Path(alone).read_text(encoding="utf-8")
+
+        # Nothing to say: the base passes through untouched, None stays None.
+        assert profile_with_overrides(str(base), {}) == str(base)
+        assert profile_with_overrides(None, None) is None
+
+    @pytest.mark.skipif(not _slicer_available(), reason="no PrusaSlicer/OrcaSlicer installed")
+    def test_bambu_wrap_settings_survive_an_unmappable_model(self, tmp_path: Path):
+        """A Bambu whose model is unset or custom-named must STILL slice with
+        the three settings wrap_gcode_as_3mf requires.
+
+        Before the fix this dropped to no profile at all: absolute
+        extrusion and PrusaSlicer's own start/end gcode, wrapped into a
+        Bambu 3MF that assumes the opposite — a wrong file, not untuned
+        settings.
+        """
+        import kiln.slicer as _slicer
+
+        from kiln.plugins.slicer_tools import _SlicerToolsPlugin
+
+        tools = _register_plugin(_SlicerToolsPlugin)
+        stl = _make_box_stl(20.0, 20.0, 10.0)
+        real_slice = _slicer.slice_file
+        seen: dict[str, Any] = {}
+
+        def _spy(input_path, **kw):
+            seen["profile"] = kw.get("profile")
+            return real_slice(input_path, **kw)
+
+        try:
+            for model in ("bambu_a1", None, "my-printer"):
+                seen.clear()
+                with patch("kiln.server._check_auth", side_effect=_no_auth), \
+                        patch("kiln.server._PRINTER_TYPE", "bambu"), \
+                        patch("kiln.server._PRINTER_MODEL", model), \
+                        patch("kiln.slicer.slice_file", side_effect=_spy):
+                    tools["slice_and_print"](input_path=stl, skip_validation=True)
+                profile = seen.get("profile")
+                assert profile, f"no profile reached the slicer for model={model!r}"
+                body = Path(profile).read_text(encoding="utf-8")
+                assert "use_relative_e_distances = 1" in body, (model, body[:200])
+                assert "start_gcode = " in body or "start_gcode =" in body, model
+                assert "end_gcode = " in body or "end_gcode =" in body, model
+        finally:
+            os.unlink(stl)

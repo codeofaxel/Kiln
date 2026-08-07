@@ -205,6 +205,68 @@ def resolve_slicer_profile(
     return path
 
 
+def profile_with_overrides(
+    base_profile: str | None,
+    overrides: dict[str, str] | None,
+) -> str | None:
+    """Return a profile path that CARRIES *overrides*, whatever the base.
+
+    :func:`resolve_slicer_profile` merges overrides into a bundled profile,
+    but it needs a printer id.  Callers reach the slicer without one more
+    often than it looks: a printer whose TYPE is known while its model is
+    unset or unmappable ("bambu" / "my-printer" resolve to no profile id).
+    Every such caller used to drop its overrides on the floor -- including
+    the three settings ``wrap_gcode_as_3mf`` requires of a Bambu slice
+    (relative extrusion, empty start/end gcode), which is a wrong FILE,
+    not merely untuned settings.
+
+    So this is the fallback that keeps overrides reaching the slicer:
+
+    * no overrides -> the base is returned untouched;
+    * no base -> a partial ini of just the overrides, which PrusaSlicer
+      loads over its own defaults (that IS its override mechanism, so this
+      is the intended path, not a workaround);
+    * a base -> its lines with the override keys replaced in place and any
+      new ones appended, so an explicit profile keeps everything the
+      caller chose except what was deliberately overridden.
+
+    Returns ``None`` only when there is nothing at all to say.
+    """
+    if not overrides:
+        return base_profile
+
+    lines: list[str] = []
+    remaining = dict(overrides)
+    if base_profile and os.path.isfile(base_profile):
+        for raw in Path(base_profile).read_text(encoding="utf-8").splitlines():
+            key = raw.split("=", 1)[0].strip() if "=" in raw else ""
+            if key and key in remaining:
+                lines.append(f"{key} = {remaining.pop(key)}")
+            else:
+                lines.append(raw)
+    else:
+        lines.append("# Kiln auto-generated profile: overrides only")
+        lines.append("")
+    lines.extend(f"{key} = {remaining[key]}" for key in sorted(remaining))
+    content = "\n".join(lines) + "\n"
+
+    cache_key = f"overrides:{_settings_hash({'base': base_profile or '', 'body': content})}"
+    if cache_key in _temp_cache and os.path.isfile(_temp_cache[cache_key]):
+        return _temp_cache[cache_key]
+
+    tmp_dir = os.path.join(tempfile.gettempdir(), "kiln_slicer_profiles")
+    os.makedirs(tmp_dir, mode=0o700, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=tmp_dir,
+        prefix="overrides_", suffix=".ini", delete=False,
+    ) as fh:
+        fh.write(content)
+        path = fh.name
+    _temp_cache[cache_key] = path
+    logger.debug("Wrote override profile (base=%s) → %s", base_profile, path)
+    return path
+
+
 def slicer_profile_to_dict(profile: SlicerProfile) -> dict[str, Any]:
     """Serialise a :class:`SlicerProfile` to a plain dict for MCP responses."""
     return {
