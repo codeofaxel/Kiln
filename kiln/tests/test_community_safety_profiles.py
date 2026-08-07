@@ -342,19 +342,38 @@ class TestCommunityOverridesBundled:
     """Community profiles take precedence over bundled profiles in get_profile()."""
 
     def test_community_overrides_bundled(self):
+        """A HIGHER limit now requires declaring the hardware change.
+
+        The all-metal upgrade is the real case this file exists for: the
+        260 C bundled ceiling is a property of the PTFE liner, and
+        replacing it genuinely raises the safe limit.  What changed is
+        that exceeding a curated limit must now SAY it is a modified
+        machine, so the number is a statement about specific hardware
+        rather than one that quietly wins.  Without the declaration the
+        curated ceiling holds — see TestACommunityProfileCannotLoosenACuratedLimit
+        in test_safety_profile_clamp.py.
+        """
         # Bundled ender3 has max_hotend_temp=260.0
         bundled = get_profile("ender3")
         assert bundled.max_hotend_temp == 260.0
 
-        # Add a community override with a higher limit.
         override = _valid_profile()
         override["max_hotend_temp"] = 300.0
         override["display_name"] = "Ender 3 (All-Metal Upgrade)"
+        override["hardware_modified"] = True
+        override["notes"] = "PTFE liner replaced with an all-metal hotend"
         add_community_profile("ender3", override)
 
         overridden = get_profile("ender3")
         assert overridden.max_hotend_temp == 300.0
         assert overridden.display_name == "Ender 3 (All-Metal Upgrade)"
+
+    def test_an_undeclared_higher_limit_does_not_override(self):
+        """The same edit without the declaration is clamped."""
+        override = _valid_profile()
+        override["max_hotend_temp"] = 300.0
+        add_community_profile("ender3", override)
+        assert get_profile("ender3").max_hotend_temp == 260.0
 
     def test_bundled_still_available_for_non_overridden(self):
         add_community_profile("custom_only", _valid_profile())

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as _dc_replace
 from pathlib import Path
 from typing import Any
 
@@ -72,6 +72,10 @@ class SafetyProfile:
     max_volumetric_flow: float | None
     build_volume: list[int] | None
     notes: str
+    #: Set by an operator who has physically changed this machine (an
+    #: all-metal hotend, say).  The ONLY way a profile may exceed a
+    #: curated safety limit, and honoured on local installs only.
+    hardware_modified: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +134,7 @@ def _parse_profiles(raw: dict[str, Any], target: dict[str, SafetyProfile]) -> No
                 else None,
                 build_volume=data.get("build_volume"),
                 notes=data.get("notes", ""),
+                hardware_modified=bool(data.get("hardware_modified", False)),
             )
         except (KeyError, TypeError, ValueError) as exc:
             logger.warning("Skipping malformed safety profile '%s': %s", key, exc)
@@ -207,6 +212,88 @@ def _load_community() -> None:
 # ---------------------------------------------------------------------------
 
 
+#: Fields where a HIGHER number is a LOOSER limit.  A community profile
+#: may lower these; it may never raise them above the curated value.
+_CEILING_FIELDS = (
+    "max_hotend_temp",
+    "max_bed_temp",
+    "max_chamber_temp",
+    "max_feedrate",
+    "max_volumetric_flow",
+)
+
+#: Fields where a LOWER number is a looser limit — clamped the other way.
+_FLOOR_FIELDS = ("min_safe_z",)
+
+
+def _clamp_to_curated(
+    community: SafetyProfile, curated: SafetyProfile | None
+) -> SafetyProfile:
+    """Let a community profile tighten a curated limit, never loosen it.
+
+    A community entry REPLACED the curated profile wholesale, and nothing
+    compared the two: ``validate_safety_profile`` only checks a flat
+    absolute range, so an Ender-3 could be given a 500 C hotend ceiling
+    and pass.  The curated 260 C is not a preference — it is what a
+    PTFE-lined hotend tolerates before it off-gasses.
+
+    So the merge is directional.  A community value that is more
+    conservative than the curated one is honoured, because a user
+    tightening their own machine's limits is exactly what this file is
+    for.  A value that is less conservative is discarded in favour of
+    the curated number.  That makes exceeding a curated safety limit
+    structurally impossible rather than merely disallowed, whatever path
+    the value arrived by — this tool, a hand-edited file, or any future
+    federation that learns to write here.
+
+    An unknown printer has no curated profile to clamp against; the
+    community entry stands, having already passed the absolute-range
+    validation.
+
+    ONE deliberate exception, and only locally.  A user who has physically
+    replaced a PTFE-lined hotend with an all-metal one really can run
+    hotter, and this file exists partly to record that.  Such a profile
+    must say so — ``hardware_modified: true`` — which turns exceeding a
+    curated limit into a conscious statement about a specific machine
+    rather than a number that quietly won.  It is honoured only where the
+    operator IS the caller: on the hosted deploy the community overlay is
+    not loaded at all, so a shared process can never take this path.
+    """
+    if curated is None:
+        return community
+    if getattr(community, "hardware_modified", False):
+        logger.info(
+            "community safety profile %r exceeds curated limits under a "
+            "declared hardware modification: %s",
+            community.id,
+            community.notes or "(no note given)",
+        )
+        return community
+
+    replacements: dict[str, float] = {}
+    for field in _CEILING_FIELDS:
+        mine, theirs = getattr(community, field, None), getattr(curated, field, None)
+        if isinstance(mine, (int, float)) and isinstance(theirs, (int, float)):
+            if mine > theirs:
+                replacements[field] = theirs
+    for field in _FLOOR_FIELDS:
+        mine, theirs = getattr(community, field, None), getattr(curated, field, None)
+        if isinstance(mine, (int, float)) and isinstance(theirs, (int, float)):
+            if mine < theirs:
+                replacements[field] = theirs
+
+    if not replacements:
+        return community
+
+    logger.warning(
+        "community safety profile %r tried to loosen %s beyond the curated "
+        "limits; the curated values are being used instead",
+        community.id,
+        ", ".join(sorted(replacements)),
+    )
+    return _dc_replace(community, **replacements)
+
+
 def get_profile(printer_id: str) -> SafetyProfile:
     """Return the safety profile for *printer_id*.
 
@@ -227,11 +314,15 @@ def get_profile(printer_id: str) -> SafetyProfile:
     if normalised.startswith("creality_"):
         candidates.append(normalised.removeprefix("creality_"))
 
-    # Community profiles take precedence over bundled.
+    # Community profiles take precedence over bundled — but only in the
+    # SAFE direction.  See _clamp_to_curated.
     for candidate in candidates:
         community = _community_cache.get(candidate)
         if community is not None:
-            return community
+            curated = next(
+                (_cache[c] for c in candidates if c in _cache), None
+            )
+            return _clamp_to_curated(community, curated)
 
     for candidate in candidates:
         profile = _cache.get(candidate)
@@ -433,6 +524,7 @@ def _save_community_profiles() -> None:
             "max_volumetric_flow": sp.max_volumetric_flow,
             "build_volume": sp.build_volume,
             "notes": sp.notes,
+            "hardware_modified": sp.hardware_modified,
         }
     _COMMUNITY_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -488,6 +580,7 @@ def add_community_profile(
         else None,
         build_volume=profile["build_volume"],
         notes=notes,
+        hardware_modified=bool(profile.get("hardware_modified", False)),
     )
 
     _community_cache[normalised] = sp
