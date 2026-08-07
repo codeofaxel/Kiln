@@ -313,6 +313,7 @@ class TestProfileToDict:
             "id", "display_name", "max_hotend_temp", "max_bed_temp",
             "max_chamber_temp", "max_feedrate", "min_safe_z",
             "max_volumetric_flow", "build_volume", "notes",
+            "variant", "available_variants",
         }
         assert set(d.keys()) == expected_keys
 

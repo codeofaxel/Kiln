@@ -48,23 +48,23 @@ def _reset_caches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     # Reset singleton caches so each test starts clean.
     sp._cache.clear()
-    sp._community_cache.clear()
+    sp._local_override_cache.clear()
     sp._loaded = False
-    sp._community_loaded = False
+    sp._local_overrides_loaded = False
 
     # Redirect community file to a temp directory.
     community_dir = tmp_path / ".kiln"
     community_file = community_dir / "community_profiles.json"
-    monkeypatch.setattr(sp, "_COMMUNITY_DIR", community_dir)
-    monkeypatch.setattr(sp, "_COMMUNITY_FILE", community_file)
+    monkeypatch.setattr(sp, "_LOCAL_DIR", community_dir)
+    monkeypatch.setattr(sp, "_LOCAL_OVERRIDE_FILE", community_file)
 
     yield
 
     # Cleanup caches after test.
     sp._cache.clear()
-    sp._community_cache.clear()
+    sp._local_override_cache.clear()
     sp._loaded = False
-    sp._community_loaded = False
+    sp._local_overrides_loaded = False
 
 
 # ---------------------------------------------------------------------------
@@ -239,9 +239,9 @@ class TestAddCommunityProfile:
         import kiln.safety_profiles as sp
 
         add_community_profile("disk_test", _valid_profile())
-        assert sp._COMMUNITY_FILE.exists()
+        assert sp._LOCAL_OVERRIDE_FILE.exists()
 
-        raw = json.loads(sp._COMMUNITY_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(sp._LOCAL_OVERRIDE_FILE.read_text(encoding="utf-8"))
         assert "disk_test" in raw
         assert raw["disk_test"]["max_hotend_temp"] == 280.0
 
@@ -330,6 +330,9 @@ class TestExportProfile:
             "display_name", "max_hotend_temp", "max_bed_temp",
             "max_chamber_temp", "max_feedrate", "min_safe_z",
             "max_volumetric_flow", "build_volume", "notes",
+            # A limit exported without the hardware configuration it belongs
+            # to is the confusion this module exists to prevent.
+            "variant", "available_variants",
         }
         assert set(exported.keys()) == expected_keys
 
@@ -341,19 +344,16 @@ class TestExportProfile:
 class TestCommunityOverridesBundled:
     """Community profiles take precedence over bundled profiles in get_profile()."""
 
-    def test_community_overrides_bundled(self):
-        """A HIGHER limit now requires declaring the hardware change.
+    def test_a_hardware_modified_declaration_no_longer_raises_a_limit(self):
+        """``hardware_modified`` is dead, and its removal is the point.
 
-        The all-metal upgrade is the real case this file exists for: the
-        260 C bundled ceiling is a property of the PTFE liner, and
-        replacing it genuinely raises the safe limit.  What changed is
-        that exceeding a curated limit must now SAY it is a modified
-        machine, so the number is a statement about specific hardware
-        rather than one that quietly wins.  Without the declaration the
-        curated ceiling holds — see TestACommunityProfileCannotLoosenACuratedLimit
-        in test_safety_profile_clamp.py.
+        It used to be the one way past a curated ceiling, and it existed
+        only because the curated data could not express an all-metal
+        Ender 3.  Now it can — see test_hardware_variants.py — so the
+        modified machine resolves through CURATED data and nothing has to
+        trust a hand-typed 300.  An old file still carrying the flag is
+        held to the curated number like any other override.
         """
-        # Bundled ender3 has max_hotend_temp=260.0
         bundled = get_profile("ender3")
         assert bundled.max_hotend_temp == 260.0
 
@@ -365,11 +365,13 @@ class TestCommunityOverridesBundled:
         add_community_profile("ender3", override)
 
         overridden = get_profile("ender3")
-        assert overridden.max_hotend_temp == 300.0
+        assert overridden.max_hotend_temp == 260.0
+        # The rest of the entry is still the user's to set — only the
+        # direction of a LIMIT is constrained.
         assert overridden.display_name == "Ender 3 (All-Metal Upgrade)"
 
     def test_an_undeclared_higher_limit_does_not_override(self):
-        """The same edit without the declaration is clamped."""
+        """The same edit without the declaration is clamped identically."""
         override = _valid_profile()
         override["max_hotend_temp"] = 300.0
         add_community_profile("ender3", override)
@@ -427,7 +429,7 @@ class TestCommunityFileReload:
         import kiln.safety_profiles as sp
 
         # Pre-populate the community file.
-        sp._COMMUNITY_DIR.mkdir(parents=True, exist_ok=True)
+        sp._LOCAL_DIR.mkdir(parents=True, exist_ok=True)
         data = {
             "preloaded": {
                 "display_name": "Preloaded Printer",
@@ -438,11 +440,11 @@ class TestCommunityFileReload:
                 "notes": "From disk.",
             }
         }
-        sp._COMMUNITY_FILE.write_text(json.dumps(data), encoding="utf-8")
+        sp._LOCAL_OVERRIDE_FILE.write_text(json.dumps(data), encoding="utf-8")
 
         # Force a fresh load.
-        sp._community_loaded = False
-        sp._community_cache.clear()
+        sp._local_overrides_loaded = False
+        sp._local_override_cache.clear()
 
         result = list_community_profiles()
         assert "preloaded" in result
@@ -453,11 +455,11 @@ class TestCommunityFileReload:
     def test_corrupt_community_file_handled_gracefully(self, tmp_path: Path):
         import kiln.safety_profiles as sp
 
-        sp._COMMUNITY_DIR.mkdir(parents=True, exist_ok=True)
-        sp._COMMUNITY_FILE.write_text("not valid json {{{", encoding="utf-8")
+        sp._LOCAL_DIR.mkdir(parents=True, exist_ok=True)
+        sp._LOCAL_OVERRIDE_FILE.write_text("not valid json {{{", encoding="utf-8")
 
-        sp._community_loaded = False
-        sp._community_cache.clear()
+        sp._local_overrides_loaded = False
+        sp._local_override_cache.clear()
 
         # Should not raise — just logs an error and returns empty.
         result = list_community_profiles()

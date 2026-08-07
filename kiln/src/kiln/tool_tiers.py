@@ -249,6 +249,11 @@ TIER_FULL: list[str] = [
     # --- Safety profiles ---
     "list_safety_profiles",
     "get_safety_profile",
+    # Declaring a hardware variant is how an operator with a modified machine
+    # gets an accurate ceiling without typing one.  Never gate it: a user who
+    # cannot say "my hotend is upgraded" goes back to hand-editing a limit.
+    "list_printer_variants",
+    "select_printer_variant",
     "validate_gcode_safe",
     # --- Safety audit & dashboard ---
     "safety_audit",

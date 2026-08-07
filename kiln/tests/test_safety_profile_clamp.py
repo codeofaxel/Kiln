@@ -38,17 +38,17 @@ _BASE = {
 def community(monkeypatch):
     """Point the community store at a temp file and reset the caches."""
     path = Path(tempfile.mkdtemp()) / "community_profiles.json"
-    monkeypatch.setattr(sp, "_COMMUNITY_FILE", path)
+    monkeypatch.setattr(sp, "_LOCAL_OVERRIDE_FILE", path)
     monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
 
     def write(payload: dict) -> None:
         path.write_text(json.dumps({"ender3": payload}), encoding="utf-8")
-        sp._community_loaded = False
-        sp._community_cache.clear()
+        sp._local_overrides_loaded = False
+        sp._local_override_cache.clear()
 
     yield write
-    sp._community_loaded = False
-    sp._community_cache.clear()
+    sp._local_overrides_loaded = False
+    sp._local_override_cache.clear()
 
 
 class TestACommunityProfileCannotLoosenACuratedLimit:
@@ -104,13 +104,13 @@ class TestTighteningStillWorks:
     def test_an_unknown_printer_is_not_clamped_away(self, community, monkeypatch):
         """Nothing curated to clamp against — the entry stands, having
         already passed the absolute-range validation."""
-        path = sp._COMMUNITY_FILE
+        path = sp._LOCAL_OVERRIDE_FILE
         path.write_text(
             json.dumps({"some_new_printer": {**_BASE, "max_hotend_temp": 300.0}}),
             encoding="utf-8",
         )
-        sp._community_loaded = False
-        sp._community_cache.clear()
+        sp._local_overrides_loaded = False
+        sp._local_override_cache.clear()
         assert sp.get_profile("some_new_printer").max_hotend_temp == 300.0
 
 
@@ -121,8 +121,8 @@ class TestTheHostedOverlayIsStillSkipped:
         curated = sp.get_profile("ender3").max_hotend_temp
         community({**_BASE, "max_hotend_temp": 200.0})
         monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
-        sp._community_loaded = False
-        sp._community_cache.clear()
+        sp._local_overrides_loaded = False
+        sp._local_override_cache.clear()
         assert sp.get_profile("ender3").max_hotend_temp == curated
 
 
@@ -160,13 +160,13 @@ class TestTheFuzzyDoorClampsToo:
         profile that request actually resolves to, sat right there saying 260.
         Both the lookup and the clamp now ask _curated_match.
         """
-        path = sp._COMMUNITY_FILE
+        path = sp._LOCAL_OVERRIDE_FILE
         path.write_text(
             json.dumps({"ender": {**_BASE, "max_hotend_temp": 500.0}}),
             encoding="utf-8",
         )
-        sp._community_loaded = False
-        sp._community_cache.clear()
+        sp._local_overrides_loaded = False
+        sp._local_override_cache.clear()
         assert "ender" not in sp._cache, "the premise: no curated twin"
         got = sp.get_profile("ender3_pro_custom")
         assert got.max_hotend_temp == sp._cache["ender3"].max_hotend_temp
@@ -174,13 +174,13 @@ class TestTheFuzzyDoorClampsToo:
     def test_a_short_community_key_cannot_become_a_wildcard(self, community):
         """A one-letter key prefix-matches almost everything.  It must still be
         measured against whatever the request really resolves to."""
-        path = sp._COMMUNITY_FILE
+        path = sp._LOCAL_OVERRIDE_FILE
         path.write_text(
             json.dumps({"e": {**_BASE, "max_hotend_temp": 500.0}}),
             encoding="utf-8",
         )
-        sp._community_loaded = False
-        sp._community_cache.clear()
+        sp._local_overrides_loaded = False
+        sp._local_override_cache.clear()
         assert sp.get_profile("ender3").max_hotend_temp <= 260.0
 
 
@@ -234,23 +234,33 @@ class TestClampSettingsToProfile:
         held = sp.clamp_settings_to_profile({"chamber_temp": 500.0}, "ender3")
         assert held.settings["chamber_temp"] == 500.0
 
-    def test_a_declared_hardware_modification_is_still_honoured(self, community):
-        """get_profile already honours the declaration, so the clamp inherits
-        it — the operator who fitted an all-metal hotend keeps their ceiling."""
+    def test_a_hardware_modified_declaration_is_no_longer_a_way_through(
+        self, community
+    ):
+        """The escape hatch is gone, and the clamp inherits its absence.
+
+        ``hardware_modified`` used to let a hand-typed ceiling survive this
+        clamp.  It existed only because the curated data could not describe
+        an all-metal Ender 3.  Now it can, so the way to run a modified
+        machine hotter is to SELECT a curated variant — which resolves to a
+        number Kiln verified — and a raw typed ceiling gets held to the
+        curated value like every other one.
+        """
         community({**_BASE, "max_hotend_temp": 300.0, "hardware_modified": True})
         held = sp.clamp_settings_to_profile({"temp_tool": 290.0}, "ender3")
-        assert held.settings["temp_tool"] == 290.0
+        assert held.settings["temp_tool"] == sp._cache["ender3"].max_hotend_temp
+        assert held.clamped
 
-    def test_a_hardware_declaration_does_not_travel_to_the_shared_server(
+    def test_a_local_override_does_not_travel_to_the_shared_server(
         self, community, monkeypatch
     ):
-        """A declaration is a statement about ONE person's machine.  The hosted
-        process serves everybody, so it must not take that path — the community
+        """An override is a statement about ONE person's machine.  The hosted
+        process serves everybody, so it must not take that path — the local
         overlay is not loaded there at all, and the clamp inherits that too."""
-        community({**_BASE, "max_hotend_temp": 300.0, "hardware_modified": True})
+        community({**_BASE, "max_hotend_temp": 300.0})
         monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
-        sp._community_loaded = False
-        sp._community_cache.clear()
+        sp._local_overrides_loaded = False
+        sp._local_override_cache.clear()
         held = sp.clamp_settings_to_profile({"temp_tool": 290.0}, "ender3")
         assert held.settings["temp_tool"] == sp._cache["ender3"].max_hotend_temp
         assert held.clamped

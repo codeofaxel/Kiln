@@ -142,6 +142,7 @@ _ESSENTIAL_TOOLS = frozenset(
         "get_material",
         "list_safety_profiles",
         "get_safety_profile",
+        "list_printer_variants",
         "list_print_pipelines",
         "list_generation_providers",
         "list_slicer_profiles",

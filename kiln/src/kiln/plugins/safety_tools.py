@@ -317,12 +317,21 @@ class _SafetyToolsPlugin:
         @mcp.tool()
         @_srv.requires_tier(_srv.LicenseTier.BUSINESS)
         def add_safety_profile(printer_model: str, profile: dict) -> dict:
-            """Add a community safety profile for a printer model.
+            """Add a local safety-profile override for a printer model.
 
-            Validates the profile and saves it to the user-local community
-            profiles file (``~/.kiln/community_profiles.json``).  Community
-            profiles take precedence over bundled profiles, allowing users to
-            contribute limits for printers not in the built-in database.
+            Validates the profile and saves it to this machine's override file
+            (``~/.kiln/local_printer_overrides.json``; the older name
+            ``community_profiles.json`` is still read).  Nothing saved here is
+            uploaded, pooled or shared.
+
+            An override may only TIGHTEN a curated limit.  A higher number is
+            discarded in favour of Kiln's curated value, so this is the right
+            tool for a printer Kiln has never heard of, or for holding your own
+            machine BELOW the curated limits.
+
+            It is the WRONG tool for "my hotend is upgraded".  Use
+            ``select_printer_variant`` for that: it resolves to a ceiling Kiln
+            has verified against the manufacturer, instead of one you typed.
 
             Args:
                 printer_model: Short identifier for the printer (e.g.
@@ -351,7 +360,7 @@ class _SafetyToolsPlugin:
                 return {
                     "success": True,
                     "printer_model": printer_model.lower().replace("-", "_").strip(),
-                    "message": "Community safety profile saved successfully.",
+                    "message": "Local printer override saved successfully.",
                 }
             except ValueError as exc:
                 return _srv._error_dict(
@@ -361,6 +370,86 @@ class _SafetyToolsPlugin:
                 _logger.exception("Unexpected error in add_safety_profile")
                 return _srv._error_dict(
                     f"Unexpected error in add_safety_profile: {exc}",
+                    code="INTERNAL_ERROR",
+                )
+
+        # ------------------------------------------------------------------
+        # list_printer_variants / select_printer_variant
+        # ------------------------------------------------------------------
+
+        @mcp.tool()
+        def list_printer_variants(printer_model: str) -> dict:
+            """Show the curated hardware variants available for a printer.
+
+            A curated profile describes a printer AS SHIPPED.  When Kiln has
+            verified a documented hardware change — an Ender 3 whose PTFE-lined
+            hotend has been replaced with an E3D Revo CR, say — that
+            configuration is curated as a VARIANT, with its own limits, its
+            manufacturer source, and the preconditions that make it true.
+
+            Returns the as-shipped limits alongside each variant's, so you can
+            see what selecting one would change before selecting it.  An empty
+            ``variants`` map is the honest answer for a machine Kiln has not
+            verified a modified configuration for.
+
+            Args:
+                printer_model: Printer identifier (e.g. ``"ender3"``).
+            """
+            if err := _srv._check_auth("safety"):
+                return err
+            try:
+                from kiln.safety_profiles import list_printer_variants as _list
+
+                return {"success": True, **_list(printer_model)}
+            except Exception as exc:
+                _logger.exception("Unexpected error in list_printer_variants")
+                return _srv._error_dict(
+                    f"Unexpected error in list_printer_variants: {exc}",
+                    code="INTERNAL_ERROR",
+                )
+
+        @mcp.tool()
+        def select_printer_variant(printer_model: str, variant_id: str = "") -> dict:
+            """Declare which curated hardware variant your machine actually is.
+
+            This is how an operator with a modified printer gets an accurate
+            ceiling WITHOUT typing one.  You say which hardware you have; Kiln
+            supplies the limit from curated, manufacturer-sourced data.  There
+            is no argument here that accepts a temperature, which is the point:
+            a limit Kiln enforces is always a limit Kiln verified.
+
+            Check ``requires`` on the variant first — a ceiling is only true if
+            its preconditions are met.  Several variants need a firmware change
+            as well as the part, and selecting the variant is your statement
+            that you have done both.  Kiln cannot check your hardware remotely.
+
+            The declaration stays on this machine.  It is never uploaded or
+            pooled, and it is ignored entirely on hosted multi-tenant
+            deployments, where "this machine" has no single owner.
+
+            Args:
+                printer_model: Printer identifier (e.g. ``"ender3"``).
+                variant_id: Variant to declare, from ``list_printer_variants``.
+                    Pass ``""`` to go back to the as-shipped profile.
+            """
+            if err := _srv._check_auth("safety"):
+                return err
+            try:
+                from kiln.safety_profiles import list_printer_variants as _list
+                from kiln.safety_profiles import select_printer_variant as _select
+
+                result = _select(printer_model, variant_id or None)
+                if result.get("variant"):
+                    spec = _list(printer_model)["variants"].get(result["variant"], {})
+                    result["requires"] = spec.get("requires", [])
+                    result["source"] = spec.get("source")
+                return {"success": True, **result}
+            except ValueError as exc:
+                return _srv._error_dict(str(exc), code="VALIDATION_ERROR")
+            except Exception as exc:
+                _logger.exception("Unexpected error in select_printer_variant")
+                return _srv._error_dict(
+                    f"Unexpected error in select_printer_variant: {exc}",
                     code="INTERNAL_ERROR",
                 )
 

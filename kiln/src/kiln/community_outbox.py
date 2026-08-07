@@ -606,6 +606,33 @@ def canonical_printer_model(model: str | None) -> str:
     ``"Bambu A1"`` → ``"bambu_a1"``; a slug already in canonical form
     passes through unchanged; empty/None → ``"unknown"`` (matching the
     door's existing fallback).
+
+    MODIFIED MACHINES: THIS STRING IS NOT A COMPLETE BUCKET KEY.
+    -----------------------------------------------------------
+    A printer model names hardware AS SHIPPED.  Operators replace hotends,
+    and ``kiln.safety_profiles`` now records that structurally: a curated
+    profile carries ``variants``, and an operator declares which one they own
+    (``select_printer_variant``).  An Ender 3 with an E3D Revo CR fitted is
+    rated 300 C; a stock one is 260 C, because its PTFE liner off-gasses
+    above that.  Same model string, two different machines.
+
+    So if printer intelligence is ever federated or aggregated here:
+
+    1. **Key on (model, variant), never model alone.**  ``canonical_printer_model``
+       supplies the first half only.
+    2. **A machine whose variant is UNDECLARED contributes to NOTHING** — not
+       to the base bucket, not to a catch-all.  Undeclared is not a synonym
+       for stock; it means unknown, and a modified machine that quietly lands
+       in the base pool teaches every stock owner of that model a number their
+       hardware cannot survive.
+    3. **The (model, variant) bucket must exist before any data does.**  Do not
+       mint it on first write, or the first contributor defines the cohort.
+
+    Nothing federates variants today, and the declaration is deliberately
+    local-only: ``~/.kiln/local_printer_overrides.json`` is one person's disk
+    and is not even read on the hosted multi-tenant deploy.  This note exists
+    because that is a decision, not an accident, and the next person to wire a
+    printer-intelligence rail will arrive at this function first.
     """
     import re as _re
 
