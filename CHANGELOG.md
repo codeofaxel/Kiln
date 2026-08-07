@@ -7,6 +7,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Paint a model by its own surfaces.** Ask Kiln to colour a part of a model —
+  the handle, the lid, the base — and it finds the model's natural surfaces,
+  shows you which is which, and paints the ones you choose. Out comes a
+  printable 3MF your slicer reads natively, with a suggested filament slot per
+  colour. Works on models you made, CAD you brought in, or a mesh you
+  downloaded.
+
 - **Report a problem and Kiln sends the evidence with it.** Bug reports now
   include the tail of Kiln's activity log, so we can see what actually broke
   instead of guessing from a description. Only when you report something,
@@ -47,6 +54,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **A crash in the 3D geometry engine now leaves a record.** OpenSCAD
   failures showed you an error and wrote nothing down, so a bug report
   carried no trace of what actually broke.
+
+- **Previews now put every colour where it belongs.** On a plate with several
+  parts, one part's colour could bleed across another in the picture. The model
+  was always correct; the preview wasn't.
 
 - **Printing several copies in different colors now works.** Each copy gets
   its own spot on the bed — they used to all be placed in the same place.

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-04T09:32:04.252760+00:00",
+  "generated": "2026-08-07T20:27:42.265596+00:00",
   "tool_count": 410,
   "categories": {
     "product_generators": {
@@ -2474,7 +2474,7 @@
     },
     {
       "name": "paint_mesh_regions",
-      "description": "Paint mesh regions by id and write a painted 3MF.\n\nFree tier: 3 painted models/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Paint mesh regions by id and write a painted 3MF.",
       "tier": "free",
       "category": "decoration",
       "parameters": {
@@ -2544,12 +2544,6 @@
         ],
         "title": "paint_mesh_regionsArguments",
         "type": "object"
-      },
-      "quota": {
-        "bucket": "decoration",
-        "limit": 3,
-        "noun": "painted models",
-        "period": "month"
       }
     },
     {
