@@ -518,6 +518,34 @@ class TestDesignLibraryIsPerMachine:
         monkeypatch.delenv("KILN_HOSTED_MULTITENANT", raising=False)
         assert _ensure_design_dir("my-mug-v3").endswith("my-mug-v3")
 
+    def test_the_refusal_is_typed_and_word_for_word(self, monkeypatch, tmp_path):
+        """The refusal carries a TYPE, and the sentence itself is pinned.
+
+        The type is what lets each tool catch the refusal explicitly before
+        its generic handler — without it, "the refusal reaches the caller"
+        depends on every broad handler happening to return ``str(exc)``
+        verbatim, which nothing enforced.  It stays a ``ValueError``
+        subclass so the tools' existing envelope handling is unchanged.
+
+        The sentence is asserted byte-for-byte because it is user-facing
+        copy that names where the tool DOES work; a reword that drops that
+        half turns a helpful refusal into "Kiln is broken."
+        """
+        from kiln.errors import HostedUnavailableError
+        from kiln.plugins.version_tools import _designs_root
+
+        monkeypatch.setattr("kiln.plugins.version_tools._DESIGNS_ROOT", str(tmp_path))
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        with pytest.raises(HostedUnavailableError) as excinfo:
+            _designs_root()
+        assert isinstance(excinfo.value, ValueError)
+        assert str(excinfo.value) == (
+            "Your design library is not available on the hosted Kiln API: "
+            "it lives on the machine that made the designs, and this server "
+            "keeps no per-account copy of it. Run this from your local Kiln "
+            "install or the CLI, where your files are."
+        )
+
     def test_search_does_not_read_a_shared_library(self, monkeypatch, tmp_path):
         """The read side, which is worse than the write side.
 

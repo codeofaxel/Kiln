@@ -18,6 +18,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kiln.errors import HostedUnavailableError
+
 _logger = logging.getLogger(__name__)
 
 _DESIGNS_ROOT = "~/.kiln/designs"
@@ -47,17 +49,20 @@ def _designs_root() -> str:
     so on a shared box it answers one customer with another's design names,
     prompts and notes.
 
-    Raises ``ValueError`` deliberately — every tool in this module already
-    funnels exceptions into its ``{"ok": False, "error": ...}`` envelope, so
-    the refusal reaches the caller as a stated reason instead of a stack
-    trace, without a single per-tool branch.
+    Raises ``HostedUnavailableError`` — a ``ValueError`` subclass, so every
+    tool's existing envelope handling still shapes it into ``{"ok": False,
+    "error": ...}``, and a TYPE, so each tool catches it explicitly before
+    its generic handler.  A bare ``ValueError`` reached the caller too, but
+    only because every broad handler happened to return ``str(exc)``
+    verbatim; nothing enforced that, and a refusal downgraded to an
+    ordinary failure is the silence this resolver exists to remove.
     """
     import os
 
     from kiln.runtime_env import is_hosted_multitenant
 
     if is_hosted_multitenant():
-        raise ValueError(_HOSTED_REFUSAL)
+        raise HostedUnavailableError(_HOSTED_REFUSAL)
     return os.path.expanduser(_DESIGNS_ROOT)
 
 
@@ -341,6 +346,8 @@ class _VersionToolsPlugin:
                     )
                 except ImportError:
                     return result
+            except HostedUnavailableError as exc:
+                return {"ok": False, "error": str(exc)}
             except Exception as exc:
                 _logger.exception("save_design_version failed")
                 return {"ok": False, "error": str(exc)}
@@ -369,6 +376,8 @@ class _VersionToolsPlugin:
                     "count": len(versions),
                     "versions": versions,
                 }
+            except HostedUnavailableError as exc:
+                return {"ok": False, "error": str(exc)}
             except Exception as exc:
                 _logger.exception("list_design_versions failed")
                 return {"ok": False, "error": str(exc)}
@@ -413,6 +422,8 @@ class _VersionToolsPlugin:
                     )
                 )
                 return {"ok": True, "diff": "".join(diff_lines)}
+            except HostedUnavailableError as exc:
+                return {"ok": False, "error": str(exc)}
             except ValueError as exc:
                 return {"ok": False, "error": str(exc)}
             except Exception as exc:
@@ -500,6 +511,8 @@ class _VersionToolsPlugin:
                     )
                 except ImportError:
                     return result
+            except HostedUnavailableError as exc:
+                return {"ok": False, "error": str(exc)}
             except ValueError as exc:
                 return {"ok": False, "error": str(exc)}
             except Exception as exc:
@@ -545,6 +558,8 @@ class _VersionToolsPlugin:
                         "provenance": recipe.provenance,
                     },
                 }
+            except HostedUnavailableError as exc:
+                return {"ok": False, "error": str(exc)}
             except ValueError as exc:
                 return {"ok": False, "error": str(exc)}
             except Exception as exc:
@@ -632,6 +647,8 @@ class _VersionToolsPlugin:
                     "count": len(matches),
                     "versions": matches,
                 }
+            except HostedUnavailableError as exc:
+                return {"ok": False, "error": str(exc)}
             except Exception as exc:
                 _logger.exception("search_design_versions failed")
                 return {"ok": False, "error": str(exc)}

@@ -484,7 +484,6 @@ _HEATER_TIMEOUT_MIN: float = parse_float_env("KILN_HEATER_TIMEOUT", 30.0)
 
 # Default snapshot directory — use ~/.kiln/snapshots/ instead of /tmp to
 # avoid macOS periodic /tmp cleanup deleting saved snapshots.
-_DEFAULT_SNAPSHOT_DIR = os.path.join(os.path.expanduser("~"), ".kiln", "snapshots")
 
 
 def _key_fingerprint(key: str) -> str:

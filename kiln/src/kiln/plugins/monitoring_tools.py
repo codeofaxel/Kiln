@@ -21,13 +21,71 @@ import secrets
 import tempfile
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
+from kiln.errors import HostedUnavailableError
 from kiln.events import EventType
 from kiln.tool_results import unwrap_tool_result
 
 _logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Timelapse frame store — ~/.kiln/timelapses/<watch_id>/
+# ---------------------------------------------------------------------------
+
+_TIMELAPSES_ROOT = "~/.kiln/timelapses"
+
+#: Said when frames cannot be saved from here.  A refusal that does not name
+#: where the thing DOES work reads as Kiln being broken.
+_HOSTED_REFUSAL = (
+    "Timelapse frames are not saved on the hosted Kiln API: they are "
+    "captured by the machine that watches your printer, and this server "
+    "keeps no per-account copy of them. Run this from your local Kiln "
+    "install, where the camera and the frames are."
+)
+
+
+def _timelapse_root() -> str:
+    """The timelapse-frame root — the one place this module resolves it.
+
+    Refuses on the hosted multi-tenant deploy.  Frames are photographs of
+    one caller's printer and parts, and the hosted server runs ONE
+    ``~/.kiln`` for every customer with no persistent volume: whatever
+    landed there would sit on a disk shared with every other tenant until
+    the next deploy discarded it.  Watching a print stays ungated — only
+    saving frames to this box refuses.
+
+    Raises :class:`~kiln.errors.HostedUnavailableError` so ``watch_print``
+    catches it explicitly and the refusal reaches the caller as a stated
+    reason, not an "unexpected error".
+    """
+    from kiln.runtime_env import is_hosted_multitenant
+
+    if is_hosted_multitenant():
+        raise HostedUnavailableError(_HOSTED_REFUSAL)
+    return os.path.expanduser(_TIMELAPSES_ROOT)
+
+
+def _timelapse_dir(watch_id: str) -> str:
+    """Return the frames directory for *watch_id*, inside the root.
+
+    ``watch_id`` is server-generated today (``secrets.token_hex``), but
+    this resolver must not depend on that staying true — a caller-supplied
+    id would otherwise select a directory outside the library.  Same
+    resolved-path comparison as the design library: the resolved parent is
+    the property actually wanted, and it holds for spellings a blocklist
+    misses, for symlinks, and for macOS's /var aliasing.
+    """
+    root = _timelapse_root()
+    if not isinstance(watch_id, str) or not watch_id.strip():
+        raise ValueError("watch_id must be a non-empty name")
+    real_root = os.path.realpath(root)
+    target = os.path.realpath(os.path.join(real_root, watch_id))
+    if os.path.dirname(target) != real_root or target == real_root:
+        raise ValueError(
+            f"watch_id must be a simple name, not a path: {watch_id!r}"
+        )
+    return target
 
 # ---------------------------------------------------------------------------
 # Phase hints — guidance shown to agents during snapshot-based monitoring
@@ -93,6 +151,7 @@ class _PrintWatcher:
         event_bus: Any | None = None,
         stall_timeout: int = 600,
         save_to_disk: bool = False,
+        save_dir: str | None = None,
         cancel_at_percent: float = 0.0,
     ) -> None:
         self._watch_id = watch_id
@@ -124,7 +183,10 @@ class _PrintWatcher:
         self._consecutive_static_frames: int = 0
         self._save_dir: str | None = None
         if self._save_to_disk:
-            self._save_dir = os.path.join(str(Path.home()), ".kiln", "timelapses", watch_id)
+            # The caller (watch_print) resolves the directory up front so the
+            # hosted refusal fires before a thread starts; resolving here too
+            # keeps any direct constructor use behind the same guard.
+            self._save_dir = save_dir or _timelapse_dir(watch_id)
 
     # -- public API --------------------------------------------------------
 
@@ -959,6 +1021,11 @@ class _MonitoringToolsPlugin:
                     }
 
                 watch_id = secrets.token_hex(6)
+                # Resolve the frames directory BEFORE the watcher exists:
+                # on the hosted multi-tenant deploy this refuses (frames are
+                # one caller's photographs, and this box is shared), and the
+                # refusal must land before a thread starts, not inside one.
+                save_dir = _timelapse_dir(watch_id) if save_to_disk else None
                 watcher = _PrintWatcher(
                     watch_id,
                     adapter,
@@ -970,6 +1037,7 @@ class _MonitoringToolsPlugin:
                     event_bus=_srv._get_event_bus(),
                     stall_timeout=stall_timeout,
                     save_to_disk=save_to_disk,
+                    save_dir=save_dir,
                     cancel_at_percent=cancel_at_percent,
                 )
                 _srv._watchers[watch_id] = watcher
@@ -1005,6 +1073,10 @@ class _MonitoringToolsPlugin:
                 return _srv._error_dict(
                     f"Failed to start print watcher: {exc}. Check that the printer is online."
                 )
+            except HostedUnavailableError as exc:
+                # The frames-store refusal, verbatim — not an "unexpected
+                # error": it tells the caller where saving frames DOES work.
+                return _srv._error_dict(str(exc), code="HOSTED_UNAVAILABLE")
             except Exception as exc:
                 _logger.exception("Unexpected error in watch_print")
                 return _srv._error_dict(
