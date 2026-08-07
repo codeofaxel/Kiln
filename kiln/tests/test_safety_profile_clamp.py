@@ -148,6 +148,39 @@ class TestTheFuzzyDoorClampsToo:
         community({**_BASE, "max_hotend_temp": 200.0})
         assert sp.get_profile("ender3_custom_build").max_hotend_temp == 200.0
 
+    def test_a_community_key_with_no_curated_twin_clamps_to_the_real_match(self):
+        """The second-order version of the same mistake, found on review.
+
+        Clamping against the curated entry filed under the COMMUNITY's key
+        means a community key nothing curated shares — ``"ender"`` — clamps
+        against nothing.  It would then satisfy a request for
+        ``"ender3_pro_custom"`` at 500 C while curated ``"ender3"``, the
+        profile that request actually resolves to, sat right there saying 260.
+        Both the lookup and the clamp now ask _curated_match.
+        """
+        path = sp._COMMUNITY_FILE
+        path.write_text(
+            json.dumps({"ender": {**_BASE, "max_hotend_temp": 500.0}}),
+            encoding="utf-8",
+        )
+        sp._community_loaded = False
+        sp._community_cache.clear()
+        assert "ender" not in sp._cache, "the premise: no curated twin"
+        got = sp.get_profile("ender3_pro_custom")
+        assert got.max_hotend_temp == sp._cache["ender3"].max_hotend_temp
+
+    def test_a_short_community_key_cannot_become_a_wildcard(self):
+        """A one-letter key prefix-matches almost everything.  It must still be
+        measured against whatever the request really resolves to."""
+        path = sp._COMMUNITY_FILE
+        path.write_text(
+            json.dumps({"e": {**_BASE, "max_hotend_temp": 500.0}}),
+            encoding="utf-8",
+        )
+        sp._community_loaded = False
+        sp._community_cache.clear()
+        assert sp.get_profile("ender3").max_hotend_temp <= 260.0
+
 
 class TestClampSettingsToProfile:
     """The read-side twin: a number produced DOWNSTREAM of a limit — a
@@ -205,3 +238,17 @@ class TestClampSettingsToProfile:
         community({**_BASE, "max_hotend_temp": 300.0, "hardware_modified": True})
         held = sp.clamp_settings_to_profile({"temp_tool": 290.0}, "ender3")
         assert held.settings["temp_tool"] == 290.0
+
+    def test_a_hardware_declaration_does_not_travel_to_the_shared_server(
+        self, community, monkeypatch
+    ):
+        """A declaration is a statement about ONE person's machine.  The hosted
+        process serves everybody, so it must not take that path — the community
+        overlay is not loaded there at all, and the clamp inherits that too."""
+        community({**_BASE, "max_hotend_temp": 300.0, "hardware_modified": True})
+        monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+        sp._community_loaded = False
+        sp._community_cache.clear()
+        held = sp.clamp_settings_to_profile({"temp_tool": 290.0}, "ender3")
+        assert held.settings["temp_tool"] == sp._cache["ender3"].max_hotend_temp
+        assert held.clamped

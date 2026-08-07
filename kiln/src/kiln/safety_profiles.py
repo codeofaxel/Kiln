@@ -294,6 +294,29 @@ def _clamp_to_curated(
     return _dc_replace(community, **replacements)
 
 
+def _curated_match(candidates: list[str]) -> SafetyProfile | None:
+    """The curated profile these candidates resolve to, exact then fuzzy.
+
+    The one answer to "what does the bundled database say about this machine",
+    used both to ANSWER a lookup and to clamp a community entry against.  They
+    have to be the same answer: clamping against the curated entry filed under
+    the COMMUNITY's key instead meant a community key with no curated twin
+    clamped against nothing.  A community ``"ender"`` at 500 C then satisfied a
+    request for ``"ender3_pro_custom"`` and stood unclamped, while curated
+    ``"ender3"`` — the profile that request actually resolves to — sat right
+    there saying 260.  Same prefix rule, one place.
+    """
+    for candidate in candidates:
+        profile = _cache.get(candidate)
+        if profile is not None:
+            return profile
+    for key, profile in _cache.items():
+        for candidate in candidates:
+            if candidate.startswith(key) or key.startswith(candidate):
+                return profile
+    return None
+
+
 def get_profile(printer_id: str) -> SafetyProfile:
     """Return the safety profile for *printer_id*.
 
@@ -314,34 +337,29 @@ def get_profile(printer_id: str) -> SafetyProfile:
     if normalised.startswith("creality_"):
         candidates.append(normalised.removeprefix("creality_"))
 
-    # Community profiles take precedence over bundled — but only in the
-    # SAFE direction.  See _clamp_to_curated.
+    # Community profiles take precedence over bundled — but only in the SAFE
+    # direction, and BOTH community doors go through the same clamp against
+    # the same curated answer.  See _clamp_to_curated and _curated_match.
     for candidate in candidates:
         community = _community_cache.get(candidate)
         if community is not None:
-            curated = next(
-                (_cache[c] for c in candidates if c in _cache), None
-            )
-            return _clamp_to_curated(community, curated)
+            return _clamp_to_curated(community, _curated_match(candidates))
 
     for candidate in candidates:
         profile = _cache.get(candidate)
         if profile is not None:
             return profile
 
-    # Try fuzzy prefix match (e.g. "ender-3-v2" → "ender3").  The community
-    # entry goes through the SAME clamp the exact-match branch uses: a fuzzy
-    # hit resolves to a community key that usually has a curated twin under
-    # that very key, so there is something to clamp against and skipping it
-    # would just be a second door onto the first door's bug.
+    # Try fuzzy prefix match (e.g. "ender-3-v2" → "ender3").
     for key in _community_cache:
         for candidate in candidates:
             if candidate.startswith(key) or key.startswith(candidate):
-                return _clamp_to_curated(_community_cache[key], _cache.get(key))
-    for key in _cache:
-        for candidate in candidates:
-            if candidate.startswith(key) or key.startswith(candidate):
-                return _cache[key]
+                return _clamp_to_curated(
+                    _community_cache[key], _curated_match(candidates)
+                )
+    curated = _curated_match(candidates)
+    if curated is not None:
+        return curated
 
     default = _cache.get("default")
     if default is not None:
