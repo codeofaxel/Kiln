@@ -62,6 +62,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Printing several copies in different colors now works.** Each copy gets
   its own spot on the bed — they used to all be placed in the same place.
 
+- **Print time and filament estimates now come back with real numbers for
+  anyone slicing with PrusaSlicer.** Kiln looked for the summary in the
+  wrong part of the file.
+
+- **Custom slicer settings now reach the print.** A setting you asked for —
+  thicker layers, a wider brim — was silently dropped whenever Kiln didn't
+  recognize your printer's model, and still reported as applied. On Bambu
+  that could also leave the print file itself wrong. Now fixed.
+
 ## [1.3.2] - 2026-08-01
 
 ### Added
