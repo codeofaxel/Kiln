@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-08-07T21:05:04.241048+00:00",
-  "tool_count": 409,
+  "generated": "2026-08-07T22:36:22.043795+00:00",
+  "tool_count": 408,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -2474,7 +2474,7 @@
     },
     {
       "name": "paint_mesh_regions",
-      "description": "Paint mesh regions by id and write a painted 3MF.\n\nFree tier: 3 painted models/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Paint mesh regions by id and write a painted 3MF.",
       "tier": "free",
       "category": "decoration",
       "parameters": {
@@ -2544,12 +2544,6 @@
         ],
         "title": "paint_mesh_regionsArguments",
         "type": "object"
-      },
-      "quota": {
-        "bucket": "decoration",
-        "limit": 3,
-        "noun": "painted models",
-        "period": "month"
       }
     },
     {
@@ -17458,30 +17452,6 @@
           "artifact_id"
         ],
         "title": "unassign_artifactArguments",
-        "type": "object"
-      }
-    },
-    {
-      "name": "unlink_identity",
-      "description": "Remove a ``(provider, provider_user_id)`` binding.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "category": "teams",
-      "parameters": {
-        "properties": {
-          "provider": {
-            "title": "Provider",
-            "type": "string"
-          },
-          "provider_user_id": {
-            "title": "Provider User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "provider",
-          "provider_user_id"
-        ],
-        "title": "unlink_identityArguments",
         "type": "object"
       }
     },
