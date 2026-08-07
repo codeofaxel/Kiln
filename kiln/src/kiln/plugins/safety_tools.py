@@ -442,7 +442,6 @@ class _SafetyToolsPlugin:
                 if result.get("variant"):
                     spec = _list(printer_model)["variants"].get(result["variant"], {})
                     result["requires"] = spec.get("requires", [])
-                    result["source"] = spec.get("source")
                 return {"success": True, **result}
             except ValueError as exc:
                 return _srv._error_dict(str(exc), code="VALIDATION_ERROR")

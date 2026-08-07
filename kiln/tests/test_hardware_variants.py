@@ -49,7 +49,7 @@ def local_store(monkeypatch):
 # A profile that really carries a curated variant, so the tests below are
 # pinned to shipped data rather than to a fixture that could drift from it.
 _PRINTER = "ender3"
-_VARIANT = "e3d_revo_cr"
+_VARIANT = "e3d_revo_cr_reflashed"
 
 
 class TestSelectionResolvesToTheCuratedNumber:
@@ -93,19 +93,46 @@ class TestSelectionResolvesToTheCuratedNumber:
         sp.select_printer_variant(_PRINTER, None)
         assert sp.get_profile(_PRINTER).max_hotend_temp == base
 
-    def test_every_shipped_variant_resolves_and_is_cited(self):
-        """No variant ships without a source — the rule this data lives under."""
+    def test_every_shipped_variant_states_its_preconditions(self):
+        """A variant ships its REQUIREMENTS, never its sourcing.
+
+        A raised ceiling is only true if the operator has done what it
+        assumes, so the preconditions have to travel with the number.  The
+        research behind the number does not: that is recorded privately, and
+        a sourcing field in the public file is a leak rather than diligence.
+        """
         sp._load()
         assert sp._variant_data, "expected at least one curated variant"
         for pid, variants in sp._variant_data.items():
             for vid, spec in variants.items():
-                assert spec.get("source"), f"{pid}/{vid} has no source"
-                assert spec.get("source_kind"), f"{pid}/{vid} has no source_kind"
-                assert spec.get("verified"), f"{pid}/{vid} has no verified date"
                 assert spec.get("requires"), f"{pid}/{vid} states no preconditions"
                 resolved = sp.get_profile(pid, variant=vid)
                 assert resolved.variant == vid
                 assert 0 < resolved.max_hotend_temp <= sp._MAX_TEMP_CEILING
+
+    def test_no_variant_carries_sourcing_into_public_data(self):
+        """The leak guard, as a test rather than a good intention.
+
+        Sourcing was added to this file on 2026-08-07 and removed the same
+        day: a curated list of which vendors publish what is hand-collected
+        research, and it does not belong in a public repo.  The public
+        SME-table gate did not catch it because it was prose in a data file
+        rather than a compiled table, so the check lives here too.
+        """
+        import json as _json
+
+        raw = _json.loads(sp._DATA_FILE.read_text(encoding="utf-8"))
+        banned = ("source", "source_kind", "verified", "url", "citation")
+        for pid, prof in raw.items():
+            if pid.startswith("_"):
+                continue
+            for vid, spec in (prof.get("variants") or {}).items():
+                leaked = sorted(set(spec) & set(banned))
+                assert not leaked, f"{pid}/{vid} carries sourcing fields: {leaked}"
+                blob = _json.dumps(spec)
+                assert "http://" not in blob and "https://" not in blob, (
+                    f"{pid}/{vid} carries a source URL"
+                )
 
 
 class TestAnUndeclaredMachineGetsTheConservativeNumber:
@@ -156,8 +183,8 @@ class TestAnUndeclaredMachineGetsTheConservativeNumber:
         owner's upgrade is fitted to a machine they do not own, and the vendor
         compatibility lists explicitly exclude the later CR-10 revisions.
         """
-        sp.select_printer_variant("cr10", "e3d_revo_cr")
-        assert sp.get_profile("cr10").variant == "e3d_revo_cr"
+        sp.select_printer_variant("cr10", "e3d_revo_cr_reflashed")
+        assert sp.get_profile("cr10").variant == "e3d_revo_cr_reflashed"
 
         # Relatives with no curated profile of their own reach ``cr10`` by
         # prefix match.  They get its conservative BASE ceiling and none of
@@ -317,7 +344,9 @@ class TestListingVariants:
         assert _VARIANT in out["variants"]
         entry = out["variants"][_VARIANT]
         assert entry["max_hotend_temp"] > out["as_shipped"]["max_hotend_temp"]
-        assert entry["requires"] and entry["source"]
+        assert entry["requires"]
+        # Preconditions reach the operator; sourcing never does.
+        assert "source" not in entry and "verified" not in entry
 
     def test_listing_reflects_the_current_selection(self, local_store):
         sp.select_printer_variant(_PRINTER, _VARIANT)

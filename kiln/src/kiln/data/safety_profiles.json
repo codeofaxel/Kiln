@@ -27,21 +27,18 @@
       220,
       250
     ],
-    "notes": "PTFE-lined hotend by default - exceeding 240C risks toxic fumes. A generic 'all-metal upgrade' does NOT raise this: no vendor publishes a defensible figure for the Micro Swiss Ender 3/CR-10 kit, the Creality Spider, the E3D V6 or the Phaetus Dragon on this machine. The one upgrade that verifies is the E3D Revo CR - see variants.",
+    "notes": "PTFE-lined hotend by default - exceeding 240C risks toxic fumes. A generic 'all-metal upgrade' does NOT raise this ceiling. Only a curated variant does; see variants.",
     "variants": {
-      "e3d_revo_cr": {
-        "display_name": "Creality Ender 3 / Pro / V2 + E3D Revo CR",
-        "description": "PTFE-lined stock hotend replaced with an E3D Revo CR, which E3D rates as a complete assembly at 300 C.",
+      "e3d_revo_cr_reflashed": {
+        "display_name": "Creality Ender 3 / Pro / V2 + E3D Revo CR (firmware reflashed)",
+        "description": "PTFE-lined stock hotend replaced with an E3D Revo CR AND the firmware reflashed to allow the higher target. Both are required; the part alone does not raise what the machine will accept.",
         "max_hotend_temp": 300.0,
         "requires": [
-          "An E3D Revo CR is actually fitted. This ceiling is NOT transferable to a generic all-metal swap: Micro Swiss, Creality Spider, E3D V6 and Phaetus Dragon were each checked and none publishes a defensible figure for this machine. Revo CR qualifies because E3D rates the whole hot path - heater, thermistor, heat break and nozzle ship together.",
-          "Firmware reflashed with HEATER_0_MAXTEMP >= 315. Creality's stock Marlin ships 275 and its M104/M109 path does not clamp the target at all, so an unreflashed machine accepts 300, heats toward it, and MAXTEMP-kills mid-print around 275. E3D's 'no firmware changes required' refers to drop-in INSTALLATION at stock temperatures, not to reaching 300 C.",
-          "The Revo core voltage matches the printer's supply. E3D publishes both 12 V and 24 V and does not map printer to voltage; a 12 V core on a 24 V rail dissipates roughly four times its rated power."
+          "FIRMWARE MUST BE REFLASHED FIRST, to HEATER_0_MAXTEMP >= 315. The part's own documentation says no firmware change is needed - that is true for FITTING it at stock temperatures, and it does NOT make 300C reachable. Creality's stock firmware caps the settable target well below 300, so without the reflash this machine will fault mid-print. Do the reflash, or do not select this variant.",
+          "An E3D Revo CR is actually fitted. This ceiling belongs to that specific part - its heater, thermistor, heat break and nozzle are rated together as one assembly - and is not transferable to any other all-metal hotend.",
+          "The Revo core matches this machine's 24V supply (Creality's own bill of materials specifies a 24V 40W heater)."
         ],
-        "notes": "300 C is the last calibrated row in Creality's Marlin thermistor table, so there is no calibrated margin above it - readings past 300 are a linear extrapolation off a nonlinear NTC curve.",
-        "source": "https://e3d-online.com/pages/revo-support-revo-creality",
-        "source_kind": "manufacturer support/spec page",
-        "verified": "2026-08-07"
+        "notes": "300 C is the last calibrated row in Creality's Marlin thermistor table, so there is no calibrated margin above it - readings past 300 are a linear extrapolation off a nonlinear NTC curve."
       }
     }
   },
@@ -69,10 +66,7 @@
           "HARDWARE FIRST, FIRMWARE SECOND. Creality's own instruction says to flash Ender-3 S1 Pro firmware with no stated ordering; flashing before fitting the titanium throat leaves 305 C settable on a PTFE-lined heat break, which is the exact melt this ceiling exists to prevent.",
           "Reflashed to Ender-3 S1 Pro firmware. Stock S1 firmware is HEATER_0_MAXTEMP 275 with HOTEND_OVERSHOOT 15, capping the machine at 260 C however good the hardware is."
         ],
-        "notes": "Creality's wording is 'supports the high temperature printing under 300', and above 300 C the silicone sock has to come off. Treat 300 as a boundary, not a midpoint.",
-        "source": "https://www.creality3dofficial.com/products/heating-block-kit",
-        "source_kind": "manufacturer product page",
-        "verified": "2026-08-07"
+        "notes": "Creality's wording is 'supports the high temperature printing under 300', and above 300C the silicone sock has to come off. Treat 300 as a boundary, not a midpoint."
       }
     }
   },
@@ -89,21 +83,18 @@
       220,
       300
     ],
-    "notes": "Standard Ender 5 dimensions (220x220x300). Ender 5 Plus users should create a custom profile with 350x350x400. PTFE hotend - same hotend caution as Ender 3; see variants for the one verified upgrade.",
+    "notes": "Standard Ender 5 dimensions (220x220x300). Ender 5 Plus users should create a custom profile with 350x350x400. PTFE hotend - same hotend caution as Ender 3; see variants.",
     "variants": {
-      "e3d_revo_cr": {
-        "display_name": "Creality Ender 5 / Pro / Plus + E3D Revo CR",
-        "description": "PTFE-lined stock hotend replaced with an E3D Revo CR, which E3D rates as a complete assembly at 300 C.",
+      "e3d_revo_cr_reflashed": {
+        "display_name": "Creality Ender 5 / Pro / Plus + E3D Revo CR (firmware reflashed)",
+        "description": "PTFE-lined stock hotend replaced with an E3D Revo CR AND the firmware reflashed to allow the higher target. Both are required; the part alone does not raise what the machine will accept.",
         "max_hotend_temp": 300.0,
         "requires": [
-          "An E3D Revo CR is actually fitted. This ceiling is NOT transferable to a generic all-metal swap: Micro Swiss, Creality Spider, E3D V6 and Phaetus Dragon were each checked and none publishes a defensible figure for this machine. Revo CR qualifies because E3D rates the whole hot path - heater, thermistor, heat break and nozzle ship together.",
-          "Firmware reflashed with HEATER_0_MAXTEMP >= 315. Creality's stock Marlin ships 275 and its M104/M109 path does not clamp the target at all, so an unreflashed machine accepts 300, heats toward it, and MAXTEMP-kills mid-print around 275. E3D's 'no firmware changes required' refers to drop-in INSTALLATION at stock temperatures, not to reaching 300 C.",
-          "The Revo core voltage matches the printer's supply. E3D publishes both 12 V and 24 V and does not map printer to voltage; a 12 V core on a 24 V rail dissipates roughly four times its rated power."
+          "FIRMWARE MUST BE REFLASHED FIRST, to HEATER_0_MAXTEMP >= 315. The part's own documentation says no firmware change is needed - that is true for FITTING it at stock temperatures, and it does NOT make 300C reachable. Creality's stock firmware caps the settable target well below 300, so without the reflash this machine will fault mid-print. Do the reflash, or do not select this variant.",
+          "An E3D Revo CR is actually fitted. This ceiling belongs to that specific part - its heater, thermistor, heat break and nozzle are rated together as one assembly - and is not transferable to any other all-metal hotend.",
+          "The Revo core voltage matches the printer's supply. Verify it on the machine: E3D ships 12V and 24V cores and does not map printer to voltage, and Creality publishes no bill of materials for this model."
         ],
-        "notes": "300 C is the last calibrated row in Creality's Marlin thermistor table, so there is no calibrated margin above it - readings past 300 are a linear extrapolation off a nonlinear NTC curve.",
-        "source": "https://e3d-online.com/pages/revo-support-revo-creality",
-        "source_kind": "manufacturer support/spec page",
-        "verified": "2026-08-07"
+        "notes": "300 C is the last calibrated row in Creality's Marlin thermistor table, so there is no calibrated margin above it - readings past 300 are a linear extrapolation off a nonlinear NTC curve."
       }
     }
   },
@@ -122,19 +113,16 @@
     ],
     "notes": "PTFE hotend. Large build volume. Covers the original CR-10 family (CR-10, CR-10S, S4, S5, Mini). The CR-10 V2, V3, Max, Smart, Smart Pro and SE are different machines with different hotends and are NOT covered by the variant here.",
     "variants": {
-      "e3d_revo_cr": {
-        "display_name": "Creality CR-10 + E3D Revo CR",
-        "description": "PTFE-lined stock hotend replaced with an E3D Revo CR, which E3D rates as a complete assembly at 300 C.",
+      "e3d_revo_cr_reflashed": {
+        "display_name": "Creality CR-10 + E3D Revo CR (firmware reflashed)",
+        "description": "PTFE-lined stock hotend replaced with an E3D Revo CR AND the firmware reflashed to allow the higher target. Both are required; the part alone does not raise what the machine will accept.",
         "max_hotend_temp": 300.0,
         "requires": [
-          "An E3D Revo CR is actually fitted. This ceiling is NOT transferable to a generic all-metal swap: Micro Swiss, Creality Spider, E3D V6 and Phaetus Dragon were each checked and none publishes a defensible figure for this machine. Revo CR qualifies because E3D rates the whole hot path - heater, thermistor, heat break and nozzle ship together.",
-          "Firmware reflashed with HEATER_0_MAXTEMP >= 315. Creality's stock Marlin ships 275 and its M104/M109 path does not clamp the target at all, so an unreflashed machine accepts 300, heats toward it, and MAXTEMP-kills mid-print around 275. E3D's 'no firmware changes required' refers to drop-in INSTALLATION at stock temperatures, not to reaching 300 C.",
-          "The Revo core voltage matches the printer's supply. E3D publishes both 12 V and 24 V and does not map printer to voltage; a 12 V core on a 24 V rail dissipates roughly four times its rated power."
+          "FIRMWARE MUST BE REFLASHED FIRST, to HEATER_0_MAXTEMP >= 315. The part's own documentation says no firmware change is needed - that is true for FITTING it at stock temperatures, and it does NOT make 300C reachable. Creality's stock firmware caps the settable target well below 300, so without the reflash this machine will fault mid-print. Do the reflash, or do not select this variant.",
+          "An E3D Revo CR is actually fitted. This ceiling belongs to that specific part - its heater, thermistor, heat break and nozzle are rated together as one assembly - and is not transferable to any other all-metal hotend.",
+          "THIS MACHINE IS 12V. Creality's own bill of materials specifies a 12V 40W heater and a 12V 30A supply, unlike the 24V Ender-3. Fit the 12V Revo core: a 12V cartridge on a 24V rail dissipates roughly 160W against a 40W rating. Verified for the ORIGINAL CR-10 family (CR-10, CR-10S, S4, S5, Mini) only - the V2, V3, Max, Smart and SE are different machines and this was not checked for them."
         ],
-        "notes": "300 C is the last calibrated row in Creality's Marlin thermistor table, so there is no calibrated margin above it - readings past 300 are a linear extrapolation off a nonlinear NTC curve.",
-        "source": "https://e3d-online.com/pages/revo-support-revo-creality",
-        "source_kind": "manufacturer support/spec page",
-        "verified": "2026-08-07"
+        "notes": "300 C is the last calibrated row in Creality's Marlin thermistor table, so there is no calibrated margin above it - readings past 300 are a linear extrapolation off a nonlinear NTC curve."
       }
     }
   },
@@ -151,21 +139,18 @@
       220,
       250
     ],
-    "notes": "Ender 3 V2 dimensions. Stock PTFE-lined hotend; the E3D Revo CR is the one upgrade with a defensible published ceiling - see variants.",
+    "notes": "Ender 3 V2 dimensions. Stock PTFE-lined hotend. A generic all-metal upgrade does not raise this ceiling; see variants.",
     "variants": {
-      "e3d_revo_cr": {
-        "display_name": "Creality Ender 3 V2 + E3D Revo CR",
-        "description": "PTFE-lined stock hotend replaced with an E3D Revo CR, which E3D rates as a complete assembly at 300 C.",
+      "e3d_revo_cr_reflashed": {
+        "display_name": "Creality Ender 3 V2 + E3D Revo CR (firmware reflashed)",
+        "description": "PTFE-lined stock hotend replaced with an E3D Revo CR AND the firmware reflashed to allow the higher target. Both are required; the part alone does not raise what the machine will accept.",
         "max_hotend_temp": 300.0,
         "requires": [
-          "An E3D Revo CR is actually fitted. This ceiling is NOT transferable to a generic all-metal swap: Micro Swiss, Creality Spider, E3D V6 and Phaetus Dragon were each checked and none publishes a defensible figure for this machine. Revo CR qualifies because E3D rates the whole hot path - heater, thermistor, heat break and nozzle ship together.",
-          "Firmware reflashed with HEATER_0_MAXTEMP >= 315. Creality's stock Marlin ships 275 and its M104/M109 path does not clamp the target at all, so an unreflashed machine accepts 300, heats toward it, and MAXTEMP-kills mid-print around 275. E3D's 'no firmware changes required' refers to drop-in INSTALLATION at stock temperatures, not to reaching 300 C.",
-          "The Revo core voltage matches the printer's supply. E3D publishes both 12 V and 24 V and does not map printer to voltage; a 12 V core on a 24 V rail dissipates roughly four times its rated power."
+          "FIRMWARE MUST BE REFLASHED FIRST, to HEATER_0_MAXTEMP >= 315. The part's own documentation says no firmware change is needed - that is true for FITTING it at stock temperatures, and it does NOT make 300C reachable. Creality's stock firmware caps the settable target well below 300, so without the reflash this machine will fault mid-print. Do the reflash, or do not select this variant.",
+          "An E3D Revo CR is actually fitted. This ceiling belongs to that specific part - its heater, thermistor, heat break and nozzle are rated together as one assembly - and is not transferable to any other all-metal hotend.",
+          "The Revo core matches this machine's 24V supply (Creality's own bill of materials specifies a 24V 40W heater)."
         ],
-        "notes": "300 C is the last calibrated row in Creality's Marlin thermistor table, so there is no calibrated margin above it - readings past 300 are a linear extrapolation off a nonlinear NTC curve.",
-        "source": "https://e3d-online.com/pages/revo-support-revo-creality",
-        "source_kind": "manufacturer support/spec page",
-        "verified": "2026-08-07"
+        "notes": "300 C is the last calibrated row in Creality's Marlin thermistor table, so there is no calibrated margin above it - readings past 300 are a linear extrapolation off a nonlinear NTC curve."
       }
     }
   },
@@ -433,26 +418,11 @@
       "max_bed_temp": "Same contract as max_hotend_temp, for the heated bed.",
       "policy_margin": "Safety MARGIN lives separately and is named: _PTFE_SAFE_MAX (240C) in server.py clamps PTFE-lined hotends below their rating, because the liner degrades before the machine does. That is what a guard band should look like — one named constant derived from a material fact, not a per-printer round number. Add new margins the same way.",
       "why_this_exists": "Until 2026-07-20 this file and the registry disagreed on 17 values. printer_intelligence had been backfilled from manufacturer specs; this file never had an equivalent pass, so it had collapsed 250/260/290-rated machines into a round 300. Nothing compared them.",
-      "variants": "OPTIONAL per-profile map of curated HARDWARE VARIANTS: {variant_id: {field: value}}. The base profile describes the printer AS SHIPPED. A variant describes the same printer after a documented, named hardware change, and restates ONLY the fields that change - everything else is inherited. This is the one place a limit may be HIGHER than the base, which is why every variant carries source/source_kind/verified and is held to the same standard as a base number. A variant is SELECTED by the operator (select_printer_variant); the number always comes from here. There is no code path from a user-supplied value into a variant.",
-      "variant_requires": "A variant's `requires` list is the set of preconditions that make its ceiling true - a specific named part, a firmware reflash, an install ordering. Selecting the variant IS the operator's attestation that these are met. Kiln cannot verify them remotely, so they must be stated plainly enough that a wrong selection is obviously wrong. Where an upgrade's ceiling could not be made conditional on its real preconditions, the correct action was to ship NO variant."
+      "variants": "OPTIONAL per-profile map of curated HARDWARE VARIANTS: {variant_id: {field: value}}. The base profile describes the printer AS SHIPPED. A variant describes the same printer after a documented, named hardware change, and restates ONLY the fields that change - everything else is inherited. This is the one place a limit may be HIGHER than the base. A variant is SELECTED by the operator (select_printer_variant); the number always comes from here. There is no code path from a user-supplied value into a variant.",
+      "variant_requires": "A variant's `requires` list is the set of preconditions that make its ceiling true - a specific named part, a firmware reflash, an install ordering, a supply voltage. Selecting the variant IS the operator's attestation that these are met; Kiln cannot verify them remotely. When a part's own documentation would lead an operator to believe a precondition is unnecessary, state the precondition FIRST and name it in the variant id, so satisfying the documentation cannot be mistaken for satisfying the requirement. Where a precondition cannot be made explicit, ship NO variant.",
+      "variant_sourcing": "Sourcing for these numbers is NOT in this file and must not be added to it - no urls, no source fields, and no prose about which vendors publish what. Each variant traces to a manufacturer primary source recorded privately; that record is the research, and the research does not ship. What ships here is the enforced value plus the preconditions an operator must have met, because both are needed to print safely. Sourcing metadata appearing in this file is a leak, not documentation."
     },
-    "variant_bucketing_rule": "IF SHARED OR AGGREGATED PRINTER INTELLIGENCE IS EVER BUILT ON TOP OF THIS DATA, READ THIS FIRST. A curated profile describes a printer as shipped; a variant describes one person's modified machine. They are different objects and must never merge into one number. (1) Any shared or aggregated printer intelligence keys on (model, variant), NEVER model alone. (2) A machine whose variant is UNDECLARED contributes to NOTHING - not to the base bucket, not to a catch-all. Undeclared is not a synonym for stock. (3) The (model, variant) bucket must exist before any data is written into it; do not create it by first write. A tweaked printer feeding the base model's pool would silently teach every stock owner of that model a number their hardware cannot survive. Existing federation rails already carry the cohort-key discipline this extends - see canonical_printer_model() in kiln/community_outbox.py.",
-    "variant_provenance_2026_08_07": {
-      "method": "Every variant here was verified against a manufacturer-owned primary source before shipping. Reseller listings, forums, Reddit, YouTube and blog reviews were excluded. Where a vendor's marketing and its own documentation disagreed, documentation won.",
-      "shipped": {
-        "ender3 / ender3_v2 / ender5 / cr10 -> e3d_revo_cr": "E3D support page, 300C, whole-assembly rating.",
-        "ender3_s1 -> creality_high_temp_block": "Creality product page, 300C, TC4 titanium throat.",
-        "ratrig_vcore3 -> pt1000_hotend": "RatRig shipping firmware (RatOS hotends/*.cfg), 350C."
-      },
-      "checked_and_deliberately_not_shipped": {
-        "generic 'all-metal upgrade' on any machine": "DOES NOT VERIFY, and the prose claiming it has been removed from ender3. 'All-metal' is not one number. The Micro Swiss kit that actually fits the Ender 3 / CR-10 publishes NO max temperature and reuses the stock thermistor and heater; E3D's own support doc puts the V6 at 285C bare and 260C with the sock fitted, against the 300C on its product page; Creality's Spider publishes 300C as marketing but no firmware for these machines; Phaetus publishes no operating temperature for any Dragon or Rapido. The previously shipping figure of 300C matched the last row of Creality's Marlin thermistor table, which is the edge of measurability, not a rating.",
-        "elegoo_neptune3": "No variant exists. Elegoo's own replacement hotend kit is still PTFE-lined and still 260C. All four Neptune 3 sub-models verified at 260C, so the single entry conflates nothing thermally.",
-        "prusa_mini": "No variant exists. Prusa's HT hotend upgrade explicitly lists the MINI and MINI+ as NOT compatible. Stock 280C verified in Prusa's own firmware, but note it is version-dependent: firmware 5.x caps at 275C, so 280 carries an implicit firmware >= 6.0.0.",
-        "voron_0 / voron_2": "No variant shipped: the one verified hotend figure (E3D Revo Voron, 300C) equals the base already here, so a variant would change nothing. SEPARATELY FLAGGED, NOT YET ACTED ON: the 300C base itself does not verify. Voron's own Klipper configs ship max_temp 270 with sensor_type deliberately left blank. Lowering an enforced ceiling is a change with its own blast radius and was left for an explicit decision rather than made silently here.",
-        "bambu_a1 / a1_mini / a2l / k1 hardened-nozzle upgrades": "Real, officially sold, and correctly OUT of this schema. Fitting a hardened nozzle changes which MATERIALS are safe (abrasives), not any numeric ceiling. Bambu's own A2L spec table puts the hardened nozzle in the filament section, not the temperature section; Creality's K1 and K1C publish identical 300C/100C across a genuine nozzle-material difference. A variant restating unchanged numbers would be schema noise implying a change that did not happen. If this axis is ever modelled it needs a three-state material gate, not a ceiling.",
-        "klipper_generic": "No variant: a generic catch-all has no manufacturer and therefore no primary source to cite."
-      }
-    }
+    "variant_bucketing_rule": "IF SHARED OR AGGREGATED PRINTER INTELLIGENCE IS EVER BUILT ON TOP OF THIS DATA, READ THIS FIRST. A curated profile describes a printer as shipped; a variant describes one person's modified machine. They are different objects and must never merge into one number. (1) Any shared or aggregated printer intelligence keys on (model, variant), NEVER model alone. (2) A machine whose variant is UNDECLARED contributes to NOTHING - not to the base bucket, not to a catch-all. Undeclared is not a synonym for stock. (3) The (model, variant) bucket must exist before any data is written into it; do not create it by first write. A tweaked printer feeding the base model's pool would silently teach every stock owner of that model a number their hardware cannot survive. Existing federation rails already carry the cohort-key discipline this extends - see canonical_printer_model() in kiln/community_outbox.py."
   },
   "prusa_mk3s": {
     "display_name": "Prusa i3 MK3S / MK3S+",
@@ -696,16 +666,13 @@
     "variants": {
       "pt1000_hotend": {
         "display_name": "RatRig V-Core 3 + PT1000-sensor hotend",
-        "description": "A hotend using a PT1000 sensor rather than the NTC thermistor most V-Core 3 builds ship with. In RatRig's own firmware the ceiling tracks the SENSOR, not the hotend brand or metal: all ten NTC hotends are 285-290 C and all three PT1000 hotends are 350 C. Covers Rapido Plus, Rapido Plus UHF and Goliath.",
+        "description": "A hotend using a PT1000 sensor rather than the NTC thermistor most V-Core 3 builds ship with. The ceiling tracks the SENSOR, not the hotend brand, metal or flow class. Covers Rapido Plus, Rapido Plus UHF and Goliath.",
         "max_hotend_temp": 350.0,
         "requires": [
           "The fitted hotend genuinely uses a PT1000 sensor. An NTC hotend is 285 C in RatRig's own configuration whatever its brand, flow class or block metal.",
           "Klipper printer.cfg declares the matching sensor_type. A PT1000 read as an NTC misreports temperature outright."
         ],
-        "notes": "E3D publishes a separate, LOWER limit that this does not lift: a hardened steel nozzle in an aluminium block is not suitable above 240 C. That is a nozzle/block pairing limit and no machine or hotend field can express it.",
-        "source": "https://github.com/Rat-OS/RatOS-configuration (branch v2.1.x, hotends/*.cfg)",
-        "source_kind": "manufacturer shipping firmware configuration",
-        "verified": "2026-08-07"
+        "notes": "This does not lift a separate, LOWER limit: a hardened steel nozzle in an aluminium block is not suitable above 240C. That is a nozzle/block pairing limit and no machine or hotend field can express it."
       }
     }
   },
@@ -992,7 +959,7 @@
       220,
       270
     ],
-    "notes": "Sprite Pro full-metal direct-drive extruder - Creality publishes 300C for this machine (verified 2026-08-07), against 260C for the base S1. Creality describes the hot end as 'full metal'; it does not publish a no-PTFE statement, so treat that as an inference rather than a spec. Open-frame bed-slinger, so ABS and ASA still warp without an enclosure."
+    "notes": "Sprite Pro full-metal direct-drive extruder, rated 300C against 260C for the base S1. Creality describes the hot end as 'full metal' and does not state that the hot zone is PTFE-free, so do not assume it. Open-frame bed-slinger, so ABS and ASA still warp without an enclosure."
   },
   "aon_hylo": {
     "display_name": "AON3D Hylo",

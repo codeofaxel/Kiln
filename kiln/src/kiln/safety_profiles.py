@@ -1162,10 +1162,8 @@ def list_printer_variants(printer_model: str) -> dict[str, Any]:
             "max_bed_temp": resolved.max_bed_temp,
             "max_chamber_temp": resolved.max_chamber_temp,
             "max_volumetric_flow": resolved.max_volumetric_flow,
+            "description": spec.get("description", ""),
             "requires": list(spec.get("requires", [])),
-            "source": spec.get("source"),
-            "source_kind": spec.get("source_kind"),
-            "verified": spec.get("verified"),
         }
 
     return {
