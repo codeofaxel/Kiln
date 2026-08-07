@@ -1,4 +1,18 @@
-"""Local fulfillment shipping profiles and confirmation tokens."""
+"""Local fulfillment shipping profiles and confirmation tokens.
+
+Saved profiles are a person's real name, street address, email and phone,
+kept in one ``~/.kiln/shipping_profiles.json`` keyed by a NAME the caller
+picks — "home", "work", "shop".  On someone's own machine that is the
+whole point.  On the hosted multi-tenant server it means two customers who
+both save a profile called "home" are writing the same record, and either
+can read the other's by asking for it by name, so :func:`_profiles_path`
+refuses there.
+
+The confirmation TOKEN is unaffected: it is issued from an explicitly
+supplied address and lives in memory under an unguessable key, so the
+hosted ordering flow keeps working — a caller passes the address on the
+call instead of naming a profile the server cannot own.
+"""
 
 from __future__ import annotations
 
@@ -161,6 +175,32 @@ def summarize_shipping_address(
 
 
 def _profiles_path() -> Path:
+    """Resolve the profile store, refusing on the hosted multi-tenant deploy.
+
+    The refusal sits on the path rather than on the four tools that read
+    and write profiles, because three of those were already blocked by
+    name on the hosted API and ``issue_shipping_confirmation_token`` — a
+    tool whose job is the token, not the store — quietly reached the same
+    file through ``shipping_profile_name`` and ``save_profile_decision``.
+    Measured 2026-08-07: a second tenant named the profile "home" and got
+    the first tenant's street address, email and phone back in the
+    response, then overwrote it.  A resolver cannot be walked around the
+    way a list of tool names can.
+
+    The env override is checked AFTER the guard on purpose: it is one
+    process-wide value on that deploy, so pointing it somewhere else
+    changes which shared file everyone collides in, not whether they do.
+    """
+    from kiln.errors import HostedUnavailableError
+    from kiln.runtime_env import is_hosted_multitenant
+
+    if is_hosted_multitenant():
+        raise HostedUnavailableError(
+            "Saved shipping profiles live on your own machine — one file, "
+            "named by you — so the hosted Kiln API can't read or write "
+            "them. Pass the shipping address on the call instead, or "
+            "manage saved profiles from your local Kiln install."
+        )
     explicit = os.environ.get(_PROFILE_ENV, "").strip()
     if explicit:
         return Path(explicit).expanduser()

@@ -130,3 +130,90 @@ def test_shipping_confirmation_token_rejects_changed_address():
 
     assert not ok
     assert reason == "token_shipping_details_mismatch"
+
+
+# ---------------------------------------------------------------------------
+# The hosted refusal
+# ---------------------------------------------------------------------------
+#
+# 2026-08-07, reproduced with two tenants on a hosted process: the three
+# tools that manage profiles were already refused by name, and
+# issue_shipping_confirmation_token — a tool about tokens — reached the same
+# file through shipping_profile_name and save_profile_decision.  Tenant B
+# asked for the profile called "home", got tenant A's street address, email
+# and phone back in the response, then overwrote it.
+#
+# The refusal therefore sits on _profiles_path, the one resolver both the
+# load and the save pass through, rather than on a list of tool names.
+
+
+def test_saved_profiles_refuse_on_the_hosted_deploy(monkeypatch, tmp_path):
+    import pytest
+
+    from kiln.errors import HostedUnavailableError
+
+    monkeypatch.setenv("KILN_SHIPPING_PROFILES_PATH", str(tmp_path / "profiles.json"))
+    monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+
+    with pytest.raises(HostedUnavailableError):
+        save_shipping_profile("home", ADDRESS, overwrite=True, set_default=True)
+    with pytest.raises(HostedUnavailableError):
+        get_shipping_profile("home")
+    with pytest.raises(HostedUnavailableError):
+        list_shipping_profiles()
+    assert not (tmp_path / "profiles.json").exists(), (
+        "a refusal that still writes the file is half a refusal"
+    )
+
+
+def test_the_env_override_does_not_get_you_past_it(monkeypatch, tmp_path):
+    """Checked AFTER the guard, deliberately.
+
+    On the hosted deploy that variable is one process-wide value, so
+    pointing it elsewhere changes WHICH shared file every customer collides
+    in, not whether they collide.
+    """
+    import pytest
+
+    from kiln.errors import HostedUnavailableError
+
+    monkeypatch.setenv("KILN_SHIPPING_PROFILES_PATH", str(tmp_path / "elsewhere.json"))
+    monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+
+    with pytest.raises(HostedUnavailableError):
+        list_shipping_profiles()
+
+
+def test_the_token_still_issues_from_an_explicit_address_when_hosted(monkeypatch):
+    """The half that must keep working.
+
+    The token is derived from an address the caller supplied and held in
+    memory under an unguessable key, so hosted ordering is unaffected —
+    which is why the tool is not blocked by name.
+    """
+    monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+
+    token = issue_shipping_confirmation_token(
+        quote_id="q1",
+        shipping_option_id="std",
+        shipping_address=normalize_shipping_address(ADDRESS),
+    )
+    assert validate_shipping_confirmation_token(
+        token.token,
+        quote_id="q1",
+        shipping_option_id="std",
+        shipping_address=normalize_shipping_address(ADDRESS),
+    )
+
+
+def test_the_refusal_says_what_to_do_instead(monkeypatch):
+    import pytest
+
+    from kiln.errors import HostedUnavailableError
+
+    monkeypatch.setenv("KILN_HOSTED_MULTITENANT", "1")
+    with pytest.raises(HostedUnavailableError) as excinfo:
+        list_shipping_profiles()
+    message = str(excinfo.value)
+    assert "shipping address on the call" in message
+    assert "local Kiln install" in message
