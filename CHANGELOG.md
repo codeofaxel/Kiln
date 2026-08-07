@@ -14,6 +14,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   colour. Works on models you made, CAD you brought in, or a mesh you
   downloaded.
 
+- **Tell Kiln your printer's real hardware.** Upgraded to an all-metal hotend
+  or a PT1000? Pick your setup by name and Kiln uses its checked limit for it —
+  you choose the hardware, Kiln supplies the number. Each option lists what it
+  assumes, including any firmware change. Stock machines are unaffected.
+
 - **Report a problem and Kiln sends the evidence with it.** Bug reports now
   include the tail of Kiln's activity log, so we can see what actually broke
   instead of guessing from a description. Only when you report something,
@@ -24,11 +29,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
-- **Custom printer limits can no longer exceed Kiln's tested limits.** Setting
-  your own temperature or speed limit above what Kiln has tested for that
-  printer now requires noting that you've physically modified it — an
-  all-metal hotend, say. Kiln's own limits are unchanged, and nothing you've
-  already set is lost.
+- **You can no longer type your own limit above Kiln's.** Upgraded your
+  printer? Declare the hardware and Kiln raises the limit to the one it has
+  checked for that setup. Hardware Kiln hasn't checked stays at the stock
+  limit. Limits you set *lower* than Kiln's still apply.
+
+- **A few printer limits corrected to the maker's published figures.** Where a
+  maker publishes two different figures for one machine, Kiln now uses the
+  lower.
 
 - **Jobs go to the printer that's been finishing them (Business).** When Kiln has
   more than one printer to choose from, it weighs each machine's own print
