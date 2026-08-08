@@ -7,6 +7,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Kiln checks where features are, not just how many and how big (Pro).** Say
+  the holes go 10mm in from each corner; Kiln measures whether they actually
+  did, and names anything that landed somewhere else and by how far. Served via
+  kiln-pro; see https://kiln3d.com/pricing.
+
+- **Check a file Kiln didn't make (Pro).** Point at a model you already have,
+  list the numbers it should hit, get the same plain receipt back. Served via
+  kiln-pro; see https://kiln3d.com/pricing.
+
 - **Paint a model by its own surfaces.** Ask Kiln to colour a part of a model —
   the handle, the lid, the base — and it finds the model's natural surfaces,
   shows you which is which, and paints the ones you choose. Out comes a
