@@ -39,7 +39,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   lower.
 
 - **Voron V0/V0.2 and V2.4/Trident hotend limits corrected to 270°C.** Fitted
-  an E3D Revo Voron? Declare it and Kiln uses 300°C.
+  an E3D Revo Voron? Declare it and Kiln uses 300°C. Hotends whose makers
+  publish no temperature stay at 270 — Kiln won't guess one.
 
 - **Jobs go to the printer that's been finishing them (Business).** When Kiln has
   more than one printer to choose from, it weighs each machine's own print
@@ -56,9 +57,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
-- **Design advice now uses the same printer limits as the safety check.**
-  Also corrects stale figures for the Rat Rig V-Core 3, Ender 3 V2, and
-  Ender 3 S1 Pro.
+- **Design suggestions no longer exceed what your printer will accept.**
+  Material and design advice could suggest a hotend temperature Kiln would
+  then refuse. Affected the Rat Rig V-Core 3, Ender 3 V2, and Ender 3 S1 Pro.
 
 - **A 3D panel that never gets your model now says so** — it used to sit
   empty indefinitely with nothing to read. It now tells you the 3D view
