@@ -125,6 +125,13 @@ dev = [
     # reads 3MF as a ZIP — so these stay out of the core dependencies.
     "networkx>=3.4",
     "lxml>=5.0",
+    # manifold3d is trimesh's boolean backend.  Only test fixtures cut one
+    # mesh out of another (the renderer suite builds a tray as
+    # outer.difference(cavity) so the near rim is an interior edge);
+    # production never runs a boolean.  Undeclared, it passed on any
+    # machine that happened to have it and failed in CI, which reads as a
+    # renderer bug rather than a missing package.
+    "manifold3d>=2.5",
 ]
 
 [project.scripts]
