@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-08-08T19:17:08.678815+00:00",
-  "tool_count": 409,
+  "generated": "2026-08-08T19:49:01.335007+00:00",
+  "tool_count": 410,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -2972,6 +2972,34 @@
           "mesh_path"
         ],
         "title": "inspect_mesh_viewArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "verify_mesh_measurements",
+      "description": "Measure a mesh file against the numbers it's supposed to hit and get back a receipt: what was asked, what was measured, what matched.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_inspection",
+      "parameters": {
+        "properties": {
+          "mesh_path": {
+            "title": "Mesh Path",
+            "type": "string"
+          },
+          "measurements": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Measurements",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mesh_path",
+          "measurements"
+        ],
+        "title": "verify_mesh_measurementsArguments",
         "type": "object"
       }
     },
