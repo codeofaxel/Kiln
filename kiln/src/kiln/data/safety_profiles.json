@@ -16,7 +16,7 @@
   },
   "ender3": {
     "display_name": "Creality Ender 3 / Ender 3 Pro / Ender 3 V2",
-    "max_hotend_temp": 260.0,
+    "max_hotend_temp": 250.0,
     "max_bed_temp": 110.0,
     "max_chamber_temp": null,
     "max_feedrate": 7500.0,
@@ -27,7 +27,7 @@
       220,
       250
     ],
-    "notes": "PTFE-lined hotend by default - exceeding 240C risks toxic fumes. A generic 'all-metal upgrade' does NOT raise this ceiling. Only a curated variant does; see variants.",
+    "notes": "PTFE-lined hotend by default - exceeding 240C risks toxic fumes. 250C is Creality's own published figure (product FAQ, 'Ender-3 3D Printer Basic Parameters': highest nozzle temperature 250 degrees Celsius); the firmware would accept 260. Where a manufacturer gives two answers the lower one is enforced - see _meta.field_semantics.two_published_answers. A generic 'all-metal upgrade' does NOT raise this ceiling. Only a curated variant does; see variants.",
     "variants": {
       "e3d_revo_cr_reflashed": {
         "display_name": "Creality Ender 3 / Pro / V2 + E3D Revo CR (firmware reflashed)",

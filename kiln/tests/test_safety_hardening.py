@@ -182,9 +182,9 @@ class TestAdapterSafetyProfile:
         # Without profile: 300 should be OK
         adapter._validate_temp(300, 300.0, "Hotend")  # should not raise
 
-        # With ender3 profile: 300 should fail (max 260)
+        # With ender3 profile: 300 should fail (max 250)
         adapter.set_safety_profile("ender3")
-        with pytest.raises(PrinterError, match="260"):
+        with pytest.raises(PrinterError, match="250"):
             adapter._validate_temp(300, 300.0, "Hotend")
 
         # 250 should still be OK for ender3

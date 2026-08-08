@@ -122,7 +122,10 @@ class TestGetProfile:
     def test_ender3_limits(self) -> None:
         profile = get_profile("ender3")
         assert profile.id == "ender3"
-        assert profile.max_hotend_temp == 260.0
+        # 250, not 260: Creality's own FAQ rates the machine at 250C while
+        # the firmware accepts 260, and the two-published-answers rule takes
+        # the lower one.  See _meta.field_semantics in safety_profiles.json.
+        assert profile.max_hotend_temp == 250.0
         assert profile.max_bed_temp == 110.0
         assert profile.max_chamber_temp is None
         assert profile.max_feedrate == 7500.0
@@ -298,7 +301,7 @@ class TestProfileToDict:
         d = profile_to_dict(profile)
         assert d["id"] == "ender3"
         assert d["display_name"] == profile.display_name
-        assert d["max_hotend_temp"] == 260.0
+        assert d["max_hotend_temp"] == 250.0
         assert d["max_bed_temp"] == 110.0
         assert d["max_chamber_temp"] is None
         assert d["max_feedrate"] == 7500.0
@@ -400,7 +403,7 @@ class TestValidateGcodeForPrinterTemperature:
     """Printer-specific temperature validation via validate_gcode_for_printer()."""
 
     def test_ender3_hotend_270_blocked(self) -> None:
-        """Ender 3 max hotend is 260C; 270C should be BLOCKED."""
+        """Ender 3 max hotend is 250C; 270C should be BLOCKED."""
         r = validate_gcode_for_printer("M104 S270", "ender3")
         assert r.valid is False
         assert len(r.errors) == 1
@@ -428,15 +431,27 @@ class TestValidateGcodeForPrinterTemperature:
         assert r.errors == []
 
     def test_ender3_hotend_at_limit_passes(self) -> None:
-        """Ender 3 max hotend is 260C; exactly 260C should PASS."""
-        r = validate_gcode_for_printer("M104 S260", "ender3")
+        """Ender 3 max hotend is 250C; exactly 250C should PASS."""
+        r = validate_gcode_for_printer("M104 S250", "ender3")
         assert r.valid is True
-        assert "M104 S260" in r.commands
+        assert "M104 S250" in r.commands
 
     def test_ender3_hotend_just_over_blocked(self) -> None:
-        """Ender 3 max hotend is 260C; 260.1C should be BLOCKED."""
-        r = validate_gcode_for_printer("M104 S260.1", "ender3")
+        """Ender 3 max hotend is 250C; 250.1C should be BLOCKED."""
+        r = validate_gcode_for_printer("M104 S250.1", "ender3")
         assert r.valid is False
+
+    def test_ender3_firmware_accepted_260_is_now_blocked(self) -> None:
+        """The regression this correction exists to prevent.
+
+        260C is what the firmware takes; 250C is what Creality rates the
+        machine at.  The rule takes the lower, so a command the old ceiling
+        waved through must now be refused — if this ever passes again, the
+        ceiling has silently drifted back to the firmware figure.
+        """
+        r = validate_gcode_for_printer("M104 S260", "ender3")
+        assert r.valid is False
+        assert "M104 S260" in r.blocked_commands
 
     def test_bambu_x1c_hotend_at_limit_passes(self) -> None:
         """Bambu X1C max hotend is 300C; exactly 300C should PASS."""

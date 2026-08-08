@@ -305,7 +305,7 @@ class TestExportProfile:
     def test_export_bundled_profile(self):
         # The bundled data should load from the real JSON file.
         exported = export_profile("ender3")
-        assert exported["max_hotend_temp"] == 260.0
+        assert exported["max_hotend_temp"] == 250.0
         assert "id" not in exported
 
     def test_export_missing_falls_back_to_default(self):
@@ -355,7 +355,7 @@ class TestCommunityOverridesBundled:
         held to the curated number like any other override.
         """
         bundled = get_profile("ender3")
-        assert bundled.max_hotend_temp == 260.0
+        assert bundled.max_hotend_temp == 250.0
 
         override = _valid_profile()
         override["max_hotend_temp"] = 300.0
@@ -365,7 +365,7 @@ class TestCommunityOverridesBundled:
         add_community_profile("ender3", override)
 
         overridden = get_profile("ender3")
-        assert overridden.max_hotend_temp == 260.0
+        assert overridden.max_hotend_temp == 250.0
         # The rest of the entry is still the user's to set — only the
         # direction of a LIMIT is constrained.
         assert overridden.display_name == "Ender 3 (All-Metal Upgrade)"
@@ -375,7 +375,7 @@ class TestCommunityOverridesBundled:
         override = _valid_profile()
         override["max_hotend_temp"] = 300.0
         add_community_profile("ender3", override)
-        assert get_profile("ender3").max_hotend_temp == 260.0
+        assert get_profile("ender3").max_hotend_temp == 250.0
 
     def test_bundled_still_available_for_non_overridden(self):
         add_community_profile("custom_only", _valid_profile())
