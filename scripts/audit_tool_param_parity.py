@@ -158,7 +158,15 @@ def audit_tool(
     scope.visit(tool)
     bindings = {**file_bindings, **scope.bindings}
 
-    findings: list[dict[str, str]] = []
+    # (engine, param) -> did ANY call in this tool forward the param?
+    # One tool may call one engine twice: the tuned path, plus a deliberate
+    # fallback that drops the axis (multi_color_copies arranges on the
+    # default plate when printer_id is not a known model, rather than
+    # refusing the print).  The axis is reachable through the door as long
+    # as one call carries it, so the verdict is per (engine, param) — never
+    # per call site, which would report a fallback as a missing seam.
+    forwarded_by: dict[tuple[str, str], bool] = {}
+
     for call in ast.walk(tool):
         if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name):
             continue
@@ -177,17 +185,21 @@ def audit_tool(
         passed_kw = {kw.arg for kw in call.keywords if kw.arg}
         passed_pos = set(_positional_names(sig)[: len(call.args)])
         for param in sorted(watch_in_engine):
-            if param in passed_kw or param in passed_pos:
-                continue  # forwarded (whatever the source expression is)
-            findings.append(
-                {
-                    "tool": tool.name,
-                    "param": param,
-                    "engine": f"{module}.{name}",
-                    "exposed_on_tool": str(param in tool_params),
-                }
-            )
-    return findings
+            # forwarded (whatever the source expression is)
+            forwarded = param in passed_kw or param in passed_pos
+            key = (f"{module}.{name}", param)
+            forwarded_by[key] = forwarded_by.get(key, False) or forwarded
+
+    return [
+        {
+            "tool": tool.name,
+            "param": param,
+            "engine": engine,
+            "exposed_on_tool": str(param in tool_params),
+        }
+        for (engine, param), forwarded in sorted(forwarded_by.items())
+        if not forwarded
+    ]
 
 
 def run_audit() -> list[dict[str, str]]:
