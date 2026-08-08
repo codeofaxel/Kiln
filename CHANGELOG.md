@@ -7,6 +7,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **See what Kiln read off a customer's engineering drawing (Business+).** Send
+  back the marked-up sheet: every dimension Kiln pulled is boxed on the drawing
+  itself and color-coded by how well it checked out, with the key printed on
+  the image. One look tells you whether the read is right before you quote
+  from it.
+
 - **Kiln checks where features are, not just how many and how big (Pro).** Say
   the holes go 10mm in from each corner; Kiln measures whether they actually
   did, and names anything that landed somewhere else and by how far. Served via
@@ -74,6 +80,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   for your machine and the panel says so.
 
 ### Fixed
+
+- **Inch drawings are now read completely (Business+).** Shop drawings write
+  sub-inch sizes without a leading zero (".375", not "0.375"), and Kiln's
+  completeness tally was skipping them — so a drawing could come back fully
+  accounted for while real dimensions had been missed. Confirming a dimension
+  is stricter now too.
 
 - **Design suggestions no longer exceed what your printer will accept.**
   Material and design advice could suggest a hotend temperature Kiln would
