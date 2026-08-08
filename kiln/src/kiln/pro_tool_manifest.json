@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-08T07:08:57.863651+00:00",
+  "generated": "2026-08-08T18:40:08.175141+00:00",
   "tool_count": 408,
   "categories": {
     "product_generators": {
@@ -2686,6 +2686,11 @@
             "default": "",
             "title": "Partition Hash",
             "type": "string"
+          },
+          "include_face_map": {
+            "default": false,
+            "title": "Include Face Map",
+            "type": "boolean"
           }
         },
         "required": [
