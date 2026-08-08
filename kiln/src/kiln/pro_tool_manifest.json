@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-08T19:49:01.335007+00:00",
+  "generated": "2026-08-08T22:55:40.878902+00:00",
   "tool_count": 410,
   "categories": {
     "product_generators": {
@@ -3257,6 +3257,9 @@
               "all",
               "needs_questions",
               "ready_to_generate",
+              "checks_passed",
+              "checks_missed",
+              "not_fully_checked",
               "matches_what_you_asked_for"
             ],
             "title": "Filter Status",
