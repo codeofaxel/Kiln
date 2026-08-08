@@ -34,6 +34,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   checked for that setup. Hardware Kiln hasn't checked stays at the stock
   limit. Limits you set *lower* than Kiln's still apply.
 
+- **Temperatures suggested from your print history stay inside your printer's
+  limits.** When you ask Kiln for settings for a specific printer, a suggested
+  hotend, bed or chamber temperature above that machine's limit now comes back
+  at the limit. Lower suggestions are unchanged.
+
 - **A few printer limits corrected to the maker's published figures.** Where a
   maker publishes two different figures for one machine, Kiln now uses the
   lower.
