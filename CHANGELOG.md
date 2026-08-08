@@ -14,6 +14,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   colour. Works on models you made, CAD you brought in, or a mesh you
   downloaded.
 
+- **Paint by clicking, right in the browser.** Click a surface on the model,
+  pick a colour — every click paints while a colour's armed. One Keep writes
+  the printable file with the colours built in.
+
 - **Tell Kiln your printer's real hardware.** Upgraded to an all-metal hotend
   or a PT1000? Pick your setup by name and Kiln uses its checked limit for it —
   you choose the hardware, Kiln supplies the number. Each option lists what it
