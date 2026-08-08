@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-08-08T18:40:08.175141+00:00",
-  "tool_count": 408,
+  "generated": "2026-08-08T19:17:08.678815+00:00",
+  "tool_count": 409,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -7766,6 +7766,57 @@
           "file_path"
         ],
         "title": "intake_engineering_drawingArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "manage_drawing_intakes",
+      "description": "Housekeep the drawing-intake workspace: list intakes, archive, reclaim disk.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "category": "drawing_intake",
+      "parameters": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "intake_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Intake Ids"
+          },
+          "older_than_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Older Than Days"
+          },
+          "include_archived": {
+            "default": false,
+            "title": "Include Archived",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "manage_drawing_intakesArguments",
         "type": "object"
       }
     },
