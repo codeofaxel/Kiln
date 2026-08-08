@@ -397,7 +397,7 @@ class TestOnlyAnAppsHostGetsTheGeometry:
         assert sc["message"] == "made a thing"
 
 
-def _run_hook(host, mesh_path, tool_name=None):
+def _run_hook(host, mesh_path, tool_name=None, extra=None):
     """Drive the real lowlevel hook over a result and return its
     structuredContent.
 
@@ -417,7 +417,9 @@ def _run_hook(host, mesh_path, tool_name=None):
 
     _cache_the_stage()
     mcp = _fastmcp()
-    result = _Result({"success": True, "message": "made a thing", "stl_path": mesh_path})
+    body = {"success": True, "message": "made a thing", "stl_path": mesh_path}
+    body.update(extra or {})
+    result = _Result(body)
     server = lowlevel_server(mcp)
 
     params = None
@@ -575,3 +577,53 @@ class TestPayloadFollowsTheStamp:
         sc = _run_hook(self._apps_host(), _real_cube(tmp_path / "c.stl"),
                        tool_name="somebody_elses_tool")
         assert sc["kiln_viewer"]["kind"] == "kiln.mesh.v1"
+
+
+class TestCadFactsRideTheInlinePayload:
+    """A STEP import's analytic truth reaches the stage payload — the local
+    half of "no stage shows a STEP as a bare mesh with no facts"."""
+
+    UI = local_stage.MCP_APPS_EXTENSION_ID
+
+    def test_import_facts_reach_the_stage_payload(self, tmp_path):
+        facts = {
+            "kind": "kiln.step_facts.v1",
+            "available": True,
+            "source": "read",
+            "solids": 1,
+            "surfaces": {"plane": 6},
+            "cylinders": {"count": 0, "radii_mm": []},
+            "header": {"stamped_by_kiln": False, "name": "vendor_part"},
+        }
+        host = _Host(_Caps(extensions={self.UI: {}}))
+        sc = _run_hook(
+            host, _real_cube(tmp_path / "c.stl"), extra={"cad_facts": facts}
+        )
+        payload = sc[local_stage.VIEWER_STRUCTURED_CONTENT_KEY]
+        assert payload["cad"]["solids"] == 1
+        assert payload["cad"]["header"]["name"] == "vendor_part"
+        # The stage names the STEP, not the tessellation it rode in on.
+        assert payload["source"]["format"] == "step"
+
+    def test_unavailable_facts_still_ride(self, tmp_path):
+        """A kernel-less install's import still tells the stage WHY there
+        are no facts — silence would read as "just a mesh"."""
+        facts = {
+            "kind": "kiln.step_facts.v1",
+            "available": False,
+            "reason": "no kernel",
+            "header": {"stamped_by_kiln": False},
+        }
+        host = _Host(_Caps(extensions={self.UI: {}}))
+        sc = _run_hook(
+            host, _real_cube(tmp_path / "c.stl"), extra={"cad_facts": facts}
+        )
+        payload = sc[local_stage.VIEWER_STRUCTURED_CONTENT_KEY]
+        assert payload["cad"]["available"] is False
+
+    def test_a_plain_mesh_result_gains_no_cad_block(self, tmp_path):
+        host = _Host(_Caps(extensions={self.UI: {}}))
+        sc = _run_hook(host, _real_cube(tmp_path / "c.stl"))
+        payload = sc[local_stage.VIEWER_STRUCTURED_CONTENT_KEY]
+        assert "cad" not in payload
+        assert payload["source"]["format"] == "stl"

@@ -1778,3 +1778,72 @@ def test_probe_agrees_with_a_real_import():
         really_there = False
 
     assert _REAL_OCP_AVAILABLE() is really_there
+def test_tool_import_step_file_carries_cad_facts(monkeypatch, tmp_dir):
+    """The import result carries the analytic truth behind the triangles it
+    just made — through the registered TOOL, real kernel, real file — so
+    every stage downstream can label the model as CAD."""
+    if not _REAL_OCP_AVAILABLE():
+        pytest.skip("OCCT kernel (OCP) not installed")
+    monkeypatch.setattr("kiln.step_import._ocp_available", _REAL_OCP_AVAILABLE)
+    monkeypatch.setattr("kiln.step_import._find_freecad_cmd", lambda: None)
+    monkeypatch.setattr("kiln.step_import._find_gmsh_cmd", lambda: None)
+
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+    from OCP.IFSelect import IFSelect_ReturnStatus
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    step = tmp_dir / "true_cylinder.step"
+    writer = STEPControl_Writer()
+    writer.Transfer(
+        BRepPrimAPI_MakeCylinder(45.0, 8.0).Shape(),
+        STEPControl_StepModelType.STEPControl_AsIs,
+    )
+    assert writer.Write(str(step)) == IFSelect_ReturnStatus.IFSelect_RetDone
+
+    tools = _register_step_tools()
+    result = tools["import_step_file"](str(step), output_dir=str(tmp_dir))
+
+    assert result["status"] == "ok"
+    facts = result["cad_facts"]
+    assert facts["available"] is True
+    assert facts["solids"] == 1
+    assert facts["cylinders"]["radii_mm"] == [45.0]
+    assert facts["surfaces"]["cylinder"] == 1
+
+
+def test_tool_import_facts_degrade_without_taking_the_import_down(
+    monkeypatch, tmp_dir
+):
+    """Facts measurement failing must never cost the conversion: the mesh
+    lands, and cad_facts says honestly that it could not measure."""
+    if not _REAL_OCP_AVAILABLE():
+        pytest.skip("OCCT kernel (OCP) not installed")
+    monkeypatch.setattr("kiln.step_import._ocp_available", _REAL_OCP_AVAILABLE)
+    monkeypatch.setattr("kiln.step_import._find_freecad_cmd", lambda: None)
+    monkeypatch.setattr("kiln.step_import._find_gmsh_cmd", lambda: None)
+
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.IFSelect import IFSelect_ReturnStatus
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    step = tmp_dir / "box.step"
+    writer = STEPControl_Writer()
+    writer.Transfer(
+        BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape(),
+        STEPControl_StepModelType.STEPControl_AsIs,
+    )
+    assert writer.Write(str(step)) == IFSelect_ReturnStatus.IFSelect_RetDone
+
+    import kiln.step_facts as step_facts_mod
+
+    def _measurement_dies(*a, **k):
+        raise RuntimeError("kernel exploded mid-census")
+
+    monkeypatch.setattr(step_facts_mod, "read_step_facts", _measurement_dies)
+
+    tools = _register_step_tools()
+    result = tools["import_step_file"](str(step), output_dir=str(tmp_dir))
+
+    assert result["status"] == "ok"
+    assert result["output_path"]
+    assert "cad_facts" not in result  # skipped, said nothing false

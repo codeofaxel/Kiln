@@ -122,6 +122,18 @@ class _StepToolsPlugin:
                         "Run slice_model to prepare for printing.",
                     ],
                 }
+                # The analytic truth behind the triangles just made: the
+                # stage that shows this import labels it CAD ("1 solid, 4
+                # true cylinders, r=45.000 exact") instead of passing the
+                # tessellation off as the geometry.  Best-effort — the
+                # facts degrade honestly (available:false + reason) and
+                # must never cost the import.
+                try:
+                    from kiln.step_facts import read_step_facts
+
+                    response["cad_facts"] = read_step_facts(file_path)
+                except Exception:  # noqa: BLE001 — display material only
+                    _logger.debug("step facts skipped", exc_info=True)
                 try:
                     from kiln_pro.plugins.git_render_tools import attach_inspect_bundle
                     return attach_inspect_bundle(response, level="quick")

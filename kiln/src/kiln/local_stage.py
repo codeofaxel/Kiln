@@ -725,6 +725,15 @@ def _install_result_hook(mcp: Any) -> bool:
             if attaching and _tool_opens_stage(mcp, name):
                 payload = _inline_payload(token)
                 if payload is not None:
+                    # A STEP import's analytic truth rides the payload so
+                    # the stage labels the model as CAD over its display
+                    # tessellation — or says the facts are unavailable,
+                    # which is still the truth.
+                    facts = sc.get("cad_facts")
+                    if isinstance(facts, dict):
+                        from kiln.mesh_payload import attach_cad_facts
+
+                        attach_cad_facts(payload, facts)
                     sc[VIEWER_STRUCTURED_CONTENT_KEY] = payload
             inner.structuredContent = sc
         except Exception:  # noqa: BLE001
