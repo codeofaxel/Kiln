@@ -1354,7 +1354,7 @@ def get_step_metadata(step_path: str) -> dict[str, Any]:
     Returns:
         Dictionary with keys: ``file_name``, ``file_size_bytes``,
         ``estimated_body_count``, ``products``, ``schema``,
-        ``description``, ``author``.
+        ``description``, ``author``, ``originating_system``.
 
     Raises:
         FileNotFoundError: File does not exist.
@@ -1370,6 +1370,7 @@ def get_step_metadata(step_path: str) -> dict[str, Any]:
         "schema": None,
         "description": None,
         "author": None,
+        "originating_system": None,
     }
 
     try:
@@ -1392,6 +1393,39 @@ def get_step_metadata(step_path: str) -> dict[str, Any]:
     name_match = re.search(r"FILE_NAME\s*\(\s*'([^']*)'", text)
     if name_match:
         metadata["original_file_name"] = name_match.group(1)
+
+    # FILE_NAME's originating_system (6th field) — the stamp a viewer reads
+    # to answer "who made this file?".  Fields are strings or paren lists;
+    # a plain split can't see that, so walk the top-level commas.
+    fn_match = re.search(r"FILE_NAME\s*\((.*?)\)\s*;", text, re.DOTALL)
+    if fn_match:
+        fields: list[str] = []
+        depth = 0
+        in_string = False
+        current = ""
+        for ch in fn_match.group(1):
+            if in_string:
+                current += ch
+                if ch == "'":
+                    in_string = False
+                continue
+            if ch == "'":
+                in_string = True
+                current += ch
+            elif ch == "(":
+                depth += 1
+                current += ch
+            elif ch == ")":
+                depth -= 1
+                current += ch
+            elif ch == "," and depth == 0:
+                fields.append(current.strip())
+                current = ""
+            else:
+                current += ch
+        fields.append(current.strip())
+        if len(fields) >= 6 and fields[5].startswith("'"):
+            metadata["originating_system"] = fields[5].strip("'")
 
     # Count PRODUCT entities (rough body count estimate).
     product_pattern = re.compile(

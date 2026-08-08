@@ -30,8 +30,22 @@ platform-endian, which is LE on every client Kiln targets)::
       "downgraded": false,
       "decimated_from": N,             # only when a decimation backend ran
       "source": {"filename": "<basename only>", "format": "stl"},
-      "plate": {...}                   # optional — see THE PLATE below
+      "plate": {...},                  # optional — see THE PLATE below
+      "cad": {...}                     # optional — see THE CAD BLOCK below
     }
+
+THE CAD BLOCK
+-------------
+Optional, and attached by :func:`attach_cad_facts` rather than built here —
+present when the mesh is a DISPLAY TESSELLATION of a real B-rep source (a
+STEP file) and the analytic truth rides alongside.  The block is the
+``kiln.step_facts.v1`` dict from :mod:`kiln.step_facts`: solid/face census
+by surface type, exact radii, tight analytic bbox, and the ISO header's
+stamp.  A stage that sees it labels the model as CAD and shows the facts
+readout; a stage that doesn't renders the mesh as before.  When the source
+was a STEP but the facts could not be measured, the block still rides with
+``available: false`` and a reason — the stage says "CAD facts unavailable"
+instead of silently passing triangles off as CAD.
 
 THE PLATE
 ---------
@@ -659,4 +673,28 @@ def mesh_to_viewer_payload(
             payload["vertex_colors"] = _b64(rgba)
     if decimated_from is not None:
         payload["decimated_from"] = decimated_from
+    return payload
+
+
+def attach_cad_facts(
+    payload: dict[str, Any], facts: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Stamp a ``kiln.step_facts.v1`` dict onto a viewer payload, in place.
+
+    The one place the ``cad`` block is attached, so every door labels a STEP
+    tessellation the same way.  Also corrects ``source.format`` to ``"step"``
+    — the geometry arrays came from a display tessellation file, but the
+    thing on the stage is the STEP, and the format tag is what a viewer
+    prints next to the filename.
+
+    ``facts`` of ``None`` or a non-dict attaches nothing (the caller had no
+    STEP source); an ``available: false`` facts dict IS attached — honest
+    unavailability is part of the contract, silence is not.
+    """
+    if not isinstance(payload, dict) or not isinstance(facts, dict):
+        return payload
+    payload["cad"] = facts
+    source = payload.get("source")
+    if isinstance(source, dict):
+        source["format"] = "step"
     return payload

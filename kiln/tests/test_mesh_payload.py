@@ -535,3 +535,40 @@ class TestPaintedFileColorsSurvive:
         upper, lower = pos[:, 1] > band, pos[:, 1] < -band
         assert (rgba[upper] == self.RED).all()
         assert (rgba[lower] == self.BLUE).all()
+
+
+class TestCadFactsBlock:
+    """attach_cad_facts — the one place a STEP tessellation gets its label."""
+
+    def test_facts_ride_and_format_becomes_step(self):
+        from kiln.mesh_payload import attach_cad_facts
+
+        payload = {
+            "kind": "kiln.mesh.v1",
+            "source": {"filename": "coaster.step", "format": "stl"},
+        }
+        facts = {"kind": "kiln.step_facts.v1", "available": True, "solids": 1}
+        out = attach_cad_facts(payload, facts)
+        assert out is payload  # in place, like attach_stage_plate
+        assert out["cad"]["solids"] == 1
+        # The stage labels the STEP, not the tessellation file it rode in on.
+        assert out["source"]["format"] == "step"
+
+    def test_unavailable_facts_still_ride(self):
+        """Honest unavailability is part of the contract — silence is not."""
+        from kiln.mesh_payload import attach_cad_facts
+
+        payload = {"kind": "kiln.mesh.v1", "source": {"format": "stl"}}
+        out = attach_cad_facts(
+            payload,
+            {"kind": "kiln.step_facts.v1", "available": False, "reason": "x"},
+        )
+        assert out["cad"]["available"] is False
+
+    def test_no_facts_attaches_nothing(self):
+        from kiln.mesh_payload import attach_cad_facts
+
+        payload = {"kind": "kiln.mesh.v1", "source": {"format": "stl"}}
+        out = attach_cad_facts(payload, None)
+        assert "cad" not in out
+        assert out["source"]["format"] == "stl"
