@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-08T01:58:33.699582+00:00",
+  "generated": "2026-08-08T07:08:57.863651+00:00",
   "tool_count": 408,
   "categories": {
     "product_generators": {
@@ -3780,7 +3780,7 @@
     },
     {
       "name": "bisect_start",
-      "description": "Start a new bisect session.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Start a new bisect session \u2014 find where something broke.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -3812,6 +3812,18 @@
             ],
             "default": null,
             "title": "Operator"
+          },
+          "target_check": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Check"
           }
         },
         "required": [
@@ -7459,7 +7471,7 @@
     },
     {
       "name": "verify_design_release",
-      "description": "Verify a release's signature and (optionally) its mesh fingerprint and embedded assembly-manual hash.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Verify a release's signature and (optionally) its mesh fingerprint, embedded assembly-manual hash, and measured spec record.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
       "category": "design_versioning",
       "parameters": {
@@ -7508,6 +7520,11 @@
           "recompute_manual_hash": {
             "default": false,
             "title": "Recompute Manual Hash",
+            "type": "boolean"
+          },
+          "recompute_receipt_hash": {
+            "default": false,
+            "title": "Recompute Receipt Hash",
             "type": "boolean"
           }
         },
