@@ -497,7 +497,7 @@ def render_colored_mesh(
         # Orthographic projection: X -> screen X, Z -> screen Y (inverted)
         fxs = tuple(half_rw + (v[0] - center_x) * sf for v in (t0, t1, t2))
         fys = tuple(half_rh - (v[2] - center_z) * sf for v in (t0, t1, t2))
-        pts = [(int(x), int(y)) for x, y in zip(fxs, fys)]
+        pts = [(int(x), int(y)) for x, y in zip(fxs, fys, strict=True)]
 
         # Lighting uses SMOOTH normal for gradual shading on curves
         smooth_normal = _smooth_normals[i]

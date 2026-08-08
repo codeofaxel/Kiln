@@ -964,7 +964,11 @@ class _SlicerToolsPlugin:
 
             import json as _json
 
-            from kiln.slicer_profiles import profile_with_overrides, resolve_slicer_profile, validate_profile_for_printer
+            from kiln.slicer_profiles import (
+                profile_with_overrides,
+                resolve_slicer_profile,
+                validate_profile_for_printer,
+            )
 
             # -- Validate input file --
             input_abs = os.path.abspath(input_path)

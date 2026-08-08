@@ -37,7 +37,8 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, replace as _dc_replace
+from dataclasses import dataclass
+from dataclasses import replace as _dc_replace
 from pathlib import Path
 from typing import Any
 
@@ -497,14 +498,20 @@ def _clamp_to_curated(
     replacements: dict[str, float] = {}
     for field in _CEILING_FIELDS:
         mine, theirs = getattr(community, field, None), getattr(curated, field, None)
-        if isinstance(mine, (int, float)) and isinstance(theirs, (int, float)):
-            if mine > theirs:
-                replacements[field] = theirs
+        if (
+            isinstance(mine, (int, float))
+            and isinstance(theirs, (int, float))
+            and mine > theirs
+        ):
+            replacements[field] = theirs
     for field in _FLOOR_FIELDS:
         mine, theirs = getattr(community, field, None), getattr(curated, field, None)
-        if isinstance(mine, (int, float)) and isinstance(theirs, (int, float)):
-            if mine < theirs:
-                replacements[field] = theirs
+        if (
+            isinstance(mine, (int, float))
+            and isinstance(theirs, (int, float))
+            and mine < theirs
+        ):
+            replacements[field] = theirs
 
     # Whether or not a ceiling had to be replaced, the variant the machine
     # actually resolves to is a fact about the curated side, not the override.
