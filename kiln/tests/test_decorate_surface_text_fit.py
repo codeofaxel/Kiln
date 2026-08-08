@@ -185,3 +185,39 @@ class TestExplicitSizesClampDown:
         assert "size=48" not in scad
         # … and measured centering, never the feature-flagged textmetrics.
         assert "textmetrics" not in scad
+
+
+@needs_openscad
+class TestPlacementStaysInsideTheRim:
+    """Rim guard through the tool door (text-sizing seam, 2026-08-08).
+
+    ``decorate_surface``'s own pre-fit assumes CENTERED text — a
+    ``placement="top-rim"`` band on a disc moved the block toward the
+    rim after the fit, where the square-bbox math saw no problem.  The
+    engine's elliptical rim guard now re-fits the run at its final
+    band, whichever door it arrives through.
+    """
+
+    def test_top_rim_band_on_a_disc_never_crosses_the_rim(self, tmp_path):
+        import kiln.server as server
+
+        disc = _disc(str(tmp_path), 90)
+        res = server.decorate_surface(
+            model_path=disc, content="KILN", content_type="text",
+            face="top", mode="deboss", depth_mm=1.5, placement="top-rim",
+        )
+        if isinstance(res, list):
+            res = next(r for r in res if isinstance(r, dict))
+        assert res.get("success"), res.get("message")
+        clearance = _carve_rim_clearance(res["output_stl"], rim_r=45.0)
+        assert clearance >= -0.05, (
+            f"top-rim text crosses the rim by {-clearance:.2f}mm"
+        )
+        # And the band placement is honoured — measured 2026-08-08: the
+        # old box-based offset clamp yanked the band to y~7; the
+        # measured-text clamp keeps it at y~30.
+        verts = _stl_vertices(res["output_stl"])
+        top = max(v[2] for v in verts)
+        band = [v for v in verts if top - 2.5 < v[2] < top - 0.2]
+        y_mid = (max(v[1] for v in band) + min(v[1] for v in band)) / 2.0
+        assert y_mid > 15.0, f"band placement lost: carve centered at y={y_mid:.1f}"

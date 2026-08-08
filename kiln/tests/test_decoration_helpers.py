@@ -803,3 +803,312 @@ def test_top_face_never_emits_supplemental_mirror(tmp_path):
     assert scad_files
     scad_content = scad_files[0].read_text()
     assert "mirror([1, 0, 0])" not in scad_content
+
+
+# ---------------------------------------------------------------------------
+# The text-sizing seam — closed 2026-08-08, measured regression corpus
+#
+# Before the fix the helper sized lines from a 0.6-per-char guess and the
+# engine re-fit the real glyphs to its own unmargined box.  Measured on a
+# 70x70 plate: intent 41.65mm of run width shipped as 49.00mm — exactly
+# 1/0.85, the visual margin destroyed; ["WWWW", "IIIII"] shipped the
+# secondary line LARGER than the primary (9.72mm vs 9.35mm font); and a
+# monogram "W" on an 80mm disc shipped its corners 4.58mm past the rim
+# with no warning anywhere.
+# ---------------------------------------------------------------------------
+
+
+def _stl_vertices(path):
+    """Minimal binary/ASCII STL vertex reader (test-local, stdlib only)."""
+    import struct
+
+    with open(path, "rb") as f:
+        data = f.read()
+    if data[:5] == b"solid" and b"facet" in data[:2000]:
+        verts = []
+        for line in data.decode("latin1").splitlines():
+            t = line.split()
+            if t[:1] == ["vertex"]:
+                verts.append(tuple(float(x) for x in t[1:4]))
+        return verts
+    n = struct.unpack("<I", data[80:84])[0]
+    verts = []
+    off = 84
+    for _ in range(n):
+        if off + 50 > len(data):
+            break
+        for k in range(3):
+            verts.append(struct.unpack_from("<3f", data, off + 12 + k * 12))
+        off += 50
+    return verts
+
+
+def _make_plate70(tmp_path):
+    scad = tmp_path / "aplate.scad"
+    scad.write_text("translate([0, 0, 2]) cube([70, 70, 4], center=true);")
+    stl = tmp_path / "aplate.stl"
+    subprocess.run(
+        ["openscad", "-o", str(stl), str(scad)], check=True, capture_output=True,
+    )
+    return str(stl)
+
+
+def _make_disc80(tmp_path):
+    scad = tmp_path / "adisc.scad"
+    scad.write_text("cylinder(h=6, d=80, $fn=160);")
+    stl = tmp_path / "adisc.stl"
+    subprocess.run(
+        ["openscad", "-o", str(stl), str(scad)], check=True, capture_output=True,
+    )
+    return str(stl)
+
+
+def _text_verts_above(stl_path, top_z):
+    return [v for v in _stl_vertices(stl_path) if v[2] > top_z + 0.02]
+
+
+@_NEEDS_OPENSCAD
+def test_seam_requested_margin_ships_to_the_mesh(tmp_path):
+    """Property 1: the helper's 0.85 visual margin survives to the mesh.
+
+    Intent on a 70mm face at line_scale 0.7 is a run of 0.85 x 49 =
+    41.65mm.  The pre-fix pipeline shipped 49.00mm — exactly 1/0.85
+    wider, the margin silently destroyed by the engine's re-fit.
+    """
+    from kiln.decoration_helpers import emboss_text_lines_on_face
+
+    plate = _make_plate70(tmp_path)
+    out = tmp_path / "dec"
+    final = emboss_text_lines_on_face(
+        plate, ["KILN"], mode="emboss", output_dir=str(out),
+    )
+    tv = _text_verts_above(final, 4.0)
+    assert tv, "no embossed text found above the face"
+    xs = [v[0] for v in tv]
+    run_w = max(xs) - min(xs)
+    assert run_w == pytest.approx(41.65, abs=0.6), (
+        f"shipped run {run_w:.2f}mm != intended 41.65mm "
+        f"(49.0mm means the 1/0.85 inflation is back)"
+    )
+
+
+@_NEEDS_OPENSCAD
+def test_seam_wide_narrow_hierarchy_never_inverts(tmp_path):
+    """Property 2: ["WWWW", "IIIII"] — the measured inversion case.
+
+    W really renders 1.31mm of run per font-mm (not 0.6), so the old
+    estimate over-sized the primary, the engine clamped it below the
+    honoured secondary, and the secondary shipped LARGER (9.72 vs
+    9.35mm font; 9.29 vs 8.93mm caps).  Sizes must now come out in
+    hierarchy order, in the SCAD and in the mesh.
+    """
+    import re
+
+    from kiln.decoration_helpers import emboss_text_lines_on_face
+
+    plate = _make_plate70(tmp_path)
+    out = tmp_path / "dec"
+    final = emboss_text_lines_on_face(
+        plate, ["WWWW", "IIIII"], mode="emboss", output_dir=str(out),
+    )
+    # SCAD half: aplate_emboss.scad (primary) sorts before
+    # line_0_emboss.scad (secondary).
+    sizes = []
+    for sf in sorted(out.glob("*.scad")):
+        m = re.search(r"size=([\d.]+)", sf.read_text())
+        if m:
+            sizes.append(float(m.group(1)))
+    assert len(sizes) == 2
+    primary, secondary = sizes
+    assert primary > secondary, (
+        f"hierarchy inverted again: primary {primary}mm <= secondary {secondary}mm"
+    )
+    assert secondary / primary == pytest.approx(0.7, abs=0.02)
+
+    # Mesh half: the top line's glyphs are taller than the bottom line's.
+    tv = _text_verts_above(final, 4.0)
+    top_line = [v for v in tv if v[1] > 0]
+    bottom_line = [v for v in tv if v[1] < 0]
+    assert top_line and bottom_line
+    cap_top = max(v[1] for v in top_line) - min(v[1] for v in top_line)
+    cap_bottom = max(v[1] for v in bottom_line) - min(v[1] for v in bottom_line)
+    assert cap_top > cap_bottom, (
+        f"secondary renders taller than primary ({cap_bottom:.2f} vs {cap_top:.2f}mm)"
+    )
+
+
+@_NEEDS_OPENSCAD
+def test_seam_round_monogram_stays_inside_the_rim(tmp_path):
+    """Property 3: no silent rim clip on a round face.
+
+    The measured failure: a single "W" at line_scale 0.9 on an 80mm
+    disc auto-filled the 72mm bbox and shipped its corners at radius
+    44.58mm — 4.58mm past the rim, warnings=None.  Every text vertex
+    must stay inside the rim now.
+    """
+    import math
+
+    from kiln.decoration_helpers import emboss_text_lines_on_face
+
+    disc = _make_disc80(tmp_path)
+    out = tmp_path / "dec"
+    final = emboss_text_lines_on_face(
+        disc, ["W"], mode="emboss", output_dir=str(out),
+        line_scale=0.9, min_edge_margin_mm=0.0,
+    )
+    tv = _text_verts_above(final, 6.0)
+    assert tv, "no embossed text found above the face"
+    max_r = max(math.hypot(v[0], v[1]) for v in tv)
+    assert max_r <= 40.0 + 0.05, (
+        f"glyph corner at radius {max_r:.2f}mm hangs past the 40mm rim"
+    )
+
+
+@_NEEDS_OPENSCAD
+def test_seam_offset_band_survives_and_clears_the_rim(tmp_path):
+    """Offsets clamp against the measured text, not the target box.
+
+    Box-based clamping used to yank a +24mm band placement to +4mm on
+    an 80mm disc (the box was 72mm tall), silently relocating the
+    engraving to the middle of the face.
+    """
+    import math
+
+    from kiln.decoration_helpers import emboss_text_on_face
+
+    disc = _make_disc80(tmp_path)
+    out = tmp_path / "dec"
+    out.mkdir()
+    final = emboss_text_on_face(
+        disc, "WWWWWW", mode="emboss", offset_y_mm=24.0,
+        scale=0.9, min_edge_margin_mm=0.0,
+        output_dir=str(out), output_stl=str(out / "banded.stl"),
+    )
+    tv = _text_verts_above(final, 6.0)
+    assert tv
+    ys = [v[1] for v in tv]
+    y_center = (max(ys) + min(ys)) / 2.0
+    assert y_center == pytest.approx(24.0, abs=1.0), (
+        f"band placement moved: text centered at y={y_center:.1f}, wanted 24.0"
+    )
+    max_r = max(math.hypot(v[0], v[1]) for v in tv)
+    assert max_r <= 40.0 + 0.05
+
+
+@_NEEDS_OPENSCAD
+def test_seam_collect_warnings_carries_engine_clamps(tmp_path):
+    """Nothing the engine decides is silent: clamp warnings reach the sink.
+
+    The helper used to drop the engine's warnings list on the floor —
+    an offset clamp or a size re-fit happened and the caller saw only a
+    bare STL path.
+    """
+    from kiln.decoration_helpers import emboss_text_on_face
+
+    plate = _make_plate70(tmp_path)
+    out = tmp_path / "dec"
+    out.mkdir()
+    sink = []
+    emboss_text_on_face(
+        plate, "KILN", mode="emboss", font_size_mm=40.0,
+        output_dir=str(out), output_stl=str(out / "clamped.stl"),
+        collect_warnings=sink,
+    )
+    assert any("clamped" in w for w in sink), sink
+
+
+# ---------------------------------------------------------------------------
+# compute_text_line_layout — the sizing math, hermetic (no OpenSCAD)
+# ---------------------------------------------------------------------------
+
+
+def _fake_metrics(monkeypatch, table):
+    """Route measure_text_block_mm through a per-text (w/mm, h/mm) table."""
+    import kiln.emboss_generator as eg
+
+    def fake(text, font="Liberation Sans:style=Bold", font_size=48.0):
+        w1, h1 = table[text]
+        return w1 * font_size, h1 * font_size, 0.0, 0.0
+
+    monkeypatch.setattr(eg, "measure_text_block_mm", fake)
+
+
+def _rect_face(w=70.0, h=70.0):
+    return {"width_mm": w, "height_mm": h, "area_mm2": w * h,
+            "normal": (0, 0, 1), "center": (0, 0, 4), "face_name": "top"}
+
+
+def _disc_face(d=80.0):
+    import math
+
+    return {"width_mm": d, "height_mm": d,
+            "area_mm2": math.pi / 4.0 * d * d,
+            "normal": (0, 0, 1), "center": (0, 0, 6), "face_name": "top"}
+
+
+def test_layout_hierarchy_ratios_survive_measured_fit(monkeypatch):
+    from kiln.decoration_helpers import compute_text_line_layout
+
+    _fake_metrics(monkeypatch, {"WWWW": (5.24, 0.96), "IIIII": (1.74, 0.96)})
+    layout = compute_text_line_layout(["WWWW", "IIIII"], face=_rect_face())
+    s0, s1 = layout["font_sizes_mm"]
+    assert s1 / s0 == pytest.approx(0.7, abs=1e-9)
+    # The widest line lands exactly on the 0.85 margin of the usable box.
+    assert max(layout["line_widths_mm"]) == pytest.approx(
+        0.85 * 70.0 * 0.7, abs=1e-6,
+    )
+    assert layout["measured"] is True
+
+
+def test_layout_falls_back_to_estimate_without_probe(monkeypatch):
+    import kiln.emboss_generator as eg
+    from kiln.decoration_helpers import compute_text_line_layout
+
+    def broken(*a, **k):
+        raise eg.TextMeasureError("no binary")
+
+    monkeypatch.setattr(eg, "measure_text_block_mm", broken)
+    layout = compute_text_line_layout(["KILN"], face=_rect_face())
+    assert layout["measured"] is False
+    assert any("estimate" in n for n in layout["notes"])
+    # Legacy arithmetic: (70*0.7*0.85) / (4*0.6) = 17.35
+    assert layout["font_sizes_mm"][0] == pytest.approx(17.35, abs=0.01)
+
+
+def test_layout_round_face_shrinks_all_lines_by_one_factor(monkeypatch):
+    from kiln.decoration_helpers import compute_text_line_layout
+
+    _fake_metrics(monkeypatch, {"W": (1.31, 0.96)})
+    layout = compute_text_line_layout(
+        ["W"], face=_disc_face(), line_scale=1.0, min_edge_margin_mm=0.0,
+    )
+    assert any("rim" in n for n in layout["notes"])
+    # Corner of the shrunk run sits inside the 40mm rim (with cushion).
+    import math
+
+    half_w = layout["line_widths_mm"][0] / 2.0
+    half_h = layout["line_heights_mm"][0] / 2.0
+    assert math.hypot(half_w, half_h) <= 40.0
+
+    _fake_metrics(monkeypatch, {"W": (1.31, 0.96), "II": (0.6, 0.96)})
+    two = compute_text_line_layout(
+        ["W", "II"], face=_disc_face(), line_scale=1.0, min_edge_margin_mm=0.0,
+    )
+    s0, s1 = two["font_sizes_mm"]
+    assert s1 / s0 == pytest.approx(0.7, abs=1e-9)  # ratios survive the shrink
+
+
+def test_layout_floor_refusal_uses_real_widths(monkeypatch):
+    from kiln.decoration_helpers import (
+        TextDoesNotFitError,
+        compute_text_line_layout,
+    )
+
+    # 20 wide glyphs on a 40mm face: measured width forces the size far
+    # below the 4mm floor.  The old estimate-based check could approve a
+    # size the engine then silently clamped below the floor.
+    _fake_metrics(monkeypatch, {"W" * 20: (26.2, 0.96)})
+    with pytest.raises(TextDoesNotFitError) as exc:
+        compute_text_line_layout(["W" * 20], face=_rect_face(40.0, 40.0))
+    assert exc.value.verdict["constraint"] == "min_floor"
+    assert exc.value.verdict["suggestions"]

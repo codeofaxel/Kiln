@@ -524,6 +524,78 @@ def measure_text_block_mm(
 
 
 # ---------------------------------------------------------------------------
+# Inscribed-width fitting for elliptical faces
+#
+# A face dict carries only its bounding box + area, never the outline, so a
+# coaster top and a square plate look identical to bbox math — which is how
+# a monogram "W" auto-fit to a 72mm box shipped with its corners 4.6mm past
+# an 80mm disc's rim, silently (measured 2026-08-08).  A full ellipse is the
+# one shape the dict CAN identify: it covers exactly pi/4 of its bbox, so a
+# face whose area sits at that signature is fitted against the real
+# inscribed width at the text's band instead of the square bbox.
+# ---------------------------------------------------------------------------
+
+#: Area/bbox ratio of a full ellipse (disc, oval): pi/4 ~= 0.785.
+_ELLIPSE_AREA_RATIO = math.pi / 4.0
+#: Tolerance on the signature.  Wide enough to absorb tessellation loss on
+#: a 64-segment disc, narrow enough that a rectangle (1.0) or a ring face
+#: (well below pi/4 — it has LESS material than the ellipse model assumes,
+#: so pretending would lie in the unsafe direction) is never matched.
+_ELLIPSE_AREA_TOL = 0.06
+
+
+def face_inscribed_profile(face: dict) -> tuple[float, float] | None:
+    """Return ``(semi_axis_u, semi_axis_v)`` when *face* is elliptical.
+
+    Returns ``None`` for every other shape — rectangles keep bbox fitting,
+    and hollow/ring faces (area ratio far below pi/4) are deliberately NOT
+    modelled: the ellipse would claim material where the hole is.  Callers
+    treat ``None`` as "fit to the bounding box", the pre-2026-08 behavior.
+    """
+    w = face.get("width_mm") or 0.0
+    h = face.get("height_mm") or 0.0
+    area = face.get("area_mm2") or 0.0
+    if w <= 0.0 or h <= 0.0 or area <= 0.0:
+        return None
+    if abs(area / (w * h) - _ELLIPSE_AREA_RATIO) <= _ELLIPSE_AREA_TOL:
+        return (w / 2.0, h / 2.0)
+    return None
+
+
+def ellipse_fit_scale(
+    semi_u: float,
+    semi_v: float,
+    half_w: float,
+    half_h: float,
+    off_u: float = 0.0,
+    off_v: float = 0.0,
+) -> float:
+    """Largest ``k`` in [0, 1] keeping a content rect inside an ellipse.
+
+    The rect is axis-aligned, ``2*half_w*k`` by ``2*half_h*k``, centred at
+    ``(off_u, off_v)`` in the ellipse's frame.  An axis-aligned rect sits
+    inside an ellipse iff its worst corner does, so this solves the corner
+    quadratic ``((|off_u| + k*half_w)/a)^2 + ((|off_v| + k*half_h)/b)^2 = 1``
+    for the positive root.  Returns 0.0 when the centre itself is outside
+    (no size fits there) and never returns more than 1.0 (fitting only
+    shrinks — growing is the caller's decision).
+    """
+    if semi_u <= 0.0 or semi_v <= 0.0:
+        return 1.0
+    au = abs(off_u)
+    av = abs(off_v)
+    p = (half_w / semi_u) ** 2 + (half_h / semi_v) ** 2
+    q = au * half_w / semi_u**2 + av * half_h / semi_v**2
+    r = (au / semi_u) ** 2 + (av / semi_v) ** 2 - 1.0
+    if r >= 0.0:
+        return 0.0
+    if p <= 0.0:
+        return 1.0
+    k = (-q + math.sqrt(q * q - p * r)) / p
+    return max(0.0, min(1.0, k))
+
+
+# ---------------------------------------------------------------------------
 # Main generation function
 # ---------------------------------------------------------------------------
 
@@ -614,6 +686,20 @@ def generate_emboss_scad(
     scale:
         Fraction of the face to cover (0.0 – 1.0).  Ignored when
         *absolute_size_mm* is provided.
+
+        SIZING CONTRACT (text): the engine EXECUTES, the layout layer
+        DECIDES.  Auto mode (no ``font_size`` in *content_info*) fills
+        the target box exactly — *scale* / *absolute_size_mm* are span
+        directives, and visual margins belong to the caller
+        (``decoration_helpers.emboss_text_lines_on_face`` bakes its 0.85
+        professional margin into the sizes it sends; ``decorate_surface``
+        pre-fits its own box).  An explicit ``font_size`` whose measured
+        run fits is honoured VERBATIM; it is clamped down — always with a
+        warning in ``result["warnings"]`` — only when it would overflow
+        the face or cross an elliptical face's rim (see
+        :func:`face_inscribed_profile`).  The clamp is an overflow guard,
+        never a stylist: it must not fire for layout layers that size
+        with the same measured metrics.
     absolute_size_mm:
         Exact width of the decoration in millimetres.  When > 0, overrides
         *scale* so the decoration is always this width regardless of the
@@ -726,18 +812,27 @@ def generate_emboss_scad(
     # face.  Unclamped, an offset can slide the art partly (or wholly)
     # off the face and the carve still reports success; the drag UI never
     # hits this only because dragging is bounded by the visible face.
-    # Clamp so the content box stays inside, and say so.
-    max_off_x = max((face_w - target_w) / 2.0, 0.0)
-    max_off_y = max((face_h - target_h) / 2.0, 0.0)
-    if abs(final_offset_x) > max_off_x or abs(final_offset_y) > max_off_y:
-        clamped_x = max(-max_off_x, min(max_off_x, final_offset_x))
-        clamped_y = max(-max_off_y, min(max_off_y, final_offset_y))
-        warnings.append(
-            f"placement offset ({final_offset_x:.1f}, {final_offset_y:.1f})mm "
-            f"would push the content off the {face_w:.0f}x{face_h:.0f}mm face — "
-            f"clamped to ({clamped_x:.1f}, {clamped_y:.1f})mm"
-        )
-        final_offset_x, final_offset_y = clamped_x, clamped_y
+    #
+    # The clamp runs AFTER the content branch below, against the content's
+    # REAL dimensions: text is clamped by its measured glyph run, not the
+    # target box.  Box-based clamping over-restricted text offsets so hard
+    # it destroyed layouts — on an 80mm disc at scale 0.95 the box left
+    # only ±2mm of travel, so a two-line layout's ±10.7mm offsets were
+    # yanked to ±2mm and the lines rendered 0.06mm apart (measured
+    # 2026-08-08), with the warning swallowed downstream.
+    def _clamp_offsets(content_w: float, content_h: float) -> None:
+        nonlocal final_offset_x, final_offset_y
+        max_off_x = max((face_w - content_w) / 2.0, 0.0)
+        max_off_y = max((face_h - content_h) / 2.0, 0.0)
+        if abs(final_offset_x) > max_off_x or abs(final_offset_y) > max_off_y:
+            clamped_x = max(-max_off_x, min(max_off_x, final_offset_x))
+            clamped_y = max(-max_off_y, min(max_off_y, final_offset_y))
+            warnings.append(
+                f"placement offset ({final_offset_x:.1f}, {final_offset_y:.1f})mm "
+                f"would push the content off the {face_w:.0f}x{face_h:.0f}mm face — "
+                f"clamped to ({clamped_x:.1f}, {clamped_y:.1f})mm"
+            )
+            final_offset_x, final_offset_y = clamped_x, clamped_y
 
     # Offsets are FACE-LOCAL on every face: they ride an INNER translate
     # (post-rotation), so the face-aligning rotation itself defines the
@@ -806,6 +901,9 @@ def generate_emboss_scad(
             f"linear_extrude(height={extrude_height:.4f})\n"
             f"            {inner}"
         )
+        # SVG/heightmap content fills the target box by construction, so
+        # the box IS the content extent for offset clamping.
+        _clamp_offsets(target_w, target_h)
     elif content_type == "heightmap":
         x_scale = target_w / content_info.get("width_px", 100)
         y_scale = target_h / content_info.get("height_px", 100)
@@ -817,24 +915,29 @@ def generate_emboss_scad(
         content_block = _heightmap_content_block(
             heightmap_info, x_scale, y_scale, depth_mm, mode=mode,
         )
+        _clamp_offsets(target_w, target_h)
     else:
         # openscad_text — caller can pre-set ``font_size`` in
-        # content_info to bypass auto-sizing.  Multi-line helpers use
-        # this to enforce typography hierarchy (primary > secondary >
-        # tertiary) when the auto-sizer's width/height coupling would
-        # otherwise produce inverted sizing — e.g. "Josh Beckham"
-        # width-limited at 11mm while "CEO" height-limited at 17mm
-        # on a 200×78 wedge face.
+        # content_info to bypass auto-sizing.  Layout owners (the
+        # multi-line helper, brand-spec callers) compute their sizes from
+        # the same measured metrics, so an explicit size that fits is
+        # honoured VERBATIM — what the caller requested is what ships.
         #
         # Sizing + centering are MEASURED, not estimated: a probe compile
         # gives the text's exact rendered mm bbox (see
         # ``measure_text_block_mm``), so the font is scaled to truly fit
         # the target box and the block is centered by its real bounds.
-        # An explicit caller size is honoured but clamped DOWN if its
-        # measured bbox would overflow the face — overflow is never OK.
+        # An explicit caller size is clamped DOWN — with a warning — only
+        # when its measured bbox would overflow the face or, on an
+        # elliptical face, cross the rim: a guard against overflow, never
+        # a stylist.  Visual margins are the LAYOUT layer's job
+        # (``decoration_helpers.emboss_text_lines_on_face`` /
+        # ``decorate_surface``'s pre-fit); the engine fills exactly the
+        # box it was asked to fill.
         text_str = content_info.get("text", "")
         text_font = content_info.get("font", "Liberation Sans:style=Bold")
         explicit_font_size = content_info.get("font_size", 0)
+        measured_fit = True
         try:
             chosen = float(explicit_font_size) if explicit_font_size else 48.0
             t_w, t_h, _, _ = measure_text_block_mm(text_str, text_font, chosen)
@@ -851,7 +954,62 @@ def generate_emboss_scad(
                     f"on the face"
                 )
                 chosen *= fit_ratio
-            f_w, f_h, f_minx, f_miny = measure_text_block_mm(text_str, text_font, chosen)
+            text_w_mm, text_h_mm, _, _ = measure_text_block_mm(
+                text_str, text_font, chosen
+            )
+        except TextMeasureError as exc:
+            _logger.warning("text probe unavailable (%s) — heuristic fit", exc)
+            measured_fit = False
+            if explicit_font_size:
+                chosen = float(explicit_font_size)
+            else:
+                # Fallback: the legacy char-aspect estimate.
+                char_count = max(1, len(text_str))
+                max_font_from_w = target_w / (char_count * 0.6)
+                max_font_from_h = target_h * 0.8  # leave vertical margin
+                chosen = min(max_font_from_w, max_font_from_h)
+            # Estimated extents keep the offset clamp and rim guard alive
+            # in the degraded (no-OpenSCAD) path — coarse beats blind.
+            text_w_mm = max(1, len(text_str)) * 0.6 * chosen
+            text_h_mm = chosen
+
+        # Offsets clamp against the REAL text extents (measured, or
+        # estimated on the degraded path) — never the target box.
+        _clamp_offsets(text_w_mm, text_h_mm)
+
+        # Rim guard: on an elliptical face (coaster, oval tray) the bbox
+        # lies about available width — a run that fits the box can still
+        # hang past the rim at its band.  Fit the run's corners inside
+        # the inscribed ellipse at its FINAL offsets.  Auto mode absorbs
+        # this silently (auto means "fit for me"); an explicit size that
+        # had to shrink is a changed promise, so it warns.
+        profile = face_inscribed_profile(face)
+        if profile is not None and text_w_mm > 0 and text_h_mm > 0:
+            rim_k = ellipse_fit_scale(
+                profile[0], profile[1],
+                text_w_mm / 2.0, text_h_mm / 2.0,
+                final_offset_x, final_offset_y,
+            )
+            # 0.1% dead-band: a layout layer that fitted with the same
+            # math re-arrives here through rounded font sizes; a sub-0.1%
+            # "shrink" is float noise, not a rim crossing.
+            if rim_k < 0.999:
+                if explicit_font_size:
+                    warnings.append(
+                        f"text font_size={explicit_font_size} would cross "
+                        f"the rim of the round {face_w:.0f}x{face_h:.0f}mm "
+                        f"face at offset ({final_offset_x:.1f}, "
+                        f"{final_offset_y:.1f})mm — clamped to "
+                        f"{chosen * rim_k:.1f} to keep the text on the face"
+                    )
+                chosen *= rim_k
+                text_w_mm *= rim_k
+                text_h_mm *= rim_k
+
+        if measured_fit:
+            f_w, f_h, f_minx, f_miny = measure_text_block_mm(
+                text_str, text_font, chosen
+            )
             content_info = {
                 **content_info,
                 "font_size": round(chosen, 2),
@@ -861,15 +1019,8 @@ def generate_emboss_scad(
                 # the old centering translate).
                 "_measured_center": (-(f_minx + f_w / 2), -(f_miny + f_h / 2)),
             }
-        except TextMeasureError as exc:
-            _logger.warning("text probe unavailable (%s) — heuristic fit", exc)
-            if not explicit_font_size:
-                # Fallback: the legacy char-aspect estimate.
-                char_count = max(1, len(text_str))
-                max_font_from_w = target_w / (char_count * 0.6)
-                max_font_from_h = target_h * 0.8  # leave vertical margin
-                auto_font_size = min(max_font_from_w, max_font_from_h)
-                content_info = {**content_info, "font_size": round(auto_font_size, 1)}
+        else:
+            content_info = {**content_info, "font_size": round(chosen, 1)}
         inner = _text_content_block(content_info)
         extrude_height = depth_mm + 0.1
         content_block = (
