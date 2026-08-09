@@ -206,3 +206,32 @@ def test_facts_from_shape_labels_emitted_source(real_kernel):
     )
     assert facts["source"] == "emitted"
     assert facts["surfaces"] == {"plane": 6}
+
+
+def test_census_normalises_foreign_units_to_mm(real_kernel, tmp_path):
+    """A STEP written in INCHES must report mm facts — the reader converts
+    units on transfer, and this pins that the ``_mm`` suffix stays true for
+    files Kiln did not write.  A 1-inch cube reads as 25.4 mm."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.IFSelect import IFSelect_ReturnStatus
+    from OCP.Interface import Interface_Static
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    step = tmp_path / "inch_cube.step"
+    writer = STEPControl_Writer()
+    Interface_Static.SetCVal_s("write.step.unit", "INCH")
+    try:
+        writer.Transfer(
+            BRepPrimAPI_MakeBox(25.4, 25.4, 25.4).Shape(),
+            STEPControl_StepModelType.STEPControl_AsIs,
+        )
+        assert writer.Write(str(step)) == IFSelect_ReturnStatus.IFSelect_RetDone
+    finally:
+        Interface_Static.SetCVal_s("write.step.unit", "MM")
+    # The file itself must really carry inches, or this test proves nothing.
+    assert "INCH" in step.read_text(errors="replace").upper()
+
+    facts = read_step_facts(step)
+    assert facts["available"] is True
+    for extent in facts["bbox_mm"]["size"]:
+        assert math.isclose(extent, 25.4, abs_tol=1e-6)
