@@ -333,6 +333,10 @@ class TestExportProfile:
             # A limit exported without the hardware configuration it belongs
             # to is the confusion this module exists to prevent.
             "variant", "available_variants",
+            # And a limit exported without its provenance is the OTHER
+            # confusion: the recipient can't tell a Kiln-verified number
+            # from one the exporter typed.
+            "owner_supplied", "curated_base", "limits_provenance",
         }
         assert set(exported.keys()) == expected_keys
 

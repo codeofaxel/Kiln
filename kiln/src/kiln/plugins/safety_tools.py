@@ -103,7 +103,10 @@ class _SafetyToolsPlugin:
                 profile_info["max_bed_temp"] = max_bed
                 if _srv._PRINTER_MODEL:
                     try:
-                        from kiln.safety_profiles import get_profile
+                        from kiln.safety_profiles import (
+                            get_profile,
+                            limits_provenance_note,
+                        )
 
                         profile = get_profile(_srv._PRINTER_MODEL)
                         profile_info["profile_id"] = profile.id
@@ -111,6 +114,10 @@ class _SafetyToolsPlugin:
                         profile_info["max_feedrate"] = profile.max_feedrate
                         if profile.build_volume:
                             profile_info["build_volume"] = profile.build_volume
+                        # This snapshot quotes the limits in force, so it
+                        # says whose numbers they are, same as every other
+                        # surface that quotes them.
+                        profile_info["limits_provenance"] = limits_provenance_note(profile)
                     except KeyError:
                         profile_info["profile_id"] = "default (no specific profile found)"
 
@@ -250,7 +257,11 @@ class _SafetyToolsPlugin:
             if err := _srv._check_auth("safety"):
                 return err
             try:
-                from kiln.safety_profiles import get_profile, list_profiles
+                from kiln.safety_profiles import (
+                    get_profile,
+                    limits_provenance_note,
+                    list_profiles,
+                )
 
                 ids = list_profiles()
                 profiles = []
@@ -263,6 +274,12 @@ class _SafetyToolsPlugin:
                                 "display_name": p.display_name,
                                 "max_hotend_temp": p.max_hotend_temp,
                                 "max_bed_temp": p.max_bed_temp,
+                                # A roster row quotes two limits, so it owes
+                                # the same one-line answer to "whose numbers
+                                # are these?" the full profile carries — an
+                                # owner-typed profile must not read like a
+                                # curated one here either.
+                                "limits_provenance": limits_provenance_note(p),
                             }
                         )
                     except KeyError:
@@ -286,6 +303,14 @@ class _SafetyToolsPlugin:
             Returns temperature limits, feedrate limits, volumetric flow,
             build volume, and safety notes.  Falls back to the default
             profile if the printer_id is not found.
+
+            The profile also says where its numbers came from:
+            ``owner_supplied`` lists any limit fields whose values were
+            typed by this machine's owner rather than verified by Kiln,
+            and ``limits_provenance`` is a ready-made sentence stating
+            it.  Repeat that sentence when quoting a limit, so a
+            verified number and a typed one are never presented with
+            the same authority.
 
             Args:
                 printer_id: Printer model identifier (e.g. ``"ender3"``,
@@ -332,6 +357,9 @@ class _SafetyToolsPlugin:
             It is the WRONG tool for "my hotend is upgraded".  Use
             ``select_printer_variant`` for that: it resolves to a ceiling Kiln
             has verified against the manufacturer, instead of one you typed.
+
+            Values saved here are labelled owner-supplied in every profile
+            readout — Kiln never presents them as its own verified numbers.
 
             Args:
                 printer_model: Short identifier for the printer (e.g.

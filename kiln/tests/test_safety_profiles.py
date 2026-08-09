@@ -317,6 +317,7 @@ class TestProfileToDict:
             "max_chamber_temp", "max_feedrate", "min_safe_z",
             "max_volumetric_flow", "build_volume", "notes",
             "variant", "available_variants",
+            "owner_supplied", "curated_base", "limits_provenance",
         }
         assert set(d.keys()) == expected_keys
 

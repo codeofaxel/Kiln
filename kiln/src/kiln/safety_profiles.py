@@ -19,6 +19,13 @@ or federated: it is one person's machine, on one person's disk.  An
 override may only TIGHTEN a curated limit — see ``_clamp_to_curated`` —
 and the file also records which curated variant the operator has selected.
 
+Every resolved profile also says where its numbers came from: a limit
+Kiln verified and a limit the machine's owner typed used to be
+indistinguishable once loaded.  ``owner_supplied`` names the fields whose
+values are the owner's, ``curated_base`` says whether a Kiln-verified
+profile stands underneath, and ``limits_provenance_note`` renders the
+one-line human answer every surface can quote.
+
 Usage::
 
     from kiln.safety_profiles import get_profile, list_profiles
@@ -65,6 +72,19 @@ _MAX_TEMP_CEILING = 500.0
 _MAX_FEEDRATE_CEILING = 50000.0  # mm/min — matches units used in all bundled profiles
 _REQUIRED_FIELDS = ("max_hotend_temp", "max_bed_temp", "max_feedrate", "build_volume")
 
+#: Limit-bearing fields an override's owner can state — the fields the
+#: provenance stamp is drawn from.  Presentation fields (display_name,
+#: notes) are not limits and are never labelled.
+_OWNER_STATEABLE_FIELDS = (
+    "max_hotend_temp",
+    "max_bed_temp",
+    "max_chamber_temp",
+    "max_feedrate",
+    "min_safe_z",
+    "max_volumetric_flow",
+    "build_volume",
+)
+
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -88,6 +108,10 @@ class SafetyProfile:
         notes: Free-text notes about the printer's safety characteristics.
         variant: Curated hardware variant in force, or ``None`` for as-shipped.
         available_variants: Variant IDs this profile offers.
+        owner_supplied: Limit fields whose values came from the machine's
+            owner, not from Kiln's curated data.
+        curated_base: ``False`` when Kiln has no curated profile under
+            these limits at all.
     """
 
     id: str
@@ -107,6 +131,25 @@ class SafetyProfile:
     #: Variant IDs this profile offers, for "what can I select" callers.
     #: Empty for a machine Kiln has curated no modified configuration for.
     available_variants: tuple[str, ...] = ()
+    #: Limit fields whose value in THIS object came from the machine's
+    #: owner rather than from Kiln's curated data.  The invariant, true at
+    #: every point in a profile's life: a field is listed exactly while
+    #: this object's value for it is the owner's.  Stamped where an
+    #: override is created (``_owner_stated_fields``, called by both
+    #: doors); ``_clamp_to_curated`` removes any field whose value it
+    #: replaced with the curated number.  Empty for curated profiles —
+    #: every number is Kiln's.
+    owner_supplied: tuple[str, ...] = ()
+    #: ``False`` when this profile was resolved for a printer Kiln has no
+    #: curated profile for: every limit here is somebody's typed number,
+    #: bounded only by the absolute validation range, and output must not
+    #: present it with a verified profile's authority.  Set by
+    #: ``_clamp_to_curated`` on resolved override profiles; ``True`` is
+    #: trivially correct for curated ones.  The two fields are separate
+    #: because an owner who tightens EVERY field on a curated machine is
+    #: still standing on Kiln-verified ceilings — reporting that machine
+    #: as "never verified" would be false.
+    curated_base: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +184,26 @@ def _normalise(name: str) -> str:
     return name.lower().replace("-", "_").strip()
 
 
+def _owner_stated_fields(data: dict[str, Any]) -> tuple[str, ...]:
+    """The limit fields *data* actually states — the provenance stamp.
+
+    One helper for BOTH doors that create an override profile (the file
+    parse, which also covers hand-edited and legacy files, and
+    :func:`set_local_printer_override`), so the doors can never disagree
+    about what counts as owner-stated.  A key that is absent or ``None``
+    was not stated: the parse defaults that fill it are Kiln's numbers,
+    and labelling them owner-supplied would be its own small lie.
+
+    Honest bound: a file written by the pre-provenance save carries every
+    field explicitly (``min_safe_z: 0.0`` included), so its defaulted
+    optionals read as owner-stated.  That error direction is safe — it
+    claims LESS verification than reality, never more — and dies out as
+    entries are re-saved, because the save now writes optional limit
+    fields only when the owner stated them.
+    """
+    return tuple(f for f in _OWNER_STATEABLE_FIELDS if data.get(f) is not None)
+
+
 def _load_locks() -> None:
     """Load the set of admin-locked profile IDs."""
     global _locks_loaded
@@ -169,6 +232,7 @@ def _parse_profiles(
     target: dict[str, SafetyProfile],
     *,
     variants_into: dict[str, dict[str, dict[str, Any]]] | None = None,
+    stamp_owner: bool = False,
 ) -> None:
     """Parse raw JSON profile entries into *target* dict.
 
@@ -179,6 +243,10 @@ def _parse_profiles(
     block.  Only the BUNDLED file passes it: a variant is the one thing that
     may raise a ceiling, so it may only ever come from curated data.  The
     local override file supplies a variant NAME and nothing more.
+
+    *stamp_owner* marks each entry's stated limit fields as
+    ``owner_supplied`` (see :func:`_owner_stated_fields`).  Only the LOCAL
+    OVERRIDE load passes it — a bundled profile's numbers are Kiln's own.
     """
     for key, data in raw.items():
         if key.startswith("_"):
@@ -200,6 +268,7 @@ def _parse_profiles(
                 available_variants=tuple(sorted(data.get("variants", {})))
                 if isinstance(data.get("variants"), dict)
                 else (),
+                owner_supplied=_owner_stated_fields(data) if stamp_owner else (),
             )
         except (KeyError, TypeError, ValueError) as exc:
             logger.warning("Skipping malformed safety profile '%s': %s", key, exc)
@@ -310,7 +379,7 @@ def _load_local_overrides() -> None:
         _local_overrides_loaded = True
         return
 
-    _parse_profiles(raw, _local_override_cache)
+    _parse_profiles(raw, _local_override_cache, stamp_owner=True)
 
     # Rebuilt from the file rather than merged into, so a cleared selection
     # stays cleared if anything ever reloads the overlay.
@@ -490,12 +559,13 @@ def _clamp_to_curated(
 
     An unknown printer has no curated profile to clamp against; the
     override entry stands, having already passed the absolute-range
-    validation.
+    validation — and comes back marked ``curated_base=False``, so output
+    can say plainly that Kiln has not verified this machine.
     """
     if curated is None:
-        return community
+        return _dc_replace(community, curated_base=False)
 
-    replacements: dict[str, float] = {}
+    replaced: dict[str, float] = {}
     for field in _CEILING_FIELDS:
         mine, theirs = getattr(community, field, None), getattr(curated, field, None)
         if (
@@ -503,7 +573,7 @@ def _clamp_to_curated(
             and isinstance(theirs, (int, float))
             and mine > theirs
         ):
-            replacements[field] = theirs
+            replaced[field] = theirs
     for field in _FLOOR_FIELDS:
         mine, theirs = getattr(community, field, None), getattr(curated, field, None)
         if (
@@ -511,25 +581,33 @@ def _clamp_to_curated(
             and isinstance(theirs, (int, float))
             and mine < theirs
         ):
-            replacements[field] = theirs
+            replaced[field] = theirs
 
     # Whether or not a ceiling had to be replaced, the variant the machine
     # actually resolves to is a fact about the curated side, not the override.
     # Carrying it through keeps "which configuration am I being judged as"
-    # answerable from the profile the caller is handed.
-    replacements["variant"] = curated.variant
-    replacements["available_variants"] = curated.available_variants
+    # answerable from the profile the caller is handed.  The provenance
+    # stamp follows its invariant here: a field stays in ``owner_supplied``
+    # exactly while this object's value for it is still the owner's, so a
+    # clamped-away field — whose value is now Kiln's — leaves the list.
+    carry: dict[str, Any] = {
+        "variant": curated.variant,
+        "available_variants": curated.available_variants,
+        "owner_supplied": tuple(
+            f for f in community.owner_supplied if f not in replaced
+        ),
+    }
 
-    if len(replacements) == 2:
-        return _dc_replace(community, **replacements)
+    if not replaced:
+        return _dc_replace(community, **carry)
 
     logger.warning(
         "local printer override %r tried to loosen %s beyond the curated "
         "limits; the curated values are being used instead",
         community.id,
-        ", ".join(sorted(k for k in replacements if k not in ("variant", "available_variants"))),
+        ", ".join(sorted(replaced)),
     )
-    return _dc_replace(community, **replacements)
+    return _dc_replace(community, **replaced, **carry)
 
 
 def _curated_match(candidates: list[str]) -> SafetyProfile | None:
@@ -751,6 +829,67 @@ def resolve_limits(printer_id: str | None = None) -> tuple:
         return _UNKNOWN_PRINTER_MAX_HOTEND_C, _UNKNOWN_PRINTER_MAX_BED_C
 
 
+#: Human names for the sentence in :func:`limits_provenance_note`.  The
+#: machine-readable ``owner_supplied`` list keeps exact field names for
+#: programmatic callers; the sentence is quoted to people, who should not
+#: be handed snake_case.
+_FIELD_LABELS = {
+    "max_hotend_temp": "hotend temperature",
+    "max_bed_temp": "bed temperature",
+    "max_chamber_temp": "chamber temperature",
+    "max_feedrate": "speed",
+    "min_safe_z": "minimum Z height",
+    "max_volumetric_flow": "flow rate",
+    "build_volume": "build volume",
+}
+
+
+def limits_provenance_note(profile: SafetyProfile) -> str:
+    """One pre-composed sentence saying where this profile's limits came from.
+
+    Composed HERE, once, rather than by each agent reading the raw
+    ``owner_supplied`` list — a limit's provenance matters most at the
+    moment it is quoted, and a sentence every surface can repeat verbatim
+    is how a verified number and a typed one stop being presented with
+    the same authority.
+
+    Four shapes, and only four:
+
+    - every value is Kiln's, verified for this machine (curated profiles
+      and variants);
+    - Kiln's generic conservative fallback — the values are Kiln's, but
+      claiming them "verified" for a machine Kiln does not recognise
+      would borrow authority the profile has not earned;
+    - some fields are the owner's, standing on a curated base — which
+      also covers the owner who tightened EVERY field, because Kiln's
+      verified ceilings still cap that machine and "never verified"
+      would be false;
+    - Kiln has no curated profile at all, so nothing here is verified.
+
+    Deliberately does NOT claim owner values "can only tighten" — that is
+    true for the clamped temperature/flow/feedrate fields but not for
+    ``build_volume``, which the clamp does not touch, and a provenance
+    line must not overclaim.
+    """
+    if not profile.owner_supplied:
+        if profile.id == "default":
+            return (
+                "Kiln's conservative generic limits — not verified for "
+                "this specific printer model."
+            )
+        return "All limits are Kiln-verified values."
+    fields = ", ".join(_FIELD_LABELS.get(f, f) for f in profile.owner_supplied)
+    if profile.curated_base:
+        return (
+            f"Set by this machine's owner: {fields}. "
+            "Remaining limits are Kiln-verified."
+        )
+    return (
+        "Kiln has not verified this printer: its limits were supplied by "
+        "its owner."
+    )
+
+
 def profile_to_dict(profile: SafetyProfile) -> dict[str, Any]:
     """Serialise a :class:`SafetyProfile` to a plain dict for MCP responses."""
     return {
@@ -766,6 +905,9 @@ def profile_to_dict(profile: SafetyProfile) -> dict[str, Any]:
         "notes": profile.notes,
         "variant": profile.variant,
         "available_variants": list(profile.available_variants),
+        "owner_supplied": list(profile.owner_supplied),
+        "curated_base": profile.curated_base,
+        "limits_provenance": limits_provenance_note(profile),
     }
 
 
@@ -1011,17 +1153,23 @@ def _save_local_overrides() -> None:
     _LOCAL_DIR.mkdir(parents=True, exist_ok=True)
     payload: dict[str, Any] = {"_meta": _LOCAL_FILE_META}
     for key, sp in _local_override_cache.items():
-        payload[key] = {
+        entry: dict[str, Any] = {
             "display_name": sp.display_name,
             "max_hotend_temp": sp.max_hotend_temp,
             "max_bed_temp": sp.max_bed_temp,
-            "max_chamber_temp": sp.max_chamber_temp,
             "max_feedrate": sp.max_feedrate,
-            "min_safe_z": sp.min_safe_z,
-            "max_volumetric_flow": sp.max_volumetric_flow,
             "build_volume": sp.build_volume,
             "notes": sp.notes,
         }
+        # Optional limit fields are written only when the owner stated
+        # them.  The file IS the owner's statement, and the reload stamp
+        # is drawn from which keys are present — writing the parse
+        # defaults back (min_safe_z 0.0, chamber None) would launder
+        # Kiln's fill-ins into owner-stated values on the next load.
+        for field in ("max_chamber_temp", "min_safe_z", "max_volumetric_flow"):
+            if field in sp.owner_supplied:
+                entry[field] = getattr(sp, field)
+        payload[key] = entry
     if _variant_selections:
         payload[_VARIANT_SELECTION_KEY] = dict(sorted(_variant_selections.items()))
     _LOCAL_OVERRIDE_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -1085,6 +1233,9 @@ def set_local_printer_override(
         else None,
         build_volume=profile["build_volume"],
         notes=notes,
+        # The dict handed in IS the owner's statement — same stamp rule as
+        # the file-parse door, through the same helper.
+        owner_supplied=_owner_stated_fields(profile),
     )
 
     _local_override_cache[normalised] = sp
@@ -1107,7 +1258,10 @@ def export_profile(printer_model: str) -> dict[str, Any]:
     The result carries the ``variant`` in force, because a limit exported
     without the hardware configuration it belongs to is the exact confusion
     this module now exists to prevent: a 300 C ceiling means one thing on a
-    modified machine and is simply wrong on a stock one.
+    modified machine and is simply wrong on a stock one.  It carries the
+    provenance fields for the same reason — the person receiving a shared
+    profile is precisely the person who cannot tell a Kiln-verified number
+    from one the exporter typed.
 
     :param printer_model: Printer model identifier.
     :raises KeyError: If no profile matches *printer_model*.
