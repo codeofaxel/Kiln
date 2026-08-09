@@ -54,6 +54,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,15 @@ _DEFAULT_WARN_THRESHOLD = 5
 # older than this.  Six hours keeps a session parked over lunch safe
 # while still catching overnight leftovers.
 _DEFAULT_IDLE_HOURS = 6.0
+
+# How long a SIGTERM'd server gets to actually exit before the kill is
+# escalated, and how long a SIGKILL gets to land before the PID is
+# declared unkillable.  Short on purpose: candidates are idle husks, a
+# healthy one exits in milliseconds, and the wedged ones (see
+# ``perform_trim``) never exit on SIGTERM no matter how long the wait.
+_TERM_GRACE_S = 2.0
+_KILL_GRACE_S = 2.0
+_EXIT_POLL_INTERVAL_S = 0.1
 
 
 def _warn_threshold() -> int:
@@ -298,8 +308,12 @@ def plan_trim(open_sessions: int | None = None) -> dict:
       counts toward K when it is itself one of them) and propose the
       rest.
     * ``open_sessions=None`` — no count given, so fall back to the
-      conservative default: propose only servers older than
-      ``_DEFAULT_IDLE_HOURS``.
+      conservative default: propose servers older than
+      ``_DEFAULT_IDLE_HOURS``, plus anything beyond the
+      ``_warn_threshold()`` most recently started — the same "more
+      copies than any plausible number of live sessions" line the
+      pile-up warning draws, so the default trim can always get back
+      under it (age alone no-opped on same-day pile-ups).
 
     Returns::
 
@@ -366,16 +380,42 @@ def plan_trim(open_sessions: int | None = None) -> dict:
                     }
                 )
     else:
+        # Two conditions propose a server, either alone sufficient.  Age
+        # alone used to be the whole default — and it no-ops in exactly
+        # the pile-up case this module was written for (2026-08-07:
+        # eleven servers holding ~1 GB, every one under six hours old,
+        # default plan "nothing to trim"; the module docstring's own
+        # field report, 18 servers overnight, is the LUCKY shape).  So
+        # the warn threshold caps the default keep too: it is the same
+        # line ``check_serve_siblings`` already draws for "more copies
+        # than any plausible number of live sessions", and a janitor
+        # whose default cannot get back under the line its own warning
+        # fires at is theater.  Worst case is unchanged from the module
+        # doctrine: nothing is printing (``perform_trim`` guards that),
+        # so an over-trim costs a still-open session one reconnect.
         idle_limit_s = _DEFAULT_IDLE_HOURS * 3600
-        for proc in others:
+        threshold = _warn_threshold()
+        keep_slots = max(0, threshold - 1) if self_is_a_server else threshold
+        for rank, proc in enumerate(others):
             entry = {"pid": proc["pid"], "age": proc["age"]}
             age_s = _etime_seconds(proc["age"])
-            if age_s is not None and age_s > idle_limit_s:
+            aged_out = age_s is not None and age_s > idle_limit_s
+            beyond_cap = rank >= keep_slots
+            if aged_out or beyond_cap:
+                reason = (
+                    f"running {_humanize_etime(proc['age'])}"
+                    if aged_out
+                    else (
+                        f"beyond the {threshold} most recently started — "
+                        f"more copies than open sessions plausibly need "
+                        f"(running {_humanize_etime(proc['age'])})"
+                    )
+                )
                 candidates.append(
                     {
                         **entry,
                         "age_human": _humanize_etime(proc["age"]),
-                        "reason": f"running {_humanize_etime(proc['age'])}",
+                        "reason": reason,
                     }
                 )
             else:
@@ -386,6 +426,58 @@ def plan_trim(open_sessions: int | None = None) -> dict:
     return {"scanned": len(procs), "candidates": candidates, "kept": kept}
 
 
+def _is_zombie(pid: int) -> bool:
+    """True when *pid* has exited and only awaits its parent's reap.
+
+    A zombie holds a process-table slot but no memory, so for trimming
+    purposes it is dead — reporting it as a survivor would tell the
+    user a cleanup failed when everything reclaimable was reclaimed.
+    ``kill(pid, 0)`` cannot make this distinction (it succeeds on
+    zombies), so ask ps for the state.
+    """
+    try:
+        out = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return False
+    return out.returncode == 0 and out.stdout.strip().startswith("Z")
+
+
+def _still_running(pid: int) -> bool:
+    """True while *pid* is a live, non-zombie process."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Exists but is no longer ours to probe — treat as running so
+        # the caller reports a failure instead of a phantom success.
+        return True
+    except Exception:
+        return True
+    return not _is_zombie(pid)
+
+
+def _await_exit(pids: list[int], deadline_s: float) -> set[int]:
+    """Poll until every pid is gone or *deadline_s* passes; return survivors.
+
+    Returns as soon as the set is empty, so the healthy case (servers
+    that honor SIGTERM) costs milliseconds, not the full grace window.
+    """
+    remaining = set(pids)
+    deadline = time.monotonic() + deadline_s
+    while remaining:
+        remaining = {pid for pid in remaining if _still_running(pid)}
+        if not remaining or time.monotonic() >= deadline:
+            break
+        time.sleep(_EXIT_POLL_INTERVAL_S)
+    return remaining
+
+
 def perform_trim(open_sessions: int | None = None, force: bool = False) -> dict:
     """Shut down the leftover servers ``plan_trim`` identified.
 
@@ -394,7 +486,22 @@ def perform_trim(open_sessions: int | None = None, force: bool = False) -> dict:
     they cannot trivially recover (see module docstring).  Re-plans
     against a fresh process scan immediately before signalling, so a
     recycled PID can never be hit: every target is matcher-verified as
-    a ``kiln serve`` at kill time.  SIGTERM only; never this process.
+    a ``kiln serve`` at kill time.  Never this process.
+
+    ``trimmed`` means VERIFIED gone — a delivered signal is not an
+    exited process, and nothing enters ``trimmed`` unmeasured.
+    (2026-08-07: six servers were reported "trimmed" and were all still
+    alive a minute later with their original start times.  ``kiln
+    serve`` installs a SIGTERM handler that runs several ``.stop()``
+    calls before exiting; Python signal handlers need the main thread
+    at a bytecode boundary, so a wedged main thread ignores SIGTERM
+    forever, and the old code appended to ``trimmed`` the moment
+    ``os.kill`` didn't raise.)  So: SIGTERM first (a healthy server
+    exits cleanly in milliseconds), poll for actual exit, escalate the
+    survivors to SIGKILL — which no handler can ignore — and re-verify.
+    A PID still alive after both lands in ``failed`` with the reason,
+    never in ``trimmed``.  Zombies count as gone: their memory is
+    already reclaimed and only a parent's reap is pending.
     """
     printing = printing_now()
     if printing["active"] and not force:
@@ -410,14 +517,57 @@ def perform_trim(open_sessions: int | None = None, force: bool = False) -> dict:
     plan = plan_trim(open_sessions=open_sessions)
     trimmed: list[dict] = []
     failed: list[dict] = []
+    signalled: list[dict] = []
     for cand in plan["candidates"]:
         try:
             os.kill(cand["pid"], signal.SIGTERM)
-            trimmed.append(cand)
+            signalled.append(cand)
         except ProcessLookupError:
             trimmed.append({**cand, "reason": cand["reason"] + " (already gone)"})
         except Exception as exc:
             failed.append({**cand, "error": str(exc)})
+
+    term_survivors = _await_exit(
+        [c["pid"] for c in signalled], _TERM_GRACE_S
+    )
+    escalate: list[dict] = []
+    for cand in signalled:
+        if cand["pid"] in term_survivors:
+            escalate.append(cand)
+        else:
+            trimmed.append(cand)
+
+    kill_pending: list[dict] = []
+    for cand in escalate:
+        try:
+            os.kill(cand["pid"], signal.SIGKILL)
+            kill_pending.append(cand)
+        except ProcessLookupError:
+            # Died between the poll and the escalation — still verified.
+            trimmed.append(cand)
+        except Exception as exc:
+            failed.append(
+                {**cand, "error": f"ignored SIGTERM, and SIGKILL failed: {exc}"}
+            )
+
+    unkillable = _await_exit([c["pid"] for c in kill_pending], _KILL_GRACE_S)
+    for cand in kill_pending:
+        if cand["pid"] in unkillable:
+            failed.append(
+                {
+                    **cand,
+                    "error": (
+                        "still running after SIGTERM and SIGKILL "
+                        f"({_TERM_GRACE_S + _KILL_GRACE_S:g}s) — likely stuck "
+                        "in an uninterruptible kernel wait; it should clear "
+                        "when the machine or the blocking I/O does"
+                    ),
+                }
+            )
+        else:
+            trimmed.append(
+                {**cand, "reason": cand["reason"] + " (needed a force kill)"}
+            )
 
     return {
         "blocked": False,

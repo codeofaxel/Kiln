@@ -8,7 +8,12 @@ These tests pin three layers:
   shape), threshold, and the plain-English warning;
 * the janitor — the print-safety guard (the whole reason trimming is
   safe), the self-never-trimmed rule, elimination by the user's own
-  session count, and SIGTERM mechanics;
+  session count, and the kill mechanics: ``trimmed`` means VERIFIED
+  gone (2026-08-07: six servers were reported "trimmed" and all six
+  were still alive a minute later — they ignore SIGTERM, and the old
+  code trusted signal delivery as death), so SIGTERM ignorers are
+  escalated to SIGKILL and anything that survives both is a
+  ``failed``, never a ``trimmed``;
 * wiring — every surface that reports health (health_check,
   kiln_health, get_started, ``kiln doctor``/``verify``) and both trim
   doors (the MCP tool and ``kiln trim``).
@@ -16,6 +21,7 @@ These tests pin three layers:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from unittest.mock import patch
@@ -294,6 +300,62 @@ def _quiet_printers():
     )
 
 
+class _FakeProcessTable:
+    """``os.kill`` stand-in with real death semantics.
+
+    The old tests stubbed ``os.kill`` to a recorder that killed nothing
+    and then asserted the PIDs landed in ``trimmed`` — encoding exactly
+    the bug the janitor shipped with (a delivered signal reported as a
+    dead process).  This fake models the part that matters: a signal is
+    delivered, and the PROCESS decides whether to die.  Probe signals
+    (``sig 0``) answer liveness and are not recorded.
+    """
+
+    def __init__(
+        self,
+        alive: set[int],
+        *,
+        ignore_sigterm: set[int] | None = None,
+        ignore_sigkill: set[int] | None = None,
+    ) -> None:
+        self.alive = set(alive)
+        self.ignore_sigterm = set(ignore_sigterm or ())
+        self.ignore_sigkill = set(ignore_sigkill or ())
+        self.signals: list[tuple[int, int]] = []
+
+    def kill(self, pid: int, sig: int) -> None:
+        import signal as _signal
+
+        if pid not in self.alive:
+            raise ProcessLookupError()
+        if sig == 0:
+            return
+        self.signals.append((pid, sig))
+        if sig == _signal.SIGTERM and pid not in self.ignore_sigterm:
+            self.alive.discard(pid)
+        elif sig == _signal.SIGKILL and pid not in self.ignore_sigkill:
+            self.alive.discard(pid)
+
+
+@contextlib.contextmanager
+def _kill_harness(table: _FakeProcessTable, *, zombies: set[int] | None = None):
+    """Patch the kill/verify seams to the fake table, with fast grace.
+
+    ``_is_zombie`` is pinned (a fixed set) so no real ``ps`` runs
+    against fake PIDs, and the grace windows shrink so the escalation
+    path costs milliseconds in-suite instead of seconds.
+    """
+    zombie_set = zombies or set()
+    with patch.multiple(
+        serve_siblings,
+        _TERM_GRACE_S=0.05,
+        _KILL_GRACE_S=0.05,
+        _EXIT_POLL_INTERVAL_S=0.001,
+        _is_zombie=lambda pid: pid in zombie_set,
+    ), patch.object(serve_siblings.os, "kill", table.kill):
+        yield table
+
+
 class TestPlanTrim:
     def test_default_mode_proposes_only_old_servers(self) -> None:
         out = _ps_output(
@@ -372,6 +434,44 @@ class TestPlanTrim:
             plan = serve_siblings.plan_trim(open_sessions=2)
         assert plan["candidates"] == []
 
+    def test_default_caps_a_same_day_pileup(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Eleven servers, every one hours young — age alone proposed
+        NOTHING (2026-08-07: ~1 GB held and the janitor's default said
+        "nothing to trim").  The warn threshold caps the default keep:
+        the same line the pile-up warning fires at."""
+        monkeypatch.delenv("KILN_SERVE_SIBLING_WARN_THRESHOLD", raising=False)
+        out = _ps_output(
+            [
+                _ps_line(800 + i, f"{i + 1:02d}:00", "/opt/python /v/bin/kiln serve")
+                for i in range(11)
+            ]
+        )
+        with _fake_ps(out):
+            plan = serve_siblings.plan_trim()
+        assert {k["pid"] for k in plan["kept"]} == {800, 801, 802, 803, 804}
+        assert {c["pid"] for c in plan["candidates"]} == set(range(805, 811))
+        assert "beyond the 5 most recently started" in plan["candidates"][0]["reason"]
+
+    def test_default_cap_counts_self_as_one_keeper(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("KILN_SERVE_SIBLING_WARN_THRESHOLD", raising=False)
+        out = _ps_output(
+            [_ps_line(os.getpid(), "00:30", "/opt/python /v/bin/kiln serve")]
+            + [
+                _ps_line(900 + i, f"{i + 1:02d}:00", "/opt/python /v/bin/kiln serve")
+                for i in range(5)
+            ]
+        )
+        with _fake_ps(out):
+            plan = serve_siblings.plan_trim()
+        # Self holds one of the five slots; the four youngest siblings
+        # fill the rest and the oldest is proposed.
+        assert {k["pid"] for k in plan["kept"]} == {os.getpid(), 900, 901, 902, 903}
+        assert [c["pid"] for c in plan["candidates"]] == [904]
+
     def test_unreadable_process_table_is_unknown(self) -> None:
         with patch.object(serve_siblings, "_list_serve_processes", return_value=None):
             plan = serve_siblings.plan_trim()
@@ -397,39 +497,79 @@ class TestPerformTrim:
         assert result["blocked"] is True
         assert killed == [], "must not signal anything while a print is in flight"
 
-    def test_force_overrides_the_print_guard(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        killed: list = []
-        monkeypatch.setattr(serve_siblings.os, "kill", lambda pid, sig: killed.append(pid))
+    def test_force_overrides_the_print_guard(self) -> None:
+        table = _FakeProcessTable(alive={661})
         out = _ps_output([_ps_line(661, "23:48:45", "/opt/python /v/bin/kiln serve")])
         with _fake_ps(out), patch.object(
             serve_siblings,
             "printing_now",
             return_value={"active": ["a1 (printing)"], "unknown": []},
-        ):
+        ), _kill_harness(table):
             result = serve_siblings.perform_trim(force=True)
         assert result["blocked"] is False
-        assert killed == [661]
+        assert [pid for pid, _sig in table.signals] == [661]
+        assert [t["pid"] for t in result["trimmed"]] == [661]
 
-    def test_sigterms_candidates_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_sigterms_candidates_only(self) -> None:
         import signal
 
-        killed: list[tuple] = []
-        monkeypatch.setattr(
-            serve_siblings.os, "kill", lambda pid, sig: killed.append((pid, sig))
-        )
+        table = _FakeProcessTable(alive={671, 672})
         out = _ps_output(
             [
                 _ps_line(671, "23:48:45", "/opt/python /v/bin/kiln serve"),
                 _ps_line(672, "05:44", "/opt/python /v/bin/kiln serve"),
             ]
         )
-        with _fake_ps(out), _quiet_printers():
+        with _fake_ps(out), _quiet_printers(), _kill_harness(table):
             result = serve_siblings.perform_trim()
-        assert killed == [(671, signal.SIGTERM)]
+        # One polite signal, honored, verified — no escalation.
+        assert table.signals == [(671, signal.SIGTERM)]
         assert [t["pid"] for t in result["trimmed"]] == [671]
         assert [k["pid"] for k in result["kept"]] == [672]
+        assert result["failed"] == []
+
+    def test_sigterm_ignorer_is_escalated_and_still_verified(self) -> None:
+        """The incident path with a good ending: a wedged server ignores
+        SIGTERM, SIGKILL takes it, and ``trimmed`` says it needed force."""
+        import signal
+
+        table = _FakeProcessTable(alive={701}, ignore_sigterm={701})
+        out = _ps_output([_ps_line(701, "23:48:45", "/opt/python /v/bin/kiln serve")])
+        with _fake_ps(out), _quiet_printers(), _kill_harness(table):
+            result = serve_siblings.perform_trim()
+        assert table.signals == [(701, signal.SIGTERM), (701, signal.SIGKILL)]
+        assert result["failed"] == []
+        assert [t["pid"] for t in result["trimmed"]] == [701]
+        assert result["trimmed"][0]["reason"].endswith("(needed a force kill)")
+
+    def test_survivor_of_both_signals_is_a_failure_never_a_trim(self) -> None:
+        """The incident assertion itself: nothing enters ``trimmed``
+        unmeasured.  The old code put this exact case in ``trimmed``
+        with ``failed: []`` and the message "Closed 6 leftover
+        server(s)" — while all six kept running."""
+        table = _FakeProcessTable(
+            alive={711}, ignore_sigterm={711}, ignore_sigkill={711}
+        )
+        out = _ps_output([_ps_line(711, "23:48:45", "/opt/python /v/bin/kiln serve")])
+        with _fake_ps(out), _quiet_printers(), _kill_harness(table):
+            result = serve_siblings.perform_trim()
+        assert result["trimmed"] == []
+        assert [f["pid"] for f in result["failed"]] == [711]
+        assert "SIGTERM and SIGKILL" in result["failed"][0]["error"]
+
+    def test_zombie_after_sigterm_counts_as_gone(self) -> None:
+        """A zombie exited — its memory is reclaimed, only the parent's
+        reap is pending.  ``kill(pid, 0)`` still succeeds on it, so
+        without the state check it would read as a survivor and the
+        trim would report failure over a process that is already dead."""
+        import signal
+
+        table = _FakeProcessTable(alive={721}, ignore_sigterm={721})
+        out = _ps_output([_ps_line(721, "23:48:45", "/opt/python /v/bin/kiln serve")])
+        with _fake_ps(out), _quiet_printers(), _kill_harness(table, zombies={721}):
+            result = serve_siblings.perform_trim()
+        assert table.signals == [(721, signal.SIGTERM)]
+        assert [t["pid"] for t in result["trimmed"]] == [721]
         assert result["failed"] == []
 
     def test_already_gone_process_is_not_a_failure(
