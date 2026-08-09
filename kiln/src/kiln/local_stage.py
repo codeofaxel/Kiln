@@ -176,6 +176,7 @@ VIEWER_TOOLS: frozenset[str] = frozenset(
         "import_model_parts",
         "import_step_file",
         "iterate_design",
+        "keep_painted_detail",
         "make_printable",
         "merge_decoration_preset_branches",
         "merge_design_branches",
