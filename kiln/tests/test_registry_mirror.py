@@ -49,6 +49,7 @@ _DATA = Path(__file__).resolve().parent.parent / "src" / "kiln" / "data"
 _SAFETY = _DATA / "safety_profiles.json"
 _REGISTRY = _DATA / "printer_intelligence.json"
 _DESIGN = _DATA / "design_knowledge" / "printer_profiles.json"
+_COMPAT = _DATA / "design_knowledge" / "printer_material_compatibility.json"
 
 _MIRRORED_FIELDS = ("max_hotend_temp", "max_bed_temp")
 
@@ -176,4 +177,59 @@ def test_the_design_knowledge_profile_carries_the_same_ceilings() -> None:
     assert not mismatches, (
         "design-knowledge profiles disagree with the safety ceiling: "
         + "; ".join(sorted(mismatches))
+    )
+
+
+def test_compatibility_notes_quote_the_registry_ceiling() -> None:
+    """The fourth door: the ceiling embedded in PROSE.
+
+    The compatibility matrix's refusal notes tell the user a number —
+    "needs a 380C hotend, this printer tops out at NC" — and nothing tied
+    that N to the registry.  When the Ender-3 family was corrected to its
+    maker's published 250 (2026-08-08), nine notes per machine kept saying
+    260; the sweep that fixed those found the builder platforms quoting
+    300 against registries of 285 (RatRig VCore3) and 270 (Voron 0/2.4),
+    and the Ender-3 S1 Pro quoting 260 against a real 300.  Both drift
+    directions were live at once: prose overstating grants imaginary rope
+    in the user's head, prose understating gives a refusal a false reason.
+
+    Every "tops out at NC" above the hotend threshold must equal that
+    printer's own registry ceiling — a note may omit the number, but it
+    may not freelance one.  (Values below the threshold are bed/chamber
+    figures in the same phrasing and belong to other assertions.)
+    """
+    registry = _load(_REGISTRY)
+    compat = _load(_COMPAT)
+    hotend_threshold = 150  # bed tops out ≤120C in these notes; hotends ≥250C
+
+    import re
+
+    freelanced: list[str] = []
+    for pid, rows in compat.items():
+        if pid.startswith("_") or not isinstance(rows, dict):
+            continue
+        ceiling = (registry.get(pid) or {}).get("max_hotend_temp")
+        for mid, row in rows.items():
+            if not isinstance(row, dict):
+                continue
+            texts = []
+            for value in row.values():
+                if isinstance(value, str):
+                    texts.append(value)
+                elif isinstance(value, list):
+                    texts.extend(t for t in value if isinstance(t, str))
+            for text in texts:
+                for quoted in re.findall(r"tops out at (\d+)C", text):
+                    quoted = int(quoted)
+                    if quoted < hotend_threshold:
+                        continue
+                    if ceiling is None or float(quoted) != float(ceiling):
+                        freelanced.append(
+                            f"{pid}/{mid}: note says {quoted}C, "
+                            f"registry says {ceiling}"
+                        )
+
+    assert not freelanced, (
+        "compatibility notes freelance a hotend ceiling: "
+        + "; ".join(sorted(set(freelanced)))
     )
