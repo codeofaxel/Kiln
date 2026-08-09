@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-08-09T22:04:43.831800+00:00",
-  "tool_count": 411,
+  "generated": "2026-08-09T23:54:12.077230+00:00",
+  "tool_count": 410,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -18278,56 +18278,6 @@
       }
     },
     {
-      "name": "keep_painted_detail",
-      "description": "Keep a model's painted-on detail when it prints. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 textures/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "free",
-      "category": "textures",
-      "parameters": {
-        "properties": {
-          "model_path": {
-            "title": "Model Path",
-            "type": "string"
-          },
-          "output_path": {
-            "default": "",
-            "title": "Output Path",
-            "type": "string"
-          },
-          "depth_mm": {
-            "default": 0.6,
-            "title": "Depth Mm",
-            "type": "number"
-          },
-          "target_edge_mm": {
-            "default": 1.0,
-            "title": "Target Edge Mm",
-            "type": "number"
-          },
-          "invert": {
-            "default": false,
-            "title": "Invert",
-            "type": "boolean"
-          },
-          "design_id": {
-            "default": "",
-            "title": "Design Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "model_path"
-        ],
-        "title": "keep_painted_detailArguments",
-        "type": "object"
-      },
-      "quota": {
-        "bucket": "decoration",
-        "limit": 3,
-        "noun": "textures",
-        "period": "month"
-      }
-    },
-    {
       "name": "list_custom_palettes",
       "description": "List all saved custom color palettes.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "pro",
@@ -18460,7 +18410,7 @@
     },
     {
       "name": "recover_texture_detail",
-      "description": "DEPRECATED \u2014 renamed ``keep_painted_detail``; call that. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 textures/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Turn a model's painted-on detail into REAL printable relief. Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nFree tier: 3 textures/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "free",
       "category": "textures",
       "parameters": {
