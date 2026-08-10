@@ -12,8 +12,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   list shows the real machine — an A1, an MK4S, an Ender-3 V2 — not just the
   brand, with nothing to set up. If you've told Kiln your model that stays the
   last word, and when a printer's own answers disagree Kiln reports nothing
-  rather than name the wrong machine. Klipper and OctoPrint setups still show
-  the brand only — they genuinely can't say what they are.
+  rather than name the wrong machine — and `kiln doctor` tells you which
+  sources disagree so you can settle it. Klipper and OctoPrint setups still
+  show the brand only — they genuinely can't say what they are.
 
 - **Your designs can leave as real CAD files.** Any Kiln design exports as a
   STEP — one clean solid a machine shop can open and measure. When a design
