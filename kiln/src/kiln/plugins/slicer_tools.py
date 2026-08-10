@@ -373,12 +373,60 @@ def _maybe_auto_assembly_manual(metadata: dict) -> dict | None:
     }
 
 
+# Canonical slicer identities, and the token that names each one.
+# Ordered fork-before-upstream: an OrcaSlicer build may mention Bambu
+# Studio (it is a fork of it) in its own version banner, so "orca" has
+# to be answered first for that build to be called what it is.
+_SLICER_IDENTITY_TOKENS: tuple[tuple[str, str], ...] = (
+    ("orca", "orcaslicer"),
+    ("bambu", "bambustudio"),
+    ("prusa", "prusaslicer"),
+)
+
+
+def _resolve_slicer_name(slicer_path: str | None = None) -> str | None:
+    """Name the slicer that will actually run this job.
+
+    Resolves through :func:`kiln.slicer.find_slicer` — the same call
+    :func:`kiln.slicer.slice_file` makes with the same argument — so the
+    answer names the binary that runs, rather than guessing from a
+    parallel detection of our own.  The binary's file name, its
+    directory-independent basename and its ``--version`` banner are all
+    consulted, so a renamed or bundled build still identifies itself.
+
+    :param slicer_path: Explicit slicer binary, or ``None`` to use the
+        same auto-detection the slice itself will use.
+    :returns: One of ``"orcaslicer"``, ``"bambustudio"``,
+        ``"prusaslicer"``, or ``None`` when no slicer is installed or
+        the binary isn't one of those.  Never raises: an unidentifiable
+        slicer is a missing fact, not an error.
+    """
+    try:
+        from kiln.slicer import find_slicer
+
+        info = find_slicer(slicer_path)
+        haystack = " ".join((
+            info.name or "",
+            os.path.basename(info.path or ""),
+            info.version or "",
+        )).lower()
+    except Exception as exc:  # noqa: BLE001 — a missing name is not an error
+        _logger.debug("Slicer identity unresolved: %s", exc)
+        return None
+
+    for token, identity in _SLICER_IDENTITY_TOKENS:
+        if token in haystack:
+            return identity
+    return None
+
+
 def _maybe_overlay_calibration(
     parsed_overrides: dict[str, str],
     printer_id: str,
     *,
     material: str | None = None,
     input_path: str | None = None,
+    slicer_name: str | None = None,
 ) -> tuple[dict[str, str], dict[str, Any] | None]:
     """Inject a Pro+ user's calibrated slicer values into ``parsed_overrides``.
 
@@ -405,6 +453,13 @@ def _maybe_overlay_calibration(
       future tools that apply calibration overlay don't need to know
       about slice history at all.
 
+    ``slicer_name`` names the slicer this job is about to be handed to
+    (see :func:`_resolve_slicer_name`).  A calibrated value is expressed
+    against the base profile of the slicer it was tuned in, so which
+    slicer runs decides which stored profile applies to this job; pass
+    ``None`` when it can't be determined and the lookup answers without
+    that fact, as it did before this parameter existed.
+
     Returns ``(modified_overrides, calibration_used_block_or_None)``.
     The calibration block is ``None`` when kiln-pro isn't installed
     OR ``calibration_for`` raised; never raises out of this helper.
@@ -421,8 +476,12 @@ def _maybe_overlay_calibration(
     try:
         merged = apply_calibration_to_slicer_args(
             parsed_overrides, printer_id, material,
+            slicer_name=slicer_name,
         )
-        verdict = calibration_for(printer_id, material)
+        # Same identity on both calls, so the block that reports what
+        # calibration was used describes the same profile the overlay
+        # above resolved against.
+        verdict = calibration_for(printer_id, material, prefer_slicer=slicer_name)
         cal_used = calibration_used_block(verdict, printer_id=printer_id)
     except Exception as exc:  # noqa: BLE001 — never block slicing
         _logger.debug(
@@ -1024,10 +1083,14 @@ class _SlicerToolsPlugin:
                     # Passing input_path here triggers Pro+ slice-history
                     # recording inside the helper itself — any future
                     # caller of _maybe_overlay_calibration automatically
-                    # participates without a separate hook.
+                    # participates without a separate hook.  The slicer
+                    # identity resolves from the same slicer_path the
+                    # slice below uses, so the values that get overlaid
+                    # belong to the slicer that receives them.
                     parsed_overrides, cal_used = _maybe_overlay_calibration(
                         parsed_overrides, effective_printer_id,
                         input_path=input_path,
+                        slicer_name=_resolve_slicer_name(slicer_path),
                     )
 
                 effective_profile: str | None = None
@@ -1299,10 +1362,14 @@ class _SlicerToolsPlugin:
                 parsed_overrides: dict[str, str] = {}
                 cal_used = None
                 if effective_printer_id:
+                    # This tool takes no explicit slicer path, so the
+                    # identity comes from the same auto-detection
+                    # slice_file performs further down.
                     parsed_overrides, cal_used = _maybe_overlay_calibration(
                         parsed_overrides, effective_printer_id,
                         material=material,
                         input_path=input_path,
+                        slicer_name=_resolve_slicer_name(),
                     )
                     if parsed_overrides:
                         try:

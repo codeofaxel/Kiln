@@ -166,10 +166,10 @@ def _make_fake_calibration_coach(cal_used: dict) -> types.ModuleType:
         profile = None
 
     module.apply_calibration_to_slicer_args = (  # type: ignore[attr-defined]
-        lambda args, _printer, _material: dict(args or {})
+        lambda args, _printer, _material, **_kwargs: dict(args or {})
     )
     module.calibration_for = (  # type: ignore[attr-defined]
-        lambda _printer, _material: _FakeVerdict()
+        lambda _printer, _material, **_kwargs: _FakeVerdict()
     )
     module.calibration_used_block = (  # type: ignore[attr-defined]
         lambda _verdict, *, printer_id: cal_used
