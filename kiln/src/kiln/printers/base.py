@@ -347,6 +347,48 @@ def canonical_model_key(reported: str, *, vendor_prefix: str = "") -> str | None
 
 
 @dataclass(frozen=True)
+class IdentityConflict:
+    """Two or more sources disagree about what a printer is.
+
+    ``claims`` maps a source label to the model it asserts — the
+    config-declared model appears as ``"config"``, and each adapter
+    identity channel under its own name (``"serial_prefix"``,
+    ``"firmware_product_name"``, ``"m115_machine_type"``, ...).
+
+    A conflict is diagnostic gold: either the config is stale (printer
+    replaced, model corrected) or one of Kiln's identity tables is
+    wrong.  The second is what made printer-model inference unsafe in
+    2026-04, and it stayed invisible for months because a disagreement
+    could only be expressed by reporting nothing at all.
+    """
+
+    claims: dict[str, str]
+
+    @property
+    def models(self) -> list[str]:
+        """The distinct models being claimed, order-stable."""
+        seen: list[str] = []
+        for model in self.claims.values():
+            if model not in seen:
+                seen.append(model)
+        return seen
+
+    def describe(self) -> str:
+        """One line a human can act on."""
+        parts = ", ".join(f"{src} says {model}" for src, model in self.claims.items())
+        return (
+            f"Printer identity is ambiguous — {parts}. "
+            "Set printer_model in ~/.kiln/config.yaml to the correct value; "
+            "if it is already correct, this means one of Kiln's identity "
+            "tables is wrong and should be reported."
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"claims": dict(self.claims), "models": self.models,
+                "summary": self.describe()}
+
+
+@dataclass(frozen=True)
 class PrinterInfo:
     """A printer's self-reported identity, for telemetry and display.
 
@@ -948,8 +990,33 @@ class PrinterAdapter(ABC):
         keep any fresh probe to a single short request, and fail fast
         to ``None`` when the printer is unreachable — callers treat
         this as best-effort and must keep working without it.
+
+        An adapter with more than one identity channel returns ``None``
+        when its channels disagree — naming a model on a coin flip is
+        the 2026-04 failure.  Expose the individual channels via
+        :meth:`get_identity_channels` so the disagreement stays
+        diagnosable instead of vanishing into this ``None``.
         """
         return None
+
+    def get_identity_channels(self) -> dict[str, str]:
+        """Every identity channel this adapter has, and what each claims.
+
+        Maps a channel label to the model it resolves to, e.g.
+        ``{"serial_prefix": "bambu_a1", "firmware_product_name":
+        "bambu_a1"}``.  Channels that resolve to nothing are omitted;
+        the default is an empty dict for adapters with no self-report.
+
+        This exists so a disagreement BETWEEN channels stays visible.
+        :meth:`get_printer_info` collapses a disagreement to ``None``
+        (correctly — it must not guess), which on its own is
+        indistinguishable from "the printer didn't answer".  Diagnostics
+        read this instead and can say which channel claims what.
+
+        Like the probe, this may cost a bounded network round-trip, so
+        it belongs in diagnostics rather than polling loops.
+        """
+        return {}
 
     # -- firmware updates (optional) ------------------------------------
 

@@ -395,6 +395,12 @@ class ElegooAdapter(PrinterAdapter):
         a19e665b).
         """
         machine, device_name = self._read_identity_fields()
+        return self._identity_from_fields(machine, device_name)
+
+    def _identity_from_fields(
+        self, machine: str, device_name: str
+    ) -> PrinterInfo | None:
+        """Resolve a :class:`PrinterInfo` from the two SDCP name fields."""
         if machine:
             key = canonical_model_key(machine, vendor_prefix="elegoo_")
             return PrinterInfo(
@@ -407,6 +413,25 @@ class ElegooAdapter(PrinterAdapter):
                     model=key, raw_model=device_name, source="sdcp"
                 )
         return None
+
+    def get_identity_channels(self) -> dict[str, str]:
+        """The SDCP model field, and the device-name field when it maps.
+
+        Both are reported separately so a diagnostic can show a machine
+        whose user-assigned name contradicts its model — a renamed
+        printer is a common source of confusion in a fleet.
+        """
+        machine, device_name = self._read_identity_fields()
+        channels: dict[str, str] = {}
+        if machine:
+            info = self._identity_from_fields(machine, "")
+            if info and info.model:
+                channels["sdcp_machine_name"] = info.model
+        if device_name:
+            key = canonical_model_key(device_name, vendor_prefix="elegoo_")
+            if key:
+                channels["sdcp_device_name"] = key
+        return channels
 
     # ------------------------------------------------------------------
     # Internal: WebSocket

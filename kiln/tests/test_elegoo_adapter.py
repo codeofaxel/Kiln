@@ -979,3 +979,18 @@ class TestGetPrinterInfo:
         for body in ([], "text", None):
             with mock.patch.object(adapter, "_send_command", return_value=body):
                 assert adapter.get_printer_info() is None
+
+    def test_identity_channels_separate_model_from_device_name(self) -> None:
+        adapter = _adapter()
+        adapter._last_status = {"MachineName": "Centauri Carbon", "Name": "Neptune 4"}
+        assert adapter.get_identity_channels() == {
+            "sdcp_machine_name": "elegoo_centauri_carbon",
+            "sdcp_device_name": "elegoo_neptune4",
+        }
+
+    def test_identity_channels_ignore_a_non_model_nickname(self) -> None:
+        adapter = _adapter()
+        adapter._last_status = {"MachineName": "Centauri Carbon", "Name": "garage"}
+        assert adapter.get_identity_channels() == {
+            "sdcp_machine_name": "elegoo_centauri_carbon"
+        }

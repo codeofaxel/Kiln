@@ -724,3 +724,24 @@ class TestGetPrinterInfo:
             a._printer_info_retry_at = 0.0
             with patch.object(a, "_get_json", return_value=body):
                 assert a.get_printer_info() is None
+
+    def test_identity_channels_expose_both_fields(self):
+        a = _adapter()
+        with patch.object(a, "_get_json", return_value={"printer": "2.1.0"}):
+            assert a.get_identity_channels() == {"api_version_type_code": "prusa_mini"}
+
+    def test_disagreeing_version_fields_report_nothing_but_stay_visible(self):
+        """Buddy fills `printer`, the Python PrusaLink fills `original`.
+        If both answer and disagree, one of our tables is wrong."""
+        from kiln.community_autofire import detect_identity_conflict
+
+        a = _adapter()
+        payload = {"printer": "2.1.0", "original": "PrusaLink I3MK3S"}
+        with patch.object(a, "_get_json", return_value=payload):
+            assert a.get_printer_info() is None
+            conflict = detect_identity_conflict(a)
+        assert conflict is not None
+        assert conflict.claims == {
+            "api_version_type_code": "prusa_mini",
+            "api_version_original": "prusa_mk3s",
+        }

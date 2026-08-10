@@ -299,6 +299,9 @@ class PrusaLinkAdapter(PrinterAdapter):
         # one per poll.
         self._printer_info: PrinterInfo | None = None
         self._printer_info_retry_at: float = 0.0
+        # What each /api/version identity field resolved to, for
+        # diagnostics (see get_identity_channels).
+        self._identity_channels: dict[str, str] = {}
 
     # -- PrinterAdapter identity properties ---------------------------------
 
@@ -361,20 +364,48 @@ class PrusaLinkAdapter(PrinterAdapter):
             # A proxy or captive portal answering with a JSON list/string
             # is not a printer talking — treat it as no answer.
             return None
+
         code = str(data.get("printer") or "").strip()
-        model = _PRUSA_TYPE_CODES.get(code)
-        if model:
-            self._printer_info = PrinterInfo(model=model, raw_model=code, source="http")
-            return self._printer_info
         original = str(data.get("original") or "").strip()
         type_name = original.removeprefix("PrusaLink").strip().upper()
-        model = _PRUSA_ORIGINAL_NAMES.get(type_name)
-        if model:
+        by_code = _PRUSA_TYPE_CODES.get(code)
+        by_name = _PRUSA_ORIGINAL_NAMES.get(type_name)
+
+        channels: dict[str, str] = {}
+        if by_code:
+            channels["api_version_type_code"] = by_code
+        if by_name:
+            channels["api_version_original"] = by_name
+        self._identity_channels = channels
+
+        if by_code and by_name and by_code != by_name:
+            # The two firmware families never both answer in practice —
+            # Buddy fills `printer`, the Python PrusaLink fills
+            # `original`.  If both answer and disagree, one of our
+            # tables is wrong; report nothing rather than pick.
+            logger.warning(
+                "PrusaLink identity channels disagree: type code %r says %r, "
+                "original %r says %r. Reporting no model — set `printer_model` "
+                "in ~/.kiln/config.yaml to settle it.",
+                code, by_code, original, by_name,
+            )
+            return None
+        if by_code:
             self._printer_info = PrinterInfo(
-                model=model, raw_model=original, source="http"
+                model=by_code, raw_model=code, source="http"
+            )
+            return self._printer_info
+        if by_name:
+            self._printer_info = PrinterInfo(
+                model=by_name, raw_model=original, source="http"
             )
             return self._printer_info
         return None
+
+    def get_identity_channels(self) -> dict[str, str]:
+        """Both /api/version identity fields, each with its claim."""
+        self.get_printer_info()  # populates the cache (no-op when cached)
+        return dict(self._identity_channels)
 
     # ------------------------------------------------------------------
     # Internal HTTP helpers

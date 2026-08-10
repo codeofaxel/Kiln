@@ -836,6 +836,27 @@ class BambuAdapter(PrinterAdapter):
                 return family, product_name
         return None, ""
 
+    def _identity_families(self) -> tuple[str | None, str | None, str]:
+        """``(serial_family, mqtt_family, product_name)`` — the single
+        computation behind both :meth:`get_printer_info` and
+        :meth:`get_identity_channels`, so the model this adapter
+        reports and the channels a diagnostic shows can never drift.
+        """
+        return (
+            _BAMBU_MODEL_FAMILIES.get(self._serial[:3].upper()),
+            *self._mqtt_reported_family(),
+        )
+
+    def get_identity_channels(self) -> dict[str, str]:
+        """The serial-prefix and firmware channels, each with its claim."""
+        serial_family, mqtt_family, _ = self._identity_families()
+        channels: dict[str, str] = {}
+        if serial_family:
+            channels["serial_prefix"] = f"bambu_{serial_family}"
+        if mqtt_family:
+            channels["firmware_product_name"] = f"bambu_{mqtt_family}"
+        return channels
+
     def get_printer_info(self) -> PrinterInfo | None:
         """The printer's self-reported model, for telemetry and display.
 
@@ -860,7 +881,9 @@ class BambuAdapter(PrinterAdapter):
         and shipping either answer would repeat the 2026-04 failure
         (commit a19e665b): a mapping table that was wrong in five of
         six rows, confidently naming the wrong printer.  Silence is the
-        honest answer; the fleet view falls back to family grain.
+        honest answer; the fleet view falls back to family grain, and
+        :meth:`get_identity_channels` keeps the disagreement itself
+        visible to diagnostics rather than losing it in this ``None``.
 
         SAFETY BOUNDARY: telemetry/display only.  The config-declared
         model (``printer_model`` in config.yaml) owns every safety and
@@ -870,8 +893,7 @@ class BambuAdapter(PrinterAdapter):
         and where the owner has declared a model the declaration wins
         even for display (see ``community_autofire.resolve_adapter_model``).
         """
-        serial_family = _BAMBU_MODEL_FAMILIES.get(self._serial[:3].upper())
-        mqtt_family, product_name = self._mqtt_reported_family()
+        serial_family, mqtt_family, product_name = self._identity_families()
         if serial_family and mqtt_family and serial_family != mqtt_family:
             logger.warning(
                 "Bambu identity channels disagree: serial prefix %r says %r, "

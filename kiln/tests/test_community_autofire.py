@@ -354,10 +354,11 @@ class TestResolveAdapterModelPrecedence:
         an explicit diagnostic, not a cost on every poll."""
         from kiln.community_autofire import detect_identity_conflict
 
-        assert detect_identity_conflict(self._Declared()) == (
-            "bambu_a1",
-            "bambu_x1c",
-        )
+        conflict = detect_identity_conflict(self._Declared())
+        assert conflict is not None
+        assert conflict.claims == {"config": "bambu_a1", "printer": "bambu_x1c"}
+        assert sorted(conflict.models) == ["bambu_a1", "bambu_x1c"]
+        assert "bambu_x1c" in conflict.describe()
 
     def test_no_conflict_when_channels_agree(self):
         from kiln.community_autofire import detect_identity_conflict
@@ -426,3 +427,102 @@ class TestResolveAdapterModelPrecedence:
                 return self._Info()
 
         assert len(resolve_adapter_model(_Chatty())) == 60
+
+
+class TestChannelLevelConflictDetection:
+    """The gap that a probe-only check could never see: an adapter whose
+    OWN identity channels disagree reports no model at all, so it looks
+    like silence.  Diagnostics read the channels instead."""
+
+    def test_internal_channel_disagreement_is_caught_without_any_config(self):
+        """No printer_model declared, and Kiln's two tables contradict
+        each other — no amount of user configuration would reveal this."""
+        from kiln.community_autofire import detect_identity_conflict
+        from kiln.printers.bambu import BambuAdapter
+
+        adapter = BambuAdapter(host="h", access_code="c", serial="03900D5C2513213")
+        adapter._fw_modules = [
+            {"name": "ota", "product_name": "Bambu Lab X1 Carbon"},
+        ]
+        # The probe itself is silent — that is correct, it must not guess.
+        assert adapter.get_printer_info() is None
+
+        conflict = detect_identity_conflict(adapter)
+        assert conflict is not None
+        assert conflict.claims == {
+            "serial_prefix": "bambu_a1",
+            "firmware_product_name": "bambu_x1c",
+        }
+
+    def test_channel_disagreement_also_names_the_config(self):
+        from kiln.community_autofire import detect_identity_conflict
+        from kiln.printers.bambu import BambuAdapter
+
+        adapter = BambuAdapter(
+            host="h", access_code="c", serial="03900D5C2513213",
+            printer_model="bambu_a1",
+        )
+        adapter._fw_modules = [{"name": "ota", "product_name": "Bambu Lab P1S"}]
+        conflict = detect_identity_conflict(adapter)
+        assert conflict is not None
+        assert conflict.claims["config"] == "bambu_a1"
+        assert conflict.claims["firmware_product_name"] == "bambu_p1s"
+
+    def test_agreeing_channels_are_not_a_conflict(self):
+        from kiln.community_autofire import detect_identity_conflict
+        from kiln.printers.bambu import BambuAdapter
+
+        adapter = BambuAdapter(
+            host="h", access_code="c", serial="03900D5C2513213",
+            printer_model="bambu_a1",
+        )
+        adapter._fw_modules = [{"name": "ota", "product_name": "Bambu Lab A1"}]
+        assert detect_identity_conflict(adapter) is None
+
+    def test_accessory_never_manufactures_a_conflict(self):
+        """Adam's A1 carries an ams_f1/0 module.  If accessories leaked
+        into the channels, every AMS owner would see a false alarm."""
+        from kiln.community_autofire import detect_identity_conflict
+        from kiln.printers.bambu import BambuAdapter
+
+        adapter = BambuAdapter(
+            host="h", access_code="c", serial="03900D5C2513213",
+            printer_model="bambu_a1",
+        )
+        adapter._fw_modules = [
+            {"name": "ams_f1/0", "product_name": "Bambu Lab X1 Carbon"},
+            {"name": "ota", "product_name": "Bambu Lab A1"},
+        ]
+        assert detect_identity_conflict(adapter) is None
+
+    def test_adapter_without_channels_still_compares_config_and_probe(self):
+        """Moonraker/OctoPrint keep the base no-op; the fallback path
+        must still work for them."""
+        from kiln.community_autofire import detect_identity_conflict
+
+        class _NoChannels:
+            printer_model = "ender3"
+
+            class _Info:
+                model = "ender3_v2"
+
+            def get_printer_info(self):
+                return self._Info()
+
+        conflict = detect_identity_conflict(_NoChannels())
+        assert conflict is not None
+        assert conflict.claims == {"config": "ender3", "printer": "ender3_v2"}
+
+    def test_raising_channels_never_break_the_diagnostic(self):
+        from kiln.community_autofire import detect_identity_conflict
+
+        class _Angry:
+            printer_model = "bambu_a1"
+
+            def get_identity_channels(self):
+                raise RuntimeError("offline")
+
+            def get_printer_info(self):
+                raise RuntimeError("offline")
+
+        assert detect_identity_conflict(_Angry()) is None

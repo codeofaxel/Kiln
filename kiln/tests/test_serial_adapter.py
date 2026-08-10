@@ -1977,3 +1977,11 @@ class TestGetPrinterInfo:
 
         assert depth["max"] == 1
         assert adapter._machine_type == "Ender-3 V2"
+
+    def test_identity_channels_expose_the_m115_claim(self):
+        adapter = self._adapter_with_m115(_M115_ENDER)
+        assert adapter.get_identity_channels() == {"m115_machine_type": "ender3_v2"}
+
+    def test_identity_channels_empty_without_a_capture(self):
+        adapter = _build_adapter(_make_mock_serial())
+        assert adapter.get_identity_channels() == {}

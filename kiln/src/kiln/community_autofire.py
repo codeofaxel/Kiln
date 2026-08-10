@@ -22,7 +22,10 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from kiln.printers.base import IdentityConflict
 
 logger = logging.getLogger(__name__)
 
@@ -229,36 +232,59 @@ def _probed_model(adapter: Any) -> str | None:
     )
 
 
-def detect_identity_conflict(adapter: Any) -> tuple[str, str] | None:
-    """``(declared, probed)`` when the two disagree, else ``None``.
+def detect_identity_conflict(adapter: Any) -> IdentityConflict | None:
+    """Every source's claim about this printer, when they disagree.
+
+    Collects the config-declared model plus each of the adapter's
+    identity channels (:meth:`PrinterAdapter.get_identity_channels`)
+    and returns an :class:`IdentityConflict` when more than one
+    distinct model is claimed, else ``None``.
+
+    Reading the CHANNELS rather than just the probe is what makes this
+    complete.  An adapter with two channels that disagree reports no
+    model at all — correctly, since guessing is the 2026-04 failure —
+    so a probe-only check would see "no answer" and miss the very case
+    most worth reporting.  Both shapes are caught here:
+
+    * config says A1, the printer says X1C — a stale config, or a
+      wrong table.
+    * no config at all, but the serial prefix says A1 while the
+      firmware says X1C — Kiln's own tables contradict each other,
+      which no amount of user configuration would reveal.
 
     Deliberately separate from :func:`resolve_adapter_model`, which
     short-circuits on a declaration and never probes.  This one always
     probes, so it costs network I/O — call it from a diagnostic (a
     ``kiln doctor`` check), not from a polling loop.
-
-    A conflict means one of two things, and both are worth telling the
-    user about: the config is stale (printer replaced, model corrected)
-    or one of Kiln's identity tables is wrong.  The second is what made
-    printer-model inference unsafe in 2026-04 — surfacing it is how we
-    find out before a user does.
-
-    KNOWN GAP for whoever wires the ``kiln doctor`` check: this sees
-    only DECLARED-vs-PROBED conflicts.  An adapter whose own identity
-    channels disagree internally (Bambu's serial prefix vs firmware
-    product_name) reports no model at all, so it reads here as "no
-    probe answer" rather than a conflict.  That case is logged as a
-    warning by the adapter itself; a complete doctor check should read
-    both signals.
     """
     if adapter is None:
         return None
+    from kiln.printers.base import IdentityConflict
+
+    claims: dict[str, str] = {}
     declared = _declared_model(adapter)
-    if not declared:
-        return None
-    probed = _probed_model(adapter)
-    if probed and probed != declared:
-        return declared, probed
+    if declared:
+        claims["config"] = declared
+
+    channels: dict[str, Any] = {}
+    try:
+        channels = adapter.get_identity_channels() or {}
+    except Exception:  # noqa: BLE001 — diagnostics never break the caller
+        channels = {}
+    if isinstance(channels, dict):
+        for label, model in channels.items():
+            cleaned = _clean(model)
+            if cleaned:
+                claims[str(label)] = cleaned
+
+    # An adapter with no channels still has a probe worth comparing.
+    if len(claims) < 2 and not channels:
+        probed = _probed_model(adapter)
+        if probed:
+            claims["printer"] = probed
+
+    if len({*claims.values()}) > 1:
+        return IdentityConflict(claims=claims)
     return None
 
 

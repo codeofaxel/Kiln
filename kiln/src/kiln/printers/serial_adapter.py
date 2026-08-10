@@ -1088,6 +1088,11 @@ class SerialPrinterAdapter(PrinterAdapter):
         key = canonical_model_key(machine)
         return PrinterInfo(model=key or machine, raw_model=machine, source="m115")
 
+    def get_identity_channels(self) -> dict[str, str]:
+        """The single M115 channel, when it identified anything."""
+        info = self.get_printer_info()
+        return {"m115_machine_type": info.model} if info and info.model else {}
+
     # ------------------------------------------------------------------
     # PrinterAdapter -- firmware info (optional)
     # ------------------------------------------------------------------
