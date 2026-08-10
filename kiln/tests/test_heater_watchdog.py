@@ -86,6 +86,33 @@ class TestLifecycle:
         wd.stop()
         assert not wd.is_running
 
+    def test_stop_does_not_wait_out_the_poll_doze(self) -> None:
+        """stop() sits on the server's SIGTERM path, and the loop used
+        to doze in a plain ``time.sleep(poll_interval)`` that nothing
+        could wake — with the default 30s poll, shutdown stalled ~50s
+        (measured live 2026-08-09).  The doze must be interruptible."""
+        import time as _time
+
+        wd = _make_watchdog(poll_interval=30.0)
+        wd.start()
+        started = _time.monotonic()
+        wd.stop()
+        assert _time.monotonic() - started < 2.0, (
+            "stop() waited out the poll sleep instead of waking it"
+        )
+        assert not wd.is_running
+
+    def test_restart_after_stop_dozes_again(self) -> None:
+        """The stop event must re-arm on start, or a restarted watchdog
+        spins its loop hot instead of dozing between ticks."""
+        wd = _make_watchdog(poll_interval=30.0)
+        wd.start()
+        wd.stop()
+        wd.start()
+        assert wd.is_running
+        assert not wd._stop_event.is_set()
+        wd.stop()
+
     def test_disabled_when_timeout_zero(self) -> None:
         wd = _make_watchdog(timeout_minutes=0)
         wd.start()

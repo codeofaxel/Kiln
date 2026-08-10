@@ -58,6 +58,7 @@ class HeaterWatchdog:
         self._poll_interval = poll_interval
         self._event_bus = event_bus
         self._running = False
+        self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
 
@@ -103,6 +104,7 @@ class HeaterWatchdog:
         if self._running:
             return
         self._running = True
+        self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._run_loop,
             name="kiln-heater-watchdog",
@@ -116,8 +118,16 @@ class HeaterWatchdog:
         )
 
     def stop(self) -> None:
-        """Stop the watchdog gracefully."""
+        """Stop the watchdog gracefully.
+
+        Wakes the loop's doze instead of waiting it out: stop() sits on
+        the server's SIGTERM path, and a plain ``time.sleep(30)`` there
+        read as a wedged shutdown (measured ~50s of stall — the doze
+        plus the join timeout).  The join still carries a timeout as a
+        bound for a tick blocked mid network call.
+        """
         self._running = False
+        self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=self._poll_interval * 2)
             self._thread = None
@@ -130,7 +140,8 @@ class HeaterWatchdog:
                 self._tick()
             except Exception:
                 logger.exception("Heater watchdog tick error")
-            time.sleep(self._poll_interval)
+            if self._stop_event.wait(self._poll_interval):
+                break
 
     def _tick(self) -> None:
         """Single watchdog check."""

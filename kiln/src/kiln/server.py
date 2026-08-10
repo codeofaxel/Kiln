@@ -12157,6 +12157,63 @@ def _ensure_pro_plugins_registered() -> None:
     _ensure_internal_tool_plugins_registered()
 
 
+#: Hard ceiling on how long a signal-driven shutdown may take before the
+#: process is ended regardless.  Generous: with the heater watchdog's
+#: interruptible doze every stop below completes in well under a second.
+_SHUTDOWN_DEADLINE_S = 10.0
+
+
+def _graceful_shutdown(
+    hard_exit=os._exit, deadline_s: float = _SHUTDOWN_DEADLINE_S
+) -> None:
+    """Stop background services, then END the process — guaranteed.
+
+    The signal path must finish with ``os._exit``, never ``sys.exit``.
+    ``sys.exit`` raises SystemExit inside whatever frame the signal
+    interrupted — the asyncio selector, for ``mcp.run()`` — so the event
+    loop unwinds abnormally and anyio never sends its worker threads
+    their shutdown command.  Those workers are non-daemon and block
+    forever on ``queue.get()``, so interpreter shutdown then joins them
+    forever: the process survives its own exit, immortally.  Measured
+    live 2026-08-09 — SIGTERM ran this cleanup, ``sys.exit(0)`` fired,
+    and the process sat in ``threading._shutdown`` indefinitely; on one
+    machine 10 of 10 accumulated servers were in exactly that state.
+    ``parent_watchdog`` learned the same lesson for its own exit path.
+
+    Mechanics: a daemon dead-man timer arms FIRST, so a stop that
+    wedges (a network-blocked adapter call, a stuck join) can delay
+    death by at most *deadline_s*; each stop runs in its own try/except
+    so one failure cannot skip the rest; and the exit call sits in a
+    ``finally`` so there is no path out of this function that leaves
+    the process alive.  ``hard_exit`` is injectable for tests only.
+    """
+    killer = threading.Timer(deadline_s, lambda: hard_exit(0))
+    killer.daemon = True
+    killer.start()
+    stops = (
+        lambda: _get_scheduler().stop(),
+        lambda: _get_webhook_mgr().stop(),
+        lambda: _get_heater_watchdog().stop(),
+        lambda: _get_stream_proxy().stop(),
+        lambda: _get_cloud_sync() is not None and _get_cloud_sync().stop(),
+    )
+    try:
+        for stop in stops:
+            try:
+                stop()
+            except Exception as exc:
+                logger.debug("shutdown: a service stop failed: %s", exc)
+        for wid in list(_watchers):
+            try:
+                _watchers.pop(wid).stop()
+            except Exception as exc:
+                logger.debug(
+                    "Failed to stop watcher %s during shutdown: %s", wid, exc
+                )
+    finally:
+        hard_exit(0)
+
+
 def main() -> None:
     """Run the Kiln MCP server."""
     # Load .env file if present (project root or ~/.kiln/.env).
@@ -12404,19 +12461,7 @@ def main() -> None:
         except (ValueError, AttributeError):
             sig_name = f"signal {signum}"
         logger.info("Received %s — shutting down gracefully...", sig_name)
-        _get_scheduler().stop()
-        _get_webhook_mgr().stop()
-        _get_heater_watchdog().stop()
-        _get_stream_proxy().stop()
-        if _get_cloud_sync() is not None:
-            _get_cloud_sync().stop()
-        # Stop all active print watchers
-        for wid in list(_watchers):
-            try:
-                _watchers.pop(wid).stop()
-            except Exception as exc:
-                logger.debug("Failed to stop watcher %s during shutdown: %s", wid, exc)
-        sys.exit(0)
+        _graceful_shutdown()
 
     signal.signal(signal.SIGTERM, _shutdown_handler)
     signal.signal(signal.SIGINT, _shutdown_handler)

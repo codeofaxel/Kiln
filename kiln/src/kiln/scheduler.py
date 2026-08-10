@@ -59,6 +59,7 @@ class JobScheduler:
         self._retry_backoff_base = retry_backoff_base
         self._persistence = persistence
         self._running = False
+        self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._active_jobs: dict[str, str] = {}  # job_id -> printer_name
         self._retry_counts: dict[str, int] = {}  # job_id -> attempts so far
@@ -86,6 +87,7 @@ class JobScheduler:
         if self._running:
             return
         self._running = True
+        self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._run_loop,
             name="kiln-scheduler",
@@ -95,8 +97,17 @@ class JobScheduler:
         logger.info("Job scheduler started (poll every %.1fs)", self._poll_interval)
 
     def stop(self) -> None:
-        """Stop the scheduler gracefully."""
+        """Stop the scheduler gracefully.
+
+        Wakes the loop's doze instead of waiting it out — stop() sits on
+        the server's SIGTERM path, and an un-wakeable
+        ``time.sleep(poll_interval)`` there reads as a wedged shutdown.
+        The join keeps its timeout as the bound for a tick that is
+        blocked mid network call (an unreachable printer's status query
+        can hold the doze's whole budget).
+        """
         self._running = False
+        self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=self._poll_interval * 2)
             self._thread = None
@@ -620,4 +631,5 @@ class JobScheduler:
                 self.tick()
             except Exception:
                 logger.exception("Scheduler tick failed")
-            time.sleep(self._poll_interval)
+            if self._stop_event.wait(self._poll_interval):
+                break

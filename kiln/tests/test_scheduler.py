@@ -137,6 +137,32 @@ class TestSchedulerLifecycle:
         scheduler.stop()
         assert scheduler.is_running is False
 
+    def test_stop_does_not_wait_out_the_poll_doze(self, queue, registry, event_bus):
+        """stop() sits on the server's SIGTERM path, and the loop used to
+        doze in a plain ``time.sleep(poll_interval)`` nothing could wake
+        — with the production 5s poll that stalled shutdown for seconds
+        (measured live 2026-08-09).  The doze must be interruptible."""
+        import time as _time
+
+        sched = JobScheduler(queue, registry, event_bus, poll_interval=30.0)
+        sched.start()
+        started = _time.monotonic()
+        sched.stop()
+        assert _time.monotonic() - started < 2.0, (
+            "stop() waited out the poll sleep instead of waking it"
+        )
+
+    def test_restart_after_stop_dozes_again(self, queue, registry, event_bus):
+        """The stop event must re-arm on start, or a restarted scheduler
+        spins its loop hot instead of dozing between ticks."""
+        sched = JobScheduler(queue, registry, event_bus, poll_interval=30.0)
+        sched.start()
+        sched.stop()
+        sched.start()
+        assert sched.is_running
+        assert not sched._stop_event.is_set()
+        sched.stop()
+
     def test_start_is_idempotent(self, scheduler):
         scheduler.start()
         thread1 = scheduler._thread
