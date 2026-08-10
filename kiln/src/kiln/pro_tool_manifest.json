@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-08-10T06:23:41.111999+00:00",
-  "tool_count": 412,
+  "generated": "2026-08-10T20:15:59.716954+00:00",
+  "tool_count": 413,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -94,6 +94,10 @@
     "design_inspection": {
       "label": "Design Inspection",
       "pitch": "Structured visual evidence for any design \u2014 renders, cross-section slices, raw measurements, and a print-readiness verdict \u2014 bundled into one inspectable report with a manifest."
+    },
+    "cad_exchange": {
+      "label": "CAD Exchange",
+      "pitch": "Move real CAD in and out of Kiln. A design imported from a STEP file keeps its original analytic B-rep and exports it back exactly \u2014 true cylinders and planes a machine shop's CAD opens clean, never a tessellated fake."
     },
     "technical_drawings": {
       "label": "Technical Drawings",
@@ -1538,6 +1542,36 @@
         "properties": {},
         "title": "usage_summaryArguments",
         "type": "object"
+      }
+    },
+    {
+      "name": "export_step",
+      "description": "Export a design as a STEP file \u2014 real analytic B-rep, always.\n\nFree tier: 3 STEP exports/month. Pro: unlimited.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "free",
+      "category": "cad_exchange",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "output_dir": {
+            "default": "",
+            "title": "Output Dir",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "title": "export_stepArguments",
+        "type": "object"
+      },
+      "quota": {
+        "bucket": "export",
+        "limit": 3,
+        "noun": "STEP exports",
+        "period": "month"
       }
     },
     {
@@ -14715,9 +14749,16 @@
             "type": "string"
           },
           "cigarette_rests": {
-            "default": 3,
-            "title": "Cigarette Rests",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cigarette Rests"
           },
           "color_overrides": {
             "default": "",
@@ -14738,6 +14779,11 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "title": "generate_ashtrayArguments",
@@ -14811,6 +14857,11 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "title": "generate_bookmarkArguments",
@@ -14874,6 +14925,11 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "title": "generate_coasterArguments",
@@ -14962,6 +15018,11 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "title": "generate_fridge_magnetArguments",
@@ -15030,6 +15091,11 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "title": "generate_frisbeeArguments",
@@ -15128,6 +15194,11 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "title": "generate_jewelry_trayArguments",
@@ -15211,6 +15282,11 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "title": "generate_keychainArguments",
@@ -15319,6 +15395,11 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "title": "generate_license_plate_frameArguments",
@@ -15402,6 +15483,11 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "title": "generate_nameplateArguments",
@@ -15480,6 +15566,11 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "title": "generate_ornamentArguments",
@@ -15573,6 +15664,11 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "title": "generate_pen_cupArguments",
@@ -15646,6 +15742,11 @@
             "default": "",
             "title": "Printer Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "title": "generate_pet_bowlArguments",
@@ -15728,6 +15829,11 @@
             "default": "",
             "title": "Printer Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "required": [
@@ -15824,6 +15930,11 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "title": "generate_rolling_trayArguments",
@@ -15907,6 +16018,11 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "title": "generate_soap_dishArguments",
@@ -15984,6 +16100,11 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "required": [
@@ -16090,6 +16211,11 @@
             "default": "",
             "title": "Material",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "required": [
@@ -16168,6 +16294,11 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "required": [
@@ -16208,6 +16339,11 @@
             "default": "",
             "title": "Brief Id",
             "type": "string"
+          },
+          "include_step": {
+            "default": false,
+            "title": "Include Step",
+            "type": "boolean"
           }
         },
         "required": [
@@ -17652,7 +17788,13 @@
       "parameters": {
         "properties": {
           "source_path": {
+            "default": "",
             "title": "Source Path",
+            "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
             "type": "string"
           },
           "scad_params": {
@@ -17699,9 +17841,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "source_path"
-        ],
         "title": "generate_technical_drawingArguments",
         "type": "object"
       }
