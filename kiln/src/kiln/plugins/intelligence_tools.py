@@ -353,6 +353,7 @@ class _IntelligenceToolsPlugin:
                 # it rather than making the caller carry hashes around.  A
                 # file we cannot parse is not fatal — fall through to
                 # whatever identity the caller did supply.
+                unread_file_reason = ""
                 if model_path:
                     try:
                         from kiln.print_dna import fingerprint_model as _fp
@@ -365,7 +366,8 @@ class _IntelligenceToolsPlugin:
                         geometric_signature_v2 = (
                             geometric_signature_v2 or fp.geometric_signature_v2
                         )
-                    except Exception:
+                    except Exception as exc:
+                        unread_file_reason = str(exc)
                         _logger.debug(
                             "could not fingerprint %s; using supplied identity",
                             model_path,
@@ -373,6 +375,16 @@ class _IntelligenceToolsPlugin:
                         )
 
                 if not (file_hash or geometric_signature or geometric_signature_v2):
+                    # Say what happened to the FILE.  Asking a caller to
+                    # "pass model_path" when they just did sent CAD users in
+                    # a circle, and the fingerprint_model they were pointed
+                    # at fails on the same file for the same reason.
+                    if unread_file_reason:
+                        return _srv._error_dict(
+                            f"Could not read a model from {model_path}: "
+                            f"{unread_file_reason}",
+                            code="UNREADABLE_INPUT",
+                        )
                     return _srv._error_dict(
                         "Name the model: pass model_path (best), or a "
                         "file_hash / geometric_signature from fingerprint_model.",

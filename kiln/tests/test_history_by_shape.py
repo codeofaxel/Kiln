@@ -211,3 +211,83 @@ class TestToolSurface:
         )
         assert result["success"] is True
         assert result["total_prints"] == 1
+
+
+class TestCADFileAtTheHistoryDoor:
+    """A CAD file gets told what to do, not sent in a circle.
+
+    ``model_path`` turned this tool into a door a customer can hand a file
+    to, and CAD is the format engineering customers send.  A STEP cannot be
+    fingerprinted (the signatures count triangles, which a tessellation
+    produces rather than the part having them), so it must refuse — but the
+    refusal used to read "pass model_path" to a caller who had just passed
+    it, and pointed at ``fingerprint_model``, which dies on the same file.
+    """
+
+    @staticmethod
+    def _step(tmp_path: Path, name: str = "bracket.step") -> Path:
+        path = tmp_path / name
+        path.write_text(
+            "ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n"
+        )
+        return path
+
+    def test_engine_refuses_cad_and_names_the_conversion(self, tmp_path: Path) -> None:
+        from kiln.print_dna import fingerprint_model
+
+        with pytest.raises(ValueError, match="import_step_file"):
+            fingerprint_model(str(self._step(tmp_path)))
+
+    @pytest.mark.parametrize("name", ["bracket.step", "bracket.stp"])
+    def test_history_door_names_the_conversion(self, tmp_path: Path, name: str) -> None:
+        tools = TestToolSurface._tool()
+        step = self._step(tmp_path, name)
+
+        result = tools["get_model_print_history"](model_path=str(step))
+
+        assert result["success"] is False
+        assert result["error"]["code"] == "UNREADABLE_INPUT"
+        message = result["error"]["message"]
+        assert "import_step_file" in message
+        # The old runaround: telling a caller to supply what they supplied.
+        assert "pass model_path" not in message
+
+    def test_fingerprint_door_names_the_conversion(self, tmp_path: Path) -> None:
+        tools = TestToolSurface._tool()
+
+        result = tools["fingerprint_model"](file_path=str(self._step(tmp_path)))
+
+        assert result["success"] is False
+        assert "import_step_file" in result["error"]["message"]
+
+    def test_the_named_remedy_is_a_real_tool(self) -> None:
+        """The bug was naming a dead end.  Whatever we point at must exist."""
+        captured: dict[str, Any] = {}
+
+        class FakeMCP:
+            def tool(self, *_a: Any, **kw: Any):
+                def deco(fn):
+                    captured[kw.get("name", fn.__name__)] = fn
+                    return fn
+
+                return deco
+
+        from kiln.plugins.step_tools import plugin
+
+        plugin.register(FakeMCP())
+        assert "import_step_file" in captured
+
+    def test_cad_does_not_cost_the_caller_their_own_identity(
+        self, tmp_path: Path
+    ) -> None:
+        """The fall-through is deliberate: a file we cannot read must not
+        erase a hash the caller already supplied."""
+        tools = TestToolSurface._tool()
+        _record(_fp(file_hash="hash-original"))
+
+        result = tools["get_model_print_history"](
+            file_hash="hash-original", model_path=str(self._step(tmp_path))
+        )
+
+        assert result["success"] is True
+        assert result["total_prints"] == 1

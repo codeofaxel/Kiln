@@ -352,8 +352,10 @@ def fingerprint_model(file_path: str) -> ModelFingerprint:
     surface area, volume, overhang ratio, complexity score, and a
     geometric signature for similarity matching.
 
-    :param file_path: Path to an STL file.
-    :raises ValueError: If the file is empty or unparseable.
+    :param file_path: Path to an STL file.  A STEP/STP CAD file is refused
+        with the conversion path named — see below.
+    :raises ValueError: If the file is empty, is CAD rather than a mesh, or
+        is unparseable.
     :raises FileNotFoundError: If the file does not exist.
     """
     with open(file_path, "rb") as f:
@@ -361,6 +363,22 @@ def fingerprint_model(file_path: str) -> ModelFingerprint:
 
     if not data:
         raise ValueError("Empty file")
+
+    # CAD is refused here rather than converted, and that is deliberate: the
+    # signatures below count triangles and vertices, which a tessellation
+    # produces rather than the part having them.  Convert the same STEP at a
+    # different tolerance (or on a different backend) and the same part earns
+    # a different signature, so its history would silently fail to join —
+    # a confident "never printed" about a part with a printing record.  Let
+    # the caller convert once, deliberately, and fingerprint that mesh.
+    # Checked after the read so a missing file still says so.
+    from kiln.step_import import is_step_file
+
+    if is_step_file(file_path):
+        raise ValueError(
+            "STEP is CAD geometry, not a mesh — run import_step_file on it "
+            "first, then fingerprint the converted mesh."
+        )
 
     file_hash = hashlib.sha256(data).hexdigest()
 
