@@ -844,6 +844,40 @@ _FIELD_LABELS = {
 }
 
 
+def limit_provenance_suffix(profile: SafetyProfile, field: str) -> str:
+    """A short parenthetical for ONE limit, for use inside a refusal.
+
+    :func:`limits_provenance_note` answers "where did this profile's
+    numbers come from" for a caller inspecting the whole profile.  A
+    refusal is a narrower moment: it quotes exactly ONE limit, and
+    pasting the whole-profile sentence there would name fields the
+    refusal is not about.  So this answers only for *field*.
+
+    Silence is the common, correct case.  A Kiln-verified limit says
+    nothing extra — a refusal that appended a provenance clause every
+    time would train people to skim past the clause that matters.  The
+    string is emitted only when the number is NOT a verified limit for
+    this machine, which is exactly when the reader's next move changes:
+
+    - an owner-set limit may be the reader's OWN old setting, so the fix
+      might be to change it rather than to respect it;
+    - a generic-fallback limit belongs to no particular printer, so it
+      is a conservative stand-in rather than a measured ceiling.
+
+    Deliberately says only the provenance CLASS — never a source, a
+    document, or how the verified value was established.  A refusal is
+    a user-facing surface, and the account of how a limit was
+    established is not part of what makes the refusal actionable.
+
+    Returns a leading-space parenthetical ready to append, or ``""``.
+    """
+    if field in profile.owner_supplied:
+        return " (owner-set limit, not Kiln-verified)"
+    if profile.id == "default":
+        return " (generic fallback — this printer model is not recognised)"
+    return ""
+
+
 def limits_provenance_note(profile: SafetyProfile) -> str:
     """One pre-composed sentence saying where this profile's limits came from.
 

@@ -103,7 +103,7 @@ class _GcodeValidationToolsPlugin:
             """
             from kiln.gcode import validate_gcode as _validate_gcode_impl
             from kiln.gcode import validate_gcode_for_printer
-            from kiln.safety_profiles import get_profile
+            from kiln.safety_profiles import get_profile, limits_provenance_note
 
             if err := _srv._check_auth("gcode"):
                 return err
@@ -114,6 +114,11 @@ class _GcodeValidationToolsPlugin:
                     profile_info = {
                         "id": profile.id,
                         "display_name": profile.display_name,
+                        # The errors above already attribute any limit they
+                        # quote; this answers the same question for the
+                        # profile as a whole, for a caller that wants it
+                        # without parsing messages.
+                        "limits_provenance": limits_provenance_note(profile),
                     }
                 else:
                     result = _validate_gcode_impl(commands)

@@ -983,7 +983,20 @@ class GcodeInterceptor:
         from kiln.safety_profiles import (
             _UNKNOWN_PRINTER_MAX_BED_C,
             _UNKNOWN_PRINTER_MAX_HOTEND_C,
+            limit_provenance_suffix,
         )
+
+        def _limit_note(prof: Any, field: str) -> str:
+            """Provenance for a rule's own threshold, when there is one.
+
+            A rule built with no profile carries a registry fallback
+            rather than any machine's limit, so it has no provenance to
+            state — and the message already says nothing about a
+            specific printer.  With a profile, this is the same
+            distinction the validator draws, from the same helper.
+            """
+            return limit_provenance_suffix(prof, field) if prof is not None else ""
+
         max_hotend = profile.max_hotend_temp if profile else _UNKNOWN_PRINTER_MAX_HOTEND_C
         rules.append(
             InterceptionRule(
@@ -994,7 +1007,10 @@ class GcodeInterceptor:
                 priority=RulePriority.CRITICAL,
                 threshold=max_hotend,
                 applies_to=sorted(_HOTEND_TEMP_COMMANDS),
-                message=f"Hotend temperature exceeds safety limit ({max_hotend:.0f}C)",
+                message=(
+                    f"Hotend temperature exceeds safety limit ({max_hotend:.0f}C)"
+                    + _limit_note(profile, "max_hotend_temp")
+                ),
                 created_at=now,
             )
         )
@@ -1010,7 +1026,10 @@ class GcodeInterceptor:
                 priority=RulePriority.CRITICAL,
                 threshold=max_bed,
                 applies_to=sorted(_BED_TEMP_COMMANDS),
-                message=f"Bed temperature exceeds safety limit ({max_bed:.0f}C)",
+                message=(
+                    f"Bed temperature exceeds safety limit ({max_bed:.0f}C)"
+                    + _limit_note(profile, "max_bed_temp")
+                ),
                 created_at=now,
             )
         )
@@ -1026,7 +1045,10 @@ class GcodeInterceptor:
                 priority=RulePriority.HIGH,
                 threshold=max_feedrate,
                 modify_params={"F": max_feedrate},
-                message=f"Feedrate capped to safety limit ({max_feedrate:.0f} mm/min)",
+                message=(
+                    f"Feedrate capped to safety limit ({max_feedrate:.0f} mm/min)"
+                    + _limit_note(profile, "max_feedrate")
+                ),
                 created_at=now,
             )
         )

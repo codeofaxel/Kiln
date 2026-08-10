@@ -589,7 +589,19 @@ def _validate_single_with_profile(
 
     When *dialect* is not ``GENERIC``, dialect-specific blocked commands
     are also checked.
+
+    Every message that quotes one of *profile*'s limits appends that
+    limit's provenance when it is not a Kiln-verified number — a refusal
+    is the moment the distinction changes what the reader should do, and
+    a bare ceiling cannot be told apart from one they typed themselves.
+    See :func:`~kiln.safety_profiles.limit_provenance_suffix`, which
+    returns ``""`` for the verified case so the common refusal stays
+    clean.
     """
+    # Lazy, like the profile import in the caller: keeps the base
+    # validator independent of the data layer.
+    from kiln.safety_profiles import limit_provenance_suffix  # noqa: E402
+
     cleaned = _strip_comment(raw_line)
     if not cleaned:
         return None
@@ -631,7 +643,11 @@ def _validate_single_with_profile(
                 blocked.append(cleaned)
                 return None
             if temp > limit:
-                errors.append(f"{cmd} S{temp:g} exceeds {profile.display_name} max hotend temperature ({limit:g}°C)")
+                errors.append(
+                    f"{cmd} S{temp:g} exceeds {profile.display_name} max hotend "
+                    f"temperature ({limit:g}°C)"
+                    + limit_provenance_suffix(profile, "max_hotend_temp")
+                )
                 blocked.append(cleaned)
                 return None
             if 0 < temp < _MIN_EXTRUDE_TEMP:
@@ -649,7 +665,11 @@ def _validate_single_with_profile(
                 blocked.append(cleaned)
                 return None
             if temp > limit:
-                errors.append(f"{cmd} S{temp:g} exceeds {profile.display_name} max bed temperature ({limit:g}°C)")
+                errors.append(
+                    f"{cmd} S{temp:g} exceeds {profile.display_name} max bed "
+                    f"temperature ({limit:g}°C)"
+                    + limit_provenance_suffix(profile, "max_bed_temp")
+                )
                 blocked.append(cleaned)
                 return None
 
@@ -663,7 +683,11 @@ def _validate_single_with_profile(
                 return None
             effective_limit = limit if limit is not None else _MAX_CHAMBER_TEMP
             if temp > effective_limit:
-                errors.append(f"{cmd} S{temp:g} exceeds {profile.display_name} max chamber temperature ({effective_limit:g}°C)")
+                errors.append(
+                    f"{cmd} S{temp:g} exceeds {profile.display_name} max chamber "
+                    f"temperature ({effective_limit:g}°C)"
+                    + limit_provenance_suffix(profile, "max_chamber_temp")
+                )
                 blocked.append(cleaned)
                 return None
 
@@ -671,13 +695,18 @@ def _validate_single_with_profile(
     if cmd in _MOVE_COMMANDS:
         z_val = _extract_param(cleaned, "Z")
         if z_val is not None and z_val < profile.min_safe_z:
-            warnings.append(f"{cmd} moves Z to {z_val:g} which is below the bed plane (Z < {profile.min_safe_z:g})")
+            warnings.append(
+                f"{cmd} moves Z to {z_val:g} which is below the bed plane "
+                f"(Z < {profile.min_safe_z:g})"
+                + limit_provenance_suffix(profile, "min_safe_z")
+            )
 
         f_val = _extract_param(cleaned, "F")
         if f_val is not None and f_val > profile.max_feedrate:
             warnings.append(
                 f"{cmd} feedrate F{f_val:g} exceeds {profile.display_name} "
                 f"recommended maximum ({profile.max_feedrate:g} mm/min)"
+                + limit_provenance_suffix(profile, "max_feedrate")
             )
 
         # --- Volumetric flow estimation (WARNING) ---
@@ -704,6 +733,7 @@ def _validate_single_with_profile(
                         warnings.append(
                             f"{cmd} estimated volumetric flow {flow:.1f} mm³/s exceeds "
                             f"{profile.display_name} maximum ({profile.max_volumetric_flow:g} mm³/s)"
+                            + limit_provenance_suffix(profile, "max_volumetric_flow")
                         )
 
         # --- Build volume validation (WARNING) ---
@@ -713,11 +743,23 @@ def _validate_single_with_profile(
             x_val = _extract_param(cleaned, "X")
             y_val = _extract_param(cleaned, "Y")
             if x_val is not None and (x_val < 0 or x_val > bv_x):
-                warnings.append(f"{cmd} X{x_val:g} is outside {profile.display_name} build volume (X: 0–{bv_x} mm)")
+                warnings.append(
+                    f"{cmd} X{x_val:g} is outside {profile.display_name} "
+                    f"build volume (X: 0–{bv_x} mm)"
+                    + limit_provenance_suffix(profile, "build_volume")
+                )
             if y_val is not None and (y_val < 0 or y_val > bv_y):
-                warnings.append(f"{cmd} Y{y_val:g} is outside {profile.display_name} build volume (Y: 0–{bv_y} mm)")
+                warnings.append(
+                    f"{cmd} Y{y_val:g} is outside {profile.display_name} "
+                    f"build volume (Y: 0–{bv_y} mm)"
+                    + limit_provenance_suffix(profile, "build_volume")
+                )
             if z_val is not None and z_val > bv_z:
-                warnings.append(f"{cmd} Z{z_val:g} is outside {profile.display_name} build volume (Z: 0–{bv_z} mm)")
+                warnings.append(
+                    f"{cmd} Z{z_val:g} is outside {profile.display_name} "
+                    f"build volume (Z: 0–{bv_z} mm)"
+                    + limit_provenance_suffix(profile, "build_volume")
+                )
 
     # --- Arc command validation (G2/G3) ---
     if cmd in _ARC_COMMANDS:
