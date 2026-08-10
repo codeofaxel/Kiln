@@ -29,7 +29,7 @@ Behaviour contract:
   (one contract, defined once) plus the agent-contract sentence the
   server instructions already carry;
 * every attach records ``shown_tool_result`` in the daily stats, so the
-  founder dashboard can finally see whether the nudge converts —
+  aggregate reports can finally show whether the nudge converts —
   attaches with no recorded upgrade attempts and attempts with no
   successes are different product failures needing different fixes.
 

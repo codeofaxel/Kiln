@@ -644,7 +644,7 @@ def record_account_wall(tool_name: str) -> None:
 # The upgrade funnel's stages.  A CLOSED set, unlike the tool-name maps:
 # these are our own vocabulary, so an unknown value is a bug in our
 # code rather than an exotic tool, and silently accepting it would let a
-# typo become a permanent phantom row on the founder dashboard.
+# typo become a permanent phantom row in the aggregate reports.
 _UPDATE_NUDGE_STAGES = frozenset({
     # the offer reached an agent's working context
     "shown_tool_result",
