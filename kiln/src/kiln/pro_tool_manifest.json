@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-08-10T00:10:39.916301+00:00",
-  "tool_count": 411,
+  "generated": "2026-08-10T03:12:23.839802+00:00",
+  "tool_count": 412,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -305,11 +305,19 @@
       "parameters": {
         "properties": {
           "part_paths": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Part Paths",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Part Paths"
           },
           "part_names": {
             "anyOf": [
@@ -335,11 +343,18 @@
             "default": "PLA",
             "title": "Material",
             "type": "string"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "kit_id": {
+            "default": "",
+            "title": "Kit Id",
+            "type": "string"
           }
         },
-        "required": [
-          "part_paths"
-        ],
         "title": "derive_assembly_planArguments",
         "type": "object"
       }
@@ -5332,6 +5347,11 @@
             "default": false,
             "title": "Include Retired",
             "type": "boolean"
+          },
+          "expand_kits": {
+            "default": false,
+            "title": "Expand Kits",
+            "type": "boolean"
           }
         },
         "required": [
@@ -5802,6 +5822,45 @@
           "merged_feature_version_id"
         ],
         "title": "merge_feature_branchesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "promote_kit_piece",
+      "description": "Promote one kit piece to its OWN standalone design \u2014 lineage intact.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "new_design_id": {
+            "title": "New Design Id",
+            "type": "string"
+          },
+          "piece_label": {
+            "default": "",
+            "title": "Piece Label",
+            "type": "string"
+          },
+          "kit_id": {
+            "default": "",
+            "title": "Kit Id",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id",
+          "new_design_id"
+        ],
+        "title": "promote_kit_pieceArguments",
         "type": "object"
       }
     },
@@ -13410,11 +13469,19 @@
       "parameters": {
         "properties": {
           "part_paths": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Part Paths",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Part Paths"
           },
           "part_names": {
             "anyOf": [
@@ -13430,6 +13497,11 @@
             ],
             "default": null,
             "title": "Part Names"
+          },
+          "design_id": {
+            "default": "",
+            "title": "Design Id",
+            "type": "string"
           },
           "scale": {
             "default": 1.0,
@@ -13508,9 +13580,6 @@
             "type": "number"
           }
         },
-        "required": [
-          "part_paths"
-        ],
         "title": "plan_kit_platesArguments",
         "type": "object"
       }
