@@ -22,6 +22,31 @@ These helpers are the **single supported path** for adding decoration
 to a custom-generated STL.  Hand-rolling ``linear_extrude(text(...))``
 SCAD inline is an antipattern — every custom product decoration
 must route through the emboss engine instead.
+
+SIZING CONTRACT (the text-sizing seam, closed 2026-08-08)
+---------------------------------------------------------
+The LAYOUT layer decides, the engine executes:
+
+- :func:`emboss_text_lines_on_face` owns typography.  It computes every
+  line's font size from the engine's own MEASURED glyph metrics
+  (:func:`kiln.emboss_generator.measure_text_block_mm`), applies its
+  0.85 professional visual margin, the hierarchy ratios, the FDM
+  legibility floor, and — on elliptical faces (coasters, oval trays) —
+  the real inscribed width at each line's band.  Because its sizes are
+  computed from real metrics, the engine's overflow guard never fires
+  for them: the size this helper requests is the size that ships.
+  (Before the fix it sized from a 0.6-per-char guess; the engine then
+  re-fit the real glyphs to its own unmargined box, which destroyed the
+  margin — shipped text ran exactly 1/0.85 = 17.6% wider than intent —
+  and could clamp the primary line below the secondary, inverting the
+  hierarchy the helper exists to protect.)
+- :func:`kiln.emboss_generator.generate_emboss_scad` honours explicit
+  sizes that fit VERBATIM and clamps down — always warning — only on
+  genuine overflow (face box, or an elliptical face's rim).  Its auto
+  mode fills the caller's box exactly; margins are a layout concern.
+- Nothing fails silently: engine clamp warnings are logged here and
+  surfaced through each helper's ``collect_warnings`` sink; impossible
+  fits raise :class:`TextDoesNotFitError` with actionable suggestions.
 """
 
 from __future__ import annotations
@@ -43,6 +68,7 @@ __all__ = [
     "DepthBelowLegibilityFloor",
     "TextDoesNotFitError",
     # Verdict + decision helpers
+    "compute_text_line_layout",
     "fit_text_to_strip",
     "select_bottom_face_flip",
     # Primary emboss entry points
@@ -662,6 +688,256 @@ def fit_text_to_strip(
     return verdict
 
 
+def compute_text_line_layout(
+    lines: list[str],
+    *,
+    face: dict[str, Any],
+    line_scale: float = 0.7,
+    min_edge_margin_mm: float = 4.0,
+    hierarchy: list[float] | None = None,
+    line_spacing_mm: float = 0.0,
+    font: str = "Liberation Sans:style=Bold",
+    min_size_mm: float | None = None,
+) -> dict[str, Any]:
+    """Compute honest per-line font sizes and offsets for a face.
+
+    This is the sizing half of :func:`emboss_text_lines_on_face`, pure
+    math over the face dict so it can be tested and reused without an
+    emboss compile.  Sizes come from the engine's MEASURED glyph metrics
+    (:func:`kiln.emboss_generator.measure_text_block_mm`) — one cached
+    sub-second probe per (text, font) — so the width used here is the
+    width that ships.  When no OpenSCAD binary is available the
+    0.6-per-char legacy estimate keeps the layout functional (coarse
+    beats broken; the engine's guard also degrades to the same
+    estimate, so the two layers still agree).
+
+    Constraints applied, in order:
+
+    1. Width: every line's measured run at its hierarchy ratio stays
+       within 0.85 of the usable box (``face_w x line_scale``, further
+       clamped by *min_edge_margin_mm* — the same clamp the engine
+       applies, mirrored here so the engine never has to re-fit).
+    2. Height: the primary line's measured glyph height fits its strip
+       (``face_h x line_scale / n``) at the same 0.85 margin.
+    3. Rim: on an elliptical face every line's corners must sit inside
+       the inscribed ellipse at that line's band — the bounding box
+       lies about available width near a coaster's rim.  All lines
+       shrink by ONE factor so the hierarchy ratios survive exactly.
+    4. Floor: any line below the FDM legibility floor raises
+       :class:`TextDoesNotFitError` with actionable suggestions.
+
+    :returns: dict with ``font_sizes_mm``, ``offsets_mm`` (face-local y
+        per line, top first), ``line_spacing_mm``, ``line_widths_mm`` /
+        ``line_heights_mm`` (measured extents at the final sizes),
+        ``measured`` (False on the no-OpenSCAD estimate path), and
+        ``notes`` (human-readable fit decisions worth surfacing).
+    :raises TextDoesNotFitError: when a line cannot fit legibly.
+    """
+    from kiln.emboss_generator import (
+        TextMeasureError,
+        ellipse_fit_scale,
+        face_inscribed_profile,
+        measure_text_block_mm,
+    )
+
+    if not lines:
+        return {
+            "font_sizes_mm": [],
+            "offsets_mm": [],
+            "line_spacing_mm": 0.0,
+            "line_widths_mm": [],
+            "line_heights_mm": [],
+            "measured": False,
+            "notes": [],
+        }
+
+    n = len(lines)
+    if min_size_mm is None:
+        min_size_mm = _FDM_TEXT_LEGIBILITY_FLOOR_MM
+
+    # Default hierarchy: primary 1.0, each subsequent 70% of prior —
+    # the "name big, title smaller, division smallest" pattern of real
+    # nameplates / business cards / awards plaques.
+    if hierarchy is None:
+        hierarchy = [0.7 ** i for i in range(n)]
+    if len(hierarchy) < n:
+        hierarchy = list(hierarchy) + [hierarchy[-1] * 0.7] * (n - len(hierarchy))
+    hierarchy = hierarchy[:n]
+
+    face_w = face["width_mm"]
+    face_h = face["height_mm"]
+
+    # Per-line glyph extents per mm of font size — measured when the
+    # probe is available, the legacy char-aspect estimate otherwise.
+    measured = True
+    per_mm: list[tuple[float, float]] = []  # (width/mm, height/mm)
+    for line in lines:
+        if not line:
+            per_mm.append((0.0, 0.0))
+            continue
+        try:
+            w48, h48, _, _ = measure_text_block_mm(line, font, 48.0)
+            per_mm.append((w48 / 48.0, h48 / 48.0))
+        except TextMeasureError:
+            measured = False
+            per_mm.append((len(line) * 0.6, 1.0))
+
+    notes: list[str] = []
+    if not measured:
+        notes.append(
+            "OpenSCAD probe unavailable — text sized from the "
+            "0.6-per-char estimate instead of measured glyphs."
+        )
+
+    # Usable box mirrors the engine's own target computation: the scale
+    # fraction of the face, never closer than min_edge_margin_mm to an
+    # edge.  The 0.85 visual margin then applies INSIDE that box — the
+    # professional-desk-sign breathing room around the text.  (0.95 was
+    # flagged as visually crammed by the 2026-05-03 nameplate feedback.)
+    usable_w = min(face_w * line_scale, max(face_w - 2.0 * min_edge_margin_mm, 1.0))
+    usable_h = min(face_h * line_scale, max(face_h - 2.0 * min_edge_margin_mm, 1.0))
+    budget_w = usable_w * 0.85
+    budget_h_primary = (usable_h / n) * 0.85
+
+    # Primary size: the largest that satisfies every line's width budget
+    # at its ratio, and the primary strip's height budget.
+    primary = float("inf")
+    for (w1, _h1), ratio in zip(per_mm, hierarchy, strict=False):
+        if w1 > 0 and ratio > 0:
+            primary = min(primary, budget_w / (w1 * ratio))
+    h1_primary = per_mm[0][1] if per_mm[0][1] > 0 else 1.0
+    primary = min(primary, budget_h_primary / h1_primary)
+    if primary == float("inf"):
+        primary = budget_h_primary  # all-empty lines; nothing to fit
+
+    sizes = [primary * hierarchy[i] for i in range(n)]
+
+    def _spacing(current_sizes: list[float]) -> float:
+        if line_spacing_mm > 0:
+            return line_spacing_mm
+        # Baseline-to-baseline 1.4x for clean reads, from font sizes.
+        return sum(current_sizes) * 1.4 / max(1, n)
+
+    def _offsets(spacing: float) -> list[float]:
+        if n == 1:
+            return [0.0]
+        total = (n - 1) * spacing
+        top = total / 2.0
+        return [top - i * spacing for i in range(n)]
+
+    spacing = _spacing(sizes)
+    offsets = _offsets(spacing)
+
+    # Rim fit on elliptical faces: the corners of each line's run must
+    # sit inside the inscribed ellipse at that line's band.  One shared
+    # shrink factor keeps the hierarchy exact; shrinking also pulls the
+    # (auto) offsets inward, so a single conservative pass suffices.
+    profile = face_inscribed_profile(face)
+    if profile is not None:
+        rim_k = 1.0
+        for (w1, h1), size, off in zip(per_mm, sizes, offsets, strict=False):
+            if w1 <= 0 or size <= 0:
+                continue
+            rim_k = min(
+                rim_k,
+                ellipse_fit_scale(
+                    profile[0], profile[1],
+                    w1 * size / 2.0, h1 * size / 2.0,
+                    0.0, off,
+                ),
+            )
+        if rim_k <= 0.0:
+            raise TextDoesNotFitError({
+                "fits": False,
+                "font_size_mm": 0.0,
+                "text_width_mm": 0.0,
+                "constraint": "width",
+                "warnings": [
+                    f"Text stack does not fit the round "
+                    f"{face_w:.0f}x{face_h:.0f}mm face at any size."
+                ],
+                "suggestions": [
+                    "Use fewer lines",
+                    "Use a larger product",
+                ],
+            })
+        if rim_k < 0.999:
+            # 0.5% cushion inside the rim so the engine's own rim guard
+            # (same math, re-run on rounded font sizes) never re-fires.
+            rim_k *= 0.995
+            sizes = [s * rim_k for s in sizes]
+            spacing = _spacing(sizes)
+            offsets = _offsets(spacing)
+            notes.append(
+                f"Round face: text sized to the inscribed width at its "
+                f"band ({rim_k:.2f}x of the box fit) so no glyph corner "
+                f"crosses the rim."
+            )
+
+    # Hard refusals on the FINAL numbers — the floor check must see what
+    # will actually ship, not an optimistic estimate.
+    for i, (line, size, (w1, _h1)) in enumerate(
+        zip(lines, sizes, per_mm, strict=False)
+    ):
+        if not line:
+            continue
+        text_w = w1 * size
+        if text_w > face_w * 0.95:
+            raise TextDoesNotFitError({
+                "fits": False,
+                "font_size_mm": size,
+                "text_width_mm": text_w,
+                "constraint": "width",
+                "warnings": [
+                    f"Line {i + 1} ({line!r}) at {size:.1f}mm would "
+                    f"extend {text_w:.0f}mm — exceeds face width "
+                    f"{face_w:.0f}mm."
+                ],
+                "suggestions": [
+                    "Shorten this line to fit the face",
+                    f"Use a wider product (current face: {face_w:.0f}mm)",
+                    "Split onto multiple lines",
+                ],
+            })
+        if size < min_size_mm:
+            per_char = (w1 / len(line)) if len(line) else 0.6
+            max_chars_at_floor = (
+                int(budget_w / (min_size_mm * per_char)) if per_char > 0 else 0
+            )
+            raise TextDoesNotFitError({
+                "fits": False,
+                "font_size_mm": size,
+                "text_width_mm": text_w,
+                "constraint": "min_floor",
+                "warnings": [
+                    f"Line {i + 1} ({line!r}) sized to {size:.1f}mm "
+                    f"— below the {min_size_mm}mm FDM legibility floor."
+                ],
+                "suggestions": [
+                    f"Shorten this line to <={max_chars_at_floor} chars",
+                    f"Use a larger product or fewer lines "
+                    f"(current: {n} lines x {face_h:.0f}mm height)",
+                ],
+            })
+        # Tight-but-fits — a soft note callers can surface.
+        if text_w > face_w * 0.85:
+            notes.append(
+                f"Line {i + 1} ({line!r}) at {size:.1f}mm uses "
+                f"{text_w / face_w * 100:.0f}% of face width — tight "
+                f"fit, no margin for material expansion."
+            )
+
+    return {
+        "font_sizes_mm": sizes,
+        "offsets_mm": offsets,
+        "line_spacing_mm": spacing,
+        "line_widths_mm": [w1 * s for (w1, _h1), s in zip(per_mm, sizes, strict=False)],
+        "line_heights_mm": [h1 * s for (_w1, h1), s in zip(per_mm, sizes, strict=False)],
+        "measured": measured,
+        "notes": notes,
+    }
+
+
 def emboss_text_on_face(
     body_stl: str,
     text: str,
@@ -679,6 +955,7 @@ def emboss_text_on_face(
     output_dir: str | None = None,
     output_stl: str | None = None,
     emit_post_flip_preview: bool = True,
+    collect_warnings: list[str] | None = None,
 ) -> str:
     """Apply a single line of text as emboss/deboss onto a face of an STL.
 
@@ -690,9 +967,14 @@ def emboss_text_on_face(
     is given) or :func:`find_largest_flat_face` (auto).
 
     :param body_stl: Path to the host STL the text gets applied to.
-    :param text: The text to emboss/deboss.  Single line; for multiple
-        lines, call this helper once per line with different
-        *offset_y_mm*.
+    :param text: The text to emboss/deboss.  Single line only.  For
+        multiple lines use :func:`emboss_text_lines_on_face` — chaining
+        this helper per line with the default auto-sizing maxes EACH
+        line independently to fill the face, so a short narrow-glyph
+        line renders larger than the primary above it (measured
+        2026-08-08: "IIIII" at 28.1mm under "WWWW" at 9.35mm).  Only the
+        multi-line helper knows the hierarchy and can size lines
+        together.
     :param face_name: ``"top"`` / ``"bottom"`` / ``"front"`` /
         ``"back"`` / ``"left"`` / ``"right"`` to target a cardinal face.
         ``None`` means auto-detect the largest flat face.
@@ -721,6 +1003,10 @@ def emboss_text_on_face(
     :param output_dir: Directory for intermediate SCAD + final STL.
         Auto-created in /tmp if omitted.
     :param output_stl: Final STL path.  Auto-named if omitted.
+    :param collect_warnings: Optional caller-provided list; any engine
+        fit/clamp warnings (explicit size clamped, offset clamped,
+        rim-fit on a round face) are appended to it AND logged — the
+        engine's verdicts must never vanish between here and the user.
     :returns: Absolute path to the new STL with text applied.
     :raises FileNotFoundError: If *body_stl* doesn't exist.
     :raises ValueError: If face detection fails.
@@ -813,6 +1099,16 @@ def emboss_text_on_face(
         additional_pre_text_transform=additional_pre_text_transform,
     )
 
+    # 3b. Surface the engine's fit verdicts.  A clamp (explicit size too
+    # big, offset off the face, rim-fit on a round face) is information
+    # the user acted on — swallowing it here is how a silently-resized
+    # engraving reaches a printer.  Log always; hand to the caller's
+    # sink when one was provided.
+    for engine_warning in scad_result.get("warnings") or []:
+        _logger.warning("emboss_text_on_face(%r): %s", text, engine_warning)
+        if collect_warnings is not None:
+            collect_warnings.append(engine_warning)
+
     # 4. Compile to STL
     compile_result = compile_embossed_model(scad_result["scad_path"], output_stl)
     if not compile_result.get("success"):
@@ -863,6 +1159,7 @@ def emboss_text_lines_on_face(
     line_spacing_mm: float = 0.0,
     output_dir: str | None = None,
     hierarchy: list[float] | None = None,
+    collect_warnings: list[str] | None = None,
     **kwargs: Any,
 ) -> str:
     """Apply multiple lines of text to a face by chaining emboss calls.
@@ -874,6 +1171,15 @@ def emboss_text_lines_on_face(
     "JOHN" at 22mm and "CEO" at 50mm (CEO has fewer chars → less
     width-clamped → larger).  See decoration_helpers test fixtures for
     the regression that pinned this.
+
+    Sizing is MEASURED (see :func:`compute_text_line_layout` and the
+    module-level SIZING CONTRACT): every line's font size comes from the
+    engine's real glyph metrics with the 0.85 visual margin applied, so
+    the size this helper computes is the size that ships — the engine
+    never has to re-fit, the margin survives to the mesh, and the
+    hierarchy can never invert.  Elliptical faces (coasters, oval
+    trays) are fitted against their real inscribed width at each line's
+    band, never the square bounding box.
 
     Each line is positioned at a different *offset_y_mm* relative to
     the face centre — top line at +line_spacing/2 if 2 lines, etc.
@@ -892,9 +1198,15 @@ def emboss_text_lines_on_face(
     :param hierarchy: Per-line size multipliers relative to *line_scale*.
         Defaults to ``[1.0]`` for 1 line, ``[1.0, 0.7]`` for 2 lines,
         ``[1.0, 0.7, 0.5]`` for 3+ lines (recursive 0.7^i ratio).
+    :param collect_warnings: Optional caller-provided list; layout notes
+        (round-face fitting, tight fits, degraded estimate mode) and any
+        engine clamp warnings are appended to it, so nothing the
+        pipeline decides is silent.  Everything is also logged.
     :returns: Final STL path with all lines applied.
     :raises DepthBelowLegibilityFloor: If *depth_mm* is below
         ``nozzle_diameter_mm × 3``.
+    :raises TextDoesNotFitError: If a line cannot fit the face legibly
+        (see :func:`compute_text_line_layout`).
     """
     if not lines:
         return body_stl
@@ -913,20 +1225,8 @@ def emboss_text_lines_on_face(
             nozzle_diameter_mm=nozzle_diameter_mm,
         )
 
-    n = len(lines)
-
-    # Default hierarchy: primary 1.0, each subsequent 70% of prior.
-    # Matches the "name big, title smaller, division smallest" pattern
-    # in real nameplates / business cards / awards plaques.
-    if hierarchy is None:
-        hierarchy = [0.7 ** i for i in range(n)]
-    # Pad / trim hierarchy to match line count.
-    if len(hierarchy) < n:
-        hierarchy = list(hierarchy) + [hierarchy[-1] * 0.7] * (n - len(hierarchy))
-    hierarchy = hierarchy[:n]
-
-    # Resolve the face once so we can pre-compute per-line font sizes
-    # and offsets in face-local mm.
+    # Resolve the face once so the layout math sees the same face every
+    # per-line emboss call will target.
     from kiln.surface_intelligence import (
         find_largest_flat_face,
         find_named_face,
@@ -937,102 +1237,27 @@ def emboss_text_lines_on_face(
         if face_name
         else find_largest_flat_face(body_stl)
     )
-    face_w = face["width_mm"]
-    face_h = face["height_mm"]
 
-    # Compute the primary line's font size: the larger of "fits within
-    # the strip's height" and "fits within the face width."  Width-fit
-    # uses the longest line so all lines stay inside the face.  Take
-    # the smaller of the two as the upper bound for the primary line.
-    #
-    # Safety margin: 0.85 (was 0.95) leaves ~15% of the face as a
-    # visual frame around the text so glyphs never appear to fly off
-    # the edges.  The 2026-05-03 nameplate user feedback flagged
-    # "Josh Beckham" at 0.95 as visually crammed even though it was
-    # technically inside the bounding box — the 0.85 factor gives
-    # the same "professional desk sign" margins as a real engraved
-    # nameplate.
-    longest_chars = max(len(s) for s in lines if s) or 1
-    width_fit_primary = (face_w * line_scale * 0.85) / (longest_chars * 0.6)
-    height_fit_primary = (face_h * line_scale / n) * 0.85
-    primary_size = min(width_fit_primary, height_fit_primary)
-    # Per-line sizes follow the hierarchy ratios from the primary.
-    per_line_sizes = [primary_size * hierarchy[i] for i in range(n)]
-
-    # Hard-stop if any line would not fit legibly.  The 2026-05-03
-    # user mandate "kiln should never let users put text that won't
-    # fit" applies here too — the pipeline must not produce a SCAD/STL/
-    # preview the user can't actually use.  Caller catches
-    # TextDoesNotFitError and surfaces ``verdict.suggestions`` to the
-    # user (shorten to N chars, widen to W mm, split lines).
-    fit_warnings: list[str] = []
-    for i, (line, size) in enumerate(zip(lines, per_line_sizes, strict=False)):
-        if not line:
-            continue
-        text_w = len(line) * size * 0.6
-        if text_w > face_w * 0.95:
-            verdict = {
-                "fits": False,
-                "font_size_mm": size,
-                "text_width_mm": text_w,
-                "constraint": "width",
-                "warnings": [
-                    f"Line {i + 1} ({line!r}) at {size:.1f}mm would "
-                    f"extend {text_w:.0f}mm — exceeds face width "
-                    f"{face_w:.0f}mm."
-                ],
-                "suggestions": [
-                    "Shorten this line to fit the face",
-                    f"Use a wider product (current face: {face_w:.0f}mm)",
-                    "Split onto multiple lines",
-                ],
-            }
-            raise TextDoesNotFitError(verdict)
-        if size < _FDM_TEXT_LEGIBILITY_FLOOR_MM:
-            max_chars_at_floor = int(
-                (face_w * line_scale * 0.85)
-                / (_FDM_TEXT_LEGIBILITY_FLOOR_MM * 0.6)
-            )
-            verdict = {
-                "fits": False,
-                "font_size_mm": size,
-                "text_width_mm": text_w,
-                "constraint": "min_floor",
-                "warnings": [
-                    f"Line {i + 1} ({line!r}) auto-sized to {size:.1f}mm "
-                    f"— below the {_FDM_TEXT_LEGIBILITY_FLOOR_MM}mm "
-                    f"FDM legibility floor."
-                ],
-                "suggestions": [
-                    f"Shorten this line to ≤{max_chars_at_floor} chars",
-                    f"Use a larger product or fewer lines "
-                    f"(current: {n} lines × {face_h:.0f}mm height)",
-                ],
-            }
-            raise TextDoesNotFitError(verdict)
-        # Tight-but-fits — log a soft warning that callers can surface.
-        if text_w > face_w * 0.85:
-            fit_warnings.append(
-                f"Line {i + 1} ({line!r}) at {size:.1f}mm uses "
-                f"{text_w / face_w * 100:.0f}% of face width — tight "
-                f"fit, no margin for material expansion."
-            )
-    for warning in fit_warnings:
-        _logger.warning("emboss_text_lines: %s", warning)
-
-    if line_spacing_mm <= 0:
-        # Total typography stack height = sum of per-line heights × 1.4
-        # (1.4 = baseline-to-baseline spacing for clean reads).  Then
-        # centre that stack on the face.
-        line_spacing_mm = sum(per_line_sizes) * 1.4 / max(1, n)
-
-    # Centre line(s) vertically: distribute around face centre
-    if n == 1:
-        offsets = [0.0]
-    else:
-        total_height = (n - 1) * line_spacing_mm
-        top = total_height / 2.0
-        offsets = [top - i * line_spacing_mm for i in range(n)]
+    # All sizing decisions — measured glyph metrics, the 0.85 visual
+    # margin, hierarchy ratios, elliptical-face inscribed fitting, and
+    # the legibility-floor refusal — live in compute_text_line_layout.
+    # The sizes it returns fit the engine's box by construction, so the
+    # engine honours them verbatim: requested size == shipped size.
+    layout = compute_text_line_layout(
+        lines,
+        face=face,
+        line_scale=line_scale,
+        min_edge_margin_mm=min_edge_margin_mm,
+        hierarchy=hierarchy,
+        line_spacing_mm=line_spacing_mm,
+        font=kwargs.get("font", "Liberation Sans:style=Bold"),
+    )
+    per_line_sizes = layout["font_sizes_mm"]
+    offsets = layout["offsets_mm"]
+    for note in layout["notes"]:
+        _logger.warning("emboss_text_lines: %s", note)
+    if collect_warnings is not None:
+        collect_warnings.extend(layout["notes"])
 
     current = body_stl
     for i, (line, offset) in enumerate(zip(lines, offsets, strict=False)):
@@ -1057,6 +1282,7 @@ def emboss_text_lines_on_face(
             # below against the final cumulative STL.  Skipping
             # intermediate renders saves ~1s per line of OpenSCAD time.
             emit_post_flip_preview=False,
+            collect_warnings=collect_warnings,
             **kwargs,
         )
 

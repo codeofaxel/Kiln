@@ -1710,3 +1710,71 @@ def test_ensure_mesh_path_cache_write_failure_is_not_fatal(
     p, note = ensure_mesh_path(str(step), output_dir=str(out))
     assert Path(p).is_file()
     assert "cached" not in (note or "")
+
+
+# ---------------------------------------------------------------------------
+# The probe must not load the kernel it is asking about
+# ---------------------------------------------------------------------------
+
+
+def test_backend_probe_does_not_import_the_kernel():
+    """Asking whether STEP is supported must stay cheap.
+
+    ``check_step_support`` is a registered tool, so any caller can reach
+    it.  When the probe answered by importing, that call pulled in 323
+    modules and ~247 MB resident (measured 2026-08-03) and never let go
+    — on a memory-bounded host, a question that converts nothing used a
+    quarter of the machine.  Nothing needs the import: conversions run
+    the kernel in a child interpreter and every caller of the probe uses
+    only its boolean.
+
+    Runs in a SUBPROCESS deliberately.  Other tests in this file import
+    OCP into the test process, so the parent's ``sys.modules`` proves
+    nothing about this one.
+    """
+    import subprocess
+    import sys
+
+    probe = (
+        "import sys; "
+        "sys.path.insert(0, %r); "
+        "from kiln.step_import import check_step_support; "
+        "check_step_support(); "
+        "print(len([m for m in sys.modules "
+        "if m.startswith(('OCP', 'cadquery'))]))"
+    ) % str(Path(__file__).resolve().parents[1] / "src")
+
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    leaked = int(result.stdout.strip().splitlines()[-1])
+    assert leaked == 0, (
+        f"the availability probe imported {leaked} kernel modules; it "
+        "must answer from the filesystem, not by importing"
+    )
+
+
+def test_probe_agrees_with_a_real_import():
+    """The cheap probe must give the same answer as actually importing.
+
+    Guards the other direction: a probe that always said False would
+    pass the leak test above while breaking every conversion.
+
+    Uses ``_REAL_OCP_AVAILABLE`` — the module-level autouse fixture
+    patches ``_ocp_available`` to False so the suite exercises the
+    no-backend paths by default, and asserting against the patch would
+    only prove the fixture works.
+    """
+    import importlib
+
+    try:
+        importlib.import_module("OCP.STEPControl")
+        really_there = True
+    except ImportError:
+        really_there = False
+
+    assert _REAL_OCP_AVAILABLE() is really_there

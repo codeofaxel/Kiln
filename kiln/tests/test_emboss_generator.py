@@ -970,3 +970,216 @@ class TestTextProbeContract:
         monkeypatch.setattr(eg, "_find_openscad", missing_binary)
         with pytest.raises(eg.TextMeasureError):
             eg.measure_text_block_mm("probe contract text", "Liberation Sans")
+
+
+# ---------------------------------------------------------------------------
+# Tests: inscribed-width fitting for elliptical faces (the rim guard)
+#
+# The text-sizing seam fix, 2026-08-08.  A face dict carries only bbox +
+# area, so a coaster top and a square plate were indistinguishable to the
+# fitter — a monogram "W" auto-fit to a 72mm box shipped with its corners
+# 4.58mm past an 80mm disc's rim, silently.
+# ---------------------------------------------------------------------------
+
+
+class TestFaceInscribedProfile:
+    def test_disc_face_matches_the_ellipse_signature(self):
+        import math
+
+        from kiln.emboss_generator import face_inscribed_profile
+
+        face = {
+            "width_mm": 80.0,
+            "height_mm": 80.0,
+            "area_mm2": math.pi / 4.0 * 80.0 * 80.0,
+        }
+        assert face_inscribed_profile(face) == (40.0, 40.0)
+
+    def test_oval_face_matches_too(self):
+        import math
+
+        from kiln.emboss_generator import face_inscribed_profile
+
+        face = {
+            "width_mm": 100.0,
+            "height_mm": 60.0,
+            "area_mm2": math.pi / 4.0 * 100.0 * 60.0 * 0.99,  # tessellated
+        }
+        assert face_inscribed_profile(face) == (50.0, 30.0)
+
+    def test_rectangular_face_is_not_elliptical(self):
+        from kiln.emboss_generator import face_inscribed_profile
+
+        face = {"width_mm": 70.0, "height_mm": 70.0, "area_mm2": 4900.0}
+        assert face_inscribed_profile(face) is None
+
+    def test_ring_face_is_deliberately_not_modelled(self):
+        # An annulus (ashtray rim) has LESS material than the ellipse
+        # model assumes — pretending it is a disc would lie in the
+        # unsafe direction, so it keeps bbox fitting.
+        import math
+
+        from kiln.emboss_generator import face_inscribed_profile
+
+        outer, inner = 40.0, 30.0
+        face = {
+            "width_mm": 80.0,
+            "height_mm": 80.0,
+            "area_mm2": math.pi * (outer**2 - inner**2),
+        }
+        assert face_inscribed_profile(face) is None
+
+    def test_degenerate_faces_return_none(self):
+        from kiln.emboss_generator import face_inscribed_profile
+
+        assert face_inscribed_profile({}) is None
+        assert face_inscribed_profile(
+            {"width_mm": 0.0, "height_mm": 80.0, "area_mm2": 100.0}
+        ) is None
+
+
+class TestEllipseFitScale:
+    def test_comfortably_inside_never_grows(self):
+        from kiln.emboss_generator import ellipse_fit_scale
+
+        # Fitting only shrinks: a small rect reports 1.0, not >1.
+        assert ellipse_fit_scale(40.0, 40.0, 5.0, 5.0) == 1.0
+
+    def test_centered_oversize_shrinks_corner_onto_the_rim(self):
+        import math
+
+        from kiln.emboss_generator import ellipse_fit_scale
+
+        # The measured monogram case: 72.0 x 52.59mm "W" on an 80mm disc.
+        k = ellipse_fit_scale(40.0, 40.0, 36.0, 26.3)
+        assert 0.0 < k < 1.0
+        # The scaled corner must land exactly on the rim.
+        r = math.hypot(36.0 * k, 26.3 * k)
+        assert r == pytest.approx(40.0, abs=1e-9)
+
+    def test_offset_band_gets_less_width(self):
+        from kiln.emboss_generator import ellipse_fit_scale
+
+        centered = ellipse_fit_scale(40.0, 40.0, 30.0, 5.0, 0.0, 0.0)
+        near_rim = ellipse_fit_scale(40.0, 40.0, 30.0, 5.0, 0.0, 24.0)
+        assert near_rim < centered
+
+    def test_offset_outside_the_face_fits_nothing(self):
+        from kiln.emboss_generator import ellipse_fit_scale
+
+        assert ellipse_fit_scale(40.0, 40.0, 10.0, 5.0, 0.0, 41.0) == 0.0
+
+    def test_degenerate_axes_are_a_no_op(self):
+        from kiln.emboss_generator import ellipse_fit_scale
+
+        assert ellipse_fit_scale(0.0, 40.0, 10.0, 5.0) == 1.0
+
+
+@needs_openscad
+class TestRimGuardOnRoundFaces:
+    """The engine-level half of the rim guard, on real compiled geometry."""
+
+    def _disc(self, dirpath, d_mm=80.0):
+        scad = os.path.join(dirpath, "disc.scad")
+        with open(scad, "w") as f:
+            f.write(f"cylinder(h=6, d={d_mm}, $fn=160);")
+        stl = os.path.join(dirpath, "disc.stl")
+        subprocess.run(["openscad", "-o", stl, scad], check=True, capture_output=True)
+        return stl
+
+    def _final_font_size(self, scad_path):
+        import re
+
+        with open(scad_path) as f:
+            m = re.search(r'text\("[^"]*",\s*size=([0-9.]+)', f.read())
+        assert m, "no text() in generated scad"
+        return float(m.group(1))
+
+    def test_explicit_oversize_on_disc_warns_and_stays_inside(self, tmp_path):
+        from kiln.emboss_generator import (
+            generate_emboss_scad,
+            measure_text_block_mm,
+        )
+        from kiln.surface_intelligence import find_named_face
+
+        disc = self._disc(str(tmp_path))
+        face = find_named_face(disc, "top")
+        result = generate_emboss_scad(
+            model_path=disc,
+            content_info={"type": "openscad_text", "text": "W", "font_size": 55.0},
+            face=face,
+            output_dir=str(tmp_path),
+            depth_mm=1.2,
+            mode="emboss",
+            scale=0.9,
+            min_edge_margin_mm=0.0,
+        )
+        assert any("rim" in w for w in result.get("warnings", [])), result
+        size = self._final_font_size(result["scad_path"])
+        assert size < 55.0
+        t_w, t_h, _, _ = measure_text_block_mm("W", font_size=size)
+        # Worst corner of the centered run sits inside the 40mm rim.
+        import math
+
+        assert math.hypot(t_w / 2.0, t_h / 2.0) <= 40.0 + 0.05
+
+    def test_auto_fit_respects_the_offset_band(self, tmp_path):
+        import math
+
+        from kiln.emboss_generator import (
+            generate_emboss_scad,
+            measure_text_block_mm,
+        )
+        from kiln.surface_intelligence import find_named_face
+
+        disc = self._disc(str(tmp_path))
+        face = find_named_face(disc, "top")
+        result = generate_emboss_scad(
+            model_path=disc,
+            content_info={"type": "openscad_text", "text": "WWWWWW"},
+            face=face,
+            output_dir=str(tmp_path),
+            depth_mm=1.2,
+            mode="emboss",
+            scale=0.9,
+            offset_y_mm=24.0,
+            min_edge_margin_mm=0.0,
+        )
+        with open(result["scad_path"]) as f:
+            scad = f.read()
+        # The offset survives (box-based clamping used to yank 24 -> 4)…
+        assert "24.000000" in scad
+        # …and the run still clears the rim at that band.
+        size = self._final_font_size(result["scad_path"])
+        t_w, t_h, _, _ = measure_text_block_mm("WWWWWW", font_size=size)
+        corner = math.hypot(t_w / 2.0, 24.0 + t_h / 2.0)
+        assert corner <= 40.0 + 0.05
+
+    def test_square_plate_keeps_plain_box_fitting(self, tmp_path):
+        # A rectangular face must not be ellipse-fitted: auto mode fills
+        # the target box exactly, the documented span contract.
+        from kiln.emboss_generator import (
+            generate_emboss_scad,
+            measure_text_block_mm,
+        )
+        from kiln.surface_intelligence import find_named_face
+
+        scad = os.path.join(str(tmp_path), "plate.scad")
+        with open(scad, "w") as f:
+            f.write("translate([0, 0, 2]) cube([70, 70, 4], center=true);")
+        stl = os.path.join(str(tmp_path), "plate.stl")
+        subprocess.run(["openscad", "-o", stl, scad], check=True, capture_output=True)
+
+        face = find_named_face(stl, "top")
+        result = generate_emboss_scad(
+            model_path=stl,
+            content_info={"type": "openscad_text", "text": "KILN"},
+            face=face,
+            output_dir=str(tmp_path),
+            depth_mm=1.2,
+            mode="emboss",
+            scale=0.7,
+        )
+        size = self._final_font_size(result["scad_path"])
+        t_w, _, _, _ = measure_text_block_mm("KILN", font_size=size)
+        assert t_w == pytest.approx(70.0 * 0.7, abs=0.2)
