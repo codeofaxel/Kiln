@@ -309,3 +309,51 @@ def test_mesh_load_skips_when_trimesh_absent(tmp_path, monkeypatch):
     tmf = tmp_path / "x.3mf"
     tmf.write_bytes(b"PK\x03\x04 anything")
     assert ca._signature_via_mesh_load(str(tmf)) == ""
+
+
+class TestResolveAdapterModelPrecedence:
+    """The owner's declaration outranks any probe — the 2026-04 lesson."""
+
+    class _Declared:
+        printer_model = "bambu_a1"
+
+        class _Info:
+            model = "bambu_x1c"
+
+        def get_printer_info(self):
+            return self._Info()
+
+    class _SilentConfig:
+        class _Info:
+            model = "bambu_x1c"
+
+        def get_printer_info(self):
+            return self._Info()
+
+    class _JunkProbe:
+        def get_printer_info(self):
+            return object()
+
+    def test_declaration_wins_over_contradicting_probe(self):
+        from kiln.community_autofire import resolve_adapter_model
+
+        assert resolve_adapter_model(self._Declared()) == "bambu_a1"
+
+    def test_probe_fills_the_silence(self):
+        from kiln.community_autofire import resolve_adapter_model
+
+        assert resolve_adapter_model(self._SilentConfig()) == "bambu_x1c"
+
+    def test_non_string_probe_result_is_rejected(self):
+        from kiln.community_autofire import resolve_adapter_model
+
+        assert resolve_adapter_model(self._JunkProbe()) is None
+
+    def test_mismatch_is_logged_for_the_user(self, caplog):
+        import logging
+
+        from kiln.community_autofire import resolve_adapter_model
+
+        with caplog.at_level(logging.WARNING):
+            resolve_adapter_model(self._Declared())
+        assert "identity mismatch" in caplog.text.lower()

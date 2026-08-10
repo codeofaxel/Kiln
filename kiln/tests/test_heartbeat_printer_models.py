@@ -63,8 +63,27 @@ def test_adapter_model_reads_attribute_like_the_registry_fleet_view():
     assert heartbeat._adapter_model(_AttrAdapter("  ")) is None
 
 
-def test_adapter_model_prefers_live_probe_when_available():
+def test_adapter_model_uses_live_probe_when_nothing_declared():
     assert heartbeat._adapter_model(_InfoAdapter()) == "probed_model"
+
+
+class _ConflictAdapter:
+    """Owner declared one model; the probe claims another."""
+
+    _printer_model = "bambu_a1"
+
+    class _Info:
+        model = "bambu_x1c"
+
+    def get_printer_info(self):
+        return self._Info()
+
+
+def test_declared_model_outranks_a_contradicting_probe():
+    """The 2026-04 regression in one assertion: a mapping table that
+    disagrees with the owner must never rewrite what the owner said.
+    The probe fills silence; it does not argue with a declaration."""
+    assert heartbeat._adapter_model(_ConflictAdapter()) == "bambu_a1"
 
 
 def test_get_printer_info_resolves_from_adapter_attribute(monkeypatch):

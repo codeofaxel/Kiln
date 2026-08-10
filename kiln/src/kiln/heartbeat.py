@@ -130,16 +130,19 @@ def _adapter_model(adapter: object) -> str | None:
     into a bare except, so production heartbeats carried a NULL model
     for every install whose registry was otherwise fine (2026-07-25:
     630 of 670 rows NULL while adapter_type resolved for hundreds of
-    them).  The guarded probe-first order below is what let the
-    Bambu / PrusaLink / Elegoo adapters win automatically when they
-    grew real implementations (2026-08).
+    them).  The Bambu / PrusaLink / Elegoo / serial adapters grew real
+    implementations in 2026-08 and now fill that silence.
 
-    1. ``get_printer_info()`` — the adapter's live self-report.
-       Telemetry/display grain only; safety decisions stay keyed to
-       config.yaml (see ``PrinterAdapter.get_printer_info``).
-    2. The ``printer_model`` / ``_printer_model`` attribute — the same
-       source the registry's own fleet view reads (``_model_for`` in
-       kiln/registry.py); Bambu and Creality carry it when configured.
+    1. The ``printer_model`` / ``_printer_model`` attribute — what the
+       OWNER declared in config.yaml, the same source the registry's
+       own fleet view reads (``_model_for`` in kiln/registry.py).  A
+       user's statement about their own hardware outranks anything we
+       infer, for display as well as for safety.
+    2. ``get_printer_info()`` — the adapter's live self-report, which
+       fills the silence when no model was declared (the case that
+       left 630 rows NULL).  Telemetry/display grain only; safety
+       decisions stay keyed to config.yaml (see
+       ``PrinterAdapter.get_printer_info``).
 
     The chain itself lives in ``community_autofire.resolve_adapter_model``
     — ONE resolver for the heartbeat, the registry fleet view, and the
@@ -153,6 +156,15 @@ def _adapter_model(adapter: object) -> str | None:
         return resolve_adapter_model(adapter)
     except ImportError:
         pass
+    # Same order as the shared resolver — declaration first — so the
+    # import-failure path can never report a different model than the
+    # normal one.
+    model = getattr(adapter, "printer_model", None) or getattr(
+        adapter, "_printer_model", None
+    )
+    model = str(model or "").strip()
+    if model:
+        return model
     try:
         info = adapter.get_printer_info()  # type: ignore[attr-defined]
         model = getattr(info, "model", None) or getattr(info, "printer_model", None)
@@ -161,11 +173,7 @@ def _adapter_model(adapter: object) -> str | None:
             return model
     except Exception:
         pass
-    model = getattr(adapter, "printer_model", None) or getattr(
-        adapter, "_printer_model", None
-    )
-    model = str(model or "").strip()
-    return model or None
+    return None
 
 
 def _adapter_family(adapter: object) -> str | None:

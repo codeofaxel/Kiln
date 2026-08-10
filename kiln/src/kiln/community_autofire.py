@@ -163,6 +163,18 @@ def resolve_adapter_model(adapter: Any) -> str | None:
     telemetry, the fleet table, and the community rows can never drift
     apart about what a printer is.
 
+    Resolution order puts the OWNER'S DECLARATION first: a
+    ``printer_model`` fed from config.yaml outranks any live probe,
+    even for display.  The probe exists to fill the silence left by
+    installs that never declared a model — not to argue with a user
+    who did.  Our mapping tables are fallible (the 2026-04 inference
+    table was wrong in five of six rows and confidently named the
+    wrong printer, which is why inference was scrapped in a19e665b);
+    the user's own statement about their own hardware is not.  When
+    the two disagree we keep the declaration and log the conflict, so
+    a stale config surfaces as a warning instead of silently
+    rewriting the fleet table.
+
     Only ``str`` values pass: a probe or attribute that yields any
     other type (a mock, a stray object) must not have its repr
     laundered into telemetry as a "model".
@@ -180,23 +192,35 @@ def resolve_adapter_model(adapter: Any) -> str | None:
                 return value
         return None
 
-    try:
-        info = adapter.get_printer_info()
-        model = _clean(getattr(info, "model", None)) or _clean(
-            getattr(info, "printer_model", None)
-        )
-        if model:
-            return model
-    except Exception:  # noqa: BLE001 — probe is best-effort
-        pass
+    declared: str | None = None
     for attr in ("printer_model", "_printer_model", "model"):
         try:
-            value = _clean(getattr(adapter, attr, None))
+            declared = _clean(getattr(adapter, attr, None))
         except Exception:  # noqa: BLE001 — property raised; try the next
             continue
-        if value:
-            return value
-    return None
+        if declared:
+            break
+
+    probed: str | None = None
+    try:
+        info = adapter.get_printer_info()
+        probed = _clean(getattr(info, "model", None)) or _clean(
+            getattr(info, "printer_model", None)
+        )
+    except Exception:  # noqa: BLE001 — probe is best-effort
+        pass
+
+    if declared:
+        if probed and probed != declared:
+            logger.warning(
+                "Printer identity mismatch: config declares %r but the "
+                "printer reports %r. Keeping the declared model. If the "
+                "config is stale, update printer_model in ~/.kiln/config.yaml.",
+                declared,
+                probed,
+            )
+        return declared
+    return probed
 
 
 def contribute_resolved_outcome(

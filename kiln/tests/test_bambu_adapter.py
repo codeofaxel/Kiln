@@ -3331,8 +3331,9 @@ class TestGetPrinterInfo:
     AMS interpretation and safety keying)."""
 
     def test_product_name_from_mqtt_get_version_payload(self) -> None:
-        """A get_version reply carrying product_name resolves the model."""
-        adapter = _adapter()
+        """A get_version reply carrying product_name is parsed and
+        corroborates the serial prefix (both say P1S here)."""
+        adapter = _adapter()  # serial 01P… → p1s
         msg = mock.MagicMock()
         msg.payload = json.dumps({
             "info": {
@@ -3346,11 +3347,10 @@ class TestGetPrinterInfo:
         }).encode()
         adapter._on_message(mock.MagicMock(), None, msg)
 
+        assert adapter._mqtt_reported_family() == ("p1s", "Bambu Lab P1S")
         info = adapter.get_printer_info()
         assert info is not None
         assert info.model == "bambu_p1s"
-        assert info.raw_model == "Bambu Lab P1S"
-        assert info.source == "mqtt"
 
     def test_accessory_product_name_not_reported_as_printer(self) -> None:
         """An AMS module's product_name must never masquerade as the
@@ -3366,15 +3366,15 @@ class TestGetPrinterInfo:
         assert info.source == "serial_prefix"
 
     def test_accessory_before_printer_module_still_resolves_printer(self) -> None:
-        adapter = _adapter()
+        adapter = _adapter(serial="03000A000000001")  # 030 → a1_mini
         adapter._fw_modules = [
             {"name": "ams/0", "product_name": "Bambu Lab AMS 2 Pro"},
             {"name": "ota", "product_name": "Bambu Lab A1 mini"},
         ]
+        assert adapter._mqtt_reported_family()[0] == "a1_mini"
         info = adapter.get_printer_info()
         assert info is not None
         assert info.model == "bambu_a1_mini"
-        assert info.source == "mqtt"
 
     def test_serial_prefix_fallback_when_no_modules_cached(self) -> None:
         """X1-series firmware never reports product_name; the verified
@@ -3401,7 +3401,7 @@ class TestGetPrinterInfo:
         """SAFETY BOUNDARY: the probe result must not leak into
         ``_printer_model`` — config.yaml owns behavior; the probe is
         telemetry only (commit a19e665b)."""
-        adapter = _adapter(printer_model="bambu_p1s")
+        adapter = _adapter(serial="03000A000000001", printer_model="bambu_p1s")
         adapter._fw_modules = [
             {"name": "ota", "product_name": "Bambu Lab A1 mini"},
         ]
@@ -3428,9 +3428,60 @@ class TestGetPrinterInfo:
         assert info.model == expected
 
     def test_new_model_product_name(self) -> None:
-        adapter = _adapter()
+        adapter = _adapter(serial="23900A000000001")  # 239 → h2d_pro
         adapter._fw_modules = [{"name": "ota", "product_name": "Bambu Lab H2D Pro"}]
         info = adapter.get_printer_info()
         assert info is not None
         assert info.model == "bambu_h2d_pro"
+
+    # -- regression guards for the 2026-04 misidentification ------------
+
+    def test_adams_a1_serial_resolves_a1(self) -> None:
+        """The exact printer the April inference table was built around.
+        Serial 039... is A1 per Bambu's find-sn wiki page."""
+        adapter = _adapter(serial="03900D5C2513213")
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == "bambu_a1"
+
+    def test_ams_lite_accessory_cannot_rename_an_a1(self) -> None:
+        """An A1's AMS Lite unit carries its own product_name in the
+        same module list.  Reading module order naively would report
+        the accessory as the printer."""
+        adapter = _adapter(serial="03900D5C2513213")
+        adapter._fw_modules = [
+            {"name": "ams_f1/0", "product_name": "Bambu Lab P1S"},
+            {"name": "ota", "product_name": "Bambu Lab A1"},
+        ]
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == "bambu_a1"
+
+    def test_disagreeing_channels_report_nothing(self) -> None:
+        """Serial says A1, firmware says X1C — one of our tables is
+        wrong, so we name no printer at all.  Confidently naming the
+        wrong model is exactly what got inference scrapped in a19e665b."""
+        adapter = _adapter(serial="03900D5C2513213")
+        adapter._fw_modules = [
+            {"name": "ota", "product_name": "Bambu Lab X1 Carbon"},
+        ]
+        assert adapter.get_printer_info() is None
+
+    def test_mqtt_fills_in_when_serial_prefix_unknown(self) -> None:
+        """A model too new for the prefix table still resolves from the
+        firmware's own product_name."""
+        adapter = _adapter(serial="ZZZ00A000000001")
+        adapter._fw_modules = [
+            {"name": "ota", "product_name": "Bambu Lab H2D Pro"},
+        ]
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == "bambu_h2d_pro"
         assert info.source == "mqtt"
+
+    def test_agreeing_channels_report_the_agreed_model(self) -> None:
+        adapter = _adapter(serial="01P00A000000001")
+        adapter._fw_modules = [{"name": "ota", "product_name": "Bambu Lab P1S"}]
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == "bambu_p1s"
