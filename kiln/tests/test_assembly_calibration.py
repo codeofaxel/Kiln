@@ -298,9 +298,12 @@ class TestAssemblyToolsForwarding:
         # function delegates correctly by patching the engine.
         called = {}
 
-        def _fake_engine(joint_type, material_a, material_b, *, printer_id=None):
+        def _fake_engine(
+            joint_type, material_a, material_b, *, printer_id=None, mating=None
+        ):
             called["joint_type"] = joint_type
             called["printer_id"] = printer_id
+            called["mating"] = mating
             return {"recommended_clearance_mm": 0.2, "calibration_used": {}}
 
         monkeypatch.setattr(assembly_mod, "get_clearance_recommendation", _fake_engine)
@@ -333,3 +336,14 @@ class TestAssemblyToolsForwarding:
         assert result["success"] is True
         assert called["printer_id"] == "bambu_a1"
         assert called["joint_type"] == "snap_fit"
+        # The shape hint forwards too, and defaults to "not stated" rather
+        # than to a shape the caller never chose.
+        assert called["mating"] is None
+        registered["get_joint_recommendation"](
+            joint_type="clearance_fit",
+            material_a="PETG",
+            material_b="PETG",
+            printer_id="bambu_a1",
+            mating="planar_face",
+        )
+        assert called["mating"] == "planar_face"

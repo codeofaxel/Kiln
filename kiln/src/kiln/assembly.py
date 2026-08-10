@@ -601,6 +601,7 @@ def validate_joint(
     parts: dict[str, AssemblyPart] | list[AssemblyPart],
     *,
     printer_id: str | None = None,
+    mating: str | None = None,
 ) -> JointValidation:
     """Validate a single mating interface against design rules.
 
@@ -695,7 +696,26 @@ def validate_joint(
 
     elif jtype == "clearance_fit":
         rules_checked.append("clearance_range")
-        if interface.clearance_mm < clearance_range[0]:
+        # Validate against the SAME number the recommendation gives, or
+        # the two disagree and a design passes a check it will fail on
+        # the plate: the static minimum is one number for every machine,
+        # so a gap it calls fine can still be one this printer closes.
+        running_view = _running_clearance_view(
+            jtype,
+            material=mat_a,
+            printer_id=printer_id,
+            mating=mating,
+        )
+        if running_view is not None:
+            minimum_mm, running_detail = running_view
+            if interface.clearance_mm < minimum_mm:
+                issues.append(
+                    f"Clearance {interface.clearance_mm:.2f} mm is below the "
+                    f"{minimum_mm:.2f} mm these parts need to still move on "
+                    f"this printer in {mat_a} — they are likely to come off "
+                    f"the plate fused together."
+                )
+        elif interface.clearance_mm < clearance_range[0]:
             issues.append(
                 f"Clearance {interface.clearance_mm:.2f} mm is below minimum "
                 f"{clearance_range[0]} mm for a clearance fit."
@@ -894,6 +914,7 @@ def get_clearance_recommendation(
     material_b: str = "PLA",
     *,
     printer_id: str | None = None,
+    mating: str | None = None,
 ) -> dict[str, Any]:
     """Return recommended clearance, tolerance, and rationale.
 
@@ -937,6 +958,7 @@ def get_clearance_recommendation(
     ]
     warnings: list[str] = []
     calibration_used: dict[str, Any] = {}
+    running_clearance: dict[str, Any] = {}
 
     # Calibration narrowing — only consulted when caller supplied a
     # printer_id AND kiln-pro is importable.  Failures degrade silently
@@ -966,6 +988,36 @@ def get_clearance_recommendation(
                     f"{effective_range[0]:.2f}-{effective_range[1]:.2f} mm."
                 )
 
+    # A joint that has to MOVE gets a derived gap rather than the middle
+    # of a static band.  This runs after the narrowing above and replaces
+    # its answer for moving joints only: the narrowing shrinks a fixed
+    # range around its historic midpoint, which is a percentage tweak on
+    # a number that was never about this printer or this material.
+    running_view = _running_clearance_view(
+        joint_type,
+        material=material_a,
+        printer_id=printer_id,
+        mating=mating,
+    )
+    if running_view is not None:
+        base_clearance, running_detail = running_view
+        tolerance = min(tolerance, base_clearance / 2.0)
+        effective_range = (base_clearance, max(base_clearance, effective_range[1]))
+        running_clearance = running_detail
+        assumed = (
+            " Shape not specified, so the more demanding round-joint case "
+            "was assumed."
+            if running_detail.get("mating_assumed")
+            else ""
+        )
+        rationale_parts.append(
+            f"These parts have to move against each other, so the gap is "
+            f"derived for this printer and material rather than taken from "
+            f"a fixed table: {base_clearance:.2f} mm, leaving about "
+            f"{running_detail['expected_as_printed_mm']:.2f} mm of real "
+            f"space once the walls close in.{assumed}"
+        )
+
     if flexible:
         base_clearance *= 1.5
         tolerance *= 1.5
@@ -993,6 +1045,7 @@ def get_clearance_recommendation(
         "rationale": " ".join(rationale_parts),
         "warnings": warnings,
         "calibration_used": calibration_used,
+        "running_clearance": running_clearance,
     }
 
 
@@ -1050,6 +1103,81 @@ def _calibration_view_for_clearance(
         )
 
     return verdict_block, narrow_factor, str(tier)
+
+
+#: Joint types where the two parts are meant to MOVE against each other
+#: once assembled, and so need a running clearance rather than an
+#: assembly clearance.  A snap-fit, press-fit, threaded or glued joint is
+#: static once together and is deliberately absent.
+_MOVING_JOINT_TYPES: frozenset[str] = frozenset({"clearance_fit", "loose"})
+
+#: What to assume when the caller has not said what SHAPE is moving.
+#: ``MatingInterface`` records a joint type, not a geometry, so an
+#: unqualified moving joint could be a shaft in a bore or two flat faces
+#: sliding.  A bore closes on the part from both sides and needs about
+#: twice the allowance a single flat gap does, so assuming it is the
+#: erring-loose choice: too generous a gap on a flat joint just adds
+#: play, while too tight a bore seizes.  Callers who know say so.
+_DEFAULT_MOVING_MATING = "pin_in_bore"
+
+
+def _running_clearance_view(
+    joint_type: str,
+    *,
+    material: str,
+    printer_id: str | None,
+    mating: str | None = None,
+) -> tuple[float, dict[str, Any]] | None:
+    """Machine-aware running clearance for a joint that has to move.
+
+    The static table above answers every printer and every material with
+    one number.  Kiln Pro derives the gap from the material's own
+    behaviour, the printer's calibration and anything measured about how
+    that machine actually prints — so PLA on a calibrated machine and ABS
+    on an unknown one stop getting the same answer.  See
+    https://kiln3d.com/pricing.
+
+    Returns ``None`` — and the caller keeps the historic static path —
+    when the joint does not move, when no printer was named, when the
+    caller's tier does not include it, when kiln-pro is not installed, or
+    on any error.  Free tier is not a degraded answer here, it is the
+    answer Kiln has always given.
+
+    The tier check is :func:`_has_pro_license`, which resolves the
+    CALLER rather than the process: on the hosted server the process
+    holds a licence for everybody, so asking whether kiln-pro is
+    importable would hand the derivation to every free caller.
+    """
+    if joint_type not in _MOVING_JOINT_TYPES or not printer_id:
+        return None
+    if not _has_pro_license():
+        return None
+    try:
+        from kiln_pro.engineering.running_clearance import (  # type: ignore[import-not-found]
+            recommend_running_clearance,
+        )
+    except ImportError:
+        return None
+
+    try:
+        verdict = recommend_running_clearance(
+            mating or _DEFAULT_MOVING_MATING,
+            material,
+            printer_id=printer_id,
+        )
+    except Exception:
+        return None
+
+    detail: dict[str, Any] = {
+        "recommended_mm": verdict.recommended_mm,
+        "modeled_quantity": verdict.modeled_quantity,
+        "confidence": verdict.confidence,
+        "binding_term": verdict.binding_term,
+        "expected_as_printed_mm": verdict.expected_as_printed_mm,
+        "mating": verdict.mating,
+        "mating_assumed": mating is None,
+    }
+    return verdict.recommended_mm, detail
 
 
 def _adhesive_hint_for_joint(material_a: str, material_b: str) -> str | None:

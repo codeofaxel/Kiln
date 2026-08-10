@@ -306,6 +306,7 @@ class _AssemblyToolsPlugin:
             material_b: str = "PLA",
             *,
             printer_id: str | None = None,
+            mating: str | None = None,
         ) -> dict:
             """Get recommended clearance settings for a joint type and material pairing.
 
@@ -326,6 +327,17 @@ class _AssemblyToolsPlugin:
                     ``"bambu_a1"``).  Omit to keep the historic flat-range
                     behaviour (free users + calls that don't care about
                     calibration tightening).
+                mating: Optional shape hint for joints whose parts MOVE
+                    against each other (``"clearance_fit"``, ``"loose"``):
+                    ``"pin_in_bore"`` for a shaft or pin turning in a hole,
+                    ``"slot"`` for a tongue sliding in a groove,
+                    ``"planar_face"`` for two flat faces sliding, or
+                    ``"gear_flank"`` for meshing teeth.  Omit it and the
+                    round-joint case is assumed, which is the erring-loose
+                    reading — a bore is closed on from both sides and needs
+                    about twice the allowance a flat gap does, so assuming
+                    it can only give a joint too much room, never too
+                    little.  Ignored for joints that do not move.
             """
             try:
                 from kiln.assembly import get_clearance_recommendation
@@ -335,6 +347,7 @@ class _AssemblyToolsPlugin:
                     material_a,
                     material_b,
                     printer_id=printer_id,
+                    mating=mating,
                 )
                 response = {"success": True, "data": result}
                 # Nudge toward engineering-grade math when the pairing carries
