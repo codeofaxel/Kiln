@@ -7,6 +7,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Split a big model and Kiln remembers the kit (Pro+).** Every piece is kept
+  in the design's history with the seam and fastening that hold it to its
+  neighbours — so months later you can reprint just the piece that broke. See
+  https://kiln3d.com/pricing.
+
+- **Save a split kit from the design page (Pro+).** One button puts every piece
+  and the whole assembly onto the design's record.
+
+- **Assembly manuals use a kit's real joints (Business+).** Steps come from the
+  decisions Kiln made when it cut the part, not from re-measuring afterwards.
+
 - **See what Kiln read off a customer's engineering drawing (Business+).** Send
   back the marked-up sheet: every dimension Kiln pulled is boxed on the drawing
   itself and color-coded by how well it checked out, with the key printed on
