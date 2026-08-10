@@ -324,9 +324,12 @@ class _AssemblyToolsPlugin:
                 material_a: Material of the first part (default ``"PLA"``).
                 material_b: Material of the second part (default ``"PLA"``).
                 printer_id: Optional printer identifier (e.g.
-                    ``"bambu_a1"``).  Omit to keep the historic flat-range
-                    behaviour (free users + calls that don't care about
-                    calibration tightening).
+                    ``"bambu_a1"``).  For a joint whose parts MOVE, omitting
+                    it resolves the user's active printer rather than
+                    answering generically — pass it only to ask about a
+                    machine that is not the one they are set up on.  For
+                    every other joint type, omitting it keeps the historic
+                    flat-range behaviour.
                 mating: Optional shape hint for joints whose parts MOVE
                     against each other (``"clearance_fit"``, ``"loose"``):
                     ``"pin_in_bore"`` for a shaft or pin turning in a hole,

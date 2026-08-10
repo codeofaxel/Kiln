@@ -322,3 +322,78 @@ class TestCalibrationIsResolvedOncePerSweep:
             iface, parts, printer_id="bambu_a1", _clearance_cache=cache
         )
         assert uncached.issues == first.issues == second.issues
+
+
+class TestReachesCallersThatNeverAskedForIt:
+    """The wiring that decides whether any of this actually lands.
+
+    A machine-aware clearance that only fires when a caller passes
+    printer_id reaches the callers who already knew to ask, and leaves
+    every existing assembly path on the static table forever.  Not
+    passing a printer was never a request for a generic answer — it is a
+    call site that predates the parameter.
+    """
+
+    @pytest.fixture()
+    def configured(self):
+        import kiln.printer_model_resolver as R
+        with patch.object(R, "resolve_printer_model", lambda: "bambu_a1"):
+            yield
+
+    @pytest.fixture()
+    def unconfigured(self):
+        import kiln.printer_model_resolver as R
+        with patch.object(R, "resolve_printer_model", lambda: None):
+            yield
+
+    def test_the_recommendation_uses_the_active_printer(self, entitled, configured):
+        r = A.get_clearance_recommendation("clearance_fit", "PETG", "PETG")
+        assert r["running_clearance"], "never reached the derivation"
+        assert r["running_clearance"]["printer_resolved"] is True
+        assert r["running_clearance"]["printer_id"] == "bambu_a1"
+
+    def test_validation_uses_the_active_printer(self, entitled, configured, parts):
+        iface = A.MatingInterface("a", "b", "clearance_fit", clearance_mm=0.40)
+        assert A.validate_joint(iface, parts).issues, (
+            "a gap this printer closes passed a check that never asked "
+            "which printer"
+        )
+
+    def test_the_whole_assembly_sweep_inherits_it(self, entitled, configured, parts):
+        iface = A.MatingInterface("a", "b", "clearance_fit", clearance_mm=0.40)
+        asm = A.Assembly(assembly_id="x", name="x", parts=parts, interfaces=[iface])
+        with patch.object(A, "check_all_clearances", lambda a: None):
+            A.validate_assembly(asm)
+        assert asm.joint_validations[0].issues
+
+    def test_an_explicit_printer_still_wins(self, entitled, configured):
+        r = A.get_clearance_recommendation(
+            "clearance_fit", "PETG", "PETG", printer_id="prusa_mk4"
+        )
+        assert r["running_clearance"]["printer_id"] == "prusa_mk4"
+        assert r["running_clearance"]["printer_resolved"] is False
+
+    def test_no_configured_printer_keeps_the_static_answer(
+        self, entitled, unconfigured
+    ):
+        """Bare library call, or the hosted server with its empty registry."""
+        r = A.get_clearance_recommendation("clearance_fit", "PETG", "PETG")
+        assert r["running_clearance"] == {}
+        low, high = A._DEFAULT_JOINT_CLEARANCES["clearance_fit"]
+        assert r["recommended_clearance_mm"] == pytest.approx((low + high) / 2)
+
+    def test_a_free_caller_is_not_swept_in(self, free, configured):
+        """Resolving the printer must not become a way past the tier gate."""
+        r = A.get_clearance_recommendation("clearance_fit", "PETG", "PETG")
+        assert r["running_clearance"] == {}
+
+    def test_an_unreadable_config_degrades_quietly(self, entitled, monkeypatch):
+        import kiln.printer_model_resolver as R
+
+        def _boom():
+            raise OSError("config unreadable")
+
+        monkeypatch.setattr(R, "resolve_printer_model", _boom)
+        r = A.get_clearance_recommendation("clearance_fit", "PETG", "PETG")
+        assert r["running_clearance"] == {}
+        assert r["recommended_clearance_mm"] > 0

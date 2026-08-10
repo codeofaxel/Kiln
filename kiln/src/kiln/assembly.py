@@ -606,6 +606,12 @@ def validate_joint(
 ) -> JointValidation:
     """Validate a single mating interface against design rules.
 
+    A joint whose parts have to move is checked against a gap derived
+    for the machine and material rather than a fixed minimum; the
+    printer is taken from ``printer_id`` or, failing that, from the
+    user's active printer.  Free tier and un-configured setups keep the
+    static check.
+
     When ``printer_id`` is supplied AND kiln-pro is installed AND the
     interface drives a screw into a printed part, the result also carries
     a ``screw_hole`` block with the compensated self-threading hole
@@ -945,12 +951,19 @@ def get_clearance_recommendation(
     insert; treating it as the calibration anchor keeps the chosen
     range honest about the part where dimensional drift matters most).
 
-    Free users (kiln-pro not installed) and callers that omit
-    ``printer_id`` get the historic behaviour exactly — the function
-    is additive on the ``printer_id`` axis and the response always
-    carries a ``calibration_used`` field (empty when no calibration
-    was applied) so downstream consumers can rely on the field's
-    presence.
+    Free users (kiln-pro not installed) get the historic behaviour
+    exactly, and the response always carries a ``calibration_used``
+    field (empty when no calibration was applied) so downstream
+    consumers can rely on the field's presence.
+
+    For a joint whose parts MOVE, omitting ``printer_id`` no longer
+    means "answer generically": the user's active printer is resolved
+    from their config, because a call site that does not pass a printer
+    is almost never asking to ignore the one they own.  The
+    ``running_clearance`` block records whether the machine was supplied
+    or inferred.  With no configured printer — a bare library call, or
+    the hosted server with its empty registry — the static answer
+    stands.
     """
     clearance_range = _DEFAULT_JOINT_CLEARANCES.get(joint_type, (0.1, 0.5))
     base_clearance = (clearance_range[0] + clearance_range[1]) / 2.0
@@ -1167,6 +1180,33 @@ _MOVING_JOINT_TYPES: frozenset[str] = frozenset({"clearance_fit", "loose"})
 _DEFAULT_MOVING_MATING = "pin_in_bore"
 
 
+def _resolve_printer_for_clearance(explicit: str | None) -> tuple[str | None, bool]:
+    """The machine to judge a moving joint against.
+
+    An explicit ``printer_id`` always wins.  Otherwise the user's ACTIVE
+    printer is resolved from their config, because "the caller did not
+    pass a printer" was never a request for a generic answer — it is
+    almost always a call site that predates the parameter.  Without this,
+    a machine-aware clearance only reaches callers who already knew to
+    ask for it, which leaves every existing assembly path on the static
+    table forever.
+
+    Returns ``(printer_id, was_resolved)`` so the response can say the
+    machine was inferred rather than supplied.  ``None`` when there is no
+    configured printer to infer — a bare library call, or the hosted
+    server, which boots with an empty printer registry and therefore
+    keeps the static answer.
+    """
+    if explicit:
+        return explicit, False
+    try:
+        from kiln.printer_model_resolver import resolve_printer_model
+
+        return resolve_printer_model(), True
+    except Exception:  # noqa: BLE001 — no config, unreadable config
+        return None, False
+
+
 def _running_clearance_view(
     joint_type: str,
     *,
@@ -1195,7 +1235,10 @@ def _running_clearance_view(
     holds a licence for everybody, so asking whether kiln-pro is
     importable would hand the derivation to every free caller.
     """
-    if joint_type not in _MOVING_JOINT_TYPES or not printer_id:
+    if joint_type not in _MOVING_JOINT_TYPES:
+        return None
+    printer_id, printer_resolved = _resolve_printer_for_clearance(printer_id)
+    if not printer_id:
         return None
     # Resolving calibration scans the filesystem for slicer profiles, and
     # validating an assembly asks the same question once per interface —
@@ -1238,6 +1281,8 @@ def _running_clearance_view(
         "expected_as_printed_mm": verdict.expected_as_printed_mm,
         "mating": verdict.mating,
         "mating_assumed": mating is None,
+        "printer_id": printer_id,
+        "printer_resolved": printer_resolved,
     }
     result = (verdict.recommended_mm, detail)
     if cache is not None:
