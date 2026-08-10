@@ -563,6 +563,11 @@ def visualize_model(
                     ),
                     "file_path": file_path,
                     "file_type": ext,
+                    # Every success envelope names its engine, or a caller
+                    # that branches on this key crashes on whichever path
+                    # forgot it.  This one is the PIL painter's-algorithm
+                    # renderer, not OpenSCAD and not the stage.
+                    "renderer": "colored_mesh",
                     "rendered": len(successful),
                     "failed": len(failed),
                     "message": (
@@ -604,6 +609,10 @@ def visualize_model(
                     "output_dir": thumb_out_dir,
                     "file_path": file_path,
                     "file_type": ext,
+                    # Not a render at all — these are the slicer's own
+                    # embedded plate images, so say that rather than
+                    # claiming an engine drew them.
+                    "renderer": "slicer_thumbnails",
                     "rendered": len(bambu_views),
                     "failed": 0,
                     "source": "bambu_3mf_thumbnails",
@@ -703,22 +712,24 @@ def visualize_model(
         # and for machines with no browser.  All-or-nothing per result:
         # one preview never mixes two looks.
         used_stage = False
-        if not color:
-            from kiln.stage_still import try_render_stage_views
+        from kiln.stage_still import try_render_stage_views
 
-            stage_views = try_render_stage_views(
-                file_path,
-                selected,
-                angle_rotations,
-                output_dir=output_dir,
-                width=width,
-                height=height,
-            )
-            if stage_views:
-                views = stage_views
-                used_stage = True
+        stage_views = try_render_stage_views(
+            file_path,
+            selected,
+            angle_rotations,
+            output_dir=output_dir,
+            width=width,
+            height=height,
+            color=color,
+        )
+        if stage_views:
+            views = stage_views
+            used_stage = True
 
-        for label, description in (selected if not used_stage else []):
+        # Nothing left to draw when the stage already produced every view.
+        openscad_views = [] if used_stage else selected
+        for label, description in openscad_views:
             rx, ry, rz = angle_rotations[label]
             # Model is now centered at origin via translate in the wrapper,
             # so camera targets 0,0,0 with the computed distance.

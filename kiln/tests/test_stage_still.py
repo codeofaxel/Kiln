@@ -21,6 +21,7 @@ import pytest
 
 from kiln import stage_still
 from kiln.stage_still import (
+    _MIN_STDDEV,
     _frame_ok,
     _openscad_rotation_to_orbit,
     find_browser,
@@ -151,6 +152,71 @@ def test_blank_guard_rejects_flat_and_accepts_textured(tmp_path: Path) -> None:
     assert not _frame_ok(str(tmp_path / "absent.png"), 64, 64)
 
 
+def test_blank_guard_keeps_a_vivid_dark_colour_on_a_dark_background(
+    tmp_path: Path,
+) -> None:
+    """The regression that discarded a perfect red render as 'blank'.
+
+    A saturated red part on the stage's dark background varies hugely in
+    the red channel and barely at all in brightness (measured: 40.4
+    per-channel vs 12.6 luminance).  Graded by luminance it fell under
+    the floor, so asking for a colour silently cost you the stage look.
+    """
+    from PIL import Image
+
+    red_on_dark = tmp_path / "red.png"
+    im = Image.new("RGB", (64, 64), (26, 34, 45))  # the stage background
+    # A red whose BRIGHTNESS matches that background (~33 by luma) while
+    # its red channel differs by ~75.  This isolates the failure mode
+    # instead of merely resembling it: a luminance grader sees nothing
+    # here at all, a per-channel grader sees the part plainly.
+    for y in range(16, 48):
+        for x in range(16, 48):
+            im.putpixel((x, y), (100, 5, 5))
+    im.save(red_on_dark)
+
+    from PIL import ImageStat
+
+    assert ImageStat.Stat(im.convert("L")).stddev[0] < _MIN_STDDEV, (
+        "fixture must reproduce the low-luminance condition, or it proves nothing"
+    )
+    assert _frame_ok(str(red_on_dark), 64, 64)
+
+
+def test_blank_guard_rejects_a_truncated_png(tmp_path: Path) -> None:
+    """_shoot stops when the file size holds steady — which a browser
+    stalled mid-write also looks like on a loaded machine.  A PNG missing
+    its IEND trailer is an incomplete capture and must not ship."""
+    good = tmp_path / "good.png"
+    good.write_bytes(_textured_png_bytes())
+    assert _frame_ok(str(good), 64, 64)
+
+    truncated = tmp_path / "cut.png"
+    truncated.write_bytes(_textured_png_bytes()[:-40])
+    assert not _frame_ok(str(truncated), 64, 64)
+
+
+def test_harness_cannot_be_broken_out_of_by_payload_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Payload strings are embedded in a <script> block, and json.dumps
+    does not escape a closing script tag.  No current field can carry one
+    (the only caller-influenced string is a basename, and no filesystem
+    allows "/" in one), so this pins the escaping BEFORE some later field
+    — a label, a note, a downgrade reason — makes it reachable."""
+    from kiln.stage_still import _build_harness
+
+    hostile = {"kind": "kiln.mesh.v1", "note": "</script><script>stolen()</script>"}
+    doc = "<!doctype html><html><body>__KILN_STILL__</body></html>"
+    harness = _build_harness(doc, hostile, 25.0, 35.0)
+    assert harness is not None
+
+    injected = harness.split("<body>", 1)[1].split("</script>", 1)[0]
+    assert "stolen()" in injected, "the hostile text must still be INSIDE our block"
+    assert "<script>stolen" not in harness
+    assert "\\u003c/script" in harness
+
+
 # ---------------------------------------------------------------------------
 # Capability detection: every honest "no"
 # ---------------------------------------------------------------------------
@@ -276,26 +342,71 @@ def test_visualize_model_uses_stage_views_and_labels_renderer(
     assert result["views"] == canned
 
 
-def test_visualize_model_custom_color_skips_stage_backend(
+def test_visualize_model_hands_the_requested_color_to_the_stage(
     cube_stl: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The stage ignores caller colors, so a colored render must never
-    # route through it — even on a machine where the backend would work.
-    def _boom(*a: object, **k: object) -> None:
-        raise AssertionError("stage backend must not run for colored renders")
+    # A colored render is NOT excluded from the stage — the color rides
+    # into the still config.  (It was excluded on first write, which
+    # silently left every 3MF thumbnail on the OpenSCAD path, since the
+    # thumbnail regenerator always passes a color.)
+    seen: dict = {}
 
-    monkeypatch.setattr(stage_still, "try_render_stage_views", _boom)
+    def _capture(*a: object, **k: object) -> None:
+        seen.update(k)
+        return None
+
+    monkeypatch.setattr(stage_still, "try_render_stage_views", _capture)
 
     from kiln.model_visualizer import visualize_model
 
-    result = visualize_model(
+    visualize_model(
         cube_stl, angles=["isometric"], output_dir=str(tmp_path), color="#FF0000"
     )
-    # Whether OpenSCAD is installed or not, the call must not have hit the
-    # stage backend; renderer is openscad on success and the envelope is
-    # still honest on failure.
-    if result.get("success"):
-        assert result["renderer"] == "openscad"
+    assert seen.get("color") == "#FF0000"
+
+
+def test_requested_color_reaches_the_harness(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path
+) -> None:
+    out = tmp_path / "out"
+    out.mkdir()
+    views = try_render_stage_views(
+        cube_stl, [("isometric", "3/4")], _ROTATIONS,
+        output_dir=str(out), width=64, height=64, color="#FF0000",
+    )
+    assert views is not None
+    harness = (tmp_path / "seen_harnesses.txt").read_text()
+    assert '"color": "#FF0000"' in harness
+
+
+def test_a_non_hex_color_declines_to_openscad(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path
+) -> None:
+    # OpenSCAD accepts color NAMES the stage cannot resolve.  Rendering
+    # them at the stage's default would hand back a color nobody asked
+    # for, so the whole render declines instead.
+    assert (
+        try_render_stage_views(
+            cube_stl, _VIEWS, _ROTATIONS,
+            output_dir=str(tmp_path), width=64, height=64, color="red",
+        )
+        is None
+    )
+
+
+def test_no_color_requested_leaves_the_config_colorless(
+    cube_stl: str, stage_doc: Path, good_browser: Path, tmp_path: Path
+) -> None:
+    out = tmp_path / "out"
+    out.mkdir()
+    views = try_render_stage_views(
+        cube_stl, [("isometric", "3/4")], _ROTATIONS,
+        output_dir=str(out), width=64, height=64,
+    )
+    assert views is not None
+    harness = (tmp_path / "seen_harnesses.txt").read_text()
+    # No key at all — the stage keeps its own default filament preset.
+    assert '"color"' not in harness
 
 
 def test_visualize_model_falls_back_when_stage_declines(

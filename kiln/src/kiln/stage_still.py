@@ -38,10 +38,13 @@ THE BLANK-FRAME GUARD
 A headless browser that half-works is worse than one that is absent: it
 exits 0 and writes a picture of an empty stage.  The stage's still mode
 deliberately hides its own waiting/error cards so a failed render reads
-as a near-empty frame, and this module refuses any frame whose luminance
-variation is below ``_MIN_STDDEV`` (an empty stage measures ~9; a real
-still measures 30+).  Without Pillow the guard degrades to a bytes-floor
-heuristic — a blank dark PNG compresses far below any real still.
+as a near-empty frame, and this module refuses any frame whose largest
+per-channel variation is below ``_MIN_STDDEV`` (an empty stage measures
+~10; a real still measures 40+).  Per-CHANNEL, because a vivid dark
+colour barely varies in brightness against the stage's dark background
+— grading by luminance discarded a correct red render as blank.
+Without Pillow the guard degrades to a bytes-floor heuristic — a blank
+dark PNG compresses far below any real still.
 
 All-or-nothing: if ANY view fails, every view is discarded and the
 OpenSCAD path renders the full set — one result must not mix two looks.
@@ -53,6 +56,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -60,6 +64,12 @@ import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+#: A caller-requested filament colour the stage can honour.  OpenSCAD also
+#: accepts names ("red") and other spellings; the stage takes hex, so
+#: anything else declines to the OpenSCAD path rather than rendering a
+#: colour the caller did not ask for.
+_HEX_COLOR = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
 #: Path override / opt-out knobs.  ``KILN_STAGE_DOC`` points at a local
 #: stage document (tests and stage development); absent, the cached copy
@@ -91,10 +101,14 @@ _VIRTUAL_TIME_MS = 9_000
 #: and a hung browser must never hang a preview call.
 _VIEW_TIMEOUT_S = 60
 
-#: Blank-frame guard thresholds, calibrated against real captures
-#: (2026-08-09): an empty stage frame measures luminance stddev ~9, a
-#: real still 32-57.  The bytes floor is the no-Pillow fallback: a blank
-#: 1000x750 frame compressed to ~16 KB, real stills to 80-120 KB.
+#: Blank-frame guard threshold, measured as the LARGEST per-channel
+#: standard deviation — never luminance.  Calibrated against real
+#: captures (2026-08-10): an empty stage measures 9.7, a grey part
+#: 43-59, and a saturated red part 40.4 — but that same red frame is
+#: only 12.6 in luminance, because a dark-but-vivid colour on the
+#: stage's dark background barely varies in brightness.  Grading it by
+#: luminance threw away a perfect render as "blank"; a colour the user
+#: asked for must not read as a failure.
 _MIN_STDDEV = 15.0
 _MIN_BYTES_PER_25_PX = 1  # floor = (width * height) // 25 bytes
 
@@ -205,19 +219,37 @@ def _frame_ok(png_path: str, width: int, height: int) -> bool:
         return False
     if size <= 0:
         return False
+    # A COMPLETE png, not merely a non-empty one: _shoot stops as soon as
+    # the file size holds steady, and a browser stalled mid-write (a
+    # loaded machine pauses between chunks) can hold it steady while
+    # truncated.  The IEND trailer is the file's own end-of-stream mark.
+    try:
+        with open(png_path, "rb") as fh:
+            fh.seek(-8, os.SEEK_END)
+            if fh.read(4) != b"IEND":
+                logger.debug("stage stills: truncated PNG (no IEND)")
+                return False
+    except OSError:
+        return False
     try:
         from PIL import Image, ImageStat
     except ImportError:
         return size >= (width * height) // 25
     try:
         with Image.open(png_path) as im:
-            stddev = ImageStat.Stat(im.convert("L")).stddev[0]
+            spread = ImageStat.Stat(im.convert("RGB")).stddev
     except Exception:  # noqa: BLE001 — an unreadable frame is a failed frame
         return False
-    return stddev >= _MIN_STDDEV
+    return max(spread) >= _MIN_STDDEV
 
 
-def _build_harness(document: str, payload: dict, az_deg: float, el_deg: float) -> str | None:
+def _build_harness(
+    document: str,
+    payload: dict,
+    az_deg: float,
+    el_deg: float,
+    color: str | None = None,
+) -> str | None:
     """The stage document with this view's still config baked in.
 
     Data-only injection: the config script lands immediately after
@@ -227,7 +259,23 @@ def _build_harness(document: str, payload: dict, az_deg: float, el_deg: float) -
     if document.count("<body>") != 1:
         logger.debug("stage stills: document has no unique <body> anchor")
         return None
-    config = json.dumps({"payload": payload, "az_deg": az_deg, "el_deg": el_deg})
+    still: dict = {"payload": payload, "az_deg": az_deg, "el_deg": el_deg}
+    if color:
+        still["color"] = color
+    # JSON inside a <script> block: json.dumps does NOT escape "</script>",
+    # so any string in the payload that contains it would close our tag and
+    # let the rest run as markup.  No CURRENT field can: the only
+    # caller-influenced string is the mesh's basename, and terminating the
+    # block needs a "/", which no filesystem allows in one.  This is
+    # therefore defence in depth against a field added later (a label, a
+    # note, a downgrade reason) rather than a live hole — it costs one
+    # string pass, is inert inside JSON, and removes the whole class.
+    config = (
+        json.dumps(still)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
     return document.replace(
         "<body>", "<body><script>window." + _STILL_MARKER + " = " + config + ";</script>", 1
     )
@@ -297,6 +345,7 @@ def try_render_stage_views(
     output_dir: str,
     width: int,
     height: int,
+    color: str | None = None,
 ) -> list[dict] | None:
     """Render every requested view as a stage photograph, or ``None``.
 
@@ -306,8 +355,16 @@ def try_render_stage_views(
     its ``(label, description)`` list, ``rotations`` its aspect-adapted
     ``label → (rx, ry, rz)`` map, so the stage inherits the exact same
     angle intelligence the OpenSCAD path has always had.
+
+    ``color`` is the caller's requested filament colour.  A hex value is
+    handed to the stage; any other spelling declines to OpenSCAD, which
+    accepts colour names this renderer does not — a render must never
+    quietly come back in a colour nobody asked for.
     """
     try:
+        if color and not _HEX_COLOR.match(color.strip()):
+            logger.debug("stage stills: colour %r is not hex — using OpenSCAD", color)
+            return None
         browser = find_browser()
         if browser is None:
             return None
@@ -348,7 +405,10 @@ def try_render_stage_views(
             for label, description in selected:
                 rx, _ry, rz = rotations[label]
                 az_deg, el_deg = _openscad_rotation_to_orbit(rx, rz)
-                harness = _build_harness(document, payload, az_deg, el_deg)
+                harness = _build_harness(
+                    document, payload, az_deg, el_deg,
+                    color=color.strip() if color else None,
+                )
                 if harness is None:
                     return None
                 harness_path = tmp / f"still_{label}.html"
