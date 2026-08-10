@@ -92,6 +92,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Kiln stops suggesting settings from a different design.** Move a hole or
+  resize a slot and Kiln now treats it as the new part it is, instead of
+  recommending what worked for the previous version.
+
 - **Leftover Kiln servers now actually close.** Background servers weren't
   quitting when your app closed them, so they piled up holding memory. And
   cleanup (`kiln trim`) reported them closed without checking — it could say
