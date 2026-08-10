@@ -9554,11 +9554,13 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
         checks.append({"name": "config", "ok": False, "detail": str(exc)})
 
     # 6. Printer reachable (use adapter with auth, not raw HTTP)
+    verify_adapter = None
     if printer_cfg:
         host = printer_cfg.get("host", "")
         if host:
             try:
                 adapter = _make_adapter(printer_cfg)
+                verify_adapter = adapter
                 state = adapter.get_state()
                 if state.connected:
                     checks.append({"name": "printer_reachable", "ok": True, "detail": f"{host} ({state.state.value})"})
@@ -9571,6 +9573,62 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
                         "name": "printer_reachable",
                         "ok": False,
                         "detail": f"cannot reach {host}: {exc}",
+                    }
+                )
+
+        # 6b. Printer identity — does every source agree what this machine is?
+        #
+        # A disagreement is the one printer-model problem a user cannot see
+        # for themselves, and it can be a SAFETY problem rather than a
+        # cosmetic one: the config-declared model is what the temperature
+        # ceilings and bed-fit checks key off, so declaring an X1C on a
+        # machine that is really an A1 applies all-metal limits to a
+        # PTFE-lined hotend.  Fails the run (not a warning) — the same
+        # class of wrong-limits-silently-applied that got printer-model
+        # inference scrapped in the first place.
+        if verify_adapter is not None:
+            try:
+                from kiln.community_autofire import (
+                    detect_identity_conflict,
+                    resolve_adapter_model,
+                )
+
+                conflict = detect_identity_conflict(verify_adapter)
+                if conflict is not None:
+                    checks.append(
+                        {
+                            "name": "printer_model",
+                            "ok": False,
+                            "detail": conflict.describe(),
+                            "claims": dict(conflict.claims),
+                        }
+                    )
+                else:
+                    model = resolve_adapter_model(verify_adapter)
+                    if model:
+                        checks.append(
+                            {"name": "printer_model", "ok": True, "detail": model}
+                        )
+                    else:
+                        checks.append(
+                            {
+                                "name": "printer_model",
+                                "ok": True,
+                                "warn": True,
+                                "detail": (
+                                    "not set and not self-reported — model-specific "
+                                    "checks (temperature limits, bed fit) fall back to "
+                                    "defaults. Add printer_model to ~/.kiln/config.yaml."
+                                ),
+                            }
+                        )
+            except Exception as exc:
+                logger.debug("Printer identity check failed: %s", exc)
+                checks.append(
+                    {
+                        "name": "printer_model",
+                        "ok": True,
+                        "detail": f"check skipped: {exc}",
                     }
                 )
 
