@@ -15,6 +15,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   rather than name the wrong machine. Klipper and OctoPrint setups still show
   the brand only — they genuinely can't say what they are.
 
+- **Your designs can leave as real CAD files.** Any Kiln design exports as a
+  STEP — one clean solid a machine shop can open and measure. When a design
+  can't honestly be CAD (a photo relief, wrapped text), Kiln says so instead
+  of faking it. Free, like STL and 3MF.
+
+- **The drawing knows how it prints (Business+).** Production drawings label
+  features at the size they'll actually print, not just the size you asked
+  for — checked against the design's own CAD. Served via kiln-pro; see
+  https://kiln3d.com/pricing.
+
 - **Split a big model and Kiln remembers the kit (Pro+).** Every piece is kept
   in the design's history with the seam and fastening that hold it to its
   neighbours — so months later you can reprint just the piece that broke. See
