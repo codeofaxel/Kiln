@@ -40,6 +40,9 @@ class CommunityPrintRecord:
     print_time_seconds: int
     region: str  # "anonymous"
     timestamp: float
+    # v2 geometric signature ("v2:" prefix, kiln.print_dna).  "" for records
+    # from before v2 shipped — matched through v1 alone, never guessed.
+    geometric_signature_v2: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -58,6 +61,10 @@ class CommunityInsight:
     common_failures: list[dict[str, Any]]  # [{mode, count, percentage}]
     average_print_time_seconds: int
     confidence: str  # "low" (<5), "medium" (5-20), "high" (>20)
+    # Which DESIGN this aggregate is about, when known.  Two insights can
+    # share a v1 geometric_signature and be different designs, so without
+    # this a caller cannot tell them apart or ask about one again.
+    geometric_signature_v2: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -113,13 +120,15 @@ def contribute_print(record: CommunityPrintRecord) -> None:
         db._conn.execute(
             """
             INSERT INTO community_prints (
-                geometric_signature, printer_model, material,
+                geometric_signature, geometric_signature_v2,
+                printer_model, material,
                 settings_hash, settings, outcome, quality_grade,
                 failure_mode, print_time_seconds, region, timestamp
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.geometric_signature,
+                record.geometric_signature_v2 or None,
                 record.printer_model,
                 record.material,
                 record.settings_hash,
@@ -135,33 +144,57 @@ def contribute_print(record: CommunityPrintRecord) -> None:
         db._conn.commit()
 
 
-def get_community_insight(geometric_signature: str) -> CommunityInsight | None:
+def get_community_insight(
+    geometric_signature: str,
+    geometric_signature_v2: str = "",
+) -> CommunityInsight | None:
     """Get aggregated community data for a geometric signature.
 
     Returns insight from the local SQLite registry.  Pro users get
     additional global community data via kiln-pro's confidence blend.
 
-    :param geometric_signature: The geometric signature to look up.
+    Dual-key: when the caller knows the v2 signature, rows that carry one
+    must match on it (a v1 collision between two different designs is the
+    over-merge v2 exists to catch), while pre-v2 rows still join through
+    their v1 key.  Without a v2 the read is v1-only, as before.
+
+    :param geometric_signature: The v1 geometric signature to look up.
+    :param geometric_signature_v2: Optional v2 signature of the same mesh.
     :returns: Aggregated insight or ``None`` if no data exists.
     """
     from kiln.persistence import get_db
 
     db = get_db()
 
-    rows = db._conn.execute(
-        "SELECT * FROM community_prints WHERE geometric_signature = ?",
-        (geometric_signature,),
-    ).fetchall()
+    if geometric_signature_v2:
+        rows = db._conn.execute(
+            """
+            SELECT * FROM community_prints
+            WHERE geometric_signature_v2 = ?
+               OR ((geometric_signature_v2 IS NULL OR geometric_signature_v2 = '')
+                   AND geometric_signature = ?)
+            """,
+            (geometric_signature_v2, geometric_signature),
+        ).fetchall()
+    else:
+        rows = db._conn.execute(
+            "SELECT * FROM community_prints WHERE geometric_signature = ?",
+            (geometric_signature,),
+        ).fetchall()
 
     if not rows:
         return None
 
     records = [dict(row) for row in rows]
-    return aggregate_community_records(geometric_signature, records)
+    return aggregate_community_records(
+        geometric_signature, records, geometric_signature_v2
+    )
 
 
 def aggregate_community_records(
-    signature: str, records: list[dict[str, Any]],
+    signature: str,
+    records: list[dict[str, Any]],
+    signature_v2: str = "",
 ) -> CommunityInsight:
     """Aggregate a list of print record dicts into a CommunityInsight.
 
@@ -274,6 +307,7 @@ def aggregate_community_records(
 
     return CommunityInsight(
         geometric_signature=signature,
+        geometric_signature_v2=signature_v2,
         total_prints=total,
         success_rate=round(success_count / total, 4) if total else 0.0,
         top_printer_models=top_printers,
@@ -357,7 +391,10 @@ def search_community(
 
     db = get_db()
 
-    query = "SELECT DISTINCT geometric_signature FROM community_prints WHERE 1=1"
+    query = (
+        "SELECT DISTINCT geometric_signature, geometric_signature_v2 "
+        "FROM community_prints WHERE 1=1"
+    )
     params: list[Any] = []
 
     if printer_model:
@@ -372,10 +409,27 @@ def search_community(
 
     rows = db._conn.execute(query, params).fetchall()
 
+    # One entry per DESIGN, not per stored key.  A design is identified by
+    # its v2 signature where it has one, else by v1.  Legacy rows of a
+    # design that has since acquired a v2 identity are skipped as entries
+    # of their own — they belong to that design's cohort, and the dual-key
+    # read below folds them in.  Two designs that collide on v1 stay two
+    # entries, which is the whole point.
+    pairs = [(row[0], row[1] or "") for row in rows]
+    have_v2 = {v1 for v1, v2 in pairs if v2}
+    identities: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for v1, v2 in pairs:
+        if not v2 and v1 in have_v2:
+            continue
+        key = v2 or v1
+        if key not in seen:
+            seen.add(key)
+            identities.append((v1, v2))
+
     results: list[CommunityInsight] = []
-    for row in rows:
-        sig = row[0]
-        insight = get_community_insight(sig)
+    for sig, sig_v2 in identities:
+        insight = get_community_insight(sig, geometric_signature_v2=sig_v2)
         if insight and insight.success_rate >= min_success_rate:
             results.append(insight)
             if len(results) >= limit:

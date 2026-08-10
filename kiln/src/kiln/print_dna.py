@@ -5,9 +5,11 @@ which models printed successfully, which failed, on which printers, with
 which settings. Builds a knowledge graph that enables optimal settings
 prediction for similar models.
 
-The fingerprint includes: file hash (SHA-256), geometric signature
-(triangle count, bounding box, surface area), complexity metrics
-(overhang ratio, thin wall ratio), and material compatibility scores.
+The fingerprint includes: file hash (SHA-256), the v1 geometric signature
+(triangle/vertex counts + rounded area and volume — kept stable as the join
+key for pre-v2 history), the v2 geometric signature (area-weighted surface
+integrals; order-, weld- and placement-invariant, sensitive to feature
+relocation), complexity metrics, and material compatibility scores.
 """
 
 from __future__ import annotations
@@ -42,6 +44,10 @@ class ModelFingerprint:
     overhang_ratio: float  # 0.0 - 1.0
     complexity_score: float  # 0.0 - 1.0 (simple cube=0.1, organic shape=0.9)
     geometric_signature: str  # compact hash of geometry for similarity matching
+    # Successor signature ("v2:" prefix) built from area-weighted surface
+    # integrals — see _geometric_signature_v2.  Defaults to "" so records
+    # rehydrated from pre-v2 rows are honest about not having one.
+    geometric_signature_v2: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -192,6 +198,149 @@ def _signed_volume_of_triangle(v0: tuple, v1: tuple, v2: tuple) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Geometric signature v2 — area-weighted surface integrals
+# ---------------------------------------------------------------------------
+#
+# The v1 signature (four aggregate totals, two of them raw counts) is both
+# under-sensitive and fragile: moving a feature preserves every total, so two
+# genuinely different designs share a signature, while vertex_count depends on
+# exporter welding, so the SAME design re-exported can split.  v2 keys on
+# quantities that are exact integrals over the triangle surface: they ignore
+# triangle order, vertex indexing, and welding entirely, survive any rigid
+# placement (rotation + translation — a plated 3MF matches its as-designed
+# STL), and shift when surface mass moves, so a relocated hole or boss gets
+# its own identity.
+#
+# The identity vector: surface area, enclosed volume, the RMS distance of the
+# surface from its area-weighted centroid, and the two ordered eigenvalue
+# ratios of the surface covariance (the shape's proportions, independent of
+# orientation).  Scale-ful terms quantize into 0.1% relative (log) buckets,
+# ratios into 0.1% absolute buckets — comfortably above the noise a re-export
+# introduces, comfortably below a real design change.  Known accepted merges:
+# mirror images (every term is chirality-blind; they print the same), and
+# feature moves too small to shift any term by 0.1%.  Known accepted splits:
+# a value landing within re-export noise of a bucket edge (STL stores float32
+# coordinates, so that noise is ~1e-7 relative against a 1e-3 bucket — order
+# 1e-4 per term, not zero), and genuine re-tessellation of curved surfaces
+# beyond 0.1%.  Both err toward splitting, which loses a cohort join rather
+# than teaching from the wrong design.
+
+_V2_LOG_BUCKETS_PER_E = 1000  # ln-space buckets → ~0.1% relative steps
+_V2_RATIO_BUCKETS = 1000  # absolute steps of 0.001 on ratios in [0, 1]
+_V2_TINY = 1e-9  # below this a scale-ful term is "absent" (open shell volume)
+
+
+def _quantize_log(value: float) -> int:
+    """Relative (log-space) bucket index for a positive scale-ful quantity."""
+    if value <= _V2_TINY:
+        return -(10**9)  # sentinel: absent/degenerate, never near a real bucket
+    return int(round(math.log(value) * _V2_LOG_BUCKETS_PER_E))
+
+
+def _sym3_eigenvalues(
+    xx: float, yy: float, zz: float, xy: float, xz: float, yz: float
+) -> tuple[float, float, float]:
+    """Eigenvalues of a symmetric 3x3 matrix, descending (closed form)."""
+    p1 = xy * xy + xz * xz + yz * yz
+    q = (xx + yy + zz) / 3.0
+    p2 = (xx - q) ** 2 + (yy - q) ** 2 + (zz - q) ** 2 + 2.0 * p1
+    p = math.sqrt(max(p2 / 6.0, 0.0))
+    if p <= 0.0:
+        return (q, q, q)
+    bxx, byy, bzz = (xx - q) / p, (yy - q) / p, (zz - q) / p
+    bxy, bxz, byz = xy / p, xz / p, yz / p
+    det_b = (
+        bxx * (byy * bzz - byz * byz)
+        - bxy * (bxy * bzz - byz * bxz)
+        + bxz * (bxy * byz - byy * bxz)
+    )
+    r = max(-1.0, min(1.0, det_b / 2.0))
+    phi = math.acos(r) / 3.0
+    lam1 = q + 2.0 * p * math.cos(phi)
+    lam3 = q + 2.0 * p * math.cos(phi + 2.0 * math.pi / 3.0)
+    lam2 = 3.0 * q - lam1 - lam3
+    return (lam1, lam2, lam3)
+
+
+def _geometric_signature_v2(
+    triangles: list[tuple],
+    vertices: list[tuple],
+    surface_area: float,
+    volume: float,
+) -> str:
+    """Compute the v2 geometric signature from parsed geometry.
+
+    Uses exact per-triangle integrals (uniform density over each flat
+    triangle), so any tessellation of the same surface — subdivided,
+    re-welded, re-indexed — integrates to the same values:
+
+        E[x]   over a triangle (a, b, c) = (a + b + c) / 3
+        E[x⊗x] over a triangle           = (a⊗a + b⊗b + c⊗c + s⊗s) / 12,
+                                           s = a + b + c
+    """
+    if surface_area <= _V2_TINY:
+        return ""
+
+    # Area-weighted first and second moments of the surface.
+    total_a = 0.0
+    cx = cy = cz = 0.0
+    mxx = myy = mzz = mxy = mxz = myz = 0.0
+    for tri in triangles:
+        a = vertices[tri[0]]
+        b = vertices[tri[1]]
+        c = vertices[tri[2]]
+        area = _triangle_area(a, b, c)
+        if area <= 0.0:
+            continue
+        total_a += area
+        sx, sy, sz = a[0] + b[0] + c[0], a[1] + b[1] + c[1], a[2] + b[2] + c[2]
+        cx += area * sx / 3.0
+        cy += area * sy / 3.0
+        cz += area * sz / 3.0
+        w = area / 12.0
+        mxx += w * (a[0] * a[0] + b[0] * b[0] + c[0] * c[0] + sx * sx)
+        myy += w * (a[1] * a[1] + b[1] * b[1] + c[1] * c[1] + sy * sy)
+        mzz += w * (a[2] * a[2] + b[2] * b[2] + c[2] * c[2] + sz * sz)
+        mxy += w * (a[0] * a[1] + b[0] * b[1] + c[0] * c[1] + sx * sy)
+        mxz += w * (a[0] * a[2] + b[0] * b[2] + c[0] * c[2] + sx * sz)
+        myz += w * (a[1] * a[2] + b[1] * b[2] + c[1] * c[2] + sy * sz)
+
+    if total_a <= _V2_TINY:
+        return ""
+
+    cx, cy, cz = cx / total_a, cy / total_a, cz / total_a
+    # Covariance about the centroid — translation drops out here; rotation
+    # drops out below when only eigenvalues are kept.
+    vxx = mxx / total_a - cx * cx
+    vyy = myy / total_a - cy * cy
+    vzz = mzz / total_a - cz * cz
+    vxy = mxy / total_a - cx * cy
+    vxz = mxz / total_a - cx * cz
+    vyz = myz / total_a - cy * cz
+
+    lam1, lam2, lam3 = _sym3_eigenvalues(vxx, vyy, vzz, vxy, vxz, vyz)
+    lam1 = max(lam1, 0.0)
+    lam2 = max(min(lam2, lam1), 0.0)
+    lam3 = max(min(lam3, lam2), 0.0)
+
+    r_rms = math.sqrt(max(vxx + vyy + vzz, 0.0))
+    e2 = lam2 / lam1 if lam1 > _V2_TINY else 0.0
+    e3 = lam3 / lam1 if lam1 > _V2_TINY else 0.0
+
+    sig_data = ":".join(
+        str(term)
+        for term in (
+            _quantize_log(surface_area),
+            _quantize_log(abs(volume)),
+            _quantize_log(r_rms),
+            int(round(e2 * _V2_RATIO_BUCKETS)),
+            int(round(e3 * _V2_RATIO_BUCKETS)),
+        )
+    )
+    return "v2:" + hashlib.sha256(sig_data.encode()).hexdigest()[:16]
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -274,7 +423,9 @@ def fingerprint_model(file_path: str) -> ModelFingerprint:
     # Normalise to 0-1 range with a sigmoid-like curve
     complexity_score = min(1.0, max(0.0, 1.0 - 1.0 / (1.0 + tri_density / 100.0)))
 
-    # Geometric signature: hash of sorted vertex coordinates + triangle count
+    # v1 geometric signature: four aggregate totals.  Kept byte-stable
+    # forever — it is the join key for every pre-v2 print_dna and
+    # community_prints row, and the fallback key dual-key reads use.
     sig_data = f"{triangle_count}:{vertex_count}:{round(surface_area, 2)}:{round(volume, 2)}"
     geometric_signature = hashlib.sha256(sig_data.encode()).hexdigest()[:16]
 
@@ -288,6 +439,9 @@ def fingerprint_model(file_path: str) -> ModelFingerprint:
         overhang_ratio=round(overhang_ratio, 4),
         complexity_score=round(complexity_score, 4),
         geometric_signature=geometric_signature,
+        geometric_signature_v2=_geometric_signature_v2(
+            triangles, vertices, surface_area, volume
+        ),
     )
 
 
@@ -328,17 +482,19 @@ def record_print_dna(
         db._conn.execute(
             """
             INSERT INTO print_dna (
-                file_hash, geometric_signature, triangle_count,
+                file_hash, geometric_signature, geometric_signature_v2,
+                triangle_count,
                 bounding_box, surface_area, volume,
                 overhang_ratio, complexity_score,
                 printer_model, material, settings,
                 outcome, quality_grade, failure_mode,
                 print_time_seconds, timestamp
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 fingerprint.file_hash,
                 fingerprint.geometric_signature,
+                fingerprint.geometric_signature_v2 or None,
                 fingerprint.triangle_count,
                 json.dumps(fingerprint.bounding_box),
                 fingerprint.surface_area_mm2,
@@ -374,6 +530,7 @@ def _row_to_record(row: Any) -> PrintDNARecord:
         overhang_ratio=row_dict.get("overhang_ratio", 0.0),
         complexity_score=row_dict.get("complexity_score", 0.0),
         geometric_signature=row_dict.get("geometric_signature", ""),
+        geometric_signature_v2=row_dict.get("geometric_signature_v2") or "",
     )
 
     return PrintDNARecord(
@@ -387,6 +544,25 @@ def _row_to_record(row: Any) -> PrintDNARecord:
         print_time_seconds=row_dict.get("print_time_seconds", 0),
         timestamp=row_dict.get("timestamp", 0.0),
     )
+
+
+def _signature_match_sql(fingerprint: ModelFingerprint) -> tuple[str, list[str]]:
+    """SQL predicate + params selecting rows that are this design.
+
+    The one dual-key rule, shared by every signature read: a row that
+    carries a v2 signature must match on v2 (two designs sharing a v1
+    signature is exactly the collision v2 exists to detect), while a row
+    from before v2 shipped matches on v1.  A fingerprint with no v2 of its
+    own (rehydrated from an old row) falls back to v1-only matching.
+    """
+    if fingerprint.geometric_signature_v2:
+        return (
+            "(geometric_signature_v2 = ?"
+            " OR ((geometric_signature_v2 IS NULL OR geometric_signature_v2 = '')"
+            " AND geometric_signature = ?))",
+            [fingerprint.geometric_signature_v2, fingerprint.geometric_signature],
+        )
+    return ("geometric_signature = ?", [fingerprint.geometric_signature])
 
 
 def predict_settings(
@@ -422,16 +598,17 @@ def predict_settings(
     if rows:
         return _aggregate_prediction(rows, source="exact_match", printer_model=printer_model)
 
-    # Strategy 2: similar geometric signature
+    # Strategy 2: similar geometric signature (dual-key: v2, v1 fallback)
+    sig_sql, sig_params = _signature_match_sql(fingerprint)
     rows = db._conn.execute(
-        """
+        f"""
         SELECT * FROM print_dna
-        WHERE geometric_signature = ? AND printer_model = ? AND material = ?
+        WHERE {sig_sql} AND printer_model = ? AND material = ?
             AND outcome = 'success'
         ORDER BY quality_grade ASC, timestamp DESC
         LIMIT 20
         """,
-        (fingerprint.geometric_signature, printer_model, material),
+        (*sig_params, printer_model, material),
     ).fetchall()
 
     if rows:
@@ -543,16 +720,18 @@ def find_similar_models(
 
     db = get_db()
 
+    sig_sql, sig_params = _signature_match_sql(fingerprint)
+
     if threshold >= 1.0:
-        # Exact geometric signature match only
+        # Exact geometric signature match only (dual-key: v2, v1 fallback)
         rows = db._conn.execute(
-            """
+            f"""
             SELECT * FROM print_dna
-            WHERE geometric_signature = ? AND file_hash != ?
+            WHERE {sig_sql} AND file_hash != ?
             ORDER BY timestamp DESC
             LIMIT ?
             """,
-            (fingerprint.geometric_signature, fingerprint.file_hash, limit),
+            (*sig_params, fingerprint.file_hash, limit),
         ).fetchall()
     else:
         # Include same geometric signature (exact similarity)
@@ -563,11 +742,11 @@ def find_similar_models(
         vol_hi = fingerprint.volume_mm3 / max(threshold, 0.01)
 
         rows = db._conn.execute(
-            """
+            f"""
             SELECT * FROM print_dna
             WHERE file_hash != ?
                 AND (
-                    geometric_signature = ?
+                    {sig_sql}
                     OR (
                         surface_area BETWEEN ? AND ?
                         AND volume BETWEEN ? AND ?
@@ -579,7 +758,7 @@ def find_similar_models(
             """,
             (
                 fingerprint.file_hash,
-                fingerprint.geometric_signature,
+                *sig_params,
                 sa_lo,
                 sa_hi,
                 vol_lo,

@@ -15,23 +15,23 @@ from unittest import mock
 import pytest
 
 # --------------------------------------------------------------------------
-# geometric_signature_for
+# geometric_signatures_for
 # --------------------------------------------------------------------------
 
 
 def test_signature_empty_for_missing_name():
     from kiln import community_autofire as ca
 
-    assert ca.geometric_signature_for(None) == ""
-    assert ca.geometric_signature_for("") == ""
-    assert ca.geometric_signature_for("N/A") == ""
+    assert ca.geometric_signatures_for(None) == ("", "")
+    assert ca.geometric_signatures_for("") == ("", "")
+    assert ca.geometric_signatures_for("N/A") == ("", "")
 
 
 def test_signature_empty_when_source_unresolved():
     from kiln import community_autofire as ca
 
     with mock.patch("kiln.upload_manifest.resolve_source_path", return_value=None):
-        assert ca.geometric_signature_for("plate.gcode") == ""
+        assert ca.geometric_signatures_for("plate.gcode") == ("", "")
 
 
 def test_signature_from_fingerprint(tmp_path):
@@ -39,10 +39,15 @@ def test_signature_from_fingerprint(tmp_path):
 
     src = tmp_path / "m.stl"
     src.write_text("solid x")  # existence is what matters; fingerprint is mocked
-    fp = SimpleNamespace(geometric_signature="abc123def4567890")
+    fp = SimpleNamespace(
+        geometric_signature="abc123def4567890", geometric_signature_v2="v2:abc123def45678"
+    )
     with mock.patch("kiln.upload_manifest.resolve_source_path", return_value=str(src)), \
          mock.patch("kiln.print_dna.fingerprint_model", return_value=fp):
-        assert ca.geometric_signature_for("plate.gcode") == "abc123def4567890"
+        assert ca.geometric_signatures_for("plate.gcode") == (
+            "abc123def4567890",
+            "v2:abc123def45678",
+        )
 
 
 def test_signature_empty_on_fingerprint_error(tmp_path):
@@ -56,7 +61,7 @@ def test_signature_empty_on_fingerprint_error(tmp_path):
          mock.patch(
              "kiln.print_dna.fingerprint_model", side_effect=ValueError("no triangles")
          ):
-        assert ca.geometric_signature_for("plate.gcode") == ""
+        assert ca.geometric_signatures_for("plate.gcode") == ("", "")
 
 
 # --------------------------------------------------------------------------
@@ -78,7 +83,7 @@ def test_skips_when_no_geometry():
     from kiln import community_autofire as ca
 
     with mock.patch(
-        "kiln.community_autofire.geometric_signature_for", return_value=""
+        "kiln.community_autofire.geometric_signatures_for", return_value=("", "")
     ), mock.patch("kiln.community_outbox.contribute") as contrib:
         r = ca.auto_contribute_completion(outcome="completed", printer_file_name="x.gcode")
     assert r == {"contributed": False, "reason": "no_geometry"}
@@ -89,8 +94,8 @@ def test_completed_contributes_success_with_geo_signature():
     from kiln import community_autofire as ca
 
     with mock.patch(
-        "kiln.community_autofire.geometric_signature_for",
-        return_value="geo16char0000000",
+        "kiln.community_autofire.geometric_signatures_for",
+        return_value=("geo16char0000000", "v2:geo16char00000"),
     ), mock.patch(
         "kiln.community_outbox.contribute", return_value={"queued": True}
     ) as contrib:
@@ -122,8 +127,8 @@ def test_failed_contributes_failed_with_defaults():
     from kiln import community_autofire as ca
 
     with mock.patch(
-        "kiln.community_autofire.geometric_signature_for",
-        return_value="geo16char0000000",
+        "kiln.community_autofire.geometric_signatures_for",
+        return_value=("geo16char0000000", "v2:geo16char00000"),
     ), mock.patch(
         "kiln.community_outbox.contribute", return_value={"queued": True}
     ) as contrib:
@@ -139,8 +144,8 @@ def test_never_raises_on_contribute_error():
     from kiln import community_autofire as ca
 
     with mock.patch(
-        "kiln.community_autofire.geometric_signature_for",
-        return_value="geo16char0000000",
+        "kiln.community_autofire.geometric_signatures_for",
+        return_value=("geo16char0000000", "v2:geo16char00000"),
     ), mock.patch(
         "kiln.community_outbox.contribute", side_effect=RuntimeError("boom")
     ):
@@ -236,13 +241,14 @@ def test_3mf_signature_matches_stl_twin(tmp_path):
     tmf = tmp_path / "m.3mf"
     tmf.write_bytes(mesh.export(file_type="3mf"))
 
-    sig_stl = fingerprint_model(str(stl)).geometric_signature
-    sig_3mf = ca._signature_via_mesh_load(str(tmf))
-    assert sig_stl and sig_3mf == sig_stl
+    fp_stl = fingerprint_model(str(stl))
+    sig_3mf, sig_3mf_v2 = ca._signatures_via_mesh_load(str(tmf))
+    assert fp_stl.geometric_signature and sig_3mf == fp_stl.geometric_signature
+    assert fp_stl.geometric_signature_v2 and sig_3mf_v2 == fp_stl.geometric_signature_v2
 
 
-def test_geometric_signature_for_routes_3mf_through_mesh_load(tmp_path):
-    """End-to-end: geometric_signature_for on a .3mf source yields the same
+def test_geometric_signatures_for_routes_3mf_through_mesh_load(tmp_path):
+    """End-to-end: geometric_signatures_for on a .3mf source yields the same
     signature as the STL twin (STL via native path, 3MF via mesh-load)."""
     trimesh = pytest.importorskip("trimesh")
     from kiln import community_autofire as ca
@@ -254,10 +260,10 @@ def test_geometric_signature_for_routes_3mf_through_mesh_load(tmp_path):
     tmf.write_bytes(mesh.export(file_type="3mf"))
 
     with mock.patch("kiln.upload_manifest.resolve_source_path", return_value=str(stl)):
-        sig_stl = ca.geometric_signature_for("plate.gcode")
+        sig_stl = ca.geometric_signatures_for("plate.gcode")
     with mock.patch("kiln.upload_manifest.resolve_source_path", return_value=str(tmf)):
-        sig_3mf = ca.geometric_signature_for("plate.gcode")
-    assert sig_stl and sig_3mf == sig_stl
+        sig_3mf = ca.geometric_signatures_for("plate.gcode")
+    assert all(sig_stl) and sig_3mf == sig_stl
 
 
 def test_rigid_transformed_3mf_still_matches(tmp_path):
@@ -270,7 +276,7 @@ def test_rigid_transformed_3mf_still_matches(tmp_path):
     mesh = trimesh.creation.box(extents=(18, 24, 9))
     stl = tmp_path / "m.stl"
     stl.write_bytes(mesh.export(file_type="stl"))
-    sig_stl = fingerprint_model(str(stl)).geometric_signature
+    fp_stl = fingerprint_model(str(stl))
 
     placed = mesh.copy()
     rot = trimesh.transformations.rotation_matrix(0.7, [0.0, 0.0, 1.0])
@@ -279,7 +285,10 @@ def test_rigid_transformed_3mf_still_matches(tmp_path):
     tmf = tmp_path / "placed.3mf"
     tmf.write_bytes(placed.export(file_type="3mf"))
 
-    assert ca._signature_via_mesh_load(str(tmf)) == sig_stl
+    assert ca._signatures_via_mesh_load(str(tmf)) == (
+        fp_stl.geometric_signature,
+        fp_stl.geometric_signature_v2,
+    )
 
 
 def test_corrupt_3mf_skips(tmp_path):
@@ -288,7 +297,7 @@ def test_corrupt_3mf_skips(tmp_path):
 
     bad = tmp_path / "bad.3mf"
     bad.write_bytes(b"PK\x03\x04 not a real 3mf payload")
-    assert ca._signature_via_mesh_load(str(bad)) == ""
+    assert ca._signatures_via_mesh_load(str(bad)) == ("", "")
 
 
 def test_mesh_load_skips_when_trimesh_absent(tmp_path, monkeypatch):
@@ -308,4 +317,4 @@ def test_mesh_load_skips_when_trimesh_absent(tmp_path, monkeypatch):
     monkeypatch.setattr(builtins, "__import__", _no_trimesh)
     tmf = tmp_path / "x.3mf"
     tmf.write_bytes(b"PK\x03\x04 anything")
-    assert ca._signature_via_mesh_load(str(tmf)) == ""
+    assert ca._signatures_via_mesh_load(str(tmf)) == ("", "")

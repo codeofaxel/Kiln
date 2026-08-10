@@ -551,6 +551,7 @@ class KilnDB:
         self._ensure_schema()
         self._migrate_agent_memory()
         self._migrate_print_outcomes()
+        self._migrate_signature_v2()
         self._enforce_permissions()
 
     # ------------------------------------------------------------------
@@ -592,6 +593,39 @@ class KilnDB:
             columns = {row[1] for row in self._conn.execute("PRAGMA table_info(print_outcomes)").fetchall()}
         if "determined_by" not in columns:
             self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN determined_by TEXT DEFAULT NULL")
+        self._conn.commit()
+
+    def _migrate_signature_v2(self) -> None:
+        """Add geometric_signature_v2 to existing print_dna / community_prints.
+
+        The v2 signature (kiln.print_dna) rides ALONGSIDE v1, never replaces
+        it: pre-v2 rows keep matching through their v1 key, new rows carry
+        both, and dual-key reads prefer v2.  NULL means "written before v2
+        shipped (or the mesh was degenerate)" — it is never backfilled with a
+        guess, because the source mesh may be gone.
+        """
+        for table in ("print_dna", "community_prints"):
+            if self._is_postgres:
+                rows = self._conn.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    f"WHERE table_name = '{table}'",
+                ).fetchall()
+                columns = {row[0] for row in rows}
+            else:
+                columns = {
+                    row[1]
+                    for row in self._conn.execute(
+                        f"PRAGMA table_info({table})"
+                    ).fetchall()
+                }
+            if "geometric_signature_v2" not in columns:
+                self._conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN geometric_signature_v2 TEXT DEFAULT NULL"
+                )
+                self._conn.execute(
+                    f"CREATE INDEX IF NOT EXISTS idx_{table}_sig_v2 "
+                    f"ON {table}(geometric_signature_v2)"
+                )
         self._conn.commit()
 
     def _enforce_permissions(self) -> None:
@@ -985,6 +1019,7 @@ class KilnDB:
                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
                     file_hash       TEXT NOT NULL,
                     geometric_signature TEXT NOT NULL,
+                    geometric_signature_v2 TEXT DEFAULT NULL,
                     triangle_count  INTEGER,
                     bounding_box    TEXT,
                     surface_area    REAL,
@@ -1004,6 +1039,8 @@ class KilnDB:
                     ON print_dna(file_hash);
                 CREATE INDEX IF NOT EXISTS idx_print_dna_geometric_sig
                     ON print_dna(geometric_signature);
+                CREATE INDEX IF NOT EXISTS idx_print_dna_sig_v2
+                    ON print_dna(geometric_signature_v2);
                 CREATE INDEX IF NOT EXISTS idx_print_dna_outcome
                     ON print_dna(outcome);
                 CREATE INDEX IF NOT EXISTS idx_print_dna_printer
@@ -1012,6 +1049,7 @@ class KilnDB:
                 CREATE TABLE IF NOT EXISTS community_prints (
                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
                     geometric_signature TEXT NOT NULL,
+                    geometric_signature_v2 TEXT DEFAULT NULL,
                     printer_model   TEXT NOT NULL,
                     material        TEXT NOT NULL,
                     settings_hash   TEXT,
@@ -1025,6 +1063,8 @@ class KilnDB:
                 );
                 CREATE INDEX IF NOT EXISTS idx_community_prints_sig
                     ON community_prints(geometric_signature);
+                CREATE INDEX IF NOT EXISTS idx_community_prints_sig_v2
+                    ON community_prints(geometric_signature_v2);
                 CREATE INDEX IF NOT EXISTS idx_community_prints_printer
                     ON community_prints(printer_model);
                 CREATE INDEX IF NOT EXISTS idx_community_prints_material

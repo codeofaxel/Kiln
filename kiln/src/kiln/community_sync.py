@@ -145,6 +145,7 @@ def sync_community_print(record: dict[str, Any], send_id: str | None = None) -> 
         return False
 
     try:
+        import urllib.error
         import urllib.request
 
         insert_url = f"{_SUPABASE_URL}/rest/v1/community_prints"
@@ -159,31 +160,54 @@ def sync_community_print(record: dict[str, Any], send_id: str | None = None) -> 
             "failure_mode": record.get("failure_mode"),
             "print_time_seconds": record.get("print_time_seconds"),
         }
+        # Shipped only when present — like send_id, the field may only reach
+        # the wire once the cloud column exists (PostgREST rejects the whole
+        # insert on an unknown column, which would lose the outcome).
+        if record.get("geometric_signature_v2"):
+            body["geometric_signature_v2"] = record["geometric_signature_v2"]
         prefer = "return=minimal"
         if send_id:
             body["send_id"] = send_id
             insert_url = f"{insert_url}?on_conflict=send_id"
             prefer = "return=minimal,resolution=ignore-duplicates"
-        payload = json.dumps(body).encode()
+        # Headers built HERE so the key stays referenced only by this
+        # function (pinned by test_publishable_key_is_contribution_only).
+        headers = {
+            "Content-Type": "application/json",
+            "apikey": _SUPABASE_ANON_KEY,
+            "Authorization": f"Bearer {_SUPABASE_ANON_KEY}",
+            "Prefer": prefer,
+        }
 
-        req = urllib.request.Request(
-            insert_url,
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "apikey": _SUPABASE_ANON_KEY,
-                "Authorization": f"Bearer {_SUPABASE_ANON_KEY}",
-                "Prefer": prefer,
-            },
-            method="POST",
-        )
+        def _post(body_dict: dict[str, Any]) -> int:
+            req = urllib.request.Request(
+                insert_url,
+                data=json.dumps(body_dict).encode(),
+                headers=headers,
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return resp.status
 
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            if resp.status < 300:
-                _logger.debug("Community print synced")
-                return True
-            _logger.debug("Community sync response: %s", resp.status)
-            return False
+        try:
+            status = _post(body)
+        except urllib.error.HTTPError as exc:
+            # A schema-lagged server rejects the WHOLE insert over the one
+            # unknown field (400), and a column-scoped grant would refuse it
+            # (403).  Losing the outcome over an optional column is the wrong
+            # trade either way: drop the field and send the row the old server
+            # understands.  A rejection with a real cause fails again below.
+            if exc.code in (400, 403) and "geometric_signature_v2" in body:
+                body.pop("geometric_signature_v2")
+                status = _post(body)
+            else:
+                raise
+
+        if status < 300:
+            _logger.debug("Community print synced")
+            return True
+        _logger.debug("Community sync response: %s", status)
+        return False
 
     except Exception as exc:
         _logger.debug("Community sync failed (non-fatal): %s", exc)
@@ -373,6 +397,7 @@ def fetch_community_insights(
 
 def fetch_community_insight_for_signature(
     geometric_signature: str,
+    geometric_signature_v2: str = "",
 ) -> dict[str, Any] | None:
     """Community aggregate for ONE model geometry, or ``None``.
 
@@ -392,9 +417,15 @@ def fetch_community_insight_for_signature(
     if not signature:
         return None
 
-    body = _ask_community_api(
-        _INSIGHT_ROUTE, {"geometric_signature": signature}
-    )
+    request_body: dict[str, Any] = {"geometric_signature": signature}
+    # The v2 signature lets an upgraded server match precisely (v2 rows on
+    # v2, pre-v2 rows through v1).  A server that predates it reads only the
+    # keys it knows, so sending it early is harmless.
+    signature_v2 = (geometric_signature_v2 or "").strip()
+    if signature_v2:
+        request_body["geometric_signature_v2"] = signature_v2
+
+    body = _ask_community_api(_INSIGHT_ROUTE, request_body)
     if body is None:
         return None
 

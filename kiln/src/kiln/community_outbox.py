@@ -674,6 +674,7 @@ def contribute_print_outcome(
     *,
     outcome: str,
     geometric_signature: str,
+    geometric_signature_v2: str | None = None,
     job_id: str | None = None,
     printer_file_name: str | None = None,
     printer_model: str | None = None,
@@ -717,6 +718,14 @@ def contribute_print_outcome(
             "print_time_seconds": int(print_time_seconds) if print_time_seconds else 0,
         }
     )
+    # The v2 signature rides alongside v1 when the resolver produced one.
+    # The dedupe key below stays keyed on v1 on purpose: both contribution
+    # paths derive their signatures through the same resolver, and keeping
+    # the key's ingredients fixed means a v2 rollout can never re-open the
+    # watched-then-recorded double-ship.
+    signature_v2 = str(geometric_signature_v2 or "").strip()
+    if signature_v2:
+        record["geometric_signature_v2"] = signature_v2
     result = contribute(
         print_contribution_key(job_id, signature, printer_file_name), record
     )
