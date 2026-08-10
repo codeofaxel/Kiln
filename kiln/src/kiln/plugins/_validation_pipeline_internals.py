@@ -19,7 +19,7 @@ import struct
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from kiln.support_assessment import MATERIAL_ALIASES as _MATERIAL_ALIASES
 from kiln.tool_results import unwrap_tool_result
@@ -245,14 +245,47 @@ def _inline_stl_binary_fallback(path: Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _get_build_volume_for_printer(printer_id: str) -> tuple[float, float, float] | None:
-    """Resolve build volume from printer_id via intelligence, then profiles."""
+class _BuildVolume(NamedTuple):
+    """A resolved build volume and where its numbers came from.
+
+    The provenance has to be resolved HERE because only this function
+    knows which of the two sources answered.  A caller that guessed
+    would be attributing a curated catalogue number to the machine's
+    owner, or the reverse — a false claim is worse than no claim, which
+    is why the bed-fit verdict said nothing at all until now.
+    """
+
+    dims: tuple[float, float, float]
+    #: Ready-to-append parenthetical, or ``""`` when the number is Kiln's.
+    provenance: str
+
+
+def _resolve_build_volume(printer_id: str) -> _BuildVolume | None:
+    """Resolve build volume via printer intelligence, then safety profiles.
+
+    Order is unchanged; what is new is that the answer says which source
+    produced it.
+
+    The intelligence catalogue is entirely Kiln's own — a narrow dict of
+    variant shorthands plus ``printer_intelligence.json`` — so a hit
+    there carries no provenance note.  A safety profile may hold numbers
+    the machine's owner typed, so a hit there is attributed with the
+    same helper the G-code refusals use.
+
+    Worth knowing for ``build_volume`` specifically: unlike the
+    temperature and flow ceilings, it is NOT clamped against curated
+    data, because a bed is not a safety limit that only tightens.  So an
+    owner-declared volume can be LARGER than the real machine, and the
+    dangerous direction is a model that "fits" a bed only on paper.
+    That is why the caller attributes the passing verdict too, not just
+    the refusal.
+    """
     try:
         from kiln.printers.bed_fit import get_build_volume
 
         volume = get_build_volume(printer_id)
         if volume is not None:
-            return volume
+            return _BuildVolume(volume, "")
     except Exception:
         _logger.debug(
             "Could not resolve printer-intelligence build volume for %s",
@@ -260,18 +293,32 @@ def _get_build_volume_for_printer(printer_id: str) -> tuple[float, float, float]
             exc_info=True,
         )
     try:
-        from kiln.safety_profiles import get_profile
+        from kiln.safety_profiles import get_profile, limit_provenance_suffix
 
         profile = get_profile(printer_id)
         if profile and profile.build_volume and len(profile.build_volume) >= 3:
-            return (
-                float(profile.build_volume[0]),
-                float(profile.build_volume[1]),
-                float(profile.build_volume[2]),
+            return _BuildVolume(
+                (
+                    float(profile.build_volume[0]),
+                    float(profile.build_volume[1]),
+                    float(profile.build_volume[2]),
+                ),
+                limit_provenance_suffix(profile, "build_volume"),
             )
     except Exception:
         _logger.debug("Could not resolve build volume for %s", printer_id, exc_info=True)
     return None
+
+
+def _get_build_volume_for_printer(printer_id: str) -> tuple[float, float, float] | None:
+    """Resolve build volume from printer_id via intelligence, then profiles.
+
+    Dimensions only, for callers that do not report a verdict about
+    them.  One resolution path, so this can never disagree with
+    :func:`_resolve_build_volume` about which source wins.
+    """
+    resolved = _resolve_build_volume(printer_id)
+    return resolved.dims if resolved is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -1097,7 +1144,9 @@ def _step_bed_fit(
 ) -> None:
     """Step 7: bed size check + scale_check."""
     if printer_id:
-        build_vol = _get_build_volume_for_printer(printer_id)
+        resolved_vol = _resolve_build_volume(printer_id)
+        build_vol = resolved_vol.dims if resolved_vol is not None else None
+        vol_note = resolved_vol.provenance if resolved_vol is not None else ""
         if build_vol is not None:
             dims_mm = report.model_info.get("dimensions_mm") or report.model_info.get("bounding_box", {})
             mx = dims_mm.get("x", dims_mm.get("width_mm", 0))
@@ -1109,10 +1158,17 @@ def _step_bed_fit(
                 vol_str = f"{build_vol[0]:.0f}x{build_vol[1]:.0f}x{build_vol[2]:.0f}mm"
 
                 if fits:
+                    # The PASSING verdict is attributed too, and for this
+                    # field that matters more than the refusal does: a bed
+                    # is not a safety limit that only tightens, so an
+                    # owner-declared volume is never clamped down to the
+                    # curated one.  A model can therefore "fit" a bed that
+                    # is larger on paper than in the room, and this is the
+                    # only place a reader would ever be told.
                     report.checks.append(_CheckResult(
                         name="bed_fit",
                         passed=True,
-                        details=f"Fits build volume ({vol_str})",
+                        details=f"Fits build volume ({vol_str}){vol_note}",
                     ))
                 else:
                     report.checks.append(_CheckResult(
@@ -1120,7 +1176,7 @@ def _step_bed_fit(
                         passed=False,
                         details=(
                             f"Model {mx:.1f}x{my:.1f}x{mz:.1f}mm exceeds "
-                            f"build volume ({vol_str})"
+                            f"build volume ({vol_str}){vol_note}"
                         ),
                         severity="error",
                     ))
