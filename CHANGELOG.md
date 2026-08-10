@@ -81,6 +81,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Leftover Kiln servers now actually close.** Background servers weren't
+  quitting when your app closed them, so they piled up holding memory. And
+  cleanup (`kiln trim`) reported them closed without checking — it could say
+  it freed memory while every one kept running. Both fixed.
+
 - **Inch drawings are now read completely (Business+).** Shop drawings write
   sub-inch sizes without a leading zero (".375", not "0.375"), and Kiln's
   completeness tally was skipping them — so a drawing could come back fully
