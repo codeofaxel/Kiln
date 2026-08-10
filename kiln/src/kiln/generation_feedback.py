@@ -1238,11 +1238,21 @@ def resolve_printer_generation_context(
             nozzle = getattr(info, "nozzle_diameter", None)
             if nozzle:
                 ctx.nozzle_diameter_mm = float(nozzle)
-            model = getattr(info, "model", None) or getattr(info, "printer_model", None)
-            if model:
-                ctx.printer_model = str(model)
         except Exception:
             logger.debug("Could not resolve printer info", exc_info=True)
+
+        # The model goes through the shared resolver, NOT the raw probe:
+        # ctx.printer_model drives printer intelligence and the design
+        # profile, so a live self-report must never outrank the model
+        # the owner declared in config.yaml.
+        try:
+            from kiln.community_autofire import resolve_adapter_model
+
+            resolved = resolve_adapter_model(adapter)
+            if resolved:
+                ctx.printer_model = resolved
+        except Exception:
+            logger.debug("Could not resolve printer model", exc_info=True)
 
     # Auto-detect material from AMS (Bambu) or spool manager.
     if not ctx.material and adapter is not None:

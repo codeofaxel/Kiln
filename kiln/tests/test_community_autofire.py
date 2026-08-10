@@ -349,11 +349,80 @@ class TestResolveAdapterModelPrecedence:
 
         assert resolve_adapter_model(self._JunkProbe()) is None
 
-    def test_mismatch_is_logged_for_the_user(self, caplog):
-        import logging
+    def test_conflict_is_detectable_on_demand(self):
+        """The stale-config / bad-table signal stays available — but as
+        an explicit diagnostic, not a cost on every poll."""
+        from kiln.community_autofire import detect_identity_conflict
 
+        assert detect_identity_conflict(self._Declared()) == (
+            "bambu_a1",
+            "bambu_x1c",
+        )
+
+    def test_no_conflict_when_channels_agree(self):
+        from kiln.community_autofire import detect_identity_conflict
+
+        class _Agreeing:
+            printer_model = "bambu_a1"
+
+            class _Info:
+                model = "bambu_a1"
+
+            def get_printer_info(self):
+                return self._Info()
+
+        assert detect_identity_conflict(_Agreeing()) is None
+
+    def test_no_conflict_when_nothing_declared(self):
+        from kiln.community_autofire import detect_identity_conflict
+
+        assert detect_identity_conflict(self._SilentConfig()) is None
+
+    class _CountingProbe:
+        printer_model = "bambu_a1"
+
+        def __init__(self):
+            self.probe_calls = 0
+
+        def get_printer_info(self):
+            self.probe_calls += 1
+            return None
+
+    def test_declared_model_skips_the_probe_entirely(self):
+        """Perf + safety property: when the owner declared a model we
+        never touch the network.  PrusaLink/Elegoo probes do real I/O,
+        and the fleet view calls this per printer per poll."""
         from kiln.community_autofire import resolve_adapter_model
 
-        with caplog.at_level(logging.WARNING):
-            resolve_adapter_model(self._Declared())
-        assert "identity mismatch" in caplog.text.lower()
+        adapter = self._CountingProbe()
+        assert resolve_adapter_model(adapter) == "bambu_a1"
+        assert adapter.probe_calls == 0
+
+    def test_blank_declaration_falls_through_to_probe(self):
+        """An empty or whitespace printer_model is not a declaration."""
+        from kiln.community_autofire import resolve_adapter_model
+
+        class _Blank:
+            printer_model = "   "
+
+            class _Info:
+                model = "prusa_mk4"
+
+            def get_printer_info(self):
+                return self._Info()
+
+        assert resolve_adapter_model(_Blank()) == "prusa_mk4"
+
+    def test_absurdly_long_device_string_is_capped(self):
+        """Device-controlled strings (M115, SDCP names) must not stuff
+        telemetry — the cap matches the heartbeat's own limit."""
+        from kiln.community_autofire import resolve_adapter_model
+
+        class _Chatty:
+            class _Info:
+                model = "X" * 500
+
+            def get_printer_info(self):
+                return self._Info()
+
+        assert len(resolve_adapter_model(_Chatty())) == 60

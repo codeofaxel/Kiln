@@ -714,3 +714,13 @@ class TestGetPrinterInfo:
         with patch.object(a, "_get_json", return_value={"printer": "2.1.0"}):
             info = a.get_printer_info()
         assert info is not None and info.model == "prusa_mini"
+
+    def test_non_dict_json_body_is_not_a_printer(self):
+        """A captive portal or proxy answering with a JSON list must not
+        crash the probe or be read as an identity."""
+        a = _adapter()
+        for body in ([], ["nope"], "a string"):
+            a._printer_info = None
+            a._printer_info_retry_at = 0.0
+            with patch.object(a, "_get_json", return_value=body):
+                assert a.get_printer_info() is None

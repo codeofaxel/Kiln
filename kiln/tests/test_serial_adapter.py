@@ -1916,3 +1916,64 @@ class TestGetPrinterInfo:
         adapter = _build_adapter(_make_mock_serial())
         assert adapter._machine_type is None
         assert adapter.get_printer_info() is None
+
+    @pytest.mark.parametrize(
+        ("layout", "raw"),
+        [
+            ("mid-line", "FIRMWARE_NAME:Marlin MACHINE_TYPE:Ender-3 V2 EXTRUDER_COUNT:1\nok\n"),
+            ("last token before ok", "FIRMWARE_NAME:Marlin MACHINE_TYPE:Ender-3 V2\nok\n"),
+            ("CRLF line ending", "FIRMWARE_NAME:Marlin MACHINE_TYPE:Ender-3 V2\r\nok\r\n"),
+        ],
+    )
+    def test_machine_type_parses_every_real_m115_layout(self, layout, raw):
+        """Firmwares differ on whether MACHINE_TYPE is last on the line
+        and on CRLF.  A layout-sensitive regex silently reports nothing
+        for perfectly identifiable printers."""
+        adapter = self._adapter_with_m115(raw.encode())
+        assert adapter._machine_type == "Ender-3 V2", f"missed on {layout}"
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "FIRMWARE_NAME:Marlin MACHINE_TYPE:Ender-3 V2 EXTRUDER_COUNT:1",
+            "FIRMWARE_NAME:Marlin MACHINE_TYPE:Ender-3 V2",
+            "FIRMWARE_NAME:Marlin MACHINE_TYPE:Ender-3 V2\nok",
+            "FIRMWARE_NAME:Marlin MACHINE_TYPE:Ender-3 V2\r\nok",
+        ],
+    )
+    def test_machine_type_regex_handles_terminators(self, line):
+        from kiln.printers.serial_adapter import _MACHINE_TYPE_RE
+
+        match = _MACHINE_TYPE_RE.search(line)
+        assert match is not None
+        assert match.group("machine").strip() == "Ender-3 V2"
+
+    def test_empty_machine_type_value_is_not_a_model(self):
+        adapter = self._adapter_with_m115(
+            b"FIRMWARE_NAME:Marlin MACHINE_TYPE: EXTRUDER_COUNT:1\nok\n"
+        )
+        assert adapter._machine_type is None
+        assert adapter.get_printer_info() is None
+
+    def test_capture_is_reentrancy_guarded(self):
+        """_send_command can trigger a reconnect, which calls connect(),
+        which calls the capture again.  The guard stops the recursion."""
+        from kiln.printers.serial_adapter import SerialPrinterAdapter
+
+        adapter = _build_adapter(_make_mock_serial())
+        depth = {"max": 0, "cur": 0}
+
+        def _reentrant_send(cmd, **kwargs):
+            depth["cur"] += 1
+            depth["max"] = max(depth["max"], depth["cur"])
+            try:
+                SerialPrinterAdapter._capture_machine_type(adapter)
+                return "FIRMWARE_NAME:Marlin MACHINE_TYPE:Ender-3 V2\nok\n"
+            finally:
+                depth["cur"] -= 1
+
+        with patch.object(adapter, "_send_command", side_effect=_reentrant_send):
+            SerialPrinterAdapter._capture_machine_type(adapter)
+
+        assert depth["max"] == 1
+        assert adapter._machine_type == "Ender-3 V2"

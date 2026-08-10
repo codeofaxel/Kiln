@@ -1211,7 +1211,11 @@ class ElegooAdapter(PrinterAdapter):
             resp = self._send_command(_CMD_GET_ATTRIBUTES, timeout=5.0)
         except PrinterError:
             return "", ""
-        data = (resp or {}).get("Data", resp or {})
+        if not isinstance(resp, dict):
+            return "", ""
+        data = resp.get("Data", resp)
+        if not isinstance(data, dict):
+            return "", ""
         return (
             str(data.get("MachineName") or "").strip(),
             str(data.get("Name") or "").strip(),

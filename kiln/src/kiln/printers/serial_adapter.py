@@ -61,8 +61,14 @@ _SD_PROGRESS_RE = re.compile(r"SD printing byte\s+(?P<current>\d+)\s*/\s*(?P<tot
 _FIRMWARE_RE = re.compile(r"FIRMWARE_NAME:(?P<name>[^\s]+)")
 _FIRMWARE_VER_RE = re.compile(r"FIRMWARE_VERSION:(?P<version>[^\s]+)")
 # MACHINE_TYPE value runs until the next KEY: token on the M115 line
-# (e.g. "... MACHINE_TYPE:Ender-3 V2 EXTRUDER_COUNT:1 ...").
-_MACHINE_TYPE_RE = re.compile(r"MACHINE_TYPE:(?P<machine>.*?)(?=\s+[A-Z_]+:|\s*$)")
+# (e.g. "... MACHINE_TYPE:Ender-3 V2 EXTRUDER_COUNT:1 ...").  MULTILINE
+# matters: plenty of firmwares put MACHINE_TYPE last, so the value ends
+# at the line break before the "ok" — without it the whole match fails
+# and a perfectly identifiable printer reports nothing.  The \s* before
+# the anchor absorbs the \r of a CRLF line ending.
+_MACHINE_TYPE_RE = re.compile(
+    r"MACHINE_TYPE:(?P<machine>.*?)(?=\s+[A-Z_]+:|\s*$)", re.MULTILINE
+)
 
 # M115 MACHINE_TYPE values that identify nothing: Marlin's stock
 # default is "3D Printer" (Version.h: MACHINE_NAME) — only vendor
@@ -138,6 +144,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         # captured; vendor builds report their model, stock Marlin
         # reports a generic string that is suppressed).
         self._machine_type: str | None = None
+        self._capturing_machine_type: bool = False
 
         # Open the connection.
         self.connect()
@@ -236,9 +243,22 @@ class SerialPrinterAdapter(PrinterAdapter):
         bounded pause at connect, not the adapter's full command
         timeout.  Generic values (stock Marlin's "3D Printer") are
         suppressed — only vendor builds identify a real model.
+
+        Reentrancy-guarded: this sends a command, and a command can
+        trigger a reconnect, which calls connect() again.  Without the
+        guard a flapping port could recurse through connect → M115 →
+        reconnect → connect.
         """
-        if self._machine_type is not None:
+        if self._machine_type is not None or self._capturing_machine_type:
             return
+        self._capturing_machine_type = True
+        try:
+            self._capture_machine_type_locked()
+        finally:
+            self._capturing_machine_type = False
+
+    def _capture_machine_type_locked(self) -> None:
+        """Body of :meth:`_capture_machine_type`, guard already held."""
         try:
             response = self._send_command("M115", timeout=min(self._timeout, 3.0))
         except PrinterError:

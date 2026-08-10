@@ -357,6 +357,10 @@ class PrusaLinkAdapter(PrinterAdapter):
         except PrinterError:
             self._printer_info_retry_at = time.monotonic() + 300.0
             return None
+        if not isinstance(data, dict):
+            # A proxy or captive portal answering with a JSON list/string
+            # is not a printer talking — treat it as no answer.
+            return None
         code = str(data.get("printer") or "").strip()
         model = _PRUSA_TYPE_CODES.get(code)
         if model:

@@ -973,3 +973,9 @@ class TestGetPrinterInfo:
         adapter = _adapter()
         adapter._last_status = {"Name": "garage printer"}
         assert adapter.get_printer_info() is None
+
+    def test_non_dict_attribute_response_is_not_an_identity(self) -> None:
+        adapter = _adapter()
+        for body in ([], "text", None):
+            with mock.patch.object(adapter, "_send_command", return_value=body):
+                assert adapter.get_printer_info() is None

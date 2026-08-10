@@ -170,10 +170,13 @@ def resolve_adapter_model(adapter: Any) -> str | None:
     who did.  Our mapping tables are fallible (the 2026-04 inference
     table was wrong in five of six rows and confidently named the
     wrong printer, which is why inference was scrapped in a19e665b);
-    the user's own statement about their own hardware is not.  When
-    the two disagree we keep the declaration and log the conflict, so
-    a stale config surfaces as a warning instead of silently
-    rewriting the fleet table.
+    the user's own statement about their own hardware is not.
+
+    A declaration therefore short-circuits: the probe is never called,
+    so this stays free of network I/O on the hot paths that call it
+    per printer per poll (fleet view, heartbeat, community rows).  To
+    compare the two channels deliberately — a stale-config check —
+    call :func:`detect_identity_conflict` instead.
 
     Only ``str`` values pass: a probe or attribute that yields any
     other type (a mock, a stray object) must not have its repr
@@ -181,46 +184,74 @@ def resolve_adapter_model(adapter: Any) -> str | None:
     """
     if adapter is None:
         return None
+    declared = _declared_model(adapter)
+    if declared:
+        return declared
+    return _probed_model(adapter)
 
-    def _clean(value: Any) -> str | None:
-        # Cap mirrors the heartbeat's per-model limit: some of these
-        # strings are device-controlled (M115 MACHINE_TYPE, SDCP names)
-        # and a buggy firmware must not stuff a novel into telemetry.
-        if isinstance(value, str):
-            value = value.strip()[:60]
-            if value:
-                return value
-        return None
 
-    declared: str | None = None
+def _clean(value: Any) -> str | None:
+    """A usable model string, or None.
+
+    Only ``str`` survives — a probe or attribute yielding any other
+    type must not have its repr laundered into telemetry as a model.
+    The cap mirrors the heartbeat's per-model limit: some of these
+    strings are device-controlled (M115 MACHINE_TYPE, SDCP names) and
+    a buggy firmware must not stuff a novel into telemetry.
+    """
+    if isinstance(value, str):
+        value = value.strip()[:60]
+        if value:
+            return value
+    return None
+
+
+def _declared_model(adapter: Any) -> str | None:
+    """The model the OWNER declared, via every attribute spelling."""
     for attr in ("printer_model", "_printer_model", "model"):
         try:
-            declared = _clean(getattr(adapter, attr, None))
+            value = _clean(getattr(adapter, attr, None))
         except Exception:  # noqa: BLE001 — property raised; try the next
             continue
-        if declared:
-            break
+        if value:
+            return value
+    return None
 
-    probed: str | None = None
+
+def _probed_model(adapter: Any) -> str | None:
+    """The model the PRINTER reports about itself, or None."""
     try:
         info = adapter.get_printer_info()
-        probed = _clean(getattr(info, "model", None)) or _clean(
-            getattr(info, "printer_model", None)
-        )
     except Exception:  # noqa: BLE001 — probe is best-effort
-        pass
+        return None
+    return _clean(getattr(info, "model", None)) or _clean(
+        getattr(info, "printer_model", None)
+    )
 
-    if declared:
-        if probed and probed != declared:
-            logger.warning(
-                "Printer identity mismatch: config declares %r but the "
-                "printer reports %r. Keeping the declared model. If the "
-                "config is stale, update printer_model in ~/.kiln/config.yaml.",
-                declared,
-                probed,
-            )
-        return declared
-    return probed
+
+def detect_identity_conflict(adapter: Any) -> tuple[str, str] | None:
+    """``(declared, probed)`` when the two disagree, else ``None``.
+
+    Deliberately separate from :func:`resolve_adapter_model`, which
+    short-circuits on a declaration and never probes.  This one always
+    probes, so it costs network I/O — call it from a diagnostic (a
+    ``kiln doctor`` check), not from a polling loop.
+
+    A conflict means one of two things, and both are worth telling the
+    user about: the config is stale (printer replaced, model corrected)
+    or one of Kiln's identity tables is wrong.  The second is what made
+    printer-model inference unsafe in 2026-04 — surfacing it is how we
+    find out before a user does.
+    """
+    if adapter is None:
+        return None
+    declared = _declared_model(adapter)
+    if not declared:
+        return None
+    probed = _probed_model(adapter)
+    if probed and probed != declared:
+        return declared, probed
+    return None
 
 
 def contribute_resolved_outcome(

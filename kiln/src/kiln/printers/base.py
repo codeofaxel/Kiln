@@ -918,7 +918,7 @@ class PrinterAdapter(ABC):
 
     # -- printer identity self-report (optional) ------------------------
 
-    def get_printer_info(self) -> "PrinterInfo | None":
+    def get_printer_info(self) -> PrinterInfo | None:
         """Return the printer's self-reported model, or ``None``.
 
         Adapters whose protocol carries a model identity (Bambu MQTT,
