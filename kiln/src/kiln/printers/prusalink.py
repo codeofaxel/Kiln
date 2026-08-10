@@ -52,6 +52,8 @@ _FILE_ROOT_FALLBACK_HTTP_CODES: tuple[int, ...] = (403, 404)
 # the field is PrinterVersion{type, version, subversion} formatted
 # "%i.%i.%i" by get_version() in lib/WUI/link_content/basic_gets.cpp.
 _PRUSA_TYPE_CODES: dict[str, str] = {
+    "1.2.5": "prusa_mk2_5",
+    "1.2.6": "prusa_mk2_5s",
     "1.3.0": "prusa_mk3",
     "1.3.1": "prusa_mk3s",
     "1.3.5": "prusa_mk3_5",
@@ -71,6 +73,8 @@ _PRUSA_TYPE_CODES: dict[str, str] = {
     # so the code alone is ambiguous.  Also absent: 7.10.0 / 8.10.0
     # (Core One iNdx industrial variants) — too new to trust the codes
     # as settled.  Unknown codes report nothing (family grain).
+    # 1.2.5 / 1.2.6 (MK2.5 / MK2.5S) come from the Connect SDK
+    # PrinterType enum — the Python PrusaLink serves those too.
 }
 
 # Printer type names reported by the Python PrusaLink (MK3-era printers
@@ -288,7 +292,13 @@ class PrusaLinkAdapter(PrinterAdapter):
 
         # Successful get_printer_info() result, cached for the session —
         # the hardware behind a host:port doesn't change mid-process.
+        # After a failed probe, _printer_info_retry_at holds the
+        # monotonic time before which we won't probe again: the fleet
+        # view resolves models at poll frequency, and an offline
+        # printer must cost one bounded probe per cooldown window, not
+        # one per poll.
         self._printer_info: PrinterInfo | None = None
+        self._printer_info_retry_at: float = 0.0
 
     # -- PrinterAdapter identity properties ---------------------------------
 
@@ -327,7 +337,9 @@ class PrusaLinkAdapter(PrinterAdapter):
 
         A successful result is cached for the adapter's lifetime; an
         unreachable printer or unknown code returns ``None`` and the
-        caller keeps its family-grain fallback.
+        caller keeps its family-grain fallback.  A failed probe backs
+        off for five minutes so poll-frequency callers (the registry
+        fleet view) never stack timeouts against an offline printer.
 
         SAFETY BOUNDARY: telemetry/display only.  The config-declared
         model (``printer_model`` in config.yaml) owns every safety and
@@ -338,9 +350,12 @@ class PrusaLinkAdapter(PrinterAdapter):
         """
         if self._printer_info is not None:
             return self._printer_info
+        if time.monotonic() < self._printer_info_retry_at:
+            return None
         try:
             data = self._get_json("/api/version")
         except PrinterError:
+            self._printer_info_retry_at = time.monotonic() + 300.0
             return None
         code = str(data.get("printer") or "").strip()
         model = _PRUSA_TYPE_CODES.get(code)

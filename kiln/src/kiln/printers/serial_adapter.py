@@ -31,10 +31,12 @@ from kiln.printers.base import (
     PrinterCapabilities,
     PrinterError,
     PrinterFile,
+    PrinterInfo,
     PrinterState,
     PrinterStatus,
     PrintResult,
     UploadResult,
+    canonical_model_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,6 +60,14 @@ _SD_PROGRESS_RE = re.compile(r"SD printing byte\s+(?P<current>\d+)\s*/\s*(?P<tot
 # Regex for parsing M115 firmware info.
 _FIRMWARE_RE = re.compile(r"FIRMWARE_NAME:(?P<name>[^\s]+)")
 _FIRMWARE_VER_RE = re.compile(r"FIRMWARE_VERSION:(?P<version>[^\s]+)")
+# MACHINE_TYPE value runs until the next KEY: token on the M115 line
+# (e.g. "... MACHINE_TYPE:Ender-3 V2 EXTRUDER_COUNT:1 ...").
+_MACHINE_TYPE_RE = re.compile(r"MACHINE_TYPE:(?P<machine>.*?)(?=\s+[A-Z_]+:|\s*$)")
+
+# M115 MACHINE_TYPE values that identify nothing: Marlin's stock
+# default is "3D Printer" (Version.h: MACHINE_NAME) — only vendor
+# builds that set CUSTOM_MACHINE_NAME report a real model.
+_GENERIC_MACHINE_TYPES = frozenset({"3d printer", "marlin", "unknown", "reprap"})
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +133,11 @@ class SerialPrinterAdapter(PrinterAdapter):
 
         # Track pause state (Marlin M27 doesn't distinguish paused from printing).
         self._paused: bool = False
+
+        # MACHINE_TYPE from the connect-time M115 exchange (None until
+        # captured; vendor builds report their model, stock Marlin
+        # reports a generic string that is suppressed).
+        self._machine_type: str | None = None
 
         # Open the connection.
         self.connect()
@@ -206,6 +221,34 @@ class SerialPrinterAdapter(PrinterAdapter):
         self._wait_for_startup()
         self._connected = True
         logger.info("Connected to serial printer on %s @ %d baud", self._port, self._baudrate)
+
+        # Capture the firmware's MACHINE_TYPE while the line is
+        # guaranteed idle — connect() is the only moment nothing else
+        # can be streaming, so the model probe (get_printer_info) never
+        # has to inject commands into a live print later.
+        self._capture_machine_type()
+
+    def _capture_machine_type(self) -> None:
+        """One best-effort M115 to learn the firmware's MACHINE_TYPE.
+
+        Called only from :meth:`connect`, when the line is known idle.
+        Short timeout ceiling: a firmware that ignores M115 must cost a
+        bounded pause at connect, not the adapter's full command
+        timeout.  Generic values (stock Marlin's "3D Printer") are
+        suppressed — only vendor builds identify a real model.
+        """
+        if self._machine_type is not None:
+            return
+        try:
+            response = self._send_command("M115", timeout=min(self._timeout, 3.0))
+        except PrinterError:
+            logger.debug("M115 machine-type capture failed", exc_info=True)
+            return
+        match = _MACHINE_TYPE_RE.search(response)
+        if match:
+            machine = match.group("machine").strip()
+            if machine and machine.lower() not in _GENERIC_MACHINE_TYPES:
+                self._machine_type = machine
 
     def disconnect(self) -> None:
         """Close the serial port."""
@@ -995,6 +1038,35 @@ class SerialPrinterAdapter(PrinterAdapter):
                 "The printer will home and probe the bed."
             ),
         )
+
+    # ------------------------------------------------------------------
+    # PrinterAdapter -- printer identity self-report (optional)
+    # ------------------------------------------------------------------
+
+    def get_printer_info(self) -> PrinterInfo | None:
+        """The printer's self-reported model, for telemetry and display.
+
+        Reads only the ``MACHINE_TYPE`` captured from the one M115 sent
+        during :meth:`connect` — this method itself NEVER writes to the
+        serial line, because it gets called from poll-frequency paths
+        (heartbeat, fleet view) and the same line streams live prints.
+        Vendor Marlin builds report their model there ("Ender-3 V2");
+        stock builds report a generic string that connect() already
+        suppressed, and those rigs stay at family grain — honest for a
+        transport that can front any board.
+
+        SAFETY BOUNDARY: telemetry/display only.  The config-declared
+        model (``printer_model`` in config.yaml) owns every safety and
+        behavior decision; this self-report must never override it
+        where the two disagree — it fills in only where config is
+        silent (see ``PrinterAdapter.get_printer_info`` and commit
+        a19e665b).
+        """
+        machine = (self._machine_type or "").strip()
+        if not machine:
+            return None
+        key = canonical_model_key(machine)
+        return PrinterInfo(model=key or machine, raw_model=machine, source="m115")
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- firmware info (optional)

@@ -33,7 +33,6 @@ import http.server
 import json
 import logging
 import os
-import re
 import socket
 import threading
 import time
@@ -54,6 +53,7 @@ from kiln.printers.base import (
     PrinterStatus,
     PrintResult,
     UploadResult,
+    canonical_model_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -372,15 +372,20 @@ class ElegooAdapter(PrinterAdapter):
     def get_printer_info(self) -> PrinterInfo | None:
         """The printer's self-reported model, for telemetry and display.
 
-        SDCP machines announce their model as free text in the
-        ``Name``/``MachineName`` attribute fields — the same fields the
-        fan-control FDM gate already trusts.  Resolution goes through
-        :meth:`_resolve_machine_name` (cached attributes first, one
-        bounded fetch otherwise).  When the normalized name matches a
-        Kiln canonical key (``elegoo_centauri_carbon``, ...) that key
-        is reported; otherwise the machine's own name verbatim — still
-        exact grain, just not a key ``printer_intelligence.json``
-        knows yet.
+        SDCP attribute frames carry two identity fields with different
+        trust levels (semantics per the SDCP client ecosystem —
+        ``MachineName`` is the machine model, ``Name`` is the
+        user-assignable device name):
+
+        * ``MachineName`` — the model.  Reported as the canonical Kiln
+          key when it maps (``elegoo_centauri_carbon``, ...), verbatim
+          otherwise.
+        * ``Name`` — consulted only when ``MachineName`` is absent, and
+          only when it maps to a canonical key.  Never verbatim: a
+          user-renamed machine ("garage printer") must not show up as
+          a model in the fleet table.
+
+        Cached attributes are read first; one bounded fetch otherwise.
 
         SAFETY BOUNDARY: telemetry/display only.  The config-declared
         model (``printer_model`` in config.yaml) owns every safety and
@@ -389,21 +394,19 @@ class ElegooAdapter(PrinterAdapter):
         silent (see ``PrinterAdapter.get_printer_info`` and commit
         a19e665b).
         """
-        name = self._resolve_machine_name().strip()
-        if not name:
-            return None
-        norm = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
-        # "neptune_4" -> "neptune4", matching canonical key spelling.
-        norm = re.sub(r"(?<=[a-z])_(?=\d)", "", norm)
-        candidate = norm if norm.startswith("elegoo_") else f"elegoo_{norm}"
-        try:
-            from kiln.printer_intelligence import list_intel_profiles
-
-            if candidate in list_intel_profiles():
-                return PrinterInfo(model=candidate, raw_model=name, source="sdcp")
-        except Exception:  # noqa: BLE001 — intelligence lookup is optional
-            pass
-        return PrinterInfo(model=name, raw_model=name, source="sdcp")
+        machine, device_name = self._read_identity_fields()
+        if machine:
+            key = canonical_model_key(machine, vendor_prefix="elegoo_")
+            return PrinterInfo(
+                model=key or machine, raw_model=machine, source="sdcp"
+            )
+        if device_name:
+            key = canonical_model_key(device_name, vendor_prefix="elegoo_")
+            if key:
+                return PrinterInfo(
+                    model=key, raw_model=device_name, source="sdcp"
+                )
+        return None
 
     # ------------------------------------------------------------------
     # Internal: WebSocket
@@ -1193,24 +1196,34 @@ class ElegooAdapter(PrinterAdapter):
     # Fan control
     # ------------------------------------------------------------------
 
+    def _read_identity_fields(self) -> tuple[str, str]:
+        """``(machine_name, device_name)`` from the SDCP attribute
+        fields — cached frames first, one bounded fetch otherwise.
+        Empty strings when unavailable.  ``MachineName`` is the machine
+        model; ``Name`` is the user-assignable device name.
+        """
+        with self._state_lock:
+            machine = str(self._last_status.get("MachineName") or "").strip()
+            device = str(self._last_status.get("Name") or "").strip()
+        if machine or device:
+            return machine, device
+        try:
+            resp = self._send_command(_CMD_GET_ATTRIBUTES, timeout=5.0)
+        except PrinterError:
+            return "", ""
+        data = (resp or {}).get("Data", resp or {})
+        return (
+            str(data.get("MachineName") or "").strip(),
+            str(data.get("Name") or "").strip(),
+        )
+
     def _resolve_machine_name(self) -> str:
         """Return the printer's reported Name/MachineName, fetching fresh
         attributes if nothing is cached yet.  Returns ``""`` if it can't be
         determined -- callers must treat that as "unknown", never as FDM.
         """
-        with self._state_lock:
-            cached = self._last_status.get("Name") or self._last_status.get("MachineName")
-        if cached:
-            return str(cached)
-        try:
-            resp = self._send_command(_CMD_GET_ATTRIBUTES, timeout=5.0)
-        except PrinterError:
-            return ""
-        if not resp:
-            return ""
-        data = resp.get("Data", resp)
-        name = data.get("Name") or data.get("MachineName") or ""
-        return str(name)
+        machine, device = self._read_identity_fields()
+        return device or machine
 
     def set_fan(self, node: str, percent: int) -> bool:
         """Set the part-cooling fan speed via SDCP's settings command.

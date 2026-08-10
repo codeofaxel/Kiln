@@ -156,28 +156,46 @@ def resolve_adapter_model(adapter: Any) -> str | None:
     ``printer_model="unknown"`` (the heartbeat hit the identical bug on
     2026-07-25: 630 of 670 rows NULL — and was fixed with this fallback
     chain while the community sites were not).  The Bambu / PrusaLink /
-    Elegoo adapters grew real implementations in 2026-08, so the probe
-    branch now resolves exact models; the attribute chain stays as the
-    fallback.  One resolver, imported by every contribution path, so
-    the next adapter attribute rename is one edit instead of a re-run
-    of that incident.
+    Elegoo / serial adapters grew real implementations in 2026-08, so
+    the probe branch now resolves exact models; the attribute chain
+    stays as the fallback.  One resolver — imported by the heartbeat,
+    the registry fleet view, and every contribution path — so the
+    telemetry, the fleet table, and the community rows can never drift
+    apart about what a printer is.
+
+    Only ``str`` values pass: a probe or attribute that yields any
+    other type (a mock, a stray object) must not have its repr
+    laundered into telemetry as a "model".
     """
     if adapter is None:
         return None
+
+    def _clean(value: Any) -> str | None:
+        # Cap mirrors the heartbeat's per-model limit: some of these
+        # strings are device-controlled (M115 MACHINE_TYPE, SDCP names)
+        # and a buggy firmware must not stuff a novel into telemetry.
+        if isinstance(value, str):
+            value = value.strip()[:60]
+            if value:
+                return value
+        return None
+
     try:
         info = adapter.get_printer_info()
-        model = getattr(info, "model", None) or getattr(info, "printer_model", None)
+        model = _clean(getattr(info, "model", None)) or _clean(
+            getattr(info, "printer_model", None)
+        )
         if model:
-            return str(model)
-    except Exception:  # noqa: BLE001 — the method that never existed
+            return model
+    except Exception:  # noqa: BLE001 — probe is best-effort
         pass
     for attr in ("printer_model", "_printer_model", "model"):
         try:
-            value = getattr(adapter, attr, None)
+            value = _clean(getattr(adapter, attr, None))
         except Exception:  # noqa: BLE001 — property raised; try the next
             continue
         if value:
-            return str(value)
+            return value
     return None
 
 

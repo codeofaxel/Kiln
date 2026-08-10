@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import enum
 import os
+import re
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -309,6 +310,40 @@ class FirmwareUpdateResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def canonical_model_key(reported: str, *, vendor_prefix: str = "") -> str | None:
+    """Map a device-reported model name to a ``printer_intelligence.json``
+    key, or ``None`` when no canonical profile matches.
+
+    One normalizer for every adapter that self-reports free-text model
+    names (Elegoo SDCP, serial/Marlin ``MACHINE_TYPE``), so the spelling
+    rules can't drift between them: lower-case, non-alphanumeric runs
+    collapse to ``_``, and a lone ``_`` between a letter and a digit is
+    dropped so ``"Ender-3 V2"`` lands on ``ender3_v2`` and
+    ``"Neptune 4"`` (with ``vendor_prefix="elegoo_"``) lands on
+    ``elegoo_neptune4`` — the way the canonical keys are spelled.
+
+    Matching is strict membership against the intelligence profile list;
+    a new model becomes mappable the moment its key is added there.
+    """
+    norm = re.sub(r"[^a-z0-9]+", "_", reported.lower()).strip("_")
+    norm = re.sub(r"(?<=[a-z])_(?=\d)", "", norm)
+    if not norm:
+        return None
+    candidates = [norm]
+    if vendor_prefix and not norm.startswith(vendor_prefix):
+        candidates.insert(0, f"{vendor_prefix}{norm}")
+    try:
+        from kiln.printer_intelligence import list_intel_profiles
+
+        profiles = set(list_intel_profiles())
+    except Exception:  # noqa: BLE001 — intelligence lookup is optional
+        return None
+    for candidate in candidates:
+        if candidate in profiles:
+            return candidate
+    return None
 
 
 @dataclass(frozen=True)

@@ -345,9 +345,18 @@ class PrinterRegistry:
         def _model_for(adapter: PrinterAdapter) -> str | None:
             # Raw model string (e.g. "bambu_a1") so clients can resolve a
             # display label and build volume. Not every adapter tracks one.
-            m = getattr(adapter, "printer_model", None) or getattr(adapter, "_printer_model", None)
-            m = (m or "").strip()
-            return m or None
+            # One resolver shared with the heartbeat and community paths:
+            # live self-report (get_printer_info) first, config-fed
+            # attributes second — the fleet view must never disagree with
+            # the telemetry about what a printer is.
+            try:
+                from kiln.community_autofire import resolve_adapter_model
+
+                return resolve_adapter_model(adapter)
+            except Exception:
+                m = getattr(adapter, "printer_model", None) or getattr(adapter, "_printer_model", None)
+                m = (m or "").strip()
+                return m or None
 
         def _query(name: str, adapter: PrinterAdapter) -> dict:
             state = adapter.get_state()

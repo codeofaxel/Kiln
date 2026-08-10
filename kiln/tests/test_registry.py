@@ -422,3 +422,45 @@ class TestPrinterRegistryThreadSafety:
         t2.join()
 
         assert len(errors) == 0
+
+
+# ---------------------------------------------------------------------------
+# Fleet view model resolution (the same chain the heartbeat uses)
+# ---------------------------------------------------------------------------
+
+class TestFleetModelResolution:
+    """get_fleet_status resolves each printer's model through the shared
+    resolver: live self-report first, config-fed attributes second."""
+
+    def test_probe_capable_adapter_surfaces_model(self):
+        from kiln.printers.base import PrinterInfo
+
+        registry = PrinterRegistry()
+        adapter = _make_mock_adapter(name="bambu")
+        adapter.get_printer_info.return_value = PrinterInfo(
+            model="bambu_x1c", raw_model="00M", source="serial_prefix"
+        )
+        registry.register("shop-x1c", adapter)
+
+        fleet = registry.get_fleet_status()
+        assert fleet[0]["model"] == "bambu_x1c"
+
+    def test_attribute_fallback_when_probe_silent(self):
+        registry = PrinterRegistry()
+        adapter = _make_mock_adapter(name="creality")
+        adapter.get_printer_info.return_value = None
+        adapter.printer_model = "k1_max"
+        registry.register("shop-k1", adapter)
+
+        fleet = registry.get_fleet_status()
+        assert fleet[0]["model"] == "k1_max"
+
+    def test_junk_probe_object_never_leaks_a_model(self):
+        """A probe returning a non-PrinterInfo object (spec'd mock, stray
+        type) must yield None — not an object repr as a "model"."""
+        registry = PrinterRegistry()
+        adapter = _make_mock_adapter(name="mock")  # get_printer_info → MagicMock
+        registry.register("mocked", adapter)
+
+        fleet = registry.get_fleet_status()
+        assert fleet[0]["model"] is None

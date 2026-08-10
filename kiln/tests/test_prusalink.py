@@ -683,11 +683,34 @@ class TestGetPrinterInfo:
         assert first is second
         assert first is not None and first.model == "prusa_mini"
 
-    def test_failure_is_not_cached(self):
-        """An offline probe must not poison later attempts."""
+    def test_failure_is_not_cached_forever(self):
+        """An offline probe must not poison later attempts — once the
+        cooldown passes, the next probe runs and can succeed."""
         a = _adapter()
         with patch.object(a, "_get_json", side_effect=PrinterError("down")):
             assert a.get_printer_info() is None
+        a._printer_info_retry_at = 0.0  # cooldown elapsed
         with patch.object(a, "_get_json", return_value={"printer": "1.4.0"}):
             info = a.get_printer_info()
         assert info is not None and info.model == "prusa_mk4"
+
+    def test_mk2_5_codes_from_connect_sdk(self):
+        a = _adapter()
+        with patch.object(a, "_get_json", return_value={"printer": "1.2.6"}):
+            info = a.get_printer_info()
+        assert info is not None and info.model == "prusa_mk2_5s"
+
+    def test_failed_probe_backs_off_before_retrying(self):
+        """Fleet views resolve models at poll frequency; an offline
+        printer must cost one probe per cooldown window, not one per
+        poll."""
+        a = _adapter()
+        with patch.object(a, "_get_json", side_effect=PrinterError("down")) as m:
+            assert a.get_printer_info() is None
+            assert a.get_printer_info() is None  # inside cooldown — no I/O
+        m.assert_called_once()
+        # After the cooldown expires the probe runs again.
+        a._printer_info_retry_at = 0.0
+        with patch.object(a, "_get_json", return_value={"printer": "2.1.0"}):
+            info = a.get_printer_info()
+        assert info is not None and info.model == "prusa_mini"

@@ -324,26 +324,37 @@ _BAMBU_MODEL_FAMILIES: dict[str, str] = {
     "N9": "a2l",
     "N7": "p2s",
     "O1S": "h2s",
-    # Human-readable names (from slicer config / XML metadata)
+    # Human-readable names (from slicer config / XML metadata, and the
+    # product_name field of MQTT get_version firmware modules)
     "Bambu Lab A1 mini": "a1_mini",
     "Bambu Lab A1": "a1",
     "Bambu Lab A2L": "a2l",
     "Bambu Lab X1 Carbon": "x1c",
     "Bambu Lab X1E": "x1e",
+    "Bambu Lab X2D": "x2d",
     "Bambu Lab P1S": "p1s",
     "Bambu Lab P2S": "p2s",
+    "Bambu Lab H2C": "h2c",
+    "Bambu Lab H2D": "h2d",
+    "Bambu Lab H2D Pro": "h2d_pro",
     "Bambu Lab H2S": "h2s",
     "Bambu Lab P1P": "p1p",
     # Serial number prefixes (first 3 chars of Bambu serial).
-    # All verified against wiki.bambulab.com/en/general/find-sn (2026-06).
+    # All verified against wiki.bambulab.com/en/general/find-sn
+    # (2026-06; re-verified 2026-08-09, when the X2D/H2C/H2D/H2D Pro
+    # rows were added from the same page).
     "030": "a1_mini",
     "039": "a1",
     "00M": "x1c",
     "03W": "x1e",
+    "20P": "x2d",
     "01P": "p1s",
     "01S": "p1p",  # FIX: was wrongly mapped to "x1c". 01S is P1P; X1C is 00M.
     "22E": "p2s",
     "26A": "a2l",
+    "31B": "h2c",
+    "094": "h2d",
+    "239": "h2d_pro",
     "093": "h2s",
 }
 

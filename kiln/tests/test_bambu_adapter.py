@@ -3409,3 +3409,28 @@ class TestGetPrinterInfo:
         assert info is not None
         assert info.model == "bambu_a1_mini"  # probe reports what it saw
         assert adapter._printer_model == "bambu_p1s"  # config untouched
+
+    @pytest.mark.parametrize(
+        ("serial", "expected"),
+        [
+            ("20P00A000000001", "bambu_x2d"),
+            ("31B00A000000001", "bambu_h2c"),
+            ("09400A000000001", "bambu_h2d"),
+            ("23900A000000001", "bambu_h2d_pro"),
+        ],
+    )
+    def test_new_model_serial_prefixes(self, serial: str, expected: str) -> None:
+        """X2D / H2 family prefixes, verified against Bambu's own
+        find-sn wiki page (2026-08-09)."""
+        adapter = _adapter(serial=serial)
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == expected
+
+    def test_new_model_product_name(self) -> None:
+        adapter = _adapter()
+        adapter._fw_modules = [{"name": "ota", "product_name": "Bambu Lab H2D Pro"}]
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == "bambu_h2d_pro"
+        assert info.source == "mqtt"

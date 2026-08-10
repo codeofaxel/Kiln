@@ -140,7 +140,19 @@ def _adapter_model(adapter: object) -> str | None:
     2. The ``printer_model`` / ``_printer_model`` attribute — the same
        source the registry's own fleet view reads (``_model_for`` in
        kiln/registry.py); Bambu and Creality carry it when configured.
+
+    The chain itself lives in ``community_autofire.resolve_adapter_model``
+    — ONE resolver for the heartbeat, the registry fleet view, and the
+    community contribution paths, so the three can never drift apart
+    about what a printer is.  The inline fallback below exists only for
+    the import-failure case.
     """
+    try:
+        from kiln.community_autofire import resolve_adapter_model
+
+        return resolve_adapter_model(adapter)
+    except ImportError:
+        pass
     try:
         info = adapter.get_printer_info()  # type: ignore[attr-defined]
         model = getattr(info, "model", None) or getattr(info, "printer_model", None)

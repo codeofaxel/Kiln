@@ -139,7 +139,11 @@ def _build_adapter(
     _fake_serial_mod.Serial = MagicMock(return_value=mock_serial_instance)  # type: ignore[attr-defined]
     _fake_serial_mod.SerialException = _FakeSerialException  # type: ignore[attr-defined]
 
-    with patch.object(SerialPrinterAdapter, "_wait_for_startup"):
+    # _capture_machine_type is patched out too: the M115 exchange would
+    # spin against the mock port's empty reads until its timeout.  The
+    # capture has its own dedicated tests (TestGetPrinterInfo).
+    with patch.object(SerialPrinterAdapter, "_wait_for_startup"), \
+            patch.object(SerialPrinterAdapter, "_capture_machine_type"):
         adapter = SerialPrinterAdapter(
             port=port,
             baudrate=baudrate,
@@ -1399,7 +1403,8 @@ class TestWaitForStartup:
         mock_ser = _make_mock_serial(readline_responses=[])
         _fake_serial_mod.Serial = MagicMock(return_value=mock_ser)  # type: ignore[attr-defined]
 
-        with patch("kiln.printers.serial_adapter.time.monotonic") as mock_time:
+        with patch("kiln.printers.serial_adapter.time.monotonic") as mock_time, \
+                patch.object(SerialPrinterAdapter, "_capture_machine_type"):
             mock_time.side_effect = [0.0, 100.0]
             adapter = SerialPrinterAdapter(
                 port="/dev/ttyUSB0",
@@ -1838,3 +1843,76 @@ class TestResumeNotPausedHonest:
         result = adapter.resume_print()
         assert result.success is False
         assert "no paused print" in result.message.lower()
+
+
+# ---------------------------------------------------------------------------
+# Printer model self-report (get_printer_info / _capture_machine_type)
+# ---------------------------------------------------------------------------
+
+_M115_ENDER = (
+    b"FIRMWARE_NAME:Marlin 2.0.8.2 (Jul 20 2021) SOURCE_CODE_URL:github.com/MarlinFirmware/Marlin "
+    b"PROTOCOL_VERSION:1.0 MACHINE_TYPE:Ender-3 V2 EXTRUDER_COUNT:1 UUID:cede2a2f-41a2-4748-9b12-c55c62f367ff\nok\n"
+)
+_M115_STOCK = (
+    b"FIRMWARE_NAME:Marlin 2.1.2 PROTOCOL_VERSION:1.0 "
+    b"MACHINE_TYPE:3D Printer EXTRUDER_COUNT:1\nok\n"
+)
+
+
+class TestGetPrinterInfo:
+    """Model self-report from the connect-time M115 capture.  The probe
+    itself never writes to the serial line — it reads only what
+    connect() captured while the line was idle."""
+
+    def _adapter_with_m115(self, m115_response: bytes):
+        from kiln.printers.serial_adapter import SerialPrinterAdapter
+
+        adapter = _build_adapter(_make_mock_serial())
+        # Re-run the real capture against a fresh mock that answers M115.
+        adapter._serial = _make_mock_serial(
+            readline_responses=m115_response.splitlines(keepends=True)
+        )
+        SerialPrinterAdapter._capture_machine_type(adapter)
+        return adapter
+
+    def test_vendor_machine_type_resolves_canonical_key(self):
+        adapter = self._adapter_with_m115(_M115_ENDER)
+        assert adapter._machine_type == "Ender-3 V2"
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == "ender3_v2"
+        assert info.raw_model == "Ender-3 V2"
+        assert info.source == "m115"
+
+    def test_generic_machine_type_suppressed(self):
+        """Stock Marlin's "3D Printer" identifies nothing — family grain."""
+        adapter = self._adapter_with_m115(_M115_STOCK)
+        assert adapter._machine_type is None
+        assert adapter.get_printer_info() is None
+
+    def test_no_m115_response_reports_nothing(self):
+        adapter = self._adapter_with_m115(b"ok\n")
+        assert adapter.get_printer_info() is None
+
+    def test_probe_never_writes_to_the_serial_line(self):
+        """get_printer_info is called from poll-frequency paths while
+        the same line streams prints — it must be read-only."""
+        adapter = self._adapter_with_m115(_M115_ENDER)
+        adapter._serial.write.reset_mock()
+        adapter.get_printer_info()
+        adapter.get_printer_info()
+        adapter._serial.write.assert_not_called()
+
+    def test_unmapped_vendor_name_reported_verbatim(self):
+        adapter = self._adapter_with_m115(
+            b"FIRMWARE_NAME:Marlin 2.1.1 MACHINE_TYPE:Sovol SV06 Plus EXTRUDER_COUNT:1\nok\n"
+        )
+        info = adapter.get_printer_info()
+        assert info is not None
+        # sovol_sv06_plus IS a canonical key — normalization lands on it.
+        assert info.model == "sovol_sv06_plus"
+
+    def test_capture_failure_leaves_probe_silent(self):
+        adapter = _build_adapter(_make_mock_serial())
+        assert adapter._machine_type is None
+        assert adapter.get_printer_info() is None

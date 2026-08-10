@@ -953,3 +953,23 @@ class TestGetPrinterInfo:
             adapter, "_send_command", side_effect=PrinterError("down")
         ):
             assert adapter.get_printer_info() is None
+
+    def test_machine_name_beats_user_device_name(self) -> None:
+        """MachineName is the model; Name is the user's device name.
+        When both are present the model field must win."""
+        adapter = _adapter()
+        adapter._last_status = {
+            "Name": "garage printer",
+            "MachineName": "Centauri Carbon",
+        }
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == "elegoo_centauri_carbon"
+        assert info.raw_model == "Centauri Carbon"
+
+    def test_user_device_name_never_reported_verbatim(self) -> None:
+        """A renamed machine with no MachineName must not surface its
+        nickname as a model — canonical match or nothing."""
+        adapter = _adapter()
+        adapter._last_status = {"Name": "garage printer"}
+        assert adapter.get_printer_info() is None
