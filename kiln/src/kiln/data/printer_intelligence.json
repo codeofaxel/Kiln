@@ -44,7 +44,7 @@
     "has_input_shaping": false
   },
   "ender3": {
-    "display_name": "Creality Ender 3 / Ender 3 Pro / Ender 3 V2",
+    "display_name": "Creality Ender 3 / Ender 3 Pro",
     "firmware": "marlin",
     "extruder_type": "bowden",
     "hotend_type": "ptfe_lined",
