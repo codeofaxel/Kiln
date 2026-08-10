@@ -104,6 +104,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   resize a slot and Kiln now treats it as the new part it is, instead of
   recommending what worked for the previous version.
 
+- **Text prints at the size the design asked for.** Stamped text came out a
+  touch wider than intended; now it doesn't.
+
 - **Leftover Kiln servers now actually close.** Background servers weren't
   quitting when your app closed them, so they piled up holding memory. And
   cleanup (`kiln trim`) reported them closed without checking — it could say
