@@ -236,6 +236,15 @@ def _empty_day() -> dict[str, Any]:
         # call never leaves the machine, so no server counter can see
         # it — which made the product's most common refusal invisible.
         "account_wall": {},        # {"apply_image_texture": 3}
+        # Upgrade-nudge funnel: stage -> count today.  Stages are a
+        # CLOSED vocabulary (_UPDATE_NUDGE_STAGES), not tool names: the
+        # question is "did the offer get shown, taken, and did it work",
+        # and each stage failing means something different.  A nudge
+        # shown with no attempt is an agent that never relayed it; an
+        # attempt with no success is an upgrade that cannot run on that
+        # machine (a managed venv, a system Python).  Same fix bucket,
+        # opposite fixes.
+        "update_nudge": {},        # {"shown_tool_result": 1, "upgrade_ok": 1}
         # Per-tool call counts: tool_name → times called today.  Counts
         # EVERY local tool dispatch (not just the six outcome events),
         # so the anonymous heartbeat can finally show what unsigned
@@ -264,7 +273,7 @@ _ROLLOVER_COUNTERS = (
 # _ROLLOVER_COUNTERS to _VALID_EVENTS (the scalar activity counters);
 # these are a different shape answering a different question.
 _ROLLOVER_MAPS = (
-    "tier_denials", "account_wall", "tool_calls",
+    "tier_denials", "account_wall", "tool_calls", "update_nudge",
     "texture_names", "decoration_types", "slicer_profiles",
     "marketplace_sources",
 )
@@ -632,6 +641,44 @@ def record_account_wall(tool_name: str) -> None:
     _record_name_count("account_wall", tool_name)
 
 
+# The upgrade funnel's stages.  A CLOSED set, unlike the tool-name maps:
+# these are our own vocabulary, so an unknown value is a bug in our
+# code rather than an exotic tool, and silently accepting it would let a
+# typo become a permanent phantom row on the founder dashboard.
+_UPDATE_NUDGE_STAGES = frozenset({
+    # the offer reached an agent's working context
+    "shown_tool_result",
+    # the user said yes and upgrade_kiln actually ran
+    "upgrade_attempted",
+    # pip reported success (or we were already latest)
+    "upgrade_ok",
+    # pip ran and failed — the machine cannot upgrade itself, which is
+    # a different product problem from nobody being asked
+    "upgrade_failed",
+    # refused because a print was in flight; the user was never asked to
+    # choose, so this is neither a yes nor a no
+    "upgrade_deferred",
+})
+
+
+def record_update_nudge(stage: str) -> None:
+    """Count one stage of the upgrade-nudge funnel for today.
+
+    The nudge has existed on three surfaces since 2026-05-28 and
+    ``upgrade_kiln`` has never been recorded firing — but the counters
+    that would show whether it converts did not exist, so "nobody
+    upgrades" and "we cannot see upgrades" were indistinguishable.
+    Each stage answers a different question and they fail differently:
+    shown-with-no-attempt is an agent that never relayed the offer;
+    attempted-with-no-success is a machine that cannot pip-upgrade
+    itself.  Silent by contract — telemetry never breaks a tool call.
+    """
+    name = (stage or "").strip()
+    if name not in _UPDATE_NUDGE_STAGES:
+        return
+    _record_name_count("update_nudge", name)
+
+
 def record_tool_call(tool_name: str) -> None:
     """Increment the per-tool call counter for ``tool_name``.
 
@@ -662,6 +709,7 @@ def get_daily_stats() -> dict[str, Any]:
         "tier_denials": data.get("tier_denials", {}),
         "account_wall": data.get("account_wall", {}),
         "tool_calls": data.get("tool_calls", {}),
+        "update_nudge": data.get("update_nudge", {}),
         # The last COMPLETE day's counters (see _archive_completed_day).
         # The heartbeat reports these because the same-day counters it
         # can see at server startup are structurally near-empty.
