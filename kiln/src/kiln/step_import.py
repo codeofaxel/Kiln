@@ -14,7 +14,7 @@ they're on: a one-command fix locally, an honest "this is our gap" on the
 hosted server, where they have nothing to install.  ``kiln
 install-step-backend`` is the local fix.
 
-This is a **free-tier** feature — no kiln-pro dependency.
+This is a **free-tier** feature — it needs nothing beyond this package.
 """
 
 from __future__ import annotations

@@ -103,10 +103,10 @@ STAGE_DESCRIPTION_CLAUSE = (
 #: ever told to draw.
 #:
 #: Reviewed, not derived — but the reviewing is anchored, not remembered.
-#: Every tool wired to the preview chokepoint belongs here unless kiln-pro's
-#: ``scripts/stage_coverage.yaml`` records a reason otherwise, and a new
-#: mesh-returning tool on neither list fails that repo's stage-coverage gate
-#: at conception.  The reasons a tool sits OUT: its output is a print or
+#: Every tool wired to the preview chokepoint belongs here unless the
+#: downstream stage-coverage ledger records a reason otherwise, and a new
+#: mesh-returning tool on neither list fails that coverage gate at
+#: conception.  The reasons a tool sits OUT: its output is a print or
 #: gcode artifact rather than a design mesh; it is a bookkeeping act on
 #: geometry the user has already seen (branch/save/sign ceremonies keep
 #: their PNG receipt, not a panel); it is an N-result batch; or the value it

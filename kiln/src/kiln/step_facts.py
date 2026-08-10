@@ -3,10 +3,16 @@
 No viewer renders B-rep directly; every stage shows triangles.  What makes a
 STEP display honest is carrying the ANALYTIC facts alongside the tessellation,
 so the stage can say "1 solid, 4 true cylinders, r=45.000 exact" instead of
-passing triangles off as CAD.  This module is the one place those facts are
-measured — the same census serves the import flow, the inline stage, the
-hosted viewer, and kiln-pro's B-rep emitter, so every surface reports the
-same numbers about the same file.
+passing triangles off as CAD.
+
+Scope, deliberately narrow: this describes a STEP file the USER BROUGHT IN,
+for display beside its preview.  Importing STEP is a free-tier feature, so
+the readout that labels an import is free too, and both doors that need it —
+the import tool and the inline stage — read it here so they can never
+disagree about the same file.  It is NOT an emission-side validator: a
+pipeline that writes CAD checks its own output against its own plan, which
+is a different question asked by a different owner, and answering both from
+one module would couple two unrelated release cycles.
 
 Two measurement paths, one census:
 
@@ -63,9 +69,10 @@ logger = logging.getLogger(__name__)
 #: Versioned discriminator for the facts dict.
 FACTS_KIND = "kiln.step_facts.v1"
 
-#: The originating_system stamp every Kiln-born STEP carries in its ISO
-#: 10303-21 header.  Owned here (public — the string is readable in every
-#: emitted file); kiln-pro's emitter and re-stamper write it.
+#: The originating_system stamp a Kiln-born STEP carries in its ISO 10303-21
+#: header.  Owned here because this is the READING side and the string is
+#: plainly readable in every stamped file; whatever wrote the file is not
+#: this module's business.
 KILN_STAMP = "Kiln - kiln3d.com"
 
 #: Unique radii reported per surface family before the list is capped.  The
@@ -78,8 +85,9 @@ def facts_from_shape(shape: Any, *, source: str = "read") -> dict[str, Any]:
     """Census a live ``TopoDS_Shape`` into the facts dict (sans header).
 
     KERNEL-SIDE: imports OCP, so call this only where OCP is already loaded —
-    inside a child interpreter (the reader child below, kiln-pro's emitter
-    child).  Never import it into a serving process.
+    inside a child interpreter, never in a serving process.  Compiled C++ that
+    Python cannot interrupt must be able to die by timeout rather than wedge
+    a worker.
     """
     from OCP.Bnd import Bnd_Box
     from OCP.BRepAdaptor import BRepAdaptor_Surface
@@ -260,18 +268,39 @@ def read_step_facts(
     * kernel absent / child failed / timed out → :func:`unavailable_facts`
       with the reason, header facts still filled from the text parse.
 
-    Never raises for a missing kernel or an unreadable file — a facts readout
-    is display material and must not take the surface down with it.  Path
-    validation errors (traversal, wrong extension) do raise, mirroring
+    Never raises for a missing kernel, a vanished file, or an unreadable one
+    — a facts readout is display material and must not take the surface down
+    with it.  Path validation errors that indicate a CALLER mistake
+    (traversal, wrong extension) still raise, mirroring
     :func:`kiln.step_import.convert_step_to_stl`.
     """
     from kiln.step_import import (
+        _VALID_EXTENSIONS,
         SUBPROCESS_TIMEOUT_S,
         _ocp_available,
         _validate_step_path,
     )
 
-    validated = _validate_step_path(str(step_path))
+    # A path that fails validation on SHAPE (traversal, wrong extension) is a
+    # caller error and keeps raising.  A file that is merely GONE is not: STEP
+    # sources sit in TTL-swept work dirs, so a vanished file is an ordinary
+    # runtime condition on the display path — degrade with the reason instead
+    # of taking down the stage that only wanted to label a preview.
+    #
+    # The validator checks existence BEFORE extension, so a path that is both
+    # missing AND misnamed arrives here as FileNotFoundError.  Re-raise that
+    # one: "the file is gone" must never mask a call site asking for facts
+    # about an .stl.
+    try:
+        validated = _validate_step_path(str(step_path))
+    except FileNotFoundError:
+        if Path(step_path).suffix.lower() not in _VALID_EXTENSIONS:
+            raise
+        return unavailable_facts(
+            step_path,
+            "The STEP file is no longer on disk, so its CAD facts could not "
+            "be measured. The preview below is a display tessellation.",
+        )
     if not _ocp_available():
         return unavailable_facts(
             validated,

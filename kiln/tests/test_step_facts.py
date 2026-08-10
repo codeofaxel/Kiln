@@ -235,3 +235,31 @@ def test_census_normalises_foreign_units_to_mm(real_kernel, tmp_path):
     assert facts["available"] is True
     for extent in facts["bbox_mm"]["size"]:
         assert math.isclose(extent, 25.4, abs_tol=1e-6)
+
+
+def test_a_vanished_step_degrades_instead_of_raising(tmp_path):
+    """A STEP that is no longer on disk must not take the stage down.
+
+    STEP sources sit in TTL-swept work dirs, so "the file went away between
+    the import and the readout" is an ordinary runtime condition on the
+    display path — not a caller mistake.  The readout is display material:
+    it says so and carries on.
+    """
+    facts = read_step_facts(tmp_path / "gone.step")
+
+    assert facts["kind"] == FACTS_KIND
+    assert facts["available"] is False
+    assert "no longer on disk" in facts["reason"]
+    # Header keys are still present (nulled), so a consumer that reads
+    # facts["header"]["stamped_by_kiln"] never hits a KeyError.
+    assert facts["header"]["stamped_by_kiln"] is False
+
+
+def test_a_caller_mistake_still_raises(tmp_path):
+    """The other half of the contract: a path that is wrong by SHAPE is a
+    programming error and must not be silently swallowed into a readout."""
+    wrong = tmp_path / "model.stl"
+    wrong.write_text("solid x\nendsolid x\n")
+
+    with pytest.raises(ValueError):
+        read_step_facts(wrong)
