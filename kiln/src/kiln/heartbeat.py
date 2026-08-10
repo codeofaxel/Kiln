@@ -424,6 +424,12 @@ def _send_heartbeat() -> None:
                 # actually does.  Capped to the busiest tools so the
                 # payload stays small; names + counts only, never args.
                 "tool_calls": _top_n(stats.get("tool_calls", {}), 100),
+                # Upgrade-nudge funnel — {stage: count_today}.  A closed
+                # five-value vocabulary, not tool names.  This is the
+                # only way the funnel is ever seen: the offer, the
+                # attempt and the outcome all happen on the user's own
+                # machine and never touch a server.
+                "update_nudge": stats.get("update_nudge", {}),
                 # Model names of EVERY registered printer (deduped,
                 # capped) — the top-level printer_model field only ever
                 # names the default machine, which made second printers

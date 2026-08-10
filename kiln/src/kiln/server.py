@@ -12546,6 +12546,20 @@ def main() -> None:
     except Exception:
         logger.debug("inline stage not installed", exc_info=True)
 
+    # The update offer, on the FIRST tool result of the session.  The
+    # server instructions already carry it, but that is one sentence in
+    # a long preamble read once on connect — and a session that never
+    # calls get_started sees nothing else.  Riding a real result puts it
+    # in the agent's context while it is composing a reply.  Installed
+    # here, after the stage, so both lowlevel wrappers compose in a
+    # deterministic order.
+    try:
+        from kiln import update_nudge
+
+        update_nudge.install(mcp)
+    except Exception:
+        logger.debug("update nudge not installed", exc_info=True)
+
     mcp.run()
 
 

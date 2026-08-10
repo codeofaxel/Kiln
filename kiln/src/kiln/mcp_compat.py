@@ -38,7 +38,10 @@ actually on the wire.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+_logger = logging.getLogger(__name__)
 
 try:  # mcp>=2.0 — speaks MCP spec 2026-07-28 (stateless core)
     from mcp.server.mcpserver import (  # type: ignore[import-not-found]
@@ -113,6 +116,12 @@ def set_instructions(mcp: Any, text: str) -> None:
 
 #: Marks our wrapper so a second install is a no-op rather than a second layer.
 _WRAPPED = "_kiln_wrapped_call_tool"
+# The mutator list carried by an installed wrapper.  A SECOND caller
+# appends to it instead of being turned away: before this existed the
+# already-wrapped guard returned False, so whichever feature installed
+# second silently did nothing forever — a wire that reports success by
+# staying quiet is the worst shape a wire can have.
+_MUTATORS = "_kiln_call_tool_mutators"
 
 
 def _call_tool_name(source: Any) -> str | None:
@@ -162,11 +171,33 @@ def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
     A caller that branched on any of that would be a second place that knows
     which SDK is installed, which is the thing this module exists to prevent.
 
-    Returns True when a wrapper was installed, False when there was no handler
-    to wrap or ours is already in place.  Never raises for the ordinary
-    reasons; an exotic server object propagates, and callers decide.
+    DIFFERENT callers COMPOSE; the SAME caller is idempotent.  The first
+    install wraps the handler, and each later one appends its mutator to
+    that chain in install order — but a mutator whose identity
+    (``module.qualname``) is already registered is ignored, so a feature
+    whose ``install()`` runs twice still attaches once.  Both halves are
+    load-bearing: without composition the second FEATURE was turned away
+    with a False nobody checked and silently never ran; without the
+    identity guard a re-installed feature would attach twice and pay for
+    its work twice.  Each mutator is isolated — one that raises is logged
+    and skipped, so it cannot cost a sibling its attach or the caller
+    their result.
+
+    Returns True when this mutator is newly registered, False when there
+    is no handler to wrap or this exact mutator is already in the chain.
+    Never raises for the ordinary reasons; an exotic server object
+    propagates, and callers decide.
     """
     server = lowlevel_server(mcp)
+    identity = f"{getattr(mutate, '__module__', '?')}."\
+               f"{getattr(mutate, '__qualname__', repr(mutate))}"
+
+    def _run_all(result: Any, ctx: Any, name: str | None, chain: list) -> None:
+        for _identity, fn in list(chain):
+            try:
+                fn(result, ctx, name)
+            except Exception:  # noqa: BLE001 -- one bad mutator, not all
+                _logger.debug("call-tool mutator failed", exc_info=True)
 
     def _wrap(previous: Any) -> Any:
         """Shared body: run the handler, let ``mutate`` see the result."""
@@ -174,22 +205,30 @@ def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
         def _apply(resp: Any, ctx: Any, name: str | None) -> Any:
             # 1.x hands back a ServerResult with the real result on ``.root``;
             # 2.x hands back the CallToolResult itself, which has no ``.root``.
-            mutate(getattr(resp, "root", resp), ctx, name)
+            _run_all(getattr(resp, "root", resp), ctx, name, chain)
             return resp
 
         return _apply
 
     if MCP_SDK_MAJOR >= 2:
         entry = server.get_request_handler("tools/call")
-        if entry is None or getattr(entry.handler, _WRAPPED, False):
+        if entry is None:
             return False
+        existing = getattr(entry.handler, _MUTATORS, None)
+        if existing is not None:
+            if identity in {k for k, _ in existing}:
+                return False  # same feature installing twice — attach once
+            existing.append((identity, mutate))
+            return True
         previous, params_type = entry.handler, entry.params_type
+        chain: list = [(identity, mutate)]
         apply = _wrap(previous)
 
         async def _wrapped_v2(ctx: Any, params: Any) -> Any:
             return apply(await previous(ctx, params), ctx, _call_tool_name(params))
 
         setattr(_wrapped_v2, _WRAPPED, True)
+        setattr(_wrapped_v2, _MUTATORS, chain)
         server.add_request_handler("tools/call", params_type, _wrapped_v2)
         return True
 
@@ -197,13 +236,21 @@ def wrap_call_tool_result(mcp: Any, mutate: Any) -> bool:
 
     handlers = getattr(server, "request_handlers", None) or {}
     previous = handlers.get(CallToolRequest)
-    if previous is None or getattr(previous, _WRAPPED, False):
+    if previous is None:
         return False
+    existing = getattr(previous, _MUTATORS, None)
+    if existing is not None:
+        if identity in {k for k, _ in existing}:
+            return False  # same feature installing twice — attach once
+        existing.append((identity, mutate))
+        return True
+    chain = [(identity, mutate)]
     apply = _wrap(previous)
 
     async def _wrapped_v1(req: Any) -> Any:
         return apply(await previous(req), None, _call_tool_name(req))
 
     setattr(_wrapped_v1, _WRAPPED, True)
+    setattr(_wrapped_v1, _MUTATORS, chain)
     handlers[CallToolRequest] = _wrapped_v1
     return True

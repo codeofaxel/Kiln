@@ -139,15 +139,41 @@ class _UtilityToolsPlugin:
                     ),
                 }
 
+            # The funnel's second half.  The offer being SHOWN is
+            # recorded where it is attached (kiln.update_nudge); this
+            # records what the user's machine did about it.  Without the
+            # split, "nobody was asked" and "everybody was asked and pip
+            # failed" are the same zero — different products, different
+            # fixes.  Best-effort throughout: telemetry never turns an
+            # upgrade into an error.
+            def _stage(name: str) -> None:
+                try:
+                    from kiln.daily_stats import record_update_nudge
+
+                    record_update_nudge(name)
+                except Exception:  # noqa: BLE001
+                    pass
+
+            _stage("upgrade_attempted")
             try:
                 result = self_update.perform_upgrade(force=force)
             except Exception as exc:  # noqa: BLE001 -- never surface a raw traceback
                 _logger.exception("Unexpected error in upgrade_kiln")
+                _stage("upgrade_failed")
                 return _srv._error_dict(
                     f"Update failed unexpectedly: {exc}. You can run it yourself: "
                     f"{self_update.UPGRADE_COMMAND}",
                     code="INTERNAL_ERROR",
                 )
+            # A mid-print defer is neither a yes nor a no — the user was
+            # never asked to choose, so counting it as a failure would
+            # read as "upgrades are broken" when the safety rule worked.
+            if result.get("status") == "deferred_active_print":
+                _stage("upgrade_deferred")
+            elif result.get("ok"):
+                _stage("upgrade_ok")
+            else:
+                _stage("upgrade_failed")
             return {"success": bool(result.get("ok")), **result}
 
         # ------------------------------------------------------------------
