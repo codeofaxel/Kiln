@@ -78,6 +78,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Preview pictures now match the 3D viewer.** Kiln's stills get the same
+  studio lighting as the model viewer instead of the flat grey render — in
+  your chosen filament colour, from the angles Kiln already picks for your
+  model's shape. Nothing to install; where it isn't available, previews look
+  exactly as before.
+
 - **You can no longer type your own limit above Kiln's.** Upgraded your
   printer? Declare the hardware and Kiln raises the limit to the one it has
   checked for that setup. Hardware Kiln hasn't checked stays at the stock
