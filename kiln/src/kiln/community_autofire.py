@@ -242,6 +242,14 @@ def detect_identity_conflict(adapter: Any) -> tuple[str, str] | None:
     or one of Kiln's identity tables is wrong.  The second is what made
     printer-model inference unsafe in 2026-04 — surfacing it is how we
     find out before a user does.
+
+    KNOWN GAP for whoever wires the ``kiln doctor`` check: this sees
+    only DECLARED-vs-PROBED conflicts.  An adapter whose own identity
+    channels disagree internally (Bambu's serial prefix vs firmware
+    product_name) reports no model at all, so it reads here as "no
+    probe answer" rather than a conflict.  That case is logged as a
+    warning by the adapter itself; a complete doctor check should read
+    both signals.
     """
     if adapter is None:
         return None
