@@ -3317,3 +3317,95 @@ class TestMqttSingleClientErrorMessaging:
             mock_ftp_cls.return_value.connect.side_effect = exc
             with pytest.raises(PrinterError, match="refused"):
                 adapter._ftp_connect()
+
+
+# ---------------------------------------------------------------------------
+# Printer model self-report (get_printer_info)
+# ---------------------------------------------------------------------------
+
+
+class TestGetPrinterInfo:
+    """Model self-report for telemetry — MQTT product_name first, then
+    the verified serial-prefix table.  Telemetry/display only: the
+    probe must never touch ``_printer_model`` (config-declared, drives
+    AMS interpretation and safety keying)."""
+
+    def test_product_name_from_mqtt_get_version_payload(self) -> None:
+        """A get_version reply carrying product_name resolves the model."""
+        adapter = _adapter()
+        msg = mock.MagicMock()
+        msg.payload = json.dumps({
+            "info": {
+                "command": "get_version",
+                "module": [
+                    {"name": "ota", "hw_ver": "OTA",
+                     "product_name": "Bambu Lab P1S", "sw_ver": "01.08.00.00"},
+                    {"name": "esp32", "hw_ver": "AP04", "product_name": ""},
+                ],
+            }
+        }).encode()
+        adapter._on_message(mock.MagicMock(), None, msg)
+
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == "bambu_p1s"
+        assert info.raw_model == "Bambu Lab P1S"
+        assert info.source == "mqtt"
+
+    def test_accessory_product_name_not_reported_as_printer(self) -> None:
+        """An AMS module's product_name must never masquerade as the
+        printer model; with no printer module reporting one, resolution
+        falls to the serial prefix (01P → P1S)."""
+        adapter = _adapter()
+        adapter._fw_modules = [
+            {"name": "ams/0", "product_name": "Bambu Lab AMS 2 Pro"},
+        ]
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == "bambu_p1s"
+        assert info.source == "serial_prefix"
+
+    def test_accessory_before_printer_module_still_resolves_printer(self) -> None:
+        adapter = _adapter()
+        adapter._fw_modules = [
+            {"name": "ams/0", "product_name": "Bambu Lab AMS 2 Pro"},
+            {"name": "ota", "product_name": "Bambu Lab A1 mini"},
+        ]
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == "bambu_a1_mini"
+        assert info.source == "mqtt"
+
+    def test_serial_prefix_fallback_when_no_modules_cached(self) -> None:
+        """X1-series firmware never reports product_name; the verified
+        serial-prefix table answers instead (00M → X1C)."""
+        adapter = _adapter(serial="00M09A312345678")
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == "bambu_x1c"
+        assert info.raw_model == "00M"
+        assert info.source == "serial_prefix"
+
+    def test_lowercase_serial_still_matches_prefix(self) -> None:
+        adapter = _adapter(serial="00m09a312345678")
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == "bambu_x1c"
+
+    def test_unknown_serial_prefix_reports_nothing(self) -> None:
+        """Unknown hardware stays at family grain — no guessing."""
+        adapter = _adapter(serial="ZZZ00A000000001")
+        assert adapter.get_printer_info() is None
+
+    def test_probe_never_writes_config_declared_model(self) -> None:
+        """SAFETY BOUNDARY: the probe result must not leak into
+        ``_printer_model`` — config.yaml owns behavior; the probe is
+        telemetry only (commit a19e665b)."""
+        adapter = _adapter(printer_model="bambu_p1s")
+        adapter._fw_modules = [
+            {"name": "ota", "product_name": "Bambu Lab A1 mini"},
+        ]
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == "bambu_a1_mini"  # probe reports what it saw
+        assert adapter._printer_model == "bambu_p1s"  # config untouched

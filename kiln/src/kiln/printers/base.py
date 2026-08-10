@@ -311,6 +311,31 @@ class FirmwareUpdateResult:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class PrinterInfo:
+    """A printer's self-reported identity, for telemetry and display.
+
+    ``model`` is Kiln's canonical model key (``"bambu_a1"``,
+    ``"prusa_mk4"``, ...) when the self-report maps to one, otherwise
+    the device's own model string verbatim — still exact grain, just
+    not a key ``printer_intelligence.json`` knows yet.  ``raw_model``
+    preserves what the device actually said before normalization, and
+    ``source`` names the channel it said it through (``"mqtt"``,
+    ``"http"``, ``"serial_prefix"``, ``"config"``).
+
+    Never carries serial numbers, hostnames, or addresses — instances
+    flow into the telemetry heartbeat and community aggregation, which
+    are model-grain by design.
+    """
+
+    model: str | None = None
+    raw_model: str | None = None
+    source: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 # ---------------------------------------------------------------------------
 # Abstract base class
 # ---------------------------------------------------------------------------
@@ -853,6 +878,41 @@ class PrinterAdapter(ABC):
         Returns the full URL to the live video stream, or ``None`` if
         streaming is not available.  This is an optional method -- the
         default implementation returns ``None``.
+        """
+        return None
+
+    # -- printer identity self-report (optional) ------------------------
+
+    def get_printer_info(self) -> "PrinterInfo | None":
+        """Return the printer's self-reported model, or ``None``.
+
+        Adapters whose protocol carries a model identity (Bambu MQTT,
+        PrusaLink HTTP, Elegoo SDCP) override this so installs that
+        never set ``printer_model`` in config.yaml still report exact
+        hardware to the telemetry heartbeat instead of adapter-family
+        grain.  The default returns ``None``, which every caller treats
+        as "not reported" and falls through to its config path.
+
+        SAFETY BOUNDARY: this is a telemetry/display report, never a
+        behavior input.  Safety ceilings, temperature clamps, and
+        bed-fit decisions key off the config-declared model
+        (``printer_model`` in config.yaml, read live by
+        ``printer_model_resolver``) — a self-report must never
+        override that declaration where the two disagree; it may fill
+        in only where config is silent.  That split is why
+        printer-model *inference* was scrapped for safety use
+        (commit a19e665b): a wrong guess silently applies wrong
+        limits.  A wrong telemetry row, by contrast, is just a wrong
+        row.  Implementations must therefore not write their probe
+        result into any attribute that behavior reads (e.g. Bambu's
+        ``_printer_model``, which selects AMS interpretation), and
+        must not report build volume or temperature data here.
+
+        Implementations should also stay cheap and bounded: prefer
+        cached protocol state where the transport already carries it,
+        keep any fresh probe to a single short request, and fail fast
+        to ``None`` when the printer is unreachable — callers treat
+        this as best-effort and must keep working without it.
         """
         return None
 

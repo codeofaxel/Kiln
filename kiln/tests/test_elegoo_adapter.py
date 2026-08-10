@@ -899,3 +899,57 @@ class TestHelpers:
 
     def test_safe_int_float(self) -> None:
         assert _safe_int(42.9) == 42
+
+
+# ---------------------------------------------------------------------------
+# Printer model self-report (get_printer_info)
+# ---------------------------------------------------------------------------
+
+
+class TestGetPrinterInfo:
+    """Model self-report from SDCP's Name/MachineName attributes —
+    canonical Kiln key when the name maps, the machine's own name
+    verbatim otherwise.  Telemetry/display only."""
+
+    def test_cached_machine_name_maps_to_canonical_key(self) -> None:
+        adapter = _adapter()
+        adapter._last_status = {"MachineName": "Centauri Carbon"}
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == "elegoo_centauri_carbon"
+        assert info.raw_model == "Centauri Carbon"
+        assert info.source == "sdcp"
+
+    def test_digit_spacing_normalizes_to_canonical_key(self) -> None:
+        """"Neptune 4" must land on elegoo_neptune4, not elegoo_neptune_4."""
+        adapter = _adapter()
+        adapter._last_status = {"Name": "Neptune 4"}
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == "elegoo_neptune4"
+
+    def test_unmapped_name_reported_verbatim(self) -> None:
+        adapter = _adapter()
+        adapter._last_status = {"MachineName": "Mars 5 Ultra"}
+        info = adapter.get_printer_info()
+        assert info is not None
+        assert info.model == "Mars 5 Ultra"
+        assert info.raw_model == "Mars 5 Ultra"
+
+    def test_fresh_attributes_fetched_when_nothing_cached(self) -> None:
+        adapter = _adapter()
+        response = {"Data": {"MachineName": "Centauri Carbon"}}
+        with mock.patch.object(
+            adapter, "_send_command", return_value=response
+        ) as m:
+            info = adapter.get_printer_info()
+        m.assert_called_once()
+        assert info is not None
+        assert info.model == "elegoo_centauri_carbon"
+
+    def test_unreachable_printer_reports_nothing(self) -> None:
+        adapter = _adapter()
+        with mock.patch.object(
+            adapter, "_send_command", side_effect=PrinterError("down")
+        ):
+            assert adapter.get_printer_info() is None

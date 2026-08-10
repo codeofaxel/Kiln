@@ -150,14 +150,17 @@ def auto_contribute_completion(
 def resolve_adapter_model(adapter: Any) -> str | None:
     """The adapter's model string, via every spelling an adapter actually has.
 
-    ``adapter.get_printer_info()`` is a method NO production adapter
-    implements — every community call site that used it got an
-    AttributeError into a bare except and contributed
+    ``adapter.get_printer_info()`` spent months as a method NO
+    production adapter implemented — every community call site that
+    used it got an AttributeError into a bare except and contributed
     ``printer_model="unknown"`` (the heartbeat hit the identical bug on
     2026-07-25: 630 of 670 rows NULL — and was fixed with this fallback
-    chain while the community sites were not).  One resolver, imported by
-    every contribution path, so the next adapter attribute rename is one
-    edit instead of a re-run of that incident.
+    chain while the community sites were not).  The Bambu / PrusaLink /
+    Elegoo adapters grew real implementations in 2026-08, so the probe
+    branch now resolves exact models; the attribute chain stays as the
+    fallback.  One resolver, imported by every contribution path, so
+    the next adapter attribute rename is one edit instead of a re-run
+    of that incident.
     """
     if adapter is None:
         return None

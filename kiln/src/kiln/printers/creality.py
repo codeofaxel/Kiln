@@ -732,6 +732,22 @@ class CrealityAdapter(PrinterAdapter):
         return "creality"
 
     @property
+    def printer_model(self) -> str | None:
+        """The config-declared model, normalized to Kiln's profile key.
+
+        Creality's transport here is Moonraker, and Moonraker does not
+        self-report a vendor model — so unlike the Bambu/PrusaLink/
+        Elegoo live probes, this is the user's own ``model`` hint from
+        config, exposed under the attribute name the telemetry
+        heartbeat and community-aggregation resolvers already read.
+        Config-sourced by definition, so the config-wins-for-safety
+        rule is trivially satisfied.  Returns ``None`` when no model
+        was configured (family grain — honest for a DIY-agnostic
+        Klipper transport).
+        """
+        return _normalise_model_hint(self._model)
+
+    @property
     def capabilities(self) -> PrinterCapabilities:
         return self._backend.capabilities
 

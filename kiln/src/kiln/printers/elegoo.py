@@ -33,6 +33,7 @@ import http.server
 import json
 import logging
 import os
+import re
 import socket
 import threading
 import time
@@ -48,6 +49,7 @@ from kiln.printers.base import (
     PrinterCapabilities,
     PrinterError,
     PrinterFile,
+    PrinterInfo,
     PrinterState,
     PrinterStatus,
     PrintResult,
@@ -366,6 +368,42 @@ class ElegooAdapter(PrinterAdapter):
             can_stream=True,
             supported_extensions=(".gcode", ".gco", ".ctb", ".3mf"),
         )
+
+    def get_printer_info(self) -> PrinterInfo | None:
+        """The printer's self-reported model, for telemetry and display.
+
+        SDCP machines announce their model as free text in the
+        ``Name``/``MachineName`` attribute fields — the same fields the
+        fan-control FDM gate already trusts.  Resolution goes through
+        :meth:`_resolve_machine_name` (cached attributes first, one
+        bounded fetch otherwise).  When the normalized name matches a
+        Kiln canonical key (``elegoo_centauri_carbon``, ...) that key
+        is reported; otherwise the machine's own name verbatim — still
+        exact grain, just not a key ``printer_intelligence.json``
+        knows yet.
+
+        SAFETY BOUNDARY: telemetry/display only.  The config-declared
+        model (``printer_model`` in config.yaml) owns every safety and
+        behavior decision; this self-report must never override it
+        where the two disagree — it fills in only where config is
+        silent (see ``PrinterAdapter.get_printer_info`` and commit
+        a19e665b).
+        """
+        name = self._resolve_machine_name().strip()
+        if not name:
+            return None
+        norm = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+        # "neptune_4" -> "neptune4", matching canonical key spelling.
+        norm = re.sub(r"(?<=[a-z])_(?=\d)", "", norm)
+        candidate = norm if norm.startswith("elegoo_") else f"elegoo_{norm}"
+        try:
+            from kiln.printer_intelligence import list_intel_profiles
+
+            if candidate in list_intel_profiles():
+                return PrinterInfo(model=candidate, raw_model=name, source="sdcp")
+        except Exception:  # noqa: BLE001 — intelligence lookup is optional
+            pass
+        return PrinterInfo(model=name, raw_model=name, source="sdcp")
 
     # ------------------------------------------------------------------
     # Internal: WebSocket

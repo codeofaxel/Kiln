@@ -1,12 +1,15 @@
 """Heartbeat printer-model resolution.
 
 Regression guard for a silent production blindness: the heartbeat
-resolved the model via ``adapter.get_printer_info()`` — a method no
-adapter has ever implemented — so every call raised into a bare except
-and 630 of 670 production heartbeat rows carried a NULL model while
-adapter_type resolved fine for the same rows.  The fix resolves the way
-the registry's own fleet view does (the ``printer_model`` attribute)
-plus config.yaml via printer_model_resolver.
+resolved the model via ``adapter.get_printer_info()`` — for months a
+method no adapter implemented — so every call raised into a bare
+except and 630 of 670 production heartbeat rows carried a NULL model
+while adapter_type resolved fine for the same rows.  The fix resolves
+the way the registry's own fleet view does (the ``printer_model``
+attribute) plus config.yaml via printer_model_resolver.  Since 2026-08
+the Bambu / PrusaLink / Elegoo adapters implement the probe for real,
+so the probe-first order now yields exact models for installs that
+never configured one — the live-probe tests at the bottom cover that.
 """
 from __future__ import annotations
 
@@ -186,3 +189,67 @@ def test_all_adapter_types_and_default_classifier_agree(monkeypatch):
 def test_empty_registry_yields_no_families(monkeypatch):
     _install_registry(monkeypatch, {})
     assert heartbeat._get_all_adapter_types() == []
+
+
+# ---------------------------------------------------------------------------
+# Live probe resolution — adapters implement get_printer_info() now
+# ---------------------------------------------------------------------------
+
+
+class _RaisingProbeAdapter:
+    """Probe blows up (printer offline mid-call); attribute must answer."""
+
+    _printer_model = "bambu_p1s"
+
+    def get_printer_info(self):
+        raise RuntimeError("printer offline")
+
+
+class _NoneProbeAdapter:
+    """Probe returns None (base-class default); attribute must answer."""
+
+    _printer_model = "prusa_mini"
+
+    def get_printer_info(self):
+        return None
+
+
+def test_adapter_model_resolves_from_real_bambu_probe():
+    """End-to-end through a REAL adapter: a BambuAdapter that never set
+    printer_model in config still self-reports via its serial prefix."""
+    from kiln.printers.bambu import BambuAdapter
+
+    adapter = BambuAdapter(
+        host="192.168.1.100",
+        access_code="12345678",
+        serial="00M09A312345678",  # 00M → X1C, per Bambu's own SN scheme
+    )
+    assert heartbeat._adapter_model(adapter) == "bambu_x1c"
+
+
+def test_adapter_model_falls_back_when_probe_raises():
+    assert heartbeat._adapter_model(_RaisingProbeAdapter()) == "bambu_p1s"
+
+
+def test_adapter_model_falls_back_when_probe_returns_none():
+    assert heartbeat._adapter_model(_NoneProbeAdapter()) == "prusa_mini"
+
+
+def test_all_models_include_probe_resolved_fleet(monkeypatch, tmp_path):
+    """A mixed fleet: one probe-capable adapter, one attribute-only,
+    one silent — the aggregate walks all three without cross-talk."""
+    from kiln.printers.bambu import BambuAdapter
+
+    probing = BambuAdapter(
+        host="192.168.1.100", access_code="1", serial="03009A312345678"
+    )  # 030 → A1 mini
+    _install_registry(monkeypatch, {
+        "probing": probing,
+        "declared": _AttrAdapter("prusa_xl"),
+        "silent": _AttrAdapter(None),
+    })
+    config = tmp_path / "config.yaml"
+    config.write_text("printers: {}\n")
+    monkeypatch.setattr(printer_model_resolver, "_CONFIG_PATH", config)
+    models = heartbeat._get_all_printer_models()
+    assert models == ["bambu_a1_mini", "prusa_xl"]

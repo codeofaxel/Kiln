@@ -125,18 +125,21 @@ def _mark_sent() -> None:
 def _adapter_model(adapter: object) -> str | None:
     """Best-effort model name for one adapter.
 
-    Resolution order matters — this function replaces a call to
-    ``adapter.get_printer_info()``, a method NO adapter has ever
-    implemented: every call raised AttributeError into a bare except,
-    so production heartbeats carried a NULL model for every install
-    whose registry was otherwise fine (2026-07-25: 630 of 670 rows
-    NULL while adapter_type resolved for hundreds of them).
+    Resolution order matters.  ``get_printer_info()`` spent months as
+    a method NO adapter implemented: every call raised AttributeError
+    into a bare except, so production heartbeats carried a NULL model
+    for every install whose registry was otherwise fine (2026-07-25:
+    630 of 670 rows NULL while adapter_type resolved for hundreds of
+    them).  The guarded probe-first order below is what let the
+    Bambu / PrusaLink / Elegoo adapters win automatically when they
+    grew real implementations (2026-08).
 
-    1. ``get_printer_info()`` — kept first, guarded, so an adapter that
-       grows a live-probe method someday wins automatically.
+    1. ``get_printer_info()`` — the adapter's live self-report.
+       Telemetry/display grain only; safety decisions stay keyed to
+       config.yaml (see ``PrinterAdapter.get_printer_info``).
     2. The ``printer_model`` / ``_printer_model`` attribute — the same
        source the registry's own fleet view reads (``_model_for`` in
-       kiln/registry.py); Bambu carries it when configured.
+       kiln/registry.py); Bambu and Creality carry it when configured.
     """
     try:
         info = adapter.get_printer_info()  # type: ignore[attr-defined]

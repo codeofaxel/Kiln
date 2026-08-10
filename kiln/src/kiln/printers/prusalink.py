@@ -32,6 +32,7 @@ from kiln.printers.base import (
     PrinterCapabilities,
     PrinterError,
     PrinterFile,
+    PrinterInfo,
     PrinterState,
     PrinterStatus,
     PrintResult,
@@ -43,6 +44,48 @@ logger = logging.getLogger(__name__)
 _RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({502, 503, 504})
 _FILE_ROOTS: tuple[str, ...] = ("usb", "local")
 _FILE_ROOT_FALLBACK_HTTP_CODES: tuple[int, ...] = (403, 404)
+
+# Printer type codes reported in the ``printer`` field of GET /api/version
+# by PrusaLink on Buddy firmware (MINI / MK3.5 / MK3.9 / MK4 / XL / iX /
+# Core One).  Verified against Prusa-Firmware-Buddy
+# include/common/printer_model_data.hpp (master, checked 2026-08-09):
+# the field is PrinterVersion{type, version, subversion} formatted
+# "%i.%i.%i" by get_version() in lib/WUI/link_content/basic_gets.cpp.
+_PRUSA_TYPE_CODES: dict[str, str] = {
+    "1.3.0": "prusa_mk3",
+    "1.3.1": "prusa_mk3s",
+    "1.3.5": "prusa_mk3_5",
+    "1.3.6": "prusa_mk3_5s",
+    "1.3.9": "prusa_mk3_9",
+    "1.3.10": "prusa_mk3_9s",
+    "1.4.0": "prusa_mk4",
+    "1.4.1": "prusa_mk4s",
+    "2.1.0": "prusa_mini",
+    "3.1.0": "prusa_xl",
+    "4.1.0": "prusa_ix",
+    "7.1.0": "prusa_core_one",
+    "7.2.0": "prusa_core_one",  # COREONEOAK, a Core One variant
+    "8.1.0": "prusa_core_one_l",
+    # Deliberately absent: "5.1.0" — Buddy assigns it to the XL dev kit
+    # while the Prusa Connect SDK assigns it to the SL1 resin printer,
+    # so the code alone is ambiguous.  Also absent: 7.10.0 / 8.10.0
+    # (Core One iNdx industrial variants) — too new to trust the codes
+    # as settled.  Unknown codes report nothing (family grain).
+}
+
+# Printer type names reported by the Python PrusaLink (MK3-era printers
+# with a Pi) in the ``original`` field of GET /api/version, formatted
+# "PrusaLink <TYPE>".  Verified against prusa3d/Prusa-Link
+# prusa/link/web/main.py api_version() and the PrinterType enum in
+# prusa3d/Prusa-Connect-SDK-Printer prusa/connect/printer/const.py
+# (master, checked 2026-08-09).  FDM members only — the enum's resin
+# entries (SL1, SL1S, M1) don't run PrusaLink and are left out.
+_PRUSA_ORIGINAL_NAMES: dict[str, str] = {
+    "I3MK25": "prusa_mk2_5",
+    "I3MK25S": "prusa_mk2_5s",
+    "I3MK3": "prusa_mk3",
+    "I3MK3S": "prusa_mk3s",
+}
 
 # Prusa Link printer states → PrinterStatus
 _STATE_MAP: dict[str, PrinterStatus] = {
@@ -243,6 +286,10 @@ class PrusaLinkAdapter(PrinterAdapter):
         # kiln-pro wear-signal log every poll cycle.
         self._prior_state: str | None = None
 
+        # Successful get_printer_info() result, cached for the session —
+        # the hardware behind a host:port doesn't change mid-process.
+        self._printer_info: PrinterInfo | None = None
+
     # -- PrinterAdapter identity properties ---------------------------------
 
     @property
@@ -264,6 +311,51 @@ class PrusaLinkAdapter(PrinterAdapter):
             can_pause=True,
             supported_extensions=(".gcode", ".gco", ".g", ".bgcode"),
         )
+
+    def get_printer_info(self) -> PrinterInfo | None:
+        """The printer's self-reported model, for telemetry and display.
+
+        One GET /api/version, parsed against the two real PrusaLink
+        implementations:
+
+        * Buddy firmware (MINI / MK3.5 / MK3.9 / MK4 / XL / iX / Core
+          One) reports a ``printer`` type code like ``"1.4.1"``, mapped
+          through :data:`_PRUSA_TYPE_CODES`.
+        * The Python PrusaLink (MK3-era printers with a Pi) reports an
+          ``original`` string like ``"PrusaLink I3MK3S"``, mapped
+          through :data:`_PRUSA_ORIGINAL_NAMES`.
+
+        A successful result is cached for the adapter's lifetime; an
+        unreachable printer or unknown code returns ``None`` and the
+        caller keeps its family-grain fallback.
+
+        SAFETY BOUNDARY: telemetry/display only.  The config-declared
+        model (``printer_model`` in config.yaml) owns every safety and
+        behavior decision; this self-report must never override it
+        where the two disagree — it fills in only where config is
+        silent (see ``PrinterAdapter.get_printer_info`` and commit
+        a19e665b).
+        """
+        if self._printer_info is not None:
+            return self._printer_info
+        try:
+            data = self._get_json("/api/version")
+        except PrinterError:
+            return None
+        code = str(data.get("printer") or "").strip()
+        model = _PRUSA_TYPE_CODES.get(code)
+        if model:
+            self._printer_info = PrinterInfo(model=model, raw_model=code, source="http")
+            return self._printer_info
+        original = str(data.get("original") or "").strip()
+        type_name = original.removeprefix("PrusaLink").strip().upper()
+        model = _PRUSA_ORIGINAL_NAMES.get(type_name)
+        if model:
+            self._printer_info = PrinterInfo(
+                model=model, raw_model=original, source="http"
+            )
+            return self._printer_info
+        return None
 
     # ------------------------------------------------------------------
     # Internal HTTP helpers

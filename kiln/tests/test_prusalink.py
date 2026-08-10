@@ -600,3 +600,94 @@ class TestHelpers:
         a = _adapter()
         assert "PrusaLinkAdapter" in repr(a)
         assert "prusa.local" in repr(a)
+
+
+# ---------------------------------------------------------------------------
+# Printer model self-report (get_printer_info)
+# ---------------------------------------------------------------------------
+
+
+class TestGetPrinterInfo:
+    """Model self-report via GET /api/version, parsed against both real
+    PrusaLink implementations: Buddy firmware reports a ``printer``
+    type code; the Python MK3-era PrusaLink reports an ``original``
+    name string.  Telemetry/display only — config.yaml keeps owning
+    safety decisions."""
+
+    def test_buddy_type_code_resolves_model(self):
+        a = _adapter()
+        payload = {
+            "api": "1.0.0",
+            "server": "2.1.2",
+            "text": "PrusaLink",
+            "firmware": "6.1.3",
+            "printer": "1.4.1",
+        }
+        with patch.object(a, "_get_json", return_value=payload) as m:
+            info = a.get_printer_info()
+        m.assert_called_once_with("/api/version")
+        assert info is not None
+        assert info.model == "prusa_mk4s"
+        assert info.raw_model == "1.4.1"
+        assert info.source == "http"
+
+    @pytest.mark.parametrize(
+        ("code", "expected"),
+        [
+            ("1.3.0", "prusa_mk3"),
+            ("1.3.1", "prusa_mk3s"),
+            ("2.1.0", "prusa_mini"),
+            ("3.1.0", "prusa_xl"),
+            ("7.1.0", "prusa_core_one"),
+        ],
+    )
+    def test_known_type_codes(self, code, expected):
+        a = _adapter()
+        with patch.object(a, "_get_json", return_value={"printer": code}):
+            info = a.get_printer_info()
+        assert info is not None and info.model == expected
+
+    def test_python_prusalink_original_field_resolves_model(self):
+        a = _adapter()
+        payload = {
+            "api": "2.0.0",
+            "server": "0.8.1",
+            "original": "PrusaLink I3MK3S",
+            "text": "PrusaLink 0.8.1",
+        }
+        with patch.object(a, "_get_json", return_value=payload):
+            info = a.get_printer_info()
+        assert info is not None
+        assert info.model == "prusa_mk3s"
+        assert info.raw_model == "PrusaLink I3MK3S"
+
+    def test_unknown_code_reports_nothing(self):
+        """Unknown or ambiguous codes stay at family grain — the
+        deliberately unmapped 5.1.0 (XL dev kit vs SL1 clash) included."""
+        a = _adapter()
+        for payload in ({"printer": "5.1.0"}, {"printer": "9.9.9"}, {}):
+            with patch.object(a, "_get_json", return_value=payload):
+                assert a.get_printer_info() is None
+
+    def test_unreachable_printer_reports_nothing(self):
+        a = _adapter()
+        with patch.object(a, "_get_json", side_effect=PrinterError("down")):
+            assert a.get_printer_info() is None
+
+    def test_success_is_cached_for_the_session(self):
+        a = _adapter()
+        with patch.object(a, "_get_json", return_value={"printer": "2.1.0"}) as m:
+            first = a.get_printer_info()
+            second = a.get_printer_info()
+        m.assert_called_once()
+        assert first is second
+        assert first is not None and first.model == "prusa_mini"
+
+    def test_failure_is_not_cached(self):
+        """An offline probe must not poison later attempts."""
+        a = _adapter()
+        with patch.object(a, "_get_json", side_effect=PrinterError("down")):
+            assert a.get_printer_info() is None
+        with patch.object(a, "_get_json", return_value={"printer": "1.4.0"}):
+            info = a.get_printer_info()
+        assert info is not None and info.model == "prusa_mk4"

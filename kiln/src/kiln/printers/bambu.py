@@ -45,6 +45,7 @@ from kiln.printers.base import (
     PrinterCapabilities,
     PrinterError,
     PrinterFile,
+    PrinterInfo,
     PrinterState,
     PrinterStatus,
     PrintResult,
@@ -782,6 +783,58 @@ class BambuAdapter(PrinterAdapter):
             can_stream=True,
             supported_extensions=(".3mf", ".gcode", ".gco"),
         )
+
+    def get_printer_info(self) -> PrinterInfo | None:
+        """The printer's self-reported model, for telemetry and display.
+
+        Two verified identity channels, no new I/O:
+
+        1. ``product_name`` from the cached ``get_version`` firmware
+           module list (``self._fw_modules``) — the printer's own exact
+           model string, e.g. ``"Bambu Lab P1S"``.  X1-series firmware
+           never reports this field, and the legacy hw_ver/project_name
+           matching that covered it is unreliable on newer firmware
+           (hardware revisions re-use hw_ver codes), so it is
+           deliberately not used here.
+        2. The serial-number prefix, mapped through
+           :data:`_BAMBU_MODEL_FAMILIES` — the same table the 3MF
+           mismatch check trusts, verified against
+           wiki.bambulab.com/en/general/find-sn.  Covers the X1 series
+           and any session where no ``get_version`` reply is cached.
+
+        SAFETY BOUNDARY: telemetry/display only.  The config-declared
+        model (``printer_model`` in config.yaml) owns every safety and
+        behavior decision — including this adapter's own
+        ``_printer_model`` attribute, which selects AMS-Lite vs full
+        AMS interpretation.  This probe never writes to that attribute
+        and its result must never override config where the two
+        disagree; it fills in only where config is silent (see
+        ``PrinterAdapter.get_printer_info`` and commit a19e665b).
+        """
+        with self._state_lock:
+            modules = list(self._fw_modules)
+        for mod in modules:
+            if not isinstance(mod, dict):
+                continue
+            product_name = str(mod.get("product_name") or "").strip()
+            family = _BAMBU_MODEL_FAMILIES.get(product_name) if product_name else None
+            if family:
+                return PrinterInfo(
+                    model=f"bambu_{family}", raw_model=product_name, source="mqtt"
+                )
+            # An unmapped product_name is deliberately NOT reported
+            # verbatim: accessory modules (AMS units) can carry a
+            # product_name of their own, and a verbatim fallback would
+            # report the accessory as the printer.  Unmapped names fall
+            # through to the serial prefix; a genuinely new model means
+            # one new row in _BAMBU_MODEL_FAMILIES.
+        prefix = self._serial[:3].upper()
+        family = _BAMBU_MODEL_FAMILIES.get(prefix)
+        if family:
+            return PrinterInfo(
+                model=f"bambu_{family}", raw_model=prefix, source="serial_prefix"
+            )
+        return None
 
     # ------------------------------------------------------------------
     # Internal: MQTT

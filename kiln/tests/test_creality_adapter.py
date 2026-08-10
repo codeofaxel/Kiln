@@ -260,3 +260,33 @@ class TestCrealityResumeInheritsHonesty:
         assert "no paused print" in result.message.lower()
         # The gate fired before delegating — no resume command was sent.
         adapter._backend._resume_print_impl.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# printer_model property (config echo for telemetry)
+# ---------------------------------------------------------------------------
+
+
+class TestPrinterModelProperty:
+    """Moonraker doesn't self-report a vendor model, so the adapter
+    exposes the config-declared hint under the attribute name the
+    heartbeat and community resolvers read — normalized to Kiln's
+    profile key.  None when unconfigured (family grain)."""
+
+    def _adapter(self, model: str | None) -> CrealityAdapter:
+        with patch("kiln.printers.creality.requests.get") as mock_get:
+            mock_get.return_value = _ok_response(
+                {"result": {"klippy_state": "ready"}}
+            )
+            return CrealityAdapter(
+                "k1-max.local", model=model, timeout=5, retries=1
+            )
+
+    def test_configured_model_normalized(self):
+        assert self._adapter("K1 Max").printer_model == "k1_max"
+
+    def test_already_canonical_passthrough(self):
+        assert self._adapter("k1_max").printer_model == "k1_max"
+
+    def test_unconfigured_reports_nothing(self):
+        assert self._adapter(None).printer_model is None
