@@ -694,7 +694,31 @@ def visualize_model(
         views: list[dict] = []
         stem = Path(file_path).stem
 
-        for label, description in selected:
+        # Stage-look backend: photograph the same three.js stage the web
+        # viewer and inline conversation viewer render, when this machine
+        # can (a chromium-family browser + a still-capable cached stage
+        # document — see kiln.stage_still).  Any miss falls through to
+        # the OpenSCAD loop below unchanged, which also remains the only
+        # renderer for caller-specified colors (the stage ignores them)
+        # and for machines with no browser.  All-or-nothing per result:
+        # one preview never mixes two looks.
+        used_stage = False
+        if not color:
+            from kiln.stage_still import try_render_stage_views
+
+            stage_views = try_render_stage_views(
+                file_path,
+                selected,
+                angle_rotations,
+                output_dir=output_dir,
+                width=width,
+                height=height,
+            )
+            if stage_views:
+                views = stage_views
+                used_stage = True
+
+        for label, description in (selected if not used_stage else []):
             rx, ry, rz = angle_rotations[label]
             # Model is now centered at origin via translate in the wrapper,
             # so camera targets 0,0,0 with the computed distance.
@@ -797,6 +821,10 @@ def visualize_model(
             "output_dir": output_dir,
             "file_path": file_path,
             "file_type": ext,
+            # Which engine produced the pixels — "stage" is the browser
+            # photograph of the shared three.js stage, "openscad" the
+            # canonical fallback.  Agents and tests branch on this.
+            "renderer": "stage" if used_stage else "openscad",
             "rendered": len(successful),
             "failed": len(failed),
             "message": (

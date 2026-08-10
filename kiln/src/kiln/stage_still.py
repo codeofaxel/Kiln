@@ -1,0 +1,370 @@
+"""Stage-look still renders through a local headless browser.
+
+WHAT THIS IS
+------------
+The beauty backend for :func:`kiln.model_visualizer.visualize_model`.
+Kiln has exactly one calibrated "look" — the three.js stage the web
+viewer, the inline conversation viewer, and the ``/view`` page all
+render.  When this machine has a chromium-family browser and a cached
+copy of that stage document, a still image is produced by *photographing
+the stage itself*: load the document headlessly, hand it the mesh
+payload, screenshot the settled frame.  The lighting recipe is never
+re-implemented here — a still is a picture of the stage, so stills can
+never drift from what users see in the viewer.
+
+WHEN IT RUNS (and when it must not)
+-----------------------------------
+Everything here is best-effort and silent.  The OpenSCAD renderer in
+``model_visualizer`` remains the canonical, always-available path; this
+backend runs only when EVERY precondition holds:
+
+* a chromium-family binary is discoverable (``KILN_STAGE_BROWSER``
+  override, the Playwright browser caches, a system Chrome/Chromium/
+  Edge/Brave, or PATH) — never downloaded, never required;
+* the cached stage document (``kiln.stage_cache``) is present AND
+  still-capable (carries the ``__KILN_STILL__`` still-mode block — an
+  older cached document simply means OpenSCAD until the next refresh);
+* the mesh converts to a full-fidelity viewer payload within generous
+  caps (a mesh too large to inline honestly falls back rather than
+  shipping a downgraded ghost);
+* every requested view screenshots successfully AND passes the
+  blank-frame guard below.
+
+Any miss returns ``None`` and the caller runs OpenSCAD exactly as it
+always has.  ``KILN_NO_STAGE_STILLS=1`` opts out entirely.
+
+THE BLANK-FRAME GUARD
+---------------------
+A headless browser that half-works is worse than one that is absent: it
+exits 0 and writes a picture of an empty stage.  The stage's still mode
+deliberately hides its own waiting/error cards so a failed render reads
+as a near-empty frame, and this module refuses any frame whose luminance
+variation is below ``_MIN_STDDEV`` (an empty stage measures ~9; a real
+still measures 30+).  Without Pillow the guard degrades to a bytes-floor
+heuristic — a blank dark PNG compresses far below any real still.
+
+All-or-nothing: if ANY view fails, every view is discarded and the
+OpenSCAD path renders the full set — one result must not mix two looks.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import logging
+import os
+import shutil
+import subprocess
+import tempfile
+import time
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+#: Path override / opt-out knobs.  ``KILN_STAGE_DOC`` points at a local
+#: stage document (tests and stage development); absent, the cached copy
+#: from :mod:`kiln.stage_cache` is used.
+_BROWSER_ENV = "KILN_STAGE_BROWSER"
+_DOC_ENV = "KILN_STAGE_DOC"
+_OPT_OUT_ENV = "KILN_NO_STAGE_STILLS"
+
+#: The still-mode marker in the stage document.  A cached document from
+#: before still mode shipped renders interactively but cannot pose or
+#: self-deliver a payload — detect that HERE and fall back, instead of
+#: screenshotting a stage that never got the memo.
+_STILL_MARKER = "__KILN_STILL__"
+
+#: Payload caps for a LOCAL render.  The inline-conversation caps
+#: (80k triangles) exist to protect chat transport and model context;
+#: a headless browser on this machine has neither constraint.  Meshes
+#: beyond even these caps fall back to OpenSCAD rather than rendering
+#: a silently decimated ghost of the user's part.
+_STILL_MAX_TRIANGLES = 600_000
+_STILL_MAX_BYTES = 64 * 1024 * 1024
+
+#: Virtual-time budget handed to the browser.  Virtual time fast-forwards
+#: timers and animation frames deterministically, so this is generous
+#: headroom, not wall-clock waiting.
+_VIRTUAL_TIME_MS = 9_000
+
+#: Wall-clock ceiling per view — SwiftShader on a big mesh is CPU-bound
+#: and a hung browser must never hang a preview call.
+_VIEW_TIMEOUT_S = 60
+
+#: Blank-frame guard thresholds, calibrated against real captures
+#: (2026-08-09): an empty stage frame measures luminance stddev ~9, a
+#: real still 32-57.  The bytes floor is the no-Pillow fallback: a blank
+#: 1000x750 frame compressed to ~16 KB, real stills to 80-120 KB.
+_MIN_STDDEV = 15.0
+_MIN_BYTES_PER_25_PX = 1  # floor = (width * height) // 25 bytes
+
+
+def _browser_candidates() -> list[Path]:
+    """Chromium-family binaries this machine might have, best first.
+
+    Playwright caches lead (headless-shell is purpose-built and has no
+    profile/UI baggage), newest build first; system browsers follow;
+    PATH lookups last.  Nothing is ever downloaded.
+    """
+    out: list[Path] = []
+    for cache in (
+        Path.home() / "Library" / "Caches" / "ms-playwright",
+        Path.home() / ".cache" / "ms-playwright",
+    ):
+        for pattern in (
+            "chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell",
+            "chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium",
+            "chromium-*/chrome-linux/chrome",
+        ):
+            out.extend(sorted(cache.glob(pattern), reverse=True))
+    out.extend(
+        Path(p)
+        for p in (
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+        )
+    )
+    for name in ("chromium", "chromium-browser", "google-chrome",
+                 "google-chrome-stable", "chrome"):
+        found = shutil.which(name)
+        if found:
+            out.append(Path(found))
+    return out
+
+
+def find_browser() -> Path | None:
+    """The browser to photograph with, or ``None`` for "use OpenSCAD".
+
+    An explicit ``KILN_STAGE_BROWSER`` that does not exist returns
+    ``None`` rather than silently scanning on — a stated override that
+    is wrong should surface as "stills stopped being stage-look", not
+    as a mystery browser being used instead.
+    """
+    if os.environ.get(_OPT_OUT_ENV, "").strip():
+        return None
+    override = os.environ.get(_BROWSER_ENV, "").strip()
+    if override:
+        p = Path(override)
+        if p.is_file() and os.access(p, os.X_OK):
+            return p
+        logger.debug("stage stills: %s=%s is not an executable", _BROWSER_ENV, override)
+        return None
+    for cand in _browser_candidates():
+        if cand.is_file() and os.access(cand, os.X_OK):
+            return cand
+    return None
+
+
+def _stage_document() -> str | None:
+    """The still-capable stage document, or ``None``.
+
+    Missing document ⇒ kick the background cache warm so the NEXT render
+    can upgrade, and fall back now — a preview call never waits on a
+    download.
+    """
+    override = os.environ.get(_DOC_ENV, "").strip()
+    if override:
+        try:
+            doc = Path(override).read_text(encoding="utf-8")
+        except OSError:
+            return None
+        return doc if _STILL_MARKER in doc else None
+
+    from kiln import stage_cache
+
+    doc = stage_cache.document()
+    if doc is None:
+        stage_cache.warm()
+        return None
+    if _STILL_MARKER not in doc:
+        # Cached from before still mode shipped; refresh in the background.
+        stage_cache.warm()
+        return None
+    return doc
+
+
+def _openscad_rotation_to_orbit(rx: float, rz: float) -> tuple[float, float]:
+    """OpenSCAD camera rotation → stage orbit (azimuth°, elevation°).
+
+    OpenSCAD's ``--camera=..,rx,ry,rz,dist`` tilts from straight-down
+    (``rx=0`` top view, ``90`` horizontal, ``170`` under); the stage
+    orbits by elevation above the horizon.  Azimuth follows the spin
+    angle directly — the payload's baked z-up→y-up rotation keeps the
+    model's front on the stage's front.
+    """
+    return float(rz), 90.0 - float(rx)
+
+
+def _frame_ok(png_path: str, width: int, height: int) -> bool:
+    """The blank-frame guard (see module docstring)."""
+    try:
+        size = os.path.getsize(png_path)
+    except OSError:
+        return False
+    if size <= 0:
+        return False
+    try:
+        from PIL import Image, ImageStat
+    except ImportError:
+        return size >= (width * height) // 25
+    try:
+        with Image.open(png_path) as im:
+            stddev = ImageStat.Stat(im.convert("L")).stddev[0]
+    except Exception:  # noqa: BLE001 — an unreadable frame is a failed frame
+        return False
+    return stddev >= _MIN_STDDEV
+
+
+def _build_harness(document: str, payload: dict, az_deg: float, el_deg: float) -> str | None:
+    """The stage document with this view's still config baked in.
+
+    Data-only injection: the config script lands immediately after
+    ``<body>`` so it exists before the stage script runs.  Every
+    behaviour it triggers lives in the stage document itself.
+    """
+    if document.count("<body>") != 1:
+        logger.debug("stage stills: document has no unique <body> anchor")
+        return None
+    config = json.dumps({"payload": payload, "az_deg": az_deg, "el_deg": el_deg})
+    return document.replace(
+        "<body>", "<body><script>window." + _STILL_MARKER + " = " + config + ";</script>", 1
+    )
+
+
+def _shoot(browser: Path, harness_path: Path, png_path: str,
+           width: int, height: int, profile_dir: Path) -> bool:
+    """One headless screenshot.  True only for exit 0 + a written file."""
+    cmd = [
+        str(browser),
+        "--headless",
+        f"--screenshot={png_path}",
+        f"--window-size={width},{height}",
+        f"--virtual-time-budget={_VIRTUAL_TIME_MS}",
+        "--hide-scrollbars",
+        # WebGL in CLI screenshot mode needs the software rasterizer
+        # spelled out; without these the stage gets no GL context at all.
+        "--use-angle=swiftshader",
+        "--enable-unsafe-swiftshader",
+        f"--user-data-dir={profile_dir}",
+        "--no-first-run",
+        "--disable-extensions",
+        "--disable-crash-reporter",
+        "--mute-audio",
+        f"file://{harness_path}",
+    ]
+    try:
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        logger.debug("stage stills: browser failed to launch: %s", exc)
+        return False
+    # The FILE is the deliverable, the process is disposable: the
+    # headless shell exits cleanly after writing, but full Chrome in CLI
+    # screenshot mode writes the PNG and then never exits (measured
+    # 2026-08-09 — the screenshot lands in seconds, the process hangs
+    # forever).  So poll for a written-and-stable file, and kill the
+    # browser once it exists; waiting for exit would turn every view
+    # into a full timeout on the most common browser there is.
+    deadline = time.monotonic() + _VIEW_TIMEOUT_S
+    last_size = -1
+    try:
+        while time.monotonic() < deadline:
+            size = os.path.getsize(png_path) if os.path.isfile(png_path) else 0
+            rc = proc.poll()
+            if rc is not None:
+                return rc == 0 and size > 0
+            if size > 0 and size == last_size:
+                return True
+            last_size = size
+            time.sleep(0.3)
+        logger.debug("stage stills: browser timed out (%ss)", _VIEW_TIMEOUT_S)
+        return os.path.isfile(png_path) and os.path.getsize(png_path) > 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            with contextlib.suppress(Exception):
+                proc.wait(5)
+
+
+def try_render_stage_views(
+    file_path: str,
+    selected: list[tuple[str, str]],
+    rotations: dict[str, tuple[float, float, float]],
+    *,
+    output_dir: str,
+    width: int,
+    height: int,
+) -> list[dict] | None:
+    """Render every requested view as a stage photograph, or ``None``.
+
+    ``None`` — never a partial list, never an exception — means "run the
+    OpenSCAD path"; the two renderers must not mix inside one result.
+    Arguments mirror the caller's own angle machinery: ``selected`` is
+    its ``(label, description)`` list, ``rotations`` its aspect-adapted
+    ``label → (rx, ry, rz)`` map, so the stage inherits the exact same
+    angle intelligence the OpenSCAD path has always had.
+    """
+    try:
+        browser = find_browser()
+        if browser is None:
+            return None
+        document = _stage_document()
+        if document is None:
+            return None
+
+        from kiln.mesh_payload import mesh_to_viewer_payload
+
+        try:
+            payload = mesh_to_viewer_payload(
+                file_path,
+                max_triangles=_STILL_MAX_TRIANGLES,
+                max_bytes=_STILL_MAX_BYTES,
+            )
+        except Exception as exc:  # noqa: BLE001 — any unreadable source → OpenSCAD
+            logger.debug("stage stills: no payload for %s: %s", file_path, exc)
+            return None
+        if not payload or payload.get("downgraded"):
+            return None
+
+        # Supersample exactly like the OpenSCAD path: shoot oversized,
+        # Lanczos-downscale to the requested size (the shared knob in
+        # kiln.preview_render governs BOTH renderers, so every preview
+        # surface has one crispness policy).  A raw 1x browser frame under
+        # the software rasterizer reads visibly soft.
+        from kiln.preview_render import downscale_png, effective_supersample
+
+        ss = effective_supersample()
+        shot_w, shot_h = width * ss, height * ss
+
+        stem = Path(file_path).stem
+        views: list[dict] = []
+        tmp = Path(tempfile.mkdtemp(prefix="kiln_stage_still_"))
+        try:
+            profile_dir = tmp / "profile"
+            profile_dir.mkdir()
+            for label, description in selected:
+                rx, _ry, rz = rotations[label]
+                az_deg, el_deg = _openscad_rotation_to_orbit(rx, rz)
+                harness = _build_harness(document, payload, az_deg, el_deg)
+                if harness is None:
+                    return None
+                harness_path = tmp / f"still_{label}.html"
+                harness_path.write_text(harness, encoding="utf-8")
+                png_path = os.path.join(output_dir, f"{stem}_{label}.png")
+                if not _shoot(browser, harness_path, png_path, shot_w, shot_h, profile_dir):
+                    return None
+                if not _frame_ok(png_path, shot_w, shot_h):
+                    logger.debug("stage stills: blank frame for %s — falling back", label)
+                    return None
+                if ss > 1:
+                    downscale_png(png_path, width, height)
+                views.append({"angle": label, "description": description, "path": png_path})
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        return views
+    except Exception as exc:  # noqa: BLE001 — this backend must never break a preview
+        logger.debug("stage stills: unexpected failure: %s", exc)
+        return None
