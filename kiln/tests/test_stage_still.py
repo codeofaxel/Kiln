@@ -48,9 +48,16 @@ def cube_stl(tmp_path: Path) -> str:
 
 @pytest.fixture()
 def stage_doc(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A stand-in for the CURRENT stage: still mode and colour support.
+
+    Both markers, because the engine checks for each independently — a
+    fixture carrying only the first would quietly exercise the
+    pre-colour fallback instead of the path under test.
+    """
     doc = tmp_path / "stage.html"
     doc.write_text(
-        "<!doctype html><html><head></head><body><p>stage __KILN_STILL__</p>"
+        "<!doctype html><html><head></head><body>"
+        "<p>stage __KILN_STILL__ reads STILL.color</p>"
         "</body></html>",
         encoding="utf-8",
     )
@@ -261,6 +268,32 @@ def test_doc_without_still_marker_returns_none(
         )
         is None
     )
+
+
+def test_colour_request_against_a_pre_colour_stage_declines(
+    cube_stl: str, good_browser: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Colour support shipped one release after still mode, so a cached
+    stage can support stills and silently ignore the colour — handing
+    back a grey part the caller asked to be red.  A wrong colour is worse
+    than an old look, so that combination declines to OpenSCAD."""
+    doc = tmp_path / "stills_but_no_colour.html"
+    doc.write_text(
+        "<!doctype html><html><body>__KILN_STILL__</body></html>", encoding="utf-8"
+    )
+    monkeypatch.setenv("KILN_STAGE_DOC", str(doc))
+
+    # Without a colour it still renders — the stage is not rejected wholesale.
+    assert try_render_stage_views(
+        cube_stl, [("isometric", "3/4")], _ROTATIONS,
+        output_dir=str(tmp_path), width=64, height=64,
+    ) is not None
+
+    assert try_render_stage_views(
+        cube_stl, [("isometric", "3/4")], _ROTATIONS,
+        output_dir=str(tmp_path), width=64, height=64, color="#FF0000",
+    ) is None
 
 
 def test_unreadable_mesh_returns_none(

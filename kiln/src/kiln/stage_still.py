@@ -84,6 +84,13 @@ _OPT_OUT_ENV = "KILN_NO_STAGE_STILLS"
 #: screenshotting a stage that never got the memo.
 _STILL_MARKER = "__KILN_STILL__"
 
+#: Colour support arrived one release AFTER still mode, so a cached stage
+#: document can honestly support stills and ignore a colour — and ignoring
+#: it means rendering the caller's red part in default grey and calling it
+#: done.  A wrong colour is worse than an old look, so a colour request
+#: against a stage that cannot honour it declines to OpenSCAD.
+_STILL_COLOR_MARKER = "STILL.color"
+
 #: Payload caps for a LOCAL render.  The inline-conversation caps
 #: (80k triangles) exist to protect chat transport and model context;
 #: a headless browser on this machine has neither constraint.  Meshes
@@ -370,6 +377,9 @@ def try_render_stage_views(
             return None
         document = _stage_document()
         if document is None:
+            return None
+        if color and _STILL_COLOR_MARKER not in document:
+            logger.debug("stage stills: cached stage predates colour — using OpenSCAD")
             return None
 
         from kiln.mesh_payload import mesh_to_viewer_payload
