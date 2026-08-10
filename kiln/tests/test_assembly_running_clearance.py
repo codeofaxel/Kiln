@@ -193,3 +193,132 @@ class TestValidationAgrees:
         result = A.validate_joint(iface, parts)
         assert result.issues
         assert "below minimum" in result.issues[0]
+
+
+class TestResponseIsSelfConsistent:
+    """The three numbers in the payload have to agree with each other.
+
+    They did not.  Every material reported a tolerance that took the
+    recommendation BELOW its own floor, so a caller reading
+    `recommended +/- tolerance` designed the gap the recommendation
+    exists to rule out; and TPU came back recommending 1.65 mm against a
+    range of [1.1, 1.1], because the flexible-material bump raises the
+    recommendation after the range is fixed.
+    """
+
+    JOINTS = ("clearance_fit", "loose", "press_fit", "snap_fit",
+              "threaded", "glued", "magnetic")
+    MATERIALS = ("PLA", "PETG", "ABS", "ASA", "Nylon", "TPU", "TPE",
+                 "unobtainium")
+
+    @pytest.mark.parametrize("entitled_caller", [True, False])
+    def test_recommendation_lies_inside_its_own_range(self, entitled_caller):
+        with patch.object(A, "_has_pro_license", lambda: entitled_caller):
+            for joint in self.JOINTS:
+                for material in self.MATERIALS:
+                    for printer in ("bambu_a1", None):
+                        r = A.get_clearance_recommendation(
+                            joint, material, material, printer_id=printer
+                        )
+                        rec = r["recommended_clearance_mm"]
+                        low, high = r["clearance_range_mm"]
+                        assert low <= high, f"{joint}/{material}: range inverted"
+                        assert low - 1e-9 <= rec <= high + 1e-9, (
+                            f"{joint}/{material}/printer={printer}: "
+                            f"recommended {rec} outside range [{low}, {high}]"
+                        )
+
+    def test_a_running_fit_never_offers_give_it_does_not_have(self, entitled):
+        """Below the floor the parts weld, so the minus side of the
+        tolerance may never cross it."""
+        for material in self.MATERIALS:
+            r = A.get_clearance_recommendation(
+                "clearance_fit", material, material, printer_id="bambu_a1"
+            )
+            if not r["running_clearance"]:
+                continue
+            rec = r["recommended_clearance_mm"]
+            floor = r["clearance_range_mm"][0]
+            assert rec - r["tolerance_mm"] >= floor - 1e-9, (
+                f"{material}: recommended-minus-tolerance "
+                f"{rec - r['tolerance_mm']:.3f} is under the {floor:.3f} floor"
+            )
+
+    def test_the_flexible_bump_cannot_escape_the_range(self, entitled):
+        """A threaded TPU joint has always reported 0.30 mm recommended
+        against a 0.15-0.25 mm range on main.  Widening the range to
+        contain its own recommendation changes no advice."""
+        r = A.get_clearance_recommendation(
+            "threaded", "TPU", "TPU", printer_id="bambu_a1"
+        )
+        low, high = r["clearance_range_mm"]
+        assert low <= r["recommended_clearance_mm"] <= high
+
+    def test_the_minimum_is_named_as_a_minimum(self, entitled):
+        r = A.get_clearance_recommendation(
+            "clearance_fit", "PETG", "PETG", printer_id="bambu_a1"
+        )
+        assert "minimum rather than a target" in r["rationale"]
+
+
+class TestCalibrationIsResolvedOncePerSweep:
+    """Validating an assembly asks one unchanging question per interface.
+
+    Resolving calibration scans the filesystem for slicer profiles, so a
+    twenty-interface assembly paid for the same answer twenty times.
+    """
+
+    def test_the_sweep_resolves_calibration_once(self, entitled, parts):
+        calls: list = []
+        real = A._running_clearance_view
+
+        def _counting(joint_type, **kw):
+            if kw.get("cache") is None or (
+                joint_type, kw.get("material"), kw.get("printer_id"),
+                kw.get("mating"),
+            ) not in kw["cache"]:
+                calls.append(joint_type)
+            return real(joint_type, **kw)
+
+        ifaces = [
+            A.MatingInterface("a", "b", "clearance_fit", clearance_mm=0.9)
+            for _ in range(8)
+        ]
+        asm = A.Assembly(
+            assembly_id="x", name="x", parts=parts, interfaces=ifaces
+        )
+        with patch.object(A, "_running_clearance_view", _counting), \
+                patch.object(A, "check_all_clearances", lambda a: None):
+            A.validate_assembly(asm, printer_id="bambu_a1")
+        assert len(calls) == 1, f"resolved calibration {len(calls)} times for 8 joints"
+
+    def test_the_cache_does_not_outlive_the_call(self, entitled, parts):
+        """A cache that survived would answer a later call from slicer
+        profiles the user has since edited."""
+        seen: list = []
+        real = A.validate_joint
+
+        def _spy(interface, parts_, **kw):
+            seen.append(kw.get("_clearance_cache"))
+            return real(interface, parts_, **kw)
+
+        ifaces = [A.MatingInterface("a", "b", "clearance_fit", clearance_mm=0.9)]
+        asm = A.Assembly(assembly_id="x", name="x", parts=parts, interfaces=ifaces)
+        with patch.object(A, "validate_joint", _spy), \
+                patch.object(A, "check_all_clearances", lambda a: None):
+            A.validate_assembly(asm, printer_id="bambu_a1")
+            A.validate_assembly(asm, printer_id="bambu_a1")
+        assert len(seen) == 2
+        assert seen[0] is not seen[1], "the same cache spanned two calls"
+
+    def test_caching_does_not_change_the_verdict(self, entitled, parts):
+        iface = A.MatingInterface("a", "b", "clearance_fit", clearance_mm=0.4)
+        uncached = A.validate_joint(iface, parts, printer_id="bambu_a1")
+        cache: dict = {}
+        first = A.validate_joint(
+            iface, parts, printer_id="bambu_a1", _clearance_cache=cache
+        )
+        second = A.validate_joint(
+            iface, parts, printer_id="bambu_a1", _clearance_cache=cache
+        )
+        assert uncached.issues == first.issues == second.issues

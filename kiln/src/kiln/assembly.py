@@ -602,6 +602,7 @@ def validate_joint(
     *,
     printer_id: str | None = None,
     mating: str | None = None,
+    _clearance_cache: dict[Any, Any] | None = None,
 ) -> JointValidation:
     """Validate a single mating interface against design rules.
 
@@ -705,6 +706,7 @@ def validate_joint(
             material=mat_a,
             printer_id=printer_id,
             mating=mating,
+            cache=_clearance_cache,
         )
         if running_view is not None:
             minimum_mm, running_detail = running_view
@@ -823,8 +825,16 @@ def validate_assembly(
     check_all_clearances(assembly)
 
     joint_validations: list[JointValidation] = []
+    # One cache for the whole sweep — every interface asks the same
+    # calibration question and it cannot change mid-call.
+    clearance_cache: dict[Any, Any] = {}
     for iface in assembly.interfaces:
-        jv = validate_joint(iface, assembly.parts, printer_id=printer_id)
+        jv = validate_joint(
+            iface,
+            assembly.parts,
+            printer_id=printer_id,
+            _clearance_cache=clearance_cache,
+        )
         joint_validations.append(jv)
     assembly.joint_validations = joint_validations
 
@@ -1001,8 +1011,6 @@ def get_clearance_recommendation(
     )
     if running_view is not None:
         base_clearance, running_detail = running_view
-        tolerance = min(tolerance, base_clearance / 2.0)
-        effective_range = (base_clearance, max(base_clearance, effective_range[1]))
         running_clearance = running_detail
         assumed = (
             " Shape not specified, so the more demanding round-joint case "
@@ -1031,6 +1039,44 @@ def get_clearance_recommendation(
             "Brittle material detected. Snap fits in PLA/PLA+ typically "
             "survive only 2-3 cycles. Consider PETG or Nylon for repeated use."
         )
+
+    if running_clearance:
+        # Make the three numbers agree, AFTER every adjustment above.
+        #
+        # A running clearance is a FLOOR, not a target: more room costs a
+        # little play, less welds the parts together.  A symmetric
+        # tolerance cannot say that, so it is clamped to the distance
+        # actually available above the floor — otherwise a caller reading
+        # `recommended +/- tolerance` designs a gap the recommendation
+        # exists to rule out.  It reached zero-minus-side honestly rather
+        # than pretending there is give that is not there.
+        #
+        # The range has to be recomputed here too: the flexible-material
+        # bump above raises the recommendation without knowing about the
+        # floor, which on TPU put the recommended value outside its own
+        # range.
+        floor_mm = float(running_clearance["recommended_mm"])
+        effective_range = (
+            floor_mm,
+            max(base_clearance, effective_range[1], floor_mm),
+        )
+        tolerance = min(tolerance, max(0.0, base_clearance - floor_mm))
+        rationale_parts.append(
+            f"{floor_mm:.2f} mm is a minimum rather than a target — more "
+            f"room only costs a little play, less can weld the parts "
+            f"together."
+        )
+
+    # A recommendation has to lie inside the range it ships with, on
+    # every path.  The flexible-material bump raises the recommendation
+    # without touching the range, which has always reported a threaded
+    # TPU joint as 0.30 mm recommended against a 0.15-0.25 mm range.
+    # Widening the range to contain its own recommendation changes no
+    # advice; it stops the payload contradicting itself.
+    effective_range = (
+        min(effective_range[0], base_clearance),
+        max(effective_range[1], base_clearance),
+    )
 
     return {
         "joint_type": joint_type,
@@ -1127,6 +1173,7 @@ def _running_clearance_view(
     material: str,
     printer_id: str | None,
     mating: str | None = None,
+    cache: dict[Any, Any] | None = None,
 ) -> tuple[float, dict[str, Any]] | None:
     """Machine-aware running clearance for a joint that has to move.
 
@@ -1150,13 +1197,26 @@ def _running_clearance_view(
     """
     if joint_type not in _MOVING_JOINT_TYPES or not printer_id:
         return None
+    # Resolving calibration scans the filesystem for slicer profiles, and
+    # validating an assembly asks the same question once per interface —
+    # 7 ms a joint that a 20-joint assembly pays twenty times over for one
+    # unchanging fact.  The cache is supplied by the CALLER and lives for
+    # one call on purpose: a longer-lived one would answer a later call
+    # from profiles the user has since edited.
+    key = (joint_type, material, printer_id, mating)
+    if cache is not None and key in cache:
+        return cache[key]
     if not _has_pro_license():
+        if cache is not None:
+            cache[key] = None
         return None
     try:
         from kiln_pro.engineering.running_clearance import (  # type: ignore[import-not-found]
             recommend_running_clearance,
         )
     except ImportError:
+        if cache is not None:
+            cache[key] = None
         return None
 
     try:
@@ -1166,6 +1226,8 @@ def _running_clearance_view(
             printer_id=printer_id,
         )
     except Exception:
+        if cache is not None:
+            cache[key] = None
         return None
 
     detail: dict[str, Any] = {
@@ -1177,7 +1239,10 @@ def _running_clearance_view(
         "mating": verdict.mating,
         "mating_assumed": mating is None,
     }
-    return verdict.recommended_mm, detail
+    result = (verdict.recommended_mm, detail)
+    if cache is not None:
+        cache[key] = result
+    return result
 
 
 def _adhesive_hint_for_joint(material_a: str, material_b: str) -> str | None:
