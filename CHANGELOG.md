@@ -7,6 +7,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Parts that need to move get a gap that suits your printer (Pro+).** On
+  anything that has to turn or slide, that gap decides whether it works or
+  comes off the plate as one solid lump — and it used to be the same number
+  for every printer and every material. Kiln now sizes it for yours, and
+  leaves more room when it knows less about your setup. Without Kiln Pro you
+  keep the standard clearance. See https://kiln3d.com/pricing.
+
 - **Kiln names the printer you actually have.** Bambu, PrusaLink, Elegoo and
   USB-connected Marlin printers now report their own model, so your printer
   list shows the real machine — an A1, an MK4S, an Ender-3 V2 — not just the
