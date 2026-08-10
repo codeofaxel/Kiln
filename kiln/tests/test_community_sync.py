@@ -322,6 +322,9 @@ def test_signature_read_returns_registry_shape(_no_cache, monkeypatch):
         "common_failures": [{"mode": "warping", "count": 3, "percentage": 7.5}],
         "average_print_time_seconds": 1800,
         "confidence": "high",
+        # The hosted aggregate names the design it matched, same as the
+        # local one — kiln_pro/_rest/community.py passes it through.
+        "geometric_signature_v2": "v2:abc123",
     }
 
     with mock.patch(

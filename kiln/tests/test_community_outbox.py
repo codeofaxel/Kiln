@@ -505,8 +505,8 @@ def test_watched_then_recorded_print_lands_one_row(ob, monkeypatch):
 
     # 1) A monitor watches the print end.
     with mock.patch(
-        "kiln.community_autofire.geometric_signature_for",
-        return_value="geo16char0000000",
+        "kiln.community_autofire.geometric_signatures_for",
+        return_value=("geo16char0000000", "v2:geo16char00000"),
     ):
         watched = ca.auto_contribute_completion(
             outcome="completed",
@@ -543,8 +543,8 @@ def test_a_second_real_print_still_ships(ob, monkeypatch):
     from kiln import community_autofire as ca
 
     with mock.patch(
-        "kiln.community_autofire.geometric_signature_for",
-        return_value="geo16char0000000",
+        "kiln.community_autofire.geometric_signatures_for",
+        return_value=("geo16char0000000", "v2:geo16char00000"),
     ):
         for job in ("job-a", "job-b"):
             ca.auto_contribute_completion(
@@ -630,3 +630,76 @@ class TestRealOutboxIsProtected:
         monkeypatch.setattr(ob, "_conn", None)
         assert ob._suppressed_under_test() is False
         assert ob.enqueue("guard:own-path", {"x": 1}) is True
+
+
+def test_recorded_outcome_files_geometry_never_the_file_hash(ob, monkeypatch):
+    """A file hash names BYTES; the corpus is keyed on SHAPE.
+
+    ``record_print_outcome`` used to file the caller's ``file_hash`` into
+    the geometric_signature column whenever one was supplied.  Those rows
+    could never match a real signature — present in the corpus totals,
+    joined to nothing — and the dedupe key minted from one could not
+    collapse against the monitors' key, so a print with no job id shipped
+    twice under two spellings of itself.
+    """
+    monkeypatch.setenv("KILN_COMMUNITY_OPT_IN", "true")
+    import kiln.persistence as _p
+    monkeypatch.setattr(_p, "_db", None, raising=False)
+
+    from kiln.plugins.learning_tools import record_print_outcome
+
+    with mock.patch(
+        "kiln.community_autofire.geometric_signatures_for",
+        return_value=("geo16char0000000", "v2:geo16char00000"),
+    ), mock.patch("kiln.server._check_auth", return_value=None), mock.patch(
+        "kiln.community_outbox.contribute", return_value={"queued": True}
+    ) as contrib:
+        result = record_print_outcome(
+            job_id="job-hash",
+            outcome="success",
+            printer_name="bambu-01",
+            file_name="plate.gcode",
+            file_hash="f" * 64,  # a real SHA-256, the shape of the old bug
+            material_type="PLA",
+        )
+
+    assert result.get("success") is True
+    _key, record = contrib.call_args.args
+    assert record["geometric_signature"] == "geo16char0000000"
+    assert record["geometric_signature_v2"] == "v2:geo16char00000"
+    assert "f" * 64 not in record.values()
+    assert "file_hash" not in record
+
+    monkeypatch.setattr(_p, "_db", None, raising=False)
+
+
+def test_recorded_outcome_contributes_nothing_without_geometry(ob, monkeypatch):
+    """No resolvable shape → no contribution, even with a file_hash in hand.
+    Contributing the hash instead is what put unjoinable rows in the pool."""
+    monkeypatch.setenv("KILN_COMMUNITY_OPT_IN", "true")
+    import kiln.persistence as _p
+    monkeypatch.setattr(_p, "_db", None, raising=False)
+
+    from kiln.plugins.learning_tools import record_print_outcome
+
+    with mock.patch(
+        "kiln.community_autofire.geometric_signatures_for",
+        return_value=("", ""),
+    ), mock.patch("kiln.server._check_auth", return_value=None), mock.patch(
+        "kiln.community_outbox.contribute"
+    ) as contrib:
+        result = record_print_outcome(
+            job_id="job-nogeo",
+            outcome="success",
+            printer_name="bambu-01",
+            file_name="plate.gcode",
+            file_hash="a" * 64,
+            material_type="PLA",
+        )
+
+    # The local outcome row is still written — only the community
+    # contribution is withheld.
+    assert result.get("success") is True
+    contrib.assert_not_called()
+
+    monkeypatch.setattr(_p, "_db", None, raising=False)

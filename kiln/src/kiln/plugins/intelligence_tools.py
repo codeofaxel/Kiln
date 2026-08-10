@@ -75,8 +75,16 @@ class _IntelligenceToolsPlugin:
 
             Reads the STL file and produces a fingerprint containing: SHA-256
             file hash, triangle/vertex counts, bounding box, surface area,
-            volume, overhang ratio, complexity score, and a geometric
-            signature for similarity matching.
+            volume, overhang ratio, complexity score, and TWO geometric
+            signatures for similarity matching.
+
+            ``geometric_signature_v2`` is the one to carry into
+            ``record_print_dna`` / ``predict_print_settings`` /
+            ``find_similar_prints`` / ``contribute_community_print``: it
+            tells this design apart from a different one that happens to
+            share the older ``geometric_signature``.  Pass both — the
+            older key is what joins this print to history recorded before
+            v2 existed.
 
             Args:
                 file_path: Path to the STL file to fingerprint.
@@ -112,6 +120,7 @@ class _IntelligenceToolsPlugin:
             quality_grade: str = "B",
             failure_mode: str | None = None,
             print_time_seconds: int = 0,
+            geometric_signature_v2: str = "",
         ) -> dict:
             """Record a print outcome with full model DNA.
 
@@ -134,6 +143,12 @@ class _IntelligenceToolsPlugin:
                 quality_grade: Grade from ``"A"`` to ``"F"`` (default ``"B"``).
                 failure_mode: Optional failure description.
                 print_time_seconds: Print duration in seconds.
+                geometric_signature_v2: ``fingerprint_model``'s
+                    ``geometric_signature_v2``.  Pass it: it is what lets
+                    this print be told apart from a different design that
+                    happens to share the older signature.  Omitted, the row
+                    is stored with the older key only and can never be
+                    separated from that design later.
             """
             import kiln.server as _srv
 
@@ -151,6 +166,7 @@ class _IntelligenceToolsPlugin:
                     overhang_ratio=overhang_ratio,
                     complexity_score=complexity_score,
                     geometric_signature=geometric_signature,
+                    geometric_signature_v2=geometric_signature_v2,
                 )
 
                 _record(
@@ -186,6 +202,7 @@ class _IntelligenceToolsPlugin:
             complexity_score: float,
             printer_model: str,
             material: str,
+            geometric_signature_v2: str = "",
         ) -> dict:
             """Predict optimal print settings from historical DNA data.
 
@@ -200,6 +217,10 @@ class _IntelligenceToolsPlugin:
                 complexity_score: Model complexity (0.0-1.0).
                 printer_model: Target printer model.
                 material: Target material.
+                geometric_signature_v2: ``fingerprint_model``'s
+                    ``geometric_signature_v2``.  Pass it: without it the
+                    prediction can be averaged over prints of a DIFFERENT
+                    design that shares the older signature.
             """
             import kiln.server as _srv
 
@@ -219,6 +240,7 @@ class _IntelligenceToolsPlugin:
                     overhang_ratio=0.0,
                     complexity_score=complexity_score,
                     geometric_signature=geometric_signature,
+                    geometric_signature_v2=geometric_signature_v2,
                 )
 
                 prediction = predict_settings(fp, printer_model, material)
@@ -236,6 +258,7 @@ class _IntelligenceToolsPlugin:
             complexity_score: float = 0.0,
             limit: int = 10,
             threshold: float = 0.8,
+            geometric_signature_v2: str = "",
         ) -> dict:
             """Find similar models in the print DNA knowledge base.
 
@@ -250,6 +273,10 @@ class _IntelligenceToolsPlugin:
                 complexity_score: Complexity (for fuzzy matching).
                 limit: Maximum results (default 10).
                 threshold: Similarity threshold 0.0-1.0 (default 0.8).
+                geometric_signature_v2: ``fingerprint_model``'s
+                    ``geometric_signature_v2``.  Pass it: without it,
+                    models that merely share the older signature are
+                    reported as the same geometry.
             """
             import kiln.server as _srv
 
@@ -269,6 +296,7 @@ class _IntelligenceToolsPlugin:
                     overhang_ratio=0.0,
                     complexity_score=complexity_score,
                     geometric_signature=geometric_signature,
+                    geometric_signature_v2=geometric_signature_v2,
                 )
 
                 records = find_similar_models(fp, limit=limit, threshold=threshold)
@@ -282,36 +310,109 @@ class _IntelligenceToolsPlugin:
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool()
-        def get_model_print_history(file_hash: str, material: str = "") -> dict:
-            """Get all print attempts for a model identified by file hash.
+        def get_model_print_history(
+            file_hash: str = "",
+            material: str = "",
+            model_path: str = "",
+            geometric_signature: str = "",
+            geometric_signature_v2: str = "",
+        ) -> dict:
+            """Get all print attempts for a model.
 
             Returns the complete history of print outcomes, settings, and
-            quality grades for a specific model.  The success-rate metrics
-            cover every material by default; pass ``material`` to scope
-            them to one filament ("how does this do in PETG?").
+            quality grades.  The success-rate metrics cover every material
+            by default; pass ``material`` to scope them to one filament
+            ("how does this do in PETG?").
+
+            PASS ``model_path`` WHENEVER YOU HAVE THE FILE.  History is a
+            question about the SHAPE, and ``model_path`` lets Kiln identify
+            it directly.  A file hash alone identifies BYTES: re-export an
+            unchanged part from CAD and the hash changes, so a hash-only
+            lookup reports a part with real history as never printed.
+
+            ``identified_by`` in the response says which it used —
+            ``"shape"`` is the precise answer, ``"file"`` means the history
+            may be incomplete.
 
             Args:
-                file_hash: SHA-256 hash of the model file.
+                file_hash: SHA-256 hash of the model file, when known.
                 material: Optional material filter for the success-rate
                     metrics.  Empty = all materials.
+                model_path: Path to the model file — the best input.  Kiln
+                    fingerprints it and identifies the design itself.
+                geometric_signature: v1 shape signature, if you already have
+                    one from ``fingerprint_model``.
+                geometric_signature_v2: v2 shape signature, likewise.
             """
             import kiln.server as _srv
 
             try:
                 from kiln.print_dna import get_model_history, get_success_rate
 
-                records = get_model_history(file_hash)
-                rate = get_success_rate(file_hash, material=material or None)
+                # The file is the richest input: derive every identity from
+                # it rather than making the caller carry hashes around.  A
+                # file we cannot parse is not fatal — fall through to
+                # whatever identity the caller did supply.
+                if model_path:
+                    try:
+                        from kiln.print_dna import fingerprint_model as _fp
 
-                return {
+                        fp = _fp(model_path)
+                        file_hash = file_hash or fp.file_hash
+                        geometric_signature = (
+                            geometric_signature or fp.geometric_signature
+                        )
+                        geometric_signature_v2 = (
+                            geometric_signature_v2 or fp.geometric_signature_v2
+                        )
+                    except Exception:
+                        _logger.debug(
+                            "could not fingerprint %s; using supplied identity",
+                            model_path,
+                            exc_info=True,
+                        )
+
+                if not (file_hash or geometric_signature or geometric_signature_v2):
+                    return _srv._error_dict(
+                        "Name the model: pass model_path (best), or a "
+                        "file_hash / geometric_signature from fingerprint_model.",
+                        code="VALIDATION_ERROR",
+                    )
+
+                records = get_model_history(
+                    file_hash,
+                    geometric_signature=geometric_signature,
+                    geometric_signature_v2=geometric_signature_v2,
+                )
+                rate = get_success_rate(
+                    file_hash,
+                    material=material or None,
+                    geometric_signature=geometric_signature,
+                    geometric_signature_v2=geometric_signature_v2,
+                )
+
+                # Defaulted, not indexed: an older kiln3d (or a caller that
+                # substitutes this engine) returns a rate dict without the
+                # key, and a history answer must not become an exception
+                # over a provenance label.
+                identified = rate.get("identified_by", "file")
+                result = {
                     "success": True,
                     "file_hash": file_hash,
+                    "identified_by": identified,
                     "history": [r.to_dict() for r in records],
                     "total_prints": rate["total_prints"],
                     "success_rate": rate["success_rate"],
                     "outcomes": rate["outcomes"],
                     "grade_distribution": rate["grade_distribution"],
                 }
+                if identified == "file":
+                    result["note"] = (
+                        "Matched on the file only, so this covers this exact "
+                        "file and not the design. Pass model_path for the "
+                        "part's full history."
+                    )
+                return result
             except Exception as exc:
                 _logger.exception("Unexpected error in get_model_print_history")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
@@ -327,6 +428,7 @@ class _IntelligenceToolsPlugin:
             failure_mode: str | None = None,
             print_time_seconds: int = 0,
             job_id: str | None = None,
+            geometric_signature_v2: str = "",
         ) -> dict:
             """Contribute a print outcome to the community registry.
 
@@ -347,6 +449,10 @@ class _IntelligenceToolsPlugin:
                     federation dedupe key, so a print that was also
                     watched (or recorded via ``record_print_outcome``)
                     ships to the community pool once, not twice.
+                geometric_signature_v2: ``fingerprint_model``'s
+                    ``geometric_signature_v2``.  Pass it: it is what keeps
+                    this contribution from being averaged into a different
+                    design that shares the older signature.
             """
             import kiln.server as _srv
 
@@ -370,6 +476,7 @@ class _IntelligenceToolsPlugin:
                     print_time_seconds=print_time_seconds,
                     region="anonymous",
                     timestamp=time.time(),
+                    geometric_signature_v2=geometric_signature_v2,
                 )
 
                 contribute_print(record)
@@ -385,6 +492,7 @@ class _IntelligenceToolsPlugin:
                     community_outbox.contribute_print_outcome(
                         outcome=outcome,
                         geometric_signature=geometric_signature,
+                        geometric_signature_v2=geometric_signature_v2 or None,
                         job_id=job_id,
                         printer_model=printer_model,
                         material=material,
@@ -406,7 +514,9 @@ class _IntelligenceToolsPlugin:
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool()
-        def get_community_insight(geometric_signature: str) -> dict:
+        def get_community_insight(
+            geometric_signature: str, geometric_signature_v2: str = ""
+        ) -> dict:
             """Get aggregated print data for a model geometry.
 
             Two layers, and the tool always returns whatever it can get:
@@ -426,7 +536,13 @@ class _IntelligenceToolsPlugin:
             insights all still return the local answer.
 
             Args:
-                geometric_signature: Geometric signature to look up.
+                geometric_signature: Geometric signature to look up
+                    (``fingerprint_model``'s ``geometric_signature``).
+                geometric_signature_v2: The same mesh's
+                    ``geometric_signature_v2``, when known.  Supplying it
+                    narrows the answer to THIS design: without it, prints
+                    of a different design that happens to share the older
+                    signature can be counted into the result.
             """
             import kiln.server as _srv
 
@@ -435,7 +551,10 @@ class _IntelligenceToolsPlugin:
                     get_community_insight as _get_insight,
                 )
 
-                local = _get_insight(geometric_signature)
+                local = _get_insight(
+                    geometric_signature,
+                    geometric_signature_v2=geometric_signature_v2,
+                )
                 local_dict = local.to_dict() if local is not None else None
 
                 community_dict = None
@@ -445,7 +564,8 @@ class _IntelligenceToolsPlugin:
                     )
 
                     community_dict = fetch_community_insight_for_signature(
-                        geometric_signature
+                        geometric_signature,
+                        geometric_signature_v2=geometric_signature_v2,
                     )
                 except Exception:
                     # A community read never costs the caller their local

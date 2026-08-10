@@ -487,17 +487,24 @@ def record_print_outcome(
             # second opinion about the vocabulary is what let one print ship
             # twice under two different words.  ``translate_outcome`` is the
             # one authority; a cancelled print translates to nothing.
-            # The geometry key: the caller's file_hash when supplied, else
-            # resolved from the printed file the same way the monitors do.
-            # Requiring the CALLER to pass file_hash made the auto-record
-            # hook a silent no-op here — ``fire_terminal_state_hook`` never
-            # passes one, so every hook-observed ending (the most common
-            # automatic path) contributed nothing while looking wired.
-            _signature = file_hash
-            if not _signature:
-                from kiln import community_autofire as _caf
+            # The community key is the GEOMETRY, always resolved from the
+            # printed file — never the caller's file_hash.  A file hash is a
+            # different noun: it names bytes, not a shape.  Filed here it
+            # produced rows that could not match any real signature (counted
+            # in the corpus totals, joined to nothing), and it minted a
+            # dedupe key the monitors' key could never collapse against, so
+            # a print with no job id shipped twice under two spellings of
+            # itself.  Unresolvable geometry contributes nothing, exactly as
+            # the monitors do — the local row above still carries file_hash,
+            # where it is the right noun for the right column.
+            #
+            # Resolving unconditionally is also what keeps the auto-record
+            # hook working: ``fire_terminal_state_hook`` passes no file_hash,
+            # and requiring one made this door a silent no-op for every
+            # hook-observed ending while looking wired.
+            from kiln import community_autofire as _caf
 
-                _signature = _caf.geometric_signature_for(file_name)
+            _signature, _signature_v2 = _caf.geometric_signatures_for(file_name)
             if (
                 community_opt_in_enabled()
                 and _signature
@@ -528,6 +535,7 @@ def record_print_outcome(
                 community_outbox.contribute_print_outcome(
                     outcome=outcome,
                     geometric_signature=_signature,
+                    geometric_signature_v2=_signature_v2 or None,
                     job_id=job_id,
                     printer_file_name=file_name,
                     printer_model=resolved_model or printer_name,
