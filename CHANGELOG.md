@@ -7,6 +7,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Kiln names the printer you actually have.** Bambu, PrusaLink, Elegoo and
+  USB-connected Marlin printers now report their own model, so your printer
+  list shows the real machine — an A1, an MK4S, an Ender-3 V2 — not just the
+  brand, with nothing to set up. If you've told Kiln your model that stays the
+  last word, and when a printer's own answers disagree Kiln reports nothing
+  rather than name the wrong machine. Klipper and OctoPrint setups still show
+  the brand only — they genuinely can't say what they are.
+
 - **Split a big model and Kiln remembers the kit (Pro+).** Every piece is kept
   in the design's history with the seam and fastening that hold it to its
   neighbours — so months later you can reprint just the piece that broke. See
