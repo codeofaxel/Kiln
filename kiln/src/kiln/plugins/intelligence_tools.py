@@ -310,36 +310,109 @@ class _IntelligenceToolsPlugin:
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool()
-        def get_model_print_history(file_hash: str, material: str = "") -> dict:
-            """Get all print attempts for a model identified by file hash.
+        def get_model_print_history(
+            file_hash: str = "",
+            material: str = "",
+            model_path: str = "",
+            geometric_signature: str = "",
+            geometric_signature_v2: str = "",
+        ) -> dict:
+            """Get all print attempts for a model.
 
             Returns the complete history of print outcomes, settings, and
-            quality grades for a specific model.  The success-rate metrics
-            cover every material by default; pass ``material`` to scope
-            them to one filament ("how does this do in PETG?").
+            quality grades.  The success-rate metrics cover every material
+            by default; pass ``material`` to scope them to one filament
+            ("how does this do in PETG?").
+
+            PASS ``model_path`` WHENEVER YOU HAVE THE FILE.  History is a
+            question about the SHAPE, and ``model_path`` lets Kiln identify
+            it directly.  A file hash alone identifies BYTES: re-export an
+            unchanged part from CAD and the hash changes, so a hash-only
+            lookup reports a part with real history as never printed.
+
+            ``identified_by`` in the response says which it used —
+            ``"shape"`` is the precise answer, ``"file"`` means the history
+            may be incomplete.
 
             Args:
-                file_hash: SHA-256 hash of the model file.
+                file_hash: SHA-256 hash of the model file, when known.
                 material: Optional material filter for the success-rate
                     metrics.  Empty = all materials.
+                model_path: Path to the model file — the best input.  Kiln
+                    fingerprints it and identifies the design itself.
+                geometric_signature: v1 shape signature, if you already have
+                    one from ``fingerprint_model``.
+                geometric_signature_v2: v2 shape signature, likewise.
             """
             import kiln.server as _srv
 
             try:
                 from kiln.print_dna import get_model_history, get_success_rate
 
-                records = get_model_history(file_hash)
-                rate = get_success_rate(file_hash, material=material or None)
+                # The file is the richest input: derive every identity from
+                # it rather than making the caller carry hashes around.  A
+                # file we cannot parse is not fatal — fall through to
+                # whatever identity the caller did supply.
+                if model_path:
+                    try:
+                        from kiln.print_dna import fingerprint_model as _fp
 
-                return {
+                        fp = _fp(model_path)
+                        file_hash = file_hash or fp.file_hash
+                        geometric_signature = (
+                            geometric_signature or fp.geometric_signature
+                        )
+                        geometric_signature_v2 = (
+                            geometric_signature_v2 or fp.geometric_signature_v2
+                        )
+                    except Exception:
+                        _logger.debug(
+                            "could not fingerprint %s; using supplied identity",
+                            model_path,
+                            exc_info=True,
+                        )
+
+                if not (file_hash or geometric_signature or geometric_signature_v2):
+                    return _srv._error_dict(
+                        "Name the model: pass model_path (best), or a "
+                        "file_hash / geometric_signature from fingerprint_model.",
+                        code="VALIDATION_ERROR",
+                    )
+
+                records = get_model_history(
+                    file_hash,
+                    geometric_signature=geometric_signature,
+                    geometric_signature_v2=geometric_signature_v2,
+                )
+                rate = get_success_rate(
+                    file_hash,
+                    material=material or None,
+                    geometric_signature=geometric_signature,
+                    geometric_signature_v2=geometric_signature_v2,
+                )
+
+                # Defaulted, not indexed: an older kiln3d (or a caller that
+                # substitutes this engine) returns a rate dict without the
+                # key, and a history answer must not become an exception
+                # over a provenance label.
+                identified = rate.get("identified_by", "file")
+                result = {
                     "success": True,
                     "file_hash": file_hash,
+                    "identified_by": identified,
                     "history": [r.to_dict() for r in records],
                     "total_prints": rate["total_prints"],
                     "success_rate": rate["success_rate"],
                     "outcomes": rate["outcomes"],
                     "grade_distribution": rate["grade_distribution"],
                 }
+                if identified == "file":
+                    result["note"] = (
+                        "Matched on the file only, so this covers this exact "
+                        "file and not the design. Pass model_path for the "
+                        "part's full history."
+                    )
+                return result
             except Exception as exc:
                 _logger.exception("Unexpected error in get_model_print_history")
                 return _srv._error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")

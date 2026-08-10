@@ -743,8 +743,18 @@ def recommend_material(
             from kiln.print_dna import get_success_rate
 
             file_hash = model_fingerprint.get("file_hash", "")
-            if file_hash:
-                rate_data = get_success_rate(file_hash, material=top_mat.name)
+            # The fingerprint dict already carries the shape signatures, and
+            # a material recommendation should weigh how the DESIGN prints,
+            # not how one export of it did.
+            signature = model_fingerprint.get("geometric_signature", "") or ""
+            signature_v2 = model_fingerprint.get("geometric_signature_v2", "") or ""
+            if file_hash or signature or signature_v2:
+                rate_data = get_success_rate(
+                    file_hash,
+                    material=top_mat.name,
+                    geometric_signature=signature,
+                    geometric_signature_v2=signature_v2,
+                )
                 if rate_data["total_prints"] > 0:
                     success_rate = rate_data["success_rate"]
         except Exception:

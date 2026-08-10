@@ -772,17 +772,84 @@ def find_similar_models(
     return [_row_to_record(row) for row in rows]
 
 
-def get_model_history(file_hash: str) -> list[PrintDNARecord]:
-    """Return all print attempts for a model identified by file hash.
+def design_match_sql(
+    file_hash: str,
+    geometric_signature: str = "",
+    geometric_signature_v2: str = "",
+) -> tuple[str, list[Any], str]:
+    """Predicate selecting every stored print of THIS design.
+
+    A model has two identities and they answer different questions.  The
+    file hash names BYTES: re-export an unchanged part from CAD and it
+    changes, because exporters stamp a header and may re-weld vertices.
+    The geometric signature names the SHAPE, and survives that.  Asking
+    "how has this printed before?" is a question about the shape, so a
+    row counts when EITHER identity matches — the file hash still pulls
+    in rows recorded before a signature was ever stored.
+
+    Returns ``(sql, params, identified_by)``, where ``identified_by``
+    says which identity the caller was able to supply — surfaced to the
+    user so a thin answer can be told apart from a precise one.
+    """
+    clauses: list[str] = []
+    params: list[Any] = []
+    identified_by = "file"
+
+    if file_hash:
+        clauses.append("file_hash = ?")
+        params.append(file_hash)
+
+    if geometric_signature or geometric_signature_v2:
+        # Same dual-key rule the prediction path uses: a row carrying a v2
+        # must match on v2 (two designs can share a v1), while a row from
+        # before v2 existed still joins through v1.
+        if geometric_signature_v2:
+            sig_sql = (
+                "(geometric_signature_v2 = ?"
+                " OR ((geometric_signature_v2 IS NULL OR geometric_signature_v2 = '')"
+                " AND geometric_signature = ?))"
+            )
+            clauses.append(sig_sql)
+            params.extend([geometric_signature_v2, geometric_signature or ""])
+            identified_by = "shape"
+        else:
+            clauses.append("geometric_signature = ?")
+            params.append(geometric_signature)
+            # v1 alone cannot separate two designs that collide on it.
+            identified_by = "shape_v1_only"
+
+    if not clauses:
+        # No identity at all matches nothing, rather than everything.
+        return ("1 = 0", [], "none")
+
+    return ("(" + " OR ".join(clauses) + ")", params, identified_by)
+
+
+def get_model_history(
+    file_hash: str,
+    *,
+    geometric_signature: str = "",
+    geometric_signature_v2: str = "",
+) -> list[PrintDNARecord]:
+    """Return all print attempts for a model.
+
+    Pass the geometric signatures when known: without them this answers
+    only for the exact FILE, so a re-export of an unchanged part reads as
+    a model nobody has ever printed.
 
     :param file_hash: SHA-256 hash of the model file.
+    :param geometric_signature: v1 shape signature, when known.
+    :param geometric_signature_v2: v2 shape signature, when known.
     """
     from kiln.persistence import get_db
 
     db = get_db()
+    match_sql, match_params, _ = design_match_sql(
+        file_hash, geometric_signature, geometric_signature_v2
+    )
     rows = db._conn.execute(
-        "SELECT * FROM print_dna WHERE file_hash = ? ORDER BY timestamp DESC",
-        (file_hash,),
+        f"SELECT * FROM print_dna WHERE {match_sql} ORDER BY timestamp DESC",
+        match_params,
     ).fetchall()
 
     return [_row_to_record(row) for row in rows]
@@ -793,19 +860,29 @@ def get_success_rate(
     *,
     printer_model: str | None = None,
     material: str | None = None,
+    geometric_signature: str = "",
+    geometric_signature_v2: str = "",
 ) -> dict[str, Any]:
     """Compute success rate metrics for a model.
+
+    Pass the geometric signatures when known — see :func:`get_model_history`
+    for why a file-hash-only answer understates history.
 
     :param file_hash: SHA-256 hash of the model file.
     :param printer_model: Optional filter by printer.
     :param material: Optional filter by material.
+    :param geometric_signature: v1 shape signature, when known.
+    :param geometric_signature_v2: v2 shape signature, when known.
     """
     from kiln.persistence import get_db
 
     db = get_db()
 
-    query = "SELECT outcome, quality_grade FROM print_dna WHERE file_hash = ?"
-    params: list[Any] = [file_hash]
+    match_sql, match_params, identified_by = design_match_sql(
+        file_hash, geometric_signature, geometric_signature_v2
+    )
+    query = f"SELECT outcome, quality_grade FROM print_dna WHERE {match_sql}"
+    params: list[Any] = list(match_params)
 
     if printer_model:
         query += " AND printer_model = ?"
@@ -819,6 +896,7 @@ def get_success_rate(
     if not rows:
         return {
             "file_hash": file_hash,
+            "identified_by": identified_by,
             "total_prints": 0,
             "success_rate": 0.0,
             "outcomes": {},
@@ -840,6 +918,7 @@ def get_success_rate(
 
     return {
         "file_hash": file_hash,
+        "identified_by": identified_by,
         "total_prints": total,
         "success_rate": round(success_count / total, 4) if total > 0 else 0.0,
         "outcomes": outcomes,
