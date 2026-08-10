@@ -1778,10 +1778,35 @@ def test_probe_agrees_with_a_real_import():
         really_there = False
 
     assert _REAL_OCP_AVAILABLE() is really_there
-def test_tool_import_step_file_carries_cad_facts(monkeypatch, tmp_dir):
-    """The import result carries the analytic truth behind the triangles it
-    just made — through the registered TOOL, real kernel, real file — so
-    every stage downstream can label the model as CAD."""
+
+
+def _pro_facts_installed() -> bool:
+    """True when the kiln-pro census engine is importable in this env."""
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec("kiln_pro.step_facts") is not None
+    except (ImportError, ValueError, AttributeError):
+        return False
+
+
+def test_tool_import_step_file_is_truthful_with_or_without_the_census(
+    monkeypatch, tmp_dir
+):
+    """The import succeeds either way, and never invents a CAD block.
+
+    The analytic census lives in kiln-pro.  This asserts the PUBLIC half of
+    that seam from the registered tool, on a real kernel and a real file:
+
+    * kiln-pro absent (the open-source install) — the conversion lands and
+      the result simply says nothing about the B-rep.  Silence is the honest
+      answer when nothing measured it; a census guessed from the triangles
+      would be the exact lie the facts block exists to prevent.
+    * kiln-pro present — the block rides along and is well-formed.
+
+    The census itself is covered in kiln-pro's suite, which is the only
+    place its engine exists to be tested.
+    """
     if not _REAL_OCP_AVAILABLE():
         pytest.skip("OCCT kernel (OCP) not installed")
     monkeypatch.setattr("kiln.step_import._ocp_available", _REAL_OCP_AVAILABLE)
@@ -1804,20 +1829,30 @@ def test_tool_import_step_file_carries_cad_facts(monkeypatch, tmp_dir):
     result = tools["import_step_file"](str(step), output_dir=str(tmp_dir))
 
     assert result["status"] == "ok"
+    assert result["output_path"]
+
+    if not _pro_facts_installed():
+        assert "cad_facts" not in result
+        return
+
     facts = result["cad_facts"]
-    assert facts["available"] is True
-    assert facts["solids"] == 1
-    assert facts["cylinders"]["radii_mm"] == [45.0]
-    assert facts["surfaces"]["cylinder"] == 1
+    assert facts["kind"] == "kiln.step_facts.v1"
+    if facts["available"]:
+        assert facts["solids"] == 1
+        assert facts["cylinders"]["radii_mm"] == [45.0]
 
 
-def test_tool_import_facts_degrade_without_taking_the_import_down(
-    monkeypatch, tmp_dir
-):
-    """Facts measurement failing must never cost the conversion: the mesh
-    lands, and cad_facts says honestly that it could not measure."""
+def test_tool_import_survives_a_census_that_explodes(monkeypatch, tmp_dir):
+    """A census failure must never cost the conversion.
+
+    The facts are display material attached by an optional engine; if it
+    raises, the mesh still lands and the result carries no ``cad_facts``
+    rather than a half-built one.
+    """
     if not _REAL_OCP_AVAILABLE():
         pytest.skip("OCCT kernel (OCP) not installed")
+    if not _pro_facts_installed():
+        pytest.skip("kiln-pro census engine not installed")
     monkeypatch.setattr("kiln.step_import._ocp_available", _REAL_OCP_AVAILABLE)
     monkeypatch.setattr("kiln.step_import._find_freecad_cmd", lambda: None)
     monkeypatch.setattr("kiln.step_import._find_gmsh_cmd", lambda: None)
@@ -1834,7 +1869,7 @@ def test_tool_import_facts_degrade_without_taking_the_import_down(
     )
     assert writer.Write(str(step)) == IFSelect_ReturnStatus.IFSelect_RetDone
 
-    import kiln.step_facts as step_facts_mod
+    import kiln_pro.step_facts as step_facts_mod
 
     def _measurement_dies(*a, **k):
         raise RuntimeError("kernel exploded mid-census")

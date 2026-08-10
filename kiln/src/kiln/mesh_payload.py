@@ -38,14 +38,20 @@ THE CAD BLOCK
 -------------
 Optional, and attached by :func:`attach_cad_facts` rather than built here —
 present when the mesh is a DISPLAY TESSELLATION of a real B-rep source (a
-STEP file) and the analytic truth rides alongside.  The block is the
-``kiln.step_facts.v1`` dict from :mod:`kiln.step_facts`: solid/face census
-by surface type, exact radii, tight analytic bbox, and the ISO header's
-stamp.  A stage that sees it labels the model as CAD and shows the facts
-readout; a stage that doesn't renders the mesh as before.  When the source
-was a STEP but the facts could not be measured, the block still rides with
-``available: false`` and a reason — the stage says "CAD facts unavailable"
-instead of silently passing triangles off as CAD.
+STEP file) and the analytic truth rides alongside.  The block is a
+``kiln.step_facts.v1`` dict: solid/face census by surface type, exact radii,
+tight analytic bbox, and the ISO header's stamp.  A stage that sees it labels
+the model as CAD and shows the facts readout; a stage that doesn't renders
+the mesh as before.  When the source was a STEP but the facts could not be
+measured, the block still rides with ``available: false`` and a reason — the
+stage says "CAD facts unavailable" instead of silently passing triangles off
+as CAD.
+
+This module owns the CARRIER, not the census.  The measuring engine lives in
+kiln-pro, so an install without it simply never attaches a ``cad`` block and
+every stage renders exactly as it did before the block existed.  Keeping the
+shape here is what lets both sides agree on it: a payload is a contract, and
+a contract that only one repo can spell is not one.
 
 THE PLATE
 ---------
