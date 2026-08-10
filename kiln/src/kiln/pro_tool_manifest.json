@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-08-10T20:15:59.716954+00:00",
-  "tool_count": 413,
+  "generated": "2026-08-10T21:48:28.272533+00:00",
+  "tool_count": 414,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
@@ -8731,6 +8731,86 @@
           "nominal_size_mm"
         ],
         "title": "query_per_machine_offsetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "recommend_running_clearance",
+      "description": "What gap to MODEL between two printed parts that must move.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "pro",
+      "category": "engineering",
+      "parameters": {
+        "properties": {
+          "mating": {
+            "title": "Mating",
+            "type": "string"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "printer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Id"
+          },
+          "same_print": {
+            "default": true,
+            "title": "Same Print",
+            "type": "boolean"
+          },
+          "nominal_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nominal Mm"
+          },
+          "pressure_angle_deg": {
+            "default": 20.0,
+            "title": "Pressure Angle Deg",
+            "type": "number"
+          },
+          "brief": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Brief"
+          },
+          "mode": {
+            "default": "auto",
+            "enum": [
+              "normie",
+              "engineer",
+              "auto"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mating"
+        ],
+        "title": "recommend_running_clearanceArguments",
         "type": "object"
       }
     },
