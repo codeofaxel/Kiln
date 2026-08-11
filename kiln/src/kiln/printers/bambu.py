@@ -1897,21 +1897,43 @@ class BambuAdapter(PrinterAdapter):
     def _detect_storage_path(self, ftp: ftplib.FTP_TLS) -> str:
         """Detect the correct FTPS storage path for this printer.
 
-        A1 series printers store files at ``/model/`` while X1/P1 series
-        use ``/sdcard/``.  Tries ``/model/`` first (A1), falls back to
-        ``/sdcard/`` if CWD fails.
+        A1 series store files at ``/model/``, X1/P1 at ``/sdcard/``, and the
+        P2S keeps print jobs in ``cache/`` — which this probe never tried, so
+        a P2S upload landed in a directory the firmware does not read.
+
+        A declared P2S is offered ``/cache`` first, following the same
+        identity rule :meth:`_build_print_url` documents: the config-declared
+        model is the only identity allowed to drive behaviour, and a probe is
+        evidence rather than a guess.  An undeclared printer keeps ``/model``
+        first, so no A1/X1/P1 ordering changes.
+
+        The directory name is spelled from :data:`_BAMBU_FTP_URL_DIR` so it
+        cannot drift away from the URL the print command is given.
 
         Returns:
-            The storage path (e.g. ``"/model"`` or ``"/sdcard"``).
+            The storage path (e.g. ``"/model"``, ``"/sdcard"``, ``"/cache"``).
         """
-        for path in ("/model", "/sdcard"):
+        cache = f"/{_BAMBU_FTP_URL_DIR}"
+        if self._printer_model in _BAMBU_FTP_URL_MODELS:
+            candidates = (cache, "/model", "/sdcard")
+        else:
+            candidates = ("/model", "/sdcard", cache)
+        for path in candidates:
             try:
                 ftp.cwd(path)
-                logger.debug("Detected Bambu storage path: %s", path)
-                return path
             except ftplib.error_perm:
                 continue
-        # Default fallback.
+            logger.debug("Detected Bambu storage path: %s", path)
+            return path
+        # Nothing answered.  Previously this returned the same value as a
+        # successful /sdcard probe, so "found it" and "found nothing" were
+        # indistinguishable in the logs.
+        logger.warning(
+            "No Bambu storage directory answered CWD (tried %s); falling "
+            "back to /sdcard. Uploads may land where the firmware does not "
+            "look.",
+            ", ".join(candidates),
+        )
         return "/sdcard"
 
     def upload_file(self, file_path: str) -> UploadResult:
@@ -2534,6 +2556,9 @@ class BambuAdapter(PrinterAdapter):
                 * ``use_ams`` (bool): Enable AMS filament feeding.
                   Default ``False``.
                 * ``ams_mapping`` (list[int]): Slot mapping per extruder.
+                  Defaults to ``[0]`` when AMS feeding is on and ``[]``
+                  (external spool) when it is off.  Use ``-1`` for unused
+                  positions.
                   Default ``[0]``.  Use ``[-1]`` for unused slots.
                 * ``timelapse`` (bool): Record timelapse.  Default ``False``.
                 * ``bed_leveling`` (bool): Run bed leveling.  Default ``True``.
@@ -2639,10 +2664,33 @@ class BambuAdapter(PrinterAdapter):
                     )
 
             # Fall back to single-filament defaults.
-            if ams_mapping is None:
-                ams_mapping = [0]
-            if not isinstance(ams_mapping, list):
-                ams_mapping = [0]
+            #
+            # [0] names AMS unit 0, slot 0.  Sending it when AMS feeding is
+            # OFF points the firmware at a tray that need not exist, and on a
+            # machine with no AMS at all it halts at the filament-mapping
+            # dialog waiting for a human to reconcile a mapping against
+            # hardware that is not there — a no-AMS owner being asked to fix
+            # their AMS.
+            #
+            # The external-spool wire shape is an EMPTY array, not a magic
+            # slot number.  Bambu's own networking plugin sends exactly
+            # ``use_ams ? "[0]" : "[]"`` (open-bamboo-networking
+            # src/print_job.cpp:184), and its comment there records that
+            # firmware treats [] the same as the field not being provided.
+            # Genuine BambuStudio traffic also carries one -1 per 3MF
+            # filament (SelectMachine.cpp:1414); both are accepted, and [] is
+            # the smaller change with the plugin-parity citation.
+            #
+            # 254 and 255 do NOT belong in this field.  255 is the virtual
+            # external tray in ``ams_mapping2`` ({"ams_id": 255, "slot_id":
+            # 0}) and in the ``tray_now`` status field; putting either here
+            # conflates a tray identifier with a slot index.
+            #
+            # An explicitly passed [] is preserved, not rewritten — callers
+            # already send one (kiln_pro material routing normalises with
+            # ``list(mapping or [])``).
+            if ams_mapping is None or not isinstance(ams_mapping, list):
+                ams_mapping = [0] if use_ams else []
 
             # Validate ams_mapping length covers all filament_ids in the 3MF.
             # If the mapping is too short, filament IDs beyond the mapping
@@ -2739,7 +2787,13 @@ class BambuAdapter(PrinterAdapter):
                 if not (path.startswith("/sdcard/") or path.startswith("/cache/")):
                     raise PrinterError(f"File path must be under /sdcard/ or /cache/, got: {file_name!r}")
             else:
-                if self._last_storage_path == "/sdcard":
+                if self._last_storage_path == f"/{_BAMBU_FTP_URL_DIR}":
+                    # P2S — jobs live in cache/, which is where the upload
+                    # just went.  Without this case a declared P2S uploads a
+                    # .gcode to cache/ and is then told to print
+                    # /sdcard/model/<name>, which is not where it landed.
+                    path = f"/{_BAMBU_FTP_URL_DIR}/{basename}"
+                elif self._last_storage_path == "/sdcard":
                     # X1/P1 series — files live directly under /sdcard/.
                     path = f"/sdcard/{basename}"
                 else:
