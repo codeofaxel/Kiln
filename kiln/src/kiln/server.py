@@ -11981,11 +11981,17 @@ def _register_pro_tool_stubs(mcp_instance) -> None:
         tier = str(tool_def.get("tier") or "").strip().lower()
         if tier and tier != "free":
             _PRO_TOOL_TIERS[name] = tier
-            description = (
-                f"{description}\n\n"
-                f"Requires Kiln {tier.capitalize()}. "
-                f"Pricing: https://kiln3d.com/pricing"
-            )
+            # Only if the manifest did not already say it.  The generator
+            # writes "Requires Kiln Business. / Upgrade: <url>" into the
+            # description itself, so appending unconditionally made every paid
+            # tool state its paywall TWICE, in two wordings, to the agent whose
+            # job is to relay it — the one sentence that has to read cleanly.
+            if f"requires kiln {tier}" not in description.lower():
+                description = (
+                    f"{description}\n\n"
+                    f"Requires Kiln {tier.capitalize()}. "
+                    f"Pricing: https://kiln3d.com/pricing"
+                )
         # Metered tools carry their real monthly allowance; unmetered ones
         # carry no block at all, and get no entry, so the account wall can
         # only ever state a number the server actually charges.

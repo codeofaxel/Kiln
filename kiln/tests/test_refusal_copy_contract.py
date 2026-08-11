@@ -479,3 +479,123 @@ def test_no_shipping_source_says_kiln_login():
             if "kiln login" in line:
                 offenders.append(f"{rel}:{lineno}: {line.strip()}")
     assert not offenders, "say `kiln signin`, not `kiln login`:\n" + "\n".join(offenders)
+
+
+# ---------------------------------------------------------------------------
+# The nudge an agent relays — said once, or not at all
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def registered_stub_descriptions():
+    """The descriptions the stubs are actually REGISTERED with.
+
+    The fixture above reads the allowance registries; this one captures what
+    an agent receives, which is a different artifact — the registries can be
+    perfectly populated while the sentence built from them reads badly.
+    """
+    import kiln.server as server
+
+    tiers = dict(server._PRO_TOOL_TIERS)
+    quota = dict(server._PRO_TOOL_QUOTA)
+    seen: dict[str, str] = {}
+
+    class CapturingMCP:
+        def tool(self_mcp):
+            def _decorator(fn):
+                doc = fn.__doc__ or ""
+                seen[getattr(fn, "__name__", "?")] = doc
+                return fn
+            return _decorator
+
+    try:
+        server._register_pro_tool_stubs(CapturingMCP())
+        yield seen, server._PRO_TOOL_TIERS
+    finally:
+        server._PRO_TOOL_TIERS.clear()
+        server._PRO_TOOL_TIERS.update(tiers)
+        server._PRO_TOOL_QUOTA.clear()
+        server._PRO_TOOL_QUOTA.update(quota)
+
+
+def test_a_paid_tool_states_its_paywall_exactly_once(registered_stub_descriptions):
+    """It used to say it twice, in two wordings, with two link labels.
+
+    The manifest generator writes "Requires Kiln Business. / Upgrade: <url>"
+    into the description, and the stub registrar appended "Requires Kiln
+    Business. Pricing: <url>" on top of it unconditionally.  Nothing was
+    factually wrong, which is why it survived — but this is the one sentence
+    whose whole job is to be relayed to a person deciding whether to pay, and
+    it arrived stuttering.  Neither half is wrong alone; only together.
+    """
+    seen, tiers = registered_stub_descriptions
+    if not seen:
+        pytest.skip("no pro tool manifest bundled in this checkout")
+    # Not vacuous: the real bundled manifest, with real paid tools in it.
+    assert len(seen) > 100 and tiers, "the stub surface came back empty"
+    # And the detector really detects — the shape as it shipped, verbatim.
+    _shipped_bug = (
+        "Modify the design.\n\nRequires Kiln Business.\nUpgrade: u"
+        "\n\nRequires Kiln Business. Pricing: u"
+    )
+    assert _shipped_bug.lower().count("requires kiln") > 1
+
+    doubled = [
+        name for name, desc in seen.items()
+        if desc.lower().count("requires kiln") > 1
+    ]
+    assert not doubled, f"paid tools stating the paywall twice: {sorted(doubled)[:5]}"
+
+    unstated = [
+        name for name, tier in tiers.items()
+        if f"requires kiln {tier}" not in seen.get(name, "").lower()
+    ]
+    assert not unstated, (
+        f"paid tools an agent cannot see the price of: {sorted(unstated)[:5]}"
+    )
+
+
+def test_the_agent_guidance_names_the_real_access_classes():
+    """The guidance tells agents the three classes and the exact field values.
+
+    Prose teaching a vocabulary the data does not use is worse than no prose:
+    the agent applies a rule that never matches, silently. So the class names
+    it promises are checked against the values the manifest actually carries.
+    """
+    import json
+    from pathlib import Path
+
+    from dataclasses import asdict
+
+    from kiln.skill_manifest import generate_manifest
+
+    manifest = asdict(generate_manifest())
+
+    guidance = None
+    for value in _walk_strings(manifest):
+        if "access classes" in value:
+            guidance = value
+            break
+    assert guidance, "the three-class guidance is gone from the skill manifest"
+
+    bundled = Path(__file__).resolve().parents[1] / "src" / "kiln" / "pro_tool_manifest.json"
+    if not bundled.exists():
+        pytest.skip("no bundled pro manifest in this checkout")
+    real = {t.get("access") for t in json.loads(bundled.read_text())["tools"]}
+    assert real, "the bundled manifest carries no access field at all"
+    for value in sorted(real):
+        assert f"'{value}'" in guidance, (
+            f"the manifest uses access={value!r} but the agent guidance never "
+            f"names it — an agent cannot classify what it was not told about"
+        )
+
+
+def _walk_strings(obj):
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            yield from _walk_strings(v)
+    elif isinstance(obj, (list, tuple)):
+        for v in obj:
+            yield from _walk_strings(v)
