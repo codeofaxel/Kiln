@@ -22,10 +22,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   can't be read on your setup, Kiln says so plainly instead of showing an
   estimate as though it were exact. Served via kiln-pro.
 
-- **A CAD part says how closely it was read (Pro+).** Turning a STEP into a
-  printable shape is always an approximation. Kiln keeps how close it got, so
-  the part's passport can tell you — and says so plainly when the shape has
-  changed since, instead of quoting a figure that no longer applies. See
+- **Ask the print questions about your CAD file directly.** Which way up
+  should this print, will it warp, how much support material will it need,
+  what are its dimensions — every one takes a STEP file directly now, with no
+  converting it to a mesh yourself first. If your machine has no CAD converter
+  installed, Kiln says so and tells you how to add one.
+
+- **A CAD part says how closely it matches what you sent (Pro+).** Reading a
+  STEP is an approximation, and repairing the shape can move it again. Kiln
+  measures both and keeps them with the part, so its passport still answers
+  months later — and tells you when the answer has stopped applying. See
   https://kiln3d.com/pricing.
 
 - **Parts that need to move get a gap that suits your printer (Pro+).** On
