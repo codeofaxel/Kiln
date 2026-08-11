@@ -14,6 +14,7 @@ no manual imports needed.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 _logger = logging.getLogger(__name__)
@@ -34,6 +35,59 @@ def _resolve_tool_build_volume(
             "printer model id."
         )
     return resolved
+
+
+def _edge_census_sentence(
+    census: dict[str, Any], source_path: str, *, converted: bool
+) -> str:
+    """Say what the edge census found AND whose artifact it found it in.
+
+    The verdict clause is identical for both subjects; only the prefix and
+    the trailing explanation change.  That is deliberate — the "whose
+    artifact is this" clause then sits in a fixed position, first, whatever
+    the answer turns out to be, so a reader who has seen one of these has
+    seen the shape of all of them.
+
+    The reframe exists because a non-manifold edge is a defect of the mesh
+    REPRESENTATION, not of the shape.  A STEP solid has no triangles and so
+    cannot have one.  Run the count on a converted CAD file and the honest
+    subject of the sentence is Kiln's own tessellation — a real and useful
+    thing to know, and a lie the moment it is worded as a finding about the
+    file the user handed us.
+    """
+    source_name = os.path.basename(source_path)
+    non_manifold = census["non_manifold_edges"]
+    total = census["total_edges"]
+    if census["is_watertight"]:
+        verdict = f"watertight, 0 non-manifold edges out of {total}"
+    else:
+        verdict = (
+            f"not watertight — {non_manifold} non-manifold edges out of "
+            f"{total} ({census['boundary_edges']} boundary, "
+            f"{census['t_junction_edges']} T-junction)"
+        )
+
+    if not converted:
+        return f"Measured directly on {source_name}: {verdict}."
+
+    opening = f"Measured on Kiln's mesh conversion of {source_name}, not on the CAD file itself: {verdict}."
+    if census["is_watertight"]:
+        return (
+            f"{opening} Non-manifold edges are a mesh defect and a STEP solid "
+            "cannot have them, so this grades Kiln's tessellation, not your "
+            "CAD: a clean result means the converted mesh is sound to slice."
+        )
+    # Never "your CAD is fine" here.  An open surface model is a legitimate
+    # STEP that genuinely tessellates to boundary edges, so the openness can
+    # belong to the source — measured, 2026-08-11: a four-wall shell converts
+    # to 8 boundary edges of 16.  Both causes get named; neither is guessed.
+    return (
+        f"{opening} Non-manifold edges are a mesh defect, so this grades "
+        "Kiln's tessellation, not your CAD: either the conversion left gaps, "
+        "or your source is an open surface model rather than a closed solid. "
+        "Worth checking which in CAD before you repair — repair_mesh closes "
+        "the converted mesh and never touches your original."
+    )
 
 
 class _MeshToolsPlugin:
@@ -265,17 +319,78 @@ class _MeshToolsPlugin:
             to understand exactly how many edges are problematic before
             deciding whether to repair.
 
-            :param file_path: Path to mesh file (.stl, .obj, or .glb).
-            :returns: Dict with edge count breakdown and watertight status.
+            A STEP/STP CAD file is converted first and the count is taken on
+            the converted mesh, because a non-manifold edge is a defect of
+            the triangles, not of the shape -- a STEP solid has none to be
+            defective.  So on CAD input this measures KILN'S TESSELLATION,
+            which is worth knowing (it says whether the conversion came out
+            clean) and is not a finding about the user's file.  ``subject``
+            says which artifact was measured and ``message`` says it in
+            words.  AGENT CONTRACT: when ``subject`` is
+            ``"kiln_tessellation"``, carry that attribution through to the
+            user -- never report the count as a verdict on their CAD.
+
+            :param file_path: Path to a mesh (.stl, .obj, .glb) or a
+                STEP/STP CAD file.
+            :returns: Dict with edge count breakdown, watertight status,
+                ``subject``, ``message``, and (CAD only) ``converted_from``.
             """
+            # STEP in, mesh out — the one shared door, never a per-tool
+            # branch, so the CAD format engineering customers actually send
+            # works here instead of failing several layers down.
+            from kiln.step_import import resolve_mesh_input
+
+            source_path = file_path
+            file_path, _conversion, _refusal = resolve_mesh_input(file_path)
+            if _refusal:
+                return _refusal
+
             from kiln.server import _error_dict
 
             try:
                 from kiln.generation.validation import count_non_manifold_edges
 
-                return {"success": True, **count_non_manifold_edges(file_path)}
+                census = count_non_manifold_edges(file_path)
             except Exception as exc:
-                return _error_dict(f"Edge analysis failed: {exc}")
+                # Not retryable: a file these parsers cannot read will not
+                # parse on the second attempt either, and the old generic
+                # code told an agent to keep trying.
+                return _error_dict(
+                    f"Edge analysis failed: {exc}", code="UNREADABLE_INPUT"
+                )
+
+            # Whether a conversion HAPPENED is the path changing, never the
+            # record being present.  ``resolve_mesh_input`` returns the input
+            # string unchanged for a mesh and a fresh temp path for CAD,
+            # whereas the record is honestly None for a cache entry whose
+            # sidecar predates it or went unreadable — so keying off the
+            # record would, on exactly that entry, report a converted STEP as
+            # "measured directly on your file".  That is the lie this whole
+            # branch exists to prevent, and it would surface only rarely,
+            # which is the worst way for it to surface.
+            converted = file_path != source_path
+            response: dict[str, Any] = {
+                "success": True,
+                **census,
+                # Always present, both subjects.  A caveat that appears only
+                # when it applies is one an absent-minded reader learns
+                # nothing from when it is missing.
+                "subject": "kiln_tessellation" if converted else "input_mesh",
+                "message": _edge_census_sentence(
+                    census, source_path, converted=converted
+                ),
+            }
+            if converted:
+                response["converted_from"] = {
+                    "source_file": source_path,
+                    "mesh_path": file_path,
+                    # None where the conversion's origin was never written
+                    # down (a pre-record cache entry); naming a plausible
+                    # backend there would report what is INSTALLED as what
+                    # ran.  The attribution above does not depend on it.
+                    "backend": _conversion.backend if _conversion else None,
+                }
+            return response
 
         @mcp.tool()
         def cross_section_view(

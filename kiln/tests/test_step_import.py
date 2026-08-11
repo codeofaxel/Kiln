@@ -2895,6 +2895,7 @@ _CAD_DOORS = [
     ("estimate_support_material", "file_path"),
     ("analyze_warping_risk", "file_path"),
     ("analyze_mesh_geometry", "file_path"),
+    ("analyze_non_manifold_edges", "file_path"),
 ]
 
 
