@@ -294,28 +294,29 @@ class TestStartGcodeSubstitutionIsAudible:
     substitution has to reach whoever decides to press print.
     """
 
-    def test_non_a1_model_returns_a_warning(self, tmp_path) -> None:
+    def test_uncaptured_model_returns_a_warning(self, tmp_path) -> None:
+        """A model with no captured sequence of its own still substitutes."""
         gcode = _write_dummy_gcode(tmp_path)
 
         threemf, warning = _auto_wrap_bambu_3mf(
-            str(gcode), effective_printer_id="bambu_p2s", stl_path=None,
+            str(gcode), effective_printer_id="bambu_h2d", stl_path=None,
         )
 
         assert threemf is not None, "the wrap still succeeds — this is a warning"
         assert warning is not None, "the A1 substitution passed silently"
-        assert "bambu_p2s" in warning
+        assert "bambu_h2d" in warning
         assert "bambu_a1" in warning
 
-    def test_a1_itself_stays_silent(self, tmp_path) -> None:
+    def test_a_captured_model_stays_silent(self, tmp_path) -> None:
         """No warning when the file really is flavoured for the machine."""
         gcode = _write_dummy_gcode(tmp_path)
 
-        threemf, warning = _auto_wrap_bambu_3mf(
-            str(gcode), effective_printer_id="bambu_a1", stl_path=None,
-        )
-
-        assert threemf is not None
-        assert warning is None
+        for model in ("bambu_a1", "bambu_p2s", "bambu_x1c"):
+            threemf, warning = _auto_wrap_bambu_3mf(
+                str(gcode), effective_printer_id=model, stl_path=None,
+            )
+            assert threemf is not None
+            assert warning is None, f"{model} has its own sequence, nothing to warn"
 
     def test_result_object_carries_the_substitution(self, tmp_path) -> None:
         """One source of truth, so every door reports the same fact."""
@@ -325,9 +326,9 @@ class TestStartGcodeSubstitutionIsAudible:
         result = build_bambu_3mf(
             Path(gcode).read_text(encoding="utf-8"),
             str(tmp_path / "out.3mf"),
-            printer_model="bambu_x1c",
+            printer_model="bambu_h2d",
         )
 
         assert result.start_gcode_model == "bambu_a1"
-        assert result.requested_model == "bambu_x1c"
+        assert result.requested_model == "bambu_h2d"
         assert "start_gcode_warning" in result.to_dict()
