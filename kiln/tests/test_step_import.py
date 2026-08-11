@@ -1556,7 +1556,7 @@ def test_write_3mf_gives_a_nameless_part_a_name(tmp_dir):
         ],
         out,
     )
-    assert written == ["part_1", "part_2"]
+    assert written == ["Part 1", "Part 2"]
     assert len(object_display_colors(out)) == 2
 
 
@@ -1724,6 +1724,71 @@ def test_duplicate_named_3mf_colours_reach_the_viewer_payload(tmp_dir):
     assert distinct == {(0xC7, 0x54, 0x2E), (0x3D, 0x6B, 0x99)}, (
         f"both body colours must survive, got {distinct}"
     )
+
+
+def test_convert_step_labels_bodies_nobody_named(real_kernel, tmp_dir):
+    """A kernel token is not a name, and the user should never read one.
+
+    OCCT's STEP writer stamps ``PRODUCT('SOLID','SOLID')`` for a shape nobody
+    named, so a two-body file comes back as ``["SOLID", "SOLID"]`` — a machine
+    artifact that says nothing and reads like a bug in a slicer's object list.
+    """
+    from kiln.step_import import convert_step
+
+    step = tmp_dir / "unnamed.step"
+    _write_colored_two_body_step(step, names=None)
+
+    out_dir = tmp_dir / "out"
+    out_dir.mkdir()
+    result = convert_step(str(step), output_dir=str(out_dir))
+
+    assert result.part_names == ["Part 1", "Part 2"]
+    assert not any("SOLID" in n or "COMPOUND" in n for n in result.part_names)
+
+
+def test_convert_step_keeps_a_name_a_person_chose(real_kernel, tmp_dir):
+    """The rule is "equals THIS body's own type", not a list of banned words,
+    so a part someone deliberately named survives untouched."""
+    from kiln.step_import import convert_step
+
+    step = tmp_dir / "named.step"
+    _write_colored_two_body_step(step, names=("SHELL", "lid"))
+
+    out_dir = tmp_dir / "out"
+    out_dir.mkdir()
+    result = convert_step(str(step), output_dir=str(out_dir))
+
+    # "SHELL" on a SOLID body is a person's odd choice, not a kernel stamp.
+    assert result.part_names == ["SHELL", "lid"]
+
+
+def test_convert_step_names_agree_whichever_format_it_writes(real_kernel, tmp_dir):
+    """``part_names`` means one thing: what a user will read in the output.
+
+    A plain single solid leaves as STL and a coloured assembly as 3MF; the
+    caller should not have to know which branch produced their names.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    from kiln.step_import import convert_step
+
+    step = tmp_dir / "plain.step"
+    writer = STEPControl_Writer()
+    writer.Transfer(
+        BRepPrimAPI_MakeBox(20.0, 10.0, 5.0).Shape(),
+        STEPControl_StepModelType.STEPControl_AsIs,
+    )
+    writer.Write(str(step))
+
+    out_dir = tmp_dir / "out"
+    out_dir.mkdir()
+    result = convert_step(str(step), output_dir=str(out_dir))
+
+    assert result.output_format == "stl", "a plain solid keeps the classic path"
+    # The STL exit names its part through the same helper as the 3MF exit, so
+    # no kernel token escapes one branch and not the other.
+    assert result.part_names == ["Part 1"]
 
 
 def test_convert_step_auto_plain_solid_stays_classic_stl(real_kernel, tmp_dir):

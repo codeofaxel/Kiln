@@ -10763,7 +10763,10 @@ def compose_multicolor_3mf(
             ColorPart(
                 stl_path=str(p["stl_path"]),
                 extruder=int(p.get("extruder", 1)),
-                name=str(p.get("name", f"part_{i + 1}")),
+                # Passed through blank rather than defaulted here: the composer
+                # names a nameless part, so the same label ("Part 1") reaches
+                # the user whichever door built the plate.
+                name=str(p.get("name") or ""),
                 color=p.get("color"),
                 material=p.get("material"),
                 x=float(p.get("x", 0.0)),

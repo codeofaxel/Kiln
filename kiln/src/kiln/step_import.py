@@ -256,13 +256,13 @@ class StepImportResult:
     """``"stl"`` or ``"3mf"`` — what :attr:`output_path` actually is."""
 
     part_names: list[str] = field(default_factory=list)
-    """Per-part names from the STEP, when the colour-aware path ran.
+    """Per-part names, when the colour-aware path ran — as a user will see them.
 
-    For a 3MF these are the names as they appear IN the file, so a caller can
-    address a part by the name it will see there.  A STEP may name two bodies
-    the same; the 3MF may not (see
-    :func:`~kiln.threemf_parser.unique_object_names`), so a repeat carries a
-    ``" (2)"`` suffix here too.
+    These are the names as written to the output, whatever its format, so a
+    caller can address a part by the name it will read there.  A STEP may name
+    two bodies the same and may name none of them at all; the output may do
+    neither (see :func:`~kiln.threemf_parser.unique_object_names`), so a repeat
+    carries a ``" (2)"`` suffix and a body nobody named reads as ``Part 1``.
     """
 
     part_colors: list[str | None] = field(default_factory=list)
@@ -779,11 +779,25 @@ for i in range(1, labels.Length() + 1):
     label = labels.Value(i)
     shape = shape_tool.GetShape_s(label)
 
+    # Two things a STEP calls a "name" were stamped by software, not chosen by
+    # a person, and both reach the user as gibberish in a slicer's object list:
+    #
+    #   PRODUCT('SOLID','SOLID')                       - shape nobody named
+    #   PRODUCT('Open CASCADE STEP translator 7.9 1')  - writer's own identity
+    #
+    # Both are reported as unnamed so the caller can label them "Part 1".  The
+    # first test is against THIS body's own type rather than a list of words,
+    # so a FACE someone deliberately called "SOLID" keeps the name they chose;
+    # the second is a prefix because the trailing counter varies per file.
     name_attr = TDataStd_Name()
-    name = "part_%d" % (i - 1)
+    name = ""
     if label.FindAttribute(TDataStd_Name.GetID_s(), name_attr):
         got = name_attr.Get().ToExtString().strip()
-        if got:
+        stamped_by_software = (
+            got == shape.ShapeType().name.removeprefix("TopAbs_")
+            or got.startswith("Open CASCADE STEP translator")
+        )
+        if not stamped_by_software:
             name = got
 
     col = Quantity_Color()
@@ -1011,7 +1025,10 @@ def _convert_via_ocp_xcaf(
 
     data = _parse_kiln_result(result, "OCCT")
     n = len(data["outputs"])
-    data.setdefault("names", [f"part_{i}" for i in range(n)])
+    # Blank rather than invented: naming an unnamed part happens in ONE place
+    # (:func:`~kiln.threemf_parser.unique_object_names`), so every door reports
+    # the same "Part 1" instead of each growing its own fallback.
+    data.setdefault("names", [""] * n)
     data.setdefault("colors", [None] * n)
     return data
 
@@ -1432,11 +1449,17 @@ def convert_step(
     validated_path = _validate_step_path(step_path)
     out_dir = _validate_output_dir(output_dir, validated_path)
 
+    from kiln.threemf_parser import unique_object_names
+
     t0 = time.monotonic()
     data = _convert_via_ocp_xcaf(validated_path, out_dir)
+    # Named once, above the branch, so both exits report the same thing: a
+    # caller reading :attr:`StepImportResult.part_names` should never have to
+    # know which output format produced them.
+    names = unique_object_names(data["names"])
     parts = [
         {"stl_path": p, "name": n, "color": c}
-        for p, n, c in zip(data["outputs"], data["names"], data["colors"], strict=True)
+        for p, n, c in zip(data["outputs"], names, data["colors"], strict=True)
     ]
 
     has_color = any(p["color"] for p in parts)
@@ -1454,12 +1477,14 @@ def convert_step(
             conversion_time_s=round(elapsed, 3),
             output_paths=[final],
             output_format="stl",
-            part_names=data["names"],
+            part_names=names,
             part_colors=data["colors"],
         )
 
     out_3mf = str(out_dir / f"{validated_path.stem}.3mf")
-    written_names = _write_3mf(parts, out_3mf)
+    # These names are already unique; the writer re-establishes that for
+    # callers who did not, and returns what it wrote.
+    _write_3mf(parts, out_3mf)
     for p in parts:  # the per-part STLs were scaffolding, not output
         with contextlib.suppress(OSError):
             os.unlink(p["stl_path"])
@@ -1472,7 +1497,7 @@ def convert_step(
         conversion_time_s=round(elapsed, 3),
         output_paths=[out_3mf],
         output_format="3mf",
-        part_names=written_names,
+        part_names=names,
         part_colors=data["colors"],
     )
 

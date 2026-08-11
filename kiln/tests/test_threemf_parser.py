@@ -685,15 +685,15 @@ class TestUniqueObjectNames:
         which a real sibling could be named after.  Whitespace-only counts as
         blank — it is truthy to the reader but invisible in a slicer's list."""
         assert unique_object_names(["", None, "   ", "lid"]) == [
-            "part_1",
-            "part_2",
-            "part_3",
+            "Part 1",
+            "Part 2",
+            "Part 3",
             "lid",
         ]
 
     def test_a_positional_fallback_that_collides_is_still_resolved(self) -> None:
-        """A part literally named "part_2" next to a blank one at position 2."""
-        assert unique_object_names(["part_2", ""]) == ["part_2", "part_2 (2)"]
+        """A part literally named "Part 2" next to a blank one at position 2."""
+        assert unique_object_names(["Part 2", ""]) == ["Part 2", "Part 2 (2)"]
 
     def test_names_are_preserved_verbatim_otherwise(self) -> None:
         """Only blanks and repeats are touched — surrounding whitespace and
@@ -716,7 +716,7 @@ class TestUniqueObjectNames:
             ["COMPOUND", "COMPOUND"],
             ["", "", ""],
             ["a", "a (2)", "a", "a (2)", "a"],
-            ["part_1", "", "part_1", ""],
+            ["Part 1", "", "Part 1", ""],
             ["x"] * 12,
             # An assembly really can hold this many identical fasteners.
             ["M3x8"] * 2000,
