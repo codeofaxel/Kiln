@@ -179,6 +179,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   one into the file it sends the printer — so that file could open incomplete,
   or fail to open at all. Designs Kiln makes itself were never affected.
 
+- **Bambu prints on the P2S, P1S, P1P, X1 Carbon, X1E, H2S and A1 mini start
+  their own way now.** Every Bambu print used to open with the A1's startup
+  moves, the only ones Kiln had. Each printer gets its own now. A1 and A2L
+  unchanged.
+
   Thanks to [@hype-eth](https://github.com/hype-eth) for finding these on a
   brand-new P2S, and for digging through the printer's own error codes to prove
   what was happening.
