@@ -994,3 +994,80 @@ class TestGetPrinterInfo:
         assert adapter.get_identity_channels() == {
             "sdcp_machine_name": "elegoo_centauri_carbon"
         }
+
+
+# ---------------------------------------------------------------------------
+# Telemetry vintage — a cached state says how old it is
+# ---------------------------------------------------------------------------
+
+
+class TestTelemetryVintage:
+    """SDCP is a push transport too, so the same honesty applies here.
+
+    ``get_state`` asks the printer on every call, but the reply is not
+    guaranteed: the wait is bounded, and a printer that answers nothing leaves
+    the previous cache in place and reports it as ``connected=True``.  The age
+    is what tells those two apart.
+    """
+
+    def test_pushed_state_reports_a_small_age(
+        self, adapter_with_ws: ElegooAdapter
+    ) -> None:
+        adapter_with_ws._handle_message({"Status": {"CurrentStatus": 13}})
+
+        with mock.patch.object(adapter_with_ws, "_ensure_ws"), mock.patch.object(
+            adapter_with_ws, "_send_command"
+        ):
+            state = adapter_with_ws.get_state()
+
+        assert state.state is PrinterStatus.PRINTING
+        assert state.state_age_seconds is not None
+        assert state.state_age_seconds < 5.0
+        assert state.staleness_note() is None
+
+    def test_silent_printer_leaves_the_old_state_labelled_with_its_age(
+        self, adapter_with_ws: ElegooAdapter
+    ) -> None:
+        adapter_with_ws._handle_message({"Status": {"CurrentStatus": 13}})
+        adapter_with_ws._print_state_time -= 300.0
+        adapter_with_ws._last_state_time -= 300.0
+
+        # The request goes out; nothing comes back.
+        with mock.patch.object(adapter_with_ws, "_ensure_ws"), mock.patch.object(
+            adapter_with_ws, "_send_command", return_value=None
+        ):
+            state = adapter_with_ws.get_state()
+
+        assert state.state is PrinterStatus.PRINTING
+        assert state.is_stale() is True
+        assert state.staleness_note() is not None
+
+    def test_temperature_only_push_does_not_refresh_the_state_age(
+        self, adapter_with_ws: ElegooAdapter
+    ) -> None:
+        adapter_with_ws._handle_message({"Status": {"CurrentStatus": 13}})
+        adapter_with_ws._print_state_time -= 300.0
+        adapter_with_ws._last_state_time -= 300.0
+
+        adapter_with_ws._handle_message({"Status": {"TempOfNozzle": 35.0}})
+
+        with mock.patch.object(adapter_with_ws, "_ensure_ws"), mock.patch.object(
+            adapter_with_ws, "_send_command"
+        ):
+            state = adapter_with_ws.get_state()
+
+        assert state.tool_temp_actual == 35.0  # the temperature is current
+        assert state.state_age_seconds is not None
+        assert state.state_age_seconds > 295.0  # the state is not
+        assert state.is_stale() is True
+
+    def test_never_pushed_state_claims_no_age(
+        self, adapter_with_ws: ElegooAdapter
+    ) -> None:
+        with mock.patch.object(adapter_with_ws, "_ensure_ws"), mock.patch.object(
+            adapter_with_ws, "_send_command"
+        ):
+            state = adapter_with_ws.get_state()
+
+        assert state.state_age_seconds is None
+        assert state.staleness_note() is None

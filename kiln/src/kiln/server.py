@@ -307,6 +307,7 @@ from kiln.printers import (
     PrinterStatus,
     PrusaLinkAdapter,
     SerialPrinterAdapter,
+    describe_stale_state,
 )
 from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
 from kiln.registry import PrinterNotFoundError, PrinterRegistry
@@ -2985,6 +2986,17 @@ def printer_status() -> dict:
             "job": job.to_dict(),
             "capabilities": caps.to_dict(),
         }
+        # `printer` already carries state_age_seconds when the adapter measures
+        # it; this promotes the age to a sentence when it is past the point of
+        # being evidence, so the answer cannot be read as current by accident.
+        # Read from the serialised form, so an adapter returning a duck-typed
+        # state object cannot turn a status read into an AttributeError.
+        stale_note = describe_stale_state(
+            response["printer"].get("state_age_seconds"),
+            response["printer"].get("state", "unknown"),
+        )
+        if stale_note:
+            response["telemetry_warning"] = stale_note
         from kiln.safety_gap_warning import attach_safety_warning
         return attach_safety_warning(response)
     except (PrinterError, RuntimeError) as exc:
@@ -3243,6 +3255,13 @@ def _format_goal_line_for_monitor(brief_id: str) -> str:
     return ""
 
 
+# Last (printer-reported elapsed, wall clock) pair seen by monitor_print, per
+# printer.  Keyed by printer name because this used to live on the function
+# object itself, where one printer's numbers overwrote another's and a
+# two-machine setup compared each reading against the wrong machine.
+_MONITOR_ELAPSED_HISTORY: dict[str, tuple[float, float]] = {}
+
+
 @mcp.tool()
 def monitor_print(
     printer_name: str | None = None,
@@ -3335,28 +3354,49 @@ def monitor_print(
                 logger.debug("Snapshot capture failed: %s", snap_exc)
                 snapshot_line = "Snapshot capture failed"
 
-        # --- MQTT staleness detection ---
-        # Bambu A1 MQTT telemetry can lag 30-60s behind reality on long
-        # first layers.  Track elapsed_s across calls; if wall-clock time
-        # advances but printer-reported elapsed doesn't, warn the agent.
+        _resolved_printer = (
+            printer_name or _resolve_effective_printer_name(printer_name)
+        )
+
+        # --- Telemetry staleness ---
+        # Two independent signals, because each is blind where the other sees.
+        #
+        # (1) The reading's own age, from the adapter.  This is the only signal
+        #     available at 0% / layer 0 — where a printer paused at layer 0
+        #     with an error was once reported as printing, off a cache that had
+        #     stopped advancing.  Signal (2) could not fire there: it needs
+        #     printer-reported elapsed, which the Bambu adapter only computes
+        #     above 0% completion, so the one staleness witness this report had
+        #     was structurally unreachable for the whole first layer.
+        #
+        # (2) Printer-reported elapsed failing to advance across calls, which
+        #     catches a cache that keeps arriving but stops moving — a shape
+        #     signal (1) cannot see, since any push refreshes the age.
         import time as _time_mod
         _now = _time_mod.time()
-        _stale_warning = ""
+        _stale_warning = describe_stale_state(
+            sd.get("state_age_seconds"), state_str
+        ) or ""
         if elapsed_s is not None and state_str == "printing":
-            _prev = getattr(monitor_print, "_last_elapsed", None)
-            _prev_ts = getattr(monitor_print, "_last_ts", None)
+            _prev, _prev_ts = _MONITOR_ELAPSED_HISTORY.get(
+                _resolved_printer, (None, None)
+            )
             if _prev is not None and _prev_ts is not None:
                 wall_delta = _now - _prev_ts
                 printer_delta = (elapsed_s or 0) - (_prev or 0)
                 if wall_delta > 30 and printer_delta < 5:
-                    _stale_warning = (
-                        f"MQTT telemetry may be stale — {wall_delta:.0f}s of "
+                    _lag_warning = (
+                        f"Telemetry may be stale — {wall_delta:.0f}s of "
                         f"wall-clock time passed but printer-reported elapsed "
                         f"only advanced {printer_delta:.0f}s. Visual check "
                         f"recommended."
                     )
-            monitor_print._last_elapsed = elapsed_s  # type: ignore[attr-defined]
-            monitor_print._last_ts = _now  # type: ignore[attr-defined]
+                    _stale_warning = (
+                        f"{_stale_warning} {_lag_warning}".strip()
+                        if _stale_warning
+                        else _lag_warning
+                    )
+            _MONITOR_ELAPSED_HISTORY[_resolved_printer] = (float(elapsed_s), _now)
 
         # --- Smart-monitoring summary (Tier-1 fields) ---
         # Five conditional lines surfacing the new monitoring/recovery
@@ -3365,10 +3405,8 @@ def monitor_print(
         # is present, so a healthy print with no active monitoring
         # shows the same compact format as before.  Best-effort
         # throughout — any helper failure debug-logs and skips its
-        # line; never blocks monitor_print.
-        _resolved_printer = (
-            printer_name or _resolve_effective_printer_name(printer_name)
-        )
+        # line; never blocks monitor_print.  (_resolved_printer is set above,
+        # where the staleness history needs it to key by machine.)
         _monitoring_line = ""
         _risk_line = ""
         _predictive_line = ""
@@ -14751,16 +14789,37 @@ def print_status_lite(printer_name: str | None = None) -> dict:
             "file_name": job.file_name,
         }
 
-        # Include ETA if available
-        if job.time_left is not None:
-            result["eta_seconds"] = job.time_left
-        if job.time_elapsed is not None:
-            result["elapsed_seconds"] = job.time_elapsed
+        # Include ETA if available.
+        #
+        # These four reads used to name attributes that no adapter return type
+        # has ever had (`job.time_left`, `job.time_elapsed`,
+        # `state.hotend_temp`, `state.bed_temp`).  The first one raised
+        # AttributeError on every call for every backend in every state, the
+        # bare `except Exception` below turned that into `{"state": "error"}`,
+        # and the tests passed because they handed the tool MagicMocks, which
+        # answer to any attribute name.  The names below are the real fields on
+        # JobProgress and PrinterState.
+        if job.print_time_left_seconds is not None:
+            result["eta_seconds"] = job.print_time_left_seconds
+        if job.print_time_seconds is not None:
+            result["elapsed_seconds"] = job.print_time_seconds
 
-        # Include temperatures if printing
+        # Include temperatures if printing.
         if state.state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
-            result["hotend_temp"] = state.hotend_temp
-            result["bed_temp"] = state.bed_temp
+            if state.tool_temp_actual is not None:
+                result["hotend_temp"] = state.tool_temp_actual
+            if state.bed_temp_actual is not None:
+                result["bed_temp"] = state.bed_temp_actual
+
+        # How old the reading is, when the adapter measures it.  This tool is
+        # what `printer_status` recommends for polling during a print, so it is
+        # exactly where a frozen cache gets read as progress.
+        state_age = getattr(state, "state_age_seconds", None)
+        if state_age is not None:
+            result["state_age_seconds"] = state_age
+        stale_note = describe_stale_state(state_age, result["state"])
+        if stale_note:
+            result["telemetry_warning"] = stale_note
 
         return result
 

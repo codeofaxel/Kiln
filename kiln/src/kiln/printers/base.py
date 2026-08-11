@@ -104,6 +104,46 @@ class DeviceType(enum.Enum):
 # ---------------------------------------------------------------------------
 
 
+# A reading older than this is no longer evidence about now.  Adapters that
+# query the printer on every call are current by construction; adapters that
+# answer from a push cache (Bambu, over MQTT) are only as current as the last
+# push they were sent, and a push cache that stops advancing keeps answering
+# confidently.  One minute is the point past which a cached print state is
+# reported as stale rather than presented as the present tense.
+#
+# Bambu's own cooldown ceiling reads this constant rather than restating the
+# number, so the two cannot drift into disagreeing about when a cache stops
+# being trustworthy.
+STALE_STATE_WARN_AGE: float = 60.0
+
+
+def describe_stale_state(
+    state_age_seconds: float | None,
+    state_label: str,
+    max_age: float = STALE_STATE_WARN_AGE,
+) -> str | None:
+    """One sentence naming a reading's age, or ``None`` when it is fresh.
+
+    The single implementation behind :meth:`PrinterState.staleness_note` and
+    every reporting surface.  It takes plain values rather than a state object
+    so a caller holding the serialised form -- ``state.to_dict()``, a relayed
+    payload, a duck-typed adapter's shim -- reports staleness identically
+    instead of writing its own sentence, which is how two surfaces end up
+    disagreeing about the same reading.
+
+    ``None`` age means the adapter does not measure it, which is not evidence
+    of staleness: adapters that query the printer on every call are current by
+    construction, and warning about them would make the signal noise.
+    """
+    if state_age_seconds is None or state_age_seconds <= max_age:
+        return None
+    return (
+        f"Telemetry is {state_age_seconds:.0f}s old — the printer has not "
+        f"reported since, so {str(state_label).upper()} describes then, not "
+        f"now. Verify against the machine before acting."
+    )
+
+
 @dataclass
 class PrinterState:
     """Snapshot of the printer's current state and temperatures."""
@@ -127,6 +167,13 @@ class PrinterState:
     speed_profile: str | None = None
     speed_magnitude: int | None = None
     print_error: int | None = None
+    # How long ago the printer last reported the value in :attr:`state`,
+    # in seconds.  ``None`` means the adapter does not measure it -- absence
+    # of an age is not a claim of freshness, and it is the honest answer for
+    # a transport that asks the printer on every call.  An adapter answering
+    # from a push cache sets it, because "the last thing the printer said"
+    # and "what the printer is doing right now" are not the same sentence.
+    state_age_seconds: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary.
@@ -142,11 +189,35 @@ class PrinterState:
             "cooling_fan_speed", "aux_fan_speed", "chamber_fan_speed",
             "heatbreak_fan_speed", "wifi_signal", "nozzle_diameter",
             "nozzle_type", "speed_profile", "speed_magnitude", "print_error",
+            "state_age_seconds",
         )
         for key in _EXTENDED:
             if data.get(key) is None:
                 data.pop(key, None)
         return data
+
+    def is_stale(self, max_age: float = STALE_STATE_WARN_AGE) -> bool:
+        """Whether :attr:`state` is older than *max_age* seconds.
+
+        ``False`` when the adapter reports no age: a missing measurement
+        is not evidence of staleness, and treating it as stale would put a
+        warning on every polling adapter's output.
+        """
+        return self.state_age_seconds is not None and self.state_age_seconds > max_age
+
+    def staleness_note(self, max_age: float = STALE_STATE_WARN_AGE) -> str | None:
+        """One sentence naming this reading's age, or ``None`` when fresh.
+
+        Every surface that reports printer state in prose leads with this when
+        it is not ``None``.  It exists because the failure it names is silent
+        otherwise: a frozen push cache answers "printing" in exactly the tone
+        it would use for a live reading, and a confidently wrong answer costs
+        more than an error.  The state itself is never rewritten -- callers
+        downstream read the enum to decide whether a printer is busy, and
+        demoting a stale PRINTING to UNKNOWN would let a second concurrent
+        print start.
+        """
+        return describe_stale_state(self.state_age_seconds, self.state.value, max_age)
 
 
 @dataclass
