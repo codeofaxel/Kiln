@@ -723,16 +723,17 @@ def unique_object_names(names: Sequence[str | None]) -> list[str]:
     reads geometry through trimesh addresses objects by NAME — so two
     objects sharing one name make the whole file's colour unattributable,
     and the reader honestly declines all of it.  Duplicates are not an edge
-    case: a CAD assembly legitimately holds four bolts all called "M3x8",
-    and an unnamed STEP body degrades to its shape type, so a two-body file
-    arrives as ``["SOLID", "SOLID"]``.
+    case: a CAD assembly legitimately holds four bolts all called "M3x8", and
+    a file can arrive with two bodies nobody named at all.
 
     Uniqueness is guaranteed against the key the reader actually builds
     (``name`` if non-empty, else the object id), by never returning a blank
-    name: a name that is empty or all whitespace becomes ``part_N`` at its
-    1-based position, which also keeps a nameless part legible in a slicer's
-    object list.  Repeats then take a ``" (2)"``, ``" (3)"`` … suffix, the
-    disambiguation every file browser and CAD tree already uses.
+    name: a name that is empty or all whitespace becomes ``Part N`` at its
+    1-based position.  This is the ONE place an unnamed part gets named — the
+    label is read by a person in a slicer's object list, so it is written the
+    way a person writes one rather than as an identifier.  Repeats then take a
+    ``" (2)"``, ``" (3)"`` … suffix, the disambiguation every file browser and
+    CAD tree already uses.
 
     The first use of a name always keeps it verbatim, and a suffix never
     lands on a name spoken for elsewhere in the list — ``["A", "A (2)",
@@ -744,7 +745,7 @@ def unique_object_names(names: Sequence[str | None]) -> list[str]:
     filled: list[str] = []
     for i, raw in enumerate(names):
         name = raw or ""
-        filled.append(name if name.strip() else f"part_{i + 1}")
+        filled.append(name if name.strip() else f"Part {i + 1}")
 
     # Every name in the list is spoken for from the start, so a suffix can
     # never collide with a name that appears LATER (the "A (2)" case above).

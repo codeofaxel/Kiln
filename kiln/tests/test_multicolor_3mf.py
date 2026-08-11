@@ -1517,7 +1517,7 @@ def test_compose_names_agree_across_every_document(
 def test_compose_nameless_parts_keep_the_positional_names(
     stl_a: Path, stl_b: Path, tmp_path: Path
 ):
-    """Unchanged behaviour: a part with no name is still part_1, part_2 …"""
+    """A part with no name is labelled the way a person would label it."""
     import re
 
     out = str(tmp_path / "nameless.3mf")
@@ -1532,6 +1532,6 @@ def test_compose_nameless_parts_keep_the_positional_names(
     with zipfile.ZipFile(out) as zf:
         model = zf.read("3D/3dmodel.model").decode()
     assert re.findall(r'<object id="\d+" type="model" name="([^"]*)"', model) == [
-        "part_1",
-        "part_2",
+        "Part 1",
+        "Part 2",
     ]
