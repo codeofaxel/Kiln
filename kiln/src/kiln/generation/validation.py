@@ -457,6 +457,67 @@ def _bounding_box(vertices: list[tuple[float, ...]]) -> dict[str, float]:
     }
 
 
+_DEFAULT_LAYER_HEIGHT_MM: float = 0.2
+
+
+def _mesh_bed_z(triangles: list[tuple[tuple[float, ...], ...]]) -> float:
+    """Return the plate plane: the lowest point of actual geometry.
+
+    Derived from triangles, never from a parsed vertex list.  An OBJ may
+    carry ``v`` lines that no face references, and one stray vertex below
+    the model puts the plate somewhere the model never touches — which
+    silently restores the very bug the bed test exists to fix.
+    """
+    return min(v[2] for tri in triangles for v in tri) if triangles else 0.0
+
+
+def _bed_threshold_z(
+    z_min: float,
+    layer_height: float = _DEFAULT_LAYER_HEIGHT_MM,
+) -> float:
+    """Top of the band that counts as resting on the plate.
+
+    Two layer heights above the plate — anything the first couple of
+    layers can pin down.  Exposed so callers that need the height itself
+    (rather than a per-triangle verdict) cannot drift from the band
+    ``_is_bed_supported_triangle`` applies.
+    """
+    return z_min + layer_height * 2.0
+
+
+def _is_bed_supported_triangle(
+    tri: tuple[tuple[float, ...], ...],
+    z_min: float,
+    layer_height: float = _DEFAULT_LAYER_HEIGHT_MM,
+) -> bool:
+    """Return True when a triangle is effectively resting on the build plate.
+
+    The overhang angle convention treats a horizontal downward-facing face
+    as 90° — the hardest thing to bridge.  That is right for a face in
+    mid-air and wrong for the face the model *stands on*: the bed carries
+    it, so it is not an overhang at all.  Without this test a plain box
+    scores as a 90° overhang because of its own bottom (2026-08-11).
+
+    ``z_min`` is the mesh's own minimum Z, not a hard-coded 0.0 — a model
+    authored at z=25 still rests on the plate once placed, so the check
+    stays correct regardless of where the exporter put the origin.
+
+    All three vertices must sit within the band, so a steeply tilted face
+    that merely touches the plate along one edge (a cone tip, a wedge)
+    keeps counting as the overhang it is.  The band is two layer heights:
+    anything the first couple of layers can pin down.
+
+    This is the single definition of "on the plate" in Kiln.  Every door
+    that judges overhangs or supports calls it: in this module
+    ``analyze_mesh``, ``estimate_support_volume``, ``predict_print_failures``
+    and ``optimize_orientation``; ``printability`` and ``support_assessment``
+    import it for theirs.  Keep it that way — the bug it fixes came from
+    one door growing its own answer.
+    """
+    threshold = _bed_threshold_z(z_min, layer_height)
+    return all(v[2] <= threshold for v in tri)
+
+
 def _edge_census(
     triangles: list[tuple[tuple[float, ...], ...]],
     *,
@@ -1032,6 +1093,7 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
     overhang_count = 0
     max_overhang = 0.0
     degenerate_count = 0
+    bed_z = _mesh_bed_z(triangles)  # the plane the model rests on
 
     for tri in triangles:
         v0, v1, v2 = tri
@@ -1069,9 +1131,11 @@ def analyze_mesh(file_path: str) -> MeshAnalysis:
         cy += centroid[1] * tri_area
         cz += centroid[2] * tri_area
 
-        # Overhang detection: angle between face normal and -Z
+        # Overhang detection: angle between face normal and -Z.
+        # A downward face sitting on the plate is held up by the bed, so
+        # it is not an overhang — see _is_bed_supported_triangle.
         nz = cross[2] / area_2  # normalized Z component of normal
-        if nz < 0:  # face points downward
+        if nz < 0 and not _is_bed_supported_triangle(tri, bed_z):
             angle = math.degrees(math.acos(max(-1.0, min(1.0, -nz))))
             overhang_angle = 90.0 - angle  # angle from vertical
             if overhang_angle > max_overhang:
@@ -1777,7 +1841,13 @@ def optimize_orientation(
             else:
                 rotated = _rotate_triangles(triangles, rx, ry)
 
-            # Score: minimize overhangs, maximize bed contact
+            # Score: minimize overhangs, maximize bed contact.
+            # The plate sits at whatever this rotation makes the lowest
+            # point — the model gets dropped onto it below.  Measuring
+            # bed contact against an absolute z=0 scored every candidate
+            # orientation of a mesh not authored at the origin as zero
+            # bed contact, leaving the score to overhang count alone.
+            rot_bed_z = _mesh_bed_z(rotated)
             overhang_count = 0
             bed_contact = 0.0
             for tri in rotated:
@@ -1793,12 +1863,14 @@ def optimize_orientation(
                     continue
 
                 nz_norm = cz / area_2
-                if nz_norm < -0.7:  # face points strongly downward
-                    overhang_count += 1
-                # Bottom face contributes to bed contact
-                min_z = min(v0[2], v1[2], v2[2])
-                if min_z < 0.5 and nz_norm < -0.9:
-                    bed_contact += area_2 / 2.0
+                # Only downward faces can be either an overhang or bed
+                # contact, so the bed test stays off the upward half.
+                if nz_norm < -0.7:  # points strongly downward
+                    if not _is_bed_supported_triangle(tri, rot_bed_z):
+                        overhang_count += 1
+                    elif nz_norm < -0.9:
+                        # Bottom face contributes to bed contact
+                        bed_contact += area_2 / 2.0
 
             # Score: less overhangs is better, more bed contact is better
             score = bed_contact * 10.0 - overhang_count
@@ -1896,6 +1968,9 @@ def estimate_support_volume(file_path: str) -> dict[str, Any]:
     overhang_area = 0.0
     overhang_count = 0
     total_count = 0
+    # Supports stand on the plate the model rests on, which is its own
+    # lowest point once placed — not an absolute z=0.
+    bed_z = _mesh_bed_z(triangles)
 
     for tri in triangles:
         v0, v1, v2 = tri
@@ -1913,19 +1988,22 @@ def estimate_support_volume(file_path: str) -> dict[str, Any]:
         total_count += 1
         nz = cross[2] / area_2  # normalized Z of face normal
 
-        # Overhang: face points downward past 45 degrees
-        if nz < -0.707:  # cos(45°) ≈ 0.707
+        # Overhang: face points downward past 45 degrees.  The face the
+        # model stands on needs no support — the bed is already there.
+        if nz < -0.707 and not _is_bed_supported_triangle(tri, bed_z):
             tri_area = area_2 / 2.0
             overhang_area += tri_area
             overhang_count += 1
 
-            # Approximate support volume: project triangle down to z=0
-            avg_z = (v0[2] + v1[2] + v2[2]) / 3.0
-            if avg_z > 0:
+            # Approximate support volume: project the triangle down to the
+            # bed plane.  Measuring from an absolute z=0 billed a model
+            # authored above the origin for support it never needs.
+            height_above_bed = (v0[2] + v1[2] + v2[2]) / 3.0 - bed_z
+            if height_above_bed > 0:
                 # Prism volume = projected area × height
                 # Projected XY area ≈ tri_area × |nz| (projection onto XY)
                 proj_area = tri_area * abs(nz)
-                support_volume += proj_area * avg_z
+                support_volume += proj_area * height_above_bed
 
     # Estimate support weight (typical PLA density ~1.24 g/cm³)
     support_volume_cm3 = support_volume / 1000.0
@@ -2384,6 +2462,7 @@ def predict_print_failures(
     overhang_count = 0
     severe_count = 0
     max_angle = 0.0
+    bed_z = _mesh_bed_z(tris)  # the plane the model rests on
     for tri in tris:
         v0, v1, v2 = tri
         e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
@@ -2397,7 +2476,8 @@ def predict_print_failures(
         if area_2 < 1e-10:
             continue
         nz = (e1[0] * e2[1] - e1[1] * e2[0]) / area_2
-        if nz < 0:
+        # The bed carries the face the model stands on — not a failure mode.
+        if nz < 0 and not _is_bed_supported_triangle(tri, bed_z):
             angle = math.degrees(math.acos(max(-1.0, min(1.0, -nz))))
             overhang_angle = 90.0 - angle
             if overhang_angle > max_angle:

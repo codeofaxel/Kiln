@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln.generation.validation import _is_bed_supported_triangle, _mesh_bed_z
+
 logger = logging.getLogger(__name__)
 
 _DATA_FILE = Path(__file__).resolve().parent / "data" / "support_profiles.json"
@@ -481,27 +483,39 @@ def _analyze_orientation(
     rotation_name: str,
     matrix: tuple[tuple[int, int, int], ...],
     safe_deg: float,
+    layer_height_mm: float = 0.2,
 ) -> OrientationCandidate:
     """Analyze overhang characteristics for a given orientation."""
     total_area = 0.0
     overhang_area = 0.0
     support_volume = 0.0
 
-    for tri in triangles:
-        rotated = (
+    rotated_tris = [
+        (
             _rotate_point(tri[0], matrix),
             _rotate_point(tri[1], matrix),
             _rotate_point(tri[2], matrix),
         )
+        for tri in triangles
+    ]
+    # Each candidate orientation lands the model on the plate, so the
+    # plate sits under whatever this rotation makes the lowest point.
+    bed_z = _mesh_bed_z(rotated_tris)
+
+    for rotated in rotated_tris:
         area = _triangle_area(rotated)
         total_area += area
+
+        # The face this orientation stands on rests on the bed.
+        if _is_bed_supported_triangle(rotated, bed_z, layer_height_mm):
+            continue
 
         normal = _triangle_normal(rotated)
         angle = _overhang_angle_deg(normal)
         if angle > safe_deg:
             overhang_area += area
-            # Rough support volume: area * centroid Z height
-            cz = _triangle_centroid(rotated)[2]
+            # Rough support volume: area * height above the plate
+            cz = _triangle_centroid(rotated)[2] - bed_z
             if cz > 0:
                 support_volume += area * cz
 
@@ -675,9 +689,19 @@ def assess_support_feasibility(
     # (triangle, angle_deg, area_mm2) for overhangs
     overhang_tris: list[tuple[_Triangle, float, float]] = []
 
+    # The plate the model rests on — its own lowest point, not z=0.
+    bed_z = _mesh_bed_z(tris)
+
     for tri in tris:
         area = _triangle_area(tri)
         total_area += area
+
+        # The face the model stands on is carried by the bed: safe, and
+        # never a candidate for supports or a bridge.
+        if _is_bed_supported_triangle(tri, bed_z, layer_height_mm):
+            safe_area += area
+            continue
+
         normal = _triangle_normal(tri)
         angle = _overhang_angle_deg(normal)
 
@@ -802,14 +826,18 @@ def assess_support_feasibility(
     # ---------------------------------------------------------------
     # f) Orientation suggestions
     # ---------------------------------------------------------------
-    current_orient = _analyze_orientation(tris, "none", _ROTATIONS["none"], safe_deg)
+    current_orient = _analyze_orientation(
+        tris, "none", _ROTATIONS["none"], safe_deg, layer_height_mm
+    )
     orientation_suggestions: list[OrientationCandidate] = []
 
     if total_overhang_area > 0:
         for name, matrix in _ROTATIONS.items():
             if name == "none":
                 continue
-            candidate = _analyze_orientation(tris, name, matrix, safe_deg)
+            candidate = _analyze_orientation(
+                tris, name, matrix, safe_deg, layer_height_mm
+            )
             # Only suggest if >30% improvement
             if current_orient.overhang_area_mm2 > 0:
                 improvement = (

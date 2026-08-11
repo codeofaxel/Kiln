@@ -239,7 +239,7 @@ def _score_orientation(
     z_min = bbox["z_min"]
     print_height = bbox["z_max"] - z_min
 
-    overhangs = _analyze_overhangs(triangles)
+    overhangs = _analyze_overhangs(triangles, z_min=z_min)
     bed_adhesion = _analyze_bed_adhesion(triangles, z_min, bbox)
     supports = _analyze_supports(triangles, z_min)
 
@@ -479,7 +479,9 @@ def estimate_supports(
 
     z_min = min(v[2] for v in vertices)
 
-    overhangs = _analyze_overhangs(triangles, max_overhang_angle=max_overhang_angle)
+    overhangs = _analyze_overhangs(
+        triangles, z_min=z_min, max_overhang_angle=max_overhang_angle
+    )
     supports = _analyze_supports(triangles, z_min, max_overhang_angle=max_overhang_angle)
 
     return SupportEstimate(
