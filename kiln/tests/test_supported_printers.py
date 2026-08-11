@@ -78,6 +78,51 @@ def test_readme_printer_block_is_not_stale():
     )
 
 
+def test_pypi_readme_printer_block_is_not_stale():
+    """kiln/README.md is the PyPI project page and gets the same guarantee.
+
+    It stated the catalogue link for a long time without the catalogue's
+    SIZE, which is the one number a stranger is actually asking for. Now the
+    generator owns it, so this test is what stops it going stale the way the
+    root README's block did.
+    """
+    import re
+
+    if not gen.PYPI_README.exists():
+        return
+    text = gen.PYPI_README.read_text()
+    if gen.RM_BEGIN not in text:
+        return  # not wired with markers in this checkout
+    payload, _ = gen.build_surface()
+    expected = gen.render_pypi_block(payload)
+    match = re.search(
+        re.escape(gen.RM_BEGIN) + ".*?" + re.escape(gen.RM_END), text, re.DOTALL
+    )
+    assert match and match.group(0) == expected, (
+        "PyPI README printer block is stale — run "
+        "`python3 scripts/generate_supported_printers.py`."
+    )
+
+
+def test_the_pypi_block_does_not_open_a_second_brand_roster():
+    """The brand-order ledger governs kiln/README.md.
+
+    The root README's block names all fifteen brands in model-count order.
+    Rendering that same list into the PyPI README would put a second,
+    differently-ordered roster in a file whose order that ledger owns — the
+    file disagreeing with itself, which is the defect the ledger exists to
+    catch. The count and the link carry the value; the backend table above
+    already carries the roster.
+    """
+    payload, _ = gen.build_surface()
+    block = gen.render_pypi_block(payload)
+    for brand in (b["brand"] for b in payload["brands"]):
+        assert brand not in block, (
+            f"the PyPI block names '{brand}' — it must state the counts and "
+            "link only, leaving brand order to the backend table."
+        )
+
+
 # Fields allowed on the PUBLIC, crawlable /printers surface. Just enough to
 # answer "is my printer supported?" — never per-model engineering specs.
 _PUBLIC_MODEL_FIELDS = {"id", "name"}

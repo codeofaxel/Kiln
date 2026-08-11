@@ -20,7 +20,29 @@ from pathlib import Path
 import pytest
 
 from kiln import stage_still
-from kiln.stage_still import (
+
+
+def _openscad_available() -> bool:
+    import subprocess
+
+    try:
+        subprocess.run(["openscad", "--version"], capture_output=True, check=True)
+        return True
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return False
+
+
+# These two stub the STAGE renderer but still drive the real
+# ``visualize_model``, which compiles through OpenSCAD; without the binary it
+# returns ``success: False`` and the assertion reads as a code failure. CI
+# runners have no OpenSCAD, so both have been red there while passing on any
+# developer machine that does — the same class of gap the rest of this suite
+# already guards with this mark.
+needs_openscad = pytest.mark.skipif(
+    not _openscad_available(), reason="visualize_model compiles through OpenSCAD"
+)
+
+from kiln.stage_still import (  # noqa: E402
     _MIN_STDDEV,
     _frame_ok,
     _openscad_rotation_to_orbit,
@@ -358,6 +380,7 @@ def test_blank_frame_falls_back(
 # visualize_model wiring
 # ---------------------------------------------------------------------------
 
+@needs_openscad
 def test_visualize_model_uses_stage_views_and_labels_renderer(
     cube_stl: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -375,6 +398,7 @@ def test_visualize_model_uses_stage_views_and_labels_renderer(
     assert result["views"] == canned
 
 
+@needs_openscad
 def test_visualize_model_hands_the_requested_color_to_the_stage(
     cube_stl: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

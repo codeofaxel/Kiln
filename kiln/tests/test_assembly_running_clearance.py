@@ -38,6 +38,28 @@ def entitled():
 
 
 @pytest.fixture()
+def derived():
+    """An entitled caller ON A MACHINE WHERE THE DERIVATION IS INSTALLED.
+
+    ``entitled`` only says the caller's tier allows the derivation.  The
+    material-aware numbers themselves live in kiln-pro, so a test that
+    asserts a value the derivation produced needs the module present as
+    well — and public CI installs public Kiln alone, on purpose.  Those
+    tests were using ``entitled`` and failing there against the static
+    fallback, which is the correct free answer and not a bug.
+
+    Tests of the FREE answer keep using ``free`` or ``entitled`` so they
+    go on running in that environment, which is the whole point of it.
+    """
+    pytest.importorskip(
+        "kiln_pro.engineering.running_clearance",
+        reason="the material-aware derivation ships in kiln-pro",
+    )
+    with patch.object(A, "_has_pro_license", lambda: True):
+        yield
+
+
+@pytest.fixture()
 def free():
     with patch.object(A, "_has_pro_license", lambda: False):
         yield
@@ -95,7 +117,7 @@ class TestFreePathUnchanged:
 
 
 class TestDerivedForMovingJoints:
-    def test_the_gap_depends_on_the_material(self, entitled):
+    def test_the_gap_depends_on_the_material(self, derived):
         """The whole point: one number for every material was the bug."""
         pla = A.get_clearance_recommendation(
             "clearance_fit", "PLA", "PLA", printer_id="bambu_a1"
@@ -115,7 +137,7 @@ class TestDerivedForMovingJoints:
             )["recommended_clearance_mm"]
             assert low <= got <= high, f"{material} landed outside {low}-{high}"
 
-    def test_the_provenance_rides_along(self, entitled):
+    def test_the_provenance_rides_along(self, derived):
         r = A.get_clearance_recommendation(
             "clearance_fit", "PETG", "PETG", printer_id="bambu_a1"
         )
@@ -133,7 +155,7 @@ class TestDerivedForMovingJoints:
             )
             assert r["running_clearance"] == {}, f"{joint} was treated as moving"
 
-    def test_an_unspecified_shape_assumes_the_demanding_one(self, entitled):
+    def test_an_unspecified_shape_assumes_the_demanding_one(self, derived):
         """A bore is closed on from both sides and needs about twice what
         a flat gap does, so assuming it can only give a joint too much
         room, never too little."""
@@ -165,7 +187,7 @@ class TestValidationAgrees:
     machine-aware, a design passes a check it will fail on the plate.
     """
 
-    def test_a_gap_this_printer_would_close_is_flagged(self, entitled, parts):
+    def test_a_gap_this_printer_would_close_is_flagged(self, derived, parts):
         low, _high = A._DEFAULT_JOINT_CLEARANCES["clearance_fit"]
         # Legal by the static table, too tight for PETG on a real machine.
         iface = A.MatingInterface("a", "b", "clearance_fit", clearance_mm=low + 0.1)
@@ -254,7 +276,7 @@ class TestResponseIsSelfConsistent:
         low, high = r["clearance_range_mm"]
         assert low <= r["recommended_clearance_mm"] <= high
 
-    def test_the_minimum_is_named_as_a_minimum(self, entitled):
+    def test_the_minimum_is_named_as_a_minimum(self, derived):
         r = A.get_clearance_recommendation(
             "clearance_fit", "PETG", "PETG", printer_id="bambu_a1"
         )
@@ -346,27 +368,27 @@ class TestReachesCallersThatNeverAskedForIt:
         with patch.object(R, "resolve_printer_model", lambda: None):
             yield
 
-    def test_the_recommendation_uses_the_active_printer(self, entitled, configured):
+    def test_the_recommendation_uses_the_active_printer(self, derived, configured):
         r = A.get_clearance_recommendation("clearance_fit", "PETG", "PETG")
         assert r["running_clearance"], "never reached the derivation"
         assert r["running_clearance"]["printer_resolved"] is True
         assert r["running_clearance"]["printer_id"] == "bambu_a1"
 
-    def test_validation_uses_the_active_printer(self, entitled, configured, parts):
+    def test_validation_uses_the_active_printer(self, derived, configured, parts):
         iface = A.MatingInterface("a", "b", "clearance_fit", clearance_mm=0.40)
         assert A.validate_joint(iface, parts).issues, (
             "a gap this printer closes passed a check that never asked "
             "which printer"
         )
 
-    def test_the_whole_assembly_sweep_inherits_it(self, entitled, configured, parts):
+    def test_the_whole_assembly_sweep_inherits_it(self, derived, configured, parts):
         iface = A.MatingInterface("a", "b", "clearance_fit", clearance_mm=0.40)
         asm = A.Assembly(assembly_id="x", name="x", parts=parts, interfaces=[iface])
         with patch.object(A, "check_all_clearances", lambda a: None):
             A.validate_assembly(asm)
         assert asm.joint_validations[0].issues
 
-    def test_an_explicit_printer_still_wins(self, entitled, configured):
+    def test_an_explicit_printer_still_wins(self, derived, configured):
         r = A.get_clearance_recommendation(
             "clearance_fit", "PETG", "PETG", printer_id="prusa_mk4"
         )
