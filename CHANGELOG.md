@@ -7,6 +7,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Open a CAD file and see the real part.** A STEP now opens labelled as CAD,
+  with the exact dimensions the file itself defines. When those exact figures
+  can't be read on your setup, Kiln says so plainly instead of showing an
+  estimate as though it were exact. Served via kiln-pro.
+
 - **Parts that need to move get a gap that suits your printer (Pro+).** On
   anything that has to turn or slide, that gap decides whether it works or
   comes off the plate as one solid lump — and it used to be the same number
