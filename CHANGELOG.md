@@ -152,10 +152,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - **Artillery Sidewinder X3 owners get settings that match their machine.** Kiln
-  had the X3 down as a Klipper printer; Artillery ships it running Marlin. Its
-  slicer profile was built for the wrong firmware, and its safe bed temperature
-  sat 10°C above Artillery's own rating. Both now match the manuals, for the X3
-  Pro and Plus alike.
+  had the X3 down as Klipper when Artillery ships it running Marlin, and both its
+  temperature limits were wrong. The Plus was sharing the Pro's entry too, so its
+  owners were told their bed was smaller than it is — it's now its own machine.
+  Every figure comes from Artillery's manuals.
 
 - **Bambu P2S prints start the first time.** Kiln gave every Bambu the same
   instructions for where to find your print file, and the P2S expects a
