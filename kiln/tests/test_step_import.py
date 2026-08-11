@@ -2825,3 +2825,98 @@ def test_a_genuinely_broken_stl_is_still_reported_as_a_broken_stl(tmp_path):
     _parse_stl(broken, errors)
     assert errors and "500 triangles" in errors[0]
     assert "STEP" not in errors[0]
+
+
+# ─────────────── the shared CAD door, and who goes through it ───────────────
+
+
+def test_the_shared_door_passes_an_ordinary_mesh_straight_through(tmp_path):
+    """Safe to call unconditionally: a caller never has to ask whether it was
+    handed CAD, which is what stops the per-tool branch growing back."""
+    from kiln.step_import import resolve_mesh_input
+
+    stl = tmp_path / "plain.stl"
+    stl.write_bytes(b"\x00" * 80 + (0).to_bytes(4, "little"))
+
+    out, conversion, refusal = resolve_mesh_input(str(stl))
+    assert out == str(stl)
+    assert conversion is None
+    assert refusal is None
+
+
+def test_the_shared_door_hands_back_a_ready_refusal(tmp_path, monkeypatch):
+    """The wording is the part that was being retyped, so it lives once.
+
+    A tool adopts CAD support in three lines and cannot get the
+    NoBackendError branch subtly different from the tool next door — which is
+    how one of them ends up dropping ``exc.remedy`` and telling a user
+    nothing actionable.
+    """
+    import kiln.step_import as si
+
+    def _no_backend(*a, **k):
+        # Takes no arguments — it builds its own message from install_remedy().
+        raise si.NoBackendError()
+
+    monkeypatch.setattr(si, "ensure_mesh_path", _no_backend)
+
+    step = tmp_path / "part.step"
+    step.write_text("ISO-10303-21;\n")
+
+    out, conversion, refusal = si.resolve_mesh_input(str(step))
+    assert conversion is None
+    assert refusal["success"] is False
+    assert refusal["error"]["code"] == "NO_BACKEND"
+    assert "remedy" in refusal
+
+
+def test_a_corrupt_cad_file_is_user_input_not_a_crash(tmp_path, monkeypatch):
+    import kiln.step_import as si
+
+    monkeypatch.setattr(
+        si, "ensure_mesh_path",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("bad entity at line 12")),
+    )
+    step = tmp_path / "broken.step"
+    step.write_text("ISO-10303-21;\n")
+
+    _out, _conv, refusal = si.resolve_mesh_input(str(step))
+    assert refusal["error"]["code"] == "STEP_CONVERSION_FAILED"
+    assert "bad entity" in refusal["error"]["message"]
+
+
+#: Every tool a person naturally reaches for after importing CAD.  Table-driven
+#: because the failure mode is a door being FORGOTTEN, and a per-door test that
+#: nobody remembers to add is the same gap one layer up.
+_CAD_DOORS = [
+    ("auto_orient_model", "file_path"),
+    ("check_orientation", "model_path"),
+    ("estimate_supports", "file_path"),
+    ("estimate_support_material", "file_path"),
+    ("analyze_warping_risk", "file_path"),
+    ("analyze_mesh_geometry", "file_path"),
+]
+
+
+@pytest.mark.parametrize("tool_name,param", _CAD_DOORS)
+def test_the_cad_doors_route_through_the_shared_helper(tool_name, param):
+    """Structural, not behavioural: proves each door reaches the ONE helper.
+
+    A behavioural test needs a converter installed, which not every machine
+    has.  This asks the question that actually regresses — did someone add a
+    mesh tool and hand-roll its CAD branch again, or skip it entirely.
+    """
+    import inspect
+
+    from kiln import server as ks
+
+    ks._ensure_pro_plugins_registered()
+    tools = {t.name: t for t in ks.mcp._tool_manager.list_tools()}
+    assert tool_name in tools, f"{tool_name} is not registered"
+
+    source = inspect.getsource(tools[tool_name].fn)
+    assert "resolve_mesh_input" in source, (
+        f"{tool_name} does not route CAD through the shared door — a .step "
+        "will fail several layers down with a contradictory error"
+    )
+    assert param in inspect.signature(tools[tool_name].fn).parameters

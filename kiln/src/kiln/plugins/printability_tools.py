@@ -139,6 +139,15 @@ class _PrintabilityToolsPlugin:
                     when ``apply`` is True.  Defaults to
                     ``<input>_oriented.stl``.
             """
+            # STEP in, mesh out — the one shared door, never a per-tool
+            # branch, so the CAD format engineering customers actually send
+            # works here instead of failing several layers down.
+            from kiln.step_import import resolve_mesh_input
+
+            file_path, _conversion, _refusal = resolve_mesh_input(file_path)
+            if _refusal:
+                return _refusal
+
             import kiln.server as _srv
             from kiln.auto_orient import (
                 apply_orientation,
@@ -203,6 +212,15 @@ class _PrintabilityToolsPlugin:
                 max_overhang_angle: Maximum overhang angle in degrees
                     before supports are needed (default 45).
             """
+            # STEP in, mesh out — the one shared door, never a per-tool
+            # branch, so the CAD format engineering customers actually send
+            # works here instead of failing several layers down.
+            from kiln.step_import import resolve_mesh_input
+
+            file_path, _conversion, _refusal = resolve_mesh_input(file_path)
+            if _refusal:
+                return _refusal
+
             import kiln.server as _srv
             from kiln.auto_orient import estimate_supports as _estimate
 

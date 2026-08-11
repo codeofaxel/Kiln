@@ -1872,3 +1872,59 @@ def get_step_metadata(step_path: str) -> dict[str, Any]:
         )
 
     return metadata
+
+
+def resolve_mesh_input(
+    path: str,
+    *,
+    output_dir: str | None = None,
+) -> tuple[str, MeshConversion | None, dict[str, Any] | None]:
+    """Hand this any model path; get back something a mesh tool can read.
+
+    :func:`ensure_mesh_path` is the door.  This is the door plus the three
+    ways it can fail, worded once — because the wording is the part that was
+    being retyped.  Every tool that had grown CAD support had also grown its
+    own copy of the same try/except: a ``NoBackendError`` branch that
+    remembers to attach ``exc.remedy``, a catch-all for a corrupt file, and
+    (in the tools that thought of it) an ``ImportError`` branch for a kiln3d
+    too old to convert at all.  Fifteen lines each, and the tools that got it
+    slightly different are the ones that told a user something unhelpful.
+
+    A tool adopts CAD support in three lines::
+
+        mesh_path, conversion, refusal = resolve_mesh_input(file_path)
+        if refusal:
+            return refusal
+
+    Anything that is already a mesh passes straight through with no
+    conversion and no refusal, so this is safe to call unconditionally — a
+    caller never needs to ask whether it was handed CAD.
+
+    :returns: ``(mesh_path, conversion, refusal)``.  ``conversion`` records
+        how the CAD became triangles, for a caller that wants to say what its
+        answer rests on; it is ``None`` for an ordinary mesh.  ``refusal`` is
+        a ready-to-return error envelope, and ``None`` when all is well.
+    """
+    # Lazily imported: kiln.server imports this module, so taking its error
+    # builder at module scope would be a cycle.  By the time any tool calls
+    # this, the server is loaded.  Reimplementing the envelope here instead
+    # would be a hand-copy of `_error_dict`'s retryable-code logic, which is
+    # exactly how two refusals from one product start disagreeing.
+    from kiln.server import _error_dict
+
+    try:
+        mesh_path, _note, conversion = ensure_mesh_path(
+            path, output_dir=output_dir, with_record=True
+        )
+    except NoBackendError as exc:
+        refusal = _error_dict(str(exc), code="NO_BACKEND")
+        # Structured remedy: tells the agent whether the user can fix this
+        # themselves (install a converter) or is on a hosted server.
+        refusal["remedy"] = exc.remedy
+        return path, None, refusal
+    except Exception as exc:  # noqa: BLE001 — a bad CAD file is user input
+        return path, None, _error_dict(
+            f"Could not read that CAD file: {exc}",
+            code="STEP_CONVERSION_FAILED",
+        )
+    return mesh_path, conversion, None

@@ -1184,6 +1184,15 @@ class _DesignReasoningToolsPlugin:
             :param file_path: Path to .stl, .obj, or .glb file.
             :returns: Dict with support volume (mm\u00b3), weight (g), and overhang stats.
             """
+            # STEP in, mesh out — the one shared door, never a per-tool
+            # branch, so the CAD format engineering customers actually send
+            # works here instead of failing several layers down.
+            from kiln.step_import import resolve_mesh_input
+
+            file_path, _conversion, _refusal = resolve_mesh_input(file_path)
+            if _refusal:
+                return _refusal
+
             try:
                 from kiln.generation.validation import estimate_support_volume
 

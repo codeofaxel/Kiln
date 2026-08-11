@@ -1164,15 +1164,38 @@ class TestAnalyzeMeshGeometryHonesty:
         assert result["success"] is False
         assert result["error"]["code"] == "UNREADABLE_INPUT"
 
-    def test_step_input_error_names_the_conversion_path(self, mesh_tools, tmp_path):
-        step = tmp_path / "part.step"
+    def test_a_cad_file_is_converted_rather_than_handed_back_to_the_user(
+        self, mesh_tools, tmp_path
+    ):
+        """This tool used to answer a .step by telling the user to convert it
+        themselves — its docstring said so, and the ledger recorded it as a
+        deliberate dead end from before a shared door existed.
+
+        It now goes through that door.  Volume, area, centre of mass and
+        overhangs are all questions about the SHAPE, and a tessellation
+        answers every one of them.
+        """
+        import inspect
+
+        source = inspect.getsource(mesh_tools["analyze_mesh_geometry"])
+        assert "resolve_mesh_input" in source
+
+    def test_a_cad_file_that_cannot_be_read_refuses_in_cad_terms(
+        self, mesh_tools, tmp_path
+    ):
+        """A STEP with no geometry in it is a CAD problem, and must be worded
+        as one — never as a mesh that failed to parse, which is what sends
+        someone back to their CAD package to fix a file that is not the
+        issue."""
+        step = tmp_path / "empty.step"
         step.write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n")
 
         result = mesh_tools["analyze_mesh_geometry"](file_path=str(step))
 
         assert result["success"] is False
-        assert result["error"]["code"] == "UNREADABLE_INPUT"
-        assert "import_step_file" in result["error"]["message"]
+        assert result["error"]["code"] in {"STEP_CONVERSION_FAILED", "NO_BACKEND"}
+        # Never the mesh-parser's vocabulary for a file that is not a mesh.
+        assert "truncated" not in result["error"]["message"].lower()
 
     def test_real_mesh_still_analyzes(self, mesh_tools, tmp_path):
         stl = tmp_path / "tri.stl"

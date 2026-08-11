@@ -192,6 +192,15 @@ class _MeshToolsPlugin:
                 and analyze the resulting mesh.
             :returns: Dict with full mesh analysis metrics.
             """
+            # STEP in, mesh out — the one shared door, never a per-tool
+            # branch, so the CAD format engineering customers actually send
+            # works here instead of failing several layers down.
+            from kiln.step_import import resolve_mesh_input
+
+            file_path, _conversion, _refusal = resolve_mesh_input(file_path)
+            if _refusal:
+                return _refusal
+
             from kiln.server import _error_dict
 
             try:

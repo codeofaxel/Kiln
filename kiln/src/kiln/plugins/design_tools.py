@@ -1739,6 +1739,15 @@ class _DesignToolsPlugin:
                 analyze_warping_risk("/path/to/model.stl", material="abs")
                 analyze_warping_risk("/path/to/plate.stl")  # defaults to PLA
             """
+            # STEP in, mesh out — the one shared door, never a per-tool
+            # branch, so the CAD format engineering customers actually send
+            # works here instead of failing several layers down.
+            from kiln.step_import import resolve_mesh_input
+
+            file_path, _conversion, _refusal = resolve_mesh_input(file_path)
+            if _refusal:
+                return _refusal
+
             from kiln.printability import analyze_printability
 
             try:

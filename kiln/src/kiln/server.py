@@ -8363,6 +8363,15 @@ async def check_orientation(
     :param model_path: Path to the STL or OBJ model file.
     :returns: Dict with stability assessment.
     """
+    # STEP in, mesh out — the one shared door, never a per-tool branch, so
+    # the CAD format engineering customers actually send works here instead
+    # of failing several layers down.
+    from kiln.step_import import resolve_mesh_input
+
+    model_path, _conversion, _refusal = resolve_mesh_input(model_path)
+    if _refusal:
+        return _refusal
+
     try:
         from kiln.auto_orient import check_stability
 
