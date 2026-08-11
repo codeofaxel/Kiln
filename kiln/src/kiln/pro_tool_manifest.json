@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-11T09:55:05.000458+00:00",
+  "generated": "2026-08-11T16:59:13.665719+00:00",
   "tool_count": 414,
   "categories": {
     "product_generators": {
@@ -1110,9 +1110,9 @@
     },
     {
       "name": "billing_check_setup",
-      "description": "Check if billing setup is complete after user visited the setup URL.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Check if billing setup is complete after user visited the setup URL.",
+      "tier": "free",
+      "access": "free",
       "category": "billing",
       "parameters": {
         "properties": {},
@@ -1204,9 +1204,9 @@
     },
     {
       "name": "billing_setup_url",
-      "description": "Get a URL to link a payment method for Kiln orchestration fees.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Get a URL to link a payment method for Kiln orchestration fees.",
+      "tier": "free",
+      "access": "free",
       "category": "billing",
       "parameters": {
         "properties": {
@@ -1222,9 +1222,9 @@
     },
     {
       "name": "billing_status",
-      "description": "Get enriched billing status including payment method info.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Get enriched billing status including payment method info.",
+      "tier": "free",
+      "access": "free",
       "category": "billing",
       "parameters": {
         "properties": {},
@@ -1246,9 +1246,9 @@
     },
     {
       "name": "check_payment_status",
-      "description": "Check the current status of a pending payment by ID.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Check the current status of a pending payment by ID.",
+      "tier": "free",
+      "access": "free",
       "category": "billing",
       "parameters": {
         "properties": {
@@ -1427,9 +1427,9 @@
     },
     {
       "name": "open_billing_portal",
-      "description": "Get a Stripe Billing Portal URL so a paying customer can manage their subscription (update card, change plan, cancel).\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Get a Stripe Billing Portal URL so a paying customer can manage their subscription (update card, change plan, cancel).",
+      "tier": "free",
+      "access": "free",
       "category": "billing",
       "parameters": {
         "properties": {
@@ -1522,9 +1522,9 @@
     },
     {
       "name": "start_subscription_checkout",
-      "description": "Get a URL the user can visit to subscribe to a Kiln paid tier.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Get a URL the user can visit to subscribe to a Kiln paid tier.",
+      "tier": "free",
+      "access": "free",
       "category": "billing",
       "parameters": {
         "properties": {
@@ -3678,9 +3678,9 @@
     },
     {
       "name": "archive_design",
-      "description": "Archive a design \u2014 hide from default listings while preserving every version, branch, recipe sidecar, and print outcome.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Archive a design \u2014 hide from default listings while preserving every version, branch, recipe sidecar, and print outcome.",
+      "tier": "free",
+      "access": "free",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -7714,9 +7714,9 @@
     },
     {
       "name": "unarchive_design",
-      "description": "Restore a previously-archived design to default listings.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Restore a previously-archived design to default listings.",
+      "tier": "free",
+      "access": "free",
       "category": "design_versioning",
       "parameters": {
         "properties": {
@@ -9633,9 +9633,9 @@
     },
     {
       "name": "check_chemical_resistance",
-      "description": "Will a printed <material> part survive <reagent>? -- cited, plain-English, tier-gated.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Will a printed <material> part survive <reagent>? -- cited, plain-English, tier-gated.",
+      "tier": "free",
+      "access": "free",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -9805,9 +9805,9 @@
     },
     {
       "name": "drying_advisor",
-      "description": "Is this spool ready to print -- and if not, exactly how to dry it?\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Is this spool ready to print -- and if not, exactly how to dry it?",
+      "tier": "free",
+      "access": "free",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -10930,9 +10930,9 @@
     },
     {
       "name": "recommend_magnet_for_product",
-      "description": "Recommend a magnet strategy for a printed product, with tier-gated depth.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Recommend a magnet strategy for a printed product, with tier-gated depth.",
+      "tier": "free",
+      "access": "free",
       "category": "engineering_intelligence",
       "parameters": {
         "properties": {
@@ -11367,9 +11367,9 @@
     },
     {
       "name": "check_skin_contact_suitability",
-      "description": "Is a printed <material> part OK for <exposure> skin contact? -- honest, cited, tier-gated.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Is a printed <material> part OK for <exposure> skin contact? -- honest, cited, tier-gated.",
+      "tier": "free",
+      "access": "free",
       "category": "material_safety",
       "parameters": {
         "properties": {
@@ -11679,9 +11679,9 @@
     },
     {
       "name": "delete_decoration",
-      "description": "Delete a decoration preset \u2014 retire it (default, recoverable) or erase it permanently.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Delete a decoration preset \u2014 retire it (default, recoverable) or erase it permanently.",
+      "tier": "free",
+      "access": "free",
       "category": "other",
       "parameters": {
         "properties": {
@@ -11709,9 +11709,9 @@
     },
     {
       "name": "delete_design",
-      "description": "Delete a design \u2014 retire it (default, recoverable) or erase it permanently.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Delete a design \u2014 retire it (default, recoverable) or erase it permanently.",
+      "tier": "free",
+      "access": "free",
       "category": "other",
       "parameters": {
         "properties": {
@@ -11739,9 +11739,9 @@
     },
     {
       "name": "delete_feature",
-      "description": "Delete a feature \u2014 retire it (default, recoverable) or erase it permanently.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Delete a feature \u2014 retire it (default, recoverable) or erase it permanently.",
+      "tier": "free",
+      "access": "free",
       "category": "other",
       "parameters": {
         "properties": {
@@ -13378,9 +13378,9 @@
     },
     {
       "name": "get_material_success_rates",
-      "description": "Get per-material success/fail breakdown for a printer.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Get per-material success/fail breakdown for a printer.",
+      "tier": "free",
+      "access": "free",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
@@ -13644,9 +13644,9 @@
     },
     {
       "name": "get_telemetry_preferences",
-      "description": "Return the per-category telemetry disclosure + opt-out state.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Return the per-category telemetry disclosure + opt-out state.",
+      "tier": "free",
+      "access": "free",
       "category": "print_intelligence",
       "parameters": {
         "properties": {},
@@ -14403,9 +14403,9 @@
     },
     {
       "name": "record_completed_print",
-      "description": "Record a completed print into the learning system.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Record a completed print into the learning system.",
+      "tier": "free",
+      "access": "free",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
@@ -14867,9 +14867,9 @@
     },
     {
       "name": "set_telemetry_preference",
-      "description": "Set the opt-out / acknowledged state for a telemetry category.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Set the opt-out / acknowledged state for a telemetry category.",
+      "tier": "free",
+      "access": "free",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
@@ -17817,9 +17817,9 @@
     },
     {
       "name": "list_role_templates",
-      "description": "Enumerate available role templates and their scope sets.\n\nEverything in Free, plus calibration that learns your printer, mid-print edits, and unlimited textures and decorations.\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Enumerate available role templates and their scope sets.",
+      "tier": "free",
+      "access": "free",
       "category": "teams",
       "parameters": {
         "properties": {},
