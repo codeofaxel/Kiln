@@ -12,7 +12,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   with a monthly allowance, or part of a paid plan — so you get a straight
   answer instead of a guess. Ask "can I do this on free?" and it knows.
   Paid features also stopped repeating themselves: the upgrade note was
-  appearing twice in a row, in two different wordings.
+  appearing twice in a row, in two different wordings. Where a tool needs a
+  paid plan, it now says what that plan gets you as well — so you can tell
+  whether it's worth having before you run into it, instead of only at the
+  moment you're turned away.
 
 - **Open a CAD file and see the real part.** A STEP now opens labelled as CAD,
   with the exact dimensions the file itself defines. When those exact figures
