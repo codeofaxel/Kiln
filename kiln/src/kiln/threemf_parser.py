@@ -750,15 +750,21 @@ def unique_object_names(names: Sequence[str | None]) -> list[str]:
     # never collide with a name that appears LATER (the "A (2)" case above).
     taken = set(filled)
     seen: set[str] = set()
+    # Where to resume the search per name.  A suffix already handed out is in
+    # `seen` forever, so restarting the scan at 2 each time would re-walk the
+    # whole run — quadratic on exactly the input this exists for, a thousand
+    # identical fasteners in one assembly.
+    resume: dict[str, int] = {}
     out: list[str] = []
     for name in filled:
         if name not in seen:
             seen.add(name)
             out.append(name)
             continue
-        n = 2
+        n = resume.get(name, 2)
         while f"{name} ({n})" in taken or f"{name} ({n})" in seen:
             n += 1
+        resume[name] = n + 1
         unique = f"{name} ({n})"
         seen.add(unique)
         out.append(unique)

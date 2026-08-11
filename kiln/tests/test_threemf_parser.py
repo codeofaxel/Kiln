@@ -718,6 +718,8 @@ class TestUniqueObjectNames:
             ["a", "a (2)", "a", "a (2)", "a"],
             ["part_1", "", "part_1", ""],
             ["x"] * 12,
+            # An assembly really can hold this many identical fasteners.
+            ["M3x8"] * 2000,
         ):
             out = unique_object_names(case)
             assert len(out) == len(case)
