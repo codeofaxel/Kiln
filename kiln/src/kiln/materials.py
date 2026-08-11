@@ -24,9 +24,39 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+#: Provenance value for a row somebody typed.  Every writer this store has
+#: ever had is a person or an agent naming a material, so it is the default —
+#: and the honest reading of a row written before the field existed.
+DECLARED = "user_reported"
+
+
+def _provenance_vocabulary() -> frozenset[str]:
+    """The one provenance vocabulary, read rather than restated.
+
+    ``observed`` / ``inferred`` / ``user_reported`` is already defined on
+    :class:`~kiln.persistence.KilnDB` for print outcomes.  A second copy here
+    would drift the day one of them gained a fourth value, so this reads the
+    original.  Imported lazily to keep ``kiln.materials`` importable without
+    the persistence layer.
+    """
+    from kiln.persistence import KilnDB
+
+    return frozenset(KilnDB.VALID_DETERMINED_BY)
+
+
 @dataclass
 class LoadedMaterial:
-    """Material currently loaded in a printer's tool slot."""
+    """Material currently loaded in a printer's tool slot.
+
+    ``determined_by`` is the field that keeps this record from being read as
+    a measurement.  "Kiln was told PETG is loaded" and "the printer reports
+    PETG is loaded" are different facts, and a reader that cannot tell them
+    apart will eventually state the weaker one as the stronger: preflight
+    once answered "Loaded material matches expected (PETG)" from a row a
+    user typed days earlier, with no sensor in the loop at all.  The record
+    now carries who decided, so every reader can say which fact it holds
+    instead of each one inventing its own honesty.
+    """
 
     printer_name: str
     tool_index: int = 0
@@ -35,9 +65,31 @@ class LoadedMaterial:
     spool_id: str | None = None
     loaded_at: float = field(default_factory=time.time)
     remaining_grams: float | None = None
+    determined_by: str = DECLARED
+
+    @property
+    def is_sensed(self) -> bool:
+        """True only when a machine reported this material, not a person."""
+        return self.determined_by == "observed"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _loaded_material_from_row(row: dict[str, Any]) -> LoadedMaterial:
+    """Build a :class:`LoadedMaterial` from a stored row.
+
+    Shared by both readers so the provenance normalisation happens once: a
+    row written before ``determined_by`` existed stores NULL, and NULL means
+    "typed by whoever loaded the spool" — that is what the only writer of
+    those rows did.  Never ``None``, so no reader has to guess.
+    """
+    values = {
+        k: row[k] for k in LoadedMaterial.__dataclass_fields__ if k in row
+    }
+    if not values.get("determined_by"):
+        values["determined_by"] = DECLARED
+    return LoadedMaterial(**values)
 
 
 @dataclass
@@ -102,8 +154,22 @@ class MaterialTracker:
         spool_id: str | None = None,
         tool_index: int = 0,
         remaining_grams: float | None = None,
+        determined_by: str = DECLARED,
     ) -> LoadedMaterial:
-        """Record which material is loaded in a printer tool slot."""
+        """Record which material is loaded in a printer tool slot.
+
+        :param determined_by: Who decided this — ``user_reported`` (a person
+            or agent named the material; the default, and what every caller
+            does today), ``observed`` (a machine reported it), or
+            ``inferred``.  It is stored with the row so a reader can say
+            which fact it is holding instead of assuming a measurement.
+        """
+        vocabulary = _provenance_vocabulary()
+        if determined_by not in vocabulary:
+            raise ValueError(
+                f"Invalid determined_by {determined_by!r}. "
+                f"Must be one of: {sorted(vocabulary)}"
+            )
         with self._lock:
             mat = LoadedMaterial(
                 printer_name=printer_name,
@@ -113,6 +179,7 @@ class MaterialTracker:
                 spool_id=spool_id,
                 loaded_at=time.time(),
                 remaining_grams=remaining_grams,
+                determined_by=determined_by,
             )
             if self._db is not None:
                 self._db.save_material(
@@ -122,6 +189,7 @@ class MaterialTracker:
                     color=color,
                     spool_id=spool_id,
                     remaining_grams=remaining_grams,
+                    determined_by=determined_by,
                 )
             if self._bus is not None:
                 self._bus.publish(
@@ -142,17 +210,47 @@ class MaterialTracker:
         row = self._db.get_material(printer_name, tool_index)
         if row is None:
             return None
-        return LoadedMaterial(**{k: row[k] for k in LoadedMaterial.__dataclass_fields__ if k in row})
+        return _loaded_material_from_row(row)
 
     def get_all_materials(self, printer_name: str) -> list[LoadedMaterial]:
         """Get all loaded materials for a printer."""
         if self._db is None:
             return []
         rows = self._db.list_materials(printer_name)
-        results: list[LoadedMaterial] = []
-        for row in rows:
-            results.append(LoadedMaterial(**{k: row[k] for k in LoadedMaterial.__dataclass_fields__ if k in row}))
-        return results
+        return [_loaded_material_from_row(row) for row in rows]
+
+    def match_verdict(
+        self,
+        printer_name: str,
+        expected_material: str,
+        tool_index: int = 0,
+    ) -> tuple[str, MaterialWarning | None, LoadedMaterial | None]:
+        """Return ``(verdict, warning, loaded)`` — three states, not two.
+
+        ``verdict`` is ``"match"``, ``"mismatch"`` or ``"unknown"``.
+        ``"unknown"`` covers every way this store can be silent: no row for
+        the printer, and no database at all — :meth:`get_material` cannot
+        tell those apart either, and for a caller about to say something to
+        a user they mean the same thing.
+
+        This exists because a two-state answer forced the caller to render
+        silence as one of the two.  Preflight did exactly that and printed
+        "Loaded material matches expected (PETG)" for a printer nothing had
+        ever been recorded against.  A verification and a silence are not
+        the same answer, so they no longer share a return value.
+
+        ``loaded`` is handed back so a caller that needs the row's age or
+        provenance does not read the store a second time.
+        """
+        loaded = self.get_material(printer_name, tool_index)
+        if loaded is None:
+            return "unknown", None, None
+        warning = self._mismatch_warning(
+            printer_name, expected_material, loaded, tool_index
+        )
+        if warning is not None:
+            return "mismatch", warning, loaded
+        return "match", None, loaded
 
     def check_match(
         self,
@@ -160,15 +258,27 @@ class MaterialTracker:
         expected_material: str,
         tool_index: int = 0,
     ) -> MaterialWarning | None:
-        """Check if the loaded material matches what's expected.
+        """Return a :class:`MaterialWarning` when the loaded material differs.
 
-        Returns a :class:`MaterialWarning` if there is a mismatch,
-        or ``None`` if the materials match (or no material is loaded).
+        ``None`` means "nothing to warn about", which is TWO different facts:
+        the materials match, or nothing is tracked for this printer.  Use
+        this only to decide whether to raise a mismatch warning; anything
+        that states a conclusion to a user wants :meth:`match_verdict`, which
+        keeps those two apart.
         """
-        loaded = self.get_material(printer_name, tool_index)
-        if loaded is None:
-            return None
+        _verdict, warning, _loaded = self.match_verdict(
+            printer_name, expected_material, tool_index
+        )
+        return warning
 
+    def _mismatch_warning(
+        self,
+        printer_name: str,
+        expected_material: str,
+        loaded: LoadedMaterial,
+        tool_index: int = 0,
+    ) -> MaterialWarning | None:
+        """Compare a known-loaded row against what the print expects."""
         expected_upper = expected_material.upper()
         loaded_upper = loaded.material_type.upper()
 

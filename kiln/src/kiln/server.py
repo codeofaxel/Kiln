@@ -307,6 +307,7 @@ from kiln.printers import (
     PrinterStatus,
     PrusaLinkAdapter,
     SerialPrinterAdapter,
+    describe_stale_state,
 )
 from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
 from kiln.registry import PrinterNotFoundError, PrinterRegistry
@@ -2241,6 +2242,133 @@ def _get_material_tracker() -> MaterialTracker:
     return _material_tracker
 
 
+#: The label the material store falls back to, and what ``set_material``'s
+#: own callers use when nobody named a printer.
+_DEFAULT_PRINTER_LABEL = "default"
+
+
+def _printer_labels(adapter: PrinterAdapter | None = None) -> list[str]:
+    """Every label the machine under test is filed under, best name first.
+
+    Preflight resolved its printer as ``list_names()[0]`` — whichever printer
+    happened to register first — so on a two-machine setup it could read one
+    printer's material and history and report them as the other's.
+
+    Names are labels, not identity (:func:`kiln.registry.machine_fingerprint`):
+    one machine sits in the registry under ``"default"`` AND its config.yaml
+    name, and per-printer records are keyed by whichever label the writer
+    used.  So resolve the machine from the adapter, and order its labels the
+    way :meth:`~kiln.registry.PrinterRegistry.list_machines` does — the name a
+    user chose beats the generic alias.  Never empty: with nothing registered,
+    ``"default"`` is what the writers themselves fall back to.
+
+    Pass the adapter under test; omit it to resolve the active printer, which
+    is what a tool call that named no printer is asking about.
+    """
+    if adapter is None:
+        try:
+            adapter = _get_adapter()
+        except Exception:  # noqa: BLE001 — no printer configured is not an error here
+            return [_DEFAULT_PRINTER_LABEL]
+    try:
+        labels = _get_registry().names_for(adapter)
+    except Exception as exc:  # noqa: BLE001 — naming must never break a check
+        logger.debug("Could not resolve printer name from adapter: %s", exc)
+        return [_DEFAULT_PRINTER_LABEL]
+    labels.sort(key=lambda name: (name == _DEFAULT_PRINTER_LABEL, name))
+    return labels or [_DEFAULT_PRINTER_LABEL]
+
+
+def _material_store_name(adapter: PrinterAdapter | None = None) -> str:
+    """The label this machine's material row is filed under.
+
+    Every label on one fingerprint is the same physical printer, so a row
+    under any of them is a true statement about it — prefer the label that
+    actually has one, and fall back to the machine's best name.
+    """
+    labels = _printer_labels(adapter)
+    tracker = _get_material_tracker()
+    for name in labels:
+        with contextlib.suppress(Exception):
+            if tracker.get_all_materials(name):
+                return name
+    return labels[0]
+
+
+def _material_match_report(
+    printer_name: str,
+    expected_material: str,
+    tool_index: int = 0,
+) -> dict[str, Any]:
+    """Turn the material store into a sentence — in ONE place.
+
+    Kiln's material store holds what somebody TOLD Kiln is loaded.  That is
+    a useful fact and a weaker one than a measurement, and the two doors that
+    reported it (``preflight_check`` and ``check_material_match``) each
+    decided for themselves how to say so.  Both said it wrong the same way:
+    a store with no row for the printer produced "Loaded material matches
+    expected (PETG)", a confident sentence about a spool nobody had looked
+    at.  An agent repeated it as ground truth to a first-time user whose
+    printer had something else in the extruder.
+
+    So the wording lives here, next to the provenance it depends on:
+
+    * ``verdict`` — ``"match"`` / ``"mismatch"`` / ``"unknown"``.
+    * ``sensed`` — whether a machine reported this material, read off the
+      record's own ``determined_by``.  Not hardcoded: the day a sensor
+      writes a row, this says ``True`` without touching this function.
+    * ``message`` — the sentence, which never claims more than the record
+      carries and says plainly when nothing is recorded at all.
+    """
+    verdict, warning, loaded = _get_material_tracker().match_verdict(
+        printer_name, expected_material, tool_index
+    )
+    expected_upper = expected_material.upper()
+    sensed = bool(loaded is not None and loaded.is_sensed)
+    determined_by = loaded.determined_by if loaded is not None else None
+
+    if verdict == "unknown":
+        message = (
+            f"Cannot confirm the loaded material is {expected_upper}: nothing "
+            f"is recorded for {printer_name}, and no sensor on this printer "
+            "reports filament type. Check the spool by eye."
+        )
+    else:
+        # The age is the point: a record nobody has touched in a fortnight is
+        # a much weaker claim about today's spool than one made this morning.
+        age = ""
+        if loaded is not None:
+            days = int(max(0.0, time.time() - loaded.loaded_at) // 86400)
+            if days == 0:
+                age = ", recorded today"
+            elif days == 1:
+                age = ", recorded yesterday"
+            else:
+                age = f", recorded {days} days ago"
+        if sensed:
+            provenance = f"the material the printer reported{age}"
+        elif determined_by == "inferred":
+            provenance = f"the material Kiln inferred is loaded{age}"
+        else:
+            provenance = (
+                f"what Kiln was told is loaded (set_material{age}); no sensor "
+                "confirmed it"
+            )
+        if verdict == "mismatch" and warning is not None:
+            message = f"{warning.message} — {provenance}."
+        else:
+            message = f"{expected_upper} matches {provenance}."
+
+    return {
+        "verdict": verdict,
+        "warning": warning,
+        "loaded": loaded,
+        "sensed": sensed,
+        "determined_by": determined_by,
+        "message": message,
+    }
+
+
 def _get_bed_level_mgr() -> BedLevelManager:
     """Return the lazily-initialised bed level manager."""
     global _bed_level_mgr  # noqa: PLW0603
@@ -3010,6 +3138,17 @@ def printer_status() -> dict:
             "job": job.to_dict(),
             "capabilities": caps.to_dict(),
         }
+        # `printer` already carries state_age_seconds when the adapter measures
+        # it; this promotes the age to a sentence when it is past the point of
+        # being evidence, so the answer cannot be read as current by accident.
+        # Read from the serialised form, so an adapter returning a duck-typed
+        # state object cannot turn a status read into an AttributeError.
+        stale_note = describe_stale_state(
+            response["printer"].get("state_age_seconds"),
+            response["printer"].get("state", "unknown"),
+        )
+        if stale_note:
+            response["telemetry_warning"] = stale_note
         from kiln.safety_gap_warning import attach_safety_warning
         return attach_safety_warning(response)
     except (PrinterError, RuntimeError) as exc:
@@ -3268,6 +3407,13 @@ def _format_goal_line_for_monitor(brief_id: str) -> str:
     return ""
 
 
+# Last (printer-reported elapsed, wall clock) pair seen by monitor_print, per
+# printer.  Keyed by printer name because this used to live on the function
+# object itself, where one printer's numbers overwrote another's and a
+# two-machine setup compared each reading against the wrong machine.
+_MONITOR_ELAPSED_HISTORY: dict[str, tuple[float, float]] = {}
+
+
 @mcp.tool()
 def monitor_print(
     printer_name: str | None = None,
@@ -3360,28 +3506,49 @@ def monitor_print(
                 logger.debug("Snapshot capture failed: %s", snap_exc)
                 snapshot_line = "Snapshot capture failed"
 
-        # --- MQTT staleness detection ---
-        # Bambu A1 MQTT telemetry can lag 30-60s behind reality on long
-        # first layers.  Track elapsed_s across calls; if wall-clock time
-        # advances but printer-reported elapsed doesn't, warn the agent.
+        _resolved_printer = (
+            printer_name or _resolve_effective_printer_name(printer_name)
+        )
+
+        # --- Telemetry staleness ---
+        # Two independent signals, because each is blind where the other sees.
+        #
+        # (1) The reading's own age, from the adapter.  This is the only signal
+        #     available at 0% / layer 0 — where a printer paused at layer 0
+        #     with an error was once reported as printing, off a cache that had
+        #     stopped advancing.  Signal (2) could not fire there: it needs
+        #     printer-reported elapsed, which the Bambu adapter only computes
+        #     above 0% completion, so the one staleness witness this report had
+        #     was structurally unreachable for the whole first layer.
+        #
+        # (2) Printer-reported elapsed failing to advance across calls, which
+        #     catches a cache that keeps arriving but stops moving — a shape
+        #     signal (1) cannot see, since any push refreshes the age.
         import time as _time_mod
         _now = _time_mod.time()
-        _stale_warning = ""
+        _stale_warning = describe_stale_state(
+            sd.get("state_age_seconds"), state_str
+        ) or ""
         if elapsed_s is not None and state_str == "printing":
-            _prev = getattr(monitor_print, "_last_elapsed", None)
-            _prev_ts = getattr(monitor_print, "_last_ts", None)
+            _prev, _prev_ts = _MONITOR_ELAPSED_HISTORY.get(
+                _resolved_printer, (None, None)
+            )
             if _prev is not None and _prev_ts is not None:
                 wall_delta = _now - _prev_ts
                 printer_delta = (elapsed_s or 0) - (_prev or 0)
                 if wall_delta > 30 and printer_delta < 5:
-                    _stale_warning = (
-                        f"MQTT telemetry may be stale — {wall_delta:.0f}s of "
+                    _lag_warning = (
+                        f"Telemetry may be stale — {wall_delta:.0f}s of "
                         f"wall-clock time passed but printer-reported elapsed "
                         f"only advanced {printer_delta:.0f}s. Visual check "
                         f"recommended."
                     )
-            monitor_print._last_elapsed = elapsed_s  # type: ignore[attr-defined]
-            monitor_print._last_ts = _now  # type: ignore[attr-defined]
+                    _stale_warning = (
+                        f"{_stale_warning} {_lag_warning}".strip()
+                        if _stale_warning
+                        else _lag_warning
+                    )
+            _MONITOR_ELAPSED_HISTORY[_resolved_printer] = (float(elapsed_s), _now)
 
         # --- Smart-monitoring summary (Tier-1 fields) ---
         # Five conditional lines surfacing the new monitoring/recovery
@@ -3390,10 +3557,8 @@ def monitor_print(
         # is present, so a healthy print with no active monitoring
         # shows the same compact format as before.  Best-effort
         # throughout — any helper failure debug-logs and skips its
-        # line; never blocks monitor_print.
-        _resolved_printer = (
-            printer_name or _resolve_effective_printer_name(printer_name)
-        )
+        # line; never blocks monitor_print.  (_resolved_printer is set above,
+        # where the staleness history needs it to key by machine.)
         _monitoring_line = ""
         _risk_line = ""
         _predictive_line = ""
@@ -6284,30 +6449,23 @@ def preflight_check(
         if expected_material is not None:
             # 1) Check against loaded material (if material tracking is configured)
             try:
-                printer_name = "default"
-                if _get_registry().count > 0:
-                    names = _get_registry().list_names()
-                    if names:
-                        printer_name = names[0]
-                warning = _get_material_tracker().check_match(printer_name, expected_material)
-                if warning is not None:
-                    mat_msg = warning.message
-                    checks.append(
-                        {
-                            "name": "material_match",
-                            "passed": False,
-                            "message": mat_msg,
-                        }
-                    )
-                    errors.append(mat_msg)
-                else:
-                    checks.append(
-                        {
-                            "name": "material_match",
-                            "passed": True,
-                            "message": f"Loaded material matches expected ({expected_material.upper()})",
-                        }
-                    )
+                printer_name = _material_store_name(adapter)
+                report = _material_match_report(printer_name, expected_material)
+                # "unknown" passes because nothing here can see the spool —
+                # it is an advisory to go look, never a block.  "match" is
+                # true of the RECORD, and the message says so.
+                material_check: dict[str, Any] = {
+                    "name": "material_match",
+                    "passed": report["verdict"] != "mismatch",
+                    "sensed": report["sensed"],
+                    "verified_by": report["determined_by"],
+                    "message": report["message"],
+                }
+                if report["verdict"] == "unknown":
+                    material_check["advisory"] = True
+                checks.append(material_check)
+                if report["verdict"] == "mismatch":
+                    errors.append(report["message"])
             except Exception as exc:
                 # Material tracking not configured — skip silently
                 logger.debug("Material match check failed: %s", exc)
@@ -6375,11 +6533,11 @@ def preflight_check(
         # about historically problematic combinations.  Advisory only —
         # never blocks a print.
         try:
+            # The machine under test, not whichever registered first — a
+            # success-rate warning about another printer is worse than none.
             _printer_name = None
             if _get_registry().count > 0:
-                names = _get_registry().list_names()
-                if names:
-                    _printer_name = names[0]
+                _printer_name = _printer_labels(adapter)[0]
 
             if _printer_name:
                 _db = get_db()
@@ -8513,6 +8671,11 @@ def set_material(
 ) -> dict:
     """Record which filament material is loaded in a printer.
 
+    This writes down a CLAIM, not a measurement: nothing verifies the spool,
+    and the record keeps saying the same thing after a filament swap.  Kiln
+    stamps it ``determined_by: user_reported`` and every reader says so, so
+    never report the recorded material back as confirmed or sensed.
+
     Args:
         printer_name: Target printer name.
         material: Material type (PLA, PETG, ABS, etc.).
@@ -8529,6 +8692,9 @@ def set_material(
             color=color,
             spool_id=spool_id,
             tool_index=tool_index,
+            # Stated at the writer: a caller of this tool is a person or an
+            # agent typing a material name.  No sensor is involved.
+            determined_by="user_reported",
         )
         return {"success": True, "material": mat.to_dict()}
     except Exception as exc:
@@ -8563,22 +8729,37 @@ def check_material_match(
     expected_material: str,
     printer_name: str | None = None,
 ) -> dict:
-    """Check if the loaded material matches what a print expects.
+    """Check whether the material Kiln has on record matches what a print expects.
+
+    Answers about Kiln's material RECORD, which normally holds what a person
+    or agent typed via ``set_material`` — not a sensor reading.  Three
+    answers, and the third one matters: ``match: true`` (the record agrees),
+    ``match: false`` (it disagrees — worth stopping for), and ``match: null``
+    (nothing is recorded for this printer, so this is neither a match nor a
+    mismatch and the spool needs an eye on it).  ``sensed`` says whether a
+    machine reported the material; when it is false, do not tell the user
+    the material is confirmed.
 
     Args:
         expected_material: The material the print file requires.
-        printer_name: Target printer.  Omit for the default printer.
+        printer_name: Target printer.  Omit to resolve the active printer.
     """
     try:
-        name = printer_name or "default"
-        warning = _get_material_tracker().check_match(name, expected_material)
-        if warning:
-            return {
-                "success": True,
-                "match": False,
-                "warning": warning.to_dict(),
-            }
-        return {"success": True, "match": True}
+        name = printer_name or _material_store_name()
+        report = _material_match_report(name, expected_material)
+        result: dict[str, Any] = {
+            "success": True,
+            "match": {"match": True, "mismatch": False, "unknown": None}[
+                report["verdict"]
+            ],
+            "printer_name": name,
+            "sensed": report["sensed"],
+            "verified_by": report["determined_by"],
+            "note": report["message"],
+        }
+        if report["warning"] is not None:
+            result["warning"] = report["warning"].to_dict()
+        return result
     except Exception as exc:
         logger.exception("Unexpected error in check_material_match")
         return _error_dict(f"Unexpected error in check_material_match: {exc}", code="INTERNAL_ERROR")
@@ -14879,16 +15060,37 @@ def print_status_lite(printer_name: str | None = None) -> dict:
             "file_name": job.file_name,
         }
 
-        # Include ETA if available
-        if job.time_left is not None:
-            result["eta_seconds"] = job.time_left
-        if job.time_elapsed is not None:
-            result["elapsed_seconds"] = job.time_elapsed
+        # Include ETA if available.
+        #
+        # These four reads used to name attributes that no adapter return type
+        # has ever had (`job.time_left`, `job.time_elapsed`,
+        # `state.hotend_temp`, `state.bed_temp`).  The first one raised
+        # AttributeError on every call for every backend in every state, the
+        # bare `except Exception` below turned that into `{"state": "error"}`,
+        # and the tests passed because they handed the tool MagicMocks, which
+        # answer to any attribute name.  The names below are the real fields on
+        # JobProgress and PrinterState.
+        if job.print_time_left_seconds is not None:
+            result["eta_seconds"] = job.print_time_left_seconds
+        if job.print_time_seconds is not None:
+            result["elapsed_seconds"] = job.print_time_seconds
 
-        # Include temperatures if printing
+        # Include temperatures if printing.
         if state.state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
-            result["hotend_temp"] = state.hotend_temp
-            result["bed_temp"] = state.bed_temp
+            if state.tool_temp_actual is not None:
+                result["hotend_temp"] = state.tool_temp_actual
+            if state.bed_temp_actual is not None:
+                result["bed_temp"] = state.bed_temp_actual
+
+        # How old the reading is, when the adapter measures it.  This tool is
+        # what `printer_status` recommends for polling during a print, so it is
+        # exactly where a frozen cache gets read as progress.
+        state_age = getattr(state, "state_age_seconds", None)
+        if state_age is not None:
+            result["state_age_seconds"] = state_age
+        stale_note = describe_stale_state(state_age, result["state"])
+        if stale_note:
+            result["telemetry_warning"] = stale_note
 
         return result
 

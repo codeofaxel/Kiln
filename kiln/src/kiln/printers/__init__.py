@@ -8,6 +8,7 @@ Re-exports the public API from the base module so consumers can write::
 from __future__ import annotations
 
 from kiln.printers.base import (
+    STALE_STATE_WARN_AGE,
     DeviceAdapter,
     DeviceType,
     FirmwareComponent,
@@ -24,6 +25,7 @@ from kiln.printers.base import (
     PrinterStatus,
     PrintResult,
     UploadResult,
+    describe_stale_state,
 )
 
 try:
@@ -44,6 +46,7 @@ from kiln.printers.prusalink import PrusaLinkAdapter
 from kiln.printers.serial_adapter import SerialPrinterAdapter
 
 __all__ = [
+    "STALE_STATE_WARN_AGE",
     "BambuAdapter",
     "CrealityAdapter",
     "DeviceAdapter",
@@ -68,4 +71,5 @@ __all__ = [
     "PrusaLinkAdapter",
     "SerialPrinterAdapter",
     "UploadResult",
+    "describe_stale_state",
 ]
