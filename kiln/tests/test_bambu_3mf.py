@@ -1242,8 +1242,8 @@ class TestPerModelTemplateSelection:
         )
 
         for registry in (_MODEL_START_GCODE_FILES, _MODEL_END_GCODE_FILES):
-            for model, filename in registry.items():
-                assert (_DATA_DIR / filename).is_file(), f"{model} -> {filename} missing"
+            for key, filename in registry.items():
+                assert (_DATA_DIR / filename).is_file(), f"{key} -> {filename} missing"
 
     def test_p2s_no_longer_gets_a1_end_gcode(self):
         """The defect this change exists for, from the end-gcode side."""
@@ -1277,13 +1277,44 @@ class TestPerModelTemplateSelection:
         assert end == _load_a1_end_gcode()
         assert start_source == end_source == "bambu_a1"
 
-    def test_a1_start_gcode_is_unchanged_for_every_model(self):
-        """The A1 start sequence is the one artifact proven on real hardware."""
+    def test_a1_start_gcode_is_untouched(self):
+        """The A1 sequence is the artifact proven on real hardware."""
         from kiln.printers.bambu_3mf import _load_a1_start_gcode, _select_start_gcode
 
-        proven = _load_a1_start_gcode()
-        for model in ("bambu_a1", "bambu_p2s", "bambu_h2s", "bambu_x1c", None):
-            assert _select_start_gcode(model)[0] == proven
+        assert _select_start_gcode("bambu_a1", 0.4)[0] == _load_a1_start_gcode()
+
+    def test_each_model_gets_its_own_start_sequence(self):
+        """The defect this change exists for, from the start-gcode side."""
+        from kiln.printers.bambu_3mf import _load_a1_start_gcode, _select_start_gcode
+
+        a1 = _load_a1_start_gcode()
+        for model in ("bambu_p2s", "bambu_p1s", "bambu_p1p", "bambu_x1c",
+                      "bambu_x1e", "bambu_h2s", "bambu_a1_mini"):
+            gcode, source = _select_start_gcode(model, 0.4)
+            assert source == model, f"{model} was served {source}'s start gcode"
+            assert gcode != a1, f"{model} still gets the A1 sequence"
+
+    def test_enclosed_models_make_no_negative_x_move(self):
+        """The hazard the A1 substitution created, pinned.
+
+        The A1 and A1 mini are bed-slingers whose startup drives X negative
+        with the soft endstops disabled first.  Wrapping an enclosed CoreXY
+        print in that sequence aimed it off the front of its own bed.
+        """
+        from kiln.printers.bambu_3mf import _select_start_gcode
+
+        for model in ("bambu_p2s", "bambu_p1s", "bambu_p1p",
+                      "bambu_x1c", "bambu_x1e", "bambu_h2s"):
+            gcode, _ = _select_start_gcode(model, 0.4)
+            assert not re.search(r"X-\d", gcode), f"{model} drives X negative"
+
+    def test_an_uncaptured_nozzle_falls_back_rather_than_borrowing(self):
+        """A 0.6 owner must never be handed the 0.4 sequence silently."""
+        from kiln.printers.bambu_3mf import _load_a1_start_gcode, _select_start_gcode
+
+        gcode, source = _select_start_gcode("bambu_p2s", 0.6)
+        assert source == "bambu_a1"
+        assert gcode == _load_a1_start_gcode()
 
     def test_start_and_end_fallback_warnings_do_not_silence_each_other(self):
         """One shared warned-set made the start gap invisible once end had warned."""
@@ -1301,7 +1332,7 @@ class TestPerModelTemplateSelection:
 
         with patch("kiln.printers.bambu_3mf.logger") as mock_logger:
             for _ in range(5):
-                _select_start_gcode("bambu_p2s")
+                _select_start_gcode("bambu_h2d")
             assert mock_logger.warning.call_count == 1
 
     def test_a1_never_warns(self):
@@ -1359,14 +1390,14 @@ class TestNoUnresolvedPlaceholderEverShips:
             _select_start_gcode,
         )
 
-        for model in _MODEL_START_GCODE_FILES:
-            template, _ = _select_start_gcode(model)
+        for model, nozzle in _MODEL_START_GCODE_FILES:
+            template, _ = _select_start_gcode(model, nozzle)
             for temps in ((220, 65, "PLA"), (255, 100, "ABS")):
                 resolved = _resolve_start_gcode(
                     template,
                     hotend_temp=temps[0], bed_temp=temps[1], filament_type=temps[2],
                 )
-                _assert_fully_resolved(resolved, source=model)
+                _assert_fully_resolved(resolved, source=f"{model} @ {nozzle}")
 
     def test_built_3mf_gcode_carries_no_placeholder(self, tmp_path):
         """End to end: the bytes actually written into the 3MF."""

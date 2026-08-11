@@ -2997,40 +2997,17 @@ def design_scorecard(file_path: str) -> dict[str, Any]:
 #
 # WHY NOT JUST GRADE IT.  ``design_scorecard`` weights four factors
 # 35/25/20/20, and the Quality factor is triangle density plus degenerate
-# count — a grade of KILN's tessellation, not of the user's design.  The
-# same STEP converts to 150,970 triangles under the OCCT kernel and 8,002
-# under FreeCAD on a 150 mm reference sphere, so what the Quality factor
-# scores is whichever converter happened to be installed on the machine that
-# read the file.  A measurement that moves when the instrument changes and
-# the object does not is not a measurement.
+# count — a grade of KILN's tessellation, not of the user's design.  Kiln
+# chooses the converter and the density, so that fifth of the score is a
+# property of this machine's setup rather than of the part: the same file
+# assessed on two machines can come out a whole letter apart, and the more
+# faithful conversion is not reliably the one that scores better.
 #
-# Measured on two real backends, same file, same machine — a 150 mm sphere
-# written once and converted by each (``test_two_backends_grade_one_file
-# _differently``, which needs FreeCAD installed and skips without it):
-#
-#   occt      150,970 triangles   volume -0.0098 %   B / 83
-#   freecad     8,000 triangles   volume -0.1842 %   A / 92
-#
-# One object, one file, a full letter apart — and note the direction.  The
-# converter that is 19x finer and 19x closer on volume gets the WORSE grade,
-# by two mechanisms that are both artifacts of the instrument: its denser
-# mesh trips the manifold check (-15 on printability, weighted 35 %), and 2
-# sliver triangles out of 150,970 at the poles trip degenerate_pct > 0 (-5
-# on quality).  Grading harder for being more faithful is not a scale with a
-# defensible edge case; it is backwards.
-#
-# On ONE backend the same file moves less: across four densities the scores
-# slide (a 40 x 8 mm disc 99 -> 97, the sphere 83 -> 81) without crossing a
-# letter.  It used to cross — that disc graded A at fine and B at coarse until
-# `overhangs: the face a model stands on is not an overhang` raised
-# printability across the board and lifted it clear of the boundary.
-#
-# Which is the point, not a reprieve.  Whether a letter crosses depends on how
-# near a boundary the part happens to sit, so the same instrument-dependence
-# is present in every score and merely invisible in most of them.  A grade
-# that is stable right up until it silently is not, with nothing on the page
-# saying which case you are holding, is not a grade worth publishing for a
-# file whose triangles Kiln chose.
+# A measurement that moves when the instrument changes and the object does
+# not is not a measurement.  Whether it crosses a letter depends on how near
+# a boundary a part happens to sit, so the dependence is in every score and
+# merely invisible in most — stable right up until it silently is not, with
+# nothing on the page saying which case you are holding.
 #
 # Two fixes were rejected before this one.  Dropping Quality and
 # re-weighting the other three into a new composite gives two scales that

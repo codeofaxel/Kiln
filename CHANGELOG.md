@@ -30,7 +30,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Open a CAD file and see the real part.** A STEP now opens labelled as CAD,
   with the exact dimensions the file itself defines. When those exact figures
   can't be read on your setup, Kiln says so plainly instead of showing an
-  estimate as though it were exact. Served via kiln-pro.
+  estimate as though it were exact.
 
 - **Ask the print questions about your CAD file directly.** Which way up
   should this print, will it warp, how much support material will it need,
@@ -67,8 +67,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **The drawing knows how it prints (Business+).** Production drawings label
   features at the size they'll actually print, not just the size you asked
-  for — checked against the design's own CAD. Served via kiln-pro; see
-  https://kiln3d.com/pricing.
+  for — checked against the design's own CAD. See https://kiln3d.com/pricing.
 
 - **Split a big model and Kiln remembers the kit (Pro+).** Every piece is kept
   in the design's history with the seam and fastening that hold it to its
@@ -89,12 +88,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Kiln checks where features are, not just how many and how big (Pro).** Say
   the holes go 10mm in from each corner; Kiln measures whether they actually
-  did, and names anything that landed somewhere else and by how far. Served via
-  kiln-pro; see https://kiln3d.com/pricing.
+  did, and names anything that landed somewhere else and by how far. See https://kiln3d.com/pricing.
 
 - **Check a file Kiln didn't make (Pro).** Point at a model you already have,
-  list the numbers it should hit, get the same plain receipt back. Served via
-  kiln-pro; see https://kiln3d.com/pricing.
+  list the numbers it should hit, get the same plain receipt back. See https://kiln3d.com/pricing.
 
 - **Paint a model by its own surfaces.** Ask Kiln to colour a part of a model —
   the handle, the lid, the base — and it finds the model's natural surfaces,
@@ -254,7 +251,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **Use a decoration you already saved (Pro).** A saved decoration — a logo, a
   texture, a pattern — now goes straight onto a model at the exact depth and
-  placement it recorded, with fewer snags. Served via kiln-pro; see
+  placement it recorded, with fewer snags. See
   https://kiln3d.com/pricing.
 
 ### Changed
@@ -584,8 +581,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   you, and — if you want — a license notice on how the file can be used. On
   the verify page, anyone who opens your file sees exactly that. Your creator
   name is separate from your sign-in, can be changed once every 30 days, and
-  an old name stays permanently yours — never handed to anyone else. Served
-  via kiln-pro; see https://kiln3d.com/pricing.
+  an old name stays permanently yours — never handed to anyone else. See https://kiln3d.com/pricing.
 
 - **Sharper 3D previews across the board.** Every preview Kiln renders —
   your models from all angles, AI-generated designs, decoration mockups,
@@ -752,8 +748,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   you a clean, dimensioned drawing of a part — top, front, and side views with
   real measurements, plus PDF and DXF files a machine shop or client can use.
   For something you designed in Kiln it fills in the exact measurements for you;
-  for an imported model it measures what it can and says so. Served via
-  kiln-pro; see https://kiln3d.com/pricing.
+  for an imported model it measures what it can and says so. See https://kiln3d.com/pricing.
 
 - **Previews now show up every time you make something, not almost every
   time.** Kiln already popped up a preview the moment you created or changed
@@ -778,11 +773,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   everyday exposures — cleaners, oils, sunlight, weather — are Kiln Business,
   and the answers someone could get hurt by — fuels, automotive fluids, food
   contact, harsh chemicals — are Enterprise. See https://kiln3d.com/pricing.
-- **Design-time sourcing-risk for bought parts (Kiln Enterprise).** Flags the
+- **Design-time sourcing-risk for bought parts (Enterprise).** Flags the
   off-the-shelf components a design depends on that are going end-of-life,
   single-source, or long-lead — before you commit a bill of materials you
-  can't buy in a year. Served via kiln-pro; see https://kiln3d.com/pricing.
-- **Part Passport (Kiln Pro+).** `get_part_passport` hands your agent everything
+  can't buy in a year. See https://kiln3d.com/pricing.
+- **Part Passport (Pro+).** `get_part_passport` hands your agent everything
   about a design in one call, instead of asking tool by tool. Enterprise adds
   approval gates. See https://kiln3d.com/pricing.
 - **Per-printer nozzle in `fleet_status`.** Now includes each printer's reported
@@ -805,18 +800,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - **Sovol SV07 Plus support, plus a build-volume fix for the SV07.** Kiln now
   carries a tuned profile for the larger SV07 Plus, and corrects the standard
   SV07's build volume.
-- **Deeper per-printer guidance (Kiln Pro+).** The model-specific know-how Kiln
+- **Deeper per-printer guidance (Pro+).** The model-specific know-how Kiln
   brings to a print — quirks, common failure modes, calibration tips — now runs
   as deep for budget and mid-range printers as for the flagships.
-- **Adhesive intelligence for bonding printed parts (Kiln Pro+).** New MCP tools
+- **Adhesive intelligence for bonding printed parts (Pro+).** New MCP tools
   — `recommend_adhesive`, `get_adhesive_profile`, `record_bond_outcome` —
   recommend the right glue for joining two printed plastics with surface prep
-  and the full cure schedule, cited to datasheets. Served via kiln-pro; see
+  and the full cure schedule, cited to datasheets. See
   https://kiln3d.com/pricing.
-- **Adhesive recommendation on glued joints (Kiln Pro+).** `validate_assembly`
+- **Adhesive recommendation on glued joints (Pro+).** `validate_assembly`
   names the cited adhesive for your two materials; free tier gets a one-line
   pointer to `recommend_adhesive`.
-- **Adhesive recommendations now learn from real-world bond outcomes (Kiln Pro+).**
+- **Adhesive recommendations now learn from real-world bond outcomes (Pro+).**
   Free tier gives cited, datasheet-backed glue picks; Pro additionally lets
   accumulated field reports of how a glue actually held sharpen the ranking,
   marked as field data and never replacing cited specs. See
@@ -826,7 +821,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   go/no-go checks, sign-off and gates — now generate end to end in English,
   German, French, Spanish, Italian, Chinese, or Japanese, each with its own page
   numbering, so a line anywhere in the world builds from the same source in its
-  own language. Served via kiln-pro; see https://kiln3d.com/pricing.
+  own language. See https://kiln3d.com/pricing.
 
 ### Changed
 
@@ -973,25 +968,25 @@ front.
 - **Engraved text doesn't kiss the edges anymore.**  Default width
   tightened and a margin clamp added so "KILN" on a coaster sits
   comfortably inside the rim instead of hitting it.
-- **Heads-up if a print would wear your nozzle out** *(Kiln Pro)*.
+- **Heads-up if a print would wear your nozzle out** *(Pro)*.
   Before a print starts, Kiln checks whether finishing this job
   would push the nozzle past its wear limit, and warns if so.
   Warns, doesn't block — your call.
 - **Every supported printer feeds the wear model on every print**
-  *(Kiln Pro)*.  Bambu, Moonraker, OctoPrint, Elegoo, and
+  *(Pro)*.  Bambu, Moonraker, OctoPrint, Elegoo, and
   PrusaLink all report extrusion anomalies to the wear model.
-- **Failure analysis considers nozzle wear** *(Kiln Pro)*.  When
+- **Failure analysis considers nozzle wear** *(Pro)*.  When
   the failure symptoms line up with what a worn nozzle would
   cause, wear surfaces as a candidate instead of always pinning
   on bed adhesion or temperature.
-- **Material recommendations factor your nozzle** *(Kiln Pro)*.
+- **Material recommendations factor your nozzle** *(Pro)*.
   Asking for an abrasive filament (carbon-fiber, glass-fiber,
   wood-fill, or metal-fill) on a brass nozzle now warns up
   front — brass wears out fast on abrasives.  Stainless gets a
   milder caution; hardened steel is the right pairing and stays
   quiet.
 - **Recovery plans suggest "replace the nozzle" when that's the
-  real fix** *(Kiln Pro)* — instead of defaulting to "same
+  real fix** *(Pro)* — instead of defaulting to "same
   nozzle, lower temp, try again" when the part actually needs a
   fresh tip.
 
@@ -1229,7 +1224,7 @@ polling.
   earlier tool already inspected the mesh, the audit reuses those
   findings instead of re-running them.
 - **Audits confirm the design matches what you asked for.** When the
-  design started from a saved design-goal questionnaire (Kiln Pro),
+  design started from a saved design-goal questionnaire (Pro),
   the audit ends with a plain-English summary or names the goals that
   weren't met.
 - **Audits surface concrete remediation candidates.** On Kiln Pro, the

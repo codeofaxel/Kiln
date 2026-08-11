@@ -51,27 +51,34 @@ That provenance is what splits start from end here:
   slicing flags that are constants for Kiln.  Nothing has to be guessed, so
   each supported model ships its own end template and
   :func:`_resolve_end_gcode` expands it at build time.
-* **Start G-code is still A1-flavoured for every model.**  The start
-  templates need ~100 further values that BambuStudio *computes during
-  slicing* and stores nowhere --- ``outer_wall_volumetric_speed``,
-  ``flush_temperatures``, ``min_vitrification_temperature``,
-  ``hold_chamber_temp_for_flat_print``, ``first_layer_print_min`` --- and
-  several of them gate real motion and heating (a bed-obstacle probe height,
-  which bed-levelling branch runs, purge feedrates).  Resolving those by hand
-  would mean guessing numbers that are sent to a machine that moves, so this
-  module does not.  A declared non-A1 model therefore still gets the A1 start
-  sequence and :func:`_select_start_gcode` says so in the log.
+* **Start G-code is per model too, and is captured rather than resolved.**
+  The start templates carry ~10 values BambuStudio *computes during slicing*
+  and stores nowhere --- the AMS flush temperature and volumetric speed are
+  emitted into ``M620.10``, and ``min_vitrification_temperature``,
+  ``overall_chamber_temperature`` and ``hold_chamber_temp_for_flat_print``
+  choose between chamber-cooling, bed-levelling and heating branches.  Those
+  cannot be resolved from the bundle: they are absent from the machine and
+  filament JSON and from every ``inherits`` parent.  So they are not resolved.
+  Each model's sequence is captured post-expansion from a real BambuStudio
+  slice, the same provenance as the A1 files, and BambuStudio itself picks the
+  flush values and the branches.  No number here was chosen by hand.
 
-Nozzle size does not enter into this, and that is the bundle's own doing: it
-publishes end G-code at the 0.4 nozzle only — one file per model, no per-nozzle
-variant — so the end template a 0.6 owner gets is the only one that exists
-rather than a 0.4 file standing in for theirs.  Start G-code is the opposite:
-P1P, P1S, X1 Carbon and X1E each publish four start templates (0.2 / 0.4 / 0.6
-/ 0.8) whose contents genuinely differ, and ``[nozzle_diameter]`` appears in
-their conditionals.  So whenever per-model start templates do become
-resolvable, ``_MODEL_START_GCODE_FILES`` has to be keyed on nozzle diameter as
-well as model, or refuse a nozzle it has no template for — never silently hand
-a 0.6 nozzle the 0.4 sequence.
+  What that buys is not cosmetic.  The A1 and A1 mini are bed-slingers whose
+  startup drives X negative --- 54 and 33 such moves --- with ``M211 X0 Y0 Z0``
+  disabling the soft endstops first.  The enclosed models make **no** negative-X
+  move at all, and their bed centres differ (the H2S homes around X170 Y160,
+  the P1P/P1S around X65 Y230).  Wrapping a P2S print in the A1 sequence sent
+  a CoreXY machine off the front of its own bed with the endstops off.
+
+Nozzle size is where start and end differ.  The bundle publishes end G-code at
+the 0.4 nozzle only --- one file per model, no per-nozzle variant --- so the end
+template a 0.6 owner gets is the only one that exists rather than a 0.4 file
+standing in for theirs.  Start G-code is the opposite: P1P, P1S, X1 Carbon and
+X1E each publish four start templates (0.2 / 0.4 / 0.6 / 0.8) whose contents
+genuinely differ, and ``[nozzle_diameter]`` appears in their conditionals.
+``_MODEL_START_GCODE_FILES`` is therefore keyed on ``(model, nozzle)`` and every
+capture so far is 0.4; any other nozzle falls back to the A1 and says so, rather
+than being handed a sequence cut for a different orifice.
 """
 
 from __future__ import annotations
@@ -124,10 +131,29 @@ _a1_end_gcode: str | None = None
 # wrapped in until now.  An unknown model is never an error: people are
 # printing successfully on this fallback right now.
 
-# Start G-code.  One entry, and that is the honest state of it: see the module
-# docstring for why the other models' start templates cannot be resolved.
-_MODEL_START_GCODE_FILES: dict[str, str] = {
-    "bambu_a1": "bambu_a1_start_gcode.gcode",
+# Start G-code, keyed on (model, nozzle diameter) --- never model alone.
+#
+# The vendor publishes four start templates per model for P1P, P1S, X1 Carbon
+# and X1E (0.2 / 0.4 / 0.6 / 0.8) whose contents genuinely differ, and
+# ``[nozzle_diameter]`` appears inside their conditionals.  Handing a 0.6 owner
+# the 0.4 sequence would be the same class of defect this table exists to end,
+# so a nozzle with no template of its own is a miss, not a near-enough match.
+#
+# Every file here is a post-expansion CAPTURE of a real BambuStudio slice, the
+# same way the A1 files were produced --- not a template this module resolved.
+# That distinction is the whole reason these can ship: BambuStudio computed the
+# AMS flush temperature and volumetric speed, chose the chamber-cooling and
+# vitrification branches, and evaluated the bed-obstacle probe itself.  Nothing
+# in them was picked by hand.  Re-capture, never hand-edit.
+_MODEL_START_GCODE_FILES: dict[tuple[str, str], str] = {
+    ("bambu_a1", "0.4"): "bambu_a1_start_gcode.gcode",
+    ("bambu_a1_mini", "0.4"): "bambu_a1_mini_start_gcode.gcode",
+    ("bambu_p1p", "0.4"): "bambu_p1p_start_gcode.gcode",
+    ("bambu_p1s", "0.4"): "bambu_p1s_start_gcode.gcode",
+    ("bambu_p2s", "0.4"): "bambu_p2s_start_gcode.gcode",
+    ("bambu_x1c", "0.4"): "bambu_x1c_start_gcode.gcode",
+    ("bambu_x1e", "0.4"): "bambu_x1e_start_gcode.gcode",
+    ("bambu_h2s", "0.4"): "bambu_h2s_start_gcode.gcode",
 }
 
 # End G-code, one file per model we ship a template for.
@@ -310,31 +336,56 @@ def _normalize_model(printer_model: str | None) -> str:
     return (printer_model or "").strip().lower()
 
 
-def _select_start_gcode(printer_model: str | None) -> tuple[str, str]:
-    """Pick the start gcode template for a DECLARED printer model.
+def _nozzle_key(nozzle_diameter: float | str | None) -> str:
+    """Normalize a nozzle diameter to the registry's key form ("0.4")."""
+    try:
+        return f"{float(nozzle_diameter):.1f}"
+    except (TypeError, ValueError):
+        return ""
 
-    Returns ``(template_text, source_model)``.  ``source_model`` is the model
-    the template actually came from, which is what the caller should believe
-    the file is flavoured for --- it is not always the model asked for.
 
-    Every model except the A1 falls back to the A1 sequence today.  That is
-    logged once per model per process rather than passed over in silence: a
-    P2S owner wrapping a print in A1 initialization is a real defect, and the
-    session that first hit it lost time because nothing said so.
+def _select_start_gcode(
+    printer_model: str | None,
+    nozzle_diameter: float | str | None = 0.4,
+) -> tuple[str, str]:
+    """Pick the start gcode for a DECLARED printer model and nozzle.
+
+    Returns ``(gcode_text, source_model)``.  ``source_model`` is the model the
+    sequence actually came from, which is what the caller should believe the
+    file is flavoured for --- it is not always the model asked for.
+
+    Keyed on the nozzle as well as the model, because the vendor's own start
+    templates branch on ``nozzle_diameter`` and differ per size.  A nozzle with
+    no capture of its own falls back rather than borrowing another size's
+    sequence, and says so.
+
+    The fallback is the A1's, and it is a real substitution rather than a
+    near-miss: the A1 and A1 mini are bed-slingers whose startup drives X
+    negative with soft endstops disabled, while every enclosed model here makes
+    no negative-X move at all.  So it is logged once per model per process, and
+    :attr:`Bambu3MFResult.start_gcode_warning` carries it to the caller.
     """
     model = _normalize_model(printer_model)
-    filename = _MODEL_START_GCODE_FILES.get(model)
+    nozzle = _nozzle_key(nozzle_diameter)
+    filename = _MODEL_START_GCODE_FILES.get((model, nozzle))
     if filename is not None:
         return _load_model_template(filename), model
 
-    if model and ("start", model) not in _fallback_warned:
-        _fallback_warned.add(("start", model))
+    if model and ("start", model, nozzle) not in _fallback_warned:
+        _fallback_warned.add(("start", model, nozzle))
+        known = sorted({n for m, n in _MODEL_START_GCODE_FILES if m == model})
+        detail = (
+            f"only the {', '.join(known)} nozzle is captured for {model}"
+            if known
+            else f"no start sequence is captured for {model}"
+        )
         logger.warning(
-            "No start gcode template for %s — using the Bambu A1 initialization "
-            "sequence, which is flavoured for the A1 (bed coordinates, purge and "
-            "calibration moves).  The print will be wrapped and can start, but the "
+            "No start gcode for %s at a %s nozzle (%s) — using the Bambu A1 "
+            "sequence, which is flavoured for the A1: its bed coordinates, purge "
+            "and calibration moves, including moves to negative X with the soft "
+            "endstops disabled.  The print will be wrapped and can start, but the "
             "startup sequence is not this model's own.",
-            model,
+            model, nozzle or "unknown", detail,
         )
     return _load_a1_start_gcode(), "bambu_a1"
 
@@ -399,6 +450,26 @@ def _assert_fully_resolved(gcode: str, *, source: str) -> None:
 # Only 220°C (PLA print temp) and 65°C (PLA bed temp) are parametric.
 
 
+_CAPTURE_HOTEND_TEMP = 220  # every capture was taken with Generic PLA at 220C
+
+
+def _capture_bed_temp(template: str) -> int | None:
+    """The bed temperature a captured start sequence was taken at.
+
+    Read from the capture instead of assumed, because it is not one number
+    across the bundle: the A1 and P1P captured at 65C and the P2S, P1S, X1
+    Carbon, X1E and H2S at 55C, all for the same Generic PLA.  Assuming the
+    A1's 65 left the substitution below silently doing nothing on five of
+    eight machines, which pins a print to the capture's bed temperature no
+    matter what the caller asked for.
+    """
+    values = [int(v) for v in re.findall(r"^\s*M1[49]0 S(\d+)", template, re.M)]
+    values = [v for v in values if v > 0]
+    if not values:
+        return None
+    return max(set(values), key=values.count)
+
+
 def _resolve_start_gcode(
     template: str,
     *,
@@ -406,12 +477,14 @@ def _resolve_start_gcode(
     bed_temp: int = 65,
     filament_type: str = "PLA",
 ) -> str:
-    """Resolve the A1 start gcode template with print-specific values.
+    """Put this print's temperatures into a captured start sequence.
 
-    Replaces PLA-default temperatures (220°C hotend, 65°C bed) and
-    filament type with the actual print values.  Fixed init temperatures
-    (140°C preheat, 250°C flush, 170°C wipe) are preserved.
+    The captures are post-expansion G-code, so this is a substitution of the
+    values the capture was taken with --- not template resolution.  Fixed init
+    temperatures (140C preheat, 250C flush, 170C wipe) are left alone, and so
+    is anything at a temperature the capture did not use for the print itself.
     """
+    capture_bed = _capture_bed_temp(template)
     lines = template.split("\n")
     resolved: list[str] = []
 
@@ -419,16 +492,22 @@ def _resolve_start_gcode(
         stripped = line.strip()
 
         # Replace hotend temp: M104/M109 S220 → S{hotend_temp}
-        if hotend_temp != 220 and (
-            stripped.startswith("M104 S220") or stripped.startswith("M109 S220")
+        if hotend_temp != _CAPTURE_HOTEND_TEMP and (
+            stripped.startswith(f"M104 S{_CAPTURE_HOTEND_TEMP}")
+            or stripped.startswith(f"M109 S{_CAPTURE_HOTEND_TEMP}")
         ):
-            line = line.replace("S220", f"S{hotend_temp}")
+            line = line.replace(f"S{_CAPTURE_HOTEND_TEMP}", f"S{hotend_temp}")
 
-        # Replace bed temp: M140/M190 S65 → S{bed_temp}
-        elif bed_temp != 65 and (
-            stripped.startswith("M140 S65") or stripped.startswith("M190 S65")
+        # Replace bed temp: M140/M190 S{capture} → S{bed_temp}
+        elif (
+            capture_bed is not None
+            and bed_temp != capture_bed
+            and (
+                stripped.startswith(f"M140 S{capture_bed}")
+                or stripped.startswith(f"M190 S{capture_bed}")
+            )
         ):
-            line = line.replace("S65", f"S{bed_temp}")
+            line = line.replace(f"S{capture_bed}", f"S{bed_temp}")
 
         # Replace filament type (skip UNKNOWN lines — fixed for AMS switching)
         elif filament_type != "PLA" and "set_filament_type:PLA" in line:
@@ -1246,7 +1325,9 @@ def build_bambu_3mf(
     # strings are then checked for surviving placeholders: this text is
     # copied into the 3MF and sent to the printer verbatim, so a template we
     # could not fully resolve must stop the build rather than reach a machine.
-    start_template, start_source = _select_start_gcode(printer_model)
+    start_template, start_source = _select_start_gcode(
+        printer_model, settings.nozzle_diameter,
+    )
     start_gcode = _resolve_start_gcode(
         start_template,
         hotend_temp=settings.hotend_temp,
@@ -1263,18 +1344,24 @@ def build_bambu_3mf(
     )
     _assert_fully_resolved(end_gcode, source=f"{end_source} end gcode")
 
-    # Correct M73 R values in the start gcode template.  The template has
-    # hardcoded R186/R184/R183/R179 from a BambuStudio default (~186 min).
-    # Scale them proportionally to our corrected estimate so the LCD is
-    # accurate throughout the startup sequence too.
-    _DEFAULT_TEMPLATE_MINUTES = 186
-    def _scale_start_m73(match: re.Match) -> str:
-        p = int(match.group(1))
-        old_r = int(match.group(2))
-        new_r = max(1, round(old_r * est_minutes_with_startup / _DEFAULT_TEMPLATE_MINUTES))
-        return f"M73 P{p} R{new_r}"
+    # Correct the M73 remaining-time values the capture carries, so the LCD is
+    # right during the startup sequence too.  Each is the estimate for the
+    # print that was sliced when the sequence was captured, so the baseline is
+    # read from the sequence in hand rather than assumed: the A1 was captured
+    # on a ~186 minute print and every model captured since on a ~21 minute
+    # one, and scaling those by the A1's 186 would understate the remaining
+    # time by roughly nine times.
     est_minutes_with_startup = max(1, (est_time_sec + _BAMBU_STARTUP_OVERHEAD_SEC) // 60)
-    start_gcode = re.sub(r"M73 P(\d+) R(\d+)", _scale_start_m73, start_gcode)
+    capture_minutes = max(
+        (int(r) for r in re.findall(r"M73 P\d+ R(\d+)", start_gcode)), default=0,
+    )
+    if capture_minutes > 0:
+        def _scale_start_m73(match: re.Match) -> str:
+            p = int(match.group(1))
+            old_r = int(match.group(2))
+            new_r = max(1, round(old_r * est_minutes_with_startup / capture_minutes))
+            return f"M73 P{p} R{new_r}"
+        start_gcode = re.sub(r"M73 P(\d+) R(\d+)", _scale_start_m73, start_gcode)
 
     # Post-process the PrusaSlicer body.
     processed_body = _postprocess_prusa_body(

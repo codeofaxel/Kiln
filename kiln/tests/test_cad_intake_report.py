@@ -333,14 +333,15 @@ def _freecad_console() -> list[str] | None:
 def test_two_backends_grade_one_file_differently(tmp_path):
     """The measurement the design rests on, taken with two REAL converters.
 
-    A 150 mm sphere, written once, converted by the OCCT kernel and by
-    FreeCAD.  Measured 2026-08-11: occt 150,970 triangles grading B/83,
-    freecad 8,000 grading A/92.  One object, one file, a full letter apart.
+    A 150 mm sphere, written once, converted by each installed backend.  The
+    two disagree on density by more than an order of magnitude and land on
+    different letters — one object, one file, two grades.  The exact read is
+    unmoved by any of it, which is the whole point.
 
-    The direction is the part worth keeping: the converter that is 19x finer
-    and 19x closer on volume gets the WORSE grade, because its denser mesh
-    trips the manifold check and its pole slivers trip degenerate_pct > 0.
-    The exact read is unmoved by any of it, which is the whole point.
+    Asserted as a relationship rather than as fixed numbers: the specific
+    figures depend on the backends a machine has and on the scorecard's
+    current weights, and a test that pinned them would break on a tuning
+    change without telling anyone anything true.
 
     Skips without FreeCAD rather than failing — one backend cannot measure a
     two-backend claim, and a test that quietly passes on one would be
@@ -422,7 +423,7 @@ def test_the_score_moves_when_only_the_tessellation_does(tmp_path, monkeypatch):
     used to straddle.  Re-measured rather than retuned: on a single backend no
     shape in the sweep crosses a letter any more, so the honest claim here is
     the score, and the letter evidence lives in the cross-backend test above,
-    where it is unchanged (occt B/83, freecad A/92).
+    where it is unchanged.
 
     That is not a reprieve for the grade.  Whether a letter crosses depends on
     how near a boundary a part happens to sit, so the same dependence is in

@@ -115,7 +115,7 @@
     }
   },
   "ender3": {
-    "display_name": "Creality Ender 3 / Ender 3 Pro / Ender 3 V2",
+    "display_name": "Creality Ender 3 / Ender 3 Pro",
     "slicer": "prusaslicer",
     "notes": "Bowden setup. Conservative retraction for PTFE tube. Slow first layer for bed adhesion on flexible build plate.",
     "settings": {
