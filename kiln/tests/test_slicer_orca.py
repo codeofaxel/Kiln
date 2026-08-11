@@ -439,19 +439,17 @@ class TestPrusaSlicerIsUnaffected:
             seen.append(list(cmd))
             return real_run(cmd, **kwargs)
 
-        import kiln.slicer as slicer_module
-
-        original = slicer_module.subprocess.run
-        slicer_module.subprocess.run = spy
-        try:
+        # patch(), not an attribute assignment: ``kiln.slicer.subprocess`` IS
+        # the subprocess module, so assigning through it swaps subprocess.run
+        # for the whole process and leaves a window where any other test in
+        # this worker would call the spy.
+        with patch("kiln.slicer.subprocess.run", side_effect=spy):
             slice_file(
                 stl,
                 output_dir=str(tmp_path / "out"),
                 profile=resolve_slicer_profile("ender3"),
                 slicer_path=_PRUSA,
             )
-        finally:
-            slicer_module.subprocess.run = original
 
         slice_cmds = [c for c in seen if "--version" not in c]
         assert len(slice_cmds) == 1, f"expected one slice command, got {seen}"
