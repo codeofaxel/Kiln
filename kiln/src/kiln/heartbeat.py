@@ -424,6 +424,15 @@ def _send_heartbeat() -> None:
                 # actually does.  Capped to the busiest tools so the
                 # payload stays small; names + counts only, never args.
                 "tool_calls": _top_n(stats.get("tool_calls", {}), 100),
+                # Per-tool FAILURE counts — {tool_name: count_today}.
+                # Only meaningful next to tool_calls, which is why they
+                # ride together: the count alone cannot tell a broken
+                # tool from a popular one, and the ratio can.  Same
+                # posture — names and counts, never an error message, an
+                # argument, or a path.  This is the wire that would have
+                # said "every P2S install fails at start_print" without
+                # anyone having to send us screenshots.
+                "tool_failures": _top_n(stats.get("tool_failures", {}), 100),
                 # Upgrade-nudge funnel — {stage: count_today}.  A closed
                 # five-value vocabulary, not tool names.  This is the
                 # only way the funnel is ever seen: the offer, the

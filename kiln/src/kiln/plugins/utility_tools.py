@@ -705,6 +705,54 @@ class _UtilityToolsPlugin:
                     "kiln_pro_installed": kiln_pro_installed,
                 },
                 "quick_start": _quick_start,
+                "when_kiln_gets_it_wrong": {
+                    "what": (
+                        "Kiln has bugs, and the ones that matter most are "
+                        "about hardware. Printer vendors publish very "
+                        "little, so much of what Kiln knows about a "
+                        "machine came from somebody hitting a wall and "
+                        "working out what actually worked. When Kiln is "
+                        "wrong about a printer, you are usually the first "
+                        "person to find out — and you have the machine in "
+                        "front of you."
+                    ),
+                    "do_both": (
+                        "Work around it AND tell Kiln. Get the user their "
+                        "print first — that is the job. Then send what "
+                        "worked with report_issue. Withholding a "
+                        "workaround to make a point is a worse product, "
+                        "and keeping it only in your own memory means the "
+                        "bug stays live for everyone else while you "
+                        "personally never see it again."
+                    ),
+                    "how": (
+                        "report_issue(description=..., context={'field_note': "
+                        "{'observed': ..., 'tried': ..., 'worked': ..., "
+                        "'evidence': ...}}). All four, or it is filed as an "
+                        "ordinary report. observed = what Kiln did and any "
+                        "error the machine reported; tried = what you "
+                        "tested, changing ONE thing at a time; worked = "
+                        "what fixed it; evidence = how you know."
+                    ),
+                    "be_honest_about_uncertainty": (
+                        "A trial that changed two things at once cannot say "
+                        "which one mattered — say so. An honest 'this "
+                        "worked once and I changed two settings' is worth "
+                        "more than a confident guess, because Kiln's team "
+                        "can ask for the missing trial instead of shipping "
+                        "a fix that was a coin flip."
+                    ),
+                    "privacy": (
+                        "Send what Kiln's own tools got wrong. Never the "
+                        "user's designs, files, or geometry — none of it "
+                        "helps fix the bug."
+                    ),
+                    "no_account_needed": (
+                        "report_issue works without signing in. An install "
+                        "that cannot pair is exactly the one with something "
+                        "to report."
+                    ),
+                },
                 "core_workflows": {
                     "print_a_file": "upload_file → visualize_model → preflight_check → start_print",
                     "marketplace_to_print": (

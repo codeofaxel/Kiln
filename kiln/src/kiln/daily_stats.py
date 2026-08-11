@@ -174,19 +174,28 @@ def _result_looks_failed(result: Any) -> bool:
     whose text is the JSON-serialised dict.  Unknown shapes count as
     success — the status quo for a returned call — so a new wire format
     degrades to slight overcount, never to silent zero.
+
+    BOTH failure spellings count.  ``{"success": False}`` is the public
+    house style and ``{"status": "error"}`` is common across the kiln-pro
+    plugin surface, which dispatches through this same hook — so reading
+    only the first meant a failed pro tool was counted as a successful
+    generation.
     """
+    def _failed(payload: dict) -> bool:
+        return payload.get("success") is False or payload.get("status") == "error"
+
     try:
         if isinstance(result, dict):
-            return result.get("success") is False
+            return _failed(result)
         if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], dict):
-            return result[1].get("success") is False
+            return _failed(result[1])
         if isinstance(result, list):
             for block in result:
                 text = getattr(block, "text", None)
                 if isinstance(text, str) and text.lstrip().startswith("{"):
                     parsed = json.loads(text)
                     if isinstance(parsed, dict):
-                        return parsed.get("success") is False
+                        return _failed(parsed)
                 break  # only the first block carries the payload
     except Exception:
         pass
@@ -236,6 +245,20 @@ def _empty_day() -> dict[str, Any]:
         # call never leaves the machine, so no server counter can see
         # it — which made the product's most common refusal invisible.
         "account_wall": {},        # {"apply_image_texture": 3}
+        # Tools that FAILED today — {tool_name: count}.  The companion to
+        # tool_calls, and the pair is the point: a count of failures alone
+        # cannot tell a broken tool from a popular one, while the ratio
+        # can.  Recorded at the same dispatch chokepoint, so it covers
+        # every tool family including kiln-pro's, and it counts a tool
+        # that RAISED as well as one that returned a failure envelope —
+        # the hook used to see only the second kind, because a raising
+        # tool never reached the recorder at all.
+        #
+        # Kept as its own map rather than folded into tier_denials or
+        # account_wall because those two are the product working: a
+        # locked door, a caller we don't know yet.  This one is Kiln not
+        # working, which is a different question with a different owner.
+        "tool_failures": {},       # {"start_print": 4}
         # Upgrade-nudge funnel: stage -> count today.  Stages are a
         # CLOSED vocabulary (_UPDATE_NUDGE_STAGES), not tool names: the
         # question is "did the offer get shown, taken, and did it work",
@@ -273,7 +296,8 @@ _ROLLOVER_COUNTERS = (
 # _ROLLOVER_COUNTERS to _VALID_EVENTS (the scalar activity counters);
 # these are a different shape answering a different question.
 _ROLLOVER_MAPS = (
-    "tier_denials", "account_wall", "tool_calls", "update_nudge",
+    "tier_denials", "account_wall", "tool_calls", "tool_failures",
+    "update_nudge",
     "texture_names", "decoration_types", "slicer_profiles",
     "marketplace_sources",
 )
@@ -595,7 +619,14 @@ def _record_name_count(bucket: str, tool_name: str) -> None:
     so neither the local file nor the heartbeat payload can grow without
     bound.  Names and counts only — never arguments or paths.
     """
-    name = (tool_name or "").strip()
+    # A non-string name is dropped, not raised on.  ``(tool_name or "")``
+    # alone let an int through to ``.strip()`` and the AttributeError
+    # escaped — the whole point of this module is that a counter can never
+    # turn a working call into a crash, and every caller relying on an
+    # outer suppress() is one refactor away from losing that.
+    if not isinstance(tool_name, str):
+        return
+    name = tool_name.strip()
     if not _TOOL_NAME_RE.match(name):
         return  # not a real tool name — drop rather than pollute the map
     try:
@@ -639,6 +670,28 @@ def record_account_wall(tool_name: str) -> None:
     told us who they are".
     """
     _record_name_count("account_wall", tool_name)
+
+
+def record_tool_failure(tool_name: str) -> None:
+    """Increment the failure counter for ``tool_name``.
+
+    Called from the tool-dispatch chokepoint for both failure shapes: a
+    tool that RAISED, and a tool that returned Kiln's failure envelope.
+
+    Deliberately just a name and a count — never the error text, the
+    arguments, or a path.  The same posture ``tool_calls`` already ships
+    under, and the reason is that this counter answers "which tool is
+    failing, on which printer model, on which version", which needs none
+    of that.  The story of WHY belongs to ``report_issue``, where a human
+    chose to send it.
+
+    A count on its own also cannot say whose fault a failure was — a
+    user's impossible geometry and our own broken code look identical
+    from here.  The ratio against ``tool_calls`` and the concentration
+    across printer models are what carry meaning; a raw failure count
+    read as a defect count would be wrong.
+    """
+    _record_name_count("tool_failures", tool_name)
 
 
 # The upgrade funnel's stages.  A CLOSED set, unlike the tool-name maps:

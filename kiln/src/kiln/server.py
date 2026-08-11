@@ -970,6 +970,19 @@ def _record_local_tool_call(name: str, result: Any = None) -> None:
 
         record_tool_event(name, result)
 
+    # The other half of that judgment: a tool that failed is counted AS a
+    # failure, not merely skipped.  Every counter on this machine records
+    # things going right, so a tool that broke for every user on a printer
+    # model we have never seen produced silence indistinguishable from
+    # nobody using it — which is how seven defects in one real session
+    # reached us by screenshot instead of by wire.  Same chokepoint, same
+    # anonymous name-and-count posture as tool_calls.
+    with contextlib.suppress(Exception):
+        from kiln.daily_stats import _result_looks_failed, record_tool_failure
+
+        if _result_looks_failed(result):
+            record_tool_failure(name)
+
     try:
         from kiln_pro.bridge import pro_features
     except Exception:
@@ -1107,12 +1120,24 @@ def _install_mcp_request_context_capture() -> None:
                 # One-time consent gate — raised so the lowlevel handler returns
                 # it to the agent as a tool error to relay (see _terms_* above).
                 raise RuntimeError(_terms_consent_message())
-            result = await original_call_tool(
-                name,
-                arguments,
-                context=context,
-                convert_result=convert_result,
-            )
+            try:
+                result = await original_call_tool(
+                    name,
+                    arguments,
+                    context=context,
+                    convert_result=convert_result,
+                )
+            except Exception:
+                # A tool that RAISES was invisible to every counter here:
+                # the recorder below only runs on a call that returned, so
+                # the loudest failure a tool can have produced no signal at
+                # all.  Count it and re-raise untouched — the agent must
+                # still see the exception it was going to see.
+                with contextlib.suppress(Exception):
+                    from kiln.daily_stats import record_tool_failure
+
+                    record_tool_failure(name)
+                raise
             # Best-effort usage tally — only after a call that returned
             # (a tool that raised is not counted); cannot affect the
             # result and cannot raise.  The result rides along so mapped
