@@ -2050,6 +2050,15 @@ def _spawn_print_watchdog(adapter: Any, file_name: str) -> None:
     printer_name = _resolve_effective_printer_name() or "default"
 
     def _on_anomaly(flag):
+        # Yellow flags report a condition; red flags report a stopped print.
+        # Only the second is an incident: filing an envelope per warning would
+        # label a weak-WiFi notice as a red flag and fill the incident store
+        # with conditions that stopped nothing.
+        if getattr(flag, "kind", "red") != "red":
+            logger.warning(
+                "PrintWatchdog warning on %s: %s", printer_name, flag,
+            )
+            return
         logger.error(
             "PrintWatchdog anomaly on %s: %s", printer_name, flag,
         )
