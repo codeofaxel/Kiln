@@ -23,6 +23,7 @@ import contextlib
 import importlib.util
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -192,9 +193,23 @@ import gmsh
 
 step_path = {step_path!r}
 output_dir = {output_dir!r}
+curvature_elements = {curvature_elements!r}
 
 gmsh.initialize()
 gmsh.option.setNumber("General.Terminal", 0)
+try:
+    # Set BEFORE open(), so a gmsh that cannot be bounded costs nothing.
+    # See _GMSH_CURVATURE_ELEMENTS for what this buys and why it is that
+    # number rather than one somebody picked.
+    gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", curvature_elements)
+except Exception:
+    # Renamed from Mesh.CharacteristicLengthFromCurvature in gmsh 4.7
+    # (2020-11); 4.15.2 still accepts BOTH, so this only fires on a build
+    # older than that rename.  The honest answer there is to hand the file
+    # to a backend that CAN be told a density, not to emit a mesh whose
+    # fineness nobody chose.
+    sys.stderr.write("this gmsh does not accept Mesh.MeshSizeFromCurvature\n")
+    raise SystemExit({unboundable_exit})
 gmsh.open(step_path)
 
 entities = gmsh.model.getEntities(3)
@@ -219,24 +234,32 @@ print("KILN_RESULT:" + json.dumps(result))
 class TessellationBound:
     """What a backend was actually TOLD about mesh density, in its own terms.
 
-    Three shapes, because the backends genuinely differ and any record that
-    flattened them to one would have to lie about the others:
+    Four shapes, because the backends genuinely differ and any record that
+    flattened them to one would have to lie about the rest:
 
     - ``"linear_angular"`` — both bounds given (the OCCT paths, cadquery).
     - ``"linear"`` — a chord tolerance only, no angular bound (FreeCAD).
+    - ``"elements_per_circle"`` — a curvature target in gmsh's own unit,
+      which is the only density gmsh can be given.
     - ``"unbounded"`` — Kiln named no density at all and the backend used
-      whatever it derives on its own (gmsh).
+      whatever it derives on its own.
 
     ``"unbounded"`` is a state, not a missing number.  The honest answer to
     "how fine is this mesh?" there is "we did not say" — which a reader must
     be able to show, because rendering it as blank would let a mesh nobody
-    chose the density of pass for one somebody did.  A backend that later
-    gains a bound fills :attr:`linear`/:attr:`angular` in and changes
-    :attr:`kind`; nothing downstream has to learn a new shape.
+    chose the density of pass for one somebody did.  No backend reports it
+    today; it stays because the condition it names is a real one, and a
+    reader that never learned to show it would go silent the moment a new
+    backend arrives unbounded.
+
+    A backend that gains a bound fills its numbers in and changes
+    :attr:`kind` — which is what gmsh just did, and nothing downstream had
+    to learn a new shape to follow it.
     """
 
     kind: str
-    """``"linear_angular"``, ``"linear"``, or ``"unbounded"``."""
+    """``"linear_angular"``, ``"linear"``, ``"elements_per_circle"``, or
+    ``"unbounded"``."""
 
     linear: float | None = None
     """Linear (chordal) deflection, in the STEP's OWN units.
@@ -247,6 +270,16 @@ class TessellationBound:
 
     angular: float | None = None
     """Angular deflection in radians, when the backend takes one."""
+
+    elements_per_circle: int | None = None
+    """Elements gmsh is asked for per full circle of curvature.
+
+    Its own unit, kept as its own unit.  Gmsh cannot be handed a chordal
+    deflection at all, and restating this as one would claim a guarantee it
+    does not make: the segment count implies a sag finer than the mesher
+    actually delivers, because ``MeshSizeFromCurvature`` is a target for a
+    surface mesh rather than an exact per-circle count.
+    """
 
     reason: str | None = None
     """Why there is no number, when :attr:`kind` is ``"unbounded"``."""
@@ -303,13 +336,13 @@ class StepImportResult:
     """``"stl"`` or ``"3mf"`` — what :attr:`output_path` actually is."""
 
     part_names: list[str] = field(default_factory=list)
-    """Per-part names from the STEP, when the colour-aware path ran.
+    """Per-part names, when the colour-aware path ran — as a user will see them.
 
-    For a 3MF these are the names as they appear IN the file, so a caller can
-    address a part by the name it will see there.  A STEP may name two bodies
-    the same; the 3MF may not (see
-    :func:`~kiln.threemf_parser.unique_object_names`), so a repeat carries a
-    ``" (2)"`` suffix here too.
+    These are the names as written to the output, whatever its format, so a
+    caller can address a part by the name it will read there.  A STEP may name
+    two bodies the same and may name none of them at all; the output may do
+    neither (see :func:`~kiln.threemf_parser.unique_object_names`), so a repeat
+    carries a ``" (2)"`` suffix and a body nobody named reads as ``Part 1``.
     """
 
     part_colors: list[str | None] = field(default_factory=list)
@@ -557,12 +590,27 @@ def _convert_via_gmsh(
 ) -> tuple[list[str], int]:
     """Run gmsh Python script to convert STEP → STL.
 
+    Density is bounded by :data:`_GMSH_CURVATURE_ELEMENTS`: gmsh is asked for
+    126 elements per full circle, which measures out at roughly R/700 of
+    chordal sag — 0.067 mm on a 150 mm sphere, against 0.0068 mm from the
+    OCCT kernel and 0.162 mm from the FreeCAD path, all three measured on
+    the same sphere.  Before that bound existed this backend meshed at
+    whatever the installed gmsh derived from the model's bounding box: 330
+    triangles and over 3 mm of sag on that sphere, differing per machine
+    with nothing in the result to say so.
+
     Returns:
         (list of output paths, body_count)
+
+    Raises:
+        RuntimeError: the installed gmsh will not accept a density bound.
+            Deliberately not :class:`StepImportError` — see below.
     """
     script = _GMSH_SCRIPT_TEMPLATE.format(
         step_path=str(step_path),
         output_dir=str(output_dir),
+        curvature_elements=_GMSH_CURVATURE_ELEMENTS,
+        unboundable_exit=_GMSH_UNBOUNDABLE_EXIT,
     )
 
     with tempfile.NamedTemporaryFile(
@@ -580,6 +628,19 @@ def _convert_via_gmsh(
         )
     finally:
         os.unlink(script_path)
+
+    if result.returncode == _GMSH_UNBOUNDABLE_EXIT:
+        # A plain RuntimeError on purpose.  convert_step_to_stl re-raises
+        # StepImportError without trying anything else, and an un-boundable
+        # gmsh is precisely the case where the NEXT backend is the better
+        # answer — so raising the ordinary kind lets the existing
+        # fall-through carry it there.  Without this, bounding gmsh would
+        # turn a working pre-4.7 install into a hard failure even on a
+        # machine with the OCCT kernel sitting right behind it.
+        raise RuntimeError(
+            "gmsh is too old to be told a mesh density "
+            "(needs Mesh.MeshSizeFromCurvature, gmsh 4.7+)"
+        )
 
     return _parse_subprocess_result(result, "Gmsh")
 
@@ -610,6 +671,75 @@ def _convert_via_gmsh(
 _OCP_LINEAR_DEFLECTION = 5e-3
 _OCP_ANGULAR_DEFLECTION = 0.1
 
+#: What the GMSH backend gets told, so its density is chosen here too.
+#:
+#: Until this existed the gmsh script set no size option at all, so per
+#: gmsh's own manual (4.15.2 §1.2.2) the element size fell through to the
+#: first item in its minimum — "the size of the model bounding box" — which
+#: is blind to curvature and moves with the installed gmsh's defaults.  Same
+#: file, same user, two machines, no way for the caller to tell.
+#:
+#: gmsh cannot be given :data:`_OCP_LINEAR_DEFLECTION`.  That manual lists
+#: every term it minimises over (bounding box, size at points, curvature,
+#: fields, per-entity) and none of them means chordal sag; the one absolute
+#: knob, ``Mesh.MeshSizeMax``, applies to FLAT faces too because gmsh is a
+#: finite-element mesher and subdivides planes.  The ~1.7 mm element that
+#: 0.005 mm of sag implies at r=75 would put ~27,000 triangles on a flat
+#: 200 mm square that a tessellator covers with 2.
+#:
+#: ``Mesh.MeshSizeFromCurvature`` IS expressible, and it is denominated in
+#: exactly the unit the kernel's angular bound turns out to use: elements
+#: per 2*pi radians.  Measured 2026-08-10 against this OCP build, OCCT lands
+#: on ceil(4*pi/angle) segments per full circle, radius-independent — four
+#: angles x three radii (r = 0.25, 0.5, 1.0 mm), no exceptions:
+#:
+#:   _OCP_ANGULAR_DEFLECTION   4*pi/angle   measured segments/circle
+#:   0.05                          251.3      252
+#:   0.10  ← shipping              125.7      126
+#:   0.15                           83.8       84
+#:   0.20                           62.8       63
+#:
+#: So this is not a new number: it is the kernel's own angular guarantee
+#: restated in gmsh's units, and it tracks automatically if that constant
+#: ever moves.
+#:
+#: What it ACTUALLY buys — measured against gmsh 4.15.2, not derived.  The
+#: derivation above would predict sag <= R*(1-cos(pi/126)) = R/3217; gmsh
+#: does not deliver that, because ``MeshSizeFromCurvature`` is a target for
+#: a 2-D surface mesh rather than the exact per-circle segment count OCCT's
+#: angular deflection resolves to.  Asked for 126 it lands nearer 60-90.
+#: Run on spheres of r = 5, 25 and 75 mm:
+#:
+#:   bound   r      triangles   sag        worst sag/R
+#:   none    75           330   3.164 mm   R/24        ← what shipped before
+#:   126      5        12,118   0.007 mm   R/710
+#:   126     25        12,140   0.017 mm   R/1505
+#:   126     75        12,140   0.067 mm   R/1116
+#:
+#: So the honest claim is sag <= ~R/700 across that range, i.e. 0.067 mm on
+#: a 150 mm sphere.  On the same sphere the kernel gives 0.0068 mm and the
+#: FreeCAD path gives 0.162 mm (TESSELLATION_TOLERANCE, 0.1 mm linear, no
+#: angular bound at all): gmsh lands roughly 10x coarser than one and 2.4x
+#: finer than the other.  That is what "comparable" can mean while the two
+#: bounded backends sit 24x apart from each other; closing THAT gap is a
+#: product decision, not a constant.
+#:
+#: The number that justifies the change is the first row.  Unbounded, gmsh
+#: put 330 triangles on a 150 mm ball and missed the true surface by over
+#: 3 mm — visibly faceted, and 20x worse than the coarsest bounded backend.
+#: Raising the bound to 220 reaches ~0.019 mm for 3x the triangles; 126 was
+#: kept because it already beats the FreeCAD path at 12k triangles, and a
+#: viewer gains nothing from the rest.
+#:
+#: Because gmsh takes the minimum, adding this can only refine: no existing
+#: gmsh user gets a coarser mesh than they get today.
+_GMSH_CURVATURE_ELEMENTS = math.ceil(4 * math.pi / _OCP_ANGULAR_DEFLECTION)
+
+#: Exit code the gmsh child uses for "this gmsh will not accept a density
+#: bound".  It gets its own code because the parent must treat it unlike any
+#: other failure — see :func:`_convert_via_gmsh`.
+_GMSH_UNBOUNDABLE_EXIT = 9
+
 
 # What each backend is told about density, kept beside the constants it
 # quotes rather than restated at the call sites.  One home means the record
@@ -621,17 +751,19 @@ _KERNEL_BOUND = TessellationBound(
     linear=_OCP_LINEAR_DEFLECTION,
     angular=_OCP_ANGULAR_DEFLECTION,
 )
-#: Gmsh is handed no size option at all, so its density comes from whatever
-#: the installed gmsh derives for itself — which moves with the gmsh build
-#: and is not a number Kiln chose.  Recorded as the state it is rather than
-#: as a blank, so a reader can say so out loud instead of showing nothing
-#: where the other backends show a figure.
+#: Gmsh, in the only unit gmsh accepts.  Reads :data:`_GMSH_CURVATURE_ELEMENTS`
+#: rather than restating it, so the recorded bound and the bound actually set
+#: on the mesher are the same number by construction and cannot drift apart.
+#:
+#: Deliberately NOT restated as a chordal deflection, even though the constant
+#: is derived from the kernel's angular bound.  The derivation predicts sag of
+#: R/3217; measurement puts it near R/700 — 2.9x optimistic — because
+#: ``MeshSizeFromCurvature`` is a target for a surface mesh, not the exact
+#: per-circle segment count the kernel's angular deflection resolves to.
+#: Recording a chord figure here would publish the prediction as the promise.
 _GMSH_BOUND = TessellationBound(
-    kind="unbounded",
-    reason=(
-        "Kiln names no mesh density for gmsh; the installed gmsh derives "
-        "its own, so it varies with the gmsh build."
-    ),
+    kind="elements_per_circle",
+    elements_per_circle=_GMSH_CURVATURE_ELEMENTS,
 )
 
 
@@ -761,11 +893,25 @@ for i in range(1, labels.Length() + 1):
     label = labels.Value(i)
     shape = shape_tool.GetShape_s(label)
 
+    # Two things a STEP calls a "name" were stamped by software, not chosen by
+    # a person, and both reach the user as gibberish in a slicer's object list:
+    #
+    #   PRODUCT('SOLID','SOLID')                       - shape nobody named
+    #   PRODUCT('Open CASCADE STEP translator 7.9 1')  - writer's own identity
+    #
+    # Both are reported as unnamed so the caller can label them "Part 1".  The
+    # first test is against THIS body's own type rather than a list of words,
+    # so a FACE someone deliberately called "SOLID" keeps the name they chose;
+    # the second is a prefix because the trailing counter varies per file.
     name_attr = TDataStd_Name()
-    name = "part_%d" % (i - 1)
+    name = ""
     if label.FindAttribute(TDataStd_Name.GetID_s(), name_attr):
         got = name_attr.Get().ToExtString().strip()
-        if got:
+        stamped_by_software = (
+            got == shape.ShapeType().name.removeprefix("TopAbs_")
+            or got.startswith("Open CASCADE STEP translator")
+        )
+        if not stamped_by_software:
             name = got
 
     col = Quantity_Color()
@@ -993,7 +1139,10 @@ def _convert_via_ocp_xcaf(
 
     data = _parse_kiln_result(result, "OCCT")
     n = len(data["outputs"])
-    data.setdefault("names", [f"part_{i}" for i in range(n)])
+    # Blank rather than invented: naming an unnamed part happens in ONE place
+    # (:func:`~kiln.threemf_parser.unique_object_names`), so every door reports
+    # the same "Part 1" instead of each growing its own fallback.
+    data.setdefault("names", [""] * n)
     data.setdefault("colors", [None] * n)
     return data
 
@@ -1215,7 +1364,15 @@ def ensure_mesh_path(
 
     backend_fingerprint = (
         _find_freecad_cmd() or "",
-        _find_gmsh_cmd() or "",
+        # The gmsh slot carries its density bound, not merely "is it here".
+        # An entry written before gmsh was bounded holds a mesh cut at
+        # whatever that machine's gmsh derived from the bounding box, and a
+        # key that cannot tell the two apart would keep serving it forever —
+        # the fix would land and no repeat caller would ever see it.
+        # Folding the bound in HERE rather than into the tuple below is what
+        # keeps the invalidation aimed: a machine with no gmsh on PATH
+        # fingerprints to "" exactly as before and keeps every entry it has.
+        f"gmsh@{_GMSH_CURVATURE_ELEMENTS}" if _find_gmsh_cmd() else "",
         _ocp_available(),
         _cadquery_available(),
     )
@@ -1299,6 +1456,7 @@ def _read_cached_conversion(sidecar: Path) -> MeshConversion | None:
                 kind=bound["kind"],
                 linear=bound.get("linear"),
                 angular=bound.get("angular"),
+                elements_per_circle=bound.get("elements_per_circle"),
                 reason=bound.get("reason"),
             ),
         )
@@ -1486,11 +1644,17 @@ def convert_step(
     validated_path = _validate_step_path(step_path)
     out_dir = _validate_output_dir(output_dir, validated_path)
 
+    from kiln.threemf_parser import unique_object_names
+
     t0 = time.monotonic()
     data = _convert_via_ocp_xcaf(validated_path, out_dir)
+    # Named once, above the branch, so both exits report the same thing: a
+    # caller reading :attr:`StepImportResult.part_names` should never have to
+    # know which output format produced them.
+    names = unique_object_names(data["names"])
     parts = [
         {"stl_path": p, "name": n, "color": c}
-        for p, n, c in zip(data["outputs"], data["names"], data["colors"], strict=True)
+        for p, n, c in zip(data["outputs"], names, data["colors"], strict=True)
     ]
 
     has_color = any(p["color"] for p in parts)
@@ -1508,7 +1672,7 @@ def convert_step(
             conversion_time_s=round(elapsed, 3),
             output_paths=[final],
             output_format="stl",
-            part_names=data["names"],
+            part_names=names,
             part_colors=data["colors"],
             conversion=MeshConversion(
                 backend="occt-xcaf", bound=_KERNEL_BOUND
@@ -1516,7 +1680,9 @@ def convert_step(
         )
 
     out_3mf = str(out_dir / f"{validated_path.stem}.3mf")
-    written_names = _write_3mf(parts, out_3mf)
+    # These names are already unique; the writer re-establishes that for
+    # callers who did not, and returns what it wrote.
+    _write_3mf(parts, out_3mf)
     for p in parts:  # the per-part STLs were scaffolding, not output
         with contextlib.suppress(OSError):
             os.unlink(p["stl_path"])
@@ -1529,7 +1695,7 @@ def convert_step(
         conversion_time_s=round(elapsed, 3),
         output_paths=[out_3mf],
         output_format="3mf",
-        part_names=written_names,
+        part_names=names,
         part_colors=data["colors"],
         conversion=MeshConversion(backend="occt-xcaf", bound=_KERNEL_BOUND),
     )

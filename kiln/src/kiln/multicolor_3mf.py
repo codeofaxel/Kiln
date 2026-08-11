@@ -547,8 +547,9 @@ def _display_names(parsed: list[_ParsedPart]) -> list[str]:
     (:func:`~kiln.threemf_parser.unique_object_names`): two parts called
     "body" is an ordinary thing for a caller to ask for, and colour is read
     back per object BY NAME, so leaving the duplicate would cost the file
-    every colour it carries.  That helper also supplies ``part_N`` for a part
-    whose name is blank, which is what this composer has always written.
+    every colour it carries.  That helper also supplies ``Part N`` for a part
+    whose name is blank — one place names the nameless, so a plate composed
+    here and a CAD file imported elsewhere label them the same way.
     """
     from kiln.threemf_parser import unique_object_names
 
