@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.codeofaxel%2Fkiln.svg)](https://mcptoplist.com/server/io.github.codeofaxel%2Fkiln)
+
 <!-- mcp-name: io.github.codeofaxel/kiln -->
 <p align="center">
   <img src="docs/assets/kiln-banner-1280x640.svg" alt="Kiln" width="640">
