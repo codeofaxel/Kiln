@@ -1904,7 +1904,7 @@
   "artillery_sw_x3": {
     "display_name": "Artillery Sidewinder X3 Plus / X3 Pro",
     "slicer": "orcaslicer",
-    "notes": "Klipper-based. Large bed. Direct drive. All-metal hotend.",
+    "notes": "Marlin-based, printing from TF card or over USB. Large bed. Direct drive. All-metal hotend.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
@@ -1933,7 +1933,7 @@
       "retract_lift": "0.2",
       "bed_shape": "0x0,240x0,240x240,0x240",
       "max_print_height": "260",
-      "gcode_flavor": "klipper"
+      "gcode_flavor": "marlin"
     },
     "tool_change": {
       "tool_change_seconds": 90,

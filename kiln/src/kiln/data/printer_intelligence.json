@@ -1726,7 +1726,7 @@
   },
   "artillery_sw_x3": {
     "display_name": "Artillery Sidewinder X3 Plus / X3 Pro",
-    "firmware": "klipper",
+    "firmware": "marlin",
     "extruder_type": "direct_drive",
     "hotend_type": "all_metal",
     "has_enclosure": false,
@@ -1759,7 +1759,7 @@
       260
     ],
     "max_hotend_temp": 260,
-    "max_bed_temp": 110,
+    "max_bed_temp": 100,
     "has_input_shaping": true
   },
   "sovol_sv06": {
