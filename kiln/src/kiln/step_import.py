@@ -1900,7 +1900,10 @@ def _exact_from_payload(data: dict[str, Any] | None) -> ExactGeometry | None:
             surface_area_mm2=float(data["surface_area_mm2"]),
             bbox_min_mm=lo,  # type: ignore[arg-type]
             bbox_max_mm=hi,  # type: ignore[arg-type]
-            size_mm=tuple(h - l for h, l in zip(hi, lo)),  # type: ignore[arg-type]
+            # strict=True: hi and lo are both 3-axis bounds, so a length
+            # mismatch is a corrupt record, not a shorter box to be quietly
+            # truncated into a 2-axis size.
+            size_mm=tuple(h - low for h, low in zip(hi, lo, strict=True)),  # type: ignore[arg-type]
             is_valid=bool(data["is_valid"]),
             topology=topology,
         )
@@ -2082,7 +2085,7 @@ def ensure_mesh_path(
     # from "converted, but this run happened to be a hit."
     cached_record = cached.with_suffix(".json")
 
-    if cached.is_file():
+    if cached.is_file():  # noqa: SIM102 — see below; each `if` has its own reason
         # The miss path creates output_dir on the way through
         # (_validate_output_dir); the hit path never did, so a caller naming
         # a directory that does not exist yet got a mesh on the first call

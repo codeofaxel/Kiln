@@ -480,9 +480,6 @@ def record_print_outcome(
             import hashlib as _hl
             import json as _js
 
-            from kiln import community_outbox
-            from kiln.community_sync import community_opt_in_enabled
-
             # Which outcomes are worth aggregating is NOT decided here — a
             # second opinion about the vocabulary is what let one print ship
             # twice under two different words.  ``translate_outcome`` is the
@@ -503,6 +500,8 @@ def record_print_outcome(
             # and requiring one made this door a silent no-op for every
             # hook-observed ending while looking wired.
             from kiln import community_autofire as _caf
+            from kiln import community_outbox
+            from kiln.community_sync import community_opt_in_enabled
 
             _signature, _signature_v2 = _caf.geometric_signatures_for(file_name)
             if (
