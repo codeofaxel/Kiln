@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
@@ -1083,3 +1084,129 @@ class TestResetCache:
         _reset_cache()
         assert mod._a1_start_gcode is None
         assert mod._a1_end_gcode is None
+
+
+# ---------------------------------------------------------------------------
+# Production-extension sub-parts must travel with the root model
+# ---------------------------------------------------------------------------
+
+
+class TestProductionExtensionSubParts:
+    """A copied root model part is only valid if its references resolve.
+
+    Under the 3MF production extension the root part holds
+    ``<component objectid=".." p:path="/3D/Objects/object_N.model"/>`` and the
+    geometry lives in those sub-parts.  This writer copied the root part
+    verbatim while reading only ``3D/3dmodel.model``, so the output referenced
+    parts it never wrote — a dangling reference we manufactured.  Bambu Studio,
+    OrcaSlicer and PrusaSlicer all emit that layout.
+    """
+
+    _SUB_PART = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<model unit="millimeter" xmlns='
+        '"http://schemas.microsoft.com/3dmanufacturing/core/2015/02">\n'
+        "  <resources>\n"
+        '    <object id="2" type="model">\n'
+        "      <mesh>\n"
+        "        <vertices>\n"
+        '          <vertex x="0" y="0" z="0"/>\n'
+        '          <vertex x="1" y="0" z="0"/>\n'
+        '          <vertex x="0" y="1" z="0"/>\n'
+        '          <vertex x="0" y="0" z="1"/>\n'
+        "        </vertices>\n"
+        "        <triangles>\n"
+        '          <triangle v1="0" v2="1" v3="2"/>\n'
+        '          <triangle v1="0" v2="1" v3="3"/>\n'
+        '          <triangle v1="0" v2="2" v3="3"/>\n'
+        '          <triangle v1="1" v2="2" v3="3"/>\n'
+        "        </triangles>\n"
+        "      </mesh>\n"
+        "    </object>\n"
+        "  </resources>\n"
+        "  <build/>\n"
+        "</model>"
+    )
+
+    _ROOT_PART = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<model unit="millimeter" xmlns='
+        '"http://schemas.microsoft.com/3dmanufacturing/core/2015/02" '
+        'xmlns:p='
+        '"http://schemas.microsoft.com/3dmanufacturing/production/2015/06">\n'
+        "  <resources>\n"
+        '    <object id="1" type="model">\n'
+        "      <components>\n"
+        '        <component objectid="2" '
+        'p:path="/3D/Objects/object_2.model"/>\n'
+        "      </components>\n"
+        "    </object>\n"
+        "  </resources>\n"
+        '  <build><item objectid="1"/></build>\n'
+        "</model>"
+    )
+
+    def _source(self, tmp_path: Path) -> str:
+        """A source 3MF in the layout every real slicer writes."""
+        src = tmp_path / "source.3mf"
+        with zipfile.ZipFile(src, "w") as zf:
+            zf.writestr("[Content_Types].xml", "<Types/>")
+            zf.writestr("_rels/.rels", "<Relationships/>")
+            zf.writestr("3D/3dmodel.model", self._ROOT_PART)
+            zf.writestr("3D/Objects/object_2.model", self._SUB_PART)
+        return str(src)
+
+    @staticmethod
+    def _dangling_refs(archive: str) -> list[str]:
+        """Every p:path the archive references but does not contain."""
+        with zipfile.ZipFile(archive) as zf:
+            names = set(zf.namelist())
+            root = zf.read("3D/3dmodel.model").decode("utf-8")
+        referenced = set(re.findall(r'p:path="([^"]+)"', root))
+        return sorted(
+            ref for ref in referenced if ref.lstrip("/") not in names
+        )
+
+    def test_sub_part_is_carried_into_the_output(self, tmp_path: Path) -> None:
+        out = str(tmp_path / "out.3mf")
+        build_bambu_3mf(
+            MINIMAL_GCODE_BODY, out, source_3mf_path=self._source(tmp_path),
+        )
+        with zipfile.ZipFile(out) as zf:
+            assert "3D/Objects/object_2.model" in zf.namelist()
+
+    def test_no_dangling_references_in_the_output(self, tmp_path: Path) -> None:
+        """The invariant, not the fixture.
+
+        This is the assertion that generalises: whatever the source layout,
+        nothing we emit may reference a part the archive does not contain.
+        """
+        out = str(tmp_path / "out.3mf")
+        build_bambu_3mf(
+            MINIMAL_GCODE_BODY, out, source_3mf_path=self._source(tmp_path),
+        )
+        assert self._dangling_refs(out) == []
+
+    def test_sub_part_bytes_are_unaltered(self, tmp_path: Path) -> None:
+        """Geometry is copied, not re-serialised."""
+        out = str(tmp_path / "out.3mf")
+        build_bambu_3mf(
+            MINIMAL_GCODE_BODY, out, source_3mf_path=self._source(tmp_path),
+        )
+        with zipfile.ZipFile(out) as zf:
+            carried = zf.read("3D/Objects/object_2.model").decode("utf-8")
+        assert carried == self._SUB_PART
+
+    def test_single_part_source_gains_nothing(self, tmp_path: Path) -> None:
+        """A source with no sub-parts must not grow spurious entries."""
+        src = tmp_path / "flat.3mf"
+        with zipfile.ZipFile(src, "w") as zf:
+            zf.writestr("3D/3dmodel.model", self._SUB_PART)
+        out = str(tmp_path / "out.3mf")
+        build_bambu_3mf(MINIMAL_GCODE_BODY, out, source_3mf_path=str(src))
+        with zipfile.ZipFile(out) as zf:
+            extra = [
+                n for n in zf.namelist()
+                if n.startswith("3D/") and n != "3D/3dmodel.model"
+            ]
+        assert extra == []
