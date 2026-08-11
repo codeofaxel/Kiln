@@ -302,6 +302,51 @@ class TessellationBound:
 
 
 @dataclass(frozen=True)
+class SourceTopology:
+    """What the CAD kernel saw, counted before tessellation erased it.
+
+    STL has no topology at all — it is a bag of triangles — so the question
+    "did this file declare a SOLID, or only the surfaces around one?" is
+    answerable exactly once, in the kernel, and never again downstream.  A
+    reader that welds coincident vertices reconstructs a closed mesh from
+    either one, which is why the mesh cannot be asked afterwards.
+
+    Recorded because the two are genuinely different files with the same
+    triangles, and the difference is the user's to know: a surface export is
+    usually an accident of the export dialog, and the fix lives in their CAD
+    tool rather than in mesh repair.
+
+    **This is not a printability verdict, and must not be read as one.**
+    Measured on this module's own fixtures: a compound of the six loose faces
+    of a box reports zero solids here and still tessellates to a watertight
+    mesh of the correct volume, byte-identical to the solid's.  Surfaces that
+    meet still mesh into a printable part; the file simply never said they
+    should.  Whether the RESULT is printable is the mesh layer's question,
+    asked of the mesh.
+    """
+
+    solids: int
+    """Closed solid bodies the kernel found.  Zero means a surface model."""
+
+    shells: int
+    """Connected face groups.  A solid has at least one; a surface model has
+    one per disjoint patch, which is how six loose faces read as six."""
+
+    faces: int
+    """Trimmed surfaces, whatever they are attached to."""
+
+    @property
+    def is_surface_model(self) -> bool:
+        """True when the file carried surfaces but declared no solid.
+
+        The ``faces`` guard keeps an empty or unreadable shape — zero of
+        everything — from reading as a surface model.  Nothing at all is a
+        different fact from surfaces-without-a-solid.
+        """
+        return self.solids == 0 and self.faces > 0
+
+
+@dataclass(frozen=True)
 class MeshConversion:
     """How a mesh was made from CAD — the neutral half of that question.
 
@@ -325,6 +370,17 @@ class MeshConversion:
     bound: TessellationBound
     """The density it was told to use."""
 
+    source: SourceTopology | None = None
+    """What the kernel counted in the file, when the backend that ran can say.
+
+    ``None`` is a state, not a gap: only the two kernel backends (``occt``,
+    ``cadquery``) read a topology Kiln can count.  FreeCAD and gmsh are
+    driven as converters — they are handed a path and hand back a mesh — and
+    the colour-aware ``occt-xcaf`` path walks document labels rather than
+    the shape tree.  Reporting zero solids for those would turn "we did not
+    look" into "there is no solid", which is the one wrong answer here.
+    """
+
 
 @dataclass
 class StepImportResult:
@@ -337,7 +393,13 @@ class StepImportResult:
     """Size of the output STL file(s) in bytes."""
 
     body_count: int
-    """Number of solid bodies found in the STEP file."""
+    """How many meshes the conversion planned to write — at least 1.
+
+    Not a count of solids, though it equals one for every file that has any:
+    a surface model has no solid and still writes its single merged mesh, so
+    this floors at 1 where :attr:`MeshConversion.source` reports 0.  The
+    honest count of what the file DECLARED lives there.
+    """
 
     conversion_time_s: float
     """Wall-clock seconds for the conversion."""
@@ -812,7 +874,28 @@ explorer = TopExp_Explorer(shape, TopAbs_ShapeEnum.TopAbs_SOLID)
 while explorer.More():
     solids.append(explorer.Current())
     explorer.Next()
+
+# body_count is a WRITE PLAN — how many STLs to emit — so a file with no
+# solid still writes its one merged mesh.  The true count goes out
+# separately: `or 1` is where a surface model used to become "1 body" and
+# the only record of what the file actually declared was lost.
 body_count = len(solids) or 1
+
+
+def count(kind):
+    exp = TopExp_Explorer(shape, kind)
+    n = 0
+    while exp.More():
+        n += 1
+        exp.Next()
+    return n
+
+
+topology = {{
+    "solids": len(solids),
+    "shells": count(TopAbs_ShapeEnum.TopAbs_SHELL),
+    "faces": count(TopAbs_ShapeEnum.TopAbs_FACE),
+}}
 
 
 def write(target, path):
@@ -835,7 +918,9 @@ else:
         write(solid, out)
         outputs.append(out)
 
-print("KILN_RESULT:" + json.dumps({{"outputs": outputs, "body_count": body_count}}))
+print("KILN_RESULT:" + json.dumps(
+    {{"outputs": outputs, "body_count": body_count, "topology": topology}}
+))
 '''
 
 
@@ -865,6 +950,8 @@ from OCP.StlAPI import StlAPI_Writer
 from OCP.TCollection import TCollection_ExtendedString
 from OCP.TDataStd import TDataStd_Name
 from OCP.TDF import TDF_LabelSequence
+from OCP.TopAbs import TopAbs_ShapeEnum
+from OCP.TopExp import TopExp_Explorer
 from OCP.TDocStd import TDocStd_Document
 from OCP.XCAFApp import XCAFApp_Application
 from OCP.XCAFDoc import XCAFDoc_ColorType, XCAFDoc_DocumentTool
@@ -904,10 +991,29 @@ def write(target, path):
     writer.Write(target, path)
 
 
+def count(target, kind):
+    exp = TopExp_Explorer(target, kind)
+    n = 0
+    while exp.More():
+        n += 1
+        exp.Next()
+    return n
+
+
+# Summed over the free shapes, which together ARE the file: this path walks
+# document labels rather than one root shape, so the census is accumulated
+# instead of read off a single tree.  Same three numbers as the plain
+# reader's, so a caller cannot tell which backend counted them.
+topology = {{"solids": 0, "shells": 0, "faces": 0}}
+
 outputs, names, colors = [], [], []
 for i in range(1, labels.Length() + 1):
     label = labels.Value(i)
     shape = shape_tool.GetShape_s(label)
+
+    topology["solids"] += count(shape, TopAbs_ShapeEnum.TopAbs_SOLID)
+    topology["shells"] += count(shape, TopAbs_ShapeEnum.TopAbs_SHELL)
+    topology["faces"] += count(shape, TopAbs_ShapeEnum.TopAbs_FACE)
 
     # Two things a STEP calls a "name" were stamped by software, not chosen by
     # a person, and both reach the user as gibberish in a slicer's object list:
@@ -950,7 +1056,7 @@ for i in range(1, labels.Length() + 1):
 
 print("KILN_RESULT:" + json.dumps({{
     "outputs": outputs, "body_count": len(outputs),
-    "names": names, "colors": colors,
+    "names": names, "colors": colors, "topology": topology,
 }}))
 '''
 
@@ -985,7 +1091,7 @@ def _convert_via_ocp(
     other two backends already pay and a CAD import can afford.
 
     Returns:
-        (list of output paths, body_count)
+        (list of output paths, body_count, source topology)
     """
     script = _OCP_SCRIPT_TEMPLATE.format(
         step_path=str(step_path),
@@ -1017,7 +1123,8 @@ def _convert_via_ocp(
     finally:
         os.unlink(script_path)
 
-    return _parse_subprocess_result(result, "OCCT")
+    data = _parse_kiln_result(result, "OCCT")
+    return data["outputs"], data["body_count"], _topology_from_result(data)
 
 
 def _convert_via_cadquery(
@@ -1028,13 +1135,19 @@ def _convert_via_cadquery(
     """Use cadquery (in-process) to convert STEP → STL.
 
     Returns:
-        (list of output paths, body_count)
+        (list of output paths, body_count, source topology)
     """
     import cadquery as cq  # type: ignore[import-untyped]
 
     result = cq.importers.importStep(str(step_path))
     solids = result.solids().vals()
+    # See the OCP script: body_count is the write plan, topology is the fact.
     body_count = len(solids) if solids else 1
+    topology = SourceTopology(
+        solids=len(solids),
+        shells=len(result.shells().vals()),
+        faces=len(result.faces().vals()),
+    )
 
     # Same tessellation bounds as the OCP backend — see the constants above.
     # cadquery's own export defaults (tolerance=0.1, angularTolerance=0.1 —
@@ -1048,7 +1161,7 @@ def _convert_via_cadquery(
     if merge_bodies or body_count <= 1:
         out_path = str(output_dir / "merged.stl")
         cq.exporters.export(result, out_path, exportType="STL", **_tess)
-        return [out_path], body_count
+        return [out_path], body_count, topology
     else:
         outputs: list[str] = []
         for i, solid in enumerate(solids):
@@ -1056,7 +1169,7 @@ def _convert_via_cadquery(
             ws = cq.Workplane().add(solid)
             cq.exporters.export(ws, out_path, exportType="STL", **_tess)
             outputs.append(out_path)
-        return outputs, body_count
+        return outputs, body_count, topology
 
 
 def _parse_kiln_result(
@@ -1093,6 +1206,28 @@ def _parse_kiln_result(
         f"{backend_name} conversion produced no result. "
         f"stdout: {(result.stdout or '')[:300]}"
     )
+
+
+def _topology_from_result(data: dict[str, Any]) -> SourceTopology | None:
+    """Read the kernel's census out of a child's KILN_RESULT, or admit none.
+
+    Shared by both OCCT scripts so the plain and colour-aware paths cannot
+    grow different ideas of what the counts mean.  Absent or malformed reads
+    as ``None`` — "we did not look" — rather than raising or, worse,
+    defaulting to zero solids, which is the one wrong answer here: a child
+    from a half-upgraded install would report every file as surface soup.
+    """
+    raw = data.get("topology")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return SourceTopology(
+            solids=int(raw["solids"]),
+            shells=int(raw["shells"]),
+            faces=int(raw["faces"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def _parse_subprocess_result(
@@ -1302,6 +1437,34 @@ def _write_3mf(
 # ---------------------------------------------------------------------------
 
 
+def surface_model_note(topology: SourceTopology | None) -> str | None:
+    """The one sentence Kiln says about a CAD file that declared no solid.
+
+    ``None`` when there is nothing to say — a real solid, or a backend that
+    could not look.  Lives here, alone, because the note is the part that
+    would otherwise be retyped per door and drift into the stronger claim
+    each time.
+
+    It deliberately does NOT say "not printable".  That claim is false on
+    measured fixtures (see :class:`SourceTopology`), and a false refusal
+    told to an engineer whose file works is worse than saying nothing: it
+    costs them a re-export they did not need and the trust to believe the
+    next warning.  What is always true is what it reports — the file
+    declared surfaces and no solid — and where the fix lives if that was an
+    accident.
+    """
+    if topology is None or not topology.is_surface_model:
+        return None
+    return (
+        f"This CAD file declares no solid body — {topology.faces} "
+        f"surface{'s' if topology.faces != 1 else ''}, no enclosed volume. "
+        "Kiln converted it as given, and the result can still be a printable "
+        "mesh, so this is a note rather than a problem. If it was meant to be "
+        "a solid part, re-export it as a solid from your CAD tool; if you "
+        "meant to send a surface to thicken or profile, carry on."
+    )
+
+
 def is_step_file(path: str) -> bool:
     """True if this path names a STEP file, by extension."""
     return Path(path).suffix.lower() in _VALID_EXTENSIONS
@@ -1509,6 +1672,11 @@ def _read_cached_conversion(sidecar: Path) -> MeshConversion | None:
     try:
         data = json.loads(sidecar.read_text(encoding="utf-8"))
         bound = data["bound"]
+        # Sidecars written before the topology existed carry no "source", and
+        # the cache key is content + tessellation settings with no format
+        # version — so they are indistinguishable from current ones and must
+        # read as "we did not look" rather than as zero solids.
+        src = data.get("source")
         return MeshConversion(
             backend=data["backend"],
             bound=TessellationBound(
@@ -1517,6 +1685,15 @@ def _read_cached_conversion(sidecar: Path) -> MeshConversion | None:
                 angular=bound.get("angular"),
                 elements_per_circle=bound.get("elements_per_circle"),
                 reason=bound.get("reason"),
+            ),
+            source=(
+                SourceTopology(
+                    solids=src["solids"],
+                    shells=src["shells"],
+                    faces=src["faces"],
+                )
+                if isinstance(src, dict)
+                else None
             ),
         )
     except (OSError, ValueError, KeyError, TypeError):
@@ -1601,17 +1778,19 @@ def convert_step_to_stl(
             # same geometry.
             if _ocp_available():
                 logger.info("Converting STEP via OCCT (OCP)")
-                outputs, body_count = _convert_via_ocp(
-                    validated_path, out_dir, merge_bodies
-                )
-                conversion = MeshConversion(backend="occt", bound=_KERNEL_BOUND)
-            elif _cadquery_available():
-                logger.info("Converting STEP via CadQuery")
-                outputs, body_count = _convert_via_cadquery(
+                outputs, body_count, topology = _convert_via_ocp(
                     validated_path, out_dir, merge_bodies
                 )
                 conversion = MeshConversion(
-                    backend="cadquery", bound=_KERNEL_BOUND
+                    backend="occt", bound=_KERNEL_BOUND, source=topology
+                )
+            elif _cadquery_available():
+                logger.info("Converting STEP via CadQuery")
+                outputs, body_count, topology = _convert_via_cadquery(
+                    validated_path, out_dir, merge_bodies
+                )
+                conversion = MeshConversion(
+                    backend="cadquery", bound=_KERNEL_BOUND, source=topology
                 )
             else:
                 raise NoBackendError()
@@ -1628,6 +1807,13 @@ def convert_step_to_stl(
     missing = set(outputs) - set(existing)
     if missing:
         warnings.append(f"Some output files were not created: {sorted(missing)}")
+
+    # Non-blocking by design: a surface model still converted, and the mesh
+    # it produced may be perfectly printable.  This is a note attached to a
+    # success, never a refusal — see surface_model_note.
+    note = surface_model_note(conversion.source if conversion else None)
+    if note is not None:
+        warnings.append(note)
 
     # Compute total file size.
     total_size = sum(Path(p).stat().st_size for p in existing)
@@ -1711,6 +1897,16 @@ def convert_step(
     # caller reading :attr:`StepImportResult.part_names` should never have to
     # know which output format produced them.
     names = unique_object_names(data["names"])
+    # Same, for the census and the note it earns: this is the path
+    # import_step_file actually takes, so a surface model has to be visible
+    # here or the feature is invisible at the door users knock on.
+    conversion = MeshConversion(
+        backend="occt-xcaf",
+        bound=_KERNEL_BOUND,
+        source=_topology_from_result(data),
+    )
+    note = surface_model_note(conversion.source)
+    surface_warnings = [note] if note is not None else []
     parts = [
         {"stl_path": p, "name": n, "color": c}
         for p, n, c in zip(data["outputs"], names, data["colors"], strict=True)
@@ -1733,9 +1929,8 @@ def convert_step(
             output_format="stl",
             part_names=names,
             part_colors=data["colors"],
-            conversion=MeshConversion(
-                backend="occt-xcaf", bound=_KERNEL_BOUND
-            ),
+            warnings=surface_warnings,
+            conversion=conversion,
         )
 
     out_3mf = str(out_dir / f"{validated_path.stem}.3mf")
@@ -1756,7 +1951,8 @@ def convert_step(
         output_format="3mf",
         part_names=names,
         part_colors=data["colors"],
-        conversion=MeshConversion(backend="occt-xcaf", bound=_KERNEL_BOUND),
+        warnings=surface_warnings,
+        conversion=conversion,
     )
 
 

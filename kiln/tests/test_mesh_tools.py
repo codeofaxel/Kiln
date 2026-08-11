@@ -1215,3 +1215,191 @@ class TestAnalyzeMeshGeometryHonesty:
 
         assert result["success"] is True
         assert result["triangle_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# TestAnalyzeNonManifoldEdgesAttribution
+# ---------------------------------------------------------------------------
+
+
+def _watertight_stl(path):
+    """A closed tetrahedron: every edge shared by exactly two triangles."""
+    v = [(0, 0, 0), (10, 0, 0), (0, 10, 0), (0, 0, 10)]
+    faces = [(0, 2, 1), (0, 1, 3), (0, 3, 2), (1, 2, 3)]
+    out = ["solid tet"]
+    for f in faces:
+        out.append(" facet normal 0 0 0\n  outer loop")
+        out += [f"   vertex {v[i][0]} {v[i][1]} {v[i][2]}" for i in f]
+        out.append("  endloop\n endfacet")
+    out.append("endsolid tet\n")
+    path.write_text("\n".join(out))
+    return path
+
+
+def _open_stl(path):
+    """One triangle: three boundary edges, nothing closed."""
+    path.write_text(
+        "solid tri\n facet normal 0 0 1\n  outer loop\n"
+        "   vertex 0 0 0\n   vertex 10 0 0\n   vertex 0 10 0\n"
+        "  endloop\n endfacet\nendsolid tri\n"
+    )
+    return path
+
+
+class TestAnalyzeNonManifoldEdgesAttribution:
+    """A non-manifold edge is a defect of the TRIANGLES, not of the shape.
+
+    So the moment this tool accepts CAD, every number it returns is a
+    measurement of Kiln's own tessellation — genuinely worth knowing, and a
+    lie the instant it is worded as a finding about the file the user handed
+    us.  These tests pin the attribution, not the arithmetic.
+    """
+
+    @staticmethod
+    def _as_conversion_of(monkeypatch, source, mesh, *, record=True):
+        """Make the shared door report that it converted *source* to *mesh*."""
+        import kiln.step_import as si
+
+        conversion = (
+            si.MeshConversion(
+                backend="occt",
+                bound=si.TessellationBound(kind="linear", linear=0.005),
+            )
+            if record
+            else None
+        )
+        monkeypatch.setattr(
+            si, "resolve_mesh_input", lambda p, **k: (str(mesh), conversion, None)
+        )
+        return str(source)
+
+    def test_a_clean_conversion_is_credited_to_kiln_not_to_the_users_cad(
+        self, mesh_tools, tmp_path, monkeypatch
+    ):
+        source = self._as_conversion_of(
+            monkeypatch, tmp_path / "bracket.step", _watertight_stl(tmp_path / "c.stl")
+        )
+
+        result = mesh_tools["analyze_non_manifold_edges"](file_path=source)
+
+        assert result["success"] is True
+        assert result["is_watertight"] is True
+        assert result["subject"] == "kiln_tessellation"
+        # The attribution is the FIRST thing read, not a footnote below the
+        # number — a skim-reader gets it or the tool has failed its job.
+        assert result["message"].startswith(
+            "Measured on Kiln's mesh conversion of bracket.step, "
+            "not on the CAD file itself:"
+        )
+        assert "not your CAD" in result["message"]
+        # And it says why the question does not even apply upstream, so the
+        # caveat does not read as "we could not be bothered to check".
+        assert "a STEP solid cannot have them" in result["message"]
+
+    def test_a_dirty_conversion_names_both_causes_and_absolves_neither(
+        self, mesh_tools, tmp_path, monkeypatch
+    ):
+        """The mirror trap.  Over-correcting into "your CAD is fine" would be
+        its own lie: an open surface model is a legitimate STEP that really
+        does tessellate to boundary edges (measured 2026-08-11 — a four-wall
+        shell converts to 8 boundary edges of 16).  Both causes get named."""
+        source = self._as_conversion_of(
+            monkeypatch, tmp_path / "shell.step", _open_stl(tmp_path / "o.stl")
+        )
+
+        result = mesh_tools["analyze_non_manifold_edges"](file_path=source)
+
+        assert result["success"] is True
+        assert result["is_watertight"] is False
+        assert result["subject"] == "kiln_tessellation"
+        assert result["message"].startswith(
+            "Measured on Kiln's mesh conversion of shell.step, "
+            "not on the CAD file itself:"
+        )
+        assert "the conversion left gaps" in result["message"]
+        assert "open surface model" in result["message"]
+        # Never the clean case's absolution, which would tell someone whose
+        # source really is open that their file is fine.
+        assert "cannot have them" not in result["message"]
+
+    def test_the_attribution_does_not_depend_on_the_conversion_record(
+        self, mesh_tools, tmp_path, monkeypatch
+    ):
+        """The record is how it was converted; it is honestly None for a
+        cache entry whose sidecar predates it or went unreadable.  Keying the
+        attribution off the record would, on exactly that entry, report a
+        converted STEP as "measured directly on your file" — the lie this
+        whole branch exists to prevent, surfacing only rarely."""
+        source = self._as_conversion_of(
+            monkeypatch,
+            tmp_path / "cached.step",
+            _watertight_stl(tmp_path / "c.stl"),
+            record=False,
+        )
+
+        result = mesh_tools["analyze_non_manifold_edges"](file_path=source)
+
+        assert result["subject"] == "kiln_tessellation"
+        assert "Kiln's mesh conversion" in result["message"]
+        # Honest about the half it genuinely does not know.
+        assert result["converted_from"]["backend"] is None
+
+    def test_an_ordinary_mesh_is_still_reported_as_the_users_own_file(
+        self, mesh_tools, tmp_path
+    ):
+        """The caveat is not free to apply where it is untrue: a count taken
+        on the user's own STL IS a fact about the user's file."""
+        stl = _watertight_stl(tmp_path / "mine.stl")
+
+        result = mesh_tools["analyze_non_manifold_edges"](file_path=str(stl))
+
+        assert result["subject"] == "input_mesh"
+        assert result["message"] == (
+            "Measured directly on mine.stl: watertight, 0 non-manifold "
+            "edges out of 6."
+        )
+        assert "converted_from" not in result
+
+    def test_the_subject_is_always_stated_even_for_a_plain_mesh(
+        self, mesh_tools, tmp_path
+    ):
+        """A caveat that appears only when it applies is one a reader learns
+        nothing from when it is absent."""
+        for maker in (_watertight_stl, _open_stl):
+            result = mesh_tools["analyze_non_manifold_edges"](
+                file_path=str(maker(tmp_path / "m.stl"))
+            )
+            assert result["subject"]
+            assert result["message"]
+
+    def test_a_cad_refusal_is_handed_back_untouched(
+        self, mesh_tools, tmp_path, monkeypatch
+    ):
+        import kiln.step_import as si
+
+        refusal = {
+            "success": False,
+            "error": {"code": "NO_BACKEND", "message": "no converter", "retryable": False},
+            "remedy": {"kind": "install"},
+        }
+        monkeypatch.setattr(
+            si, "resolve_mesh_input", lambda p, **k: (p, None, refusal)
+        )
+
+        result = mesh_tools["analyze_non_manifold_edges"](
+            file_path=str(tmp_path / "part.step")
+        )
+
+        assert result is refusal
+
+    def test_an_unreadable_mesh_does_not_invite_a_retry(self, mesh_tools, tmp_path):
+        """The old generic code said retryable:true — a file these parsers
+        cannot read will not parse on the second attempt either."""
+        bad = tmp_path / "not_a_mesh.stl"
+        bad.write_text("this is not a mesh\n")
+
+        result = mesh_tools["analyze_non_manifold_edges"](file_path=str(bad))
+
+        assert result["success"] is False
+        assert result["error"]["code"] == "UNREADABLE_INPUT"
+        assert result["error"]["retryable"] is False

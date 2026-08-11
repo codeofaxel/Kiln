@@ -4321,9 +4321,10 @@ def start_print(
               is connected.
             - ``"false"`` / ``False``: Force AMS off.  Use external spool.
 
-        ams_mapping: Slot mapping per extruder (Bambu only).  Default
-            ``[0]``.  Use ``[-1]`` for unused slots.  Check ``ams_status()``
-            to see which slots have filament.
+        ams_mapping: Slot mapping per extruder (Bambu only).  Defaults to
+            ``[0]`` when AMS feeding is on and ``[]`` (external spool) when
+            it is off.  Use ``-1`` for unused positions.  Check
+            ``ams_status()`` to see which slots have filament.
         timelapse: Record a timelapse video (Bambu only).  Default ``False``.
         bed_leveling: Run automatic bed leveling before print (Bambu only).
             Default ``True``.  Set ``False`` to skip for reprints (~2 min saved).

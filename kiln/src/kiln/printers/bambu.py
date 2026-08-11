@@ -306,6 +306,19 @@ _FAN_NODE_TO_INDEX: dict[str, int] = {
     "chamber": 3,
 }
 
+# Models whose firmware wants an ``ftp://`` job URL instead of the
+# ``file:///sdcard/model/`` form every other Bambu reads.  See
+# _build_print_url for the measurement this comes from.  Keyed on the
+# CONFIG-DECLARED model (``printer_model`` in config.yaml), because that is
+# the only identity permitted to drive behaviour — get_printer_info's probes
+# are telemetry-only, per the safety boundary documented there.
+_BAMBU_FTP_URL_MODELS: frozenset[str] = frozenset({"bambu_p2s", "p2s"})
+
+# The directory that form points into.  Also the folder the P2S actually
+# stores print jobs in, which is why the raw-G-code branch already accepts a
+# "/cache/" path.
+_BAMBU_FTP_URL_DIR = "cache"
+
 # Mapping of printer model identifiers (from 3MF metadata, MQTT, and serial
 # prefixes) to canonical family names.  Used by _check_printer_model_mismatch
 # to detect when a 3MF was sliced for a different printer family.
@@ -1884,21 +1897,43 @@ class BambuAdapter(PrinterAdapter):
     def _detect_storage_path(self, ftp: ftplib.FTP_TLS) -> str:
         """Detect the correct FTPS storage path for this printer.
 
-        A1 series printers store files at ``/model/`` while X1/P1 series
-        use ``/sdcard/``.  Tries ``/model/`` first (A1), falls back to
-        ``/sdcard/`` if CWD fails.
+        A1 series store files at ``/model/``, X1/P1 at ``/sdcard/``, and the
+        P2S keeps print jobs in ``cache/`` — which this probe never tried, so
+        a P2S upload landed in a directory the firmware does not read.
+
+        A declared P2S is offered ``/cache`` first, following the same
+        identity rule :meth:`_build_print_url` documents: the config-declared
+        model is the only identity allowed to drive behaviour, and a probe is
+        evidence rather than a guess.  An undeclared printer keeps ``/model``
+        first, so no A1/X1/P1 ordering changes.
+
+        The directory name is spelled from :data:`_BAMBU_FTP_URL_DIR` so it
+        cannot drift away from the URL the print command is given.
 
         Returns:
-            The storage path (e.g. ``"/model"`` or ``"/sdcard"``).
+            The storage path (e.g. ``"/model"``, ``"/sdcard"``, ``"/cache"``).
         """
-        for path in ("/model", "/sdcard"):
+        cache = f"/{_BAMBU_FTP_URL_DIR}"
+        if self._printer_model in _BAMBU_FTP_URL_MODELS:
+            candidates = (cache, "/model", "/sdcard")
+        else:
+            candidates = ("/model", "/sdcard", cache)
+        for path in candidates:
             try:
                 ftp.cwd(path)
-                logger.debug("Detected Bambu storage path: %s", path)
-                return path
             except ftplib.error_perm:
                 continue
-        # Default fallback.
+            logger.debug("Detected Bambu storage path: %s", path)
+            return path
+        # Nothing answered.  Previously this returned the same value as a
+        # successful /sdcard probe, so "found it" and "found nothing" were
+        # indistinguishable in the logs.
+        logger.warning(
+            "No Bambu storage directory answered CWD (tried %s); falling "
+            "back to /sdcard. Uploads may land where the firmware does not "
+            "look.",
+            ", ".join(candidates),
+        )
         return "/sdcard"
 
     def upload_file(self, file_path: str) -> UploadResult:
@@ -2455,16 +2490,53 @@ class BambuAdapter(PrinterAdapter):
         return issues
 
     def _build_print_url(self, basename: str) -> str:
-        """Build the correct ``file:///`` URL for the MQTT print command.
+        """Build the job URL for the MQTT print command.
 
-        Bambu firmware reads files from the filesystem, not FTP.  The URL
-        must always use ``file:///sdcard/model/`` (which maps to the FTPS
-        ``/model/`` path on A1 series, or ``/sdcard/`` on X1/P1 which also
-        works with this path).
+        The form is NOT the same on every model, which this function
+        assumed for a long time.
 
-        Using ``ftp:///`` URLs causes HMS error 0500-C010-010800
-        ("MicroSD Card read/write exception") on A1 printers.
+        A1 / X1 / P1 read the job off the filesystem and want
+        ``file:///sdcard/model/``.  Handing those models an ``ftp://``
+        URL raises HMS 0500-C010-010800 ("MicroSD Card read/write
+        exception") on A1, so that default stays exactly as it was.
+
+        P2S firmware rejects the ``file:///`` form outright.  Measured on
+        a P2S (2026-08-10), same file, same card, MD5 verified by
+        round-trip, three URL forms tried in sequence:
+
+        ==================================  ==========================
+        ``file:///mnt/sdcard/cache/<name>``  ERROR STATE, 0500_4002
+        ``file:///sdcard/cache/<name>``      ERROR STATE, 0500_4002
+        ``ftp://cache/<name>``               started, print_error 0
+        ==================================  ==========================
+
+        0500_4002 is the firmware's "failed to load the print job" error.
+        It also has to be cleared before a retry, because a set error
+        code blocks new print commands.
+
+        WHICH MODEL AM I? — read carefully before extending this.
+        ``self._printer_model`` (declared in ``~/.kiln/config.yaml``) is
+        the only identity allowed to drive behaviour.  The
+        serial-prefix / firmware probes behind :meth:`get_printer_info`
+        are TELEMETRY ONLY by the safety boundary documented there: a
+        model table that guessed wrong in five of six rows once named
+        the wrong printer confidently (a19e665b), so a wrong guess here
+        would send the wrong URL and fail the print.  Declared model
+        first; then the storage path we actually OBSERVED the upload land
+        in, which is evidence rather than a guess and is the same signal
+        the raw-G-code branch already trusts; then the historical
+        default, so a printer nobody has declared behaves as it did
+        before this change.
+
+        H2 series is an open question, deliberately NOT included: Bambu's
+        own wiki groups "H2 Series/P2S" together for Developer Mode,
+        which hints at a shared firmware generation, but hinting is not
+        measuring and nobody has run the three-form test on an H2.
         """
+        if self._printer_model in _BAMBU_FTP_URL_MODELS:
+            return f"ftp://{_BAMBU_FTP_URL_DIR}/{basename}"
+        if self._last_storage_path == f"/{_BAMBU_FTP_URL_DIR}":
+            return f"ftp://{_BAMBU_FTP_URL_DIR}/{basename}"
         return f"file:///sdcard/model/{basename}"
 
     def _start_print_impl(self, file_name: str, **kwargs: Any) -> PrintResult:
@@ -2484,6 +2556,9 @@ class BambuAdapter(PrinterAdapter):
                 * ``use_ams`` (bool): Enable AMS filament feeding.
                   Default ``False``.
                 * ``ams_mapping`` (list[int]): Slot mapping per extruder.
+                  Defaults to ``[0]`` when AMS feeding is on and ``[]``
+                  (external spool) when it is off.  Use ``-1`` for unused
+                  positions.
                   Default ``[0]``.  Use ``[-1]`` for unused slots.
                 * ``timelapse`` (bool): Record timelapse.  Default ``False``.
                 * ``bed_leveling`` (bool): Run bed leveling.  Default ``True``.
@@ -2589,10 +2664,33 @@ class BambuAdapter(PrinterAdapter):
                     )
 
             # Fall back to single-filament defaults.
-            if ams_mapping is None:
-                ams_mapping = [0]
-            if not isinstance(ams_mapping, list):
-                ams_mapping = [0]
+            #
+            # [0] names AMS unit 0, slot 0.  Sending it when AMS feeding is
+            # OFF points the firmware at a tray that need not exist, and on a
+            # machine with no AMS at all it halts at the filament-mapping
+            # dialog waiting for a human to reconcile a mapping against
+            # hardware that is not there — a no-AMS owner being asked to fix
+            # their AMS.
+            #
+            # The external-spool wire shape is an EMPTY array, not a magic
+            # slot number.  Bambu's own networking plugin sends exactly
+            # ``use_ams ? "[0]" : "[]"`` (open-bamboo-networking
+            # src/print_job.cpp:184), and its comment there records that
+            # firmware treats [] the same as the field not being provided.
+            # Genuine BambuStudio traffic also carries one -1 per 3MF
+            # filament (SelectMachine.cpp:1414); both are accepted, and [] is
+            # the smaller change with the plugin-parity citation.
+            #
+            # 254 and 255 do NOT belong in this field.  255 is the virtual
+            # external tray in ``ams_mapping2`` ({"ams_id": 255, "slot_id":
+            # 0}) and in the ``tray_now`` status field; putting either here
+            # conflates a tray identifier with a slot index.
+            #
+            # An explicitly passed [] is preserved, not rewritten — callers
+            # already send one (kiln_pro material routing normalises with
+            # ``list(mapping or [])``).
+            if ams_mapping is None or not isinstance(ams_mapping, list):
+                ams_mapping = [0] if use_ams else []
 
             # Validate ams_mapping length covers all filament_ids in the 3MF.
             # If the mapping is too short, filament IDs beyond the mapping
@@ -2689,7 +2787,13 @@ class BambuAdapter(PrinterAdapter):
                 if not (path.startswith("/sdcard/") or path.startswith("/cache/")):
                     raise PrinterError(f"File path must be under /sdcard/ or /cache/, got: {file_name!r}")
             else:
-                if self._last_storage_path == "/sdcard":
+                if self._last_storage_path == f"/{_BAMBU_FTP_URL_DIR}":
+                    # P2S — jobs live in cache/, which is where the upload
+                    # just went.  Without this case a declared P2S uploads a
+                    # .gcode to cache/ and is then told to print
+                    # /sdcard/model/<name>, which is not where it landed.
+                    path = f"/{_BAMBU_FTP_URL_DIR}/{basename}"
+                elif self._last_storage_path == "/sdcard":
                     # X1/P1 series — files live directly under /sdcard/.
                     path = f"/sdcard/{basename}"
                 else:

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -30,6 +31,9 @@ import pytest
 
 from kiln.step_import import _ocp_available as _REAL_OCP_AVAILABLE
 from kiln.step_import import (
+    MeshConversion,
+    SourceTopology,
+    TessellationBound,
     SUBPROCESS_TIMEOUT_S,
     TESSELLATION_TOLERANCE,
     NoBackendError,
@@ -41,8 +45,13 @@ from kiln.step_import import (
     _parse_subprocess_result,
     _validate_step_path,
     check_step_support,
+    convert_step,
     convert_step_to_stl,
     get_step_metadata,
+    _topology_from_result,
+    resolve_mesh_input,
+    surface_model_note,
+    _read_cached_conversion,
 )
 
 
@@ -268,7 +277,7 @@ def test_output_dir_default(mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_d
 
     with patch(
         "kiln.step_import._convert_via_cadquery",
-        return_value=([str(out_stl)], 1),
+        return_value=([str(out_stl)], 1, None),
     ):
         result = convert_step_to_stl(str(sample_step_file))
         assert str(sample_step_file.parent) in result.output_path or result.output_path == str(out_stl)
@@ -286,7 +295,7 @@ def test_output_dir_explicit(mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_
 
     with patch(
         "kiln.step_import._convert_via_cadquery",
-        return_value=([str(out_stl)], 1),
+        return_value=([str(out_stl)], 1, None),
     ):
         result = convert_step_to_stl(
             str(sample_step_file), output_dir=str(out_dir)
@@ -311,7 +320,7 @@ def test_merge_bodies_false_splits(mock_cq, mock_gmsh, mock_fc, sample_step_file
 
     with patch(
         "kiln.step_import._convert_via_cadquery",
-        return_value=([str(body0), str(body1)], 2),
+        return_value=([str(body0), str(body1)], 2, None),
     ):
         result = convert_step_to_stl(
             str(sample_step_file), merge_bodies=False
@@ -458,7 +467,7 @@ def test_cadquery_fallback(mock_cq_avail, mock_gmsh, mock_fc, sample_step_file):
 
     with patch(
         "kiln.step_import._convert_via_cadquery",
-        return_value=([str(out_stl)], 1),
+        return_value=([str(out_stl)], 1, None),
     ):
         result = convert_step_to_stl(str(sample_step_file))
         assert result.body_count == 1
@@ -671,7 +680,7 @@ def test_convert_no_output_files_raises(mock_cq, mock_gmsh, mock_fc, sample_step
     # Return paths that don't exist on disk.
     with patch(
         "kiln.step_import._convert_via_cadquery",
-        return_value=(["/nonexistent/output.stl"], 1),
+        return_value=(["/nonexistent/output.stl"], 1, None),
     ):
         with pytest.raises(StepImportError, match="no output files"):
             convert_step_to_stl(str(sample_step_file))
@@ -1034,7 +1043,7 @@ def test_pip_backend_is_the_vtk_free_kernel():
 @patch("kiln.step_import._find_gmsh_cmd", return_value=None)
 @patch("kiln.step_import._ocp_available", return_value=True)
 @patch("kiln.step_import._cadquery_available", return_value=True)
-@patch("kiln.step_import._convert_via_ocp", return_value=(["/tmp/o.stl"], 1))
+@patch("kiln.step_import._convert_via_ocp", return_value=(["/tmp/o.stl"], 1, None))
 @patch("kiln.step_import._convert_via_cadquery")
 def test_ocp_preferred_over_cadquery(
     mock_cq_conv, mock_ocp_conv, mock_cq, mock_ocp, mock_gmsh, mock_fc,
@@ -1044,7 +1053,7 @@ def test_ocp_preferred_over_cadquery(
     out = tmp_dir / "out"
     out.mkdir()
     (out / "o.stl").write_bytes(b"x")
-    mock_ocp_conv.return_value = ([str(out / "o.stl")], 1)
+    mock_ocp_conv.return_value = ([str(out / "o.stl")], 1, None)
 
     convert_step_to_stl(str(sample_step_file), output_dir=str(out))
 
@@ -1064,7 +1073,7 @@ def test_cadquery_still_used_when_ocp_absent(
     out = tmp_dir / "out"
     out.mkdir()
     (out / "o.stl").write_bytes(b"x")
-    mock_cq_conv.return_value = ([str(out / "o.stl")], 1)
+    mock_cq_conv.return_value = ([str(out / "o.stl")], 1, None)
 
     convert_step_to_stl(str(sample_step_file), output_dir=str(out))
 
@@ -1096,7 +1105,9 @@ def test_ocp_converts_a_real_step_file(real_kernel, tmp_dir):
 
     out_dir = tmp_dir / "out"
     out_dir.mkdir()
-    outputs, body_count = _convert_via_ocp(step_path, out_dir, merge_bodies=True)
+    outputs, body_count, _topology = _convert_via_ocp(
+        step_path, out_dir, merge_bodies=True
+    )
 
     assert body_count == 1
     assert len(outputs) == 1
@@ -1233,7 +1244,9 @@ def test_ocp_splits_bodies_when_asked(real_kernel, tmp_dir):
     out_dir = tmp_dir / "split"
     out_dir.mkdir()
 
-    outputs, body_count = _convert_via_ocp(step_path, out_dir, merge_bodies=False)
+    outputs, body_count, _topology = _convert_via_ocp(
+        step_path, out_dir, merge_bodies=False
+    )
 
     assert body_count == 2
     assert len(outputs) == 2
@@ -1254,7 +1267,9 @@ def test_ocp_merges_bodies_by_default(real_kernel, tmp_dir):
     out_dir = tmp_dir / "merged"
     out_dir.mkdir()
 
-    outputs, body_count = _convert_via_ocp(step_path, out_dir, merge_bodies=True)
+    outputs, body_count, _topology = _convert_via_ocp(
+        step_path, out_dir, merge_bodies=True
+    )
 
     assert body_count == 2
     assert len(outputs) == 1
@@ -2211,7 +2226,7 @@ def test_gmsh_too_old_to_bound_falls_through_instead_of_failing(
 
     with patch("kiln.step_import.subprocess.run", _old_gmsh_then_cadquery), patch(
         "kiln.step_import._convert_via_cadquery",
-        return_value=([str(out_stl)], 1),
+        return_value=([str(out_stl)], 1, None),
     ) as fallback:
         result = convert_step_to_stl(str(sample_step_file), output_dir=str(tmp_dir))
 
@@ -2895,6 +2910,7 @@ _CAD_DOORS = [
     ("estimate_support_material", "file_path"),
     ("analyze_warping_risk", "file_path"),
     ("analyze_mesh_geometry", "file_path"),
+    ("analyze_non_manifold_edges", "file_path"),
 ]
 
 
@@ -2920,3 +2936,280 @@ def test_the_cad_doors_route_through_the_shared_helper(tool_name, param):
         "will fail several layers down with a contradictory error"
     )
     assert param in inspect.signature(tools[tool_name].fn).parameters
+
+
+# ---------------------------------------------------------------------------
+# Source topology — what the file DECLARED, before tessellation erased it
+# ---------------------------------------------------------------------------
+
+
+def _author_step(shape, path: Path) -> str:
+    """Write a TopoDS shape to a STEP file and hand back the path."""
+    from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
+
+    writer = STEPControl_Writer()
+    writer.Transfer(shape, STEPControl_AsIs)
+    writer.Write(str(path))
+    return str(path)
+
+
+def _loose_faces(shape):
+    """The same faces, in a compound that declares no solid — surface soup.
+
+    This is what a CAD export dialog set to "surfaces" produces: the geometry
+    of a part with none of the topology that says it encloses anything.
+    """
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS_Builder, TopoDS_Compound
+
+    builder = TopoDS_Builder()
+    compound = TopoDS_Compound()
+    builder.MakeCompound(compound)
+    explorer = TopExp_Explorer(shape, TopAbs_FACE)
+    while explorer.More():
+        builder.Add(compound, explorer.Current())
+        explorer.Next()
+    return compound
+
+
+def test_solid_reports_one_solid_and_says_nothing(real_kernel, tmp_dir):
+    """The guard that matters most: a good file must never be told it is bad.
+
+    A false "you sent surfaces" costs an engineer a re-export they did not
+    need, and the trust to believe the next warning.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+
+    box = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 63, 41, 9).Shape()
+    path = _author_step(box, tmp_dir / "solid.step")
+
+    result = convert_step_to_stl(path, output_dir=str(tmp_dir / "out"))
+
+    assert result.conversion is not None
+    assert result.conversion.source == SourceTopology(solids=1, shells=1, faces=6)
+    assert surface_model_note(result.conversion.source) is None
+    assert not any("no solid body" in w for w in result.warnings)
+
+
+def test_surface_soup_is_detected_and_still_converts_correctly(
+    real_kernel, tmp_dir
+):
+    """Zero solids is reported — and the file is NOT refused, because it works.
+
+    The measurement that decided this feature is a note and not a refusal:
+    the six loose faces of a box tessellate to a watertight mesh of exactly
+    the solid's volume.  STL carries no topology, so welding coincident
+    vertices on load reconstructs the closure the file never declared.
+    Refusing this input would reject a file that produces a correct part.
+    """
+    import trimesh
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+
+    box = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 63, 41, 9).Shape()
+    path = _author_step(_loose_faces(box), tmp_dir / "soup.step")
+
+    result = convert_step_to_stl(path, output_dir=str(tmp_dir / "out"))
+
+    assert result.conversion is not None
+    assert result.conversion.source == SourceTopology(solids=0, shells=6, faces=6)
+    assert result.conversion.source.is_surface_model
+
+    # It converted, and it converted RIGHT — 63 x 41 x 9 = 23247.
+    mesh = trimesh.load(result.output_path, force="mesh")
+    assert mesh.is_watertight, "loose faces still weld into a closed mesh"
+    assert mesh.volume == pytest.approx(23247.0, rel=1e-6)
+
+    # Said, not enforced.
+    assert any("no solid body" in w for w in result.warnings)
+    assert not any("cannot" in w.lower() or "refus" in w.lower()
+                   for w in result.warnings)
+
+
+def test_surface_soup_is_not_refused_at_the_shared_door(real_kernel, tmp_dir):
+    """resolve_mesh_input hands back a mesh, never a refusal envelope."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+
+    box = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 64, 42, 11).Shape()
+    path = _author_step(_loose_faces(box), tmp_dir / "soup_door.step")
+
+    mesh_path, conversion, refusal = resolve_mesh_input(
+        path, output_dir=str(tmp_dir / "out")
+    )
+
+    assert refusal is None, "a surface model must not be refused"
+    assert Path(mesh_path).is_file()
+    assert conversion is not None and conversion.source is not None
+    assert conversion.source.solids == 0
+
+
+def test_nested_assembly_solids_are_found(real_kernel, tmp_dir):
+    """The other false-positive shape: solids nested inside sub-assemblies.
+
+    TopExp_Explorer recurses through compounds, so an assembly two levels
+    deep still reports its real solids rather than reading as surface soup.
+    """
+    from OCP.BRepPrimAPI import (
+        BRepPrimAPI_MakeBox,
+        BRepPrimAPI_MakeCylinder,
+        BRepPrimAPI_MakeSphere,
+    )
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+    from OCP.TopoDS import TopoDS_Builder, TopoDS_Compound
+
+    builder = TopoDS_Builder()
+    inner = TopoDS_Compound()
+    builder.MakeCompound(inner)
+    builder.Add(
+        inner,
+        BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 5, 20).Shape(),
+    )
+    builder.Add(inner, BRepPrimAPI_MakeSphere(gp_Pnt(30, 0, 0), 8).Shape())
+    outer = TopoDS_Compound()
+    builder.MakeCompound(outer)
+    builder.Add(outer, BRepPrimAPI_MakeBox(gp_Pnt(-40, -10, 0), 20, 20, 20).Shape())
+    builder.Add(outer, inner)
+
+    path = _author_step(outer, tmp_dir / "assembly.step")
+    result = convert_step_to_stl(path, output_dir=str(tmp_dir / "out"))
+
+    assert result.conversion is not None
+    assert result.conversion.source.solids == 3
+    assert surface_model_note(result.conversion.source) is None
+
+
+def test_single_face_is_reported_without_being_called_broken(
+    real_kernel, tmp_dir
+):
+    """A lone surface is a legitimate input — someone means to thicken it."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+    from OCP.gp import gp_Dir, gp_Pln, gp_Pnt
+
+    face = BRepBuilderAPI_MakeFace(
+        gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 0, 51, 0, 31
+    ).Face()
+    path = _author_step(face, tmp_dir / "face.step")
+
+    result = convert_step_to_stl(path, output_dir=str(tmp_dir / "out"))
+
+    assert result.conversion.source.solids == 0
+    assert result.conversion.source.faces == 1
+    note = surface_model_note(result.conversion.source)
+    assert "1 surface," in note, "singular, not '1 surfaces'"
+    assert "thicken" in note, "must not tell a deliberate surface it is wrong"
+
+
+def test_note_is_silent_when_the_backend_could_not_look():
+    """FreeCAD and gmsh report no topology; that must not become 'no solid'."""
+    assert surface_model_note(None) is None
+
+
+def test_empty_shape_is_not_a_surface_model():
+    """Nothing at all is a different fact from surfaces-without-a-solid."""
+    assert not SourceTopology(solids=0, shells=0, faces=0).is_surface_model
+    assert SourceTopology(solids=0, shells=1, faces=1).is_surface_model
+
+
+def test_cached_sidecar_without_topology_reads_as_unknown(tmp_dir):
+    """Entries cached before this field existed must not read as zero solids.
+
+    The cache key is content + tessellation settings with no format version,
+    so an old sidecar is indistinguishable from a current one.
+    """
+    sidecar = tmp_dir / "old.json"
+    sidecar.write_text(
+        json.dumps({"backend": "occt", "bound": {"kind": "linear_angular",
+                                                 "linear": 0.1, "angular": 0.5}}),
+        encoding="utf-8",
+    )
+    record = _read_cached_conversion(sidecar)
+    assert record is not None
+    assert record.source is None
+    assert surface_model_note(record.source) is None
+
+
+def test_cached_sidecar_round_trips_topology(tmp_dir):
+    """A sidecar written today gives the same answer on the cache hit."""
+    sidecar = tmp_dir / "new.json"
+    original = MeshConversion(
+        backend="occt",
+        bound=TessellationBound(kind="linear_angular", linear=0.1, angular=0.5),
+        source=SourceTopology(solids=0, shells=6, faces=6),
+    )
+    sidecar.write_text(json.dumps(asdict(original)), encoding="utf-8")
+
+    assert _read_cached_conversion(sidecar) == original
+
+
+def test_solid_with_internal_void_is_not_called_a_surface_model(
+    real_kernel, tmp_dir
+):
+    """The false positive that ruled out reading STEP entity names as text.
+
+    A box with a sealed cavity is an ordinary printable part, and it is
+    written as BREP_WITH_VOIDS — so it contains ZERO ``MANIFOLD_SOLID_BREP``
+    entities.  A text-level "does this file name a solid?" check reports no
+    solid here and tells an engineer their good file is broken.  The kernel
+    interprets the schema instead of grepping it, and counts one solid.
+
+    Measured, not assumed: this fixture really does carry 0 MANIFOLD_SOLID_BREP.
+    """
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeSphere
+    from OCP.gp import gp_Pnt
+
+    box = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 40, 40, 40).Shape()
+    cavity = BRepPrimAPI_MakeSphere(gp_Pnt(20, 20, 20), 10).Shape()
+    path = _author_step(
+        BRepAlgoAPI_Cut(box, cavity).Shape(), tmp_dir / "void.step"
+    )
+
+    text = Path(path).read_text(errors="replace")
+    assert "MANIFOLD_SOLID_BREP" not in text, (
+        "fixture no longer reproduces the trap this test exists for"
+    )
+
+    result = convert_step_to_stl(path, output_dir=str(tmp_dir / "out"))
+
+    assert result.conversion.source.solids == 1
+    assert surface_model_note(result.conversion.source) is None
+    assert not any("no solid body" in w for w in result.warnings)
+
+
+def test_colour_aware_path_reports_topology_too(real_kernel, tmp_dir):
+    """The door users actually knock on is convert_step, not convert_step_to_stl.
+
+    import_step_file takes the colour-aware XCAF path, which walks document
+    labels instead of one root shape.  Wiring only the plain reader left the
+    census null at the one door that matters — the whole feature invisible
+    where it is read.  Both paths must answer the same way.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+
+    box = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 77, 47, 17).Shape()
+    soup = _author_step(_loose_faces(box), tmp_dir / "xcaf_soup.step")
+    solid = _author_step(box, tmp_dir / "xcaf_solid.step")
+
+    soup_result = convert_step(soup, output_dir=str(tmp_dir / "a"))
+    assert soup_result.conversion.source == SourceTopology(
+        solids=0, shells=6, faces=6
+    )
+    assert any("no solid body" in w for w in soup_result.warnings)
+
+    solid_result = convert_step(solid, output_dir=str(tmp_dir / "b"))
+    assert solid_result.conversion.source.solids == 1
+    assert not any("no solid body" in w for w in solid_result.warnings)
+
+
+def test_topology_absent_from_child_reads_as_unknown():
+    """A child that did not report counts must not read as zero solids."""
+    assert _topology_from_result({"outputs": [], "body_count": 1}) is None
+    assert _topology_from_result({"topology": None}) is None
+    assert _topology_from_result({"topology": {"solids": 1}}) is None
+    assert _topology_from_result(
+        {"topology": {"solids": 0, "shells": 6, "faces": 6}}
+    ) == SourceTopology(solids=0, shells=6, faces=6)
