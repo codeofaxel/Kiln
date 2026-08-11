@@ -2036,3 +2036,191 @@ def test_tool_import_survives_a_census_that_explodes(monkeypatch, tmp_dir):
     assert result["status"] == "ok"
     assert result["output_path"]
     assert "cad_facts" not in result  # skipped, said nothing false
+
+
+# ---------------------------------------------------------------------------
+# 34. The gmsh backend has to be TOLD a density.
+#
+#     Found 2026-08-10: the gmsh script was formatted with step_path and
+#     output_dir and nothing else, so the mesh came out at whatever the
+#     installed gmsh derived from the model bounding box — the one backend
+#     of the three whose output no constant in this file governed.  FreeCAD
+#     has TESSELLATION_TOLERANCE, the kernel paths have the two deflection
+#     constants; gmsh had nothing.  Same file, same user, different machine.
+# ---------------------------------------------------------------------------
+
+
+def test_gmsh_curvature_bound_is_derived_from_the_kernels_angular_bound():
+    """The gmsh number is the kernel's angular guarantee in gmsh's units.
+
+    gmsh's ``Mesh.MeshSizeFromCurvature`` is a count of elements per 2*pi
+    radians, and OCCT's angular deflection resolves to ceil(4*pi/angle)
+    segments per full circle — measured against this OCP build 2026-08-10
+    at four angles across three radii, radius-independent.  Pinning the
+    RELATION, not the literal, is the point: move the kernel's bound and
+    gmsh follows instead of quietly drifting away from it.
+    """
+    import math
+
+    from kiln.step_import import _GMSH_CURVATURE_ELEMENTS, _OCP_ANGULAR_DEFLECTION
+
+    segments_per_circle = math.ceil(4 * math.pi / _OCP_ANGULAR_DEFLECTION)
+    assert segments_per_circle == _GMSH_CURVATURE_ELEMENTS
+    assert _GMSH_CURVATURE_ELEMENTS == 126  # at the shipping 0.1 rad
+
+    # What that buys, stated so a change has to face the number: chordal sag
+    # stays under R/3217, i.e. 0.024 mm on a 150 mm sphere.  The kernel
+    # measures 0.0068 mm on that sphere and the FreeCAD path 0.162 mm, so
+    # gmsh must land between the two backends that were already bounded.
+    sag_at_r75 = 75.0 * (1 - math.cos(math.pi / _GMSH_CURVATURE_ELEMENTS))
+    assert 0.0068 < sag_at_r75 < 0.162
+
+
+def test_gmsh_script_carries_a_density_bound(monkeypatch, sample_step_file, tmp_dir):
+    """The bound must reach the CHILD, and reach it before the mesh is cut.
+
+    Every other assertion about gmsh in this file is satisfied by a script
+    that sets no options at all, which is exactly how the gap survived.
+    This one reads what was actually written for the child to run.
+    """
+    import subprocess as _sp
+
+    from kiln.step_import import _GMSH_CURVATURE_ELEMENTS, _convert_via_gmsh
+
+    seen: dict[str, str] = {}
+
+    def _fake_run(cmd, **kwargs):
+        # The script is unlinked in the caller's `finally`, so read it here.
+        seen["script"] = Path(cmd[-1]).read_text()
+        out = tmp_dir / "merged.stl"
+        out.write_bytes(b"x")
+        return _sp.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout=f'KILN_RESULT:{{"outputs": ["{out}"], "body_count": 1}}',
+            stderr="",
+        )
+
+    monkeypatch.setattr("kiln.step_import.subprocess.run", _fake_run)
+    _convert_via_gmsh(Path(str(sample_step_file)), tmp_dir)
+
+    script = seen["script"]
+    assert "Mesh.MeshSizeFromCurvature" in script, (
+        "gmsh was left to pick its own density"
+    )
+    assert str(_GMSH_CURVATURE_ELEMENTS) in script
+    assert script.index("Mesh.MeshSizeFromCurvature") < script.index(
+        "mesh.generate"
+    ), "a bound set after meshing is no bound at all"
+
+
+@patch("kiln.step_import._find_freecad_cmd", return_value=None)
+@patch("kiln.step_import._find_gmsh_cmd", return_value="gmsh")
+@patch("kiln.step_import._cadquery_available", return_value=True)
+def test_gmsh_too_old_to_bound_falls_through_instead_of_failing(
+    mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_dir
+):
+    """A pre-4.7 gmsh must cost the user the BACKEND, never the conversion.
+
+    ``Mesh.MeshSizeFromCurvature`` was renamed in gmsh 4.7 (2020-11), so an
+    older gmsh rejects the name.  Refusing to mesh there is right — an
+    unbounded mesh is the defect — but the refusal has to arrive as an
+    ordinary failure, because convert_step_to_stl re-raises StepImportError
+    without trying anything else.  Get that wrong and bounding gmsh breaks
+    users who have a perfectly good kernel sitting behind it.
+    """
+    from kiln.step_import import _GMSH_UNBOUNDABLE_EXIT
+
+    out_stl = tmp_dir / "merged.stl"
+    out_stl.write_bytes(b"\x00" * 120)
+
+    def _old_gmsh_then_cadquery(cmd, **kwargs):
+        import subprocess as _sp
+
+        return _sp.CompletedProcess(
+            args=cmd,
+            returncode=_GMSH_UNBOUNDABLE_EXIT,
+            stdout="",
+            stderr="this gmsh does not accept Mesh.MeshSizeFromCurvature\n",
+        )
+
+    with patch("kiln.step_import.subprocess.run", _old_gmsh_then_cadquery), patch(
+        "kiln.step_import._convert_via_cadquery",
+        return_value=([str(out_stl)], 1),
+    ) as fallback:
+        result = convert_step_to_stl(str(sample_step_file), output_dir=str(tmp_dir))
+
+    assert fallback.called, "an un-boundable gmsh must hand off, not hard-fail"
+    assert result.output_path == str(out_stl)
+    assert any("Gmsh failed" in w for w in result.warnings), (
+        "the handoff has to be visible in the result, not silent"
+    )
+
+
+def test_gmsh_bound_participates_in_the_conversion_cache_key(
+    monkeypatch, tmp_dir
+):
+    """Changing the bound must miss the cache — but only where gmsh exists.
+
+    The cache promises "same bytes, same tessellation constants, same
+    backend availability ⇒ same mesh".  gmsh's density is now one of those
+    constants, so an entry written before the bound existed holds a mesh the
+    bound would not produce.  Leaving it out of the key would serve that
+    stale mesh forever to exactly the users the bound was written for.
+
+    It rides the gmsh SLOT of the fingerprint rather than the outer tuple so
+    the invalidation stays aimed: a machine with no gmsh on PATH must keep
+    every entry it has.  Both halves are asserted, because getting only the
+    first right silently throws away every cached conversion on every
+    machine in the fleet.
+    """
+    import time as _time
+
+    import kiln.step_import as si
+
+    # Unique bytes so this run starts on a genuine miss even though the
+    # cache is machine-wide and earlier runs may have populated it.
+    step = tmp_dir / "cachekey.step"
+    step.write_text(f"ISO-10303-21;\nDATA;\n/* {_time.time_ns()} */\nENDSEC;\n")
+
+    conversions: list[str] = []
+
+    def _fake_convert(path, output_dir=None, *, merge_bodies=True):
+        out = Path(output_dir) / "merged.stl"
+        out.write_bytes(b"mesh")
+        conversions.append(str(path))
+        return StepImportResult(
+            output_path=str(out),
+            file_size_bytes=4,
+            body_count=1,
+            conversion_time_s=0.0,
+            output_paths=[str(out)],
+        )
+
+    monkeypatch.setattr(si, "convert_step_to_stl", _fake_convert)
+    monkeypatch.setattr(si, "_find_freecad_cmd", lambda: None)
+
+    def _run(n: int) -> str | None:
+        d = tmp_dir / f"out{n}"
+        d.mkdir()
+        return si.ensure_mesh_path(str(step), output_dir=str(d))[1]
+
+    # --- a machine that has gmsh -------------------------------------
+    monkeypatch.setattr(si, "_find_gmsh_cmd", lambda: "gmsh")
+    assert "cached" not in (_run(0) or ""), "first call must be a real miss"
+    assert "cached" in (_run(1) or ""), "identical bytes must hit"
+
+    monkeypatch.setattr(si, "_GMSH_CURVATURE_ELEMENTS", 999)
+    assert "cached" not in (_run(2) or ""), (
+        "moving the bound must re-convert on a machine that uses gmsh"
+    )
+
+    # --- a machine that does not ------------------------------------
+    monkeypatch.setattr(si, "_find_gmsh_cmd", lambda: None)
+    assert "cached" not in (_run(3) or ""), "different backend set, own entry"
+    monkeypatch.setattr(si, "_GMSH_CURVATURE_ELEMENTS", 126)
+    assert "cached" in (_run(4) or ""), (
+        "a machine with no gmsh must not be invalidated by a gmsh constant"
+    )
+
+    assert conversions.count(str(step)) == 3
