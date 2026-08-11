@@ -2217,6 +2217,133 @@ def _get_material_tracker() -> MaterialTracker:
     return _material_tracker
 
 
+#: The label the material store falls back to, and what ``set_material``'s
+#: own callers use when nobody named a printer.
+_DEFAULT_PRINTER_LABEL = "default"
+
+
+def _printer_labels(adapter: PrinterAdapter | None = None) -> list[str]:
+    """Every label the machine under test is filed under, best name first.
+
+    Preflight resolved its printer as ``list_names()[0]`` — whichever printer
+    happened to register first — so on a two-machine setup it could read one
+    printer's material and history and report them as the other's.
+
+    Names are labels, not identity (:func:`kiln.registry.machine_fingerprint`):
+    one machine sits in the registry under ``"default"`` AND its config.yaml
+    name, and per-printer records are keyed by whichever label the writer
+    used.  So resolve the machine from the adapter, and order its labels the
+    way :meth:`~kiln.registry.PrinterRegistry.list_machines` does — the name a
+    user chose beats the generic alias.  Never empty: with nothing registered,
+    ``"default"`` is what the writers themselves fall back to.
+
+    Pass the adapter under test; omit it to resolve the active printer, which
+    is what a tool call that named no printer is asking about.
+    """
+    if adapter is None:
+        try:
+            adapter = _get_adapter()
+        except Exception:  # noqa: BLE001 — no printer configured is not an error here
+            return [_DEFAULT_PRINTER_LABEL]
+    try:
+        labels = _get_registry().names_for(adapter)
+    except Exception as exc:  # noqa: BLE001 — naming must never break a check
+        logger.debug("Could not resolve printer name from adapter: %s", exc)
+        return [_DEFAULT_PRINTER_LABEL]
+    labels.sort(key=lambda name: (name == _DEFAULT_PRINTER_LABEL, name))
+    return labels or [_DEFAULT_PRINTER_LABEL]
+
+
+def _material_store_name(adapter: PrinterAdapter | None = None) -> str:
+    """The label this machine's material row is filed under.
+
+    Every label on one fingerprint is the same physical printer, so a row
+    under any of them is a true statement about it — prefer the label that
+    actually has one, and fall back to the machine's best name.
+    """
+    labels = _printer_labels(adapter)
+    tracker = _get_material_tracker()
+    for name in labels:
+        with contextlib.suppress(Exception):
+            if tracker.get_all_materials(name):
+                return name
+    return labels[0]
+
+
+def _material_match_report(
+    printer_name: str,
+    expected_material: str,
+    tool_index: int = 0,
+) -> dict[str, Any]:
+    """Turn the material store into a sentence — in ONE place.
+
+    Kiln's material store holds what somebody TOLD Kiln is loaded.  That is
+    a useful fact and a weaker one than a measurement, and the two doors that
+    reported it (``preflight_check`` and ``check_material_match``) each
+    decided for themselves how to say so.  Both said it wrong the same way:
+    a store with no row for the printer produced "Loaded material matches
+    expected (PETG)", a confident sentence about a spool nobody had looked
+    at.  An agent repeated it as ground truth to a first-time user whose
+    printer had something else in the extruder.
+
+    So the wording lives here, next to the provenance it depends on:
+
+    * ``verdict`` — ``"match"`` / ``"mismatch"`` / ``"unknown"``.
+    * ``sensed`` — whether a machine reported this material, read off the
+      record's own ``determined_by``.  Not hardcoded: the day a sensor
+      writes a row, this says ``True`` without touching this function.
+    * ``message`` — the sentence, which never claims more than the record
+      carries and says plainly when nothing is recorded at all.
+    """
+    verdict, warning, loaded = _get_material_tracker().match_verdict(
+        printer_name, expected_material, tool_index
+    )
+    expected_upper = expected_material.upper()
+    sensed = bool(loaded is not None and loaded.is_sensed)
+    determined_by = loaded.determined_by if loaded is not None else None
+
+    if verdict == "unknown":
+        message = (
+            f"Cannot confirm the loaded material is {expected_upper}: nothing "
+            f"is recorded for {printer_name}, and no sensor on this printer "
+            "reports filament type. Check the spool by eye."
+        )
+    else:
+        # The age is the point: a record nobody has touched in a fortnight is
+        # a much weaker claim about today's spool than one made this morning.
+        age = ""
+        if loaded is not None:
+            days = int(max(0.0, time.time() - loaded.loaded_at) // 86400)
+            if days == 0:
+                age = ", recorded today"
+            elif days == 1:
+                age = ", recorded yesterday"
+            else:
+                age = f", recorded {days} days ago"
+        if sensed:
+            provenance = f"the material the printer reported{age}"
+        elif determined_by == "inferred":
+            provenance = f"the material Kiln inferred is loaded{age}"
+        else:
+            provenance = (
+                f"what Kiln was told is loaded (set_material{age}); no sensor "
+                "confirmed it"
+            )
+        if verdict == "mismatch" and warning is not None:
+            message = f"{warning.message} — {provenance}."
+        else:
+            message = f"{expected_upper} matches {provenance}."
+
+    return {
+        "verdict": verdict,
+        "warning": warning,
+        "loaded": loaded,
+        "sensed": sensed,
+        "determined_by": determined_by,
+        "message": message,
+    }
+
+
 def _get_bed_level_mgr() -> BedLevelManager:
     """Return the lazily-initialised bed level manager."""
     global _bed_level_mgr  # noqa: PLW0603
@@ -6297,30 +6424,23 @@ def preflight_check(
         if expected_material is not None:
             # 1) Check against loaded material (if material tracking is configured)
             try:
-                printer_name = "default"
-                if _get_registry().count > 0:
-                    names = _get_registry().list_names()
-                    if names:
-                        printer_name = names[0]
-                warning = _get_material_tracker().check_match(printer_name, expected_material)
-                if warning is not None:
-                    mat_msg = warning.message
-                    checks.append(
-                        {
-                            "name": "material_match",
-                            "passed": False,
-                            "message": mat_msg,
-                        }
-                    )
-                    errors.append(mat_msg)
-                else:
-                    checks.append(
-                        {
-                            "name": "material_match",
-                            "passed": True,
-                            "message": f"Loaded material matches expected ({expected_material.upper()})",
-                        }
-                    )
+                printer_name = _material_store_name(adapter)
+                report = _material_match_report(printer_name, expected_material)
+                # "unknown" passes because nothing here can see the spool —
+                # it is an advisory to go look, never a block.  "match" is
+                # true of the RECORD, and the message says so.
+                material_check: dict[str, Any] = {
+                    "name": "material_match",
+                    "passed": report["verdict"] != "mismatch",
+                    "sensed": report["sensed"],
+                    "verified_by": report["determined_by"],
+                    "message": report["message"],
+                }
+                if report["verdict"] == "unknown":
+                    material_check["advisory"] = True
+                checks.append(material_check)
+                if report["verdict"] == "mismatch":
+                    errors.append(report["message"])
             except Exception as exc:
                 # Material tracking not configured — skip silently
                 logger.debug("Material match check failed: %s", exc)
@@ -6388,11 +6508,11 @@ def preflight_check(
         # about historically problematic combinations.  Advisory only —
         # never blocks a print.
         try:
+            # The machine under test, not whichever registered first — a
+            # success-rate warning about another printer is worse than none.
             _printer_name = None
             if _get_registry().count > 0:
-                names = _get_registry().list_names()
-                if names:
-                    _printer_name = names[0]
+                _printer_name = _printer_labels(adapter)[0]
 
             if _printer_name:
                 _db = get_db()
@@ -8517,6 +8637,11 @@ def set_material(
 ) -> dict:
     """Record which filament material is loaded in a printer.
 
+    This writes down a CLAIM, not a measurement: nothing verifies the spool,
+    and the record keeps saying the same thing after a filament swap.  Kiln
+    stamps it ``determined_by: user_reported`` and every reader says so, so
+    never report the recorded material back as confirmed or sensed.
+
     Args:
         printer_name: Target printer name.
         material: Material type (PLA, PETG, ABS, etc.).
@@ -8533,6 +8658,9 @@ def set_material(
             color=color,
             spool_id=spool_id,
             tool_index=tool_index,
+            # Stated at the writer: a caller of this tool is a person or an
+            # agent typing a material name.  No sensor is involved.
+            determined_by="user_reported",
         )
         return {"success": True, "material": mat.to_dict()}
     except Exception as exc:
@@ -8567,22 +8695,37 @@ def check_material_match(
     expected_material: str,
     printer_name: str | None = None,
 ) -> dict:
-    """Check if the loaded material matches what a print expects.
+    """Check whether the material Kiln has on record matches what a print expects.
+
+    Answers about Kiln's material RECORD, which normally holds what a person
+    or agent typed via ``set_material`` — not a sensor reading.  Three
+    answers, and the third one matters: ``match: true`` (the record agrees),
+    ``match: false`` (it disagrees — worth stopping for), and ``match: null``
+    (nothing is recorded for this printer, so this is neither a match nor a
+    mismatch and the spool needs an eye on it).  ``sensed`` says whether a
+    machine reported the material; when it is false, do not tell the user
+    the material is confirmed.
 
     Args:
         expected_material: The material the print file requires.
-        printer_name: Target printer.  Omit for the default printer.
+        printer_name: Target printer.  Omit to resolve the active printer.
     """
     try:
-        name = printer_name or "default"
-        warning = _get_material_tracker().check_match(name, expected_material)
-        if warning:
-            return {
-                "success": True,
-                "match": False,
-                "warning": warning.to_dict(),
-            }
-        return {"success": True, "match": True}
+        name = printer_name or _material_store_name()
+        report = _material_match_report(name, expected_material)
+        result: dict[str, Any] = {
+            "success": True,
+            "match": {"match": True, "mismatch": False, "unknown": None}[
+                report["verdict"]
+            ],
+            "printer_name": name,
+            "sensed": report["sensed"],
+            "verified_by": report["determined_by"],
+            "note": report["message"],
+        }
+        if report["warning"] is not None:
+            result["warning"] = report["warning"].to_dict()
+        return result
     except Exception as exc:
         logger.exception("Unexpected error in check_material_match")
         return _error_dict(f"Unexpected error in check_material_match: {exc}", code="INTERNAL_ERROR")
