@@ -1535,3 +1535,30 @@ def test_compose_nameless_parts_keep_the_positional_names(
         "Part 1",
         "Part 2",
     ]
+
+
+def test_server_door_labels_nameless_parts_the_same_way(
+    stl_a: Path, stl_b: Path, tmp_path: Path
+):
+    """The MCP tool is another door onto the same composer, and a part with
+    no name has to arrive labelled the same through either one — a door that
+    keeps its own fallback is how two spellings of "Part 1" start."""
+    import re
+
+    from kiln.server import compose_multicolor_3mf as tool
+
+    out = str(tmp_path / "via_server.3mf")
+    result = tool(
+        [
+            {"stl_path": str(stl_a), "extruder": 1},
+            {"stl_path": str(stl_b), "extruder": 2},
+        ],
+        output_path=out,
+    )
+    assert result["success"] is True, result
+    with zipfile.ZipFile(out) as zf:
+        model = zf.read("3D/3dmodel.model").decode()
+    assert re.findall(r'<object id="\d+" type="model" name="([^"]*)"', model) == [
+        "Part 1",
+        "Part 2",
+    ]
