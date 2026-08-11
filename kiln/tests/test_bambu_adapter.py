@@ -3485,3 +3485,65 @@ class TestGetPrinterInfo:
         info = adapter.get_printer_info()
         assert info is not None
         assert info.model == "bambu_p1s"
+
+
+# ---------------------------------------------------------------------------
+# Job URL form — per-model, measured on hardware
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPrintUrl:
+    """The MQTT job URL is not the same string on every Bambu model.
+
+    P2S firmware rejects the ``file:///`` form the other models require
+    (measured 2026-08-10: both ``file:///`` variants returned ERROR STATE
+    with print_error 0500_4002, ``ftp://cache/<name>`` started the print).
+    A1 is the mirror image — an ``ftp://`` URL raises HMS
+    0500-C010-010800 there — so these two must never converge.
+    """
+
+    def test_default_is_the_filesystem_form(self) -> None:
+        """An undeclared printer behaves exactly as it did before the split."""
+        assert _adapter()._build_print_url("a.3mf") == "file:///sdcard/model/a.3mf"
+
+    @pytest.mark.parametrize("declared", ["bambu_p2s", "p2s", "BAMBU_P2S", " bambu_p2s "])
+    def test_p2s_gets_the_ftp_form(self, declared: str) -> None:
+        """Declared P2S wins, and the declaration is normalised."""
+        adapter = _adapter(printer_model=declared)
+        assert adapter._build_print_url("a.3mf") == "ftp://cache/a.3mf"
+
+    @pytest.mark.parametrize(
+        "declared",
+        ["bambu_a1", "bambu_a1_mini", "bambu_x1c", "bambu_p1s", "bambu_p1p"],
+    )
+    def test_other_models_never_get_ftp(self, declared: str) -> None:
+        """The A1 regression guard: ftp:// there is HMS 0500-C010-010800."""
+        url = _adapter(printer_model=declared)._build_print_url("a.3mf")
+        assert url == "file:///sdcard/model/a.3mf"
+        assert not url.startswith("ftp://")
+
+    def test_observed_cache_upload_implies_ftp_form(self) -> None:
+        """Where the upload actually landed is evidence, not a model guess.
+
+        This is the path that saves a user who never declared a model in
+        config.yaml — the case that produced the original bug report.
+        """
+        adapter = _adapter()
+        adapter._last_storage_path = "/cache"
+        assert adapter._build_print_url("a.3mf") == "ftp://cache/a.3mf"
+
+    @pytest.mark.parametrize("observed", ["/sdcard", "/model"])
+    def test_observed_non_cache_upload_keeps_filesystem_form(self, observed: str) -> None:
+        adapter = _adapter()
+        adapter._last_storage_path = observed
+        assert adapter._build_print_url("a.3mf") == "file:///sdcard/model/a.3mf"
+
+    def test_declared_model_outranks_observed_path(self) -> None:
+        """A declaration is the owner's word; an observation is a fallback."""
+        adapter = _adapter(printer_model="bambu_p2s")
+        adapter._last_storage_path = "/sdcard"
+        assert adapter._build_print_url("a.3mf") == "ftp://cache/a.3mf"
+
+    def test_basename_is_carried_verbatim(self) -> None:
+        name = "towel_stand_p2s_petg.gcode.3mf"
+        assert _adapter(printer_model="bambu_p2s")._build_print_url(name) == f"ftp://cache/{name}"

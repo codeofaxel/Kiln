@@ -306,6 +306,19 @@ _FAN_NODE_TO_INDEX: dict[str, int] = {
     "chamber": 3,
 }
 
+# Models whose firmware wants an ``ftp://`` job URL instead of the
+# ``file:///sdcard/model/`` form every other Bambu reads.  See
+# _build_print_url for the measurement this comes from.  Keyed on the
+# CONFIG-DECLARED model (``printer_model`` in config.yaml), because that is
+# the only identity permitted to drive behaviour — get_printer_info's probes
+# are telemetry-only, per the safety boundary documented there.
+_BAMBU_FTP_URL_MODELS: frozenset[str] = frozenset({"bambu_p2s", "p2s"})
+
+# The directory that form points into.  Also the folder the P2S actually
+# stores print jobs in, which is why the raw-G-code branch already accepts a
+# "/cache/" path.
+_BAMBU_FTP_URL_DIR = "cache"
+
 # Mapping of printer model identifiers (from 3MF metadata, MQTT, and serial
 # prefixes) to canonical family names.  Used by _check_printer_model_mismatch
 # to detect when a 3MF was sliced for a different printer family.
@@ -2455,16 +2468,53 @@ class BambuAdapter(PrinterAdapter):
         return issues
 
     def _build_print_url(self, basename: str) -> str:
-        """Build the correct ``file:///`` URL for the MQTT print command.
+        """Build the job URL for the MQTT print command.
 
-        Bambu firmware reads files from the filesystem, not FTP.  The URL
-        must always use ``file:///sdcard/model/`` (which maps to the FTPS
-        ``/model/`` path on A1 series, or ``/sdcard/`` on X1/P1 which also
-        works with this path).
+        The form is NOT the same on every model, which this function
+        assumed for a long time.
 
-        Using ``ftp:///`` URLs causes HMS error 0500-C010-010800
-        ("MicroSD Card read/write exception") on A1 printers.
+        A1 / X1 / P1 read the job off the filesystem and want
+        ``file:///sdcard/model/``.  Handing those models an ``ftp://``
+        URL raises HMS 0500-C010-010800 ("MicroSD Card read/write
+        exception") on A1, so that default stays exactly as it was.
+
+        P2S firmware rejects the ``file:///`` form outright.  Measured on
+        a P2S (2026-08-10), same file, same card, MD5 verified by
+        round-trip, three URL forms tried in sequence:
+
+        ==================================  ==========================
+        ``file:///mnt/sdcard/cache/<name>``  ERROR STATE, 0500_4002
+        ``file:///sdcard/cache/<name>``      ERROR STATE, 0500_4002
+        ``ftp://cache/<name>``               started, print_error 0
+        ==================================  ==========================
+
+        0500_4002 is the firmware's "failed to load the print job" error.
+        It also has to be cleared before a retry, because a set error
+        code blocks new print commands.
+
+        WHICH MODEL AM I? — read carefully before extending this.
+        ``self._printer_model`` (declared in ``~/.kiln/config.yaml``) is
+        the only identity allowed to drive behaviour.  The
+        serial-prefix / firmware probes behind :meth:`get_printer_info`
+        are TELEMETRY ONLY by the safety boundary documented there: a
+        model table that guessed wrong in five of six rows once named
+        the wrong printer confidently (a19e665b), so a wrong guess here
+        would send the wrong URL and fail the print.  Declared model
+        first; then the storage path we actually OBSERVED the upload land
+        in, which is evidence rather than a guess and is the same signal
+        the raw-G-code branch already trusts; then the historical
+        default, so a printer nobody has declared behaves as it did
+        before this change.
+
+        H2 series is an open question, deliberately NOT included: Bambu's
+        own wiki groups "H2 Series/P2S" together for Developer Mode,
+        which hints at a shared firmware generation, but hinting is not
+        measuring and nobody has run the three-form test on an H2.
         """
+        if self._printer_model in _BAMBU_FTP_URL_MODELS:
+            return f"ftp://{_BAMBU_FTP_URL_DIR}/{basename}"
+        if self._last_storage_path == f"/{_BAMBU_FTP_URL_DIR}":
+            return f"ftp://{_BAMBU_FTP_URL_DIR}/{basename}"
         return f"file:///sdcard/model/{basename}"
 
     def _start_print_impl(self, file_name: str, **kwargs: Any) -> PrintResult:
