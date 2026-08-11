@@ -2990,6 +2990,404 @@ def design_scorecard(file_path: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# CAD intake report — three bands, and deliberately no letter
+# ---------------------------------------------------------------------------
+#
+# A CAD file gets an intake report, not a report card.
+#
+# WHY NOT JUST GRADE IT.  ``design_scorecard`` weights four factors
+# 35/25/20/20, and the Quality factor is triangle density plus degenerate
+# count — a grade of KILN's tessellation, not of the user's design.  The
+# same STEP converts to 150,970 triangles under the OCCT kernel and 8,002
+# under FreeCAD on a 150 mm reference sphere, so what the Quality factor
+# scores is whichever converter happened to be installed on the machine that
+# read the file.  A measurement that moves when the instrument changes and
+# the object does not is not a measurement.
+#
+# Measured on two real backends, same file, same machine — a 150 mm sphere
+# written once and converted by each (``test_two_backends_grade_one_file
+# _differently``, which needs FreeCAD installed and skips without it):
+#
+#   occt      150,970 triangles   volume -0.0098 %   B / 83
+#   freecad     8,000 triangles   volume -0.1842 %   A / 92
+#
+# One object, one file, a full letter apart — and note the direction.  The
+# converter that is 19x finer and 19x closer on volume gets the WORSE grade,
+# by two mechanisms that are both artifacts of the instrument: its denser
+# mesh trips the manifold check (-15 on printability, weighted 35 %), and 2
+# sliver triangles out of 150,970 at the poles trip degenerate_pct > 0 (-5
+# on quality).  Grading harder for being more faithful is not a scale with a
+# defensible edge case; it is backwards.
+#
+# On ONE backend the same file moves less: across four densities the scores
+# slide (a 40 x 8 mm disc 99 -> 97, the sphere 83 -> 81) without crossing a
+# letter.  It used to cross — that disc graded A at fine and B at coarse until
+# `overhangs: the face a model stands on is not an overhang` raised
+# printability across the board and lifted it clear of the boundary.
+#
+# Which is the point, not a reprieve.  Whether a letter crosses depends on how
+# near a boundary the part happens to sit, so the same instrument-dependence
+# is present in every score and merely invisible in most of them.  A grade
+# that is stable right up until it silently is not, with nothing on the page
+# saying which case you are holding, is not a grade worth publishing for a
+# file whose triangles Kiln chose.
+#
+# Two fixes were rejected before this one.  Dropping Quality and
+# re-weighting the other three into a new composite gives two scales that
+# look alike, are named alike, and mean different things — worse than one
+# scale, because nothing on the page tells you which you are holding.
+# Grading the mesh and captioning it "approximate" leaves the letter doing
+# the talking; nobody reads the caption.
+#
+# So: three bands that say plainly whose numbers they are, and no letter.
+# The bands are not a presentation choice.  They are the three different
+# ANSWERS available about a CAD file, and merging any two of them is how a
+# fact about Kiln's copy ends up being read as a fact about the part.
+#
+# THE BOUND, stated because it is real and not closed here: this routes on
+# the file in front of it.  A user who runs ``import_step_file`` and then
+# hands the resulting STL back still gets a letter — the mesh carries no
+# mark saying it was born from CAD, and the conversion record travels with
+# the call rather than with the file.  Closing that needs provenance on
+# emitted meshes, which is a larger piece of work than this one.  What is
+# closed is the path a CAD user actually takes: hand Kiln the STEP.
+
+#: Why a CAD file carries no letter.  Said once, where the report is built,
+#: rather than per band per caller.
+#:
+#: Two endings, because the first draft had one and it was wrong in a state
+#: that really happens: it closed on "the exact numbers above come from your
+#: file", which reads as a reassurance next to a band that says
+#: ``available: false``.  A machine with no kernel gets no exact numbers, and
+#: pointing at absent ones is worse than withholding the grade silently.
+_GRADE_WITHHELD_HEAD = (
+    "No overall grade for a CAD file. A fifth of that score measures Kiln's "
+    "own tessellation — triangle density and degenerate count — so the same "
+    "part would score differently on a machine with a different converter."
+)
+_GRADE_WITHHELD_WITH_EXACT = (
+    " The exact numbers above come from your file and do not move."
+)
+_GRADE_WITHHELD_WITHOUT_EXACT = (
+    " Nothing here could be read from your file directly either, so every "
+    "number below describes Kiln's mesh copy of it."
+)
+
+
+def _grade_withheld(exact: Any) -> str:
+    return _GRADE_WITHHELD_HEAD + (
+        _GRADE_WITHHELD_WITH_EXACT
+        if exact.available
+        else _GRADE_WITHHELD_WITHOUT_EXACT
+    )
+
+
+def _exact_band(exact: Any) -> dict[str, Any]:
+    """Band 1 — the file's own geometry, or an honest reason there is none."""
+    if not exact.available:
+        return {"available": False, "reason": exact.reason}
+
+    topology = exact.topology
+    notes: list[str] = []
+    if exact.is_valid is False:
+        # A CAD fault, not a mesh fault, so it is worded as one: repairing
+        # the mesh Kiln made would leave the file itself exactly as broken.
+        notes.append(
+            "The CAD kernel reports this shape as invalid — a fault in the "
+            "file's own topology. Mesh repair will not fix it; the fix is in "
+            "the CAD tool that wrote it."
+        )
+    if topology is not None and topology.is_surface_model:
+        notes.append(
+            f"This file declares no solid — {topology.faces} surfaces and no "
+            "closed body. It may still mesh and print correctly; the volume "
+            "above is what those surfaces enclose."
+        )
+    elif topology is not None and topology.solids > 1:
+        # The kernel sums an assembly, which is the right answer to "how much
+        # material" and the wrong one to read as a part.  Saying the count
+        # without saying what it did to the number leaves the reader to
+        # assume — and the assumption a single figure invites is one part.
+        notes.append(
+            f"This file holds {topology.solids} separate solids. The volume "
+            "and area above are the total across all of them, not per part."
+        )
+
+    size = exact.size_mm or (None, None, None)
+    return {
+        "available": True,
+        "measured_on": "your CAD file, by the kernel — no triangles involved",
+        "units": "mm",
+        "volume_mm3": exact.volume_mm3,
+        "surface_area_mm2": exact.surface_area_mm2,
+        "size_mm": {
+            "width_mm": size[0],
+            "depth_mm": size[1],
+            "height_mm": size[2],
+        },
+        "bounding_box_mm": {
+            "min": list(exact.bbox_min_mm) if exact.bbox_min_mm else None,
+            "max": list(exact.bbox_max_mm) if exact.bbox_max_mm else None,
+        },
+        "is_valid": exact.is_valid,
+        "solids": topology.solids if topology else None,
+        "shells": topology.shells if topology else None,
+        "faces": topology.faces if topology else None,
+        "notes": notes,
+    }
+
+
+def exact_geometry_block(file_path: str) -> dict[str, Any] | None:
+    """The exact band for any tool that reports a CAD part's size — one line.
+
+    The intake report is not the only place a user asks how big their part
+    is; ``analyze_mesh_geometry`` is the one an agent reaches for first.  A
+    door that answers off triangles while another answers off the file is
+    the one-door fallacy with two right answers, which is worse than one
+    wrong one — the user has no way to know which they are holding.
+
+    So this is the shared helper rather than a second per-door branch::
+
+        if exact := exact_geometry_block(original_path):
+            result["exact"] = exact
+
+    ``None`` for anything that is not CAD, so a mesh tool that adopts it
+    adds a ~300-byte content sniff and nothing else.  For CAD the read is
+    cached beside the mesh cache, so the second door to ask about a file
+    pays a dictionary lookup rather than a kernel start.
+
+    Pass the path the USER handed in, not the converted mesh: by the time a
+    tool has called ``resolve_mesh_input`` its ``file_path`` local usually
+    points at Kiln's copy, and reading that would answer "this is already
+    triangles" for a file that is not.
+    """
+    from kiln.step_import import looks_like_step, read_exact_geometry
+
+    if not looks_like_step(file_path):
+        return None
+    return _exact_band(read_exact_geometry(file_path))
+
+
+def _conversion_sentence(conversion: Any) -> str:
+    """One line naming how Kiln's copy was cut, and how far off that puts it.
+
+    Asks kiln-pro first.  The measured deviation per backend and settings
+    lives there, already worded, already careful to name the reference it was
+    taken against — and a second wording of one fact is how a part ends up
+    with two accuracies.  Public Kiln's own fallback states the backend and
+    the density it was given, which is what this repo knows for certain, and
+    claims no deviation figure it cannot substantiate.
+    """
+    if conversion is None:
+        return "This is already a mesh — nothing was converted."
+    try:
+        from dataclasses import asdict
+
+        from kiln_pro.mesh_conversion_record import summarize
+
+        # Handed as a dict, which is the shape that reader documents.  Given
+        # the dataclass it normalizes to None and answers "no record of how
+        # this mesh was made" for a mesh whose record is right there — a
+        # silent downgrade, since the sentence is well-formed and wrong.
+        line = summarize(asdict(conversion))
+        if line:
+            return line
+    except Exception:  # noqa: BLE001 — kiln-pro is optional by design
+        pass
+
+    bound = conversion.bound
+    if bound.kind == "linear_angular":
+        detail = f" at {bound.linear} mm chord / {bound.angular} rad"
+    elif bound.kind == "linear":
+        detail = f" at {bound.linear} mm chord"
+    elif bound.kind == "elements_per_circle":
+        detail = f" at {bound.elements_per_circle} elements per circle"
+    else:
+        detail = " at a density Kiln did not choose"
+    return f"Converted from CAD by {conversion.backend}{detail}."
+
+
+def _conversion_deviation(exact: Any, analysis: Any) -> dict[str, Any]:
+    """How far Kiln's copy of THIS part sits from the file, in its own numbers.
+
+    The per-backend figures kiln-pro keeps are taken against a 150 mm sphere:
+    they describe the CONVERTER, which is the right way to compare two of
+    them and the wrong way to answer "how wrong is MY part?"  A flat face is
+    exact under every backend; a tight fillet is the worst case.  This is the
+    caller's actual file, measured both ways, so it answers that question
+    directly — and it is only available because the exact band exists.
+
+    Reported as volume and area differences because those are what both
+    sides measured.  It is NOT a surface deviation in mm: a mesh can sit
+    close in volume while a single fillet wanders, since errors inward and
+    outward cancel in an integral. Named so nobody reads it as a tolerance.
+    """
+    if not exact.available or not analysis.triangle_count:
+        return {"available": False}
+
+    out: dict[str, Any] = {
+        "available": True,
+        "what_this_is": (
+            "Volume and area of Kiln's mesh copy minus your file's own, on "
+            "this part. Not a surface tolerance — inward and outward error "
+            "cancel in a volume."
+        ),
+    }
+    # Percentages divide by ``abs``: the kernel signs volume by orientation,
+    # so an inverted solid reads negative and a plain division would flip the
+    # sign of the difference — reporting a mesh that came out LARGER as
+    # smaller.  The delta itself keeps its own sign, which is meaningful and
+    # worth reading: a tessellated hole is an inscribed polygon, so it takes
+    # out less material than the true circle and the mesh comes out heavier.
+    if exact.volume_mm3:
+        dv = analysis.volume_mm3 - exact.volume_mm3
+        out["volume_delta_mm3"] = round(dv, 4)
+        out["volume_delta_pct"] = round(dv / abs(exact.volume_mm3) * 100, 6)
+    if exact.surface_area_mm2:
+        da = analysis.surface_area_mm2 - exact.surface_area_mm2
+        out["area_delta_mm2"] = round(da, 4)
+        out["area_delta_pct"] = round(da / abs(exact.surface_area_mm2) * 100, 6)
+    return out
+
+
+def cad_intake_report(
+    file_path: str,
+    mesh_path: str,
+    conversion: Any = None,
+) -> dict[str, Any]:
+    """Compose a CAD file's three bands: exact, measured, and about our copy.
+
+    Band 1 (``exact``) is the file's own geometry, read by the CAD kernel —
+    volume, area, envelope, validity, body counts.  These match the user's
+    CAD package and are the reason this exists: everything Kiln otherwise
+    says about a CAD part's size is measured off triangles Kiln generated.
+
+    Band 2 (``measured``) is what genuinely needs a tessellation — overhangs,
+    stability, floating parts, fill ratio — with the conversion named and
+    this part's own conversion difference stated, rather than left implied.
+
+    Band 3 (``about_our_copy``) is conversion QA: triangle count, degenerate
+    count, backend, density.  These are facts about Kiln's artifact, so they
+    are reported as facts and never scored — scoring them and handing the
+    number over as a grade of somebody's design is the error this whole
+    report exists to avoid.
+
+    There is no overall grade, and ``grade_withheld`` says why in one line.
+
+    Takes the converted mesh rather than converting one, so the CAD door
+    stays in the tool body where every other tool keeps it — one visible
+    ``resolve_mesh_input`` call per tool, which is both the house shape and
+    the shape the mesh-input-doors gate can actually verify.  A conversion
+    hidden two modules down is a wire a reader has to take on trust.
+
+    Args:
+        file_path: The CAD file the user handed in.  Read directly by the
+            kernel for the exact band — never tessellated.
+        mesh_path: Kiln's converted mesh of it, from ``resolve_mesh_input``.
+        conversion: The ``MeshConversion`` record that came back with it, for
+            naming how the copy was cut.  ``None`` is honest for a cache
+            entry whose sidecar is unreadable.
+
+    Returns:
+        The report dict.  ``exact`` degrades to ``available: False`` with a
+        reason on a machine with no kernel — the other two bands still stand,
+        because they never needed one.
+
+    Raises:
+        ValueError: The mesh carries no readable geometry, or the file was
+            never converted at all.  A caller that cannot be told the part's
+            shape has no report to give.
+    """
+    from kiln.step_import import read_exact_geometry
+
+    exact = read_exact_geometry(file_path)
+
+    # "Did it convert?" is the path changing — never the conversion record
+    # being present, which is honestly None for a cache entry whose sidecar
+    # is unreadable and would report a converted STEP as read directly.
+    #
+    # This report is reached by CONTENT (a STEP is CAD whatever it is named),
+    # while the shared conversion door goes by EXTENSION.  So a STEP saved as
+    # .txt arrives here, reads exactly — the kernel does not care what it is
+    # called — and then passes straight through the door as "already a mesh".
+    # Analysing it as one produces a bare "unsupported format", which is the
+    # wrong half of the truth: the format is supported, the NAME is not.
+    if mesh_path == file_path:
+        raise ValueError(
+            f"{Path(file_path).name} contains CAD data but is not named like "
+            "a CAD file, and Kiln's converter goes by extension. Rename it to "
+            f"{Path(file_path).stem}.step and this will read normally."
+        )
+
+    analysis = analyze_mesh(mesh_path)
+    if not analysis.triangle_count:
+        raise ValueError(
+            "Cannot analyze this file: "
+            + ("; ".join(analysis.printability_issues) or "no geometry found")
+        )
+
+    from kiln.design_intelligence import load_pro_overlay_or_empty
+
+    overlay = load_pro_overlay_or_empty("scorecard_weights")
+    structural, structural_notes = _score_factor_from_rules(
+        rules=overlay.get("structural_deductions") or _STRUCTURAL_DEDUCTIONS_PUBLIC,
+        analysis=analysis,
+    )
+    efficiency, efficiency_notes = _score_factor_from_rules(
+        rules=overlay.get("efficiency_deductions") or _EFFICIENCY_DEDUCTIONS_PUBLIC,
+        analysis=analysis,
+    )
+
+    tri = analysis.triangle_count
+    return {
+        "subject": "cad_file",
+        "file": Path(file_path).name,
+        # Band 1 — from the user's file.
+        "exact": _exact_band(exact),
+        # Band 2 — from Kiln's mesh copy, with the copy named.
+        "measured": {
+            "measured_on": "Kiln's mesh copy of your file, not the file itself",
+            "conversion": _conversion_sentence(conversion),
+            "conversion_difference": _conversion_deviation(exact, analysis),
+            "printability": {
+                "score": analysis.printability_score,
+                "notes": analysis.printability_issues,
+            },
+            "structural": {"score": structural, "notes": structural_notes},
+            "efficiency": {"score": efficiency, "notes": efficiency_notes},
+            "max_overhang_angle_deg": analysis.max_overhang_angle_deg,
+            "overhang_percentage": analysis.overhang_percentage,
+            "connected_components": analysis.connected_components,
+            "is_watertight": analysis.is_manifold,
+        },
+        # Band 3 — about Kiln's artifact.  Counted, never scored.
+        #
+        # Deliberately no mesh path.  It earned nothing once every geometry
+        # door converted for itself — an agent that wants to render or slice
+        # passes the CAD file — and on hosted it would be a server temp path
+        # the caller cannot reach and should not be shown.
+        "about_our_copy": {
+            "triangle_count": tri,
+            "vertex_count": analysis.vertex_count,
+            "degenerate_triangles": analysis.degenerate_triangles,
+            "avg_triangle_area_mm2": (
+                round(analysis.surface_area_mm2 / tri, 4) if tri else None
+            ),
+            "volume_mm3": analysis.volume_mm3,
+            "surface_area_mm2": analysis.surface_area_mm2,
+            "backend": conversion.backend if conversion else None,
+            "note": (
+                "These describe the mesh Kiln generated, not your design. "
+                "They are reported as counts rather than a score because a "
+                "score here would read as a verdict on your part."
+            ),
+        },
+        "grade": None,
+        "grade_withheld": _grade_withheld(exact),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Material cost estimation
 # ---------------------------------------------------------------------------
 

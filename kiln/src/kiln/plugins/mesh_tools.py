@@ -241,15 +241,29 @@ class _MeshToolsPlugin:
             Use this after generating a model to understand its geometry and
             identify printability issues before sending to the slicer.
 
-            :param file_path: Path to .stl, .obj, or .glb file.  For a
-                STEP/STP CAD file, convert it first with ``import_step_file``
-                and analyze the resulting mesh.
-            :returns: Dict with full mesh analysis metrics.
+            For a STEP/STP CAD file this converts it first and every metric
+            below is measured on Kiln's mesh copy — except an added ``exact``
+            block, which carries the volume, surface area and envelope read
+            from the CAD file's own surfaces.  Those two disagree slightly
+            and the exact ones are the part's: quote ``exact`` when telling
+            a user how big their CAD part is.  ``mesh_quality_scorecard``
+            gives the same file a fuller intake report.
+
+            :param file_path: Path to a mesh (.stl, .obj, .glb) or a CAD file
+                (.step, .stp), which is converted automatically.
+            :returns: Dict with full mesh analysis metrics, plus ``exact``
+                for CAD input.
             """
             # STEP in, mesh out — the one shared door, never a per-tool
             # branch, so the CAD format engineering customers actually send
             # works here instead of failing several layers down.
             from kiln.step_import import resolve_mesh_input
+
+            # Kept before the door overwrites the local: every metric below
+            # is measured on the CONVERTED mesh, and the exact read needs the
+            # file the user actually handed in.  Reading the post-door value
+            # would answer "this is already triangles" for a CAD file.
+            source_path = file_path
 
             file_path, _conversion, _refusal = resolve_mesh_input(file_path)
             if _refusal:
@@ -258,7 +272,10 @@ class _MeshToolsPlugin:
             from kiln.server import _error_dict
 
             try:
-                from kiln.generation.validation import analyze_mesh
+                from kiln.generation.validation import (
+                    analyze_mesh,
+                    exact_geometry_block,
+                )
 
                 result = analyze_mesh(file_path)
                 # A file the analyzer could not read used to come back as
@@ -277,7 +294,12 @@ class _MeshToolsPlugin:
                         f"Could not read a mesh from this file: {reason}",
                         code="UNREADABLE_INPUT",
                     )
-                return {"success": True, **result.to_dict()}
+                out = {"success": True, **result.to_dict()}
+                # One shared helper, one line, no per-door branch: None for
+                # an ordinary mesh, so this costs a content sniff there.
+                if exact := exact_geometry_block(source_path):
+                    out["exact"] = exact
+                return out
             except Exception as exc:
                 return _error_dict(f"Mesh analysis failed: {exc}", code="ANALYSIS_ERROR")
 
@@ -435,26 +457,77 @@ class _MeshToolsPlugin:
 
         @mcp.tool()
         def mesh_quality_scorecard(file_path: str) -> dict:
-            """Generate a multi-factor quality scorecard for a mesh.
+            """Assess a model — a graded scorecard for a mesh, an intake
+            report for a CAD file.
 
-            Evaluates four dimensions:
+            **For a mesh** (.stl, .obj, .glb) it evaluates four dimensions:
             - **Printability** (35%): overhangs, manifold, support needs
             - **Structural** (25%): aspect ratio, base stability, component count
             - **Efficiency** (20%): fill ratio, support waste
             - **Quality** (20%): triangle density, degenerate count
 
-            Returns per-factor scores, an overall 0-100 score, and a letter
-            grade (A-F).
+            and returns per-factor scores, an overall 0-100 score, and a
+            letter grade (A-F).  ``subject`` is ``"mesh"``.
 
-            :param file_path: Path to mesh file (.stl, .obj, or .glb).
-            :returns: Dict with scores, grade, and per-factor notes.
+            **For a CAD file** (.step, .stp) it returns an INTAKE REPORT and
+            deliberately no letter grade.  ``subject`` is ``"cad_file"``,
+            ``grade`` is null, and ``grade_withheld`` says why: 20% of that
+            score measures Kiln's own tessellation, so the identical part
+            would grade differently depending on which converter is installed
+            on the machine that read it.  Instead you get three bands:
+
+            - ``exact`` — read from the user's file by the CAD kernel:
+              volume, surface area, envelope, validity, solid/shell/face
+              counts, in mm.  These match their CAD package to the decimal
+              and are the numbers to quote back to them.
+            - ``measured`` — what genuinely needs triangles (overhangs,
+              stability, floating parts), with the conversion named and this
+              part's own conversion difference stated.
+            - ``about_our_copy`` — triangle and degenerate counts for Kiln's
+              generated mesh, as counts, never scored.
+
+            When quoting a CAD part's size to a user, quote ``exact`` —
+            ``about_our_copy`` describes Kiln's mesh, not their design.
+
+            :param file_path: Path to a mesh (.stl, .obj, .glb) or a CAD file
+                (.step, .stp).
+            :returns: Dict with scores and a grade for a mesh; the three-band
+                intake report with ``grade: null`` for a CAD file.
             """
             from kiln.server import _error_dict
+
+            # Routed by CONTENT, not by extension: a parser that believes the
+            # extension describes the file in the wrong format's vocabulary,
+            # which is how an STL reader once called a real STEP export
+            # corrupt.  The conversion door below still goes by extension —
+            # the report says so when the two disagree.
+            from kiln.step_import import looks_like_step, resolve_mesh_input
+
+            if looks_like_step(file_path):
+                # STEP in, mesh out — the one shared door, kept HERE rather
+                # than inside the report, so the CAD wire is visible at the
+                # tool the way it is in every other tool that takes geometry.
+                mesh_path, conversion, refusal = resolve_mesh_input(file_path)
+                if refusal:
+                    return refusal
+                try:
+                    from kiln.generation.validation import cad_intake_report
+
+                    return {
+                        "success": True,
+                        **cad_intake_report(file_path, mesh_path, conversion),
+                    }
+                except Exception as exc:
+                    return _error_dict(f"CAD intake failed: {exc}")
 
             try:
                 from kiln.generation.validation import design_scorecard
 
-                return {"success": True, **design_scorecard(file_path)}
+                return {
+                    "success": True,
+                    "subject": "mesh",
+                    **design_scorecard(file_path),
+                }
             except Exception as exc:
                 return _error_dict(f"Scorecard generation failed: {exc}")
 

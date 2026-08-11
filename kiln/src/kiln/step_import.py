@@ -347,6 +347,97 @@ class SourceTopology:
 
 
 @dataclass(frozen=True)
+class ExactGeometry:
+    """What the CAD kernel measures on the user's OWN file, before triangles.
+
+    Every size number Kiln otherwise reports about a CAD part is measured off
+    a mesh Kiln generated from it, which makes the answer a property of the
+    converter as much as of the part: on a 150 mm reference sphere the OCCT
+    kernel emits 150,970 triangles where FreeCAD emits 8,002, so the same
+    file measures differently on two machines.  These numbers do not move.
+    They come from the analytic B-rep — the surfaces the engineer actually
+    drew — so they match what their CAD package says, and a user can check.
+
+    Measured on this module's own fixtures: a 72x46x11 plate with 9 mm and
+    14 mm through-holes has an analytic volume of 34038.8918 mm3.  The kernel
+    reads it back to within 4e-13 %; the mesh Kiln converts it to reads
+    34039.8800 mm3, out by 0.0029 %.  Small, and not zero — and it is the
+    kind of number a machinist checks against their own model.
+
+    **Always returned, never ``None``** — :attr:`available` carries the
+    answer instead, with :attr:`reason` next to it.  A report that has to
+    explain why a band is missing cannot do it from an absent object, and
+    the two states a caller must tell apart (no kernel installed vs. a file
+    the kernel refused) are both reasons rather than gaps.
+
+    **Units are millimetres, whatever the file declares.**  Verified against
+    an inch-declared fixture (``CONVERSION_BASED_UNIT('INCH')``, coordinates
+    written in inches): OCCT's reader normalises on transfer, so a 1 inch
+    cube reads back as 25.4 mm and 16387.064 mm3.  No unit guess is involved
+    here, which is the point — Kiln's mesh pipeline elsewhere INFERS units
+    from overall size, and that inference cannot be right for every part.
+
+    A caution for anyone extending this: the file's DECLARED unit is not
+    readable from ``SI_UNIT`` in the header.  The same inch fixture carries
+    ``SI_UNIT(.MILLI.,.METRE.)`` as its base unit with the inch layered on
+    top as a ``CONVERSION_BASED_UNIT``, so a text scan for ``SI_UNIT``
+    reports an inch part as millimetres.  Nothing here reads it, and nothing
+    should read it that way.
+    """
+
+    available: bool
+    """Whether the kernel measured this file.  False leaves every number
+    below ``None`` and fills in :attr:`reason`."""
+
+    reason: str | None = None
+    """Why there are no numbers, in a sentence a reader can act on."""
+
+    volume_mm3: float | None = None
+    """Enclosed volume of the solid, in mm3, from ``BRepGProp``.
+
+    Signed by the kernel's convention and returned as measured.  A surface
+    model with no closed volume reports whatever its faces enclose, which is
+    why :attr:`topology` travels with it — the number needs its subject.
+    """
+
+    surface_area_mm2: float | None = None
+    """Total area of every face, in mm2."""
+
+    bbox_min_mm: tuple[float, float, float] | None = None
+    """Tight analytic bounding-box minimum, in mm."""
+
+    bbox_max_mm: tuple[float, float, float] | None = None
+    """Tight analytic bounding-box maximum, in mm."""
+
+    size_mm: tuple[float, float, float] | None = None
+    """Bounding-box extents, in mm — the part's real envelope.
+
+    Computed with ``AddOptimal`` over the exact geometry with triangulation
+    excluded.  The cheaper ``Add`` pads by shape tolerance and falls back to
+    the pole hull of a spline surface, which reports a 3 mm plate as 24 mm
+    thick — an envelope drawn around the maths rather than around the part.
+    """
+
+    is_valid: bool | None = None
+    """``BRepCheck_Analyzer``'s verdict on the shape the file describes.
+
+    A property of the CAD, not of anything Kiln did to it.  False means the
+    file itself carries a topological fault — self-intersecting faces, a
+    shell that does not close where it claims to — which is the user's to
+    fix in their CAD tool, and not something mesh repair addresses.
+    """
+
+    topology: SourceTopology | None = None
+    """Solid / shell / face counts, from the same read.
+
+    Duplicated from :attr:`MeshConversion.source` on purpose: that one is
+    recorded only when a kernel backend happened to do the CONVERSION, and
+    this read stands on its own.  Both come from the same kernel counting
+    the same file, so they agree; neither depends on the other existing.
+    """
+
+
+@dataclass(frozen=True)
 class MeshConversion:
     """How a mesh was made from CAD — the neutral half of that question.
 
@@ -1430,6 +1521,306 @@ def _write_3mf(
         zf.writestr("3D/3dmodel.model", "".join(xml))
 
     return names
+
+
+# ---------------------------------------------------------------------------
+# Exact geometry — the file's own numbers, never the mesh's
+# ---------------------------------------------------------------------------
+
+# One reader, one answer.  Deliberately NOT folded into the two conversion
+# templates above, even though each already holds a live shape and could
+# compute these for free: a file reaches Kiln through the plain path, the
+# colour-aware path, a FreeCAD or gmsh conversion that never loads a kernel
+# shape at all, and a cache hit that converts nothing.  Four places computing
+# one measurement is four places for it to drift; this is the one that runs
+# for every one of them, and its answer is cached beside the mesh cache so no
+# door pays twice for the same bytes.
+_OCP_EXACT_SCRIPT_TEMPLATE = r'''
+import json, sys
+
+from OCP.Bnd import Bnd_Box
+from OCP.BRepBndLib import BRepBndLib
+from OCP.BRepCheck import BRepCheck_Analyzer
+from OCP.BRepGProp import BRepGProp
+from OCP.GProp import GProp_GProps
+from OCP.IFSelect import IFSelect_ReturnStatus
+from OCP.STEPControl import STEPControl_Reader
+from OCP.TopAbs import TopAbs_ShapeEnum
+from OCP.TopExp import TopExp_Explorer
+
+step_path = {step_path!r}
+
+reader = STEPControl_Reader()
+if reader.ReadFile(step_path) != IFSelect_ReturnStatus.IFSelect_RetDone:
+    sys.stderr.write("OCCT could not read the STEP file\n")
+    raise SystemExit(3)
+reader.TransferRoots()
+shape = reader.OneShape()
+
+if shape.IsNull():
+    sys.stderr.write("the file transferred to an empty shape\n")
+    raise SystemExit(4)
+
+
+def count(kind):
+    exp = TopExp_Explorer(shape, kind)
+    n = 0
+    while exp.More():
+        n += 1
+        exp.Next()
+    return n
+
+
+vol = GProp_GProps()
+BRepGProp.VolumeProperties_s(shape, vol)
+area = GProp_GProps()
+BRepGProp.SurfaceProperties_s(shape, area)
+
+# useTriangulation=False: with triangulation allowed this measures whatever
+# mesh happens to be attached to the shape, which is the exact thing these
+# numbers exist to avoid.  AddOptimal over the analytic surfaces instead of
+# Add, which pads by tolerance and hulls spline poles.
+box = Bnd_Box()
+BRepBndLib.AddOptimal_s(shape, box, True, False)
+xmin, ymin, zmin, xmax, ymax, zmax = box.Get()
+
+print("KILN_RESULT:" + json.dumps({{
+    "volume_mm3": vol.Mass(),
+    "surface_area_mm2": area.Mass(),
+    "bbox_min_mm": [xmin, ymin, zmin],
+    "bbox_max_mm": [xmax, ymax, zmax],
+    "is_valid": bool(BRepCheck_Analyzer(shape).IsValid()),
+    "topology": {{
+        "solids": count(TopAbs_ShapeEnum.TopAbs_SOLID),
+        "shells": count(TopAbs_ShapeEnum.TopAbs_SHELL),
+        "faces": count(TopAbs_ShapeEnum.TopAbs_FACE),
+    }},
+}}))
+'''
+
+
+#: Seconds a kernel read gets before it is killed.  Far below the conversion
+#: timeout on purpose: reading and measuring a shape is cheap where
+#: tessellating it is not, so a read that runs this long is wedged rather
+#: than busy, and an intake report that hangs for five minutes has already
+#: failed the person waiting for it.
+EXACT_READ_TIMEOUT_S: int = 60
+
+#: Shape of the cached exact-read payload.  Bump when a field is added,
+#: removed, or changes meaning: it is part of the cache key, so a bump
+#: retires every stale entry instead of serving one that no longer answers
+#: the question the reader is now asking.
+_EXACT_PAYLOAD_VERSION = "exact-v1"
+
+
+def _exact_unavailable(reason: str) -> ExactGeometry:
+    return ExactGeometry(available=False, reason=reason)
+
+
+def read_exact_geometry(path: str) -> ExactGeometry:
+    """Measure a CAD file with the kernel — no tessellation anywhere in it.
+
+    The answer to "how big is this part, really?"  Everything else Kiln
+    reports about a CAD part's size is measured off triangles Kiln made,
+    which makes it a fact about the converter as much as about the part.
+    This is the file's own geometry, and it is what the user's CAD package
+    will agree with.
+
+    Runs OUT OF PROCESS for the reasons :func:`_convert_via_ocp` documents
+    at length — a compiled kernel call cannot be interrupted from Python and
+    a pathological file must not take a server worker or its memory with it.
+    The result is cached beside the mesh cache, keyed on file content alone
+    (these numbers do not depend on any tessellation setting), so the second
+    door to ask about a file pays nothing.
+
+    Never raises for a bad input: a file the kernel refuses, a machine with
+    no kernel, and a path that is not CAD at all each come back as
+    ``available=False`` with a reason.  A caller composing a report needs the
+    reason more than it needs an exception.
+
+    :param path: A ``.step`` / ``.stp`` file.  Anything else is answered
+        honestly rather than attempted — mesh formats carry no analytic
+        geometry to read, so there is nothing exact to be had from one.
+    :returns: An :class:`ExactGeometry`, always.
+    """
+    if not looks_like_step(path):
+        return _exact_unavailable(
+            "Exact geometry comes from a CAD file's own surfaces. This is a "
+            "mesh — it is already triangles, so there is nothing analytic "
+            "left in it to measure."
+        )
+    if not _ocp_available():
+        # Named separately from a read failure because the two have opposite
+        # fixes: this one is a missing backend, the other is the file.
+        #
+        # Worded for whoever is reading it, via the same surface check the
+        # conversion refusal uses.  A hosted caller has no shell to run an
+        # install in, so handing them one is a dead end dressed up as help —
+        # the mistake this module already fixed once for `install_help`, and
+        # easy to re-introduce because the local wording reads fine from a
+        # laptop.
+        from kiln.runtime_env import is_hosted_multitenant
+
+        if is_hosted_multitenant():
+            return _exact_unavailable(
+                "This server has no CAD kernel, so it could not read the "
+                "file's own geometry. That is a gap on our side, not "
+                "something for you to install — the measurements taken from "
+                "the converted mesh are still below."
+            )
+        return _exact_unavailable(
+            "No CAD kernel on this machine, so nothing could read the file's "
+            f"own geometry. {INSTALL_COMMAND} installs one."
+        )
+
+    import hashlib
+
+    try:
+        # Content plus a payload version, and deliberately NOT the
+        # tessellation constants the mesh cache folds in: these numbers come
+        # from the analytic surfaces, so no meshing setting can change them.
+        #
+        # The version is the lesson from the entry next door, which was keyed
+        # on content alone and could not tell an old-format record from a
+        # current one — so every mesh cached before the conversion record
+        # existed answered "not from CAD" forever.  Today a missing field
+        # would fall through to a fresh read anyway (every field below is
+        # required, so a short payload reads as no measurement); the version
+        # is what keeps that true the day one becomes optional.
+        key = hashlib.sha256(
+            Path(path).read_bytes() + _EXACT_PAYLOAD_VERSION.encode()
+        ).hexdigest()
+    except OSError as exc:
+        return _exact_unavailable(f"Could not read that file: {exc}")
+
+    cache_dir = Path(tempfile.gettempdir()) / "kiln_step_cache"
+    cached = cache_dir / f"{key}.exact.json"
+    if cached.is_file():
+        hit = _exact_from_payload(_read_json_or_none(cached))
+        if hit is not None:
+            return hit
+
+    script = _OCP_EXACT_SCRIPT_TEMPLATE.format(step_path=str(Path(path).resolve()))
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        f.write(script)
+        script_path = f.name
+    try:
+        result = subprocess.run(
+            [sys.executable, script_path],
+            capture_output=True,
+            text=True,
+            timeout=EXACT_READ_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return _exact_unavailable(
+            f"Reading this file's geometry took longer than "
+            f"{EXACT_READ_TIMEOUT_S}s and was stopped. Very large assemblies "
+            "can do this — try a single part."
+        )
+    except OSError as exc:  # noqa: BLE001 — a spawn failure is not fatal here
+        return _exact_unavailable(f"Could not start the CAD kernel: {exc}")
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(script_path)
+
+    try:
+        data = _parse_kiln_exact_result(result)
+    except StepImportError as exc:
+        return _exact_unavailable(str(exc))
+
+    exact = _exact_from_payload(data)
+    if exact is None:
+        return _exact_unavailable(
+            "The CAD kernel returned a measurement Kiln could not read."
+        )
+
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        tmp = cached.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        os.replace(tmp, cached)
+    except OSError:
+        pass  # a full or read-only temp dir must never fail the read
+
+    return exact
+
+
+def _read_json_or_none(path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _parse_kiln_exact_result(
+    result: subprocess.CompletedProcess[str],
+) -> dict[str, Any]:
+    """The KILN_RESULT line from an exact read, or a reason it is absent.
+
+    Separate from :func:`_parse_kiln_result`, which requires the conversion
+    keys (``outputs``, ``body_count``) this payload does not have.  Raises
+    :class:`StepImportError` with wording aimed at the person who handed us
+    the file, since the likely cause is the file.
+    """
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()[:300]
+        raise StepImportError(
+            f"The CAD kernel could not read this file: {stderr or 'no detail given'}"
+        )
+    for line in (result.stdout or "").splitlines():
+        if line.startswith("KILN_RESULT:"):
+            try:
+                data = json.loads(line[len("KILN_RESULT:"):])
+            except json.JSONDecodeError as exc:
+                raise StepImportError(
+                    f"The CAD kernel produced an unreadable measurement: {exc}"
+                ) from exc
+            if not isinstance(data, dict):
+                raise StepImportError(
+                    "The CAD kernel produced an unreadable measurement."
+                )
+            return data
+    raise StepImportError("The CAD kernel produced no measurement.")
+
+
+def _exact_from_payload(data: dict[str, Any] | None) -> ExactGeometry | None:
+    """Rebuild an :class:`ExactGeometry` from a child's (or cache's) payload.
+
+    ``None`` for anything malformed — a partial record must never be dressed
+    up as a measurement, because the whole claim these numbers make is that
+    they are exact.  One reader for both the live child and the cache, so a
+    stale cache format degrades the same way a broken child does.
+    """
+    if not isinstance(data, dict):
+        return None
+    try:
+        raw_topology = data.get("topology")
+        topology = (
+            SourceTopology(
+                solids=int(raw_topology["solids"]),
+                shells=int(raw_topology["shells"]),
+                faces=int(raw_topology["faces"]),
+            )
+            if isinstance(raw_topology, dict)
+            else None
+        )
+        lo = tuple(float(v) for v in data["bbox_min_mm"])
+        hi = tuple(float(v) for v in data["bbox_max_mm"])
+        if len(lo) != 3 or len(hi) != 3:
+            return None
+        return ExactGeometry(
+            available=True,
+            volume_mm3=float(data["volume_mm3"]),
+            surface_area_mm2=float(data["surface_area_mm2"]),
+            bbox_min_mm=lo,  # type: ignore[arg-type]
+            bbox_max_mm=hi,  # type: ignore[arg-type]
+            size_mm=tuple(h - l for h, l in zip(hi, lo)),  # type: ignore[arg-type]
+            is_valid=bool(data["is_valid"]),
+            topology=topology,
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------
