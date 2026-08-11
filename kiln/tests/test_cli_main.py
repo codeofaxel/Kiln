@@ -2112,3 +2112,51 @@ class TestMonitor:
             or "[Smart Monitoring]" in out
         ), out
         assert "0.55" in out and "amber" in out, out
+
+
+# ---------------------------------------------------------------------------
+# `kiln step check` — the door a user knocks on to ask "is my FreeCAD found?"
+# ---------------------------------------------------------------------------
+
+
+def test_step_check_reports_a_missing_backend_as_missing(runner):
+    """It read the backend's DICT for truthiness, which is never falsy.
+
+    So every backend printed "✓ available" on every machine, including ones
+    that had just been searched for and not found — the report that was
+    supposed to answer whether FreeCAD had been located said yes regardless.
+    """
+    support = {
+        "any_available": True,
+        "backends": {
+            "freecad": {"available": False, "executable": None, "priority": 1},
+            "ocp": {"available": True, "executable": None, "priority": 3},
+        },
+    }
+    with patch("kiln.step_import.check_step_support", return_value=support):
+        result = runner.invoke(cli, ["step", "check"])
+
+    assert result.exit_code == 0, result.output
+    freecad_line = next(ln for ln in result.output.splitlines() if "freecad" in ln)
+    ocp_line = next(ln for ln in result.output.splitlines() if "ocp" in ln)
+    assert "not found" in freecad_line, freecad_line
+    assert "available" in ocp_line and "not found" not in ocp_line, ocp_line
+
+
+def test_step_check_shows_where_the_backend_was_found(runner):
+    """A found backend names the command, so "which FreeCAD?" is answerable."""
+    support = {
+        "any_available": True,
+        "backends": {
+            "freecad": {
+                "available": True,
+                "executable": "/Applications/FreeCAD.app/Contents/MacOS/FreeCAD -c",
+                "priority": 1,
+            },
+        },
+    }
+    with patch("kiln.step_import.check_step_support", return_value=support):
+        result = runner.invoke(cli, ["step", "check"])
+
+    assert result.exit_code == 0, result.output
+    assert "/Applications/FreeCAD.app/Contents/MacOS/FreeCAD -c" in result.output

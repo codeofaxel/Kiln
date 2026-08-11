@@ -311,26 +311,7 @@ def test_the_cache_returns_the_same_measurement(plate):
 # ---------------------------------------------------------------------------
 
 
-def _freecad_console() -> list[str] | None:
-    """A FreeCAD that can run a script headless, or None.
-
-    Deliberately looks past ``shutil.which``: on macOS FreeCAD installs as an
-    app bundle, and FreeCAD 1.x ships no ``FreeCADCmd`` binary at all —
-    console mode is ``FreeCAD -c script.py``.  ``step_import._find_freecad_cmd``
-    searches PATH for ``FreeCADCmd``/``freecadcmd``/``freecad-cmd`` and so
-    finds neither the location nor the name, which is why a machine with
-    FreeCAD installed still reports no backend.  This test wants the real
-    second converter, so it goes and gets it.
-    """
-    import shutil
-
-    if cmd := shutil.which("FreeCADCmd") or shutil.which("freecadcmd"):
-        return [cmd]
-    bundle = Path("/Applications/FreeCAD.app/Contents/MacOS/FreeCAD")
-    return [str(bundle), "-c"] if bundle.is_file() else None
-
-
-def test_two_backends_grade_one_file_differently(tmp_path):
+def test_two_backends_grade_one_file_differently(tmp_path, monkeypatch):
     """The measurement the design rests on, taken with two REAL converters.
 
     A 150 mm sphere, written once, converted by each installed backend.  The
@@ -349,16 +330,22 @@ def test_two_backends_grade_one_file_differently(tmp_path):
     """
     import subprocess
 
-    console = _freecad_console()
-    if console is None:
-        pytest.skip("needs a second backend (FreeCAD) to compare against")
-
     from kiln.generation.validation import design_scorecard
     from kiln.step_import import (
         _FREECAD_SCRIPT_TEMPLATE,
         TESSELLATION_TOLERANCE,
+        _find_freecad_cmd,
         resolve_mesh_input,
     )
+
+    # This used to carry its own bundle-hunting helper, because the shared
+    # finder searched PATH for FreeCADCmd only and could not see a normally
+    # installed FreeCAD.  Now that it can, the test asks the same question
+    # every other door asks — and a regression in the finder shows up here as
+    # a skip instead of hiding behind a private copy that still worked.
+    console = _find_freecad_cmd()
+    if console is None:
+        pytest.skip("needs a second backend (FreeCAD) to compare against")
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeSphere
     from OCP.gp import gp_Pnt
     from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
@@ -395,7 +382,16 @@ def test_two_backends_grade_one_file_differently(tmp_path):
     if not freecad_mesh.is_file():
         pytest.skip("FreeCAD is present but did not produce a mesh here")
 
+    # Force the kernel for this side.  FreeCAD is priority 1, so from the
+    # moment it became detectable (2026-08-11) the shared resolver picks it
+    # and both halves of this comparison would be the same converter reading
+    # 8,000 both times — which is how this test caught its own premise
+    # dissolving rather than quietly comparing FreeCAD against itself.
+    import kiln.step_import as _step_import
+
+    monkeypatch.setattr(_step_import, "_find_freecad_cmd", lambda: None)
     occt_mesh, _conversion, refusal = resolve_mesh_input(str(path))
+    monkeypatch.undo()
     assert refusal is None, refusal
 
     occt = design_scorecard(occt_mesh)

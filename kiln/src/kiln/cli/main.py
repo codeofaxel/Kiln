@@ -10751,9 +10751,14 @@ def step_check(json_mode: bool) -> None:
             click.echo(format_response("success", data=support, json_mode=True))
         else:
             click.echo("STEP import backends:")
-            for backend, available in support.get("backends", {}).items():
-                status = "✓ available" if available else "✗ not found"
-                click.echo(f"  {backend}: {status}")
+            for backend, info in support.get("backends", {}).items():
+                # info is the backend's dict, which is always truthy — read
+                # the field.  Testing the dict itself reported every backend
+                # as available on every machine, including the ones that had
+                # just been looked for and not found.
+                status = "✓ available" if info.get("available") else "✗ not found"
+                where = info.get("executable")
+                click.echo(f"  {backend}: {status}" + (f"  ({where})" if where else ""))
             if support.get("any_available"):
                 click.echo("\n✓ STEP import is ready.")
             else:

@@ -22,6 +22,7 @@ Coverage areas:
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 from dataclasses import asdict
 from pathlib import Path
@@ -135,8 +136,21 @@ def real_kernel(_hide_ocp_backend_by_default, monkeypatch):
     Restores the function captured at import time (before any fixture could
     patch it), which is cheaper and far less invasive than reloading the
     module out from under everything else holding a reference to it.
+
+    Also silences the converters that outrank the kernel.  The name of this
+    fixture is a promise about which backend actually RUNS, and
+    convert_step_to_stl tries FreeCAD and then gmsh before it ever reaches
+    OCP.  That promise used to be kept by accident: _find_freecad_cmd
+    searched PATH for a FreeCADCmd binary that FreeCAD 1.x does not ship, so
+    it found nothing on any developer machine.  The moment it could see a
+    normally installed FreeCAD (2026-08-11), eight tests here began measuring
+    FreeCAD under a kernel fixture's name — every source-topology assertion
+    among them, since the FreeCAD path reports no topology at all and those
+    reads came back None.  A fixture that names a backend has to pick it.
     """
     monkeypatch.setattr("kiln.step_import._ocp_available", _REAL_OCP_AVAILABLE)
+    monkeypatch.setattr("kiln.step_import._find_freecad_cmd", lambda: None)
+    monkeypatch.setattr("kiln.step_import._find_gmsh_cmd", lambda: None)
     if not _REAL_OCP_AVAILABLE():
         pytest.skip("OCCT kernel not installed")
 
@@ -353,7 +367,7 @@ def test_path_traversal_rejected_output_dir(sample_step_file):
 # ---------------------------------------------------------------------------
 
 
-@patch("kiln.step_import._find_freecad_cmd", return_value="FreeCADCmd")
+@patch("kiln.step_import._find_freecad_cmd", return_value=["FreeCADCmd"])
 @patch("kiln.step_import._find_gmsh_cmd", return_value=None)
 @patch("kiln.step_import._cadquery_available", return_value=False)
 def test_freecad_backend(mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_dir):
@@ -718,7 +732,7 @@ def test_ocp_deflection_sits_between_waste_and_visible():
 # ---------------------------------------------------------------------------
 
 
-@patch("kiln.step_import._find_freecad_cmd", return_value="FreeCADCmd")
+@patch("kiln.step_import._find_freecad_cmd", return_value=["FreeCADCmd"])
 @patch("kiln.step_import._find_gmsh_cmd", return_value="gmsh")
 @patch("kiln.step_import._cadquery_available", return_value=False)
 def test_freecad_failure_falls_to_gmsh(mock_cq, mock_gmsh, mock_fc, sample_step_file):
@@ -2319,7 +2333,7 @@ def test_gmsh_bound_participates_in_the_conversion_cache_key(
 # ---------------------------------------------------------------------------
 
 
-@patch("kiln.step_import._find_freecad_cmd", return_value="FreeCADCmd")
+@patch("kiln.step_import._find_freecad_cmd", return_value=["FreeCADCmd"])
 @patch("kiln.step_import._find_gmsh_cmd", return_value=None)
 @patch("kiln.step_import._cadquery_available", return_value=False)
 def test_freecad_records_a_linear_only_bound(
@@ -2391,7 +2405,7 @@ def test_gmsh_records_its_bound_in_the_only_unit_it_accepts(
     assert result.conversion.bound.angular is None
 
 
-@patch("kiln.step_import._find_freecad_cmd", return_value="FreeCADCmd")
+@patch("kiln.step_import._find_freecad_cmd", return_value=["FreeCADCmd"])
 @patch("kiln.step_import._find_gmsh_cmd", return_value="gmsh")
 @patch("kiln.step_import._cadquery_available", return_value=False)
 def test_record_names_the_backend_that_RAN_not_the_one_first_in_line(
@@ -3213,3 +3227,183 @@ def test_topology_absent_from_child_reads_as_unknown():
     assert _topology_from_result(
         {"topology": {"solids": 0, "shells": 6, "faces": 6}}
     ) == SourceTopology(solids=0, shells=6, faces=6)
+
+
+# ---------------------------------------------------------------------------
+# Backend detection — finding a FreeCAD that is installed the normal way
+# ---------------------------------------------------------------------------
+
+
+def _fake_bundle(tmp_path: Path) -> Path:
+    """An executable file standing in for the .app launcher."""
+    bundle = tmp_path / "FreeCAD.app/Contents/MacOS/FreeCAD"
+    bundle.parent.mkdir(parents=True)
+    bundle.write_text("#!/bin/sh\nexit 0\n")
+    bundle.chmod(0o755)
+    return bundle
+
+
+def test_freecad_found_in_an_app_bundle_when_path_has_nothing(tmp_path, monkeypatch):
+    """The whole defect, in one assertion.
+
+    FreeCAD 1.x installs as /Applications/FreeCAD.app and ships NO
+    ``FreeCADCmd`` binary at all, so a PATH-only search finds a normally
+    installed FreeCAD by neither location nor name and Kiln reports no STEP
+    backend while a working converter sits on disk.  Measured 2026-08-11.
+    """
+    from kiln import step_import
+
+    bundle = _fake_bundle(tmp_path)
+    monkeypatch.setattr(step_import.shutil, "which", lambda _n: None)
+    monkeypatch.setattr(step_import, "_FREECAD_BUNDLE_PATHS", (str(bundle),))
+
+    # The console flag has to travel with the binary, so this is argv.
+    assert step_import._find_freecad_cmd() == [str(bundle), "-c"]
+    assert step_import.check_step_support()["backends"]["freecad"]["available"]
+
+
+def test_a_bundle_that_is_not_executable_is_not_a_backend(tmp_path, monkeypatch):
+    """Claiming a backend that cannot run is worse than claiming none.
+
+    convert_step_to_stl re-raises StepImportError from a detected backend
+    rather than falling through, so a false positive does not merely fail to
+    help — it breaks a machine that converts fine via the OCCT kernel.
+    """
+    from kiln import step_import
+
+    bundle = _fake_bundle(tmp_path)
+    bundle.chmod(0o644)
+    monkeypatch.setattr(step_import.shutil, "which", lambda _n: None)
+    monkeypatch.setattr(step_import, "_FREECAD_BUNDLE_PATHS", (str(bundle),))
+
+    assert step_import._find_freecad_cmd() is None
+    assert not step_import.check_step_support()["backends"]["freecad"]["available"]
+
+
+def test_console_binary_on_path_wins_and_takes_no_console_flag(monkeypatch):
+    """FreeCADCmd runs a script directly; only the launcher needs ``-c``."""
+    from kiln import step_import
+
+    monkeypatch.setattr(
+        step_import.shutil,
+        "which",
+        lambda n: "/usr/bin/FreeCADCmd" if n == "FreeCADCmd" else None,
+    )
+    assert step_import._find_freecad_cmd() == ["/usr/bin/FreeCADCmd"]
+
+
+def test_launcher_on_path_gets_the_console_flag(monkeypatch):
+    """A launcher reached by name is the same binary as one reached by path."""
+    from kiln import step_import
+
+    monkeypatch.setattr(
+        step_import.shutil,
+        "which",
+        lambda n: "/usr/local/bin/freecad" if n in ("FreeCAD", "freecad") else None,
+    )
+    assert step_import._find_freecad_cmd() == ["/usr/local/bin/freecad", "-c"]
+
+
+def test_the_console_flag_reaches_the_subprocess(tmp_path):
+    """The argv must arrive intact, with the script spliced on the end.
+
+    Pinned because the bug this replaced returned a bare name: splatting a
+    string would spell the command out one character per argument.
+    """
+    from kiln import step_import
+
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = list(cmd)
+        seen["stdin"] = kwargs.get("stdin")
+        out = tmp_path / "merged.stl"
+        out.write_bytes(b"\x00" * 10)
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.stdout = (
+            "PATH=/usr/bin\nlibspnav warning\n"
+            + "KILN_RESULT:"
+            + json.dumps({"body_count": 1, "outputs": [str(out)]})
+            + "\n"
+        )
+        proc.stderr = ""
+        return proc
+
+    step = tmp_path / "part.step"
+    step.write_text("ISO-10303-21;\nENDSEC;\nEND-ISO-10303-21;\n")
+
+    with patch("kiln.step_import.subprocess.run", side_effect=fake_run):
+        step_import._convert_via_freecad(
+            step, tmp_path, True, ["/Applications/FreeCAD.app/Contents/MacOS/FreeCAD", "-c"]
+        )
+
+    assert seen["cmd"][:2] == [
+        "/Applications/FreeCAD.app/Contents/MacOS/FreeCAD",
+        "-c",
+    ], "the console flag must survive to the child"
+    assert seen["cmd"][-1].endswith(".py")
+    # Console mode reads an open stdin and waits at an interactive prompt
+    # forever — measured 2026-08-11, the mesh was written and the process
+    # still had to be killed at 90 s.
+    assert seen["stdin"] is subprocess.DEVNULL, "stdin must be closed"
+
+
+def test_a_bare_string_is_refused_rather_than_spelled_out(tmp_path):
+    """[*"FreeCADCmd"] execs 'F'. Refuse it where it is cheap to see."""
+    from kiln import step_import
+
+    step = tmp_path / "part.step"
+    step.write_text("ISO-10303-21;\n")
+    with pytest.raises(TypeError):
+        step_import._convert_via_freecad(step, tmp_path, True, "FreeCADCmd")
+
+
+def test_the_cache_does_not_serve_one_backends_mesh_for_another(tmp_path, monkeypatch):
+    """A mesh cut by one backend must not be served for another.
+
+    The backends do not produce equivalent meshes — measured 2026-08-11 on one
+    150 mm sphere, 150,970 triangles from the OCCT kernel against 8,000 from
+    FreeCAD — so which backend ran is part of what the cached bytes ARE.  This
+    runs the REAL converters through the REAL cache rather than recomputing
+    the key, because the claim is about what a second caller is handed.
+    """
+    from kiln import step_import
+
+    # Deliberately NOT the real_kernel fixture: this one needs BOTH real
+    # converters live at once, and that fixture now silences FreeCAD so the
+    # backend it names is the backend that runs.
+    monkeypatch.setattr("kiln.step_import._ocp_available", _REAL_OCP_AVAILABLE)
+    if step_import._find_freecad_cmd() is None:
+        pytest.skip("needs a real FreeCAD to compare against the kernel")
+    if not _REAL_OCP_AVAILABLE():
+        pytest.skip("needs the OCCT kernel to compare against FreeCAD")
+
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeSphere
+    from OCP.gp import gp_Pnt
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    path = tmp_path / "sphere150.step"
+    writer = STEPControl_Writer()
+    writer.Transfer(
+        BRepPrimAPI_MakeSphere(gp_Pnt(0, 0, 0), 75.0).Shape(),
+        STEPControl_StepModelType.STEPControl_AsIs,
+    )
+    writer.Write(str(path))
+
+    def convert():
+        mesh, _warn, record = step_import.ensure_mesh_path(str(path), with_record=True)
+        return record.backend, len(step_import._read_binary_stl(mesh))
+
+    freecad_backend, freecad_tris = convert()
+    assert freecad_backend == "freecad"
+
+    monkeypatch.setattr(step_import, "_find_freecad_cmd", lambda: None)
+    kernel_backend, kernel_tris = convert()
+    assert kernel_backend == "occt"
+
+    assert kernel_tris != freecad_tris, (
+        "the second backend was handed the first one's cached mesh; the "
+        "backend has to be part of the cache key"
+    )
+    assert kernel_tris > freecad_tris * 5

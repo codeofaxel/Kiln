@@ -26,11 +26,13 @@ import logging
 import math
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -597,16 +599,82 @@ def _validate_output_dir(output_dir: str | None, step_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _find_freecad_cmd() -> str | None:
-    """Return the FreeCADCmd executable name if found on PATH."""
-    for name in ("FreeCADCmd", "freecadcmd", "freecad-cmd"):
-        if shutil.which(name):
-            return name
+# The purpose-built console binaries.  These take the script directly and
+# cannot open a window, so they are tried first on every platform.
+_FREECAD_CONSOLE_NAMES = ("FreeCADCmd", "freecadcmd", "freecad-cmd")
+
+# The ordinary launcher, which runs a script headless when given ``-c``.
+# FreeCAD 1.x ships NO FreeCADCmd at all — measured 2026-08-11, a stock
+# /Applications/FreeCAD.app contains exactly one binary, ``FreeCAD`` — so on a
+# current install this is not a fallback, it is the only door there is.
+_FREECAD_LAUNCHER_NAMES = ("FreeCAD", "freecad")
+
+# Where the launcher lives when it is NOT on PATH.  A macOS .app is a
+# directory, so installing FreeCAD the normal way puts nothing on PATH and
+# ``shutil.which`` can never see it.  Both entries are the standard system and
+# per-user Applications folders; deliberately no Linux or Windows paths, since
+# a wrong guess here is worse than none — see :func:`_find_freecad_cmd`.
+_FREECAD_BUNDLE_PATHS = (
+    "/Applications/FreeCAD.app/Contents/MacOS/FreeCAD",
+    "~/Applications/FreeCAD.app/Contents/MacOS/FreeCAD",
+)
+
+
+def _find_freecad_cmd() -> list[str] | None:
+    """Return argv for a FreeCAD that can run a script headless, or None.
+
+    Returns the ARGV rather than a bare name so the console flag travels with
+    the binary that needs it: ``FreeCADCmd script.py`` and
+    ``FreeCAD -c script.py`` are the same job through two different front
+    doors, and only the caller splicing in the script path can keep them
+    straight.
+
+    This searched PATH for ``FreeCADCmd``/``freecadcmd``/``freecad-cmd`` and
+    nothing else until 2026-08-11, which found a normally-installed FreeCAD in
+    neither respect: on macOS it installs as an .app bundle (nothing on PATH),
+    and FreeCAD 1.x dropped the ``FreeCADCmd`` binary entirely (nothing by
+    that name to find).  Both misses point the same way — Kiln reported no
+    STEP backend and sent the user to a 228 MB download while a working
+    converter sat in /Applications.
+
+    A path is added here only when it has been run and measured.  The reason
+    is asymmetric cost: :func:`convert_step_to_stl` re-raises
+    :class:`StepImportError` from a detected backend instead of falling
+    through to the next one, so a hopeful guess does not merely fail to help
+    — it takes a machine that converts fine via the OCCT kernel today and
+    breaks it.  An honest gap costs a user one install; a wrong path costs
+    them a working feature.
+    """
+    for name in _FREECAD_CONSOLE_NAMES:
+        if found := shutil.which(name):
+            return [found]
+    for name in _FREECAD_LAUNCHER_NAMES:
+        if found := shutil.which(name):
+            return [found, "-c"]
+    for candidate in _FREECAD_BUNDLE_PATHS:
+        bundle = Path(candidate).expanduser()
+        if bundle.is_file() and os.access(bundle, os.X_OK):
+            return [str(bundle), "-c"]
     return None
 
 
 def _find_gmsh_cmd() -> str | None:
-    """Return 'gmsh' if the CLI is on PATH."""
+    """Return 'gmsh' if the CLI is on PATH.
+
+    Deliberately NOT given the app-bundle treatment above, and the reason is
+    not that gmsh lacks a macOS bundle — it is that this probe and the
+    conversion it gates do not ask the same question.
+    :func:`_convert_via_gmsh` never runs this command: it shells
+    ``python3`` and the script does ``import gmsh``, so what the conversion
+    actually needs is the gmsh PYTHON MODULE, while what this checks for is
+    the CLI binary.  Teaching it to find a Gmsh.app would therefore report a
+    backend that cannot convert — and per the hard-fail note in
+    :func:`_find_freecad_cmd`, that is exactly the shape that breaks a
+    working machine.  Closing that mismatch means deciding which of the two
+    the probe is for, which is a real change and wants a machine with gmsh
+    installed to verify against; none was available (measured 2026-08-11: no
+    binary, no app bundle, no importable module).
+    """
     return "gmsh" if shutil.which("gmsh") else None
 
 
@@ -677,8 +745,11 @@ def check_step_support() -> dict[str, Any]:
 
     backends: dict[str, Any] = {
         "freecad": {
+            # Reported as one readable command, not the argv list: this goes
+            # out through `kiln step check` and a registered tool, where the
+            # useful answer is the line a human could paste.
             "available": freecad_cmd is not None,
-            "executable": freecad_cmd,
+            "executable": shlex.join(freecad_cmd) if freecad_cmd else None,
             "priority": 1,
         },
         "gmsh": {
@@ -717,13 +788,21 @@ def _convert_via_freecad(
     step_path: Path,
     output_dir: Path,
     merge_bodies: bool,
-    freecad_cmd: str,
+    freecad_cmd: Sequence[str],
 ) -> tuple[list[str], int]:
-    """Run FreeCADCmd with a helper script to convert STEP → STL.
+    """Run FreeCAD with a helper script to convert STEP → STL.
+
+    *freecad_cmd* is the argv from :func:`_find_freecad_cmd`, not a bare
+    name — the console flag has to stay attached to the binary that needs it.
 
     Returns:
         (list of output paths, body_count)
     """
+    if isinstance(freecad_cmd, str):
+        # A str is a Sequence[str], so splatting one would spell the command
+        # out a character per argument and exec 'F'.  Cheaper to refuse.
+
+        raise TypeError("freecad_cmd must be an argv sequence, not a string")
     script = _FREECAD_SCRIPT_TEMPLATE.format(
         step_path=str(step_path),
         output_dir=str(output_dir),
@@ -739,15 +818,24 @@ def _convert_via_freecad(
 
     try:
         result = subprocess.run(
-            [freecad_cmd, script_path],
+            [*freecad_cmd, script_path],
             capture_output=True,
             text=True,
+            # Console mode reads stdin when it is left open: it finishes the
+            # script, drops to an interactive '>>>' and waits there forever.
+            # Measured 2026-08-11 — the mesh was written and the process still
+            # had to be killed at 90 s, so without this the conversion burns
+            # the full timeout and then reports failure over a finished file.
+            stdin=subprocess.DEVNULL,
             timeout=SUBPROCESS_TIMEOUT_S,
         )
     finally:
         os.unlink(script_path)
 
-    # Parse output for KILN_RESULT line.
+    # Parse output for KILN_RESULT line.  The launcher prints the whole
+    # environment ahead of the script's own output, so this has to scan for
+    # the KILN_RESULT prefix rather than read a clean stdout — which
+    # _parse_kiln_result already does, line by line.
     return _parse_subprocess_result(result, "FreeCAD")
 
 
@@ -1957,8 +2045,17 @@ def ensure_mesh_path(
     import hashlib
     import shutil as _shutil
 
+    _freecad_argv = _find_freecad_cmd()
     backend_fingerprint = (
-        _find_freecad_cmd() or "",
+        # Joined to a string so the slot keeps the shape it has always had:
+        # a machine with no FreeCAD still fingerprints to "" and keeps every
+        # entry it holds, exactly as before.  A machine where FreeCAD is now
+        # FOUND does change key — which is the correct outcome, not a cost.
+        # Its cached meshes were cut by a different backend (measured on one
+        # sphere: 150,970 triangles from the kernel against 8,000 from
+        # FreeCAD), so serving them under the new backend would answer with
+        # the old converter's geometry forever.
+        shlex.join(_freecad_argv) if _freecad_argv else "",
         # The gmsh slot carries its density bound, not merely "is it here".
         # An entry written before gmsh was bounded holds a mesh cut at
         # whatever that machine's gmsh derived from the bounding box, and a
