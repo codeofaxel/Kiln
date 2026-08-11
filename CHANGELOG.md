@@ -167,14 +167,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   Printing from an external spool, Kiln pointed the printer at an AMS slot,
   so a machine with no AMS stopped and waited on a filament-mapping screen.
 
-  Thanks to [@hype-eth](https://github.com/hype-eth) for finding both of these
-  on a brand-new P2S, and for digging through the printer's own error codes to
-  prove what was happening.
+- **Kiln says how old a printer reading is.** A paused print could be reported
+  as still running, because the answer came from a cached update that had
+  stopped arriving. Kiln now tells you how fresh the reading is instead of
+  presenting stale information as current.
+
+- **Kiln no longer presents what it was told as what it checked.** Asked which
+  filament was loaded, Kiln could repeat a material someone typed in earlier as
+  though it had measured it — and a printer with nothing recorded at all looked
+  like a match. Both now say which they are.
 
 - **3MF files keep all of their objects.** A .3mf you bring to Kiln can hold
   its shapes in several separate parts, and Kiln was carrying only the first
   one into the file it sends the printer — so that file could open incomplete,
   or fail to open at all. Designs Kiln makes itself were never affected.
+
+  Thanks to [@hype-eth](https://github.com/hype-eth) for finding these on a
+  brand-new P2S, and for digging through the printer's own error codes to prove
+  what was happening.
 
 - **Kiln stops suggesting settings from a different design.** Move a hole or
   resize a slot and Kiln now treats it as the new part it is, instead of
