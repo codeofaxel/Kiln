@@ -46,8 +46,10 @@ from kiln.step_import import (
     _parse_subprocess_result,
     _validate_step_path,
     check_step_support,
+    convert_step,
     convert_step_to_stl,
     get_step_metadata,
+    _topology_from_result,
     resolve_mesh_input,
     surface_model_note,
     _read_cached_conversion,
@@ -3176,3 +3178,39 @@ def test_solid_with_internal_void_is_not_called_a_surface_model(
     assert result.conversion.source.solids == 1
     assert surface_model_note(result.conversion.source) is None
     assert not any("no solid body" in w for w in result.warnings)
+
+
+def test_colour_aware_path_reports_topology_too(real_kernel, tmp_dir):
+    """The door users actually knock on is convert_step, not convert_step_to_stl.
+
+    import_step_file takes the colour-aware XCAF path, which walks document
+    labels instead of one root shape.  Wiring only the plain reader left the
+    census null at the one door that matters — the whole feature invisible
+    where it is read.  Both paths must answer the same way.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+
+    box = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 77, 47, 17).Shape()
+    soup = _author_step(_loose_faces(box), tmp_dir / "xcaf_soup.step")
+    solid = _author_step(box, tmp_dir / "xcaf_solid.step")
+
+    soup_result = convert_step(soup, output_dir=str(tmp_dir / "a"))
+    assert soup_result.conversion.source == SourceTopology(
+        solids=0, shells=6, faces=6
+    )
+    assert any("no solid body" in w for w in soup_result.warnings)
+
+    solid_result = convert_step(solid, output_dir=str(tmp_dir / "b"))
+    assert solid_result.conversion.source.solids == 1
+    assert not any("no solid body" in w for w in solid_result.warnings)
+
+
+def test_topology_absent_from_child_reads_as_unknown():
+    """A child that did not report counts must not read as zero solids."""
+    assert _topology_from_result({"outputs": [], "body_count": 1}) is None
+    assert _topology_from_result({"topology": None}) is None
+    assert _topology_from_result({"topology": {"solids": 1}}) is None
+    assert _topology_from_result(
+        {"topology": {"solids": 0, "shells": 6, "faces": 6}}
+    ) == SourceTopology(solids=0, shells=6, faces=6)

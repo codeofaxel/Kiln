@@ -950,6 +950,8 @@ from OCP.StlAPI import StlAPI_Writer
 from OCP.TCollection import TCollection_ExtendedString
 from OCP.TDataStd import TDataStd_Name
 from OCP.TDF import TDF_LabelSequence
+from OCP.TopAbs import TopAbs_ShapeEnum
+from OCP.TopExp import TopExp_Explorer
 from OCP.TDocStd import TDocStd_Document
 from OCP.XCAFApp import XCAFApp_Application
 from OCP.XCAFDoc import XCAFDoc_ColorType, XCAFDoc_DocumentTool
@@ -989,10 +991,29 @@ def write(target, path):
     writer.Write(target, path)
 
 
+def count(target, kind):
+    exp = TopExp_Explorer(target, kind)
+    n = 0
+    while exp.More():
+        n += 1
+        exp.Next()
+    return n
+
+
+# Summed over the free shapes, which together ARE the file: this path walks
+# document labels rather than one root shape, so the census is accumulated
+# instead of read off a single tree.  Same three numbers as the plain
+# reader's, so a caller cannot tell which backend counted them.
+topology = {{"solids": 0, "shells": 0, "faces": 0}}
+
 outputs, names, colors = [], [], []
 for i in range(1, labels.Length() + 1):
     label = labels.Value(i)
     shape = shape_tool.GetShape_s(label)
+
+    topology["solids"] += count(shape, TopAbs_ShapeEnum.TopAbs_SOLID)
+    topology["shells"] += count(shape, TopAbs_ShapeEnum.TopAbs_SHELL)
+    topology["faces"] += count(shape, TopAbs_ShapeEnum.TopAbs_FACE)
 
     # Two things a STEP calls a "name" were stamped by software, not chosen by
     # a person, and both reach the user as gibberish in a slicer's object list:
@@ -1035,7 +1056,7 @@ for i in range(1, labels.Length() + 1):
 
 print("KILN_RESULT:" + json.dumps({{
     "outputs": outputs, "body_count": len(outputs),
-    "names": names, "colors": colors,
+    "names": names, "colors": colors, "topology": topology,
 }}))
 '''
 
@@ -1103,18 +1124,7 @@ def _convert_via_ocp(
         os.unlink(script_path)
 
     data = _parse_kiln_result(result, "OCCT")
-    # .get, not [], so a child from a half-upgraded install — the script is
-    # formatted from THIS module but a stale .pyc could predate the counts —
-    # reports "did not look" instead of raising on a missing key.
-    raw = data.get("topology")
-    topology = (
-        SourceTopology(
-            solids=raw["solids"], shells=raw["shells"], faces=raw["faces"]
-        )
-        if isinstance(raw, dict)
-        else None
-    )
-    return data["outputs"], data["body_count"], topology
+    return data["outputs"], data["body_count"], _topology_from_result(data)
 
 
 def _convert_via_cadquery(
@@ -1196,6 +1206,28 @@ def _parse_kiln_result(
         f"{backend_name} conversion produced no result. "
         f"stdout: {(result.stdout or '')[:300]}"
     )
+
+
+def _topology_from_result(data: dict[str, Any]) -> SourceTopology | None:
+    """Read the kernel's census out of a child's KILN_RESULT, or admit none.
+
+    Shared by both OCCT scripts so the plain and colour-aware paths cannot
+    grow different ideas of what the counts mean.  Absent or malformed reads
+    as ``None`` — "we did not look" — rather than raising or, worse,
+    defaulting to zero solids, which is the one wrong answer here: a child
+    from a half-upgraded install would report every file as surface soup.
+    """
+    raw = data.get("topology")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return SourceTopology(
+            solids=int(raw["solids"]),
+            shells=int(raw["shells"]),
+            faces=int(raw["faces"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def _parse_subprocess_result(
@@ -1865,6 +1897,16 @@ def convert_step(
     # caller reading :attr:`StepImportResult.part_names` should never have to
     # know which output format produced them.
     names = unique_object_names(data["names"])
+    # Same, for the census and the note it earns: this is the path
+    # import_step_file actually takes, so a surface model has to be visible
+    # here or the feature is invisible at the door users knock on.
+    conversion = MeshConversion(
+        backend="occt-xcaf",
+        bound=_KERNEL_BOUND,
+        source=_topology_from_result(data),
+    )
+    note = surface_model_note(conversion.source)
+    surface_warnings = [note] if note is not None else []
     parts = [
         {"stl_path": p, "name": n, "color": c}
         for p, n, c in zip(data["outputs"], names, data["colors"], strict=True)
@@ -1887,9 +1929,8 @@ def convert_step(
             output_format="stl",
             part_names=names,
             part_colors=data["colors"],
-            conversion=MeshConversion(
-                backend="occt-xcaf", bound=_KERNEL_BOUND
-            ),
+            warnings=surface_warnings,
+            conversion=conversion,
         )
 
     out_3mf = str(out_dir / f"{validated_path.stem}.3mf")
@@ -1910,7 +1951,8 @@ def convert_step(
         output_format="3mf",
         part_names=names,
         part_colors=data["colors"],
-        conversion=MeshConversion(backend="occt-xcaf", bound=_KERNEL_BOUND),
+        warnings=surface_warnings,
+        conversion=conversion,
     )
 
 
