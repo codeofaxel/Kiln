@@ -1262,17 +1262,48 @@ def _parse_model_file(model_path: str) -> dict[str, Any]:
     try:
         stats.update(_parse_binary_stl_bbox(model_path))
     except Exception as exc:
-        logger.debug("Could not parse STL bounding box from %s: %s", model_path, exc)
-        # Fallback: use file size as rough proxy (1KB ~ 1mm height, very rough).
-        size = os.path.getsize(model_path)
-        stats["height_mm"] = max(1.0, size / 10000.0)
+        # No fallback height.  This used to derive one from the FILE SIZE
+        # ("1KB ~ 1mm, very rough"), which is not a rough measurement of a
+        # part — it is not a measurement of a part at all, and it arrived
+        # downstream indistinguishable from a real one.  A caller that cannot
+        # be told the height must find that out, not be handed a number
+        # nobody took.
+        logger.debug("Could not parse geometry from %s: %s", model_path, exc)
+        raise AdaptiveSlicerError(
+            f"Could not read geometry from this file: {exc}"
+        ) from exc
 
     return stats
 
 
 def _parse_binary_stl_bbox(path: str) -> dict[str, Any]:
-    """Parse a binary STL file and extract bounding box."""
+    """Parse a binary STL file and extract bounding box.
+
+    Raises rather than guessing when the file is not a binary STL.  Every
+    check below exists because this function had none of them and answered
+    anyway: handed a real STEP file it read the ASCII text at bytes 80-84 as
+    a triangle count, unpacked more text as coordinates, and returned a part
+    7.18e+31 mm tall — reported by ``analyze_model_geometry`` as
+    ``success: true``, with regions an agent would happily plan against.
+
+    A wrong number that announces itself as a measurement is worse than a
+    refusal, because nothing downstream can tell it apart from a real one.
+    """
+    import os
     import struct
+
+    from kiln.step_import import looks_like_step
+
+    # Identity first, arithmetic second.  Whether this is CAD is a fact about
+    # the file, not a conclusion to be reached from a byte count that happens
+    # to look wrong — and saying so plainly is the difference between a user
+    # converting their file and a user re-exporting a file that was fine.
+    if looks_like_step(path):
+        raise AdaptiveSlicerError(
+            "This is a STEP (CAD) file, not a mesh. Nothing is wrong with it "
+            "— convert it at the door (`ensure_mesh_path`) before a mesh tool "
+            "reads it."
+        )
 
     with open(path, "rb") as fh:
         header = fh.read(80)
@@ -1285,6 +1316,24 @@ def _parse_binary_stl_bbox(path: str) -> dict[str, Any]:
             raise AdaptiveSlicerError("Truncated STL file")
 
         num_triangles = struct.unpack("<I", count_bytes)[0]
+
+        # A binary STL is exactly 84 + 50n bytes, with no padding and no
+        # optional sections, so the declared count is CHECKABLE against the
+        # file on disk.  Without this the function toured whatever bytes it
+        # found for coordinates and returned them as a height.  Only the
+        # too-short direction is refused, matching the long-standing check in
+        # generation/validation.py: some exporters append trailing bytes to a
+        # perfectly good STL, and refusing those would trade one wrong answer
+        # for a different one.
+        declared = 84 + 50 * num_triangles
+        actual = os.path.getsize(path)
+        if actual < declared:
+            raise AdaptiveSlicerError(
+                f"Not a readable binary STL: the header declares "
+                f"{num_triangles} triangles ({declared} bytes) but the file "
+                f"is {actual} bytes."
+            )
+
         if num_triangles == 0:
             return {"height_mm": 0.0}
 

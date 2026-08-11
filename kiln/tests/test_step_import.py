@@ -2682,3 +2682,80 @@ def test_the_thumbnail_path_deliberately_keeps_no_record():
     source = Path(slicer_tools.__file__).read_text(encoding="utf-8")
     assert "with_record" not in source
     assert "DELIBERATELY drops the conversion record" in source
+
+
+# ───────────── telling a CAD file apart from a broken mesh ─────────────
+#
+# A binary STL is 80 bytes of header, 4 bytes of triangle count, then 50
+# bytes per triangle.  Handed a STEP file, every one of Kiln's STL readers
+# skipped 80 bytes and read the next 4 — the ASCII "'Ope" of "Open CASCADE
+# Model" — as a count of 1,701,859,111 triangles.  It then reported the 19 KB
+# file as an STL missing 85 GB, i.e. it told an engineer their CAD export was
+# corrupt because it read the word "Open" as a number.
+
+_MINIMAL_STEP = (
+    b"ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('Open CASCADE Model'),'2;1');\n"
+    + b"/* padding so the reader gets past its 84-byte header */\n" * 4
+    + b"ENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n"
+)
+
+
+def test_a_step_file_is_recognised_from_its_bytes_not_its_name(tmp_path):
+    """The extension has already been believed once by the time a parser is
+    holding the file; content is what it can still check."""
+    from kiln.step_import import is_step_file, looks_like_step
+
+    misnamed = tmp_path / "part.stl"
+    misnamed.write_bytes(_MINIMAL_STEP)
+
+    assert looks_like_step(str(misnamed)) is True
+    assert is_step_file(str(misnamed)) is False  # the name says otherwise
+
+
+def test_a_real_mesh_is_not_mistaken_for_cad(tmp_path):
+    """The check has to be able to say no, or it is not a check."""
+    from kiln.step_import import looks_like_step
+
+    stl = tmp_path / "real.stl"
+    stl.write_bytes(b"\x00" * 80 + (1).to_bytes(4, "little") + b"\x00" * 50)
+    assert looks_like_step(str(stl)) is False
+
+
+def test_an_unreadable_path_is_simply_not_cad(tmp_path):
+    """Never raises: a parser mid-diagnosis is the worst place to introduce a
+    new exception."""
+    from kiln.step_import import looks_like_step
+
+    assert looks_like_step(str(tmp_path / "nope.step")) is False
+    assert looks_like_step(str(tmp_path)) is False  # a directory
+
+
+def test_the_stl_reader_stops_calling_a_valid_step_file_corrupt(tmp_path):
+    """The incident, replayed through the parser eight tools share."""
+    from kiln.generation.validation import _parse_stl
+
+    step = tmp_path / "bracket.step"
+    step.write_bytes(_MINIMAL_STEP)
+
+    errors: list[str] = []
+    triangles, _vertices = _parse_stl(step, errors)
+
+    assert triangles == []
+    assert len(errors) == 1
+    assert "STEP (CAD) file" in errors[0]
+    assert "nothing is wrong with it" in errors[0].lower()
+    # The specific accusation that sent people back to their CAD package.
+    assert "truncated" not in errors[0].lower()
+
+
+def test_a_genuinely_broken_stl_is_still_reported_as_a_broken_stl(tmp_path):
+    """The CAD branch must not swallow the real failure it was carved out of."""
+    from kiln.generation.validation import _parse_stl
+
+    broken = tmp_path / "cut_short.stl"
+    broken.write_bytes(b"\x00" * 80 + (500).to_bytes(4, "little") + b"\x00" * 50)
+
+    errors: list[str] = []
+    _parse_stl(broken, errors)
+    assert errors and "500 triangles" in errors[0]
+    assert "STEP" not in errors[0]

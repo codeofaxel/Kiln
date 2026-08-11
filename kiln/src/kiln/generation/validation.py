@@ -250,6 +250,31 @@ def _parse_stl(
     return _parse_stl_binary(path, errors)
 
 
+def _not_an_stl_reason(
+    path: Path, tri_count: int, expected_size: int, actual_size: int
+) -> str:
+    """Say what the file IS before saying what is wrong with it as an STL.
+
+    This sentence reaches a person through eight different tools, and for a
+    CAD file every one of them used to report a valid STEP export as a
+    truncated STL — which sends an engineer back to their CAD package to fix
+    a file that was never broken.  A wrong diagnosis costs more than no
+    diagnosis, precisely because it is actionable.
+    """
+    from kiln.step_import import looks_like_step
+
+    if looks_like_step(path):
+        return (
+            "This is a STEP (CAD) file, not a mesh — nothing is wrong with it. "
+            "Kiln reads STEP: convert it at the door (`ensure_mesh_path`) "
+            "before a mesh tool sees it."
+        )
+    return (
+        f"Not a valid binary STL: the header declares {tri_count} triangles "
+        f"({expected_size} bytes) but the file is {actual_size} bytes."
+    )
+
+
 def _parse_stl_binary(
     path: Path,
     errors: list[str],
@@ -266,10 +291,7 @@ def _parse_stl_binary(
         expected_size = _STL_HEADER_SIZE + _STL_COUNT_SIZE + _STL_TRIANGLE_SIZE * tri_count
         actual_size = path.stat().st_size
         if actual_size < expected_size:
-            errors.append(
-                f"Binary STL truncated: header says {tri_count} triangles "
-                f"({expected_size} bytes) but file is {actual_size} bytes."
-            )
+            errors.append(_not_an_stl_reason(path, tri_count, expected_size, actual_size))
             return [], []
 
         triangles = []

@@ -43,6 +43,22 @@ logger = logging.getLogger(__name__)
 
 _VALID_EXTENSIONS = frozenset({".step", ".stp"})
 
+#: The first line of every STEP file, mandated by the exchange standard
+#: itself (ISO 10303-21 clause 5).  Every CAD system that writes STEP writes
+#: this, so it identifies the format from the BYTES rather than from a name a
+#: user is free to change.
+#:
+#: Kept here, beside the extension set, because this module owns the question
+#: "is this a STEP file?" and the answer should not be spelled out again in
+#: whichever mesh parser happens to be holding the file.
+_STEP_MAGIC = b"ISO-10303-21"
+
+#: How far in to look for it.  A conforming file starts with the magic at byte
+#: zero; a few exporters emit a comment or a byte-order mark first, so allow a
+#: short run-up rather than insisting on offset 0 and calling a real CAD file
+#: unrecognised.
+_STEP_MAGIC_WINDOW = 512
+
 #: Default tessellation tolerance for mesh conversion (lower = finer mesh).
 TESSELLATION_TOLERANCE: float = 0.1
 
@@ -1289,6 +1305,34 @@ def _write_3mf(
 def is_step_file(path: str) -> bool:
     """True if this path names a STEP file, by extension."""
     return Path(path).suffix.lower() in _VALID_EXTENSIONS
+
+
+def looks_like_step(path: str) -> bool:
+    """True if this file's CONTENT is STEP, whatever it happens to be named.
+
+    The companion to :func:`is_step_file`, and the one a mesh parser wants.
+    A parser is holding an open file, not a user's intent: by the time it is
+    deciding how to read the bytes, the extension has already been believed
+    once, and if it was wrong the parser is about to describe the file to
+    somebody in terms of a format it does not have.
+
+    That is not hypothetical.  Handed a real 19 KB STEP file, Kiln's
+    binary-STL readers took bytes 80-84 — the ASCII ``'Ope`` of "Open CASCADE
+    Model" — as a triangle count of 1,701,859,111, and reported the file as a
+    truncated STL missing 85 GB.  That tells an engineer their CAD export is
+    CORRUPT.  It is not; it is simply not an STL.  The point of this function
+    is that a parser can say what it is actually looking at instead of
+    guessing in its own vocabulary.
+
+    Never raises: a file that cannot be opened or read is not a STEP file as
+    far as the caller is concerned, and a parser mid-diagnosis is the worst
+    possible place to introduce a new exception.
+    """
+    try:
+        with open(path, "rb") as fh:
+            return _STEP_MAGIC in fh.read(_STEP_MAGIC_WINDOW)
+    except OSError:
+        return False
 
 
 def ensure_mesh_path(

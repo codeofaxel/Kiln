@@ -1536,3 +1536,73 @@ class TestCoolingAndSpeedIntegration:
     def test_first_layer_speed_factor(self, slicer, pla_profile, standard_regions):
         plan = slicer.generate_plan(standard_regions, pla_profile, model_height_mm=10.0)
         assert plan.layer_speeds[0] == pla_profile.first_layer_speed_factor
+
+
+# ───────── a measurement nobody took must not look like one ─────────
+
+
+_MINIMAL_STEP = (
+    b"ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('Open CASCADE Model'),'2;1');\n"
+    + b"/* padding so the reader gets past its 84-byte header */\n" * 4
+    + b"ENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n"
+)
+
+
+def test_a_cad_file_is_refused_instead_of_measured_as_geometry(tmp_path):
+    """The incident: handed a real STEP file, this read the ASCII at bytes
+    80-84 as a triangle count, toured more text as coordinates, and returned a
+    part 7.18e+31 mm tall — which ``analyze_model_geometry`` reported as
+    ``success: true`` with regions an agent would plan against.
+
+    A wrong number that announces itself as a measurement is worse than a
+    refusal, because nothing downstream can tell it from a real one.
+    """
+    import pytest
+
+    from kiln.adaptive_slicer import AdaptiveSlicerError, _parse_model_file
+
+    step = tmp_path / "bracket.step"
+    step.write_bytes(_MINIMAL_STEP)
+
+    with pytest.raises(AdaptiveSlicerError) as caught:
+        _parse_model_file(str(step))
+    assert "STEP (CAD) file" in str(caught.value)
+
+
+def test_an_unreadable_file_yields_no_height_rather_than_one_from_its_size(tmp_path):
+    """The fallback used to derive height from the FILE SIZE ("1KB ~ 1mm,
+    very rough").  That is not a rough measurement of a part; it is not a
+    measurement of a part at all, and it arrived downstream indistinguishable
+    from a real one."""
+    import pytest
+
+    from kiln.adaptive_slicer import AdaptiveSlicerError, _parse_model_file
+
+    junk = tmp_path / "not_a_mesh.bin"
+    junk.write_bytes(b"\xff" * 5000)
+
+    with pytest.raises(AdaptiveSlicerError):
+        _parse_model_file(str(junk))
+
+
+def test_a_real_binary_stl_still_measures(tmp_path):
+    """The guard must not cost the working path — a 10 mm box still reads as
+    10 mm tall."""
+    import struct
+
+    from kiln.adaptive_slicer import _parse_model_file
+
+    tris = [
+        ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+        ((0.0, 0.0, 10.0), (1.0, 0.0, 10.0), (0.0, 1.0, 10.0)),
+    ]
+    payload = b"\x00" * 80 + len(tris).to_bytes(4, "little")
+    for tri in tris:
+        payload += struct.pack("<3f", 0.0, 0.0, 1.0)
+        for v in tri:
+            payload += struct.pack("<3f", *v)
+        payload += b"\x00\x00"
+    stl = tmp_path / "box.stl"
+    stl.write_bytes(payload)
+
+    assert _parse_model_file(str(stl))["height_mm"] == 10.0
