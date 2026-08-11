@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -10,6 +11,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from kiln.slicer import (
+    _build_bambu_command,
+    _collect_bambu_output,
+    _split_bambu_profiles,
     SlicerError,
     SliceResult,
     SlicerInfo,
@@ -718,18 +722,31 @@ class TestSlicerCliFamily:
 
         assert slicer_cli_family(self._info("/x/mystery", None)) == "prusa"
 
-    def test_slice_file_refuses_before_running_the_binary(self, tmp_path):
-        """The refusal names the cause, and never spawns the subprocess."""
+    def test_slice_file_drives_the_bambu_cli(self, tmp_path):
+        """The BambuStudio/OrcaSlicer dialect is built, not refused."""
         from kiln.slicer import SlicerInfo
 
         stl = _write_cube(str(tmp_path / "cube.stl"))
         fake = SlicerInfo(path="/x/OrcaSlicer", name="orcaslicer", version="OrcaSlicer-2.3.2:")
+        seen: dict = {}
+
+        def fake_run(cmd, **kwargs):
+            seen["cmd"] = cmd
+            work = cmd[cmd.index("--outputdir") + 1]
+            with open(os.path.join(work, "plate_1.gcode"), "w") as fh:
+                fh.write("G28\n; filament used [mm] = 1\n")
+            return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("kiln.slicer.find_slicer", return_value=fake), \
-             patch("kiln.slicer.subprocess.run") as ran:
-            with pytest.raises(SlicerError, match="BambuStudio/OrcaSlicer command line"):
-                slice_file(stl, output_dir=str(tmp_path / "out"))
-        ran.assert_not_called()
+             patch("kiln.slicer.subprocess.run", side_effect=fake_run):
+            result = slice_file(stl, output_dir=str(tmp_path / "out"))
+
+        assert result.success is True
+        assert "--slice" in seen["cmd"]
+        assert "--outputdir" in seen["cmd"]
+        assert not {"--export-gcode", "--output", "--load"} & set(seen["cmd"])
+        assert os.path.isfile(result.output_path)
+
 
     def test_not_found_message_no_longer_recommends_orcaslicer(self):
         """It used to send Bambu owners toward the one slicer Kiln cannot drive."""
@@ -761,3 +778,112 @@ class TestRealBinariesClassifyCorrectly:
         if not os.path.isfile(app):
             pytest.skip(f"{os.path.basename(app)} not installed")
         assert slicer_cli_family(find_slicer(app)) == "bambu"
+
+
+# ---------------------------------------------------------------------------
+# BambuStudio/OrcaSlicer backend
+# ---------------------------------------------------------------------------
+
+
+def _bambu(tmp_path):
+    from kiln.slicer import SlicerInfo
+
+    return SlicerInfo(path=str(tmp_path / "OrcaSlicer"), name="orcaslicer", version="OrcaSlicer-2.4.2")
+
+
+def _profile(tmp_path, name: str, kind: str) -> str:
+    """Write a minimal profile JSON declaring *kind* and return its path."""
+    path = tmp_path / name
+    path.write_text(json.dumps({"type": kind, "name": name}))
+    return str(path)
+
+
+class TestBambuProfiles:
+    """Profiles are routed by the type they declare, not by filename."""
+
+    def test_filament_goes_to_its_own_flag(self, tmp_path):
+        machine = _profile(tmp_path, "machine.json", "machine")
+        filament = _profile(tmp_path, "pla.json", "filament")
+
+        settings, filaments = _split_bambu_profiles(f"{machine};{filament}")
+
+        assert settings == [machine]
+        assert filaments == [filament]
+
+    def test_a_prusaslicer_ini_is_rejected_by_name(self, tmp_path):
+        """This CLI exits 251 on an .ini with an empty stderr, so say so here."""
+        ini = tmp_path / "config.ini"
+        ini.write_text("[print]\nlayer_height = 0.2\n")
+
+        with pytest.raises(SlicerError, match="not a bambu profile"):
+            _split_bambu_profiles(str(ini))
+
+    def test_json_that_is_not_a_profile_is_rejected(self, tmp_path):
+        odd = tmp_path / "odd.json"
+        odd.write_text("[]")
+
+        with pytest.raises(SlicerError, match="not a bambu profile"):
+            _split_bambu_profiles(str(odd))
+
+    def test_missing_profile_is_named(self, tmp_path):
+        with pytest.raises(SlicerError, match="Profile file not found"):
+            _split_bambu_profiles(str(tmp_path / "absent.json"))
+
+
+class TestBambuCommand:
+    """The command uses this CLI's flags and keeps the caller's placement."""
+
+    def test_uses_this_dialect_and_not_the_prusaslicer_one(self, tmp_path):
+        machine = _profile(tmp_path, "machine.json", "machine")
+        filament = _profile(tmp_path, "pla.json", "filament")
+
+        cmd = _build_bambu_command(_bambu(tmp_path), "/m/cube.stl", str(tmp_path), f"{machine};{filament}")
+
+        assert cmd[cmd.index("--load-settings") + 1] == machine
+        assert cmd[cmd.index("--load-filaments") + 1] == filament
+        assert cmd[-5:] == ["--slice", "1", "--outputdir", str(tmp_path), "/m/cube.stl"]
+        assert not {"--export-gcode", "--output", "--load"} & set(cmd)
+
+    def test_keeps_the_model_where_the_caller_put_it(self, tmp_path):
+        cmd = _build_bambu_command(_bambu(tmp_path), "/m/cube.stl", str(tmp_path), None)
+
+        assert cmd[cmd.index("--arrange") + 1] == "0"
+
+
+class TestBambuOutput:
+    """The self-named output is moved to the path the caller asked for."""
+
+    def test_moves_the_gcode_and_ignores_other_files(self, tmp_path):
+        work = tmp_path / "work"
+        work.mkdir()
+        (work / "plate_1.png").write_text("thumbnail")
+        (work / "plate_1.gcode").write_text("G28\n")
+        out_file = str(tmp_path / "cube.gcode")
+
+        _collect_bambu_output(str(work), out_file, "")
+
+        assert Path(out_file).read_text() == "G28\n"
+        assert not (work / "plate_1.gcode").exists()
+
+    def test_no_gcode_produced_is_reported_with_the_slicer_output(self, tmp_path):
+        work = tmp_path / "work"
+        work.mkdir()
+
+        with pytest.raises(SlicerError, match="produced no G-code") as exc:
+            _collect_bambu_output(str(work), str(tmp_path / "cube.gcode"), "some stdout")
+
+        assert "some stdout" in str(exc.value)
+
+    def test_scratch_directory_is_removed_when_the_slicer_fails(self, tmp_path):
+        stl = _write_cube(str(tmp_path / "cube.stl"))
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        machine = _profile(tmp_path, "machine.json", "machine")
+
+        with patch("kiln.slicer.find_slicer", return_value=_bambu(tmp_path)), \
+             patch("kiln.slicer.subprocess.run",
+                   return_value=MagicMock(returncode=251, stdout="run found error", stderr="")), \
+             pytest.raises(SlicerError, match="run found error"):
+            slice_file(stl, output_dir=str(out_dir), profile=machine)
+
+        assert list(out_dir.iterdir()) == []

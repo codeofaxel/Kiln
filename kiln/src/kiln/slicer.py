@@ -259,6 +259,80 @@ def _get_version(slicer_path: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _split_bambu_profiles(profile: str) -> tuple[list[str], list[str]]:
+    """Route a ``;``-separated profile list to this CLI's two load flags.
+
+    Routing reads the ``type`` inside each file because a filament profile
+    given to ``--load-settings`` is accepted and then ignored.
+    """
+    import json
+
+    settings: list[str] = []
+    filaments: list[str] = []
+    for entry in profile.split(";"):
+        path = os.path.abspath(os.path.expanduser(entry.strip()))
+        if not path:
+            continue
+        if not os.path.isfile(path):
+            raise SlicerError(f"Profile file not found: {os.path.basename(path)}")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                kind = str(json.load(fh)["type"]).lower()
+        except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError) as exc:
+            # This CLI exits 251 on a PrusaSlicer .ini with an empty stderr, so
+            # name the file here instead.
+            raise SlicerError(
+                f"{os.path.basename(path)} is not a {_CLI_BAMBU} profile. This "
+                f"slicer loads JSON profiles carrying a 'type' field."
+            ) from exc
+        (filaments if kind == "filament" else settings).append(path)
+    return settings, filaments
+
+
+def _build_bambu_command(
+    slicer: SlicerInfo,
+    input_abs: str,
+    work_dir: str,
+    profile: str | None,
+) -> list[str]:
+    """Build a headless slice command for the BambuStudio/OrcaSlicer CLI."""
+    cmd = [slicer.path]
+    if profile:
+        settings, filaments = _split_bambu_profiles(profile)
+        if settings:
+            cmd += ["--load-settings", ";".join(settings)]
+        if filaments:
+            cmd += ["--load-filaments", ";".join(filaments)]
+    # --arrange 0: the caller positions the model, the slicer must not move it.
+    # --slice 1: one plate, since slice_file returns one file.
+    cmd += ["--arrange", "0", "--slice", "1", "--outputdir", work_dir, input_abs]
+    return cmd
+
+
+def _bambu_failure_detail(work_dir: str | None) -> str:
+    """Return the reason this CLI logged for a failed run, if it wrote one."""
+    if work_dir is None:
+        return ""
+    for log in sorted(Path(work_dir).glob("*.log")):
+        with contextlib.suppress(OSError, UnicodeDecodeError):
+            text = log.read_text(encoding="utf-8", errors="replace").strip()
+            if text:
+                return text.splitlines()[-1]
+    return ""
+
+
+def _collect_bambu_output(work_dir: str, out_file: str, stdout: str) -> None:
+    """Move this CLI's self-named output (``plate_1.gcode``) to *out_file*."""
+    produced = sorted(
+        p for p in Path(work_dir).iterdir() if p.suffix.lower() in {".gcode", ".gco", ".g"}
+    )
+    if not produced:
+        raise SlicerError(
+            f"The slicer reported success but produced no G-code. stdout: {stdout.strip()[:300]}"
+        )
+    shutil.move(str(produced[0]), out_file)
+
+
 def _gcode_output_is_complete(out_file: str) -> bool:
     """Whether *out_file* looks like a finished slice, not a truncated one.
 
@@ -302,6 +376,9 @@ def slice_file(
         output_name: Override the output file name.  Defaults to the
             input file's stem with ``.gcode`` extension.
         profile: Path to a slicer profile/config file (.ini or .json).
+            The BambuStudio/OrcaSlicer CLI takes a ``;``-separated list
+            instead; each entry is routed by the ``type`` it declares, so
+            order does not matter.  ``~`` is expanded.
         slicer_path: Explicit slicer binary path.  Auto-detected if omitted.
         extra_args: Additional CLI arguments to pass to the slicer.
         timeout: Maximum slicing time in seconds (default 300).
@@ -326,23 +403,10 @@ def slice_file(
     # Find slicer
     slicer = find_slicer(slicer_path)
 
-    # Say what is actually wrong.  Every command below is PrusaSlicer dialect,
-    # so an Orca/BambuStudio binary used to reach the subprocess and come back
-    # with "Invalid option --export-gcode" and exit 254 — a message about a
-    # flag, for a user who chose a slicer.  Refusing here costs nothing that
-    # worked a moment ago: those flags never ran on these binaries.
-    if slicer_cli_family(slicer) == _CLI_BAMBU:
-        raise SlicerError(
-            f"{os.path.basename(slicer.path)} uses the BambuStudio/OrcaSlicer "
-            f"command line, which has no --export-gcode, --output or --load "
-            f"flag and loads presets as JSON rather than the PrusaSlicer .ini "
-            f"Kiln generates. Kiln cannot drive it yet.\n"
-            f"{_INSTALL_PRUSASLICER}\n"
-            f"Your printer profile and settings are unaffected."
-        )
+    family = slicer_cli_family(slicer)
 
     # Prepare output
-    out_dir = output_dir or _DEFAULT_OUTPUT_DIR
+    out_dir = os.path.abspath(output_dir or _DEFAULT_OUTPUT_DIR)
     os.makedirs(out_dir, mode=0o700, exist_ok=True)
 
     if output_name:
@@ -371,50 +435,70 @@ def slice_file(
         os.unlink(out_file)
 
     # Build command
-    cmd: list[str] = [
-        slicer.path,
-        "--export-gcode",
-        input_abs,
-        "--output",
-        out_file,
-    ]
-
-    if profile:
-        if not os.path.isfile(profile):
-            raise SlicerError(f"Profile file not found: {os.path.basename(profile)}")
-        cmd.extend(["--load", profile])
-
-    if extra_args:
-        cmd.extend(extra_args)
-
-    logger.info("Slicing: %s", " ".join(cmd))
-
-    # Run
+    bambu_work_dir: str | None = None
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        # Clean up partial output on timeout
-        with contextlib.suppress(OSError):
-            os.unlink(out_file)
-        raise SlicerError(
-            f"Slicing timed out after {timeout}s. The model may be too complex or the slicer is hanging."
-        ) from None
-    except OSError as exc:
-        raise SlicerError(f"Failed to run slicer: {exc}") from exc
+        if family == _CLI_BAMBU:
+            # This CLI names its own output, so it slices into a scratch
+            # directory and the file is moved to out_file afterwards.
+            bambu_work_dir = tempfile.mkdtemp(prefix=".kiln_bambu_", dir=out_dir)
+            cmd = _build_bambu_command(slicer, input_abs, bambu_work_dir, profile)
+        else:
+            cmd = [
+                slicer.path,
+                "--export-gcode",
+                input_abs,
+                "--output",
+                out_file,
+            ]
+            if profile:
+                if not os.path.isfile(profile):
+                    raise SlicerError(f"Profile file not found: {os.path.basename(profile)}")
+                cmd.extend(["--load", profile])
 
-    crashed_after_finishing = (
-        result.returncode != 0
-        and result.returncode < 0  # killed by a signal, not a reported error
-        and _gcode_output_is_complete(out_file)
-    )
-    if result.returncode != 0 and not crashed_after_finishing:
-        stderr_snippet = (result.stderr or "").strip()[:500]
-        raise SlicerError(f"Slicer exited with code {result.returncode}. stderr: {stderr_snippet}")
+        if extra_args:
+            cmd.extend(extra_args)
+
+        logger.info("Slicing: %s", " ".join(cmd))
+
+        # Run
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=bambu_work_dir,
+            )
+        except subprocess.TimeoutExpired:
+            # Clean up partial output on timeout
+            with contextlib.suppress(OSError):
+                os.unlink(out_file)
+            raise SlicerError(
+                f"Slicing timed out after {timeout}s. The model may be too complex or the slicer is hanging."
+            ) from None
+        except OSError as exc:
+            raise SlicerError(f"Failed to run slicer: {exc}") from exc
+
+        crashed_after_finishing = (
+            result.returncode != 0
+            and result.returncode < 0  # killed by a signal, not a reported error
+            and _gcode_output_is_complete(out_file)
+        )
+        if result.returncode != 0 and not crashed_after_finishing:
+            stderr_snippet = (result.stderr or "").strip()[:500]
+            message = f"Slicer exited with code {result.returncode}. stderr: {stderr_snippet}"
+            if not stderr_snippet:
+                # This CLI leaves stderr empty and writes the reason to a log
+                # beside its output, so read that rather than report nothing.
+                detail = _bambu_failure_detail(bambu_work_dir) or (result.stdout or "").strip()
+                message += f" stdout: {detail[:500]}"
+            raise SlicerError(message)
+
+        if bambu_work_dir is not None:
+            _collect_bambu_output(bambu_work_dir, out_file, result.stdout or "")
+    finally:
+        if bambu_work_dir is not None:
+            shutil.rmtree(bambu_work_dir, ignore_errors=True)
 
     # Verify output exists
     if not os.path.isfile(out_file):
