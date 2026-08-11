@@ -7,6 +7,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Kiln works with OrcaSlicer and BambuStudio now.** If one of those is the
+  slicer you have, Kiln can finally use it. Kiln had listed them as supported
+  for a long time while only ever being able to drive PrusaSlicer, so anyone
+  without PrusaSlicer hit a confusing error instead of a print. There's
+  nothing to set up: Kiln works out which slicer you have and talks to it
+  properly, and your existing printer settings carry over untouched.
+
 - **Telling us something's broken no longer needs an account.** Reporting a
   problem from inside a chat now works whether or not you've signed in — the
   install least able to connect is usually the one with the most to say.
@@ -157,6 +164,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   for your machine and the panel says so.
 
 ### Fixed
+
+- **Seven Bambu printer profiles can slice again.** P2S, P1S, P1P, X1 Carbon,
+  X1E, H2S and A1 mini were quietly failing every print through Kiln's own
+  profile — no error message, just no file at the end. All seven work now.
 
 - **Your stats stopped counting failed work as finished.** A tool that failed
   could still tick over your generations or decorations count for the day, so
