@@ -83,12 +83,23 @@ def _make_45_degree_overhang() -> list[_Tri]:
 
 
 def _make_steep_overhang() -> list[_Tri]:
-    """Triangles with 70+ degree overhang (near-horizontal underside)."""
+    """A near-horizontal underside 10mm above the plate, over a footing.
+
+    The slab needs something beneath it to be an overhang at all: a mesh
+    whose lowest face is its ONLY face just rests on the bed, and the bed
+    carries it.  The footing at z=0 puts the model on the plate so the
+    slab is genuinely in the air, which is what this fixture is for.
+    """
     # Downward-facing triangles at height 10 — reversed winding for -Z normal
-    return [
+    slab = [
         ((0.0, 0.0, 10.0), (20.0, 20.0, 10.0), (20.0, 0.0, 10.0)),
         ((0.0, 0.0, 10.0), (0.0, 20.0, 10.0), (20.0, 20.0, 10.0)),
     ]
+    footing = [
+        ((0.0, 0.0, 0.0), (20.0, 20.0, 0.0), (20.0, 0.0, 0.0)),
+        ((0.0, 0.0, 0.0), (0.0, 20.0, 0.0), (20.0, 20.0, 0.0)),
+    ]
+    return slab + footing
 
 
 def _make_cube_triangles(size: float = 20.0) -> list[_Tri]:

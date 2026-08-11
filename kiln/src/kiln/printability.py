@@ -24,7 +24,13 @@ from typing import Any, Literal
 import numpy as np
 
 from kiln import _vec
-from kiln.generation.validation import _parse_obj, _parse_stl
+from kiln.generation.validation import (
+    _bed_threshold_z,
+    _is_bed_supported_triangle,
+    _mesh_bed_z,
+    _parse_obj,
+    _parse_stl,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -972,16 +978,6 @@ def _normalize_triangle_winding(
     return _normalize_triangle_winding_centroid(triangles)
 
 
-def _is_bed_supported_triangle(
-    tri: tuple[tuple[float, ...], ...],
-    z_min: float,
-    layer_height: float,
-) -> bool:
-    """Return True when a triangle is effectively resting on the build plate."""
-    threshold = z_min + layer_height * 2.0
-    return all(v[2] <= threshold for v in tri)
-
-
 def _parse_mesh(
     file_path: str,
 ) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
@@ -1822,7 +1818,7 @@ def _analyze_bridging(
     if normalize_winding:
         triangles = _normalize_triangle_winding(triangles)
 
-    bed_threshold = z_min + layer_height * 2
+    bed_threshold = _bed_threshold_z(z_min, layer_height)
 
     # ---- Filter pass: collect bridge-candidate triangles -----------
     candidates: list[tuple[tuple[float, ...], ...]] = []
@@ -3042,7 +3038,9 @@ def analyze_printability(
         "z_min": min(zs),
         "z_max": max(zs),
     }
-    z_min = bbox["z_min"]
+    # The plate the model rests on comes from geometry, not from the
+    # parsed vertex list, which may carry vertices no face references.
+    z_min = _mesh_bed_z(triangles)
 
     # Soft tier seam: load the printability_judgment overlay once and
     # pass it to each material-derived sub-analysis. Empty overlay ->
