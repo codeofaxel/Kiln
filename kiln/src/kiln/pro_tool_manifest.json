@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-11T03:56:34.672912+00:00",
+  "generated": "2026-08-11T06:17:49.998531+00:00",
   "tool_count": 414,
   "categories": {
     "product_generators": {
@@ -112,6 +112,16 @@
       "pitch": "Report a bug or share feedback from inside an agent chat. Free for everyone \u2014 server-side moderation, prompt-injection sanitisation, and rate-limiting keep the queue clean before anything reaches the team."
     }
   },
+  "tiers": {
+    "business": {
+      "benefits": "Business adds team review, approval gates, and 3 printers (grow to 50).",
+      "upgrade_url": "https://kiln3d.com/pricing"
+    },
+    "enterprise": {
+      "benefits": "Enterprise adds SSO, RBAC, and audit export.",
+      "upgrade_url": "https://kiln3d.com/pricing"
+    }
+  },
   "tools": [
     {
       "name": "ams_filament_drying",
@@ -205,7 +215,7 @@
     },
     {
       "name": "auto_generate_manual_for_print",
-      "description": "Fire the automatic manual trigger for a multi-part print (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Fire the automatic manual trigger for a multi-part print (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "assembly_manuals",
@@ -305,7 +315,7 @@
     },
     {
       "name": "derive_assembly_plan",
-      "description": "Derive an assembly plan from part GEOMETRY \u2014 no hand declaration needed.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Derive an assembly plan from part GEOMETRY \u2014 no hand declaration needed.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "assembly_manuals",
@@ -368,7 +378,7 @@
     },
     {
       "name": "diff_assembly_manuals",
-      "description": "Compute a \"what changed\" PDF between two manual revisions (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Compute a \"what changed\" PDF between two manual revisions (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "assembly_manuals",
@@ -559,7 +569,7 @@
     },
     {
       "name": "embed_manual_in_3mf",
-      "description": "Augment a 3MF with the assembly manual + signed manifest (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Augment a 3MF with the assembly manual + signed manifest (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "assembly_manuals",
@@ -632,7 +642,7 @@
     },
     {
       "name": "find_manual_siblings",
-      "description": "List sibling revisions of a parametric design (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "List sibling revisions of a parametric design (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "assembly_manuals",
@@ -662,7 +672,7 @@
     },
     {
       "name": "generate_assembly_manual",
-      "description": "Generate a flat-pack-style assembly manual for a multi-part print (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a flat-pack-style assembly manual for a multi-part print (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "assembly_manuals",
@@ -841,7 +851,7 @@
     },
     {
       "name": "get_build_history",
-      "description": "Show what prior builds of a design have taught us (Enterprise) \u2014 the read side of the closed loop.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Show what prior builds of a design have taught us (Enterprise) \u2014 the read side of the closed loop.\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "enterprise",
       "access": "enterprise",
       "category": "assembly_manuals",
@@ -871,7 +881,7 @@
     },
     {
       "name": "get_manual_revision",
-      "description": "Fetch a single manual revision by id (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Fetch a single manual revision by id (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "assembly_manuals",
@@ -891,7 +901,7 @@
     },
     {
       "name": "list_manual_history",
-      "description": "List the chronological revision history of a design's manuals (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "List the chronological revision history of a design's manuals (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "assembly_manuals",
@@ -916,7 +926,7 @@
     },
     {
       "name": "load_assembly_manual",
-      "description": "Load a previously generated manual's spec back into a dict (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Load a previously generated manual's spec back into a dict (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "assembly_manuals",
@@ -953,7 +963,7 @@
     },
     {
       "name": "record_build_outcome",
-      "description": "Record what actually happened building a unit from a factory work instruction (Enterprise) \u2014 the write side of the closed loop.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Record what actually happened building a unit from a factory work instruction (Enterprise) \u2014 the write side of the closed loop.\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "enterprise",
       "access": "enterprise",
       "category": "assembly_manuals",
@@ -1059,7 +1069,7 @@
     },
     {
       "name": "retire_manual_revision",
-      "description": "Soft-delete a manual revision (Business+, owner-only).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Soft-delete a manual revision (Business+, owner-only).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "assembly_manuals",
@@ -1803,7 +1813,7 @@
     },
     {
       "name": "cloud_pull_dfm_assessments",
-      "description": "Merge a drawing's remote manufacturability verdicts into local.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Merge a drawing's remote manufacturability verdicts into local.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "cloud_sync",
@@ -1838,7 +1848,7 @@
     },
     {
       "name": "cloud_pull_fair_records",
-      "description": "Read First Article Inspection records back from the cloud.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Read First Article Inspection records back from the cloud.\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "enterprise",
       "access": "enterprise",
       "category": "cloud_sync",
@@ -1871,7 +1881,7 @@
     },
     {
       "name": "cloud_pull_manual_history",
-      "description": "Merge a design's remote manual-revision history into local.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Merge a design's remote manual-revision history into local.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "cloud_sync",
@@ -1975,7 +1985,7 @@
     },
     {
       "name": "cloud_push_dfm_assessments",
-      "description": "Mirror a drawing's manufacturability verdicts to a remote.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Mirror a drawing's manufacturability verdicts to a remote.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "cloud_sync",
@@ -2000,7 +2010,7 @@
     },
     {
       "name": "cloud_push_fair_records",
-      "description": "Mirror First Article Inspection records to your cloud workspace.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Mirror First Article Inspection records to your cloud workspace.\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "enterprise",
       "access": "enterprise",
       "category": "cloud_sync",
@@ -2095,7 +2105,7 @@
     },
     {
       "name": "cloud_push_manual_history",
-      "description": "Push a design's assembly-manual revision history to a remote.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Push a design's assembly-manual revision history to a remote.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "cloud_sync",
@@ -2551,7 +2561,7 @@
     },
     {
       "name": "generate_qr_decoration",
-      "description": "Generate a QR code heightmap for embossing onto 3D models (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a QR code heightmap for embossing onto 3D models (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "decoration",
@@ -3204,7 +3214,7 @@
     },
     {
       "name": "smart_redesign",
-      "description": "Interpret a natural language instruction and modify the design (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Interpret a natural language instruction and modify the design (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "design_modification",
@@ -8005,7 +8015,7 @@
     },
     {
       "name": "assess_drawing_manufacturability",
-      "description": "The verdict: can this machine hold this drawing's tolerances?\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "The verdict: can this machine hold this drawing's tolerances?\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "drawing_intake",
@@ -8078,7 +8088,7 @@
     },
     {
       "name": "intake_engineering_drawing",
-      "description": "Start a drawing intake: register the drawing and get its pages to read.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Start a drawing intake: register the drawing and get its pages to read.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "drawing_intake",
@@ -8103,7 +8113,7 @@
     },
     {
       "name": "manage_drawing_intakes",
-      "description": "Housekeep the drawing-intake workspace: list intakes, archive, reclaim disk.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Housekeep the drawing-intake workspace: list intakes, archive, reclaim disk.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "drawing_intake",
@@ -8155,7 +8165,7 @@
     },
     {
       "name": "submit_drawing_extraction",
-      "description": "Submit your structured extraction of a drawing for verification.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Submit your structured extraction of a drawing for verification.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "drawing_intake",
@@ -9295,7 +9305,7 @@
     },
     {
       "name": "assess_conformal_coating_application",
-      "description": "Assess a populated board's conformal-coating and process path.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Assess a populated board's conformal-coating and process path.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "engineering_intelligence",
@@ -9601,7 +9611,7 @@
     },
     {
       "name": "assess_fair_reaccomplishment",
-      "description": "Detect FAI re-accomplishment signals from evidence drift.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Detect FAI re-accomplishment signals from evidence drift.\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "enterprise",
       "access": "enterprise",
       "category": "engineering_intelligence",
@@ -9915,7 +9925,7 @@
     },
     {
       "name": "ingest_material_datasheet",
-      "description": "Verify quoted datasheet values and build a structured material profile.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Verify quoted datasheet values and build a structured material profile.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "engineering_intelligence",
@@ -9986,7 +9996,7 @@
     },
     {
       "name": "list_ingested_materials",
-      "description": "Browse your ingested-materials library, or fetch one full spec.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Browse your ingested-materials library, or fetch one full spec.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "engineering_intelligence",
@@ -10034,7 +10044,7 @@
     },
     {
       "name": "manage_fair_characteristics",
-      "description": "Characteristic sets and inspection results for FAIR Form 3.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Characteristic sets and inspection results for FAIR Form 3.\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "enterprise",
       "access": "enterprise",
       "category": "engineering_intelligence",
@@ -10166,7 +10176,7 @@
     },
     {
       "name": "manage_fair_evidence_bundle",
-      "description": "Portable FAIR evidence bundles for air-gapped team transfer.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Portable FAIR evidence bundles for air-gapped team transfer.\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "enterprise",
       "access": "enterprise",
       "category": "engineering_intelligence",
@@ -10196,7 +10206,7 @@
     },
     {
       "name": "manage_fair_registry",
-      "description": "Record and read the attested identities FAIR drafts consume.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Record and read the attested identities FAIR drafts consume.\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "enterprise",
       "access": "enterprise",
       "category": "engineering_intelligence",
@@ -10249,7 +10259,7 @@
     },
     {
       "name": "manage_protection_outcomes",
-      "description": "Record and read real outcome observations for a protected board configuration (Enterprise).\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Record and read real outcome observations for a protected board configuration (Enterprise).\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "enterprise",
       "access": "enterprise",
       "category": "engineering_intelligence",
@@ -10329,7 +10339,7 @@
     },
     {
       "name": "manage_supplier_document_evidence",
-      "description": "Create and maintain controlled supplier evidence (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Create and maintain controlled supplier evidence (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "engineering_intelligence",
@@ -10529,7 +10539,7 @@
     },
     {
       "name": "prepopulate_fair_draft",
-      "description": "Pre-populate an AS9102 FAIR draft from a Kiln evidence case.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Pre-populate an AS9102 FAIR draft from a Kiln evidence case.\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "enterprise",
       "access": "enterprise",
       "category": "engineering_intelligence",
@@ -10692,7 +10702,7 @@
     },
     {
       "name": "read_material_datasheet",
-      "description": "Get the extraction rules + field catalog (and fingerprint your text).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Get the extraction rules + field catalog (and fingerprint your text).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "engineering_intelligence",
@@ -11013,7 +11023,7 @@
     },
     {
       "name": "recommend_static_dissipative_material",
-      "description": "Which static-dissipative material for this job -- or whether the one you named fits.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Which static-dissipative material for this job -- or whether the one you named fits.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "engineering_intelligence",
@@ -11113,7 +11123,7 @@
     },
     {
       "name": "record_chemical_outcome",
-      "description": "Record how a printed part actually held up to a chemical -- so Kiln learns.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Record how a printed part actually held up to a chemical -- so Kiln learns.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "engineering_intelligence",
@@ -11168,7 +11178,7 @@
     },
     {
       "name": "record_esd_measurement",
-      "description": "Log a measured surface resistance for a printed dissipative part.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Log a measured surface resistance for a printed dissipative part.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "engineering_intelligence",
@@ -11315,9 +11325,9 @@
     },
     {
       "name": "check_skin_contact_declaration",
-      "description": "Check a supplier substance declaration against per-market restricted-substance limits (Enterprise).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Check a supplier substance declaration against per-market restricted-substance limits (Enterprise).\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "enterprise",
+      "access": "enterprise",
       "category": "material_safety",
       "parameters": {
         "properties": {
@@ -11403,7 +11413,7 @@
     },
     {
       "name": "record_skin_contact_outcome",
-      "description": "Log what happened when someone actually wore or handled a printed part.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Log what happened when someone actually wore or handled a printed part.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "material_safety",
@@ -11838,7 +11848,7 @@
     },
     {
       "name": "batch_estimate_plate_part_costs",
-      "description": "Batch-estimate per-part economics for many sliced plates (Business).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Batch-estimate per-part economics for many sliced plates (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "part_economics",
@@ -11889,7 +11899,7 @@
     },
     {
       "name": "estimate_plate_part_costs",
-      "description": "Estimate per-part print time, filament, and cost for a sliced plate (Business).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Estimate per-part print time, filament, and cost for a sliced plate (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "part_economics",
@@ -12133,7 +12143,7 @@
     },
     {
       "name": "add_feature_during_print_fleet",
-      "description": "Add the same feature (e.g. a hat) to N paused printers (Pro).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Add the same feature (e.g. a hat) to N paused printers (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "print_intelligence",
@@ -12376,7 +12386,7 @@
     },
     {
       "name": "assess_fleet_power_loss",
-      "description": "Triage a whole fleet after a power loss \u2014 mixed brands/models (Business+).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Triage a whole fleet after a power loss \u2014 mixed brands/models (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "print_intelligence",
@@ -13020,7 +13030,7 @@
     },
     {
       "name": "decorate_during_print_fleet",
-      "description": "Apply the same decoration to N paused printers at once (Pro).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Apply the same decoration to N paused printers at once (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "print_intelligence",
@@ -13094,7 +13104,7 @@
     },
     {
       "name": "evaluate_fleet_reroute",
-      "description": "Decide whether a failed FDM job should move to another printer (Pro).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Decide whether a failed FDM job should move to another printer (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "print_intelligence",
@@ -13148,9 +13158,9 @@
     },
     {
       "name": "fleet_skip_objects",
-      "description": "Skip failed objects across several fleet printers at once (Business).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pricing",
-      "tier": "pro",
-      "access": "pro",
+      "description": "Skip failed objects across several fleet printers at once (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "tier": "business",
+      "access": "business",
       "category": "print_intelligence",
       "parameters": {
         "properties": {
@@ -13806,7 +13816,7 @@
     },
     {
       "name": "plan_fleet_material_change",
-      "description": "Plan future-object material/color changes across a fleet (Business).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Plan future-object material/color changes across a fleet (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "print_intelligence",
@@ -14759,7 +14769,7 @@
     },
     {
       "name": "revert_mid_print_fleet",
-      "description": "Revert mid-print transforms on N printers at once (Pro).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Revert mid-print transforms on N printers at once (Business+).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "print_intelligence",
@@ -16555,7 +16565,7 @@
     },
     {
       "name": "add_qr_to_product",
-      "description": "Add a scannable QR code to any product STL (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Add a scannable QR code to any product STL (Business). Opens Kiln's interactive inline 3D stage on the result (orbit/zoom panel in MCP Apps hosts; hosted sessions add a browser stage link).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "product_intelligence",
@@ -17068,7 +17078,7 @@
     },
     {
       "name": "fleet_set_speed",
-      "description": "Set speed across all registered printers in the fleet (Business).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Set speed across all registered printers in the fleet (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "speed_control",
@@ -17132,7 +17142,7 @@
     },
     {
       "name": "set_speed_schedule",
-      "description": "Set layer-based speed schedule with automatic adjustments (Business).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Set layer-based speed schedule with automatic adjustments (Business).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "speed_control",
@@ -17211,7 +17221,7 @@
     },
     {
       "name": "add_org_member",
-      "description": "Add *tenant_id* to *org_id*.  ``role`` is one of ``owner``, ``admin``, ``member``, ``viewer``.  Already- enrolled members get their role updated in place.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Add *tenant_id* to *org_id*.  ``role`` is one of ``owner``, ``admin``, ``member``, ``viewer``.  Already- enrolled members get their role updated in place.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -17253,7 +17263,7 @@
     },
     {
       "name": "add_team_member",
-      "description": "Add *tenant_id* to *team_id*.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Add *tenant_id* to *team_id*.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -17295,7 +17305,7 @@
     },
     {
       "name": "apply_role_template",
-      "description": "Grant every scope in a role template to a tenant or team in a single call.  Composes repeated ``grant_scope`` under the hood \u2014 no new primitive, just ergonomic bundling.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Grant every scope in a role template to a tenant or team in a single call.  Composes repeated ``grant_scope`` under the hood \u2014 no new primitive, just ergonomic bundling.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -17349,7 +17359,7 @@
     },
     {
       "name": "assign_artifact_to_org",
-      "description": "Mark a local artifact as owned by *org_id*.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Mark a local artifact as owned by *org_id*.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -17421,7 +17431,7 @@
     },
     {
       "name": "create_org",
-      "description": "Create a new org.  Owner is auto-enrolled as an owner-role member so permission checks never need a special case.  ``tier`` is one of ``pro``, ``business``, ``enterprise``.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Create a new org.  Owner is auto-enrolled as an owner-role member so permission checks never need a special case.  ``tier`` is one of ``pro``, ``business``, ``enterprise``.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -17456,7 +17466,7 @@
     },
     {
       "name": "create_team",
-      "description": "Create a team (sub-group) inside an org.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Create a team (sub-group) inside an org.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -17515,7 +17525,7 @@
     },
     {
       "name": "delete_team",
-      "description": "Delete a team, its memberships, and its scope grants.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Delete a team, its memberships, and its scope grants.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -17535,7 +17545,7 @@
     },
     {
       "name": "export_audit_log",
-      "description": "Dump the local reflog to JSONL or CSV.\n\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Dump the local reflog to JSONL or CSV.\n\nEnterprise adds SSO, RBAC, and audit export.\nRequires Kiln Enterprise.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "enterprise",
       "access": "enterprise",
       "category": "teams",
@@ -17630,7 +17640,7 @@
     },
     {
       "name": "grant_scope",
-      "description": "Grant *capability* on *scope_key* to a tenant OR a team.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Grant *capability* on *scope_key* to a tenant OR a team.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -17701,7 +17711,7 @@
     },
     {
       "name": "list_approval_gates",
-      "description": "List every configured approval gate, optionally filtered. Business+ tier.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "List every configured approval gate, optionally filtered. Business+ tier.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -17899,7 +17909,7 @@
     },
     {
       "name": "remove_approval_gate",
-      "description": "Remove an approval gate.  Merges on the target branch return to unprotected.  Business+ tier.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Remove an approval gate.  Merges on the target branch return to unprotected.  Business+ tier.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -17929,7 +17939,7 @@
     },
     {
       "name": "remove_org_member",
-      "description": "Remove a member and every permission scope they held inside *org_id*.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Remove a member and every permission scope they held inside *org_id*.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -17954,7 +17964,7 @@
     },
     {
       "name": "remove_team_member",
-      "description": "Remove a tenant from a team.  Their personal org membership is unaffected; only team-targeted scope grants stop applying to them.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Remove a tenant from a team.  Their personal org membership is unaffected; only team-targeted scope grants stop applying to them.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -18004,7 +18014,7 @@
     },
     {
       "name": "revoke_scope",
-      "description": "Revoke a scope grant.  Supply either ``tenant_id`` (to remove a personal grant) or ``team_id`` (to remove a team-targeted grant).\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Revoke a scope grant.  Supply either ``tenant_id`` (to remove a personal grant) or ``team_id`` (to remove a team-targeted grant).\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -18058,7 +18068,7 @@
     },
     {
       "name": "set_approval_gate",
-      "description": "Create or update an approval gate on a target branch.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Create or update an approval gate on a target branch.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -18134,7 +18144,7 @@
     },
     {
       "name": "setup_team",
-      "description": "One-shot team onboarding: create an org, invite members, and optionally migrate existing artifacts into it.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "One-shot team onboarding: create an org, invite members, and optionally migrate existing artifacts into it.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -18204,7 +18214,7 @@
     },
     {
       "name": "transfer_artifact_between_orgs",
-      "description": "Move an artifact from one org's ownership to another.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Move an artifact from one org's ownership to another.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -18239,7 +18249,7 @@
     },
     {
       "name": "unassign_artifact",
-      "description": "Remove the local org-ownership marker for an artifact.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Remove the local org-ownership marker for an artifact.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "teams",
@@ -18264,7 +18274,7 @@
     },
     {
       "name": "generate_technical_drawing",
-      "description": "Generate a dimensioned production drawing from a 3D model.\n\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
+      "description": "Generate a dimensioned production drawing from a 3D model.\n\nBusiness adds team review, approval gates, and 3 printers (grow to 50).\nRequires Kiln Business.\nUpgrade: https://kiln3d.com/pricing",
       "tier": "business",
       "access": "business",
       "category": "technical_drawings",
