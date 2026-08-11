@@ -3544,12 +3544,11 @@ def slice(
             copy_strategy = "multicolor_merge"
 
         elif copies > 1:
-            from kiln.slicer import find_slicer
+            from kiln.slicer import find_slicer, supports_duplicate_flag
 
             slicer_info = find_slicer(slicer)
-            slicer_name = slicer_info.name.lower()
 
-            if "prusaslicer" in slicer_name or "prusa" in slicer_name:
+            if supports_duplicate_flag(slicer_info):
                 extra_args.extend(["--duplicate", str(copies), "--duplicate-distance", str(spacing)])
                 copy_strategy = "prusaslicer_duplicate"
             else:

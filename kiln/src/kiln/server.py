@@ -11725,12 +11725,10 @@ def multi_copy_print(
                 )
 
         # --- Detect slicer and choose strategy ---
-        from kiln.slicer import find_slicer
+        from kiln.slicer import find_slicer, supports_duplicate_flag
 
         slicer_info = find_slicer(slicer_path)
-        slicer_name = slicer_info.name.lower()
-
-        use_duplicate_flag = "prusaslicer" in slicer_name or "prusa" in slicer_name
+        use_duplicate_flag = supports_duplicate_flag(slicer_info)
 
         if use_duplicate_flag:
             # PrusaSlicer path: use --duplicate flag

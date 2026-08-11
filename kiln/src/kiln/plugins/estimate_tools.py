@@ -295,33 +295,48 @@ class _EstimateToolsPlugin:
             profile: str = "",
             printer_id: str = "",
             slicer_path: str = "",
+            material: str = "",
         ) -> dict:
             """Estimate print time and filament usage for a model.
 
             Slices the model and parses the G-code for print time, filament
-            length/weight, layer count, and cost estimates.
+            length/weight, and layer count.
 
             For **already-sliced** G-code files, pass the ``.gcode`` path
             directly — it will be parsed without re-slicing.
 
-            **See also:** ``slice_and_estimate`` for a fuller analysis that
-            includes printability scoring and adhesion recommendations.
+            Weight needs a filament density, which lives on a filament
+            profile; Kiln's bundled profiles describe a PRINTER and name no
+            filament, so pass ``material`` to get a weight.  Without it the
+            weight is reported as absent rather than guessed — a key missing
+            from the result means the slicer could not answer it, never that
+            the answer is zero.
+
+            **See also:** ``estimate_material_cost`` for weight and cost from
+            a mesh with your own price per kg, and ``slice_and_estimate`` for
+            a fuller analysis with printability scoring.
 
             :param file_path: Path to STL/3MF/OBJ or .gcode file.
             :param profile: Optional slicer profile path.
             :param printer_id: Optional printer model ID for bundled profile
                 (e.g. ``"bambu_a1"``).  Used when no explicit profile is given.
             :param slicer_path: Optional explicit slicer binary path.
+            :param material: Optional filament family (``"PLA"``, ``"PETG"``,
+                …) used only as a density source for the weight.
             :returns: Dict with time, filament, and layer estimates.
             """
             import kiln.server as _srv
 
             try:
-                from kiln.slicer import _parse_gcode_estimates
+                from kiln.slicer import _parse_gcode_estimates, derive_filament_weight
 
-                # If already a gcode file, just parse it directly
+                # If already a gcode file, just parse it directly.  The weight
+                # is derived here too: a pre-sliced file is missing it for the
+                # same reason, and a caller who named a material should not get
+                # a different answer for having sliced first.
                 if file_path.lower().endswith((".gcode", ".gco", ".g")):
                     result = _parse_gcode_estimates(file_path)
+                    derive_filament_weight(result, material or None)
                     return {"success": True, **result}
 
                 # Otherwise, slice first with the right profile
@@ -337,6 +352,7 @@ class _EstimateToolsPlugin:
                     file_path,
                     profile=resolved_profile,
                     slicer_path=slicer_path or None,
+                    material=material or None,
                 )
                 return {"success": True, **result}
             except Exception as exc:

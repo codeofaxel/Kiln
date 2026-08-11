@@ -456,3 +456,149 @@ class TestPrusaSlicerIsUnaffected:
         cmd = slice_cmds[0]
         assert "--export-gcode" in cmd
         assert not {"--slice", "--outputdir", "--load-settings"} & set(cmd)
+
+
+# ---------------------------------------------------------------------------
+# Estimates: a weight the slicer could not work out
+# ---------------------------------------------------------------------------
+
+
+class TestFilamentWeightIsNeverZero:
+    """``0 g`` was a false statement about every print Kiln ever estimated.
+
+    A slicer works weight out from filament density, which lives on a filament
+    profile; Kiln's bundled profiles describe a printer and name no filament,
+    so the slicer wrote ``0`` and the tool surface handed it to the caller as
+    a number. Nothing that gets extruded weighs nothing.
+    """
+
+    def _gcode(self, tmp_path, weight="0.00", cost="0.00"):
+        path = tmp_path / "x.gcode"
+        path.write_text(
+            "G28\n"
+            "; filament used [mm] = 1540.33\n"
+            "; filament used [cm3] = 3.70\n"
+            f"; total filament used [g] = {weight}\n"
+            f"; total filament cost = {cost}\n"
+            "; estimated printing time (normal mode) = 26m 11s\n"
+        )
+        return str(path)
+
+    def test_a_zero_weight_is_absent_not_zero(self, tmp_path):
+        from kiln.slicer import _parse_gcode_estimates
+
+        estimates = _parse_gcode_estimates(self._gcode(tmp_path))
+        assert "filament_weight_g" not in estimates
+        assert "filament_cost" not in estimates
+        # The things the slicer DID answer still come through.
+        assert estimates["filament_length_mm"] == 1540.33
+        assert estimates["estimated_time_seconds"] == 1571
+
+    def test_a_real_weight_is_kept(self, tmp_path):
+        from kiln.slicer import _parse_gcode_estimates
+
+        estimates = _parse_gcode_estimates(self._gcode(tmp_path, weight="4.59", cost="0.12"))
+        assert estimates["filament_weight_g"] == 4.59
+        assert estimates["filament_cost"] == 0.12
+
+    def test_naming_a_material_derives_the_weight(self, tmp_path):
+        """Volume is already in the G-code; the material supplies the density."""
+        from kiln.slicer import _parse_gcode_estimates, derive_filament_weight
+
+        estimates = _parse_gcode_estimates(self._gcode(tmp_path))
+        derive_filament_weight(estimates, "PLA")
+        # 3.70 cm3 x 1.24 g/cm3, the table's generic PLA density.
+        assert estimates["filament_weight_g"] == 4.59
+        assert "generic PLA density" in estimates["filament_weight_basis"]
+
+    def test_density_comes_from_the_shared_table(self):
+        """Not a second copy of the numbers — the same table cost uses."""
+        from kiln.cost_estimator import BUILTIN_MATERIALS
+        from kiln.slicer import derive_filament_weight
+
+        for name in ("PLA", "PETG", "ABS"):
+            estimates = {"filament_volume_cm3": 10.0}
+            derive_filament_weight(estimates, name)
+            expected = round(10.0 * BUILTIN_MATERIALS[name].density_g_per_cm3, 2)
+            assert estimates["filament_weight_g"] == expected
+
+    def test_material_is_case_insensitive(self):
+        from kiln.slicer import derive_filament_weight
+
+        estimates = {"filament_volume_cm3": 10.0}
+        derive_filament_weight(estimates, "pla")
+        assert estimates["filament_weight_g"] > 0
+
+    def test_an_unknown_material_stays_silent(self):
+        """Better absent than invented — no defaulting to PLA."""
+        from kiln.slicer import derive_filament_weight
+
+        estimates = {"filament_volume_cm3": 10.0}
+        derive_filament_weight(estimates, "unobtainium")
+        assert "filament_weight_g" not in estimates
+
+    def test_no_material_stays_silent(self):
+        from kiln.slicer import derive_filament_weight
+
+        estimates = {"filament_volume_cm3": 10.0}
+        derive_filament_weight(estimates, None)
+        assert "filament_weight_g" not in estimates
+
+    def test_a_real_weight_is_never_overwritten(self):
+        """The slicer's own answer outranks a table lookup."""
+        from kiln.slicer import derive_filament_weight
+
+        estimates = {"filament_volume_cm3": 10.0, "filament_weight_g": 7.77}
+        derive_filament_weight(estimates, "PLA")
+        assert estimates["filament_weight_g"] == 7.77
+        assert "filament_weight_basis" not in estimates
+
+    def test_cost_is_not_invented_from_the_table(self):
+        """The table's price is generic, not what anyone paid."""
+        from kiln.slicer import derive_filament_weight
+
+        estimates = {"filament_volume_cm3": 10.0}
+        derive_filament_weight(estimates, "PLA")
+        assert "filament_cost" not in estimates
+
+
+# ---------------------------------------------------------------------------
+# Which binary can lay out its own copies
+# ---------------------------------------------------------------------------
+
+
+class TestSupportsDuplicateFlag:
+    """One question, one answer, asked of what the binary IS."""
+
+    def _info(self, path, version):
+        from kiln.slicer import SlicerInfo
+
+        return SlicerInfo(path=path, name=os.path.basename(path).lower(), version=version)
+
+    def test_prusaslicer_can(self):
+        from kiln.slicer import supports_duplicate_flag
+
+        assert supports_duplicate_flag(
+            self._info("/x/PrusaSlicer", "PrusaSlicer-2.9.4 based on Slic3r")
+        )
+
+    def test_orca_cannot(self):
+        from kiln.slicer import supports_duplicate_flag
+
+        assert not supports_duplicate_flag(self._info("/x/OrcaSlicer", "OrcaSlicer-2.3.2:"))
+
+    def test_a_renamed_prusaslicer_is_judged_by_its_banner(self):
+        """The old check read the FILE NAME, so this one took the slow path."""
+        from kiln.slicer import supports_duplicate_flag
+
+        assert supports_duplicate_flag(
+            self._info("/opt/bin/slicer", "PrusaSlicer-2.9.4 based on Slic3r")
+        )
+
+    def test_an_orca_named_like_prusa_is_not_handed_the_flag(self):
+        """The dangerous direction: a flag the other command line lacks."""
+        from kiln.slicer import supports_duplicate_flag
+
+        assert not supports_duplicate_flag(
+            self._info("/opt/bin/prusa-fast", "OrcaSlicer-2.3.2:")
+        )

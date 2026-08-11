@@ -244,6 +244,24 @@ def slicer_cli_family(info: SlicerInfo) -> str:
     return _CLI_PRUSA
 
 
+def supports_duplicate_flag(info: SlicerInfo) -> bool:
+    """Whether *info*'s binary can lay out copies itself, via ``--duplicate``.
+
+    The real question a multi-copy caller has, asked once.  Both callers used
+    to ask it as ``"prusa" in slicer.name``, which is the FILE NAME: a
+    PrusaSlicer installed under any other name fell back to duplicating the
+    mesh, and a binary merely named like one would have been handed a flag the
+    other command line does not have.  :func:`slicer_cli_family` reads the
+    binary's own ``--version`` banner first and the name only as a fallback,
+    so it answers what the program IS rather than what it is called.
+
+    Named for the capability rather than the vendor because that is what the
+    callers branch on — and because the answer stops being "is it PrusaSlicer"
+    the moment a third dialect appears.
+    """
+    return slicer_cli_family(info) == _CLI_PRUSA
+
+
 def _get_version(slicer_path: str) -> str | None:
     """Try to get the slicer version string."""
     try:
@@ -610,11 +628,49 @@ def slice_file(
     )
 
 
+def derive_filament_weight(estimates: dict[str, Any], material: str | None) -> None:
+    """Fill in a filament weight the slicer could not work out, in place.
+
+    A slicer gets weight by multiplying extruded volume by the filament's
+    density, and density lives on a FILAMENT profile.  Kiln's bundled profiles
+    describe a printer — bed, speeds, temperatures — and name no filament, so
+    the slicer has no density and reports ``0``.  The volume is right there in
+    the same G-code, so the missing half is only the material.
+
+    Weight is physics and is computed here when the caller names a material.
+    Cost is not: the table's price is a generic figure, not what anyone paid,
+    and a made-up price is the kind of confident wrong number this is meant to
+    stop.  ``estimate_material_cost`` takes a real ``cost_per_kg`` for that.
+
+    Recorded as *generic*, because a table density is the family's nominal
+    value and not a measurement of the spool on the shelf.
+    """
+    if not material or estimates.get("filament_weight_g"):
+        return
+    volume_cm3 = estimates.get("filament_volume_cm3")
+    if not volume_cm3:
+        return
+    try:
+        from kiln.cost_estimator import BUILTIN_MATERIALS
+    except ImportError:  # pragma: no cover — cost table always ships
+        return
+
+    profile = BUILTIN_MATERIALS.get(str(material).strip().upper())
+    if profile is None:
+        return
+    estimates["filament_weight_g"] = round(volume_cm3 * profile.density_g_per_cm3, 2)
+    estimates["filament_weight_basis"] = (
+        f"computed from extruded volume x generic {profile.name} density "
+        f"({profile.density_g_per_cm3} g/cm3)"
+    )
+
+
 def estimate_print(
     file_path: str,
     *,
     profile: str | None = None,
     slicer_path: str | None = None,
+    material: str | None = None,
 ) -> dict[str, Any]:
     """Estimate print time and filament usage by slicing to a temp file.
 
@@ -625,10 +681,14 @@ def estimate_print(
         file_path: Path to STL/3MF/OBJ file.
         profile: Optional slicer profile path.
         slicer_path: Optional explicit slicer binary path.
+        material: Optional filament family (``"PLA"``, ``"PETG"``, …).  Only
+            a density source: without it a weight the slicer could not work
+            out is reported as absent rather than guessed.
 
     Returns:
         Dict with ``estimated_time_seconds``, ``filament_length_mm``,
-        ``filament_weight_g``, ``layer_count``, and ``gcode_path``.
+        ``filament_weight_g``, ``layer_count``, and ``gcode_path``.  Keys the
+        slicer could not answer are ABSENT, never zero.
 
     Raises:
         SlicerError: If slicing fails.
@@ -637,7 +697,9 @@ def estimate_print(
     if not result.success or not result.output_path:
         raise SlicerError("Slicing failed — cannot estimate print.")
 
-    return _parse_gcode_estimates(result.output_path)
+    estimates = _parse_gcode_estimates(result.output_path)
+    derive_filament_weight(estimates, material)
+    return estimates
 
 
 def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
@@ -689,8 +751,15 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
             estimates["filament_length_mm"] = float(fil_mm.group(1))
 
         # ; filament used [g] = 12.34 or total filament used [g] = 12.34
+        #
+        # A zero here is the slicer saying it could not work the weight out —
+        # it needs a filament density, and Kiln's profiles describe a printer,
+        # not a filament.  Nothing that gets extruded weighs nothing, so the
+        # key is left ABSENT rather than recorded as 0: "I don't know" is a
+        # true statement about every print, "0 g" is a false one.  See
+        # derive_filament_weight, which fills it in when a material is named.
         fil_g = _re.search(r"filament used \[g\]\s*=\s*([\d.]+)", line, _re.IGNORECASE)
-        if fil_g:
+        if fil_g and float(fil_g.group(1)) > 0:
             estimates["filament_weight_g"] = float(fil_g.group(1))
 
         # ; filament used [cm3] = 12.34
@@ -704,8 +773,14 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
             estimates["layer_count"] = int(layers.group(1))
 
         # ; filament cost = 1.23
+        #
+        # Zero for the same reason, and left absent for the same reason: a
+        # price comes off a filament profile Kiln's printer profiles do not
+        # carry.  Unlike weight this one is NOT derived downstream — the
+        # material table's price is a generic figure rather than what anyone
+        # paid, and estimate_material_cost takes a real cost_per_kg.
         cost = _re.search(r"filament cost\s*=\s*([\d.]+)", line, _re.IGNORECASE)
-        if cost:
+        if cost and float(cost.group(1)) > 0:
             estimates["filament_cost"] = float(cost.group(1))
 
     return estimates
