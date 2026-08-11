@@ -14,6 +14,7 @@ import contextlib
 import re
 import xml.etree.ElementTree as ET
 import zipfile
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -713,6 +714,57 @@ def parse_colored_3mf(
     )
 
 
+def unique_object_names(names: Sequence[str | None]) -> list[str]:
+    """Object names made unique, so a colored 3MF stays readable per part.
+
+    The write-side counterpart to :func:`object_display_colors`' duplicate
+    refusal, and the reason that refusal never has to fire on a file Kiln
+    wrote.  Colour in a 3MF is carried per OBJECT, but every consumer that
+    reads geometry through trimesh addresses objects by NAME — so two
+    objects sharing one name make the whole file's colour unattributable,
+    and the reader honestly declines all of it.  Duplicates are not an edge
+    case: a CAD assembly legitimately holds four bolts all called "M3x8",
+    and an unnamed STEP body degrades to its shape type, so a two-body file
+    arrives as ``["SOLID", "SOLID"]``.
+
+    Uniqueness is guaranteed against the key the reader actually builds
+    (``name`` if non-empty, else the object id), by never returning a blank
+    name: a name that is empty or all whitespace becomes ``part_N`` at its
+    1-based position, which also keeps a nameless part legible in a slicer's
+    object list.  Repeats then take a ``" (2)"``, ``" (3)"`` … suffix, the
+    disambiguation every file browser and CAD tree already uses.
+
+    The first use of a name always keeps it verbatim, and a suffix never
+    lands on a name spoken for elsewhere in the list — ``["A", "A (2)",
+    "A"]`` yields ``["A", "A (2)", "A (3)"]``, not a second ``"A (2)"``.
+    Order-preserving, deterministic, and idempotent: names that are already
+    unique come back untouched, so a caller may apply it twice without
+    growing suffixes.
+    """
+    filled: list[str] = []
+    for i, raw in enumerate(names):
+        name = raw or ""
+        filled.append(name if name.strip() else f"part_{i + 1}")
+
+    # Every name in the list is spoken for from the start, so a suffix can
+    # never collide with a name that appears LATER (the "A (2)" case above).
+    taken = set(filled)
+    seen: set[str] = set()
+    out: list[str] = []
+    for name in filled:
+        if name not in seen:
+            seen.add(name)
+            out.append(name)
+            continue
+        n = 2
+        while f"{name} ({n})" in taken or f"{name} ({n})" in seen:
+            n += 1
+        unique = f"{name} ({n})"
+        seen.add(unique)
+        out.append(unique)
+    return out
+
+
 def object_display_colors(file_path: str) -> dict[str, tuple[int, int, int]]:
     """Uniform display color per build object, keyed the way trimesh keys a
     Scene's geometry: the object's ``name`` attribute, else its id as a string.
@@ -735,7 +787,10 @@ def object_display_colors(file_path: str) -> dict[str, tuple[int, int, int]]:
       color can honestly stand for a painted object;
     * everything, when two build objects share a name — trimesh renames
       duplicates with suffixes that can collide with real sibling names, so a
-      name-keyed map could color the wrong part.
+      name-keyed map could color the wrong part.  That refusal is for files
+      Kiln did not write: every composer here runs its names through
+      :func:`unique_object_names` first, so a duplicate arriving at this
+      point means the file came from elsewhere.
 
     Never raises: color is enrichment (the caller keeps its mesh either way),
     so any archive trouble reads as ``{}``.

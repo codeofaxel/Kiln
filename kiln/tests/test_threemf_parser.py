@@ -15,6 +15,7 @@ from kiln.threemf_parser import (
     _parse_hex_color,
     object_display_colors,
     parse_colored_3mf,
+    unique_object_names,
 )
 
 # ---------------------------------------------------------------------------
@@ -580,6 +581,41 @@ class TestObjectDisplayColors:
 </model>"""
         assert object_display_colors(_make_3mf(tmp_path, xml)) == {}
 
+    def test_a_file_kiln_wrote_never_hits_that_refusal(
+        self, tmp_path: Path
+    ) -> None:
+        """The refusal above is for files from elsewhere: names that arrive
+        duplicated go through unique_object_names on the way out, so both
+        parts keep their own color."""
+        names = unique_object_names(["zone_0", "zone_0"])
+        xml = f"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources>
+    <basematerials id="9">
+      <base name="Red" displaycolor="#FF0000" />
+      <base name="Blue" displaycolor="#0000FF" />
+    </basematerials>
+    <object id="1" type="model" name="{names[0]}" pid="9" pindex="0">
+      <mesh>
+        {_BASIC_VERTICES}
+        <triangles><triangle v1="0" v2="1" v3="2" /></triangles>
+      </mesh>
+    </object>
+    <object id="2" type="model" name="{names[1]}" pid="9" pindex="1">
+      <mesh>
+        {_BASIC_VERTICES}
+        <triangles><triangle v1="0" v2="1" v3="2" /></triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build><item objectid="1" /><item objectid="2" /></build>
+</model>"""
+        assert object_display_colors(_make_3mf(tmp_path, xml)) == {
+            "zone_0": (255, 0, 0),
+            "zone_0 (2)": (0, 0, 255),
+        }
+
     def test_an_uncolored_object_claims_nothing(self, tmp_path: Path) -> None:
         assert object_display_colors(_make_3mf(tmp_path, _SIDECAR_MODEL)) == {}
 
@@ -620,6 +656,73 @@ class TestObjectDisplayColors:
 </model>"""
         colors = object_display_colors(_make_3mf(tmp_path, xml))
         assert colors == {"zone_0": (35, 102, 247)}
+
+
+class TestUniqueObjectNames:
+    """The write-side guarantee that keeps object_display_colors readable."""
+
+    def test_unique_names_are_left_exactly_alone(self) -> None:
+        assert unique_object_names(["lid", "base_plate"]) == ["lid", "base_plate"]
+
+    def test_a_repeat_is_suffixed_and_the_first_use_keeps_the_name(self) -> None:
+        """The ordinary CAD case: four identical bolts in one assembly."""
+        assert unique_object_names(["M3x8"] * 4) == [
+            "M3x8",
+            "M3x8 (2)",
+            "M3x8 (3)",
+            "M3x8 (4)",
+        ]
+
+    def test_a_suffix_never_lands_on_a_name_claimed_elsewhere(self) -> None:
+        """"A (2)" is already spoken for LATER in the list, so the repeat has
+        to skip past it — otherwise deduplication would introduce the very
+        collision it exists to remove."""
+        assert unique_object_names(["A", "A (2)", "A"]) == ["A", "A (2)", "A (3)"]
+        assert unique_object_names(["A", "A", "A (2)"]) == ["A", "A (3)", "A (2)"]
+
+    def test_a_blank_name_becomes_its_position(self) -> None:
+        """Blank is not a name: the reader would key such an object by its id,
+        which a real sibling could be named after.  Whitespace-only counts as
+        blank — it is truthy to the reader but invisible in a slicer's list."""
+        assert unique_object_names(["", None, "   ", "lid"]) == [
+            "part_1",
+            "part_2",
+            "part_3",
+            "lid",
+        ]
+
+    def test_a_positional_fallback_that_collides_is_still_resolved(self) -> None:
+        """A part literally named "part_2" next to a blank one at position 2."""
+        assert unique_object_names(["part_2", ""]) == ["part_2", "part_2 (2)"]
+
+    def test_names_are_preserved_verbatim_otherwise(self) -> None:
+        """Only blanks and repeats are touched — surrounding whitespace and
+        case belong to the user, and the reader compares exact strings."""
+        assert unique_object_names([" lid ", "LID", "lid"]) == [
+            " lid ",
+            "LID",
+            "lid",
+        ]
+
+    def test_applying_it_twice_changes_nothing(self) -> None:
+        """Idempotent, so a composer may guarantee the invariant itself
+        without caring whether its caller already did."""
+        once = unique_object_names(["COMPOUND", "COMPOUND", "", "COMPOUND"])
+        assert unique_object_names(once) == once
+
+    def test_the_result_is_always_unique_and_never_blank(self) -> None:
+        """The invariant itself, stated against the key the reader builds."""
+        for case in (
+            ["COMPOUND", "COMPOUND"],
+            ["", "", ""],
+            ["a", "a (2)", "a", "a (2)", "a"],
+            ["part_1", "", "part_1", ""],
+            ["x"] * 12,
+        ):
+            out = unique_object_names(case)
+            assert len(out) == len(case)
+            assert all(n.strip() for n in out), case
+            assert len(set(out)) == len(out), case
 
 
 # ---------------------------------------------------------------------------
