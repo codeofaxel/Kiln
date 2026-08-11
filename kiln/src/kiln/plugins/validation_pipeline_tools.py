@@ -186,7 +186,9 @@ def run_full_validation_pipeline(
     from kiln.step_import import NoBackendError, ensure_mesh_path
 
     try:
-        input_path, _step_note = ensure_mesh_path(input_path)
+        input_path, _step_note, _step_conversion = ensure_mesh_path(
+            input_path, with_record=True
+        )
     except NoBackendError as exc:
         report.checks.append(_CheckResult(
             name="format",
@@ -389,7 +391,17 @@ def run_full_validation_pipeline(
         else:
             report.next_action = None
 
-    return report.to_dict()
+    out = report.to_dict()
+    if _step_conversion is not None:
+        # Every score below was measured on triangles, and this says how
+        # closely those triangles follow the CAD they came from.  A
+        # printability verdict taken on a 0.162 mm approximation is a
+        # different claim from the same verdict on a 0.0068 mm one, and
+        # without this the report reads identically either way.
+        from dataclasses import asdict as _asdict
+
+        out["conversion"] = _asdict(_step_conversion)
+    return out
 
 
 class _ValidationPipelinePlugin:
