@@ -155,6 +155,9 @@ class PrintWatchdog:
         self._last_state: Any = None
         self._last_job: Any = None
         self._flags: list[Flag] = []
+        # Yellow rules already reported for the current print, so a condition
+        # that holds for hours is reported once rather than every poll.
+        self._yellow_seen: set[str] = set()
 
     # ------------------------------------------------------------------
     # Public lifecycle
@@ -245,9 +248,17 @@ class PrintWatchdog:
             return red
 
         # --- Yellow flags ---------------------------------------------
+        # Once per rule per print.  A weak-WiFi condition holds for as long as
+        # it holds, so notifying every poll would mean thousands of callbacks
+        # (and thousands of recorded flags) for one fact the caller already
+        # knows.  The condition is reported when it appears; it is not
+        # re-reported until the next print.
         for yellow in self._evaluate_yellow_flags(state):
-            self._record_flag(yellow)
+            if yellow.rule in self._yellow_seen:
+                continue
+            self._yellow_seen.add(yellow.rule)
             logger.warning("PrintWatchdog yellow: %s", yellow.message)
+            self._notify(yellow)
 
         return None
 
@@ -314,6 +325,9 @@ class PrintWatchdog:
             self._last_completion = None
             self._last_layer = None
             self._last_progress_time = now
+            # A new print gets to hear about a condition again — "the WiFi was
+            # weak on your last print" is not a useful thing to withhold.
+            self._yellow_seen.clear()
             return None
 
         # --- Tool temperature drop -----------------------------------
@@ -450,6 +464,26 @@ class PrintWatchdog:
             self._last_progress_time = now
         return advanced
 
+    def _notify(self, flag: Flag) -> None:
+        """Record a flag and hand it to the caller.  Stops nothing.
+
+        Reporting and stopping are separate acts.  A yellow flag needs the
+        first without the second: before this split the only route to
+        ``on_anomaly`` was :meth:`_trip`, which also fires the e-stop, so
+        every yellow flag went to an in-memory list that nothing reads.  A
+        warning nobody receives is not a warning.
+        """
+        self._record_flag(flag)
+        self._dispatch(flag)
+
+    def _dispatch(self, flag: Flag) -> None:
+        """Hand a flag to ``on_anomaly``; a raising callback never propagates."""
+        if self._on_anomaly is not None:
+            try:
+                self._on_anomaly(flag)
+            except Exception:
+                logger.exception("PrintWatchdog: on_anomaly callback raised")
+
     def _trip(self, flag: Flag) -> None:
         """Handle a red-flag trip: log, e-stop, callback, and latch."""
         logger.error(
@@ -470,11 +504,9 @@ class PrintWatchdog:
         except Exception:
             logger.exception("PrintWatchdog: emergency_stop() FAILED")
 
-        if self._on_anomaly is not None:
-            try:
-                self._on_anomaly(flag)
-            except Exception:
-                logger.exception("PrintWatchdog: on_anomaly callback raised")
+        # Recording stays above the e-stop and dispatch stays below it, so a
+        # red flag's ordering is exactly what it has always been.
+        self._dispatch(flag)
 
     def _record_flag(self, flag: Flag) -> None:
         with self._lock:

@@ -287,6 +287,9 @@ class TestStalledLayer:
 
 
 class TestYellowFlags:
+    # "Yellow only" means the print is not stopped.  It does not mean the
+    # condition goes unreported: these two asserted ``anomalies == []``, which
+    # pinned the missing notification path as though it were the contract.
     def test_weak_wifi_is_yellow_only(self):
         wd, adapter, _, anomalies = _make_watchdog()
         adapter.state.wifi_signal = "-90dBm"
@@ -295,7 +298,7 @@ class TestYellowFlags:
 
         assert flag is None
         assert adapter.emergency_stops == 0
-        assert anomalies == []
+        assert [f.kind for f in anomalies] == ["yellow"]  # reported, not stopped
 
         status = wd.status()
         assert len(status["yellow_flags"]) == 1
@@ -309,7 +312,7 @@ class TestYellowFlags:
 
         assert flag is None
         assert adapter.emergency_stops == 0
-        assert anomalies == []
+        assert [f.kind for f in anomalies] == ["yellow"]
 
         status = wd.status()
         rules = [f["rule"] for f in status["yellow_flags"]]
@@ -456,6 +459,115 @@ class TestThreadLifecycle:
             assert adapter.get_state_calls >= 3
         finally:
             wd.stop(timeout=1.0)
+
+
+# --------------------------------------------------------------------------
+# Yellow flags reach the caller
+# --------------------------------------------------------------------------
+
+
+class TestYellowFlagsAreDelivered:
+    """A warning nobody receives is not a warning.
+
+    Before the notify/stop split, ``on_anomaly`` was reachable only from
+    ``_trip``, which also fires the e-stop.  Yellow flags were therefore
+    appended to an in-memory list and logged, and nothing in ``kiln/src`` ever
+    read that list — so ``wifi_weak`` and ``chamber_fan_stalled`` had never
+    reached a caller.
+    """
+
+    def test_yellow_flag_reaches_the_callback(self):
+        wd, adapter, _, anomalies = _make_watchdog()
+        adapter.state.wifi_signal = "-90dBm"
+
+        assert wd.step() is None  # a warning is not a red flag
+
+        assert [f.rule for f in anomalies] == ["wifi_weak"]
+        assert anomalies[0].kind == "yellow"
+
+    def test_yellow_flag_does_not_stop_the_print(self):
+        wd, adapter, _, _ = _make_watchdog()
+        adapter.state.wifi_signal = "-90dBm"
+        adapter.state.chamber_fan_speed = 0
+
+        wd.step()
+
+        assert adapter.emergency_stops == 0
+        assert wd.status()["anomaly_triggered"] is False
+
+    def test_a_standing_condition_is_reported_once(self):
+        """Weak WiFi holds for hours; the caller is told once, not 5000 times."""
+        wd, adapter, clock, anomalies = _make_watchdog()
+        adapter.state.wifi_signal = "-90dBm"
+
+        for _ in range(50):
+            adapter.job.current_layer += 1
+            wd.step()
+            clock.advance(2.5)
+
+        assert len(anomalies) == 1
+        assert len(wd.status()["yellow_flags"]) == 1
+
+    def test_each_condition_is_reported_on_its_own(self):
+        wd, adapter, _, anomalies = _make_watchdog()
+        adapter.state.wifi_signal = "-90dBm"
+        wd.step()
+        adapter.state.chamber_fan_speed = 0
+        wd.step()
+
+        assert sorted(f.rule for f in anomalies) == ["chamber_fan_stalled", "wifi_weak"]
+
+    def test_a_new_print_hears_about_it_again(self):
+        """'Your WiFi was weak on the last print' is not worth withholding."""
+        wd, adapter, _, anomalies = _make_watchdog()
+        adapter.state.wifi_signal = "-90dBm"
+        wd.step()
+        assert len(anomalies) == 1
+
+        adapter.state.state = "idle"
+        wd.step()
+        adapter.state.state = "printing"
+        wd.step()
+
+        assert len(anomalies) == 2
+
+    def test_a_raising_callback_does_not_escape(self):
+        def boom(flag):
+            raise RuntimeError("consumer exploded")
+
+        wd, adapter, _, _ = _make_watchdog(on_anomaly=boom)
+        adapter.state.wifi_signal = "-90dBm"
+
+        assert wd.step() is None  # swallowed, exactly as on the red path
+        assert adapter.emergency_stops == 0
+
+
+class TestRedFlagBehaviourUnchanged:
+    """The split must be invisible to red flags."""
+
+    def test_red_still_records_notifies_and_stops(self):
+        wd, adapter, _, anomalies = _make_watchdog()
+        adapter.state.tool_temp_target = 220.0
+        adapter.state.tool_temp_actual = 220.0 - (DEFAULT_TOOL_DROP_C + 5.0)
+
+        flag = wd.step()
+
+        assert flag is not None and flag.rule == "tool_drop"
+        assert adapter.emergency_stops == 1
+        assert [f.rule for f in anomalies] == ["tool_drop"]
+        assert wd.status()["red_flags"][0]["rule"] == "tool_drop"
+        assert wd.status()["anomaly_triggered"] is True
+
+    def test_a_red_flag_short_circuits_the_yellow_pass(self):
+        """Unchanged: step() returns on the red flag before yellows run."""
+        wd, adapter, _, anomalies = _make_watchdog()
+        adapter.state.wifi_signal = "-90dBm"
+        adapter.state.tool_temp_target = 220.0
+        adapter.state.tool_temp_actual = 220.0 - (DEFAULT_TOOL_DROP_C + 5.0)
+
+        wd.step()
+
+        assert [f.rule for f in anomalies] == ["tool_drop"]
 
 
 if __name__ == "__main__":  # pragma: no cover
