@@ -793,9 +793,11 @@ for i in range(1, labels.Length() + 1):
     name = ""
     if label.FindAttribute(TDataStd_Name.GetID_s(), name_attr):
         got = name_attr.Get().ToExtString().strip()
-        if got != shape.ShapeType().name.removeprefix("TopAbs_") and not (
-            got.startswith("Open CASCADE STEP translator")
-        ):
+        stamped_by_software = (
+            got == shape.ShapeType().name.removeprefix("TopAbs_")
+            or got.startswith("Open CASCADE STEP translator")
+        )
+        if not stamped_by_software:
             name = got
 
     col = Quantity_Color()
