@@ -12,6 +12,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   can't be read on your setup, Kiln says so plainly instead of showing an
   estimate as though it were exact. Served via kiln-pro.
 
+- **A CAD part says how closely it was read (Pro+).** Turning a STEP into a
+  printable shape is always an approximation. Kiln keeps how close it got, so
+  the part's passport can tell you — and says so plainly when the shape has
+  changed since, instead of quoting a figure that no longer applies. See
+  https://kiln3d.com/pricing.
+
 - **Parts that need to move get a gap that suits your printer (Pro+).** On
   anything that has to turn or slide, that gap decides whether it works or
   comes off the plate as one solid lump — and it used to be the same number
