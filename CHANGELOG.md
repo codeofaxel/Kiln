@@ -7,6 +7,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Telling us something's broken no longer needs an account.** Reporting a
+  problem from inside a chat now works whether or not you've signed in — the
+  install least able to connect is usually the one with the most to say.
+
+- **Your assistant can send back what actually fixed a problem.** When it works
+  around a Kiln bug, it can now tell us what it tried, what worked, and how it
+  knew — so the fix reaches everyone with that printer instead of living in one
+  chat's memory. Kiln asks for this in a set form, because a workaround that
+  says what it tested is one we can act on.
+
 - **Your assistant now knows what's free before you ask for it.** Every Kiln
   tool tells your assistant exactly what it costs — free and unlimited, free
   with a monthly allowance, or part of a paid plan — so you get a straight
@@ -150,6 +160,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   for your machine and the panel says so.
 
 ### Fixed
+
+- **Your stats stopped counting failed work as finished.** A tool that failed
+  could still tick over your generations or decorations count for the day, so
+  the totals on your stats page read higher than what you actually made.
 
 - **Artillery Sidewinder X3 owners get settings that match their machine.** Kiln
   had the X3 down as Klipper when Artillery ships it running Marlin, and both its
