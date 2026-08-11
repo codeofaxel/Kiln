@@ -11788,6 +11788,91 @@ def _with_local_log_tail(kwargs: dict) -> dict:
         return kwargs
 
 
+#: Tools that reach the hosted API WITHOUT a bearer, via their own
+#: unauthenticated intake.  Deliberately a set of one, and it should stay
+#: tiny: every name here is a capability an anonymous stranger can drive.
+#: ``report_issue`` earns it because the alternative is worse — an install
+#: that cannot pair is exactly the install with something to report, and a
+#: bug report that requires an account is a bug report we do not receive.
+_ANONYMOUS_OK_TOOLS = frozenset({"report_issue"})
+
+#: Where those tools go instead of ``/api/tools/<name>``.  A separate,
+#: narrow route rather than an auth exemption on the tool dispatcher: an
+#: unauthenticated caller should reach one hand-audited handler, not the
+#: whole tool surface with a null tenant.
+_ANONYMOUS_TOOL_ROUTES = {"report_issue": "/api/public/report"}
+
+
+def _anonymous_api_call(tool_name: str, **kwargs) -> dict:
+    """Forward an ``_ANONYMOUS_OK_TOOLS`` call with no Authorization header.
+
+    Mirrors :func:`_pro_api_call`'s transport and error handling, minus every
+    identity-bearing header: no bearer, and no device fingerprint either — an
+    anonymous report has no account to meter and no device worth correlating,
+    so sending one would collect something the report does not need.
+
+    ``app_version`` and ``os`` ARE filled into the context when the caller did
+    not set them, because the server's anti-flood bucket for anonymous
+    reporters is derived from exactly those two fields plus the source.  Left
+    empty, every anonymous report in the world would share one bucket and a
+    single noisy install could shut the door for everyone.
+    """
+    import json
+    import platform
+    import urllib.error
+    import urllib.request
+
+    from kiln.version_check import _current_version
+
+    api_url = (
+        os.environ.get("KILN_API_URL") or ""
+    ).strip() or _HOSTED_KILN_API_URL
+    route = _ANONYMOUS_TOOL_ROUTES[tool_name]
+
+    payload = _with_local_log_tail(dict(kwargs))
+    context = payload.get("context")
+    context = dict(context) if isinstance(context, dict) else {}
+    context.setdefault("app_version", _current_version())
+    context.setdefault("os", platform.system().lower())
+    payload["context"] = context
+    # contact_ok cannot be honoured without a verified identity, and the
+    # server ignores it on this route.  Dropping it here too keeps the
+    # request honest rather than sending a preference nothing can act on.
+    payload.pop("contact_ok", None)
+
+    try:
+        req = urllib.request.Request(
+            f"{api_url.rstrip('/')}{route}",
+            data=json.dumps(payload).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "X-Kiln-Client-Version": _current_version(),
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        try:
+            body = json.loads(exc.read().decode("utf-8"))
+            if isinstance(body, dict):
+                return body
+        except Exception:
+            pass
+        return {
+            "status": "error",
+            "error": f"Kiln API rejected '{tool_name}' (HTTP {exc.code}).",
+            "code": "KILN_API_HTTP_ERROR",
+            "tool": tool_name,
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "error": f"Failed to reach Kiln server: {exc}",
+            "code": "SERVER_UNREACHABLE",
+        }
+
+
 def _pro_api_call(tool_name: str, **kwargs) -> dict:
     """Call a hosted kiln-pro tool through the public REST API.
 
@@ -11834,6 +11919,15 @@ def _pro_api_call(tool_name: str, **kwargs) -> dict:
         }
     else:
         bearer = ""
+    if not bearer and tool_name in _ANONYMOUS_OK_TOOLS:
+        # Telling us Kiln is broken must not require an account.  Everything
+        # else here can wait for a sign-in; a bug report cannot, because the
+        # install least able to pair is the one with the most to report — and
+        # a first session going badly is exactly when the account wall lands.
+        # The pipeline has always accepted an anonymous report; the two doors
+        # to it were shut, this one locally and /api/tools/* behind auth.  So
+        # this call skips the wall and goes to the public intake instead.
+        return _anonymous_api_call(tool_name, **kwargs)
     if not bearer:
         # The most-hit refusal in the product, and until now the only one
         # that recorded nothing: it returns here without ever reaching a

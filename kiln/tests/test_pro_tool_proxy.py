@@ -224,3 +224,134 @@ def test_report_issue_forward_honours_the_opt_out(tmp_path, monkeypatch):
     sent = json.loads(captured["data"])
     assert "context" not in sent
     assert sent["description"] == "declined the log attachment"
+
+
+# ---------------------------------------------------------------------------
+# report_issue without an account (2026-08-11)
+#
+# Every other tool here rightly stops at the account wall.  report_issue must
+# not: the install least able to pair is the one with the most to report, and
+# a first session going badly is exactly when the wall lands.  The hosted
+# pipeline has always accepted an anonymous report — both doors to it were
+# just shut, this one locally and /api/tools/* behind auth.
+# ---------------------------------------------------------------------------
+
+
+def test_report_issue_files_anonymously_when_unpaired(tmp_path, monkeypatch):
+    """The regression.  This used to return KILN_ACCOUNT_NOT_PAIRED, so the
+    one thing a broken install most needed to do was the one thing it could
+    not do."""
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+    monkeypatch.delenv("KILN_API_URL", raising=False)
+    monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+    captured = {}
+
+    def fake_urlopen(req, timeout):
+        captured["url"] = req.full_url
+        captured["headers"] = dict(req.headers)
+        captured["data"] = json.loads(req.data.decode())
+        return _FakeUrlopenResponse(b'{"status": "ok", "report_id": "rep_1"}')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = _pro_api_call(
+        "report_issue", description="The P2S never starts a print."
+    )
+
+    assert result["status"] == "ok"
+    assert captured["url"].endswith("/api/public/report")
+    assert captured["data"]["description"] == "The P2S never starts a print."
+
+
+def test_the_anonymous_report_carries_no_identity(tmp_path, monkeypatch):
+    """No bearer, and no device fingerprint either.  An anonymous report has
+    no account to meter and no device worth correlating, so sending one would
+    collect something the report does not need."""
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+    monkeypatch.delenv("KILN_API_URL", raising=False)
+    monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+    captured = {}
+
+    def fake_urlopen(req, timeout):
+        captured["headers"] = {k.lower(): v for k, v in req.headers.items()}
+        captured["data"] = json.loads(req.data.decode())
+        return _FakeUrlopenResponse(b'{"status": "ok"}')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    _pro_api_call("report_issue", description="Anything.", contact_ok=True)
+
+    assert "authorization" not in captured["headers"]
+    assert not [k for k in captured["headers"] if "device" in k]
+    # contact_ok cannot be honoured without a verified identity, so it is
+    # dropped rather than sent as a preference nothing can act on.
+    assert "contact_ok" not in captured["data"]
+
+
+def test_the_antiflood_bucket_fields_are_filled(tmp_path, monkeypatch):
+    """The server buckets anonymous reporters by app_version + os + source.
+    Left empty, every anonymous report in the world shares one bucket and a
+    single noisy install shuts the door for everyone."""
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+    monkeypatch.delenv("KILN_API_URL", raising=False)
+    monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+    captured = {}
+
+    def fake_urlopen(req, timeout):
+        captured["data"] = json.loads(req.data.decode())
+        return _FakeUrlopenResponse(b'{"status": "ok"}')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    _pro_api_call("report_issue", description="Anything at all.")
+
+    assert captured["data"]["context"]["app_version"]
+    assert captured["data"]["context"]["os"]
+
+
+def test_a_callers_own_context_is_not_overwritten(tmp_path, monkeypatch):
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+    monkeypatch.delenv("KILN_API_URL", raising=False)
+    monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+    captured = {}
+
+    def fake_urlopen(req, timeout):
+        captured["data"] = json.loads(req.data.decode())
+        return _FakeUrlopenResponse(b'{"status": "ok"}')
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    _pro_api_call(
+        "report_issue",
+        description="Anything at all.",
+        context={"app_version": "0.9.0", "os": "plan9", "log_tail": "boom"},
+    )
+
+    assert captured["data"]["context"]["app_version"] == "0.9.0"
+    assert captured["data"]["context"]["os"] == "plan9"
+    assert captured["data"]["context"]["log_tail"] == "boom"
+
+
+def test_only_report_issue_skips_the_wall(tmp_path, monkeypatch):
+    """The exemption is a set of one and must stay tiny — every name in it is
+    a capability an anonymous stranger can drive."""
+    from kiln import server
+
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+    monkeypatch.delenv("KILN_API_URL", raising=False)
+    monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+
+    assert server._ANONYMOUS_OK_TOOLS == frozenset({"report_issue"})
+    for tool in ("generate_coaster", "cloud_remote_list", "billing_status"):
+        assert _pro_api_call(tool)["code"] == "KILN_ACCOUNT_NOT_PAIRED"
+
+
+def test_an_unreachable_server_does_not_raise(tmp_path, monkeypatch):
+    """A bug report must not be lost to an exception on the way out."""
+    monkeypatch.setenv("KILN_AUTH_HOME", str(tmp_path))
+    monkeypatch.delenv("KILN_API_URL", raising=False)
+    monkeypatch.delenv("KILN_LICENSE_KEY", raising=False)
+
+    def boom(_req, timeout):
+        raise OSError("network down")
+
+    monkeypatch.setattr("urllib.request.urlopen", boom)
+    result = _pro_api_call("report_issue", description="Anything at all.")
+    assert result["code"] == "SERVER_UNREACHABLE"
