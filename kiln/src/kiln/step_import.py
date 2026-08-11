@@ -230,6 +230,86 @@ print("KILN_RESULT:" + json.dumps(result))
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class TessellationBound:
+    """What a backend was actually TOLD about mesh density, in its own terms.
+
+    Four shapes, because the backends genuinely differ and any record that
+    flattened them to one would have to lie about the rest:
+
+    - ``"linear_angular"`` — both bounds given (the OCCT paths, cadquery).
+    - ``"linear"`` — a chord tolerance only, no angular bound (FreeCAD).
+    - ``"elements_per_circle"`` — a curvature target in gmsh's own unit,
+      which is the only density gmsh can be given.
+    - ``"unbounded"`` — Kiln named no density at all and the backend used
+      whatever it derives on its own.
+
+    ``"unbounded"`` is a state, not a missing number.  The honest answer to
+    "how fine is this mesh?" there is "we did not say" — which a reader must
+    be able to show, because rendering it as blank would let a mesh nobody
+    chose the density of pass for one somebody did.  No backend reports it
+    today; it stays because the condition it names is a real one, and a
+    reader that never learned to show it would go silent the moment a new
+    backend arrives unbounded.
+
+    A backend that gains a bound fills its numbers in and changes
+    :attr:`kind` — which is what gmsh just did, and nothing downstream had
+    to learn a new shape to follow it.
+    """
+
+    kind: str
+    """``"linear_angular"``, ``"linear"``, ``"elements_per_circle"``, or
+    ``"unbounded"``."""
+
+    linear: float | None = None
+    """Linear (chordal) deflection, in the STEP's OWN units.
+
+    Not necessarily mm: a STEP carries its units, and this is the number
+    handed to the backend, not a conversion of it.
+    """
+
+    angular: float | None = None
+    """Angular deflection in radians, when the backend takes one."""
+
+    elements_per_circle: int | None = None
+    """Elements gmsh is asked for per full circle of curvature.
+
+    Its own unit, kept as its own unit.  Gmsh cannot be handed a chordal
+    deflection at all, and restating this as one would claim a guarantee it
+    does not make: the segment count implies a sag finer than the mesher
+    actually delivers, because ``MeshSizeFromCurvature`` is a target for a
+    surface mesh rather than an exact per-circle count.
+    """
+
+    reason: str | None = None
+    """Why there is no number, when :attr:`kind` is ``"unbounded"``."""
+
+
+@dataclass(frozen=True)
+class MeshConversion:
+    """How a mesh was made from CAD — the neutral half of that question.
+
+    Records only what this module is in a position to know for certain:
+    which backend did the work, and what it was told.  Both are facts about
+    an operation that just happened here, so neither can be re-derived
+    honestly from outside: the backend is picked by fall-through inside
+    :func:`convert_step_to_stl` (a machine with FreeCAD installed but broken
+    uses a different one than the priority order alone predicts), and the
+    bound is whichever constant that path quotes.
+
+    What the accuracy MEANS — whether it is fine enough for a part, how it
+    compares across backends, whether a tolerance survives it — is judgment,
+    and deliberately not here.
+    """
+
+    backend: str
+    """Which backend ran: ``freecad``, ``gmsh``, ``occt``, ``occt-xcaf``,
+    or ``cadquery``.  Stable tokens, not display strings."""
+
+    bound: TessellationBound
+    """The density it was told to use."""
+
+
 @dataclass
 class StepImportResult:
     """Result of a STEP-to-STL conversion."""
@@ -267,6 +347,14 @@ class StepImportResult:
 
     part_colors: list[str | None] = field(default_factory=list)
     """Per-part ``#RRGGBB`` colours (or ``None``), same order as names."""
+
+    conversion: MeshConversion | None = None
+    """Which backend drew this mesh, and at what density.
+
+    ``None`` only where nothing converted anything — a caller holding a
+    result it did not obtain from a conversion.  Every path in this module
+    that produces a mesh from a STEP fills this in.
+    """
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-friendly dictionary."""
@@ -651,6 +739,32 @@ _GMSH_CURVATURE_ELEMENTS = math.ceil(4 * math.pi / _OCP_ANGULAR_DEFLECTION)
 #: bound".  It gets its own code because the parent must treat it unlike any
 #: other failure — see :func:`_convert_via_gmsh`.
 _GMSH_UNBOUNDABLE_EXIT = 9
+
+
+# What each backend is told about density, kept beside the constants it
+# quotes rather than restated at the call sites.  One home means the record
+# cannot drift from the value actually passed: change a constant and what
+# gets recorded changes with it, because it IS the constant.
+_FREECAD_BOUND = TessellationBound(kind="linear", linear=TESSELLATION_TOLERANCE)
+_KERNEL_BOUND = TessellationBound(
+    kind="linear_angular",
+    linear=_OCP_LINEAR_DEFLECTION,
+    angular=_OCP_ANGULAR_DEFLECTION,
+)
+#: Gmsh, in the only unit gmsh accepts.  Reads :data:`_GMSH_CURVATURE_ELEMENTS`
+#: rather than restating it, so the recorded bound and the bound actually set
+#: on the mesher are the same number by construction and cannot drift apart.
+#:
+#: Deliberately NOT restated as a chordal deflection, even though the constant
+#: is derived from the kernel's angular bound.  The derivation predicts sag of
+#: R/3217; measurement puts it near R/700 — 2.9x optimistic — because
+#: ``MeshSizeFromCurvature`` is a target for a surface mesh, not the exact
+#: per-circle segment count the kernel's angular deflection resolves to.
+#: Recording a chord figure here would publish the prediction as the promise.
+_GMSH_BOUND = TessellationBound(
+    kind="elements_per_circle",
+    elements_per_circle=_GMSH_CURVATURE_ELEMENTS,
+)
 
 
 # Runs in a CHILD interpreter — see _convert_via_ocp for why.
@@ -1181,7 +1295,8 @@ def ensure_mesh_path(
     path: str,
     *,
     output_dir: str | None = None,
-) -> tuple[str, str | None]:
+    with_record: bool = False,
+) -> tuple[str, str | None] | tuple[str, str | None, MeshConversion | None]:
     """Hand this any model path; get back something the mesh pipeline can read.
 
     The single door for "a STEP file turned up somewhere that wants a mesh."
@@ -1203,9 +1318,25 @@ def ensure_mesh_path(
     cache in the OS temp dir (each hit is an independent COPY — mutating a
     returned mesh can never poison a later call).
 
+    Args:
+        with_record: return the structured :class:`MeshConversion` as a third
+            element.  Opt-in, and defaulting to off, because this returns a
+            2-tuple in every released version — widening it unconditionally
+            would break the unpacking in every caller that already exists,
+            inside Kiln and outside it, to hand them something none of them
+            asked for.
+
     Returns:
-        ``(mesh_path, note)`` — ``note`` is a human-readable line for a
-        report when a conversion happened, else ``None``.
+        ``(mesh_path, note)``, or ``(mesh_path, note, conversion)`` when
+        ``with_record``.  ``note`` is a human-readable line for a report when
+        a conversion happened, else ``None``.
+
+        ``conversion`` is how the mesh was made — the fact a prose note
+        cannot carry, which is why half the callers of this function threw
+        the note away.  ``None`` when nothing was converted (an ordinary mesh
+        passed straight through), and also for a cache entry written before
+        the record existed, which is honest: that mesh really is one whose
+        origin was never written down.
 
     Raises:
         NoBackendError: It IS a STEP file but nothing can convert it.  The
@@ -1213,7 +1344,7 @@ def ensure_mesh_path(
             tell the user what to do instead of guessing.
     """
     if not is_step_file(path):
-        return path, None
+        return (path, None, None) if with_record else (path, None)
 
     if output_dir is None:
         output_dir = tempfile.mkdtemp(prefix="kiln_step_")
@@ -1252,13 +1383,27 @@ def ensure_mesh_path(
     ).hexdigest()
     cache_dir = Path(tempfile.gettempdir()) / "kiln_step_cache"
     cached = cache_dir / f"{key}.stl"
+    # The record rides WITH the cached mesh, in a sidecar beside it.  Without
+    # one, a cache hit would return no record at all — so the same file would
+    # report how it was made the first time and shrug every time after, which
+    # is worse than never reporting it: a caller cannot tell "not from CAD"
+    # from "converted, but this run happened to be a hit."
+    cached_record = cached.with_suffix(".json")
 
     if cached.is_file():
+        # The miss path creates output_dir on the way through
+        # (_validate_output_dir); the hit path never did, so a caller naming
+        # a directory that does not exist yet got a mesh on the first call
+        # and a FileNotFoundError on every one after — the same call
+        # succeeding or failing purely on whether something else had already
+        # converted those bytes.
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
         out = str(Path(output_dir) / "merged.stl")
         _shutil.copyfile(cached, out)
-        return out, (
-            f"Converted from STEP ({Path(path).name}) to mesh — cached, 0.0s."
-        )
+        note = f"Converted from STEP ({Path(path).name}) to mesh — cached, 0.0s."
+        if not with_record:
+            return out, note
+        return out, note, _read_cached_conversion(cached_record)
 
     result = convert_step_to_stl(path, output_dir=output_dir, merge_bodies=True)
     note = (
@@ -1274,10 +1419,49 @@ def ensure_mesh_path(
         tmp = cached.with_suffix(f".{os.getpid()}.tmp")
         _shutil.copyfile(result.output_path, tmp)
         os.replace(tmp, cached)
+        if result.conversion is not None:
+            # Written AFTER the mesh, and atomically.  The mesh is the thing
+            # callers need; a sidecar that failed to write costs a later hit
+            # its record and nothing else, whereas a mesh published without
+            # its sidecar being durable would be the same situation anyway.
+            rtmp = cached_record.with_suffix(f".{os.getpid()}.rtmp")
+            rtmp.write_text(
+                json.dumps(asdict(result.conversion)), encoding="utf-8"
+            )
+            os.replace(rtmp, cached_record)
     except OSError:
         pass  # a full or read-only temp dir must never fail the conversion
 
-    return result.output_path, note
+    if not with_record:
+        return result.output_path, note
+    return result.output_path, note, result.conversion
+
+
+def _read_cached_conversion(sidecar: Path) -> MeshConversion | None:
+    """Rebuild a conversion record from a cache sidecar, or admit there is none.
+
+    Absent for entries written before the record existed, and unreadable if
+    the temp dir was cleaned mid-flight.  Both answer ``None`` rather than a
+    partial record: a mesh whose origin was never written down is exactly
+    what ``None`` means here, and inventing a plausible one from the cache
+    key would be reporting the backends that are INSTALLED as the backend
+    that ran.
+    """
+    try:
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+        bound = data["bound"]
+        return MeshConversion(
+            backend=data["backend"],
+            bound=TessellationBound(
+                kind=bound["kind"],
+                linear=bound.get("linear"),
+                angular=bound.get("angular"),
+                elements_per_circle=bound.get("elements_per_circle"),
+                reason=bound.get("reason"),
+            ),
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def convert_step_to_stl(
@@ -1311,6 +1495,10 @@ def convert_step_to_stl(
     out_dir = _validate_output_dir(output_dir, validated_path)
 
     warnings: list[str] = []
+    # Set where a backend SUCCEEDS, never where one is merely attempted: the
+    # fall-through means the backend that ran is not the one the priority
+    # order names on a machine where an earlier one is installed but broken.
+    conversion: MeshConversion | None = None
     t0 = time.monotonic()
 
     # Try backends in priority order.
@@ -1321,6 +1509,7 @@ def convert_step_to_stl(
             outputs, body_count = _convert_via_freecad(
                 validated_path, out_dir, merge_bodies, freecad_cmd
             )
+            conversion = MeshConversion(backend="freecad", bound=_FREECAD_BOUND)
         except StepImportError:
             raise
         except Exception as exc:
@@ -1339,6 +1528,7 @@ def convert_step_to_stl(
                 )
             try:
                 outputs, body_count = _convert_via_gmsh(validated_path, out_dir)
+                conversion = MeshConversion(backend="gmsh", bound=_GMSH_BOUND)
             except StepImportError:
                 raise
             except Exception as exc:
@@ -1355,10 +1545,14 @@ def convert_step_to_stl(
                 outputs, body_count = _convert_via_ocp(
                     validated_path, out_dir, merge_bodies
                 )
+                conversion = MeshConversion(backend="occt", bound=_KERNEL_BOUND)
             elif _cadquery_available():
                 logger.info("Converting STEP via CadQuery")
                 outputs, body_count = _convert_via_cadquery(
                     validated_path, out_dir, merge_bodies
+                )
+                conversion = MeshConversion(
+                    backend="cadquery", bound=_KERNEL_BOUND
                 )
             else:
                 raise NoBackendError()
@@ -1388,6 +1582,7 @@ def convert_step_to_stl(
         conversion_time_s=round(elapsed, 3),
         warnings=warnings,
         output_paths=outputs,
+        conversion=conversion,
     )
 
 
@@ -1479,6 +1674,9 @@ def convert_step(
             output_format="stl",
             part_names=names,
             part_colors=data["colors"],
+            conversion=MeshConversion(
+                backend="occt-xcaf", bound=_KERNEL_BOUND
+            ),
         )
 
     out_3mf = str(out_dir / f"{validated_path.stem}.3mf")
@@ -1499,6 +1697,7 @@ def convert_step(
         output_format="3mf",
         part_names=names,
         part_colors=data["colors"],
+        conversion=MeshConversion(backend="occt-xcaf", bound=_KERNEL_BOUND),
     )
 
 

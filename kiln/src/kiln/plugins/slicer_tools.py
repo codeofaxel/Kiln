@@ -290,6 +290,16 @@ def _auto_wrap_bambu_3mf(
                 # installed just means no thumbnail, which is where this
                 # started, so it degrades to the old behavior rather than
                 # costing anyone a print.
+                #
+                # DELIBERATELY drops the conversion record, unlike every other
+                # caller of this door.  The gcode was sliced from the STEP
+                # itself, so this mesh is a picture of the part and not the
+                # part: recording its fidelity here would attach an accuracy
+                # figure to geometry that never reached the printer, and would
+                # attach it to the one output whose real accuracy came from
+                # PrusaSlicer's own tessellation instead.  A thumbnail's
+                # fidelity is nobody's question.  Pinned by
+                # test_the_thumbnail_path_deliberately_keeps_no_record.
                 try:
                     from kiln.step_import import ensure_mesh_path
 

@@ -2289,3 +2289,396 @@ def test_gmsh_bound_participates_in_the_conversion_cache_key(
     )
 
     assert conversions.count(str(step)) == 3
+
+
+# ---------------------------------------------------------------------------
+# 35. The conversion record: WHICH backend drew this mesh, at what density.
+#
+#     A mesh made from CAD is an approximation, and the two bounded backends
+#     sit far apart -- 0.0068 mm of sag from the kernel against 0.162 mm from
+#     the FreeCAD path on the same 150 mm sphere, both measured.  Nothing in
+#     the triangles says which one ran, and nothing outside this module can
+#     work it out: the backend is chosen by fall-through, so the answer is not
+#     the priority order but what that order did on THIS machine.  These pin
+#     the record to what actually happened rather than to what was intended.
+# ---------------------------------------------------------------------------
+
+
+@patch("kiln.step_import._find_freecad_cmd", return_value="FreeCADCmd")
+@patch("kiln.step_import._find_gmsh_cmd", return_value=None)
+@patch("kiln.step_import._cadquery_available", return_value=False)
+def test_freecad_records_a_linear_only_bound(
+    mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_dir
+):
+    """FreeCAD is given a chord tolerance and no angular bound -- say exactly that.
+
+    Recording an angular figure here would invent a guarantee this path never
+    asked for.
+    """
+    out_stl = sample_step_file.parent / "merged.stl"
+    out_stl.write_bytes(b"\x00" * 500)
+    kiln_result = json.dumps({"body_count": 1, "outputs": [str(out_stl)]})
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout = f"KILN_RESULT:{kiln_result}\n"
+    mock_proc.stderr = ""
+
+    with patch("kiln.step_import.subprocess.run", return_value=mock_proc):
+        result = convert_step_to_stl(str(sample_step_file))
+
+    from kiln.step_import import TESSELLATION_TOLERANCE
+
+    assert result.conversion is not None
+    assert result.conversion.backend == "freecad"
+    assert result.conversion.bound.kind == "linear"
+    assert result.conversion.bound.linear == TESSELLATION_TOLERANCE
+    assert result.conversion.bound.angular is None
+
+
+@patch("kiln.step_import._find_freecad_cmd", return_value=None)
+@patch("kiln.step_import._find_gmsh_cmd", return_value="gmsh")
+@patch("kiln.step_import._cadquery_available", return_value=False)
+def test_gmsh_records_its_bound_in_the_only_unit_it_accepts(
+    mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_dir
+):
+    """Gmsh's density is a curvature target, and is recorded as one.
+
+    It cannot be handed a chordal deflection at all, so the record keeps the
+    unit gmsh actually accepts.  Restating it as a chord figure would publish
+    a prediction as a promise: the segment count implies sag of R/3217 and
+    measurement puts it near R/700, because MeshSizeFromCurvature is a target
+    for a surface mesh rather than an exact per-circle count.
+
+    This backend arrived unbounded and gained a bound (fix/gmsh-density-bound).
+    It changed `kind` and filled in its number; no reader needed a new shape
+    to follow it, which is what the four-shape bound is for.
+    """
+    out_stl = sample_step_file.parent / "merged.stl"
+    out_stl.write_bytes(b"\x00" * 300)
+    kiln_result = json.dumps({"body_count": 1, "outputs": [str(out_stl)]})
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout = f"KILN_RESULT:{kiln_result}\n"
+    mock_proc.stderr = ""
+
+    with patch("kiln.step_import.subprocess.run", return_value=mock_proc):
+        result = convert_step_to_stl(str(sample_step_file))
+
+    assert result.conversion is not None
+    from kiln.step_import import _GMSH_CURVATURE_ELEMENTS
+
+    assert result.conversion.backend == "gmsh"
+    assert result.conversion.bound.kind == "elements_per_circle"
+    assert result.conversion.bound.elements_per_circle == _GMSH_CURVATURE_ELEMENTS
+    # Read off the constant the mesher is actually set to, never restated —
+    # a second copy of the number is a second number.
+    assert result.conversion.bound.linear is None
+    assert result.conversion.bound.angular is None
+
+
+@patch("kiln.step_import._find_freecad_cmd", return_value="FreeCADCmd")
+@patch("kiln.step_import._find_gmsh_cmd", return_value="gmsh")
+@patch("kiln.step_import._cadquery_available", return_value=False)
+def test_record_names_the_backend_that_RAN_not_the_one_first_in_line(
+    mock_cq, mock_gmsh, mock_fc, sample_step_file, tmp_dir
+):
+    """The whole reason this cannot be re-derived from outside.
+
+    FreeCAD is installed and first in priority, but broken -- so gmsh does the
+    work.  Anything reconstructing "which backend ran" from the priority order
+    and a PATH lookup would answer "freecad" with total confidence and be
+    wrong, and would be wrong in the direction that matters: it would report a
+    bounded 0.1 mm chord tolerance for a mesh that was cut at whatever the
+    installed gmsh felt like.
+    """
+    out_stl = sample_step_file.parent / "merged.stl"
+    out_stl.write_bytes(b"\x00" * 300)
+    kiln_result = json.dumps({"body_count": 1, "outputs": [str(out_stl)]})
+    ok = MagicMock()
+    ok.returncode = 0
+    ok.stdout = f"KILN_RESULT:{kiln_result}\n"
+    ok.stderr = ""
+
+    calls = {"n": 0}
+
+    def _freecad_is_installed_but_broken(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # NOT a StepImportError: a non-zero exit is a bad STEP and stops
+            # the conversion.  A broken install is the case that falls through.
+            raise OSError("FreeCADCmd: broken symlink")
+        return ok
+
+    with patch(
+        "kiln.step_import.subprocess.run",
+        side_effect=_freecad_is_installed_but_broken,
+    ):
+        result = convert_step_to_stl(str(sample_step_file))
+
+    assert result.conversion is not None
+    assert result.conversion.backend == "gmsh"
+    # And it carries GMSH's bound, not the 0.1 mm chord tolerance a caller
+    # would have inferred from "FreeCAD is installed and goes first".
+    assert result.conversion.bound.kind == "elements_per_circle"
+    assert result.conversion.bound.linear is None
+    # The attempt is still visible, so the record and the warnings agree.
+    assert any("FreeCAD failed" in w for w in result.warnings)
+
+
+def test_kernel_records_both_bounds_on_a_real_conversion(real_kernel, tmp_dir):
+    """A real kernel run, not a mock: the record has to describe THIS work."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.IFSelect import IFSelect_ReturnStatus
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    from kiln.step_import import (
+        _OCP_ANGULAR_DEFLECTION,
+        _OCP_LINEAR_DEFLECTION,
+    )
+
+    step = tmp_dir / "box.step"
+    writer = STEPControl_Writer()
+    writer.Transfer(
+        BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape(),
+        STEPControl_StepModelType.STEPControl_AsIs,
+    )
+    assert writer.Write(str(step)) == IFSelect_ReturnStatus.IFSelect_RetDone
+
+    result = convert_step_to_stl(str(step), output_dir=str(tmp_dir / "out"))
+
+    assert result.conversion is not None
+    assert result.conversion.backend == "occt"
+    assert result.conversion.bound.kind == "linear_angular"
+    # Read off the constants rather than restated: a record that quoted its
+    # own copy of the numbers could drift from what was actually passed.
+    assert result.conversion.bound.linear == _OCP_LINEAR_DEFLECTION
+    assert result.conversion.bound.angular == _OCP_ANGULAR_DEFLECTION
+
+
+def test_colour_aware_path_records_its_own_reader(real_kernel, tmp_dir):
+    """The 3MF path runs a DIFFERENT reader, and says so.
+
+    Same kernel, same bounds, but the XCAF reader is the one that can carry
+    colour and part names -- so a record naming plain ``occt`` would describe
+    a conversion that did not happen.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.IFSelect import IFSelect_ReturnStatus
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    from kiln.step_import import convert_step
+
+    step = tmp_dir / "plain.step"
+    writer = STEPControl_Writer()
+    writer.Transfer(
+        BRepPrimAPI_MakeBox(8.0, 8.0, 8.0).Shape(),
+        STEPControl_StepModelType.STEPControl_AsIs,
+    )
+    assert writer.Write(str(step)) == IFSelect_ReturnStatus.IFSelect_RetDone
+
+    result = convert_step(str(step), output_dir=str(tmp_dir / "out"))
+
+    assert result.conversion is not None
+    assert result.conversion.backend == "occt-xcaf"
+    assert result.conversion.bound.kind == "linear_angular"
+
+
+def test_tool_payload_carries_the_record_as_plain_json(real_kernel, tmp_dir):
+    """The carrier half: it has to cross the tool boundary intact.
+
+    A dataclass that never reaches the payload is a fact the part does not
+    have.  Asserting it survives ``json.dumps`` is the point -- whatever reads
+    this downstream gets it over the wire, not as a Python object.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.IFSelect import IFSelect_ReturnStatus
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    step = tmp_dir / "payload.step"
+    writer = STEPControl_Writer()
+    writer.Transfer(
+        BRepPrimAPI_MakeBox(6.0, 6.0, 6.0).Shape(),
+        STEPControl_StepModelType.STEPControl_AsIs,
+    )
+    assert writer.Write(str(step)) == IFSelect_ReturnStatus.IFSelect_RetDone
+
+    tools = _register_step_tools()
+    payload = tools["import_step_file"](str(step), output_dir=str(tmp_dir))
+
+    assert payload["status"] == "ok"
+    record = payload["conversion"]
+    assert record["backend"] in ("occt", "occt-xcaf")
+    assert record["bound"]["kind"] == "linear_angular"
+    json.dumps(payload["conversion"])  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# 36. Handing the record to the pipelines that convert IMPLICITLY.
+#
+#     import_step_file is the door a user knocks on deliberately; most STEP
+#     conversions happen somewhere else entirely, inside a tool that accepted
+#     a .step and quietly needed a mesh.  Those callers used to receive a
+#     prose sentence and, four times out of seven, drop it on the floor —
+#     which is what a prose note with no home invites.  These pin the
+#     structured form, and pin the compatibility that let it be added at all.
+# ---------------------------------------------------------------------------
+
+
+def _unique_step(tmp_dir, name="implicit.step"):
+    """A STEP whose bytes are unique to this run, so the first call MISSES."""
+    import time as _time
+
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    step = tmp_dir / name
+    writer = STEPControl_Writer()
+    writer.Transfer(
+        BRepPrimAPI_MakeBox(11.0, 9.0, 5.0).Shape(),
+        STEPControl_StepModelType.STEPControl_AsIs,
+    )
+    writer.Write(str(step))
+    step.write_bytes(step.read_bytes() + f"/* {_time.time_ns()} */".encode())
+    return step
+
+
+def test_the_two_tuple_contract_is_unchanged(real_kernel, tmp_dir):
+    """Every released version returns two values, and callers unpack two.
+
+    The record had to arrive without breaking that — inside Kiln and in
+    anyone's code outside it — so it is opt-in and this is the pin.
+    """
+    from kiln.step_import import ensure_mesh_path
+
+    step = _unique_step(tmp_dir)
+    out = tmp_dir / "legacy"
+    out.mkdir()
+
+    mesh, note = ensure_mesh_path(str(step), output_dir=str(out))
+    assert Path(mesh).is_file()
+    assert "Converted from STEP" in note
+
+
+def test_an_implicit_conversion_can_now_keep_the_record(real_kernel, tmp_dir):
+    from kiln.step_import import ensure_mesh_path
+
+    step = _unique_step(tmp_dir)
+    out = tmp_dir / "rec"
+    out.mkdir()
+
+    mesh, note, conversion = ensure_mesh_path(
+        str(step), output_dir=str(out), with_record=True
+    )
+    assert Path(mesh).is_file()
+    assert conversion is not None
+    assert conversion.backend == "occt"
+    assert conversion.bound.kind == "linear_angular"
+
+
+def test_a_cache_hit_reports_the_same_record_as_the_conversion(
+    real_kernel, tmp_dir
+):
+    """The one that makes the record trustworthy rather than incidental.
+
+    The cache serves most real conversions. If a hit returned no record, the
+    SAME file would report how it was made on one run and shrug on the next,
+    and a caller could not tell "not from CAD" from "converted, but somebody
+    else converted it first" — which is the more misleading of the two.
+    """
+    from kiln.step_import import ensure_mesh_path
+
+    step = _unique_step(tmp_dir)
+    d1, d2 = tmp_dir / "miss", tmp_dir / "hit"
+    for d in (d1, d2):
+        d.mkdir()
+
+    _, note1, miss = ensure_mesh_path(
+        str(step), output_dir=str(d1), with_record=True
+    )
+    _, note2, hit = ensure_mesh_path(
+        str(step), output_dir=str(d2), with_record=True
+    )
+
+    assert "cached" not in (note1 or "")
+    assert "cached" in (note2 or ""), "second identical call must hit the cache"
+    assert hit == miss, "a hit must describe the same conversion as the miss"
+
+
+def test_a_cache_entry_from_before_the_record_says_nothing_rather_than_guessing(
+    real_kernel, tmp_dir
+):
+    """Entries written by an older Kiln have no sidecar.
+
+    The cache key knows which backends are INSTALLED, so a record could be
+    reconstructed from it — and would be wrong on exactly the machine where
+    the first-choice backend is present but broken. None is the honest answer
+    for a mesh whose origin was never written down.
+    """
+    from kiln.step_import import ensure_mesh_path
+
+    step = _unique_step(tmp_dir)
+    d1, d2 = tmp_dir / "a", tmp_dir / "b"
+    for d in (d1, d2):
+        d.mkdir()
+
+    ensure_mesh_path(str(step), output_dir=str(d1), with_record=True)
+
+    cache_dir = Path(tempfile.gettempdir()) / "kiln_step_cache"
+    sidecars = sorted(cache_dir.glob("*.json"))
+    assert sidecars, "the conversion should have left a sidecar"
+    for s in sidecars:
+        s.unlink()
+
+    _, note, conversion = ensure_mesh_path(
+        str(step), output_dir=str(d2), with_record=True
+    )
+    assert "cached" in (note or "")
+    assert conversion is None
+
+
+def test_a_cache_hit_creates_an_output_dir_the_way_a_conversion_does(
+    real_kernel, tmp_dir
+):
+    """The miss path made the directory; the hit path did not.
+
+    So the same call succeeded or failed purely on whether something had
+    already converted those bytes — a first run that worked and a second that
+    raised FileNotFoundError.
+    """
+    from kiln.step_import import ensure_mesh_path
+
+    step = _unique_step(tmp_dir)
+    made = tmp_dir / "exists"
+    made.mkdir()
+    ensure_mesh_path(str(step), output_dir=str(made))
+
+    never_made = tmp_dir / "not" / "yet"
+    assert not never_made.exists()
+    mesh, note = ensure_mesh_path(str(step), output_dir=str(never_made))
+    assert "cached" in (note or "")
+    assert Path(mesh).is_file()
+
+
+def test_an_ordinary_mesh_reports_no_conversion(tmp_dir):
+    """Nothing converted it, so there is nothing to say about how."""
+    from kiln.step_import import ensure_mesh_path
+
+    stl = tmp_dir / "already.stl"
+    stl.write_bytes(b"\x00" * 84)
+    assert ensure_mesh_path(str(stl), with_record=True) == (str(stl), None, None)
+
+
+def test_the_thumbnail_path_deliberately_keeps_no_record():
+    """The one caller that SHOULD drop it, pinned so it stays a decision.
+
+    The slicer converts a STEP only to draw the printer's LCD thumbnail — the
+    gcode itself was sliced from the STEP natively. Recording that mesh's
+    fidelity would attach an accuracy figure to geometry that never reached
+    the printer. If someone later "fixes" this omission for consistency, this
+    fails and sends them to the reasoning first.
+    """
+    from kiln.plugins import slicer_tools
+
+    source = Path(slicer_tools.__file__).read_text(encoding="utf-8")
+    assert "with_record" not in source
+    assert "DELIBERATELY drops the conversion record" in source

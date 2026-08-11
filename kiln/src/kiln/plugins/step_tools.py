@@ -10,6 +10,7 @@ no manual imports needed.
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from typing import Any
 
 # Eager, unlike the conversion imports below, which stay lazy for plugin
@@ -116,6 +117,18 @@ class _StepToolsPlugin:
                     "file_size_bytes": result.file_size_bytes,
                     "conversion_time_s": result.conversion_time_s,
                     "warnings": result.warnings,
+                    # How this mesh was made, not just that it was: which
+                    # backend drew it and at what density.  Both are facts
+                    # only the conversion itself is in a position to state —
+                    # the backend is chosen by fall-through, so a machine
+                    # with a broken FreeCAD uses a different one than the
+                    # priority order alone would predict, and nothing
+                    # downstream can tell which by looking at the mesh.
+                    "conversion": (
+                        asdict(result.conversion)
+                        if result.conversion is not None
+                        else None
+                    ),
                     "next_steps": [
                         "Run diagnose_mesh on the output to check for defects.",
                         "Run analyze_mesh_geometry for printability scoring.",
