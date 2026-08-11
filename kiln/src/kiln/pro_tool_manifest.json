@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-11T09:06:43.857067+00:00",
+  "generated": "2026-08-11T09:55:05.000458+00:00",
   "tool_count": 414,
   "categories": {
     "product_generators": {
@@ -17182,7 +17182,7 @@
     },
     {
       "name": "report_issue",
-      "description": "Report a bug, or tell Kiln what you figured out.",
+      "description": "Report a bug or a workaround \u2014 what broke, and what fixed it.",
       "tier": "free",
       "access": "free",
       "category": "support",
