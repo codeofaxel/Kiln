@@ -68,6 +68,26 @@ _MACOS_PATHS: list[str] = (
     else []
 )
 
+# One place to say how to get a slicer Kiln can actually drive, so the advice
+# cannot drift from the capability again.  It said "PrusaSlicer or OrcaSlicer"
+# while every command Kiln builds is PrusaSlicer-only — which sent the one
+# group most likely to own OrcaSlicer, Bambu owners, straight into a wall.
+_INSTALL_PRUSASLICER = (
+    "Kiln slices with PrusaSlicer:\n"
+    "  Linux/WSL: apt install prusa-slicer  (or download from prusaslicer.org)\n"
+    "  macOS: brew install --cask prusaslicer\n"
+    "Or set KILN_SLICER_PATH to a PrusaSlicer binary."
+)
+
+# CLI dialects.  OrcaSlicer and BambuStudio are forks of the same non-Slic3r
+# command line: verified 2026-08-11 that OrcaSlicer 2.3.2 and BambuStudio
+# 02.06.00.51 both reject --export-gcode / --output / --load and expose
+# --slice / --outputdir / --load-settings instead.  They also load JSON
+# presets rather than the PrusaSlicer .ini Kiln generates, so driving them is
+# a new backend and not a flag rename.
+_CLI_PRUSA = "prusa"
+_CLI_BAMBU = "bambu"
+
 # Extensions the slicer can accept as input.
 _INPUT_EXTENSIONS = {".stl", ".3mf", ".step", ".stp", ".obj", ".amf"}
 
@@ -179,12 +199,40 @@ def find_slicer(slicer_path: str | None = None) -> SlicerInfo:
         version = _get_version(env_path)
         return SlicerInfo(path=env_path, name=name, version=version)
 
-    raise SlicerNotFoundError(
-        "No slicer found. Install PrusaSlicer or OrcaSlicer:\n"
-        "  Linux/WSL: apt install prusa-slicer  (or download from prusaslicer.org)\n"
-        "  macOS: brew install --cask prusaslicer\n"
-        "Or set KILN_SLICER_PATH to the binary location."
-    )
+    raise SlicerNotFoundError(f"No slicer found. {_INSTALL_PRUSASLICER}")
+
+
+def slicer_cli_family(info: SlicerInfo) -> str:
+    """Which command-line dialect *info* speaks.
+
+    ``find_slicer`` has always known which binary it resolved and then thrown
+    that away: :func:`slice_file` built one Slic3r-dialect argv for everything.
+    An OrcaSlicer-only user therefore got ``Invalid option --export-gcode``
+    and exit 254 from a tool that had just reported finding their slicer.
+
+    The ``--version`` banner is preferred over the file name, because a binary
+    called ``orca-slicer`` that reports ``PrusaSlicer-2.9.4`` is a PrusaSlicer.
+    Measured on this machine: PrusaSlicer answers
+    ``"PrusaSlicer-2.9.4 based on Slic3r (with GUI support)"`` and OrcaSlicer
+    answers ``"OrcaSlicer-2.3.2:"``, but BambuStudio's ``--version`` is itself
+    an invalid option and its banner is a log line, so BambuStudio is
+    recognised by file name alone.  Orca and Bambu are checked before Prusa
+    because Orca is a Slic3r derivative and a build whose banner mentions
+    Slic3r must not read as PrusaSlicer.
+
+    Anything unrecognised is treated as PrusaSlicer — the behaviour before
+    this function existed, so a binary Kiln cannot place keeps its old path
+    instead of gaining a new refusal.
+    """
+    banner = (info.version or "").lower()
+    if "orca" in banner or "bambu" in banner:
+        return _CLI_BAMBU
+    if "prusaslicer" in banner or "slic3r" in banner:
+        return _CLI_PRUSA
+    haystack = f"{info.name or ''} {os.path.basename(info.path or '')}".lower()
+    if "orca" in haystack or "bambu" in haystack:
+        return _CLI_BAMBU
+    return _CLI_PRUSA
 
 
 def _get_version(slicer_path: str) -> str | None:
@@ -277,6 +325,21 @@ def slice_file(
 
     # Find slicer
     slicer = find_slicer(slicer_path)
+
+    # Say what is actually wrong.  Every command below is PrusaSlicer dialect,
+    # so an Orca/BambuStudio binary used to reach the subprocess and come back
+    # with "Invalid option --export-gcode" and exit 254 — a message about a
+    # flag, for a user who chose a slicer.  Refusing here costs nothing that
+    # worked a moment ago: those flags never ran on these binaries.
+    if slicer_cli_family(slicer) == _CLI_BAMBU:
+        raise SlicerError(
+            f"{os.path.basename(slicer.path)} uses the BambuStudio/OrcaSlicer "
+            f"command line, which has no --export-gcode, --output or --load "
+            f"flag and loads presets as JSON rather than the PrusaSlicer .ini "
+            f"Kiln generates. Kiln cannot drive it yet.\n"
+            f"{_INSTALL_PRUSASLICER}\n"
+            f"Your printer profile and settings are unaffected."
+        )
 
     # Prepare output
     out_dir = output_dir or _DEFAULT_OUTPUT_DIR

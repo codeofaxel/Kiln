@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -558,3 +559,205 @@ class TestCrashAfterFinishing:
                 tmp_path, 0, None,
                 stale_body="G1 X9\n; filament used [mm] = 99.00\n; end\n",
             )
+
+
+# ---------------------------------------------------------------------------
+# Every bundled profile must survive a real slicer
+# ---------------------------------------------------------------------------
+
+
+def _real_prusaslicer() -> str | None:
+    """A PrusaSlicer binary on this machine, or None."""
+    import shutil
+
+    for name in ("prusa-slicer", "PrusaSlicer", "prusaslicer"):
+        found = shutil.which(name)
+        if found:
+            return found
+    mac = "/Applications/PrusaSlicer.app/Contents/MacOS/PrusaSlicer"
+    return mac if os.path.isfile(mac) and os.access(mac, os.X_OK) else None
+
+
+def _write_cube(path: str, size: float = 20.0) -> str:
+    """Smallest printable solid: a binary-STL cube."""
+    import struct
+
+    v = [
+        (0, 0, 0), (size, 0, 0), (size, size, 0), (0, size, 0),
+        (0, 0, size), (size, 0, size), (size, size, size), (0, size, size),
+    ]
+    faces = [
+        (0, 3, 2), (0, 2, 1), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4),
+        (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7),
+    ]
+    with open(path, "wb") as fh:
+        fh.write(b"\0" * 80)
+        fh.write(struct.pack("<I", len(faces)))
+        for a, b, c in faces:
+            fh.write(struct.pack("<3f", 0, 0, 0))
+            for i in (a, b, c):
+                fh.write(struct.pack("<3f", *v[i]))
+            fh.write(struct.pack("<H", 0))
+    return path
+
+
+@pytest.mark.skipif(_real_prusaslicer() is None, reason="needs a real PrusaSlicer")
+class TestBundledProfilesActuallySlice:
+    """Drive the real binary, because mocks cannot see this failure class.
+
+    Every slicer test in this file mocks ``subprocess.run``, which is why a
+    profile that PrusaSlicer refuses outright shipped: the refusal is a clean
+    ``exit 0`` with no output file, so nothing short of the real binary
+    distinguishes it from success.  Seven bundled Bambu profiles were in that
+    state — see ``TestRelativeExtrusionNeedsLayerReset`` in
+    ``test_slicer_profiles.py`` for the mechanism.
+    """
+
+    def _slice(self, printer_id: str, tmp_path) -> str:
+        from kiln.slicer_profiles import resolve_slicer_profile
+
+        tmp_path = Path(tmp_path)
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        stl = _write_cube(str(tmp_path / "cube.stl"))
+        result = slice_file(
+            stl,
+            profile=resolve_slicer_profile(printer_id),
+            slicer_path=_real_prusaslicer(),
+            output_dir=str(tmp_path / "out"),
+            output_name=f"{printer_id}.gcode",
+            timeout=300,
+        )
+        return result.output_path
+
+    @pytest.mark.parametrize(
+        "printer_id",
+        [
+            "bambu_a1", "bambu_a1_mini", "bambu_a2l", "bambu_h2s", "bambu_p1p",
+            "bambu_p1s", "bambu_p2s", "bambu_x1c", "bambu_x1e",
+        ],
+    )
+    def test_relative_e_profile_produces_gcode(self, printer_id, tmp_path) -> None:
+        """All nine, not just the two that happened to declare layer_gcode."""
+        assert os.path.getsize(self._slice(printer_id, tmp_path)) > 0
+
+    def test_p2s_gcode_is_relative_e_and_resets_each_layer(self, tmp_path) -> None:
+        """The output is correct, not merely non-empty."""
+        import re
+
+        body = Path(self._slice("bambu_p2s", tmp_path)).read_text(encoding="utf-8")
+        assert re.search(r"^M83", body, re.M), "expected relative extrusion"
+        assert not re.search(r"^M82", body, re.M), "absolute extrusion leaked in"
+        layers = body.count(";LAYER_CHANGE")
+        resets = len(re.findall(r"^G92 E0", body, re.M))
+        assert layers > 1
+        assert resets >= layers - 1, f"{resets} E resets across {layers} layers"
+
+    @pytest.mark.slow
+    def test_every_prusaslicer_profile_in_the_bundle(self, tmp_path) -> None:
+        """The wider net: any profile we tell users to slice with must slice."""
+        from kiln.slicer_profiles import get_slicer_profile, list_slicer_profiles
+
+        failed = []
+        for pid in list_slicer_profiles():
+            if get_slicer_profile(pid).slicer != "prusaslicer":
+                continue
+            try:
+                assert os.path.getsize(self._slice(pid, tmp_path / pid)) > 0
+            except Exception as exc:  # noqa: BLE001
+                failed.append(f"{pid}: {str(exc)[:80]}")
+        assert not failed, "bundled profiles that cannot slice:\n" + "\n".join(failed)
+
+
+# ---------------------------------------------------------------------------
+# CLI dialect detection
+# ---------------------------------------------------------------------------
+
+
+class TestSlicerCliFamily:
+    """Kiln builds one argv shape; it must know when that shape is wrong.
+
+    ``slice_file`` emits ``--export-gcode/--output/--load``, which OrcaSlicer
+    and BambuStudio do not have.  Those users used to reach the subprocess and
+    get ``Invalid option --export-gcode`` and exit 254 from a tool that had
+    just told them it found their slicer.
+    """
+
+    def _info(self, path, version=None, name=None):
+        from kiln.slicer import SlicerInfo
+
+        return SlicerInfo(path=path, name=name or os.path.basename(path).lower(), version=version)
+
+    def test_orca_banner_is_bambu_family(self):
+        from kiln.slicer import slicer_cli_family
+
+        assert slicer_cli_family(self._info("/x/OrcaSlicer", "OrcaSlicer-2.3.2:")) == "bambu"
+
+    def test_bambustudio_is_recognised_by_filename(self):
+        """Its --version is itself an invalid option, so the banner is a log line."""
+        from kiln.slicer import slicer_cli_family
+
+        banner = "[2026-08-11 03:39:29] [trace] Initializing StaticPrintConfigs"
+        assert slicer_cli_family(self._info("/x/BambuStudio", banner)) == "bambu"
+
+    def test_banner_beats_filename(self):
+        """A binary named orca-slicer that reports PrusaSlicer is a PrusaSlicer."""
+        from kiln.slicer import slicer_cli_family
+
+        info = self._info("/x/orca-slicer", "PrusaSlicer-2.9.4 based on Slic3r (with GUI support)")
+        assert slicer_cli_family(info) == "prusa"
+
+    def test_prusaslicer_banner_mentioning_slic3r_is_prusa(self):
+        from kiln.slicer import slicer_cli_family
+
+        info = self._info("/x/PrusaSlicer", "PrusaSlicer-2.9.4 based on Slic3r (with GUI support)")
+        assert slicer_cli_family(info) == "prusa"
+
+    def test_unknown_binary_falls_open_to_prusa(self):
+        """No banner and no recognisable name keeps the pre-existing path."""
+        from kiln.slicer import slicer_cli_family
+
+        assert slicer_cli_family(self._info("/x/mystery", None)) == "prusa"
+
+    def test_slice_file_refuses_before_running_the_binary(self, tmp_path):
+        """The refusal names the cause, and never spawns the subprocess."""
+        from kiln.slicer import SlicerInfo
+
+        stl = _write_cube(str(tmp_path / "cube.stl"))
+        fake = SlicerInfo(path="/x/OrcaSlicer", name="orcaslicer", version="OrcaSlicer-2.3.2:")
+
+        with patch("kiln.slicer.find_slicer", return_value=fake), \
+             patch("kiln.slicer.subprocess.run") as ran:
+            with pytest.raises(SlicerError, match="BambuStudio/OrcaSlicer command line"):
+                slice_file(stl, output_dir=str(tmp_path / "out"))
+        ran.assert_not_called()
+
+    def test_not_found_message_no_longer_recommends_orcaslicer(self):
+        """It used to send Bambu owners toward the one slicer Kiln cannot drive."""
+        with patch("shutil.which", return_value=None), \
+             patch("kiln.slicer._MACOS_PATHS", []), \
+             patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(SlicerNotFoundError) as exc:
+                find_slicer()
+        assert "OrcaSlicer" not in str(exc.value)
+        assert "prusaslicer" in str(exc.value).lower()
+
+
+@pytest.mark.skipif(_real_prusaslicer() is None, reason="needs a real PrusaSlicer")
+class TestRealBinariesClassifyCorrectly:
+    """The false-positive risk is the whole concern: never refuse a PrusaSlicer."""
+
+    def test_real_prusaslicer_is_prusa_family(self):
+        from kiln.slicer import find_slicer, slicer_cli_family
+
+        assert slicer_cli_family(find_slicer(_real_prusaslicer())) == "prusa"
+
+    @pytest.mark.parametrize(
+        "app", ["/Applications/OrcaSlicer.app/Contents/MacOS/OrcaSlicer",
+                "/Applications/BambuStudio.app/Contents/MacOS/BambuStudio"],
+    )
+    def test_real_bambu_family_binaries(self, app):
+        from kiln.slicer import find_slicer, slicer_cli_family
+
+        if not os.path.isfile(app):
+            pytest.skip(f"{os.path.basename(app)} not installed")
+        assert slicer_cli_family(find_slicer(app)) == "bambu"

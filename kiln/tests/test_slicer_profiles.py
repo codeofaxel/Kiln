@@ -443,3 +443,118 @@ class TestResolveMultiextruderProfile:
         resolve_multiextruder_profile("bambu_a1", 2)
         base_after = get_slicer_profile("bambu_a1").settings["nozzle_diameter"]
         assert base_before == base_after  # still single value, not expanded
+
+
+# ===================================================================
+# Relative-E profiles must reset E each layer
+# ===================================================================
+
+class TestRelativeExtrusionNeedsLayerReset:
+    """A relative-E profile with no per-layer E reset does not slice.
+
+    PrusaSlicer refuses such a profile on a Marlin flavour: it writes the
+    reason to stderr, produces no gcode, and **exits 0**.  Kiln saw a clean
+    exit and a missing file, so seven bundled Bambu profiles — the P2S, P1S,
+    P1P, X1C, X1E, H2S and A1 mini — reported "Slicer completed but output
+    file was not created" for every single-material job.  Only the A1 and A2L
+    had declared a ``layer_gcode`` of their own.
+
+    Measured against PrusaSlicer 2.9.4: the check is a whitespace- and
+    case-insensitive search for ``G92 E0`` anywhere in ``layer_gcode``.
+    """
+
+    def _ini(self, path: str) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for raw in Path(path).read_text(encoding="utf-8").splitlines():
+            if "=" in raw and not raw.lstrip().startswith("#"):
+                key, val = raw.split("=", 1)
+                out[key.strip()] = val.strip()
+        return out
+
+    def test_every_bundled_relative_e_profile_resets_e(self) -> None:
+        """The whole bundle, so a tenth Bambu profile cannot reintroduce it."""
+        offenders = []
+        for pid in list_slicer_profiles():
+            settings = get_slicer_profile(pid).settings
+            if str(settings.get("use_relative_e_distances", "0")).strip() != "1":
+                continue
+            emitted = self._ini(resolve_slicer_profile(pid))
+            flat = "".join(emitted.get("layer_gcode", "").split()).lower()
+            if "g92e0" not in flat:
+                offenders.append(pid)
+        assert not offenders, (
+            f"relative-E profiles that PrusaSlicer will silently refuse: {offenders}"
+        )
+
+    def test_bambu_p2s_specifically(self) -> None:
+        """The machine the field report came from."""
+        emitted = self._ini(resolve_slicer_profile("bambu_p2s"))
+        assert emitted["use_relative_e_distances"] == "1"
+        assert "G92 E0" in emitted["layer_gcode"]
+
+    def test_absolute_e_profile_gets_no_reset(self) -> None:
+        """The guard that keeps this fix from becoming a worse bug.
+
+        A per-layer ``G92 E0`` under absolute extrusion resets the extruder
+        counter mid-print; the next absolute E value would push a whole
+        layer's filament in one move.
+        """
+        for pid in ("prusa_mk4", "ender3"):
+            settings = get_slicer_profile(pid).settings
+            assert str(settings.get("use_relative_e_distances", "0")) != "1"
+            assert "layer_gcode" not in self._ini(resolve_slicer_profile(pid))
+
+    def test_declared_layer_gcode_is_not_overwritten(self) -> None:
+        """bambu_a1 ships its own value; it must survive untouched."""
+        emitted = self._ini(resolve_slicer_profile("bambu_a1"))
+        assert emitted["layer_gcode"] == "G92 E0"
+
+    def test_caller_layer_gcode_is_kept_and_extended(self) -> None:
+        """An override without an E reset gets one, and keeps what it said."""
+        emitted = self._ini(
+            resolve_slicer_profile("bambu_p2s", overrides={"layer_gcode": "M117 layer"})
+        )
+        assert "M117 layer" in emitted["layer_gcode"]
+        assert "G92 E0" in emitted["layer_gcode"]
+
+    def test_alternate_spellings_are_recognised(self) -> None:
+        """Match PrusaSlicer's own normalisation, so we never double the reset."""
+        for spelling in ("G92E0", "g92 e0", "  G92  E0  "):
+            emitted = self._ini(
+                resolve_slicer_profile(
+                    "bambu_p2s", overrides={"layer_gcode": spelling}
+                )
+            )
+            assert emitted["layer_gcode"].count("92") == 1, spelling
+
+    def test_override_switching_relative_e_on_is_covered(self) -> None:
+        """The invariant runs after the merge, not before it."""
+        emitted = self._ini(
+            resolve_slicer_profile("ender3", overrides={"use_relative_e_distances": "1"})
+        )
+        assert "G92 E0" in emitted["layer_gcode"]
+
+    def test_profile_with_overrides_door_is_covered(self) -> None:
+        """The door a Bambu with an unmappable model actually goes through.
+
+        ``slice_and_print`` pushes ``use_relative_e_distances=1`` into
+        :func:`profile_with_overrides` for a printer whose TYPE is bambu and
+        whose model is unset — that path writes an .ini too.
+        """
+        from kiln.slicer_profiles import profile_with_overrides
+
+        path = profile_with_overrides(
+            None, {"use_relative_e_distances": "1", "start_gcode": "", "end_gcode": ""}
+        )
+        assert path is not None
+        assert "G92 E0" in self._ini(path)["layer_gcode"]
+
+    def test_multiextruder_door_is_covered(self) -> None:
+        """The AMS path kept its own copy of this rule; it now shares one."""
+        emitted = self._ini(resolve_multiextruder_profile("bambu_p2s", 2))
+        assert "G92 E0" in emitted["layer_gcode"]
+
+    def test_multiextruder_absolute_e_gets_no_reset(self) -> None:
+        """The AMS builder used to inject the reset unconditionally."""
+        emitted = self._ini(resolve_multiextruder_profile("prusa_mk4", 2))
+        assert "layer_gcode" not in emitted

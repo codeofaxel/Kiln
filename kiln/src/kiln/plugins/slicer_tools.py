@@ -317,7 +317,7 @@ def _auto_wrap_bambu_3mf(
             # contains M104/M190 with the correct values from the
             # profile, so these are only used for metadata fields.
         )
-        build_bambu_3mf(
+        wrap = build_bambu_3mf(
             gcode_body,
             threemf_path,
             settings=settings,
@@ -333,7 +333,19 @@ def _auto_wrap_bambu_3mf(
             "Auto-wrapped %s as Bambu 3MF (with Bambu init) at %s",
             os.path.basename(gcode_path), threemf_path,
         )
-        return (threemf_path, None)
+        # A successful wrap can still hand back a file whose startup sequence
+        # belongs to another machine.  That used to be a log line only, which
+        # is invisible to the agent holding the 3MF — and it stopped being a
+        # rare case the moment the relative-E fix let the other Bambu models
+        # slice at all.  The wrap succeeded, so this is a warning, not a
+        # failure: same return shape, second field populated.
+        #
+        # Read defensively on purpose.  The 3MF is already written by this
+        # point, and raw gcode does not start on Bambu firmware at all, so an
+        # unexpected builder return must cost the warning and never the print.
+        # The warning itself is covered against the real builder in
+        # TestStartGcodeSubstitutionIsAudible.
+        return (threemf_path, getattr(wrap, "start_gcode_warning", None))
     except Exception as exc:  # noqa: BLE001
         _logger.warning("Bambu auto-wrap failed: %s — leaving as raw gcode", exc)
         return (None, f"Bambu auto-wrap failed: {exc}")

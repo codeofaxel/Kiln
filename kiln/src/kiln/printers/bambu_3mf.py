@@ -222,16 +222,47 @@ class Bambu3MFResult:
     file_size: int
     md5: str
     est_print_time_sec: int
+    # The model whose start sequence this file actually carries, and the one
+    # the caller asked for.  They differ whenever a template is missing, which
+    # today is every model but the A1.
+    start_gcode_model: str = "bambu_a1"
+    requested_model: str | None = None
+
+    @property
+    def start_gcode_warning(self) -> str | None:
+        """Say so when the start sequence is not this machine's own.
+
+        The fallback itself is deliberate and long-standing --- see
+        :data:`_MODEL_START_GCODE_FILES`.  What was missing is that nobody
+        downstream could tell it had happened: the substitution was a log line
+        on a server the operator is not reading.  This is the same fact on the
+        object every caller already gets back, so a tool response can carry it
+        to the person deciding whether to press print.
+        """
+        requested = _normalize_model(self.requested_model)
+        if not requested or requested == self.start_gcode_model:
+            return None
+        return (
+            f"This file carries the {self.start_gcode_model} startup sequence, not "
+            f"{requested}'s: Kiln ships no validated start G-code for {requested}. "
+            f"The print will start, and prints are running on this fallback today, "
+            f"but the homing, purge and bed-levelling moves are the A1's — it drives "
+            f"X negative and disables soft endstops. Watch the first layer."
+        )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "output_path": self.output_path,
             "total_layers": self.total_layers,
             "max_z": self.max_z,
             "file_size": self.file_size,
             "md5": self.md5,
             "est_print_time_sec": self.est_print_time_sec,
+            "start_gcode_model": self.start_gcode_model,
         }
+        if self.start_gcode_warning:
+            d["start_gcode_warning"] = self.start_gcode_warning
+        return d
 
 
 # ---------------------------------------------------------------------------
@@ -1457,6 +1488,8 @@ def build_bambu_3mf(
         file_size=file_size,
         md5=file_md5,
         est_print_time_sec=est_time_sec_with_startup,
+        start_gcode_model=start_source,
+        requested_model=printer_model,
     )
 
 

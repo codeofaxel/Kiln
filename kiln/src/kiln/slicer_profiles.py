@@ -112,6 +112,57 @@ def _load() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Profile invariants
+# ---------------------------------------------------------------------------
+
+# The reset PrusaSlicer demands of a relative-E profile, and the form it
+# looks for.  Measured against PrusaSlicer 2.9.4: the check is a
+# whitespace-insensitive, case-insensitive search for "G92 E0" anywhere in
+# layer_gcode, so "G92E0" and "g92 e0" both satisfy it.
+_E_RESET = "G92 E0"
+_E_RESET_NEEDLE = "g92e0"
+
+
+def _ensure_layer_e_reset(settings: dict[str, str]) -> None:
+    """Give a relative-E profile the per-layer E reset, in place.
+
+    PrusaSlicer refuses to slice a Marlin-flavour profile that uses relative
+    extruder addressing without resetting E at every layer.  The refusal is
+    the quiet kind: it writes the reason to stderr, produces no gcode, and
+    still **exits 0** — so the caller sees none of that and reports only
+    "Slicer completed but output file was not created."
+
+    Every bundled Bambu profile sets ``use_relative_e_distances=1`` and
+    ``gcode_flavor=marlin``, but only ``bambu_a1`` and ``bambu_a2l`` declared
+    a ``layer_gcode``.  The other seven — including the P2S — could not slice
+    at all through a bundled profile.  The multi-extruder builder had been
+    carrying its own copy of this rule for the AMS path, which is why an
+    AMS-routed job on those machines sliced while the same printer's ordinary
+    single-material job did not.
+
+    So it lives here instead, applied at every door that turns settings into
+    an ``.ini``: a profile author cannot forget it, and a tenth Bambu profile
+    cannot reintroduce it.
+
+    Absolute-E profiles are deliberately left alone.  A per-layer ``G92 E0``
+    there resets the extruder counter mid-print, and the next absolute E value
+    would extrude the whole layer's filament in one move.
+    """
+    if str(settings.get("use_relative_e_distances", "0")).strip() != "1":
+        return
+
+    existing = settings.get("layer_gcode", "")
+    if _E_RESET_NEEDLE in "".join(existing.split()).lower():
+        return
+
+    # Prepend rather than replace, so a caller that set its own layer_gcode
+    # (an M73 progress line, an M117 label) keeps it.  ``\n`` stays escaped:
+    # PrusaSlicer reads a literal backslash-n in an INI value as a newline,
+    # and a real one would end the key.
+    settings["layer_gcode"] = f"{_E_RESET}\\n{existing}" if existing else _E_RESET
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -177,6 +228,9 @@ def resolve_slicer_profile(
     merged = dict(profile.settings)
     if overrides:
         merged.update(overrides)
+    # After the merge: an override can switch relative-E on, or replace the
+    # layer_gcode that was satisfying the rule.
+    _ensure_layer_e_reset(merged)
 
     # Build a cache key from the effective settings.
     cache_key = f"{profile.id}:{_settings_hash(merged)}"
@@ -248,6 +302,27 @@ def profile_with_overrides(
         lines.append("# Kiln auto-generated profile: overrides only")
         lines.append("")
     lines.extend(f"{key} = {remaining[key]}" for key in sorted(remaining))
+
+    # The same invariant the bundled resolvers apply, for the same reason:
+    # this door writes an .ini too, and slice_and_print pushes
+    # use_relative_e_distances=1 through it for every Bambu whose model is
+    # unset or unmappable — the exact callers this helper exists to serve.
+    effective = {
+        raw.split("=", 1)[0].strip(): raw.split("=", 1)[1].strip()
+        for raw in lines
+        if "=" in raw and not raw.lstrip().startswith("#")
+    }
+    patched = dict(effective)
+    _ensure_layer_e_reset(patched)
+    if patched.get("layer_gcode") != effective.get("layer_gcode"):
+        patched_line = f"layer_gcode = {patched['layer_gcode']}"
+        for idx, raw in enumerate(lines):
+            if "=" in raw and raw.split("=", 1)[0].strip() == "layer_gcode":
+                lines[idx] = patched_line
+                break
+        else:
+            lines.append(patched_line)
+
     content = "\n".join(lines) + "\n"
 
     cache_key = f"overrides:{_settings_hash({'base': base_profile or '', 'body': content})}"
@@ -483,13 +558,13 @@ def resolve_multiextruder_profile(
     # PrusaSlicer 2.9 CLI silently produces no output with that flag.
     # Bambu AMS purging is handled by the bambu_3mf wrapping step.
     merged["extruder_count"] = str(num_extruders)
-    # G92 E0 resets relative extrusion counter before each layer — required
-    # when use_relative_e_distances=1 to avoid "Relative extruder addressing
-    # requires resetting before use" warnings in PrusaSlicer.
-    merged.setdefault("layer_gcode", "G92 E0")
 
     if overrides:
         merged.update(overrides)
+    # This builder used to set layer_gcode unconditionally, which was right
+    # for the Bambu profiles it is used with and wrong for anything with
+    # absolute E.  The shared invariant checks before it writes.
+    _ensure_layer_e_reset(merged)
 
     cache_key = f"{profile.id}_mme{num_extruders}:{_settings_hash(merged)}"
     if cache_key in _temp_cache and os.path.isfile(_temp_cache[cache_key]):
