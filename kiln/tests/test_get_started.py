@@ -40,6 +40,7 @@ class TestGetStarted:
             "tool_discovery",
             "quick_start",
             "core_workflows",
+            "when_kiln_gets_it_wrong",
             "inline_3d_stage",
             "creating_models",
             "safety_tools",
