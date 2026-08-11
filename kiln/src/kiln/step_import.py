@@ -352,9 +352,8 @@ class ExactGeometry:
 
     Every size number Kiln otherwise reports about a CAD part is measured off
     a mesh Kiln generated from it, which makes the answer a property of the
-    converter as much as of the part: on a 150 mm reference sphere the OCCT
-    kernel emits 150,970 triangles where FreeCAD emits 8,002, so the same
-    file measures differently on two machines.  These numbers do not move.
+    converter as much as of the part — the same file can measure differently
+    on two machines.  These numbers do not move.
     They come from the analytic B-rep — the surfaces the engineer actually
     drew — so they match what their CAD package says, and a user can check.
 
@@ -412,10 +411,9 @@ class ExactGeometry:
     size_mm: tuple[float, float, float] | None = None
     """Bounding-box extents, in mm — the part's real envelope.
 
-    Computed with ``AddOptimal`` over the exact geometry with triangulation
-    excluded.  The cheaper ``Add`` pads by shape tolerance and falls back to
-    the pole hull of a spline surface, which reports a 3 mm plate as 24 mm
-    thick — an envelope drawn around the maths rather than around the part.
+    Computed with ``AddOptimal`` over the exact geometry, triangulation
+    excluded.  Not ``Add``: it pads by shape tolerance and is not tight on
+    spline surfaces.  Do not swap them.
     """
 
     is_valid: bool | None = None
@@ -1578,8 +1576,7 @@ BRepGProp.SurfaceProperties_s(shape, area)
 
 # useTriangulation=False: with triangulation allowed this measures whatever
 # mesh happens to be attached to the shape, which is the exact thing these
-# numbers exist to avoid.  AddOptimal over the analytic surfaces instead of
-# Add, which pads by tolerance and hulls spline poles.
+# numbers exist to avoid.  AddOptimal, not Add — see ExactGeometry.size_mm.
 box = Bnd_Box()
 BRepBndLib.AddOptimal_s(shape, box, True, False)
 xmin, ymin, zmin, xmax, ymax, zmax = box.Get()
