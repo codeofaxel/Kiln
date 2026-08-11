@@ -7,6 +7,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Your assistant now knows what's free before you ask for it.** Every Kiln
+  tool tells your assistant exactly what it costs — free and unlimited, free
+  with a monthly allowance, or part of a paid plan — so you get a straight
+  answer instead of a guess. Ask "can I do this on free?" and it knows.
+  Paid features also stopped repeating themselves: the upgrade note was
+  appearing twice in a row, in two different wordings.
+
 - **Open a CAD file and see the real part.** A STEP now opens labelled as CAD,
   with the exact dimensions the file itself defines. When those exact figures
   can't be read on your setup, Kiln says so plainly instead of showing an
