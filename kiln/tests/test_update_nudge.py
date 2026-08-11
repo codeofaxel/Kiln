@@ -15,6 +15,7 @@ Three things are pinned here, and the middle one is why this file exists.
 """
 from __future__ import annotations
 
+import asyncio
 import sys
 import types
 
@@ -165,19 +166,61 @@ class TestComposition:
     """
 
     def _fake_server(self):
-        class _Handlers(dict):
-            pass
+        """A lowlevel server shaped like the INSTALLED SDK's, plus a way to call it.
 
-        from mcp.types import CallToolRequest
+        The two majors keep the ``tools/call`` handler in different places and
+        invoke it with different arguments — that disagreement is the whole
+        reason ``mcp_compat`` exists. This fake was 1.x-only (a dict keyed by
+        request TYPE), so under SDK 2 these tests exercised a server shape the
+        wrapper is right to reject, and went red for the harness rather than
+        the code. ``pyproject`` pins ``mcp>=1.0``, so a fresh install resolves
+        to 2.x and CI has been running that all along.
 
-        async def _handler(req):
+        Returns ``(mcp, invoke)``; ``invoke()`` runs whatever handler is
+        registered now, so a test never has to know which major it is on.
+        """
+        from kiln.mcp_compat import MCP_SDK_MAJOR
+
+        async def _handler(*_args):
             return types.SimpleNamespace(root=_Result(structured={"success": True}))
 
+        if MCP_SDK_MAJOR >= 2:
+
+            class _Srv:
+                """Enough of SDK 2's registry for the wrapper to re-register into."""
+
+                def __init__(self) -> None:
+                    self._entries: dict = {}
+
+                def get_request_handler(self, method):
+                    return self._entries.get(method)
+
+                def add_request_handler(self, method, params_type, handler):
+                    self._entries[method] = types.SimpleNamespace(
+                        handler=handler, params_type=params_type
+                    )
+
+            srv = _Srv()
+            srv.add_request_handler("tools/call", object, _handler)
+
+            def invoke():
+                # 2.x calls handler(ctx, params).
+                asyncio.run(srv.get_request_handler("tools/call").handler(None, object()))
+
+            return types.SimpleNamespace(_lowlevel_server=srv), invoke
+
+        from mcp.types import CallToolRequest  # 1.x keys the dict by request type
+
         srv = types.SimpleNamespace(request_handlers={CallToolRequest: _handler})
-        return types.SimpleNamespace(_mcp_server=srv), srv, CallToolRequest
+
+        def invoke():
+            # 1.x calls handler(req).
+            asyncio.run(srv.request_handlers[CallToolRequest](object()))
+
+        return types.SimpleNamespace(_mcp_server=srv), invoke
 
     def test_a_second_mutator_composes_instead_of_being_dropped(self):
-        mcp, srv, req_type = self._fake_server()
+        mcp, invoke = self._fake_server()
         seen: list[str] = []
 
         def _stage_like(r, c, n):
@@ -189,9 +232,7 @@ class TestComposition:
         assert wrap_call_tool_result(mcp, _stage_like)
         assert wrap_call_tool_result(mcp, _nudge_like)
 
-        import asyncio
-
-        asyncio.run(srv.request_handlers[req_type](object()))
+        invoke()
         assert seen == ["first", "second"], (
             "both mutators must run, in install order — a dropped second "
             "mutator is a feature that looks wired and does nothing"
@@ -201,7 +242,7 @@ class TestComposition:
         """Composition must not cost idempotency: local_stage.install()
         running twice would otherwise attach the token twice and pay for
         the geometry twice."""
-        mcp, srv, req_type = self._fake_server()
+        mcp, invoke = self._fake_server()
         seen: list[str] = []
 
         def _one_feature(r, c, n):
@@ -210,13 +251,11 @@ class TestComposition:
         assert wrap_call_tool_result(mcp, _one_feature) is True
         assert wrap_call_tool_result(mcp, _one_feature) is False
 
-        import asyncio
-
-        asyncio.run(srv.request_handlers[req_type](object()))
+        invoke()
         assert seen == ["x"]
 
     def test_one_raising_mutator_cannot_cost_a_sibling_its_attach(self):
-        mcp, srv, req_type = self._fake_server()
+        mcp, invoke = self._fake_server()
         seen: list[str] = []
 
         def _boom(r, c, n):
@@ -228,9 +267,7 @@ class TestComposition:
         assert wrap_call_tool_result(mcp, _boom)
         assert wrap_call_tool_result(mcp, _survivor)
 
-        import asyncio
-
-        asyncio.run(srv.request_handlers[req_type](object()))
+        invoke()
         assert seen == ["survived"]
 
 
