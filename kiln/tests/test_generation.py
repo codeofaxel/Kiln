@@ -797,7 +797,14 @@ class TestMeshValidation:
         f.write_bytes(header + count)
         result = validate_mesh(str(f))
         assert result.valid is False
-        assert any("truncated" in e.lower() for e in result.errors)
+        # What matters is that the error tells the user WHY the file is
+        # unusable — the declared size against the real one — not that it
+        # spells it with any particular word.  Asserting the literal string
+        # "truncated" pinned one phrasing, so rewording the message broke a
+        # test while the behaviour it guards stayed correct.
+        joined = " ".join(result.errors)
+        assert "100" in joined, f"error should name the declared count: {joined}"
+        assert "84" in joined, f"error should name the actual file size: {joined}"
 
     def test_ascii_stl_parsing(self, tmp_path):
         ascii_stl = """solid test
