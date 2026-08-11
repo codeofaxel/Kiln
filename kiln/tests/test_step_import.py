@@ -2248,3 +2248,175 @@ def test_tool_payload_carries_the_record_as_plain_json(real_kernel, tmp_dir):
     assert record["backend"] in ("occt", "occt-xcaf")
     assert record["bound"]["kind"] == "linear_angular"
     json.dumps(payload["conversion"])  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# 35. Handing the record to the pipelines that convert IMPLICITLY.
+#
+#     import_step_file is the door a user knocks on deliberately; most STEP
+#     conversions happen somewhere else entirely, inside a tool that accepted
+#     a .step and quietly needed a mesh.  Those callers used to receive a
+#     prose sentence and, four times out of seven, drop it on the floor —
+#     which is what a prose note with no home invites.  These pin the
+#     structured form, and pin the compatibility that let it be added at all.
+# ---------------------------------------------------------------------------
+
+
+def _unique_step(tmp_dir, name="implicit.step"):
+    """A STEP whose bytes are unique to this run, so the first call MISSES."""
+    import time as _time
+
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+
+    step = tmp_dir / name
+    writer = STEPControl_Writer()
+    writer.Transfer(
+        BRepPrimAPI_MakeBox(11.0, 9.0, 5.0).Shape(),
+        STEPControl_StepModelType.STEPControl_AsIs,
+    )
+    writer.Write(str(step))
+    step.write_bytes(step.read_bytes() + f"/* {_time.time_ns()} */".encode())
+    return step
+
+
+def test_the_two_tuple_contract_is_unchanged(real_kernel, tmp_dir):
+    """Every released version returns two values, and callers unpack two.
+
+    The record had to arrive without breaking that — inside Kiln and in
+    anyone's code outside it — so it is opt-in and this is the pin.
+    """
+    from kiln.step_import import ensure_mesh_path
+
+    step = _unique_step(tmp_dir)
+    out = tmp_dir / "legacy"
+    out.mkdir()
+
+    mesh, note = ensure_mesh_path(str(step), output_dir=str(out))
+    assert Path(mesh).is_file()
+    assert "Converted from STEP" in note
+
+
+def test_an_implicit_conversion_can_now_keep_the_record(real_kernel, tmp_dir):
+    from kiln.step_import import ensure_mesh_path
+
+    step = _unique_step(tmp_dir)
+    out = tmp_dir / "rec"
+    out.mkdir()
+
+    mesh, note, conversion = ensure_mesh_path(
+        str(step), output_dir=str(out), with_record=True
+    )
+    assert Path(mesh).is_file()
+    assert conversion is not None
+    assert conversion.backend == "occt"
+    assert conversion.bound.kind == "linear_angular"
+
+
+def test_a_cache_hit_reports_the_same_record_as_the_conversion(
+    real_kernel, tmp_dir
+):
+    """The one that makes the record trustworthy rather than incidental.
+
+    The cache serves most real conversions. If a hit returned no record, the
+    SAME file would report how it was made on one run and shrug on the next,
+    and a caller could not tell "not from CAD" from "converted, but somebody
+    else converted it first" — which is the more misleading of the two.
+    """
+    from kiln.step_import import ensure_mesh_path
+
+    step = _unique_step(tmp_dir)
+    d1, d2 = tmp_dir / "miss", tmp_dir / "hit"
+    for d in (d1, d2):
+        d.mkdir()
+
+    _, note1, miss = ensure_mesh_path(
+        str(step), output_dir=str(d1), with_record=True
+    )
+    _, note2, hit = ensure_mesh_path(
+        str(step), output_dir=str(d2), with_record=True
+    )
+
+    assert "cached" not in (note1 or "")
+    assert "cached" in (note2 or ""), "second identical call must hit the cache"
+    assert hit == miss, "a hit must describe the same conversion as the miss"
+
+
+def test_a_cache_entry_from_before_the_record_says_nothing_rather_than_guessing(
+    real_kernel, tmp_dir
+):
+    """Entries written by an older Kiln have no sidecar.
+
+    The cache key knows which backends are INSTALLED, so a record could be
+    reconstructed from it — and would be wrong on exactly the machine where
+    the first-choice backend is present but broken. None is the honest answer
+    for a mesh whose origin was never written down.
+    """
+    from kiln.step_import import ensure_mesh_path
+
+    step = _unique_step(tmp_dir)
+    d1, d2 = tmp_dir / "a", tmp_dir / "b"
+    for d in (d1, d2):
+        d.mkdir()
+
+    ensure_mesh_path(str(step), output_dir=str(d1), with_record=True)
+
+    cache_dir = Path(tempfile.gettempdir()) / "kiln_step_cache"
+    sidecars = sorted(cache_dir.glob("*.json"))
+    assert sidecars, "the conversion should have left a sidecar"
+    for s in sidecars:
+        s.unlink()
+
+    _, note, conversion = ensure_mesh_path(
+        str(step), output_dir=str(d2), with_record=True
+    )
+    assert "cached" in (note or "")
+    assert conversion is None
+
+
+def test_a_cache_hit_creates_an_output_dir_the_way_a_conversion_does(
+    real_kernel, tmp_dir
+):
+    """The miss path made the directory; the hit path did not.
+
+    So the same call succeeded or failed purely on whether something had
+    already converted those bytes — a first run that worked and a second that
+    raised FileNotFoundError.
+    """
+    from kiln.step_import import ensure_mesh_path
+
+    step = _unique_step(tmp_dir)
+    made = tmp_dir / "exists"
+    made.mkdir()
+    ensure_mesh_path(str(step), output_dir=str(made))
+
+    never_made = tmp_dir / "not" / "yet"
+    assert not never_made.exists()
+    mesh, note = ensure_mesh_path(str(step), output_dir=str(never_made))
+    assert "cached" in (note or "")
+    assert Path(mesh).is_file()
+
+
+def test_an_ordinary_mesh_reports_no_conversion(tmp_dir):
+    """Nothing converted it, so there is nothing to say about how."""
+    from kiln.step_import import ensure_mesh_path
+
+    stl = tmp_dir / "already.stl"
+    stl.write_bytes(b"\x00" * 84)
+    assert ensure_mesh_path(str(stl), with_record=True) == (str(stl), None, None)
+
+
+def test_the_thumbnail_path_deliberately_keeps_no_record():
+    """The one caller that SHOULD drop it, pinned so it stays a decision.
+
+    The slicer converts a STEP only to draw the printer's LCD thumbnail — the
+    gcode itself was sliced from the STEP natively. Recording that mesh's
+    fidelity would attach an accuracy figure to geometry that never reached
+    the printer. If someone later "fixes" this omission for consistency, this
+    fails and sends them to the reasoning first.
+    """
+    from kiln.plugins import slicer_tools
+
+    source = Path(slicer_tools.__file__).read_text(encoding="utf-8")
+    assert "with_record" not in source
+    assert "DELIBERATELY drops the conversion record" in source

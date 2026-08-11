@@ -1146,7 +1146,8 @@ def ensure_mesh_path(
     path: str,
     *,
     output_dir: str | None = None,
-) -> tuple[str, str | None]:
+    with_record: bool = False,
+) -> tuple[str, str | None] | tuple[str, str | None, MeshConversion | None]:
     """Hand this any model path; get back something the mesh pipeline can read.
 
     The single door for "a STEP file turned up somewhere that wants a mesh."
@@ -1168,9 +1169,25 @@ def ensure_mesh_path(
     cache in the OS temp dir (each hit is an independent COPY — mutating a
     returned mesh can never poison a later call).
 
+    Args:
+        with_record: return the structured :class:`MeshConversion` as a third
+            element.  Opt-in, and defaulting to off, because this returns a
+            2-tuple in every released version — widening it unconditionally
+            would break the unpacking in every caller that already exists,
+            inside Kiln and outside it, to hand them something none of them
+            asked for.
+
     Returns:
-        ``(mesh_path, note)`` — ``note`` is a human-readable line for a
-        report when a conversion happened, else ``None``.
+        ``(mesh_path, note)``, or ``(mesh_path, note, conversion)`` when
+        ``with_record``.  ``note`` is a human-readable line for a report when
+        a conversion happened, else ``None``.
+
+        ``conversion`` is how the mesh was made — the fact a prose note
+        cannot carry, which is why half the callers of this function threw
+        the note away.  ``None`` when nothing was converted (an ordinary mesh
+        passed straight through), and also for a cache entry written before
+        the record existed, which is honest: that mesh really is one whose
+        origin was never written down.
 
     Raises:
         NoBackendError: It IS a STEP file but nothing can convert it.  The
@@ -1178,7 +1195,7 @@ def ensure_mesh_path(
             tell the user what to do instead of guessing.
     """
     if not is_step_file(path):
-        return path, None
+        return (path, None, None) if with_record else (path, None)
 
     if output_dir is None:
         output_dir = tempfile.mkdtemp(prefix="kiln_step_")
@@ -1209,13 +1226,27 @@ def ensure_mesh_path(
     ).hexdigest()
     cache_dir = Path(tempfile.gettempdir()) / "kiln_step_cache"
     cached = cache_dir / f"{key}.stl"
+    # The record rides WITH the cached mesh, in a sidecar beside it.  Without
+    # one, a cache hit would return no record at all — so the same file would
+    # report how it was made the first time and shrug every time after, which
+    # is worse than never reporting it: a caller cannot tell "not from CAD"
+    # from "converted, but this run happened to be a hit."
+    cached_record = cached.with_suffix(".json")
 
     if cached.is_file():
+        # The miss path creates output_dir on the way through
+        # (_validate_output_dir); the hit path never did, so a caller naming
+        # a directory that does not exist yet got a mesh on the first call
+        # and a FileNotFoundError on every one after — the same call
+        # succeeding or failing purely on whether something else had already
+        # converted those bytes.
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
         out = str(Path(output_dir) / "merged.stl")
         _shutil.copyfile(cached, out)
-        return out, (
-            f"Converted from STEP ({Path(path).name}) to mesh — cached, 0.0s."
-        )
+        note = f"Converted from STEP ({Path(path).name}) to mesh — cached, 0.0s."
+        if not with_record:
+            return out, note
+        return out, note, _read_cached_conversion(cached_record)
 
     result = convert_step_to_stl(path, output_dir=output_dir, merge_bodies=True)
     note = (
@@ -1231,10 +1262,48 @@ def ensure_mesh_path(
         tmp = cached.with_suffix(f".{os.getpid()}.tmp")
         _shutil.copyfile(result.output_path, tmp)
         os.replace(tmp, cached)
+        if result.conversion is not None:
+            # Written AFTER the mesh, and atomically.  The mesh is the thing
+            # callers need; a sidecar that failed to write costs a later hit
+            # its record and nothing else, whereas a mesh published without
+            # its sidecar being durable would be the same situation anyway.
+            rtmp = cached_record.with_suffix(f".{os.getpid()}.rtmp")
+            rtmp.write_text(
+                json.dumps(asdict(result.conversion)), encoding="utf-8"
+            )
+            os.replace(rtmp, cached_record)
     except OSError:
         pass  # a full or read-only temp dir must never fail the conversion
 
-    return result.output_path, note
+    if not with_record:
+        return result.output_path, note
+    return result.output_path, note, result.conversion
+
+
+def _read_cached_conversion(sidecar: Path) -> MeshConversion | None:
+    """Rebuild a conversion record from a cache sidecar, or admit there is none.
+
+    Absent for entries written before the record existed, and unreadable if
+    the temp dir was cleaned mid-flight.  Both answer ``None`` rather than a
+    partial record: a mesh whose origin was never written down is exactly
+    what ``None`` means here, and inventing a plausible one from the cache
+    key would be reporting the backends that are INSTALLED as the backend
+    that ran.
+    """
+    try:
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+        bound = data["bound"]
+        return MeshConversion(
+            backend=data["backend"],
+            bound=TessellationBound(
+                kind=bound["kind"],
+                linear=bound.get("linear"),
+                angular=bound.get("angular"),
+                reason=bound.get("reason"),
+            ),
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def convert_step_to_stl(

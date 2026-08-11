@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import asdict as _asdict
 from typing import Any
 
 _logger = logging.getLogger(__name__)
@@ -378,8 +379,11 @@ class _GenerationToolsPlugin:
             from kiln.step_import import NoBackendError, ensure_mesh_path
 
             step_note: str | None = None
+            step_conversion = None
             try:
-                file_path, step_note = ensure_mesh_path(file_path)
+                file_path, step_note, step_conversion = ensure_mesh_path(
+                    file_path, with_record=True
+                )
             except NoBackendError as exc:
                 err = _srv._error_dict(str(exc), code="NO_BACKEND")
                 # Structured remedy: tells the agent whether the user can fix
@@ -428,6 +432,13 @@ class _GenerationToolsPlugin:
                     "result": result.to_dict(),
                     "message": result.summary,
                     **({"step_conversion": step_note} if step_note else {}),
+                    # The prose above says a conversion happened; this says
+                    # how faithfully, which is the part a report can act on.
+                    **(
+                        {"conversion": _asdict(step_conversion)}
+                        if step_conversion is not None
+                        else {}
+                    ),
                     **(
                         {
                             "bed_size_source": "printer_intelligence",
