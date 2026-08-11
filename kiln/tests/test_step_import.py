@@ -23,14 +23,13 @@ from __future__ import annotations
 
 import json
 import tempfile
+from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from kiln.step_import import _ocp_available as _REAL_OCP_AVAILABLE
-from dataclasses import asdict
-
 from kiln.step_import import (
     MeshConversion,
     SourceTopology,
@@ -3005,7 +3004,6 @@ def test_surface_soup_is_detected_and_still_converts_correctly(
     Refusing this input would reject a file that produces a correct part.
     """
     import trimesh
-
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
     from OCP.gp import gp_Pnt
 
