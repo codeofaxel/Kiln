@@ -7982,7 +7982,10 @@ def _quickstart_verify() -> list[dict[str, Any]]:
             {
                 "name": "slicer",
                 "ok": False,
-                "detail": "not found (install prusa-slicer or set KILN_SLICER_PATH)",
+                "detail": (
+                    "not found (install prusa-slicer, orcaslicer or "
+                    "bambustudio, or set KILN_SLICER_PATH)"
+                ),
             }
         )
 
@@ -9510,7 +9513,10 @@ def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
             {
                 "name": "slicer",
                 "ok": False,
-                "detail": "not found (install prusa-slicer or set KILN_SLICER_PATH)",
+                "detail": (
+                    "not found (install prusa-slicer, orcaslicer or "
+                    "bambustudio, or set KILN_SLICER_PATH)"
+                ),
             }
         )
     except OSError as exc:

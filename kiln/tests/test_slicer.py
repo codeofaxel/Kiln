@@ -718,28 +718,57 @@ class TestSlicerCliFamily:
 
         assert slicer_cli_family(self._info("/x/mystery", None)) == "prusa"
 
-    def test_slice_file_refuses_before_running_the_binary(self, tmp_path):
-        """The refusal names the cause, and never spawns the subprocess."""
+    def test_slice_file_runs_the_orca_dialect_not_the_slic3r_one(self, tmp_path):
+        """An Orca binary is DRIVEN now, and never handed a Slic3r flag.
+
+        This replaces the refusal that stood here while the Orca command line
+        was unimplemented.  What it asserts is the part that must not regress:
+        the dialects are never mixed.  Whether the argv it builds actually
+        slices is a question no mock can answer — ``test_slicer_orca.py``
+        drives the real binary for that.
+        """
         from kiln.slicer import SlicerInfo
 
         stl = _write_cube(str(tmp_path / "cube.stl"))
         fake = SlicerInfo(path="/x/OrcaSlicer", name="orcaslicer", version="OrcaSlicer-2.3.2:")
+        seen: dict = {}
+
+        def fake_run(cmd, **kwargs):
+            seen["cmd"] = cmd
+            work = cmd[cmd.index("--outputdir") + 1]
+            with open(os.path.join(work, "plate_1.gcode"), "w") as fh:
+                fh.write("G28\n; filament used [mm] = 1\n")
+            return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch("kiln.slicer.find_slicer", return_value=fake), \
-             patch("kiln.slicer.subprocess.run") as ran:
-            with pytest.raises(SlicerError, match="BambuStudio/OrcaSlicer command line"):
-                slice_file(stl, output_dir=str(tmp_path / "out"))
-        ran.assert_not_called()
+             patch("kiln.slicer.subprocess.run", side_effect=fake_run):
+            result = slice_file(stl, output_dir=str(tmp_path / "out"))
 
-    def test_not_found_message_no_longer_recommends_orcaslicer(self):
-        """It used to send Bambu owners toward the one slicer Kiln cannot drive."""
+        assert result.success is True
+        assert "--slice" in seen["cmd"]
+        assert not {"--export-gcode", "--output", "--load"} & set(seen["cmd"])
+
+    def test_not_found_message_names_every_slicer_kiln_can_drive(self):
+        """The advice has to match the capability, and has been wrong both ways.
+
+        It first offered "PrusaSlicer or OrcaSlicer" while every command Kiln
+        built was PrusaSlicer-only, sending the group most likely to own
+        OrcaSlicer — Bambu owners — into a wall.  The fix for that named
+        PrusaSlicer alone, which went stale the moment the Orca command line
+        landed: a user with nothing installed was told to install one of the
+        two slicers that would now work.
+
+        So this asserts the invariant rather than either specific list: the
+        message names each dialect ``slice_file`` can actually run.
+        """
         with patch("shutil.which", return_value=None), \
              patch("kiln.slicer._MACOS_PATHS", []), \
              patch.dict(os.environ, {}, clear=True):
             with pytest.raises(SlicerNotFoundError) as exc:
                 find_slicer()
-        assert "OrcaSlicer" not in str(exc.value)
-        assert "prusaslicer" in str(exc.value).lower()
+        message = str(exc.value).lower()
+        assert "prusaslicer" in message
+        assert "orcaslicer" in message
 
 
 @pytest.mark.skipif(_real_prusaslicer() is None, reason="needs a real PrusaSlicer")

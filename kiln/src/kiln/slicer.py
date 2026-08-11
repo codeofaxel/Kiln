@@ -4,11 +4,16 @@ Wraps the command-line interface of PrusaSlicer and OrcaSlicer so that STL
 (or 3MF/STEP) files can be sliced to G-code without opening the GUI.  The
 slicer binary is auto-detected on PATH or can be specified explicitly.
 
-Supported slicers:
-    * PrusaSlicer (``prusa-slicer`` / ``PrusaSlicer``)
-    * OrcaSlicer  (``orca-slicer`` / ``OrcaSlicer``)
+Two command lines, not one — they share no flags:
 
-Both expose the same ``--export-gcode`` flag for headless slicing.
+    * PrusaSlicer (``prusa-slicer`` / ``PrusaSlicer``) and other Slic3r
+      derivatives: ``--export-gcode --output FILE --load profile.ini``.
+    * OrcaSlicer and BambuStudio: ``--slice 0 --outputdir DIR
+      --load-settings machine.json;process.json``, with JSON presets that
+      :mod:`kiln.slicer_orca` emits from the same bundled settings.
+
+:func:`slicer_cli_family` tells them apart and :func:`slice_file` runs the
+right one, so callers name a model and a profile and never a dialect.
 
 Example::
 
@@ -32,6 +37,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from kiln.slicer_orca import ini_to_settings, write_orca_presets
 
 logger = logging.getLogger(__name__)
 
@@ -68,15 +75,17 @@ _MACOS_PATHS: list[str] = (
     else []
 )
 
-# One place to say how to get a slicer Kiln can actually drive, so the advice
-# cannot drift from the capability again.  It said "PrusaSlicer or OrcaSlicer"
-# while every command Kiln builds is PrusaSlicer-only — which sent the one
-# group most likely to own OrcaSlicer, Bambu owners, straight into a wall.
-_INSTALL_PRUSASLICER = (
-    "Kiln slices with PrusaSlicer:\n"
+# One place to say how to get a slicer Kiln can drive, so the advice cannot
+# drift from the capability.  It has now been wrong in both directions: it
+# offered "PrusaSlicer or OrcaSlicer" while every command Kiln built was
+# PrusaSlicer-only, and then named PrusaSlicer alone once that was fixed by
+# refusing Orca.  Both are drivable now, so it says so — and this stays the
+# only copy of the sentence.
+_INSTALL_SLICER = (
+    "Kiln slices with PrusaSlicer, OrcaSlicer or BambuStudio:\n"
     "  Linux/WSL: apt install prusa-slicer  (or download from prusaslicer.org)\n"
-    "  macOS: brew install --cask prusaslicer\n"
-    "Or set KILN_SLICER_PATH to a PrusaSlicer binary."
+    "  macOS: brew install --cask prusaslicer  (or orcaslicer)\n"
+    "Or set KILN_SLICER_PATH to any of their binaries."
 )
 
 # CLI dialects.  OrcaSlicer and BambuStudio are forks of the same non-Slic3r
@@ -199,7 +208,7 @@ def find_slicer(slicer_path: str | None = None) -> SlicerInfo:
         version = _get_version(env_path)
         return SlicerInfo(path=env_path, name=name, version=version)
 
-    raise SlicerNotFoundError(f"No slicer found. {_INSTALL_PRUSASLICER}")
+    raise SlicerNotFoundError(f"No slicer found. {_INSTALL_SLICER}")
 
 
 def slicer_cli_family(info: SlicerInfo) -> str:
@@ -283,6 +292,165 @@ def _gcode_output_is_complete(out_file: str) -> bool:
     return b"filament used" in tail
 
 
+def _record_slice(profile: str | None) -> None:
+    """Count one successful slice.
+
+    Recorded at the two runners rather than in a tool body, because the count
+    used to live in the ``slice_model`` tool alone and every other path — the
+    pipelines, estimates, CLI, kiln-pro batch flows — reported zero.  Detail is
+    the profile filename stem; profiles are named for printers, never for
+    users' models.
+    """
+    try:
+        from kiln.daily_stats import record_event
+
+        record_event("slices", detail=Path(profile).stem[:64] if profile else "unknown")
+    except Exception:  # noqa: BLE001 — stats must never fail a slice
+        logger.debug("slice telemetry recording failed", exc_info=True)
+
+
+# The crash any Bambu Lab machine preset provokes in both forks, and the one
+# thing Kiln cannot serialize its way around.  Measured 2026-08-11 against
+# OrcaSlicer 2.3.2 and BambuStudio 02.06.00.51: both die in
+# Slic3r::DynamicPrintConfig::update_values_to_printer_extruders_for_multiple_filaments
+# (null deref, EXC_BAD_ACCESS) on their OWN bundled Bambu presets as readily as
+# on Kiln's, while a Creality preset through the identical code path slices
+# fine.  So it is upstream and profile-specific, not a Kiln argv or preset bug.
+_ORCA_SIGSEGV_RETURNCODES = frozenset({-11, 139})
+
+
+def _slice_with_orca(
+    slicer: SlicerInfo,
+    input_abs: str,
+    out_file: str,
+    *,
+    profile: str | None,
+    extra_args: list[str] | None,
+    timeout: int,
+) -> SliceResult:
+    """Slice through the BambuStudio/OrcaSlicer command line.
+
+    A different argv and a different preset format from
+    :func:`slice_file`'s Slic3r path: ``--slice 0 --outputdir DIR
+    --load-settings "machine.json;process.json" --load-filaments "f.json"``,
+    where the presets are the JSON that :mod:`kiln.slicer_orca` writes out of
+    the same bundled settings the ``.ini`` is built from.
+
+    Orca names its own output (``plate_1.gcode``) inside ``--outputdir``
+    rather than taking an output path, so it writes to a private directory
+    and the result is moved to where the caller asked for it.
+    """
+    with tempfile.TemporaryDirectory(prefix="kiln_orca_") as work_dir:
+        cmd: list[str] = [slicer.path, "--slice", "0", "--outputdir", work_dir]
+
+        if profile and not os.path.isfile(profile):
+            raise SlicerError(f"Profile file not found: {os.path.basename(profile)}")
+
+        if not profile:
+            # "No profile" cannot mean "no preset" here the way it does for
+            # PrusaSlicer, which slices happily on its own defaults.  Orca's
+            # defaults use relative extrusion with no per-layer reset, so a
+            # bare slice_file("model.stl") — the documented form — fails
+            # validation before it starts.  Kiln's own generic profile is a
+            # real answer to "you didn't say", and it keeps the bare call
+            # working on both backends.
+            #
+            # Resolved through the ordinary door rather than read straight
+            # off the profile, so it passes the same invariants every other
+            # profile does — the per-layer E reset among them.
+            from kiln.slicer_profiles import resolve_slicer_profile
+
+            profile = resolve_slicer_profile("default")
+
+        settings = ini_to_settings(profile)
+        preset_name = Path(profile).stem[:48] or "kiln"
+
+        presets = write_orca_presets(settings, work_dir, name=preset_name)
+        cmd += ["--load-settings", f"{presets.machine_path};{presets.process_path}"]
+        cmd += ["--load-filaments", str(presets.filament_path)]
+
+        if extra_args:
+            cmd.extend(extra_args)
+        cmd.append(input_abs)
+
+        logger.info("Slicing (Orca dialect): %s", " ".join(cmd))
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            raise SlicerError(
+                f"Slicing timed out after {timeout}s. The model may be too complex "
+                f"or the slicer is hanging."
+            ) from None
+        except OSError as exc:
+            raise SlicerError(f"Failed to run slicer: {exc}") from exc
+
+        produced = sorted(Path(work_dir).glob("*.gcode"), key=lambda p: p.stat().st_mtime)
+
+        # A death by signal AFTER a complete write is salvageable, exactly as
+        # it is on the Slic3r path — see _gcode_output_is_complete, which
+        # exists because PrusaSlicer does this on some multi-object files.
+        # Orca is a Slic3r derivative, so it inherits the possibility; without
+        # this the two paths would disagree about the same event, and a good
+        # slice would be thrown away with a message about a Bambu crash.
+        crashed_after_finishing = bool(
+            result.returncode != 0
+            and produced
+            and _gcode_output_is_complete(str(produced[-1]))
+        )
+
+        if result.returncode in _ORCA_SIGSEGV_RETURNCODES and not crashed_after_finishing:
+            raise SlicerError(
+                f"{os.path.basename(slicer.path)} crashed while slicing. This is a "
+                f"known crash in BambuStudio and OrcaSlicer themselves, on Bambu Lab "
+                f"printer profiles specifically — their own bundled Bambu presets "
+                f"crash the same way, and the same Kiln code slices other printers "
+                f"fine. Slice this printer with PrusaSlicer instead; Kiln wraps the "
+                f"result as a Bambu 3MF itself, so nothing about the print is lost.\n"
+                f"{_INSTALL_SLICER}"
+            )
+
+        if result.returncode != 0 and not crashed_after_finishing:
+            # This CLI reports the reason on stdout and leaves stderr empty.
+            stderr_snippet = (result.stderr or "").strip() or (result.stdout or "").strip()
+            raise SlicerError(f"Slicer exited with code {result.returncode}. stderr: {stderr_snippet[:500]}")
+
+        if not produced:
+            raise SlicerError(
+                f"Slicer completed but wrote no G-code. "
+                f"stdout: {(result.stdout or '').strip()[:200]}"
+            )
+
+        # One plate, because slice_file promises exactly one file.  The model
+        # did not fit on a single plate, and quietly handing back the first
+        # one is how a user prints half a job and finds out at the printer.
+        if len(produced) > 1:
+            raise SlicerError(
+                f"This model needed {len(produced)} build plates, and a slice "
+                f"returns a single G-code file. Split it into separate models, "
+                f"or scale it down so it fits one plate."
+            )
+
+        shutil.move(str(produced[0]), out_file)
+
+    _record_slice(profile)
+    message = f"Sliced {Path(input_abs).name} -> {Path(out_file).name}"
+    if crashed_after_finishing:
+        message += (
+            f" (the slicer crashed on exit AFTER writing complete G-code — "
+            f"signal {-result.returncode}; the output was verified complete "
+            f"and kept)"
+        )
+    return SliceResult(
+        success=True,
+        output_path=out_file,
+        slicer=slicer.name,
+        message=message,
+        stdout=(result.stdout or "").strip(),
+        stderr=(result.stderr or "").strip(),
+    )
+
+
 def slice_file(
     input_path: str,
     *,
@@ -326,21 +494,6 @@ def slice_file(
     # Find slicer
     slicer = find_slicer(slicer_path)
 
-    # Say what is actually wrong.  Every command below is PrusaSlicer dialect,
-    # so an Orca/BambuStudio binary used to reach the subprocess and come back
-    # with "Invalid option --export-gcode" and exit 254 — a message about a
-    # flag, for a user who chose a slicer.  Refusing here costs nothing that
-    # worked a moment ago: those flags never ran on these binaries.
-    if slicer_cli_family(slicer) == _CLI_BAMBU:
-        raise SlicerError(
-            f"{os.path.basename(slicer.path)} uses the BambuStudio/OrcaSlicer "
-            f"command line, which has no --export-gcode, --output or --load "
-            f"flag and loads presets as JSON rather than the PrusaSlicer .ini "
-            f"Kiln generates. Kiln cannot drive it yet.\n"
-            f"{_INSTALL_PRUSASLICER}\n"
-            f"Your printer profile and settings are unaffected."
-        )
-
     # Prepare output
     out_dir = output_dir or _DEFAULT_OUTPUT_DIR
     os.makedirs(out_dir, mode=0o700, exist_ok=True)
@@ -369,6 +522,21 @@ def slice_file(
     # fresh success: the previous model's toolpath, headed for start_print.
     with contextlib.suppress(OSError):
         os.unlink(out_file)
+
+    # Two command lines, one function.  Everything below this point is the
+    # Slic3r dialect; an Orca/BambuStudio binary needs a different argv AND a
+    # different preset format, so it gets its own runner rather than a flag
+    # swap.  The branch is here — at the one place all twelve slicing doors
+    # funnel through — so none of them has to know which slicer is installed.
+    if slicer_cli_family(slicer) == _CLI_BAMBU:
+        return _slice_with_orca(
+            slicer,
+            input_abs,
+            out_file,
+            profile=profile,
+            extra_args=extra_args,
+            timeout=timeout,
+        )
 
     # Build command
     cmd: list[str] = [
@@ -423,22 +591,7 @@ def slice_file(
             f"stdout: {(result.stdout or '').strip()[:200]}"
         )
 
-    # Telemetry: one successful slicer run = one slice.  Counted here —
-    # the single function every slicing path funnels through (the
-    # slice_model tool, slice_and_print, reslice_with_overrides,
-    # pipelines, estimates, CLI, kiln-pro batch flows) — because the
-    # count used to live in the slice_model tool body alone, and every
-    # OTHER path reported zero.  Detail is the profile filename stem;
-    # profiles are named for printers, never for users' models.
-    try:
-        from kiln.daily_stats import record_event
-
-        record_event(
-            "slices",
-            detail=Path(profile).stem[:64] if profile else "unknown",
-        )
-    except Exception:  # noqa: BLE001 — stats must never fail a slice
-        logger.debug("slice telemetry recording failed", exc_info=True)
+    _record_slice(profile)
 
     message = f"Sliced {Path(input_abs).name} -> {Path(out_file).name}"
     if crashed_after_finishing:
@@ -490,25 +643,26 @@ def estimate_print(
 def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
     """Parse G-code file for slicer-generated estimates.
 
-    Reads the first 200 and last 500 lines where PrusaSlicer/OrcaSlicer
-    place their estimate comments.  PrusaSlicer puts estimates ~350 lines
-    from EOF (after slicer config comments), so 200 was too small.
+    Every estimate a slicer writes is a COMMENT, so the whole file is read
+    and only comment lines are matched.  Toolpath lines are the overwhelming
+    majority and are rejected on their first character, which is what makes
+    reading all of them cheap.
+
+    This used to search a window — the first 200 lines and the last 500 —
+    and the window kept being the bug.  It was widened once already when
+    PrusaSlicer's estimates turned out to sit ~350 lines from EOF, behind its
+    trailing config block.  OrcaSlicer's block is longer still: measured at
+    584-589 lines from EOF, just outside the 500, so every estimate came back
+    empty for an Orca slice while the values sat in the file.  A window tuned
+    to today's slicers is a bug waiting for the next one to add a setting.
     """
     import re as _re
 
     estimates: dict[str, Any] = {"gcode_path": gcode_path}
-    lines: list[str] = []
 
     try:
         with open(gcode_path, errors="replace") as fh:
-            head = []
-            for i, line in enumerate(fh):
-                if i < 200:
-                    head.append(line)
-                lines.append(line)
-            # Keep last 500 lines — PrusaSlicer puts estimates ~350 from EOF
-            tail = lines[-500:] if len(lines) > 500 else []
-            search_lines = head + tail
+            search_lines = [line for line in fh if line.startswith(";")]
     except OSError:
         return estimates
 
