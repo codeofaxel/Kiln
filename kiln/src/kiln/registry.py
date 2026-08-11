@@ -263,11 +263,27 @@ class PrinterRegistry:
             adapter = self._printers.get(name)
             if adapter is None:
                 return []
-            target = machine_fingerprint(adapter)
-            return sorted(
-                other for other, a in self._printers.items()
-                if machine_fingerprint(a) == target
-            )
+            return self._names_for_machine(adapter)
+
+    def names_for(self, adapter: PrinterAdapter) -> list[str]:
+        """Return every registered name pointing at *adapter*'s machine.
+
+        The adapter-to-names direction, which is what a caller holding the
+        machine under test needs: it has the object, not a label.  Callers
+        that guessed instead — ``list_names()[0]``, "it's probably
+        ``default``" — answered about whichever printer registered first,
+        which on a two-machine setup is a different machine.
+        """
+        with self._lock:
+            return self._names_for_machine(adapter)
+
+    def _names_for_machine(self, adapter: PrinterAdapter) -> list[str]:
+        """Names sharing *adapter*'s fingerprint.  Caller holds ``_lock``."""
+        target = machine_fingerprint(adapter)
+        return sorted(
+            other for other, a in self._printers.items()
+            if machine_fingerprint(a) == target
+        )
 
     def __contains__(self, name: str) -> bool:
         with self._lock:

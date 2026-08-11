@@ -1,40 +1,54 @@
 """Tests for print_status_lite, list_snapshots, and watch_print save_to_disk.
 
 Covers:
-- print_status_lite (printing state, idle state, printer not found)
+- print_status_lite (printing state, idle state, telemetry age, printer not found)
 - list_snapshots (filter passthrough, empty results, DB errors)
 - watch_print save_to_disk parameter
+
+The print_status_lite tests build REAL PrinterState / JobProgress objects.  They
+used to hand the tool MagicMocks carrying attribute names no adapter return type
+has ever had (``job.time_left``, ``state.hotend_temp``), so they passed green
+while the tool raised AttributeError on its first field read and returned
+``{"state": "error"}`` for every backend in every state.  A MagicMock answers to
+any attribute name, which is precisely why it cannot catch that.
 """
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from kiln.printers.base import PrinterStatus
+from kiln.printers.base import JobProgress, PrinterState, PrinterStatus
 from kiln.registry import PrinterNotFoundError
 
 
 class TestPrintStatusLite:
     """print_status_lite tool tests."""
 
+    @staticmethod
+    def _wire(mock_get_adapter, state: PrinterState, job: JobProgress) -> None:
+        adapter = MagicMock()
+        adapter.get_state.return_value = state
+        adapter.get_job.return_value = job
+        mock_get_adapter.return_value = adapter
+
     @patch("kiln.server._get_adapter")
     def test_returns_minimal_state(self, mock_get_adapter):
         from kiln.server import print_status_lite
 
-        mock_adapter = MagicMock()
-        mock_state = MagicMock()
-        mock_state.state = PrinterStatus.PRINTING
-        mock_state.hotend_temp = 210.0
-        mock_state.bed_temp = 60.0
-        mock_adapter.get_state.return_value = mock_state
-
-        mock_job = MagicMock()
-        mock_job.completion = 45.2
-        mock_job.file_name = "benchy.gcode"
-        mock_job.time_left = 1800
-        mock_job.time_elapsed = 600
-        mock_adapter.get_job.return_value = mock_job
-
-        mock_get_adapter.return_value = mock_adapter
+        self._wire(
+            mock_get_adapter,
+            PrinterState(
+                connected=True,
+                state=PrinterStatus.PRINTING,
+                tool_temp_actual=210.0,
+                bed_temp_actual=60.0,
+            ),
+            JobProgress(
+                file_name="benchy.gcode",
+                completion=45.2,
+                print_time_seconds=600,
+                print_time_left_seconds=1800,
+            ),
+        )
 
         result = print_status_lite()
         assert result["state"] == "printing"
@@ -44,24 +58,18 @@ class TestPrintStatusLite:
         assert result["elapsed_seconds"] == 600
         assert result["hotend_temp"] == 210.0
         assert result["bed_temp"] == 60.0
+        # Nothing swallowed into an error envelope.
+        assert "error" not in result
 
     @patch("kiln.server._get_adapter")
     def test_idle_no_temps(self, mock_get_adapter):
         from kiln.server import print_status_lite
 
-        mock_adapter = MagicMock()
-        mock_state = MagicMock()
-        mock_state.state = PrinterStatus.IDLE
-        mock_adapter.get_state.return_value = mock_state
-
-        mock_job = MagicMock()
-        mock_job.completion = None
-        mock_job.file_name = None
-        mock_job.time_left = None
-        mock_job.time_elapsed = None
-        mock_adapter.get_job.return_value = mock_job
-
-        mock_get_adapter.return_value = mock_adapter
+        self._wire(
+            mock_get_adapter,
+            PrinterState(connected=True, state=PrinterStatus.IDLE),
+            JobProgress(),
+        )
 
         result = print_status_lite()
         assert result["state"] == "idle"
@@ -72,23 +80,71 @@ class TestPrintStatusLite:
     def test_idle_no_eta_or_elapsed(self, mock_get_adapter):
         from kiln.server import print_status_lite
 
-        mock_adapter = MagicMock()
-        mock_state = MagicMock()
-        mock_state.state = PrinterStatus.IDLE
-        mock_adapter.get_state.return_value = mock_state
-
-        mock_job = MagicMock()
-        mock_job.completion = None
-        mock_job.file_name = None
-        mock_job.time_left = None
-        mock_job.time_elapsed = None
-        mock_adapter.get_job.return_value = mock_job
-
-        mock_get_adapter.return_value = mock_adapter
+        self._wire(
+            mock_get_adapter,
+            PrinterState(connected=True, state=PrinterStatus.IDLE),
+            JobProgress(),
+        )
 
         result = print_status_lite()
         assert "eta_seconds" not in result
         assert "elapsed_seconds" not in result
+
+    @patch("kiln.server._get_adapter")
+    def test_stale_reading_carries_its_age_and_a_warning(self, mock_get_adapter):
+        """The polling tool is where a frozen cache gets read as progress.
+
+        ``printer_status`` recommends this tool for polling during a print, so
+        a state that stopped advancing has to say so here of all places.
+        """
+        from kiln.server import print_status_lite
+
+        self._wire(
+            mock_get_adapter,
+            PrinterState(
+                connected=True,
+                state=PrinterStatus.PRINTING,
+                tool_temp_actual=180.0,
+                state_age_seconds=312.0,
+            ),
+            JobProgress(file_name="part.3mf", completion=0.0),
+        )
+
+        result = print_status_lite()
+        assert result["state"] == "printing"
+        assert result["state_age_seconds"] == 312.0
+        assert "312s old" in result["telemetry_warning"]
+
+    @patch("kiln.server._get_adapter")
+    def test_fresh_reading_says_nothing_about_staleness(self, mock_get_adapter):
+        from kiln.server import print_status_lite
+
+        self._wire(
+            mock_get_adapter,
+            PrinterState(
+                connected=True, state=PrinterStatus.PRINTING, state_age_seconds=1.2
+            ),
+            JobProgress(completion=12.0),
+        )
+
+        result = print_status_lite()
+        assert result["state_age_seconds"] == 1.2
+        assert "telemetry_warning" not in result
+
+    @patch("kiln.server._get_adapter")
+    def test_untracked_age_adds_no_field(self, mock_get_adapter):
+        """A polling adapter reports no age, and the output stays as it was."""
+        from kiln.server import print_status_lite
+
+        self._wire(
+            mock_get_adapter,
+            PrinterState(connected=True, state=PrinterStatus.PRINTING),
+            JobProgress(completion=12.0),
+        )
+
+        result = print_status_lite()
+        assert "state_age_seconds" not in result
+        assert "telemetry_warning" not in result
 
     @patch("kiln.server._get_adapter")
     def test_printer_not_found_via_registry(self, mock_get_adapter):

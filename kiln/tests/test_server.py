@@ -3608,6 +3608,109 @@ class TestMonitorPrint:
 
 
 # ---------------------------------------------------------------------------
+# monitor_print — telemetry staleness
+# ---------------------------------------------------------------------------
+
+
+class TestMonitorPrintStaleness:
+    """The report says when it is describing the past.
+
+    The incident this covers: a printer paused at layer 0 with an error was
+    reported as printing, off a cache that had stopped advancing.  The report
+    already had a staleness detector, and it was structurally unreachable at
+    the moment it was needed — it keys on printer-reported elapsed time, which
+    the Bambu adapter only computes above 0% completion.
+    """
+
+    def _adapter(self, state_fields: dict, job_fields: dict):
+        state = MagicMock()
+        state.to_dict.return_value = {
+            "connected": True,
+            "state": "printing",
+            "tool_temp_actual": 180.0,
+            "tool_temp_target": 0.0,
+            "bed_temp_actual": 60.0,
+            "bed_temp_target": 60.0,
+            "print_error": 0,
+            **state_fields,
+        }
+        job = MagicMock()
+        job.to_dict.return_value = {
+            "file_name": "part.3mf",
+            "completion": 0.0,
+            **job_fields,
+        }
+        adapter = MagicMock()
+        adapter.get_state.return_value = state
+        adapter.get_job.return_value = job
+        adapter.get_snapshot.return_value = None
+        return adapter
+
+    def test_stale_reading_at_layer_zero_is_named(self):
+        """No elapsed time to compare, so only the reading's age can speak."""
+        adapter = self._adapter(
+            {"state_age_seconds": 312.0, "print_error": 134184978},
+            {"print_time_seconds": None, "print_time_left_seconds": None},
+        )
+
+        with patch("kiln.server._get_adapter", return_value=adapter):
+            result = monitor_print(include_snapshot=False)
+
+        assert "Telemetry is 312s old" in result
+        assert "PRINTING describes then, not now" in result
+        # The error the frozen cache was hiding still leads the commentary.
+        assert "Error" in result
+
+    def test_fresh_reading_adds_no_warning(self):
+        adapter = self._adapter(
+            {"state_age_seconds": 1.5},
+            {"print_time_seconds": 90, "print_time_left_seconds": 900},
+        )
+
+        with patch("kiln.server._get_adapter", return_value=adapter):
+            result = monitor_print(include_snapshot=False)
+
+        assert "Telemetry is" not in result
+
+    def test_untracked_age_adds_no_warning(self):
+        """A polling adapter reports no age; the report reads as before."""
+        adapter = self._adapter(
+            {}, {"print_time_seconds": 90, "print_time_left_seconds": 900}
+        )
+
+        with patch("kiln.server._get_adapter", return_value=adapter):
+            result = monitor_print(include_snapshot=False)
+
+        assert "Telemetry is" not in result
+
+    def test_elapsed_history_is_kept_per_printer(self):
+        """It used to live on the function object, shared by every machine.
+
+        With one slot, a two-printer shop compared each reading against
+        whichever machine was polled last.
+        """
+        from kiln.server import _MONITOR_ELAPSED_HISTORY
+
+        _MONITOR_ELAPSED_HISTORY.clear()
+        registry = MagicMock()
+        registry.get.side_effect = lambda name: self._adapter(
+            {},
+            {
+                "print_time_seconds": 100 if name == "alpha" else 900,
+                "print_time_left_seconds": 100,
+            },
+        )
+
+        with patch("kiln.server._get_registry", return_value=registry):
+            monitor_print(printer_name="alpha", include_snapshot=False)
+            monitor_print(printer_name="beta", include_snapshot=False)
+
+        assert _MONITOR_ELAPSED_HISTORY["alpha"][0] == 100
+        assert _MONITOR_ELAPSED_HISTORY["beta"][0] == 900
+        _MONITOR_ELAPSED_HISTORY.clear()
+
+
+# ---------------------------------------------------------------------------
 # multi_copy_print
 # ---------------------------------------------------------------------------
 

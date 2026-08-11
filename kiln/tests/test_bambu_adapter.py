@@ -3687,3 +3687,199 @@ class TestCacheStoragePath:
         adapter_with_mqtt.start_print("test.gcode")
         payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
         assert payload["print"]["param"] == "/cache/test.gcode"
+
+
+# ---------------------------------------------------------------------------
+# Telemetry vintage — a cached state says how old it is
+# ---------------------------------------------------------------------------
+
+
+def _push(adapter: BambuAdapter, **fields: Any) -> None:
+    """Feed *fields* to the adapter as a real push_status MQTT message.
+
+    Goes through ``_on_message`` rather than assigning ``_last_status``, so
+    the merge, the stale-timestamp guard and the vintage stamp are all
+    exercised the way the printer exercises them.
+    """
+    msg = mock.MagicMock()
+    msg.payload = json.dumps({"print": {"command": "push_status", **fields}}).encode()
+    adapter._on_message(adapter._mqtt_client, None, msg)
+
+
+class TestTelemetryVintage:
+    """The reported state carries the age of the push that produced it.
+
+    The incident: a P2S sat PAUSED at layer 0 with an error and a cooling
+    nozzle while Kiln reported the print as running — read out of an MQTT
+    cache that had stopped advancing.  Nothing rewrites a state on account of
+    its age (the concurrency gate and the pre-flight checks read the enum),
+    so the fix is that the answer stops sounding current when it is not.
+    """
+
+    def test_fresh_push_reports_a_small_age(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        _push(adapter_with_mqtt, gcode_state="RUNNING", nozzle_temper=210)
+
+        state = adapter_with_mqtt.get_state()
+
+        assert state.state is PrinterStatus.PRINTING
+        assert state.state_age_seconds is not None
+        assert state.state_age_seconds < 5.0
+        assert state.staleness_note() is None
+
+    def test_frozen_cache_is_reported_as_stale_not_as_current(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """The incident, as a unit test.
+
+        The state still reads PRINTING — demoting it would let a second
+        concurrent print start — but it now arrives with its true age and a
+        sentence saying so, which is what the session was missing.
+        """
+        _push(adapter_with_mqtt, gcode_state="RUNNING", nozzle_temper=210)
+        # Five minutes with nothing arriving: a dropped socket, a QoS-0 push
+        # that was never retransmitted, or a discarded timestamp.
+        adapter_with_mqtt._gcode_state_time -= 300.0
+        adapter_with_mqtt._last_state_time -= 300.0
+
+        state = adapter_with_mqtt.get_state()
+
+        assert state.state is PrinterStatus.PRINTING
+        assert state.state_age_seconds is not None
+        assert 295.0 < state.state_age_seconds < 320.0
+        assert state.is_stale() is True
+        note = state.staleness_note()
+        assert note is not None
+        assert "300s old" in note
+        assert "PRINTING" in note
+        # And it rides the serialised form every reporting surface reads.
+        assert state.to_dict()["state_age_seconds"] == state.state_age_seconds
+
+    def test_partial_push_does_not_refresh_a_stale_state(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """The cache is a MERGE, so the dict's age is not the state's age.
+
+        A temperature-only push says nothing about what the printer is doing.
+        Letting it reset the clock would print a small, confident freshness
+        number beside a state minutes old — a new wrong answer, not a fix.
+        """
+        _push(adapter_with_mqtt, gcode_state="RUNNING", nozzle_temper=210)
+        adapter_with_mqtt._gcode_state_time -= 300.0
+        adapter_with_mqtt._last_state_time -= 300.0
+
+        _push(adapter_with_mqtt, nozzle_temper=35, bed_temper=22)
+
+        state = adapter_with_mqtt.get_state()
+        assert state.state is PrinterStatus.PRINTING  # unchanged by the merge
+        assert state.tool_temp_actual == 35  # the new temperature did land
+        assert state.state_age_seconds is not None
+        assert state.state_age_seconds > 295.0
+        assert state.is_stale() is True
+
+    def test_never_populated_cache_claims_no_age(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """No measurement is reported as None, never as an age since boot."""
+        adapter_with_mqtt._last_status = {"gcode_state": "running"}
+
+        state = adapter_with_mqtt.get_state()
+
+        assert state.state_age_seconds is None
+        assert state.is_stale() is False
+        assert state.staleness_note() is None
+        assert "state_age_seconds" not in state.to_dict()
+
+    def test_cooldown_branch_reports_the_state_vintage(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """The serve/refuse decision and the reported age are different clocks.
+
+        A cache still receiving temperature pushes is a live connection, so it
+        is still served during a backoff cooldown; the age handed to the caller
+        is the gcode_state's own, which can be much older.
+        """
+        _push(adapter_with_mqtt, gcode_state="RUNNING")
+        adapter_with_mqtt._gcode_state_time -= 300.0
+        _push(adapter_with_mqtt, nozzle_temper=210)  # refreshes the dict only
+        adapter_with_mqtt._backoff.record_failure()
+
+        assert adapter_with_mqtt._backoff.in_cooldown()
+        state = adapter_with_mqtt.get_state()
+
+        assert state.state is PrinterStatus.PRINTING
+        assert state.state_age_seconds is not None
+        assert state.state_age_seconds > 295.0
+
+    def test_reconnect_leaves_the_cache_and_the_age_keeps_running(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """Characterises mechanism one: a drop does not clear the snapshot.
+
+        ``_on_disconnect`` clears only the connection flags, and the pushall
+        that ``_on_connect`` fires is awaited by nobody — so the first read
+        after any drop answers from the pre-drop snapshot.  That is not fixed
+        here (it needs a wire trace to settle); it is made visible.
+        """
+        _push(adapter_with_mqtt, gcode_state="RUNNING")
+        adapter_with_mqtt._gcode_state_time -= 300.0
+        adapter_with_mqtt._last_state_time -= 300.0
+
+        adapter_with_mqtt._on_disconnect(adapter_with_mqtt._mqtt_client, None)
+        assert adapter_with_mqtt._last_status.get("gcode_state") == "RUNNING"
+
+        # Reconnected, as _on_connect leaves things: flags back up, a pushall
+        # in flight that nothing waits for, and the old snapshot still cached.
+        adapter_with_mqtt._mqtt_connected.set()
+        adapter_with_mqtt._connected = True
+
+        state = adapter_with_mqtt.get_state()
+        assert state.state is PrinterStatus.PRINTING
+        assert state.is_stale() is True
+
+    def test_timestamp_guard_freeze_becomes_visible_as_age(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """Characterises mechanism two: one high msg_timestamp poisons the cache.
+
+        The guard discards every later push with no floor and no reset, at
+        DEBUG level with no counter — so the cache can freeze for the life of
+        the process.  Also not fixed here; the age is what makes it sayable.
+        """
+        _push(adapter_with_mqtt, gcode_state="RUNNING", msg_timestamp=10**12)
+        adapter_with_mqtt._gcode_state_time -= 300.0
+        adapter_with_mqtt._last_state_time -= 300.0
+        frozen_at = adapter_with_mqtt._gcode_state_time
+
+        _push(adapter_with_mqtt, gcode_state="PAUSE", print_error=134184978,
+              msg_timestamp=1000)
+
+        # Discarded outright: the pause never entered the cache.
+        assert adapter_with_mqtt._last_status.get("gcode_state") == "RUNNING"
+        assert adapter_with_mqtt._gcode_state_time == frozen_at
+        state = adapter_with_mqtt.get_state()
+        assert state.state is PrinterStatus.PRINTING
+        assert state.is_stale() is True
+
+    def test_a_landed_pause_is_reported_fresh_and_with_its_error(
+        self, adapter_with_mqtt: BambuAdapter
+    ) -> None:
+        """Nothing here suppresses a pause that does arrive.
+
+        The mapping was never the bug: "PAUSE" lowercases to a PAUSED verdict
+        and carries print_error, and once the push lands the age is small.
+        """
+        _push(adapter_with_mqtt, gcode_state="RUNNING")
+        adapter_with_mqtt._gcode_state_time -= 300.0
+        adapter_with_mqtt._last_state_time -= 300.0
+
+        _push(adapter_with_mqtt, gcode_state="PAUSE", print_error=134184978,
+              nozzle_temper=180)
+
+        state = adapter_with_mqtt.get_state()
+        assert state.state is PrinterStatus.PAUSED
+        assert state.print_error == 134184978
+        assert state.state_age_seconds is not None
+        assert state.state_age_seconds < 5.0
+        assert state.staleness_note() is None

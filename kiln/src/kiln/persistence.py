@@ -551,6 +551,7 @@ class KilnDB:
         self._ensure_schema()
         self._migrate_agent_memory()
         self._migrate_print_outcomes()
+        self._migrate_printer_materials()
         self._migrate_signature_v2()
         self._enforce_permissions()
 
@@ -593,6 +594,36 @@ class KilnDB:
             columns = {row[1] for row in self._conn.execute("PRAGMA table_info(print_outcomes)").fetchall()}
         if "determined_by" not in columns:
             self._conn.execute("ALTER TABLE print_outcomes ADD COLUMN determined_by TEXT DEFAULT NULL")
+        self._conn.commit()
+
+    def _migrate_printer_materials(self) -> None:
+        """Add the determined_by column to existing printer_materials tables.
+
+        Same vocabulary as ``print_outcomes`` (:attr:`VALID_DETERMINED_BY`),
+        for the same reason: "a person told us PETG is loaded" and "the
+        printer reported PETG" are different facts, and a row that cannot
+        say which one it is gets read as the stronger of the two.  NULL means
+        the row predates the column, which honestly reads as
+        ``user_reported`` — ``set_material`` was the only writer this table
+        has ever had.  It is never backfilled with a guess about a sensor.
+        """
+        if self._is_postgres:
+            rows = self._conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'printer_materials'",
+            ).fetchall()
+            columns = {row[0] for row in rows}
+        else:
+            columns = {
+                row[1]
+                for row in self._conn.execute(
+                    "PRAGMA table_info(printer_materials)"
+                ).fetchall()
+            }
+        if "determined_by" not in columns:
+            self._conn.execute(
+                "ALTER TABLE printer_materials ADD COLUMN determined_by TEXT DEFAULT NULL"
+            )
         self._conn.commit()
 
     def _migrate_signature_v2(self) -> None:
@@ -723,6 +754,7 @@ class KilnDB:
                     spool_id        TEXT,
                     loaded_at       REAL NOT NULL,
                     remaining_grams REAL,
+                    determined_by   TEXT,
                     PRIMARY KEY (printer_name, tool_index)
                 );
 
@@ -1341,17 +1373,37 @@ class KilnDB:
         color: str | None = None,
         spool_id: str | None = None,
         remaining_grams: float | None = None,
+        determined_by: str | None = None,
     ) -> None:
-        """Insert or replace a loaded material record."""
+        """Insert or replace a loaded material record.
+
+        ``determined_by`` records WHO decided this material — see
+        :attr:`VALID_DETERMINED_BY` and :meth:`_migrate_printer_materials`.
+        ``None`` stores NULL, which readers take as ``user_reported``.
+        """
+        if determined_by and determined_by not in self.VALID_DETERMINED_BY:
+            raise ValueError(
+                f"Invalid determined_by {determined_by!r}. "
+                f"Must be one of: {sorted(self.VALID_DETERMINED_BY)}"
+            )
         with self._write_lock:
             self._conn.execute(
                 """
                 INSERT OR REPLACE INTO printer_materials
                     (printer_name, tool_index, material_type, color,
-                     spool_id, loaded_at, remaining_grams)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                     spool_id, loaded_at, remaining_grams, determined_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (printer_name, tool_index, material_type, color, spool_id, time.time(), remaining_grams),
+                (
+                    printer_name,
+                    tool_index,
+                    material_type,
+                    color,
+                    spool_id,
+                    time.time(),
+                    remaining_grams,
+                    determined_by,
+                ),
             )
             self._conn.commit()
 

@@ -40,6 +40,7 @@ from typing import Any
 import paho.mqtt.client as mqtt
 
 from kiln.printers.base import (
+    STALE_STATE_WARN_AGE,
     JobProgress,
     PrinterAdapter,
     PrinterCapabilities,
@@ -88,7 +89,10 @@ _SINGLE_CLIENT_FTPS_MSG = (
 _BACKOFF_INITIAL_DELAY: float = 1.0  # seconds
 _BACKOFF_MULTIPLIER: float = 2.0
 _BACKOFF_MAX_DELAY: float = 30.0  # seconds
-_STALE_STATE_MAX_AGE: float = 60.0  # seconds — max age before cached state is "too old"
+# Max age before cached state is "too old" to serve during a backoff cooldown.
+# Read from base rather than restated, so this adapter's ceiling and the age at
+# which every reporting surface calls a reading stale are one decision.
+_STALE_STATE_MAX_AGE: float = STALE_STATE_WARN_AGE
 _FTPS_MAX_RETRIES: int = 3  # retry count for transient FTPS connection failures
 
 
@@ -642,6 +646,13 @@ class BambuAdapter(PrinterAdapter):
         self._state_lock = threading.Lock()
         self._last_status: dict[str, Any] = {}
         self._last_state_time: float = 0.0  # monotonic time of last accepted update
+        # Monotonic time of the last accepted update that actually CARRIED
+        # gcode_state.  Separate from _last_state_time because the cache is a
+        # merge (see _on_message): a push carrying only temperatures advances
+        # the dict's age while gcode_state stays whatever it was, so the dict's
+        # age is not the age of the state a caller is told about.  0.0 means no
+        # push has ever carried it.
+        self._gcode_state_time: float = 0.0
         self._connected = False
         self._sequence_id = 0
         # One-shot per process: on the first full status after connecting,
@@ -1251,6 +1262,14 @@ class BambuAdapter(PrinterAdapter):
                     ).lower().strip()
                     self._last_status.update(print_data)
                     self._last_state_time = time.monotonic()
+                    # Stamp the vintage of the one key that decides the
+                    # reported state.  ``update`` is a merge, so without this
+                    # a partial push would reset the age of a gcode_state it
+                    # never contained — printing a small, confident freshness
+                    # number beside a stale state, which is worse than saying
+                    # nothing.  Reported as PrinterState.state_age_seconds.
+                    if "gcode_state" in print_data:
+                        self._gcode_state_time = self._last_state_time
 
                     # Fire the auto-record hook outside the state lock
                     # to avoid a deadlock if record_print_outcome ever
@@ -1594,8 +1613,33 @@ class BambuAdapter(PrinterAdapter):
     # PrinterAdapter -- state queries
     # ------------------------------------------------------------------
 
-    def _build_state_from_cache(self, status: dict[str, Any]) -> PrinterState:
-        """Convert a cached status dict into a :class:`PrinterState`."""
+    def _gcode_state_age_locked(self) -> float | None:
+        """Seconds since a push last carried ``gcode_state``, or ``None``.
+
+        ``None`` when no push ever has, so a never-populated cache reports no
+        age rather than an age measured from process start.
+
+        The caller must hold :attr:`_state_lock`; it is a plain
+        :class:`threading.Lock`, and :meth:`get_state`'s cooldown branch
+        already holds it where the age is needed.
+        """
+        if not self._gcode_state_time:
+            return None
+        return max(0.0, time.monotonic() - self._gcode_state_time)
+
+    def _build_state_from_cache(
+        self,
+        status: dict[str, Any],
+        *,
+        age: float | None = None,
+    ) -> PrinterState:
+        """Convert a cached status dict into a :class:`PrinterState`.
+
+        *age* is the vintage of the ``gcode_state`` this status carries, from
+        :meth:`_gcode_state_age_locked`.  It is passed in rather than read here
+        because both callers already hold — or deliberately do not hold —
+        :attr:`_state_lock`, which is not reentrant.
+        """
         gcode_state = status.get("gcode_state", "unknown")
         if not isinstance(gcode_state, str):
             gcode_state = "unknown"
@@ -1656,6 +1700,7 @@ class BambuAdapter(PrinterAdapter):
             speed_profile=speed_name,
             speed_magnitude=spd_mag_int,
             print_error=print_error_int,
+            state_age_seconds=round(age, 1) if age is not None else None,
         )
 
     def get_state(self) -> PrinterState:
@@ -1667,6 +1712,14 @@ class BambuAdapter(PrinterAdapter):
         During a backoff cooldown period, returns the last known state if
         it is recent enough (< :data:`_STALE_STATE_MAX_AGE` seconds old),
         otherwise returns OFFLINE without attempting reconnection.
+
+        The returned state carries ``state_age_seconds``: how long ago a push
+        last told us this.  Nothing here rewrites a state on account of its
+        age — a stale PRINTING stays PRINTING, because the concurrency gate
+        and the pre-flight checks read the enum, and demoting it would let a
+        second print start on a machine that is already busy.  It is reported
+        with its age instead, so a caller can tell "printing" from "was
+        printing when the socket last delivered".
         """
         # If we are in backoff cooldown, avoid the reconnect attempt.
         if self._backoff.in_cooldown():
@@ -1677,7 +1730,15 @@ class BambuAdapter(PrinterAdapter):
                         "In backoff cooldown; returning cached state (%.1fs old)",
                         age,
                     )
-                    return self._build_state_from_cache(dict(self._last_status))
+                    # The serve/refuse decision stays on the DICT's age (a
+                    # cache still receiving pushes is a live connection), while
+                    # the age reported to the caller is the gcode_state's own —
+                    # which can be older, and is the number that describes the
+                    # state being returned.
+                    return self._build_state_from_cache(
+                        dict(self._last_status),
+                        age=self._gcode_state_age_locked(),
+                    )
             logger.debug("In backoff cooldown with no recent cached state; returning OFFLINE")
             return PrinterState(
                 connected=False,
@@ -1692,7 +1753,9 @@ class BambuAdapter(PrinterAdapter):
                 state=PrinterStatus.OFFLINE,
             )
 
-        return self._build_state_from_cache(status)
+        with self._state_lock:
+            state_age = self._gcode_state_age_locked()
+        return self._build_state_from_cache(status, age=state_age)
 
     def get_job(self) -> JobProgress:
         """Retrieve progress info for the active (or last) print job.

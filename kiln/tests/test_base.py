@@ -13,6 +13,7 @@ from __future__ import annotations
 import pytest
 
 from kiln.printers.base import (
+    STALE_STATE_WARN_AGE,
     JobProgress,
     PrinterAdapter,
     PrinterCapabilities,
@@ -435,3 +436,74 @@ class TestResumePrintTemplate:
         a = self._adapter(RuntimeError("transient blip"))
         a.resume_print()
         assert a._impl_calls == ["impl"]  # a transient read must never block resume
+
+
+# ---------------------------------------------------------------------------
+# PrinterState staleness contract
+# ---------------------------------------------------------------------------
+
+
+class TestPrinterStateStaleness:
+    """One age field and one sentence, shared by every adapter and every door.
+
+    A push-cache adapter can answer "printing" in exactly the tone it would
+    use for a live reading.  These are the two things every reporting surface
+    relies on to tell the difference.
+    """
+
+    def test_no_age_is_not_a_staleness_claim(self):
+        """An adapter that queries the printer every call reports None."""
+        state = PrinterState(connected=True, state=PrinterStatus.PRINTING)
+        assert state.state_age_seconds is None
+        assert state.is_stale() is False
+        assert state.staleness_note() is None
+        assert "state_age_seconds" not in state.to_dict()
+
+    def test_fresh_age_is_quiet(self):
+        state = PrinterState(
+            connected=True, state=PrinterStatus.PRINTING, state_age_seconds=2.5
+        )
+        assert state.is_stale() is False
+        assert state.staleness_note() is None
+        assert state.to_dict()["state_age_seconds"] == 2.5
+
+    def test_stale_age_names_the_age_and_the_state(self):
+        state = PrinterState(
+            connected=True, state=PrinterStatus.PRINTING, state_age_seconds=312.4
+        )
+        assert state.is_stale() is True
+        note = state.staleness_note()
+        assert note is not None
+        assert "312s" in note
+        assert "PRINTING" in note
+
+    def test_threshold_is_the_shared_constant_and_is_overridable(self):
+        state = PrinterState(
+            connected=True,
+            state=PrinterStatus.PRINTING,
+            state_age_seconds=STALE_STATE_WARN_AGE + 1,
+        )
+        assert state.is_stale() is True
+        # A caller with a tighter tolerance can ask its own question.
+        assert state.is_stale(max_age=10_000) is False
+        assert (
+            PrinterState(
+                connected=True,
+                state=PrinterStatus.PRINTING,
+                state_age_seconds=STALE_STATE_WARN_AGE,
+            ).is_stale()
+            is False
+        )
+
+    def test_staleness_never_rewrites_the_state(self):
+        """The enum is load-bearing downstream, so age only annotates it.
+
+        The concurrency gate reads anything other than PRINTING/PAUSED as
+        not-busy: demoting a stale PRINTING to UNKNOWN would let a second
+        print start on a machine that is already running one.
+        """
+        state = PrinterState(
+            connected=True, state=PrinterStatus.PRINTING, state_age_seconds=9_999.0
+        )
+        assert state.state is PrinterStatus.PRINTING
+        assert state.to_dict()["state"] == "printing"

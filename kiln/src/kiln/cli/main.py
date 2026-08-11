@@ -6796,6 +6796,9 @@ def material_set(
             color=color,
             spool_id=spool,
             tool_index=tool,
+            # Stated at the writer: this is the operator typing a material
+            # name, so readers must not report it back as a sensor reading.
+            determined_by="user_reported",
         )
         if json_mode:
             click.echo(
@@ -6857,6 +6860,15 @@ def material_show(ctx: click.Context, json_mode: bool, live: bool) -> None:
                         if m.remaining_grams is not None:
                             line += f" — {m.remaining_grams:.0f}g remaining"
                         click.echo(line)
+                    # These rows are a record of what someone typed, not a
+                    # reading.  Printed under a "loaded materials" heading
+                    # with no provenance, they read as a measurement — which
+                    # is how a stale row became "PETG is loaded" to a user.
+                    if not all(m.is_sensed for m in materials):
+                        click.echo(
+                            "Recorded with `kiln material set` — no sensor "
+                            "confirmed this. Use --live to ask the printer."
+                        )
                 return
             # Local DB empty — fall through to live query.
 

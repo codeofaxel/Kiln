@@ -43,6 +43,7 @@ from typing import Any
 import requests
 
 from kiln.printers.base import (
+    STALE_STATE_WARN_AGE,
     JobProgress,
     PrinterAdapter,
     PrinterCapabilities,
@@ -67,7 +68,14 @@ _UDP_PORT = 3000
 _UDP_DISCOVER_MAGIC = "M99999"
 _PING_INTERVAL: float = 30.0  # Send keep-alive pings to prevent 60s timeout
 _RECONNECT_INTERVAL: float = 5.0
-_STALE_STATE_MAX_AGE: float = 60.0  # seconds
+# Max age before cached state is "too old" to serve during a backoff cooldown.
+# Read from base rather than restated — one decision about when a cached state
+# stops being evidence, shared with the age every surface reports.
+_STALE_STATE_MAX_AGE: float = STALE_STATE_WARN_AGE
+
+# SDCP keys that carry the print state itself.  A push containing neither one
+# updates temperatures without saying anything about what the printer is doing.
+_STATE_KEYS: tuple[str, ...] = ("CurrentStatus", "Status")
 
 # SDCP command codes (documented for Centauri Carbon / Saturn / Mars)
 _CMD_STATUS_REQUEST = 0
@@ -328,6 +336,10 @@ class ElegooAdapter(PrinterAdapter):
         self._state_lock = threading.Lock()
         self._last_status: dict[str, Any] = {}
         self._last_state_time: float = 0.0
+        # Monotonic time of the last push that actually carried a state key.
+        # The cache is a merge, so _last_state_time answers "when did anything
+        # arrive", not "how old is the state we report".  0.0 means never.
+        self._print_state_time: float = 0.0
         self._connected = False
 
         # WebSocket state.
@@ -567,6 +579,7 @@ class ElegooAdapter(PrinterAdapter):
             with self._state_lock:
                 self._last_status.update(status_data)
                 self._last_state_time = time.monotonic()
+                self._stamp_state_vintage_locked(status_data)
 
         # Also update top-level fields if present.
         for key in ("CurrentStatus", "PrintInfo", "Attributes"):
@@ -575,6 +588,7 @@ class ElegooAdapter(PrinterAdapter):
                 with self._state_lock:
                     self._last_status.update(section)
                     self._last_state_time = time.monotonic()
+                    self._stamp_state_vintage_locked(section)
 
         # Store mainboard ID if discovered.
         mainboard = data.get("MainboardID", "")
@@ -733,17 +747,46 @@ class ElegooAdapter(PrinterAdapter):
     # PrinterAdapter -- state queries
     # ------------------------------------------------------------------
 
+    def _stamp_state_vintage_locked(self, payload: dict[str, Any]) -> None:
+        """Record the arrival time of a payload that carries the print state.
+
+        Caller must hold :attr:`_state_lock`.  Only payloads containing one of
+        :data:`_STATE_KEYS` count: a temperature-only push says nothing about
+        what the printer is doing, and letting it reset the clock would report
+        a fresh-looking age beside a state minutes old.
+        """
+        if any(key in payload for key in _STATE_KEYS):
+            self._print_state_time = self._last_state_time
+
+    def _print_state_age_locked(self) -> float | None:
+        """Seconds since a push last carried the print state, or ``None``.
+
+        Caller must hold :attr:`_state_lock`.  ``None`` when no push ever has.
+        """
+        if not self._print_state_time:
+            return None
+        return max(0.0, time.monotonic() - self._print_state_time)
+
     def get_state(self) -> PrinterState:
         """Retrieve the current printer state and temperatures.
 
         Uses the WebSocket status cache.  During backoff cooldown,
         returns cached state if recent enough, otherwise OFFLINE.
+
+        A status request goes out on every call, but the reply is not
+        guaranteed: the wait below is bounded, and a printer that answers
+        nothing leaves the previous cache in place.  So the returned state
+        carries ``state_age_seconds`` — how long ago a push last reported it —
+        rather than presenting whatever is cached as the present tense.
         """
         if self._backoff.in_cooldown():
             with self._state_lock:
                 age = time.monotonic() - self._last_state_time
                 if self._last_status and age < _STALE_STATE_MAX_AGE:
-                    return self._build_state_from_cache(dict(self._last_status))
+                    return self._build_state_from_cache(
+                        dict(self._last_status),
+                        age=self._print_state_age_locked(),
+                    )
             return PrinterState(connected=False, state=PrinterStatus.OFFLINE)
 
         try:
@@ -758,10 +801,23 @@ class ElegooAdapter(PrinterAdapter):
         with self._state_lock:
             if not self._last_status:
                 return PrinterState(connected=True, state=PrinterStatus.IDLE)
-            return self._build_state_from_cache(dict(self._last_status))
+            return self._build_state_from_cache(
+                dict(self._last_status),
+                age=self._print_state_age_locked(),
+            )
 
-    def _build_state_from_cache(self, status: dict[str, Any]) -> PrinterState:
-        """Convert cached SDCP status to :class:`PrinterState`."""
+    def _build_state_from_cache(
+        self,
+        status: dict[str, Any],
+        *,
+        age: float | None = None,
+    ) -> PrinterState:
+        """Convert cached SDCP status to :class:`PrinterState`.
+
+        *age* is the vintage of the print state this status carries, from
+        :meth:`_print_state_age_locked`.  It is passed in because the callers
+        already hold :attr:`_state_lock`, which is not reentrant.
+        """
         print_status = status.get("CurrentStatus", status.get("Status", 0))
         # SDCP V3 (e.g. Centauri Carbon) returns CurrentStatus as a list.
         if isinstance(print_status, list):
@@ -789,6 +845,7 @@ class ElegooAdapter(PrinterAdapter):
             bed_temp_actual=bed_actual,
             bed_temp_target=bed_target,
             chamber_temp_actual=chamber_actual,
+            state_age_seconds=round(age, 1) if age is not None else None,
         )
 
     def get_job(self) -> JobProgress:
