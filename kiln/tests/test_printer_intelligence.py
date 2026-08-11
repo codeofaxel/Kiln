@@ -78,7 +78,7 @@ class TestGetPrinterIntel:
     def test_ender3_intel_exists(self) -> None:
         intel = get_printer_intel("ender3")
         assert intel.id == "ender3"
-        assert intel.display_name == "Creality Ender 3 / Ender 3 Pro / Ender 3 V2"
+        assert intel.display_name == "Creality Ender 3 / Ender 3 Pro"
 
     def test_ender3_firmware(self) -> None:
         intel = get_printer_intel("ender3")
@@ -270,7 +270,7 @@ class TestPerCallerEntitlement:
     ) -> None:
         overlay_loader.tier = "free"
         intel = get_printer_intel("ender3")
-        assert intel.display_name == "Creality Ender 3 / Ender 3 Pro / Ender 3 V2"
+        assert intel.display_name == "Creality Ender 3 / Ender 3 Pro"
         assert intel.firmware == "marlin"
         assert intel.hotend_type == "ptfe_lined"
         # The temperatures a caller could hurt a printer with are public.
