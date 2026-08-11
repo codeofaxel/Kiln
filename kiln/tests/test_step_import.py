@@ -2604,15 +2604,82 @@ def test_a_cache_hit_reports_the_same_record_as_the_conversion(
     assert hit == miss, "a hit must describe the same conversion as the miss"
 
 
-def test_a_cache_entry_from_before_the_record_says_nothing_rather_than_guessing(
+def test_a_cache_entry_from_before_the_record_reconverts_rather_than_shrugging(
     real_kernel, tmp_dir
 ):
-    """Entries written by an older Kiln have no sidecar.
+    """Entries written by an older Kiln have no sidecar — and the key carries
+    no format version, so they are indistinguishable from current ones and
+    would answer "not from CAD" for those files forever.
 
-    The cache key knows which backends are INSTALLED, so a record could be
-    reconstructed from it — and would be wrong on exactly the machine where
-    the first-choice backend is present but broken. None is the honest answer
-    for a mesh whose origin was never written down.
+    Measured the morning after the record shipped, on one developer machine:
+    135 cached meshes, 5 sidecars.  The hosted box hides it (its temp dir goes
+    at every redeploy); a laptop and a CI runner keep the cache for months, so
+    the people most likely to hit it are the ones converting the same parts
+    over and over.
+
+    A record-wanting caller therefore falls through and converts once more,
+    which writes the sidecar and makes it a hit again.  Note what this does
+    NOT do: reconstruct a record from the cache key.  That key knows which
+    backends are INSTALLED, and would be wrong on exactly the machine where
+    the first-choice backend is present but broken.  The record is re-earned
+    by running the conversion, never inferred.
+    """
+    from kiln.step_import import ensure_mesh_path
+
+    step = _unique_step(tmp_dir)
+    d1, d2 = tmp_dir / "a", tmp_dir / "b"
+    for d in (d1, d2):
+        d.mkdir()
+
+    _, _, first = ensure_mesh_path(str(step), output_dir=str(d1), with_record=True)
+
+    cache_dir = Path(tempfile.gettempdir()) / "kiln_step_cache"
+    sidecars = sorted(cache_dir.glob("*.json"))
+    assert sidecars, "the conversion should have left a sidecar"
+    for s in sidecars:
+        s.unlink()
+
+    _, _note, conversion = ensure_mesh_path(
+        str(step), output_dir=str(d2), with_record=True
+    )
+    assert conversion is not None
+    assert conversion.backend == first.backend
+
+    # And it is a hit again now, without another conversion.
+    _, note3, third = ensure_mesh_path(
+        str(step), output_dir=str(tmp_dir / "c"), with_record=True
+    )
+    assert "cached" in (note3 or "")
+    assert third is not None
+
+
+def test_a_caller_that_wanted_no_record_keeps_the_fast_path(real_kernel, tmp_dir):
+    """The fall-through is scoped to callers who asked for a record; everyone
+    else must not pay a re-conversion for a field they never read."""
+    from kiln.step_import import ensure_mesh_path
+
+    step = _unique_step(tmp_dir)
+    d1, d2 = tmp_dir / "a", tmp_dir / "b"
+    for d in (d1, d2):
+        d.mkdir()
+
+    ensure_mesh_path(str(step), output_dir=str(d1), with_record=True)
+    for s in sorted((Path(tempfile.gettempdir()) / "kiln_step_cache").glob("*.json")):
+        s.unlink()
+
+    _out, note = ensure_mesh_path(str(step), output_dir=str(d2))
+    assert "cached" in (note or "")
+
+
+def test_an_unreadable_sidecar_says_nothing_rather_than_guessing(
+    real_kernel, tmp_dir
+):
+    """The property the re-conversion above must not cost us.
+
+    A sidecar that is PRESENT but corrupt still reads as a hit, and the answer
+    stays ``None`` — a mesh whose origin cannot be read is exactly what None
+    means, and reconstructing one from the cache key would report the backends
+    that are installed as the backend that ran.
     """
     from kiln.step_import import ensure_mesh_path
 
@@ -2623,11 +2690,10 @@ def test_a_cache_entry_from_before_the_record_says_nothing_rather_than_guessing(
 
     ensure_mesh_path(str(step), output_dir=str(d1), with_record=True)
 
-    cache_dir = Path(tempfile.gettempdir()) / "kiln_step_cache"
-    sidecars = sorted(cache_dir.glob("*.json"))
-    assert sidecars, "the conversion should have left a sidecar"
+    sidecars = sorted((Path(tempfile.gettempdir()) / "kiln_step_cache").glob("*.json"))
+    assert sidecars
     for s in sidecars:
-        s.unlink()
+        s.write_text("{ not json at all", encoding="utf-8")
 
     _, note, conversion = ensure_mesh_path(
         str(step), output_dir=str(d2), with_record=True

@@ -1441,13 +1441,28 @@ def ensure_mesh_path(
         # and a FileNotFoundError on every one after — the same call
         # succeeding or failing purely on whether something else had already
         # converted those bytes.
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        out = str(Path(output_dir) / "merged.stl")
-        _shutil.copyfile(cached, out)
-        note = f"Converted from STEP ({Path(path).name}) to mesh — cached, 0.0s."
-        if not with_record:
-            return out, note
-        return out, note, _read_cached_conversion(cached_record)
+        # A hit is only a hit for what the CALLER asked for.  Entries cached
+        # before this sidecar existed carry a mesh and no record, and the key
+        # is content + tessellation settings with no format version — so they
+        # are indistinguishable from current entries and would answer "not
+        # from CAD" for those files forever.  Measured on one developer
+        # machine the morning after the record shipped: 135 cached meshes, 5
+        # sidecars.  The hosted box hides this (its temp dir goes at every
+        # redeploy); a laptop and a CI runner keep the cache for months, so
+        # the people most likely to see it are the ones converting the same
+        # parts over and over.
+        #
+        # Falling through re-converts that file ONCE and writes the sidecar,
+        # after which it is a hit again.  Callers that never wanted a record
+        # keep the fast path untouched.
+        if not with_record or cached_record.is_file():
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            out = str(Path(output_dir) / "merged.stl")
+            _shutil.copyfile(cached, out)
+            note = f"Converted from STEP ({Path(path).name}) to mesh — cached, 0.0s."
+            if not with_record:
+                return out, note
+            return out, note, _read_cached_conversion(cached_record)
 
     result = convert_step_to_stl(path, output_dir=output_dir, merge_bodies=True)
     note = (
