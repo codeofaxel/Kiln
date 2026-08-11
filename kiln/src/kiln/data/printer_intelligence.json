@@ -1758,9 +1758,9 @@
       240,
       260
     ],
-    "max_hotend_temp": 260,
+    "max_hotend_temp": 300,
     "max_bed_temp": 100,
-    "has_input_shaping": true
+    "has_input_shaping": false
   },
   "sovol_sv06": {
     "display_name": "Sovol SV06",

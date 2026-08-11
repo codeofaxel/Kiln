@@ -1388,7 +1388,7 @@
       "y": 240,
       "z": 260
     },
-    "max_hotend_temp_c": 260,
+    "max_hotend_temp_c": 300,
     "max_bed_temp_c": 100,
     "has_enclosure": false,
     "has_direct_drive": true,

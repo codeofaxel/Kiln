@@ -780,7 +780,7 @@
   },
   "artillery_sw_x3": {
     "display_name": "Artillery Sidewinder X3 Plus / X3 Pro",
-    "max_hotend_temp": 260.0,
+    "max_hotend_temp": 300.0,
     "max_bed_temp": 100.0,
     "max_chamber_temp": null,
     "max_feedrate": 20000.0,
