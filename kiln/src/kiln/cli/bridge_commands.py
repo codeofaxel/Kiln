@@ -30,6 +30,7 @@ import subprocess
 import sys
 import time
 import urllib.parse
+from typing import NamedTuple
 
 import click
 
@@ -140,6 +141,36 @@ def _windows_pythonw() -> str:
     return candidate if os.path.exists(candidate) else sys.executable
 
 
+class _Bearer(NamedTuple):
+    """What we have to authenticate with, and why we don't have it."""
+
+    token: str
+    detail: str
+
+
+def _resolve_bearer() -> _Bearer:
+    """The bridge's credential, plus the one sentence explaining any absence.
+
+    Two authorities, deliberately: :func:`_read_license` decides WHETHER we
+    have a bearer — it alone knows the ``config.yaml`` license fallback that
+    the session resolver has no idea about — and
+    :func:`~kiln.auth_session.resolve_api_bearer` is asked only for WHY when
+    there is nothing, since it can tell an expired session from a machine
+    that never signed in.  Consulting the session resolver for the verdict
+    instead would report "signed out" to an operator whose license key in
+    config.yaml is working fine.
+    """
+    token = _read_license()
+    if token:
+        return _Bearer(token=token, detail="")
+    try:
+        from kiln.auth_session import resolve_api_bearer
+
+        return _Bearer(token="", detail=resolve_api_bearer().detail)
+    except Exception:
+        return _Bearer(token="", detail="")
+
+
 def _describe_status(
     *,
     signed_in: bool,
@@ -148,6 +179,7 @@ def _describe_status(
     connected: bool,
     since: float | None,
     now: float,
+    signin_detail: str = "",
 ) -> tuple[str, list[str]]:
     """Map the facts to a (headline, detail-lines) pair — honest in every state.
 
@@ -155,8 +187,14 @@ def _describe_status(
     can walk the whole matrix.
     """
     if not signed_in:
+        # An expired session and a machine that never signed in both land
+        # here, and they are not the same problem.  ``resolve_api_bearer``
+        # already knows which — say it, rather than making the user guess
+        # why "sign in" didn't seem to take the first time.
+        lead = [signin_detail] if signin_detail else []
         return "signed out", [
-            "Sign in first so the relay can find your bridge:",
+            *lead,
+            "Sign in so the relay can find your bridge:",
             "  kiln signin   (or  kiln pair)",
         ]
 
@@ -456,9 +494,11 @@ def _remove_service() -> None:
 
 def _preflight() -> None:
     """Fail-fast checks before we start dialing out."""
-    if not _read_license():
+    bearer = _resolve_bearer()
+    if not bearer.token:
         raise click.ClickException(
-            "Sign in first so the relay can route to you:\n"
+            (f"{bearer.detail}\n" if bearer.detail else "")
+            + "Sign in so the relay can route to you:\n"
             "  kiln signin   (or  kiln pair)"
         )
     try:
@@ -486,13 +526,15 @@ def status() -> None:
     st = read_bridge_state()
     running = _running_pid() is not None
     connected = bool(st.get("connected")) and running
+    bearer = _resolve_bearer()
     headline, lines = _describe_status(
-        signed_in=bool(_read_license()),
+        signed_in=bool(bearer.token),
         enabled=_service_installed(),
         running=running,
         connected=connected,
         since=st.get("since"),
         now=time.time(),
+        signin_detail=bearer.detail,
     )
     # Default terminal colour for the off/idle states — a fixed "white" is
     # invisible on a light-background terminal.
