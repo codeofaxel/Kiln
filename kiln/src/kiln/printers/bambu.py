@@ -2134,6 +2134,11 @@ class BambuAdapter(PrinterAdapter):
             source_3mf_path=source_3mf_path,
             stl_paths=stl_paths,
             resume_mode=resume_mode,
+            # The declared model, per the identity rule _build_print_url
+            # documents: the config declaration drives behaviour and the
+            # serial/firmware probes stay telemetry.  Empty when the owner
+            # never declared one, which keeps the historical A1 templates.
+            printer_model=self._printer_model,
         )
         return result.output_path
 

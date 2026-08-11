@@ -323,6 +323,11 @@ def _auto_wrap_bambu_3mf(
             settings=settings,
             source_3mf_path=source_3mf,
             stl_paths=stl_paths,
+            # The profile id the caller asked for, or the configured
+            # printer_model when they did not — a declaration either way, and
+            # already what chose the slicer profile.  Selects the per-model
+            # end gcode; an id with no template of its own keeps the A1 files.
+            printer_model=effective_printer_id,
         )
         _logger.info(
             "Auto-wrapped %s as Bambu 3MF (with Bambu init) at %s",

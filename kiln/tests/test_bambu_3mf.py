@@ -1210,3 +1210,364 @@ class TestProductionExtensionSubParts:
                 if n.startswith("3D/") and n != "3D/3dmodel.model"
             ]
         assert extra == []
+# Per-model template selection
+# ---------------------------------------------------------------------------
+
+BUNDLE_MACHINE_DIR = Path(
+    "/Applications/BambuStudio.app/Contents/Resources/profiles/BBL/machine"
+)
+
+
+class TestPerModelTemplateSelection:
+    """The DECLARED model picks the template; anything else keeps the A1 files.
+
+    The identity rule is load-bearing here and not a style preference: a model
+    table that guessed wrong in five of six rows once named the wrong printer
+    confidently, so only a declaration may drive this.
+    """
+
+    def test_declared_model_gets_its_own_end_gcode(self):
+        from kiln.printers.bambu_3mf import _MODEL_END_GCODE_FILES, _select_end_gcode
+
+        for model in _MODEL_END_GCODE_FILES:
+            template, source = _select_end_gcode(model)
+            assert source == model, f"{model} was served {source}'s end gcode"
+            assert template, f"{model} end template is empty"
+
+    def test_every_registered_model_names_a_real_data_file(self):
+        from kiln.printers.bambu_3mf import (
+            _DATA_DIR,
+            _MODEL_END_GCODE_FILES,
+            _MODEL_START_GCODE_FILES,
+        )
+
+        for registry in (_MODEL_START_GCODE_FILES, _MODEL_END_GCODE_FILES):
+            for model, filename in registry.items():
+                assert (_DATA_DIR / filename).is_file(), f"{model} -> {filename} missing"
+
+    def test_p2s_no_longer_gets_a1_end_gcode(self):
+        """The defect this change exists for, from the end-gcode side."""
+        from kiln.printers.bambu_3mf import _select_end_gcode
+
+        p2s, _ = _select_end_gcode("bambu_p2s")
+        a1, _ = _select_end_gcode("bambu_a1")
+        assert p2s != a1
+        assert "P2S" in p2s
+
+    def test_model_id_is_normalized(self):
+        from kiln.printers.bambu_3mf import _select_end_gcode
+
+        assert _select_end_gcode("  BAMBU_P2S ")[1] == "bambu_p2s"
+
+    @pytest.mark.parametrize(
+        "declared", [None, "", "   ", "bambu_a2l", "bambu_never_heard_of_it"],
+    )
+    def test_undeclared_or_unknown_model_keeps_todays_behaviour(self, declared):
+        """Rule: an unknown model is never an error — people print on this path."""
+        from kiln.printers.bambu_3mf import (
+            _load_a1_end_gcode,
+            _load_a1_start_gcode,
+            _select_end_gcode,
+            _select_start_gcode,
+        )
+
+        start, start_source = _select_start_gcode(declared)
+        end, end_source = _select_end_gcode(declared)
+        assert start == _load_a1_start_gcode()
+        assert end == _load_a1_end_gcode()
+        assert start_source == end_source == "bambu_a1"
+
+    def test_a1_start_gcode_is_unchanged_for_every_model(self):
+        """The A1 start sequence is the one artifact proven on real hardware."""
+        from kiln.printers.bambu_3mf import _load_a1_start_gcode, _select_start_gcode
+
+        proven = _load_a1_start_gcode()
+        for model in ("bambu_a1", "bambu_p2s", "bambu_h2s", "bambu_x1c", None):
+            assert _select_start_gcode(model)[0] == proven
+
+    def test_start_and_end_fallback_warnings_do_not_silence_each_other(self):
+        """One shared warned-set made the start gap invisible once end had warned."""
+        from kiln.printers.bambu_3mf import _select_end_gcode, _select_start_gcode
+
+        with patch("kiln.printers.bambu_3mf.logger") as mock_logger:
+            _select_end_gcode("bambu_a2l")
+            _select_start_gcode("bambu_a2l")
+            messages = [c.args[0] for c in mock_logger.warning.call_args_list]
+        assert any("start gcode" in m for m in messages)
+        assert any("end gcode" in m for m in messages)
+
+    def test_fallback_warning_fires_once_per_model(self):
+        from kiln.printers.bambu_3mf import _select_start_gcode
+
+        with patch("kiln.printers.bambu_3mf.logger") as mock_logger:
+            for _ in range(5):
+                _select_start_gcode("bambu_p2s")
+            assert mock_logger.warning.call_count == 1
+
+    def test_a1_never_warns(self):
+        from kiln.printers.bambu_3mf import _select_end_gcode, _select_start_gcode
+
+        with patch("kiln.printers.bambu_3mf.logger") as mock_logger:
+            _select_start_gcode("bambu_a1")
+            _select_end_gcode("bambu_a1")
+            assert mock_logger.warning.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Shipped-template safety: nothing reaches a printer with a placeholder in it
+# ---------------------------------------------------------------------------
+
+class TestNoUnresolvedPlaceholderEverShips:
+    """A surviving placeholder would be sent to the printer verbatim.
+
+    This is the test that protects real hardware, so it sweeps every shipped
+    data file rather than the ones a fixture happens to name.
+    """
+
+    @staticmethod
+    def _shipped_gcode_files():
+        from kiln.printers.bambu_3mf import _DATA_DIR
+
+        return sorted(_DATA_DIR.glob("bambu_*_gcode.gcode"))
+
+    def test_there_are_shipped_files_to_check(self):
+        # A glob that silently matches nothing is a test that always passes.
+        assert len(self._shipped_gcode_files()) >= 9
+
+    def test_every_shipped_end_template_resolves_completely(self):
+        from kiln.printers.bambu_3mf import (
+            _MODEL_END_GCODE_FILES,
+            _assert_fully_resolved,
+            _resolve_end_gcode,
+            _select_end_gcode,
+        )
+
+        # Z values spanning a first layer to the tallest bed Kiln knows.
+        for model in _MODEL_END_GCODE_FILES:
+            template, _ = _select_end_gcode(model)
+            for max_z in (0.2, 12.0, 65.0, 150.0, 249.0, 255.0, 339.0):
+                resolved = _resolve_end_gcode(
+                    template, max_z=max_z, printer_model=model,
+                )
+                _assert_fully_resolved(resolved, source=f"{model} @ {max_z}")
+
+    def test_every_shipped_start_template_resolves_completely(self):
+        from kiln.printers.bambu_3mf import (
+            _MODEL_START_GCODE_FILES,
+            _assert_fully_resolved,
+            _resolve_start_gcode,
+            _select_start_gcode,
+        )
+
+        for model in _MODEL_START_GCODE_FILES:
+            template, _ = _select_start_gcode(model)
+            for temps in ((220, 65, "PLA"), (255, 100, "ABS")):
+                resolved = _resolve_start_gcode(
+                    template,
+                    hotend_temp=temps[0], bed_temp=temps[1], filament_type=temps[2],
+                )
+                _assert_fully_resolved(resolved, source=model)
+
+    def test_built_3mf_gcode_carries_no_placeholder(self, tmp_path):
+        """End to end: the bytes actually written into the 3MF."""
+        from kiln.printers.bambu_3mf import _MODEL_END_GCODE_FILES
+
+        for model in _MODEL_END_GCODE_FILES:
+            out = str(tmp_path / f"{model}.3mf")
+            build_bambu_3mf(MINIMAL_GCODE_BODY, out, printer_model=model)
+            with zipfile.ZipFile(out) as zf:
+                name = next(n for n in zf.namelist() if n.endswith(".gcode"))
+                gcode = zf.read(name).decode("utf-8")
+            assert "{" not in gcode, f"{model} 3MF gcode has a brace placeholder"
+
+    @pytest.mark.parametrize(
+        "leaked",
+        [
+            "M140 S[bed_temperature_initial_layer_single]",
+            "G1 Z{max_layer_z + 0.5} F900",
+            "M104 S{nozzle_temperature_initial_layer[initial_extruder]}",
+        ],
+    )
+    def test_guard_refuses_a_leaked_placeholder(self, leaked):
+        from kiln.printers.bambu_3mf import _assert_fully_resolved
+
+        with pytest.raises(ValueError, match="Unresolved gcode placeholder"):
+            _assert_fully_resolved(f"G28\n{leaked}\nM400\n", source="test")
+
+    def test_guard_reports_the_line_number(self):
+        from kiln.printers.bambu_3mf import _assert_fully_resolved
+
+        with pytest.raises(ValueError, match="line 3"):
+            _assert_fully_resolved("G28\nM400\nM140 S[bed_temp]\n", source="test")
+
+    def test_guard_passes_real_bambu_gcode(self):
+        """No false positive on the proven files' own syntax."""
+        from kiln.printers.bambu_3mf import _assert_fully_resolved, _load_a1_start_gcode
+
+        _assert_fully_resolved(_load_a1_start_gcode(), source="a1 start")
+
+    def test_build_refuses_an_unresolvable_template(self, tmp_path, monkeypatch):
+        """The guard is wired into build_bambu_3mf, not just available to it."""
+        import kiln.printers.bambu_3mf as mod
+
+        monkeypatch.setattr(
+            mod, "_select_end_gcode",
+            lambda model: ("M104 S[nozzle_temperature_initial_layer]\n", "bambu_fake"),
+        )
+        with pytest.raises(ValueError, match="Unresolved gcode placeholder"):
+            build_bambu_3mf(
+                MINIMAL_GCODE_BODY, str(tmp_path / "o.3mf"), printer_model="bambu_fake",
+            )
+
+
+# ---------------------------------------------------------------------------
+# End-template expansion, validated against the hardware-proven A1 capture
+# ---------------------------------------------------------------------------
+
+class TestEndTemplateExpansion:
+    """The expander's ground truth is the A1 file proven on real hardware."""
+
+    def test_pre_expanded_template_passes_through_untouched(self):
+        from kiln.printers.bambu_3mf import _expand_end_template, _load_a1_end_gcode
+
+        proven = _load_a1_end_gcode()
+        assert _expand_end_template(proven, {"max_layer_z": 65.0}) == proven
+
+    @pytest.mark.skipif(
+        not BUNDLE_MACHINE_DIR.is_dir(),
+        reason="BambuStudio not installed — the ground-truth template is unavailable",
+    )
+    def test_bundle_a1_template_expands_to_the_proven_capture(self):
+        """Expanding the vendor A1 end template must reproduce our proven file.
+
+        This is the only check available without hardware that the expander
+        agrees with BambuStudio itself: same conditionals taken, same numbers,
+        same blank lines where the guards were.  ``max_layer_z=65`` and bed
+        centre 128 are read back out of the capture's own resolved values.
+        """
+        from kiln.printers.bambu_3mf import _expand_end_template, _load_a1_end_gcode
+
+        source = BUNDLE_MACHINE_DIR / (
+            "Bambu Lab A1 0.4 nozzle template machine_end_gcode.json"
+        )
+        template = json.loads(source.read_text(encoding="utf-8"))["machine_end_gcode"]
+        expanded = _expand_end_template(
+            template,
+            {
+                "max_layer_z": 65.0,
+                "spiral_mode": False,
+                "print_sequence": "by layer",
+                "first_layer_center_no_wipe_tower": [128.0, 128.0],
+            },
+        )
+
+        # The capture also holds the slicer's own preamble and postamble,
+        # which are not part of the template.
+        proven = _load_a1_end_gcode()
+        middle = proven[
+            proven.index(";===== date: 20231229") : proven.index("M73 P100 R0")
+        ]
+        assert expanded.rstrip("\n") == middle.rstrip("\n")
+
+    def test_taller_print_takes_the_other_branch(self):
+        """A print near the Z ceiling must clamp, not lift through the lid."""
+        from kiln.printers.bambu_3mf import _expand_end_template, _select_end_gcode
+
+        template, _ = _select_end_gcode("bambu_p1s")
+        variables = {"max_layer_z": 20.0}
+        short = _expand_end_template(template, variables)
+        tall = _expand_end_template(template, {"max_layer_z": 240.0})
+        assert "G1 Z120 F600" in short          # 20 + 100, under the 250 limit
+        assert "G1 Z250 F600" in tall           # clamped by the {else} branch
+        assert "G1 Z340 F600" not in tall
+
+    def test_integral_results_lose_their_decimal_point(self):
+        from kiln.printers.bambu_3mf import _format_template_number
+
+        assert _format_template_number(165.0) == "165"
+        assert _format_template_number(65.5) == "65.5"
+        assert _format_template_number(163.0) == "163"
+
+    def test_unbalanced_conditionals_raise(self):
+        from kiln.printers.bambu_3mf import _expand_end_template
+
+        with pytest.raises(ValueError, match="unclosed"):
+            _expand_end_template("{if max_layer_z > 1}\nG28\n", {"max_layer_z": 5.0})
+        with pytest.raises(ValueError, match=r"\{endif\} with no"):
+            _expand_end_template("{endif}\n", {})
+
+    def test_an_unknown_variable_raises_instead_of_guessing(self):
+        from kiln.printers.bambu_3mf import _eval_template_expr
+
+        with pytest.raises(ValueError, match="no value for"):
+            _eval_template_expr("flush_temperatures + 1", {"max_layer_z": 1.0})
+
+    def test_integer_division_is_refused_rather_than_guessed(self):
+        """BambuStudio truncates `24/20` to 1; Python would say 1.2."""
+        from kiln.printers.bambu_3mf import _eval_template_expr
+
+        with pytest.raises(ValueError, match="Integer division"):
+            _eval_template_expr("24/20", {})
+
+    def test_unsupported_syntax_is_refused(self):
+        from kiln.printers.bambu_3mf import _eval_template_expr
+
+        with pytest.raises(ValueError, match="Unsupported syntax"):
+            _eval_template_expr("min(1, 2)", {})
+
+    def test_negation_does_not_mangle_not_equal(self):
+        from kiln.printers.bambu_3mf import _eval_template_expr
+
+        expr = '!spiral_mode && print_sequence != "by object"'
+        variables = {"spiral_mode": False, "print_sequence": "by layer"}
+        assert _eval_template_expr(expr, variables) is True
+        variables["print_sequence"] = "by object"
+        assert _eval_template_expr(expr, variables) is False
+
+
+class TestBedCentreIsRead:
+    """The bed centre is read from the spec sheet, never copied into a table."""
+
+    def test_known_models_resolve_from_printer_intelligence(self):
+        from kiln.printers.bambu_3mf import _bed_center
+
+        assert _bed_center("bambu_a1") == (128.0, 128.0)
+        assert _bed_center("bambu_a1_mini") == (90.0, 90.0)
+
+    def test_unknown_model_gets_none_not_a_default_bed(self):
+        """A wrong bed centre is a travel move to the wrong place."""
+        from kiln.printers.bambu_3mf import _bed_center
+
+        assert _bed_center("bambu_never_heard_of_it") is None
+        assert _bed_center("") is None
+
+
+# ---------------------------------------------------------------------------
+# The doors that reach the builder
+# ---------------------------------------------------------------------------
+
+class TestDeclaredModelReachesTheBuilder:
+    """Both public doors must pass the declaration through, not just one."""
+
+    def test_adapter_passes_its_declared_model(self, tmp_path):
+        from kiln.printers.bambu import BambuAdapter
+
+        gcode = tmp_path / "part.gcode"
+        gcode.write_text(MINIMAL_GCODE_BODY, encoding="utf-8")
+        adapter = BambuAdapter(
+            host="127.0.0.1", access_code="00000000", serial="0000",
+            printer_model="bambu_p2s",
+        )
+        with patch("kiln.printers.bambu_3mf.build_bambu_3mf") as mock_build:
+            mock_build.return_value.output_path = str(tmp_path / "part.3mf")
+            adapter.wrap_gcode_as_3mf(str(gcode))
+        assert mock_build.call_args.kwargs["printer_model"] == "bambu_p2s"
+
+    def test_slicer_autowrap_passes_the_effective_printer(self, tmp_path):
+        from kiln.plugins.slicer_tools import _auto_wrap_bambu_3mf
+
+        gcode = tmp_path / "part.gcode"
+        gcode.write_text(MINIMAL_GCODE_BODY, encoding="utf-8")
+        with patch("kiln.printers.bambu_3mf.build_bambu_3mf") as mock_build:
+            _auto_wrap_bambu_3mf(str(gcode), "bambu_h2s", None)
+        assert mock_build.call_args.kwargs["printer_model"] == "bambu_h2s"
