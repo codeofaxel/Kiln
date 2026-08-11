@@ -122,14 +122,18 @@ class _StepToolsPlugin:
                         "Run slice_model to prepare for printing.",
                     ],
                 }
-                # The analytic truth behind the triangles just made: the
-                # stage that shows this import labels it CAD ("1 solid, 4
-                # true cylinders, r=45.000 exact") instead of passing the
-                # tessellation off as the geometry.  Best-effort — the
-                # facts degrade honestly (available:false + reason) and
-                # must never cost the import.
+                # The analytic truth behind the triangles just made: a stage
+                # that gets it labels the model as CAD ("1 solid, 4 true
+                # cylinders, r=45.000 exact") instead of passing the
+                # tessellation off as the geometry.  The census engine lives
+                # in kiln-pro, so this is optional in exactly the way the
+                # inspect bundle below is: present when kiln-pro is, absent
+                # otherwise, and never a cost to the conversion either way.
+                # Without it the import still succeeds and the stage renders
+                # the mesh as it always has — it just says nothing about the
+                # B-rep, which is the honest answer when nothing measured it.
                 try:
-                    from kiln.step_facts import read_step_facts
+                    from kiln_pro.step_facts import read_step_facts
 
                     response["cad_facts"] = read_step_facts(file_path)
                 except Exception:  # noqa: BLE001 — display material only
